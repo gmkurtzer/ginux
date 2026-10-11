@@ -47,19 +47,54 @@ ginux_linux_interpreter:
     mov ecx, 9
     xor r9d, r9d
     xor r10d, r10d
+    xor r11d, r11d
 .Lscan_dependency_dynamic:
     cmp qword ptr [rdi], 6
     cmove r9, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 4
     cmove r10, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 7
+    cmove r11, qword ptr [rdi + 8]
     add rdi, 16
     loop .Lscan_dependency_dynamic
     test r9, r9
     jz .Linvalid_dynamic
     test r10, r10
     jz .Linvalid_dynamic
+    test r11, r11
+    jz .Linvalid_dynamic
     add r9, 0x610000
     add r10, 0x610000
+    add r11, 0x610000
+
+    mov rcx, qword ptr [r11]
+    add rcx, 0x610000
+    mov rdx, qword ptr [r11 + 16]
+    add rdx, 0x610000
+    mov qword ptr [rcx], rdx
+
+    mov rcx, qword ptr [r11 + 24]
+    add rcx, 0x610000
+    mov rdx, qword ptr [r11 + 32]
+    shr rdx, 32
+    cmp edx, dword ptr [r10 + 8]
+    jne .Linvalid_dynamic
+    lea rdx, [rdx + rdx * 2]
+    shl rdx, 3
+    mov r12, qword ptr [r9 + rdx + 8]
+    add r12, 0x610000
+    add r12, qword ptr [r11 + 40]
+    mov qword ptr [rcx], r12
+
+    mov rcx, qword ptr [r11 + 48]
+    add rcx, 0x610000
+    mov rdx, qword ptr [r11 + 56]
+    shr rdx, 32
+    cmp edx, dword ptr [r10 + 8]
+    jne .Linvalid_dynamic
+    add r12, qword ptr [r11 + 64]
+    mov qword ptr [rcx], r12
+
     mov rcx, qword ptr [rax]
     mov rdx, qword ptr [rax + 16]
     mov qword ptr [rcx], rdx

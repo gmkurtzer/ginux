@@ -693,6 +693,11 @@ if ! grep -q '^ginux: Linux JUMP_SLOT dependency call executed' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux dependency self-relocations applied' "$output_file"; then
+    echo "Boot test failed: Linux dependency self-relocations were not applied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: metadata-driven Linux relative relocations applied' "$output_file"; then
     echo "Boot test failed: metadata-driven Linux relative relocations were not applied." >&2
     exit 1

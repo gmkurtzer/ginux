@@ -24,8 +24,10 @@ A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The
 symbol relocations resolve to the authenticated dependency, and the interpreter
-then transfers control to the main entry. The main workload calls through the
-resolved jump slot and requires all relocated values before the full
+also applies the dependency's own relative and self-symbol relocations before
+transferring control to the main entry. The main workload calls through the
+resolved jump slot; dependency code validates all three of its relocated slots
+and returns a checked value before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
 target. The kernel then restores its root and scrubs every owned frame.
 The build rejects unresolved ELF relocation records in all three raw embedded
@@ -142,8 +144,9 @@ verified, including rejection of substituted, mutated, and truncated interpreter
 bytes. The dependency is independently authenticated by exact name and digest,
 mapped W^X at a non-overlapping bias, and rejected if it requests another
 dependency. Synthetic userspace relative relocations are executed for the
-interpreter and main image. The main image additionally proves one cross-object
-symbol resolution through `R_X86_64_GLOB_DAT` and eager
+interpreter, main image, and dependency. The dependency also receives its own
+eager `GLOB_DAT` and `JUMP_SLOT` self-bindings. The main image proves one
+cross-object symbol resolution through `R_X86_64_GLOB_DAT` and eager
 `R_X86_64_JUMP_SLOT`; the jump slot is called in ring 3 and returns a checked
 value from dependency code. The userspace interpreter verifies that the
 relocation's symbol index is the admitted SysV hash bucket result in both

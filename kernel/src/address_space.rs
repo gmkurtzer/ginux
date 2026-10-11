@@ -549,6 +549,17 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let interpreter_rw = plan.interpreter.writable;
     let dependency_rx = dependency_plan.dependency.executable;
     let dependency_rw = dependency_plan.dependency.writable;
+    let Some(dependency_entry_offset) = dependency_plan
+        .dependency
+        .entry
+        .checked_sub(dependency_rx.virtual_address)
+        .and_then(|offset| usize::try_from(offset).ok())
+    else {
+        return false;
+    };
+    let Some(&dependency_entry_byte) = dependency_rx.bytes.get(dependency_entry_offset) else {
+        return false;
+    };
     let Some(relro) = plan.main.relro else {
         return false;
     };
@@ -562,6 +573,21 @@ pub(crate) fn verify_interpreted_elf_mapping(
         main_dynamic.symbol_relocation,
         main_dynamic.jump_slot_relocation,
     ) else {
+        return false;
+    };
+    let Some(dependency_dynamic) = dependency_plan.dependency.dynamic_relocations else {
+        return false;
+    };
+    let (Some(dependency_symbol), Some(dependency_jump_slot)) = (
+        dependency_dynamic.symbol_relocation,
+        dependency_dynamic.jump_slot_relocation,
+    ) else {
+        return false;
+    };
+    let Some(dependency_relative_value) = dependency_plan
+        .dependency_base
+        .checked_add(dependency_dynamic.relocation_addend)
+    else {
         return false;
     };
     let Some(interpreter_relocation_value) = plan
@@ -905,7 +931,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
                         && (dependency_rx.virtual_address as *const u8).read_volatile() == 0x7f
-                        && (dependency_plan.dependency.entry as *const u8).read_volatile() == 0x48
+                        && (dependency_plan.dependency.entry as *const u8).read_volatile()
+                            == dependency_entry_byte
                         && (dependency_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"LIBRARY!")
                 });
@@ -937,6 +964,14 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     && (main_jump_slot.target as *const u64).read_volatile()
                         == dependency_plan.dependency.entry
             });
+            let dependency_relocated = cpu::with_supervisor_user_access(|| {
+                (dependency_dynamic.relocation_target as *const u64).read_volatile()
+                    == dependency_relative_value
+                    && (dependency_symbol.target as *const u64).read_volatile()
+                        == dependency_symbol.symbol_value
+                    && (dependency_jump_slot.target as *const u64).read_volatile()
+                        == dependency_jump_slot.symbol_value
+            });
             activate(kernel_root_physical);
             Some(
                 permissions_valid
@@ -944,6 +979,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     && mapping_removed
                     && interpreter_relocated
                     && main_relocated
+                    && dependency_relocated
                     && current_root() == kernel_root_physical,
             )
         }
