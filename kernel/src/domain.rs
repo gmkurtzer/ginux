@@ -546,7 +546,18 @@ impl Manager {
         true
     }
 
-    fn request_auxiliary_stop(&mut self, id: DomainId) -> bool {
+    fn request_auxiliary_stop(
+        &mut self,
+        supervisor: DomainId,
+        capability: Handle,
+        id: DomainId,
+    ) -> bool {
+        const HOST_CONTROL: u64 = 1;
+        if self.control_plane_id != Some(supervisor)
+            || !self.permits(supervisor, capability, HOST_CONTROL, Rights::MANAGE)
+        {
+            return false;
+        }
         if !self.auxiliary_service_ids.contains(&Some(id)) {
             return false;
         }
@@ -840,15 +851,17 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
         || manager.permits(host_service, host_handle, 1, Rights::MANAGE)
         || !manager.begin_operation(console_service)
         || manager.retire_auxiliary_service(console_service)
-        || !manager.request_auxiliary_stop(console_service)
-        || manager.request_auxiliary_stop(console_service)
+        || manager.request_auxiliary_stop(console_service, console_handle, console_service)
+        || manager.request_auxiliary_stop(control, console_source, console_service)
+        || !manager.request_auxiliary_stop(control, host_source, console_service)
+        || manager.request_auxiliary_stop(control, host_source, console_service)
         || manager.begin_operation(console_service)
         || manager.retire_auxiliary_service(console_service)
         || !manager.end_operation(console_service)
         || manager.retire_service(console_service)
         || !manager.retire_auxiliary_service(console_service)
         || manager.domain(console_service).is_some()
-        || manager.request_auxiliary_stop(console_service)
+        || manager.request_auxiliary_stop(control, host_source, console_service)
         || manager.is_descendant(control, console_service)
         || manager.service_id != Some(primary)
         || !manager.permits(host_service, host_handle, 1, Rights::READ)
@@ -864,7 +877,7 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
             && manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
             && !manager.permits(console_service, console_handle, 2, Rights::WRITE)
             && !manager.retire_auxiliary_service(replacement)
-            && manager.request_auxiliary_stop(replacement)
+            && manager.request_auxiliary_stop(control, host_source, replacement)
             && manager.retire_auxiliary_service(replacement)
             && manager.permits(
                 primary,

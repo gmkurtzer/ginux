@@ -51,6 +51,9 @@ auxiliary thread attachment is rejected until those lifecycle contracts are
 defined. Auxiliary retirement is an explicit two-phase transition: a stop
 request changes a ready service to stopping, prevents admission of new
 operations, and retirement remains blocked until existing operations drain.
+The stop transition requires the persistent control-plane generation and its
+host-control capability with `MANAGE`; an auxiliary service cannot supervise a
+peer, and a control-plane capability for another object is insufficient.
 Repeated or stale stop requests fail closed, and a newly reused slot starts in
 the ready state. Auxiliary registration is not yet exposed to userspace,
 assigned address spaces, or integrated with an auxiliary restart policy.

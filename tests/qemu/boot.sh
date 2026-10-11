@@ -298,6 +298,11 @@ if ! grep -q '^ginux: auxiliary service quiescence enforced' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary supervision authority enforced' "$output_file"; then
+    echo "Boot test failed: auxiliary supervision authority was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded service restart policy verified' "$output_file"; then
     echo "Boot test failed: service restart policy validation failed." >&2
     exit 1
