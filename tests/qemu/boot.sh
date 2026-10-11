@@ -123,6 +123,11 @@ if ! grep -q '^ginux: PE executable identity pages read-only' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: PE image section permissions enforced' "$output_file"; then
+    echo "Boot test failed: PE image section permissions were not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: supervisor write protection active' "$output_file"; then
     echo "Boot test failed: supervisor write protection is inactive." >&2
     exit 1

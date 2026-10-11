@@ -20,6 +20,10 @@ must exist.
 This establishes authoritative image-section boundaries for kernel W^X
 enforcement. The paging builder makes only validated executable PE sections and
 UEFI runtime-service code executable; executable PE pages are read-only. The
-image bounds are firmware-provided metadata and are not a cryptographic
+complete in-memory PE image is split into 4 KiB leaves: headers and sections
+without the PE write characteristic are read-only, while only validated
+writable-section pages retain write permission. Static page-table pages apply
+an even stricter read-only override after construction. The image bounds are
+firmware-provided metadata and are not a cryptographic
 measurement. The manifest and control-plane bundle retain the v2 signature and
 measurement rules.

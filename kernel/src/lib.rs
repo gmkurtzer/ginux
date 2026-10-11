@@ -277,6 +277,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: NX-by-default identity map active\r\n");
     serial_write("ginux: PE executable identity pages read-only\r\n");
+    serial_write("ginux: PE image section permissions enforced\r\n");
     if !arch::x86_64::paging::supervisor_write_protect_enabled() {
         kernel_fail("ginux: supervisor write protection inactive\r\n");
     }

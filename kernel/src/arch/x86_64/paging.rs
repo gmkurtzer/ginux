@@ -146,6 +146,37 @@ pub(crate) unsafe fn install_initial_identity_map(
             )?;
         }
     }
+    let (image_start, image_end) = image.image_range();
+    let first_region = image_start / LARGE_PAGE_SIZE as usize;
+    let last_region = (image_end - 1) / LARGE_PAGE_SIZE as usize;
+    for region in first_region..=last_region {
+        ensure_fine_region(
+            region,
+            &mut fine_regions,
+            &mut fine_count,
+            fine_tables,
+            directories,
+        )?;
+    }
+    for address in (image_start..image_end).step_by(PAGE_SIZE) {
+        let region = address / LARGE_PAGE_SIZE as usize;
+        let Some(fine_index) = fine_regions[..fine_count]
+            .iter()
+            .position(|candidate| *candidate == region)
+        else {
+            return Err(PagingError::ExecutableMapInvalid);
+        };
+        let page = (address % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
+        let entries = core::ptr::addr_of_mut!((*fine_tables.add(fine_index)).0).cast::<u64>();
+        let writable = image
+            .writable_ranges()
+            .iter()
+            .any(|(start, end)| address < *end && *start < address + PAGE_SIZE);
+        if !writable {
+            let value = entries.add(page).read();
+            entries.add(page).write(value & !WRITABLE);
+        }
+    }
     for &(start, end) in image.executable_ranges() {
         let first_region = start / LARGE_PAGE_SIZE as usize;
         let last_region = (end - 1) / LARGE_PAGE_SIZE as usize;
@@ -395,6 +426,7 @@ pub(crate) fn identity_map_obeys_wx(boot_info: &BootInfo, image: &ImageSummary) 
             if entry & LARGE_PAGE != 0 {
                 if entry & NO_EXECUTE == 0
                     || range_contains_executable(boot_info, image, region_start, region_end)
+                    || ranges_overlap(image.image_range(), (region_start, region_end))
                 {
                     return false;
                 }
@@ -411,9 +443,18 @@ pub(crate) fn identity_map_obeys_wx(boot_info: &BootInfo, image: &ImageSummary) 
                     .executable_ranges()
                     .iter()
                     .any(|(start, end)| address < *end && *start < address + PAGE_SIZE);
+                let image_page =
+                    ranges_overlap(image.image_range(), (address, address + PAGE_SIZE));
+                let image_writable = image
+                    .writable_ranges()
+                    .iter()
+                    .any(|(start, end)| address < *end && *start < address + PAGE_SIZE);
+                let expected_writable = image_writable && !is_static_table_page(address);
                 let executable = image_code
                     || range_contains_runtime_code(boot_info, address, address + PAGE_SIZE);
-                if executable == (leaf & NO_EXECUTE != 0) || (image_code && leaf & WRITABLE != 0) {
+                if executable == (leaf & NO_EXECUTE != 0)
+                    || (image_page && expected_writable != (leaf & WRITABLE != 0))
+                {
                     return false;
                 }
             }
@@ -477,6 +518,24 @@ fn range_contains_executable(
             .executable_ranges()
             .iter()
             .any(|(code_start, code_end)| start < *code_end && *code_start < end)
+}
+
+const fn ranges_overlap(left: (usize, usize), right: (usize, usize)) -> bool {
+    left.0 < right.1 && right.0 < left.1
+}
+
+fn is_static_table_page(address: usize) -> bool {
+    if address == core::ptr::addr_of!(PML4) as usize
+        || address == core::ptr::addr_of!(PDPT) as usize
+    {
+        return true;
+    }
+    let directories = core::ptr::addr_of!(PAGE_DIRECTORIES) as usize;
+    let directories_end = directories + DIRECTORY_COUNT * PAGE_SIZE;
+    let fine_tables = core::ptr::addr_of!(FINE_PAGE_TABLES) as usize;
+    let fine_tables_end = fine_tables + MAX_FINE_TABLES * PAGE_SIZE;
+    (directories..directories_end).contains(&address)
+        || (fine_tables..fine_tables_end).contains(&address)
 }
 
 unsafe fn zero_entries(entries: *mut u64) {
