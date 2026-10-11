@@ -98,6 +98,7 @@ const LINUX_SCHED_SETAFFINITY_SYSCALL: u64 = 203;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
+const LINUX_OPENAT_SYSCALL: u64 = 257;
 const LINUX_READLINKAT_SYSCALL: u64 = 267;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
@@ -140,6 +141,7 @@ const LINUX_F_SETFD: u64 = 2;
 const LINUX_F_GETFL: u64 = 3;
 const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
+const LINUX_O_CLOEXEC: u64 = 0x80000;
 const LINUX_PR_SET_NAME: u64 = 15;
 const LINUX_PR_GET_NAME: u64 = 16;
 const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
@@ -249,6 +251,7 @@ static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_NULL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
@@ -847,6 +850,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         Ordering::SeqCst,
     );
     ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
+    ELF_PROBE_NULL_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
@@ -866,7 +870,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0;
+        && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_NULL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0;
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
         == LINUX_INITIAL_PROCESS_NAME
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
@@ -1186,18 +1191,12 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     match number {
-        LINUX_READ_SYSCALL => {
-            if linux_console_descriptor(first_argument) == LINUX_DESCRIPTOR_INPUT {
-                0
-            } else {
-                LINUX_EBADF
-            }
-        }
-        LINUX_WRITE_SYSCALL => linux_console_write(first_argument, buffer, count),
+        LINUX_READ_SYSCALL => linux_descriptor_read(first_argument),
+        LINUX_WRITE_SYSCALL => linux_descriptor_write(first_argument, buffer, count),
         LINUX_SCHED_YIELD_SYSCALL => 0,
-        LINUX_CLOSE_SYSCALL => linux_console_close(first_argument),
+        LINUX_CLOSE_SYSCALL => linux_descriptor_close(first_argument),
         LINUX_FSTAT_SYSCALL => {
-            if !linux_console_descriptor_open(first_argument) {
+            if !linux_descriptor_open(first_argument) {
                 return LINUX_EBADF;
             }
             let stat = linux_console_stat();
@@ -1207,7 +1206,9 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_LSEEK_SYSCALL => {
-            if linux_console_descriptor_open(first_argument) {
+            if linux_null_descriptor(first_argument) != 0 {
+                0
+            } else if linux_console_descriptor_open(first_argument) {
                 LINUX_ESPIPE
             } else {
                 LINUX_EBADF
@@ -1235,6 +1236,9 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_IOCTL_SYSCALL => {
+            if linux_null_descriptor(first_argument) != 0 {
+                return LINUX_ENOTTY;
+            }
             if !linux_console_descriptor_open(first_argument) {
                 return LINUX_EBADF;
             }
@@ -1260,7 +1264,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
-        LINUX_FCNTL_SYSCALL => linux_console_fcntl(first_argument, buffer, count),
+        LINUX_FCNTL_SYSCALL => linux_descriptor_fcntl(first_argument, buffer, count),
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
             let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
@@ -1460,6 +1464,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_READLINK_SYSCALL => linux_readlink_self(first_argument, buffer, count),
+        LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count),
         LINUX_READLINKAT_SYSCALL => {
             if first_argument as u32 != LINUX_AT_FDCWD {
                 return LINUX_EBADF;
@@ -1574,6 +1579,54 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
     output_length as u64
 }
 
+fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
+    let mut path = [0_u8; 16];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    if &path[..path_length] != b"/dev/null" {
+        return LINUX_ENOENT;
+    }
+    let access = flags & 3;
+    if access == 3 || flags & !(3 | LINUX_O_CLOEXEC) != 0 {
+        return LINUX_EINVAL;
+    }
+    let state = (access + 1) as u8;
+    if ELF_PROBE_NULL_DESCRIPTOR
+        .compare_exchange(0, state, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return LINUX_EMFILE;
+    }
+    if flags & LINUX_O_CLOEXEC != 0 {
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << 2, Ordering::SeqCst);
+    } else {
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
+    }
+    2
+}
+
+fn linux_descriptor_read(descriptor: u64) -> u64 {
+    let null = linux_null_descriptor(descriptor);
+    if matches!(null, LINUX_DESCRIPTOR_INPUT | 3)
+        || linux_console_descriptor(descriptor) == LINUX_DESCRIPTOR_INPUT
+    {
+        0
+    } else {
+        LINUX_EBADF
+    }
+}
+
+fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
+    let null = linux_null_descriptor(descriptor);
+    if null == LINUX_DESCRIPTOR_OUTPUT || null == 3 {
+        count
+    } else {
+        linux_console_write(descriptor, address, count)
+    }
+}
+
 fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
     if linux_console_descriptor(descriptor) != LINUX_DESCRIPTOR_OUTPUT {
         return LINUX_EBADF;
@@ -1637,6 +1690,18 @@ fn linux_console_descriptor_open(descriptor: u64) -> bool {
     linux_console_descriptor(descriptor) != 0
 }
 
+fn linux_null_descriptor(descriptor: u64) -> u8 {
+    if descriptor == 2 {
+        ELF_PROBE_NULL_DESCRIPTOR.load(Ordering::SeqCst)
+    } else {
+        0
+    }
+}
+
+fn linux_descriptor_open(descriptor: u64) -> bool {
+    linux_console_descriptor_open(descriptor) || linux_null_descriptor(descriptor) != 0
+}
+
 fn linux_console_descriptor(descriptor: u64) -> u8 {
     if descriptor >= 2 {
         return 0;
@@ -1663,6 +1728,17 @@ fn linux_console_close(descriptor: u64) -> u64 {
             return 0;
         }
     }
+}
+
+fn linux_descriptor_close(descriptor: u64) -> u64 {
+    if descriptor != 2 {
+        return linux_console_close(descriptor);
+    }
+    if ELF_PROBE_NULL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0 {
+        return LINUX_EBADF;
+    }
+    ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
+    0
 }
 
 fn linux_console_dup(descriptor: u64) -> u64 {
@@ -1763,10 +1839,33 @@ fn linux_console_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     }
 }
 
+fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
+    let state = linux_null_descriptor(descriptor);
+    if state == 0 {
+        return linux_console_fcntl(descriptor, command, argument);
+    }
+    match command {
+        LINUX_F_GETFD => {
+            u64::from((ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst) >> descriptor) & 1)
+        }
+        LINUX_F_SETFD => {
+            let flag = 1 << descriptor;
+            if argument & u64::from(LINUX_FD_CLOEXEC) != 0 {
+                ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(flag, Ordering::SeqCst);
+            } else {
+                ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!flag, Ordering::SeqCst);
+            }
+            0
+        }
+        LINUX_F_GETFL => u64::from(state - 1),
+        _ => LINUX_EINVAL,
+    }
+}
+
 fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
     let value = match resource {
         LINUX_RLIMIT_STACK => PAGE_SIZE as u64,
-        LINUX_RLIMIT_NOFILE => 2,
+        LINUX_RLIMIT_NOFILE => 3,
         _ => return None,
     };
     let mut limit = [0_u8; 16];

@@ -17,7 +17,7 @@ const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
 const MAX_EXECUTABLE_SEGMENT_PAGES: usize = 3;
 const MAX_OTHER_SEGMENT_PAGES: usize = 2;
-const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (2 * PAGE_SIZE + 1) as u64;
+const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (3 * PAGE_SIZE) as u64;
 const FIXTURE_DATA_OFFSET: usize = 0x3000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
@@ -611,16 +611,20 @@ pub(crate) fn verify_load_plan() -> bool {
     }
 
     let mut page = [0xa5_u8; PAGE_SIZE];
+    let first_page_code = PAGE_SIZE - 0x100;
+    let second_page_code = (PROBE_CODE.len() - first_page_code).min(PAGE_SIZE);
+    let third_page_offset = first_page_code + second_page_code;
+    let third_page_code = PROBE_CODE.len() - third_page_offset;
     if !materialize(current_plan.executable, &mut page)
         || page[..4] != *b"\x7fELF"
-        || page[0x100..] != PROBE_CODE[..PAGE_SIZE - 0x100]
+        || page[0x100..] != PROBE_CODE[..first_page_code]
         || !materialize_page(current_plan.executable, 1, &mut page)
-        || page[..PROBE_CODE.len() - (PAGE_SIZE - 0x100)] != PROBE_CODE[PAGE_SIZE - 0x100..]
-        || page[PROBE_CODE.len() - (PAGE_SIZE - 0x100)..]
-            .iter()
-            .any(|byte| *byte != 0)
+        || page[..second_page_code]
+            != PROBE_CODE[first_page_code..first_page_code + second_page_code]
+        || page[second_page_code..].iter().any(|byte| *byte != 0)
         || !materialize_page(current_plan.executable, 2, &mut page)
-        || page.iter().any(|byte| *byte != 0)
+        || page[..third_page_code] != PROBE_CODE[third_page_offset..]
+        || page[third_page_code..].iter().any(|byte| *byte != 0)
         || !materialize(current_plan.writable, &mut page)
         || page[..8] != *b"PROBE!!\n"
         || page[8..].iter().any(|byte| *byte != 0)
@@ -657,23 +661,30 @@ pub(crate) fn verify_linked_probe() -> bool {
     let mut page = [0xa5_u8; PAGE_SIZE];
     let mut executable_tail_page = [0xa5_u8; PAGE_SIZE];
     let mut executable_third_page = [0xa5_u8; PAGE_SIZE];
+    let first_page_code = PAGE_SIZE - 0x100;
+    let second_page_code = (PROBE_CODE.len() - first_page_code).min(PAGE_SIZE);
+    let third_page_offset = first_page_code + second_page_code;
+    let third_page_code = PROBE_CODE.len() - third_page_offset;
     let read_only_valid = materialize(read_only, &mut page)
         && page[..4] == *b"\x7fELF"
         && materialized_page_matches(read_only, 0, &page);
     let executable_valid = materialize(plan.executable, &mut page)
         && page[..0x100].iter().all(|byte| *byte == 0)
-        && page[0x100..] == PROBE_CODE[..PAGE_SIZE - 0x100]
+        && page[0x100..] == PROBE_CODE[..first_page_code]
         && materialized_page_matches(plan.executable, 0, &page)
         && materialize_page(plan.executable, 1, &mut executable_tail_page)
-        && executable_tail_page[..PROBE_CODE.len() - (PAGE_SIZE - 0x100)]
-            == PROBE_CODE[PAGE_SIZE - 0x100..]
-        && executable_tail_page[PROBE_CODE.len() - (PAGE_SIZE - 0x100)..]
+        && executable_tail_page[..second_page_code]
+            == PROBE_CODE[first_page_code..first_page_code + second_page_code]
+        && executable_tail_page[second_page_code..]
             .iter()
             .all(|byte| *byte == 0)
         && materialized_page_matches(plan.executable, 1, &executable_tail_page);
     let executable_valid = executable_valid
         && materialize_page(plan.executable, 2, &mut executable_third_page)
-        && executable_third_page.iter().all(|byte| *byte == 0)
+        && executable_third_page[..third_page_code] == PROBE_CODE[third_page_offset..]
+        && executable_third_page[third_page_code..]
+            .iter()
+            .all(|byte| *byte == 0)
         && materialized_page_matches(plan.executable, 2, &executable_third_page);
     let writable_valid = materialize(plan.writable, &mut page)
         && page[..8] == *b"PROBE!!\n"

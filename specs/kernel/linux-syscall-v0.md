@@ -48,7 +48,7 @@ not a general directory-descriptor or `*at` interface.
 `rax = 95` (`__NR_umask`) atomically replaces the single process's permission
 mask, returns the previous value, and ignores bits outside `0777`. The initial
 value is `022`; the proof changes it twice and restores it before exit.
-`rax = 5` (`__NR_fstat`) reports descriptors 0 and 1 as fixed character devices
+`rax = 5` (`__NR_fstat`) reports descriptors 0, 1, and an open bounded null device as fixed character devices
 with mode `S_IFCHR | 0600`, one link, and a 4096-byte preferred block size. The
 144-byte x86-64 `stat` result is zero-initialized and copied only after its full
 destination range is validated. Unknown descriptors return `-EBADF`; an invalid
@@ -63,10 +63,10 @@ requests return `-ENOTTY`, and invalid destinations return `-EFAULT`. This is a
 fixed early-console contract, not mutable terminal state or a general ioctl
 mechanism.
 `rax = 8` (`__NR_lseek`) reports `-ESPIPE` for either open console endpoint,
-regardless of offset or origin, and `-EBADF` for a closed or unknown descriptor.
+zero for the null device, and `-EBADF` for a closed or unknown descriptor.
 The bounded console is a stream and never claims a mutable file position.
 `rax = 3` (`__NR_close`) irreversibly clears descriptor 0 or 1 from the bounded
-process-local console table. Closing an unknown or already closed descriptor
+process-local console table or closes the fixed null descriptor 2. Closing an unknown or already closed descriptor
 returns `-EBADF`; subsequent `fstat` and `ioctl` calls observe the closure. No
 file, pipe, or socket allocation, inheritance, or general table exists yet.
 `rax = 32` (`__NR_dup`) copies an open console descriptor into the lowest of
@@ -88,10 +88,19 @@ reports it. The current profile has no second `exec` operation yet, so the flag
 is process-local observable state rather than an exercised inheritance action.
 `F_GETFL` reports `O_RDONLY` for the input endpoint and `O_WRONLY` for output or
 duplicated-output endpoints. Closed or unknown descriptors return `-EBADF`;
-other mutation and duplication commands return `-EINVAL`.
+other mutation and duplication commands return `-EINVAL`. On the null
+descriptor, `F_GETFD`, `F_SETFD`, and `F_GETFL` expose its close-on-exec bit and
+selected access mode; duplication remains outside this bounded node profile.
+`rax = 257` (`__NR_openat`) recognizes only the absolute path `/dev/null` and
+allocates fixed descriptor 2 once. It accepts `O_RDONLY`, `O_WRONLY`, or
+`O_RDWR`, optionally with `O_CLOEXEC`; other paths return `-ENOENT`, unsupported
+flags return `-EINVAL`, bad path memory returns `-EFAULT`, and a second open
+returns `-EMFILE`. Reads return EOF and writes discard their requested byte
+count without touching the caller buffer. This is one pathname-backed device,
+not directory traversal or a general VFS.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
-are one page, matching the bounded mapped stack; the descriptor limits are 2,
+are one page, matching the bounded mapped stack; the descriptor limits are 3,
 matching the highest descriptor number the profile can accept plus one.
 `prlimit64` accepts PID 0 or 1 and an optional old-limit destination. Other
 PIDs return `-ESRCH`, unsupported resources return `-EINVAL`, and any non-null
@@ -258,7 +267,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`read`, `write`, `writev`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`,
+`read`, `write`, `writev`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
 bounded read-only `mprotect`,
