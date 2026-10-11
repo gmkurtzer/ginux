@@ -109,7 +109,12 @@ four-byte pointers. Both destinations are validated before either is written;
 the obsolete cache pointer is ignored as on Linux. These results describe the
 single-bootstrap-processor profile and do not claim SMP scheduling support.
 `rax = 24` (`__NR_sched_yield`) succeeds as a no-op because this bounded
-process has exactly one runnable thread.
+process has exactly one runnable thread. `sched_getscheduler` reports
+`SCHED_OTHER` for PID 0 or 1, and `sched_getparam` copies its priority of zero
+only after validating the complete output. `sched_get_priority_min` and
+`sched_get_priority_max` both report zero for `SCHED_OTHER`. Unknown PIDs
+return `-ESRCH`, an invalid output returns `-EFAULT`, and unsupported policies
+return `-EINVAL`; scheduling policy mutation remains unsupported.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x404000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x405000` follows Linux syscall
@@ -249,7 +254,7 @@ threads, general TLS state, or any syscall other than the exact bounded
 bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
-`sched_yield`, `sched_getaffinity`, `getcpu`,
+`sched_yield`, bounded scheduler-policy queries, `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,

@@ -813,6 +813,11 @@ if ! grep -q '^ginux: Linux single-thread scheduling yield validated' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux fixed scheduler policy validated' "$output_file"; then
+    echo "Boot test failed: Linux fixed scheduler policy was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

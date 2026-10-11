@@ -83,6 +83,10 @@ const LINUX_CAPGET_SYSCALL: u64 = 125;
 const LINUX_CAPSET_SYSCALL: u64 = 126;
 const LINUX_SIGALTSTACK_SYSCALL: u64 = 131;
 const LINUX_PERSONALITY_SYSCALL: u64 = 135;
+const LINUX_SCHED_GETPARAM_SYSCALL: u64 = 143;
+const LINUX_SCHED_GETSCHEDULER_SYSCALL: u64 = 145;
+const LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL: u64 = 146;
+const LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL: u64 = 147;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
@@ -1336,6 +1340,29 @@ extern "sysv64" fn linux_syscall_handler(
         },
         LINUX_CAPGET_SYSCALL => linux_capget(first_argument, buffer),
         LINUX_CAPSET_SYSCALL => linux_capset(first_argument, buffer),
+        LINUX_SCHED_GETPARAM_SYSCALL => {
+            if !matches!(first_argument, 0 | 1) {
+                return LINUX_ESRCH;
+            }
+            if !copy_to_linux_user(buffer, &0_u32.to_ne_bytes()) {
+                return LINUX_EFAULT;
+            }
+            0
+        }
+        LINUX_SCHED_GETSCHEDULER_SYSCALL => {
+            if matches!(first_argument, 0 | 1) {
+                0
+            } else {
+                LINUX_ESRCH
+            }
+        }
+        LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL | LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL => {
+            if first_argument == 0 {
+                0
+            } else {
+                LINUX_EINVAL
+            }
+        }
         LINUX_PRCTL_SYSCALL => match first_argument {
             LINUX_PR_SET_NAME => linux_set_process_name(buffer),
             LINUX_PR_GET_NAME => linux_get_process_name(buffer),

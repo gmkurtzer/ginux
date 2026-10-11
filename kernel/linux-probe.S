@@ -127,6 +127,47 @@ ginux_linux_probe:
     test rax, rax
     jne failure
 
+    xor edi, edi
+    mov eax, 145
+    syscall
+    test rax, rax
+    jne failure
+    mov edi, 2
+    mov eax, 145
+    syscall
+    cmp rax, -3
+    jne failure
+
+    xor edi, edi
+    mov esi, 0x403200
+    mov eax, 143
+    syscall
+    cmp rax, -14
+    jne failure
+    mov dword ptr [0x402060], 0x12345678
+    mov esi, 0x402060
+    mov eax, 143
+    syscall
+    test rax, rax
+    jne failure
+    cmp dword ptr [0x402060], 0
+    jne failure
+
+    xor edi, edi
+    mov eax, 146
+    syscall
+    test rax, rax
+    jne failure
+    mov eax, 147
+    syscall
+    test rax, rax
+    jne failure
+    mov edi, 1
+    mov eax, 146
+    syscall
+    cmp rax, -22
+    jne failure
+
     mov edi, 2
     mov esi, 0x402000
     mov edx, 8
