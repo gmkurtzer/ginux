@@ -50,8 +50,9 @@ never blocks. Zero timeouts and immediately ready descriptors behave like
 sizes return `-EINVAL`, invalid input ranges return `-EFAULT`, and the timeout
 is not rewritten.
 `rax = 291` (`__NR_epoll_create1`) allocates one process-local epoll instance
-in fixed descriptor 2 when that slot is free. It accepts only zero or
-`EPOLL_CLOEXEC`; an occupied device or epoll slot returns `-EMFILE`.
+in the lowest free auxiliary descriptor, 2 or 3. It accepts only zero or
+`EPOLL_CLOEXEC`; a second epoll instance or exhausted auxiliary table returns
+`-EMFILE`.
 `rax = 233` (`__NR_epoll_ctl`) retains one registration for an open console or
 device descriptor. `EPOLL_CTL_ADD`, `EPOLL_CTL_MOD`, and `EPOLL_CTL_DEL` have
 their Linux duplicate, missing-registration, invalid-descriptor, and
@@ -64,7 +65,7 @@ ready. A zero-timeout query with no event returns zero; a nonzero or infinite
 wait returns `-ENOSYS` until scheduler-backed wait queues exist. Invalid output
 memory returns `-EFAULT` without consuming the level-triggered event. The epoll
 descriptor participates in `F_GETFD`, `F_SETFD`, `F_GETFL`, `poll`, and
-`close`; closing it clears the registration and releases fixed descriptor 2.
+`close`; closing it clears the registration and releases its descriptor.
 `rax = 281` (`__NR_epoll_pwait`) uses the same bounded wait operation after
 validating an optional eight-byte signal mask and its exact signal-set size.
 The temporary mask is not installed because this implementation never blocks;
@@ -113,7 +114,7 @@ mechanism.
 zero for the null device, and `-EBADF` for a closed or unknown descriptor.
 The bounded console is a stream and never claims a mutable file position.
 `rax = 3` (`__NR_close`) irreversibly clears descriptor 0 or 1 from the bounded
-process-local console table or closes the fixed null descriptor 2. Closing an unknown or already closed descriptor
+process-local console table or closes an auxiliary descriptor. Closing an unknown or already closed descriptor
 returns `-EBADF`; subsequent `fstat` and `ioctl` calls observe the closure. No
 file, pipe, or socket allocation, inheritance, or general table exists yet.
 `rax = 32` (`__NR_dup`) copies an open console descriptor into the lowest of
@@ -140,10 +141,10 @@ descriptor, `F_GETFD`, `F_SETFD`, and `F_GETFL` expose its close-on-exec bit and
 selected access mode; duplication remains outside this bounded node profile.
 `rax = 257` (`__NR_openat`) recognizes only the absolute paths `/dev/null`,
 `/dev/zero`, `/dev/console`, and `/dev/tty`, and
-allocates fixed descriptor 2 once. It accepts `O_RDONLY`, `O_WRONLY`, or
+allocates the lowest free auxiliary descriptor, 2 or 3. It accepts `O_RDONLY`, `O_WRONLY`, or
 `O_RDWR`, optionally with `O_CLOEXEC`; other paths return `-ENOENT`, unsupported
-flags return `-EINVAL`, bad path memory returns `-EFAULT`, and a second open
-returns `-EMFILE`. `/dev/null` reads return EOF and writes discard their requested byte
+flags return `-EINVAL`, bad path memory returns `-EFAULT`, and an open with both
+auxiliary slots occupied returns `-EMFILE`. `/dev/null` reads return EOF and writes discard their requested byte
 count without touching the caller buffer. This is a fixed device namespace,
 not directory traversal or a general VFS. `/dev/zero` reads up to 256 validated
 bytes as zeros and discards writes when its selected access mode permits them.
@@ -160,7 +161,7 @@ buffers; a valid request returns the total zeroed length.
 fixed devices. Console vectors use the atomic serial-copy path; null and zero
 devices validate the vector table and lengths, then discard the total without
 touching payload memory, matching their scalar-write contract.
-`openat` also opens immutable `/dev` on fixed descriptor 2, optionally requiring
+`openat` also opens immutable `/dev` in the bounded auxiliary table, optionally requiring
 `O_DIRECTORY`; writable access returns `-EISDIR`, while `O_DIRECTORY` on a
 device node returns `-ENOTDIR`. `rax = 217` (`__NR_getdents64`) atomically
 returns six aligned records for `.`, `..`, `null`, `zero`, `console`, and `tty`
@@ -184,7 +185,7 @@ unknown mode bits or flags return `-EINVAL`, with the same path errors as
 `openat`.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
-are one page, matching the bounded mapped stack; the descriptor limits are 3,
+are one page, matching the bounded mapped stack; the descriptor limits are 4,
 matching the highest descriptor number the profile can accept plus one.
 `prlimit64` accepts PID 0 or 1 and an optional old-limit destination. Other
 PIDs return `-ESRCH`, unsupported resources return `-EINVAL`, and any non-null

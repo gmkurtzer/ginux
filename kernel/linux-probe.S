@@ -1287,9 +1287,9 @@ ginux_linux_probe:
     syscall
     test rax, rax
     jne failure
-    cmp qword ptr [0x404090], 3
+    cmp qword ptr [0x404090], 4
     jne failure
-    cmp qword ptr [0x404098], 3
+    cmp qword ptr [0x404098], 4
     jne failure
 
     mov edi, 2
@@ -1404,7 +1404,13 @@ ginux_linux_probe:
     xor edi, edi
     mov eax, 291
     syscall
-    cmp rax, -24
+    cmp rax, 3
+    jne failure
+
+    mov edi, 3
+    mov eax, 3
+    syscall
+    test rax, rax
     jne failure
 
     mov edi, 2
@@ -1436,7 +1442,16 @@ ginux_linux_probe:
     mov edx, 2
     mov eax, 257
     syscall
+    cmp rax, 3
+    jne failure
+    mov eax, 257
+    syscall
     cmp rax, -24
+    jne failure
+    mov edi, 3
+    mov eax, 3
+    syscall
+    test rax, rax
     jne failure
 
     mov edi, -100

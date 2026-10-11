@@ -167,6 +167,8 @@ const LINUX_STATX_RESERVED: u32 = 0x8000_0000;
 const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_IOV_LIMIT: usize = 4;
 const LINUX_POLLFD_LIMIT: usize = 4;
+const LINUX_AUX_DESCRIPTOR_FIRST: u64 = 2;
+const LINUX_AUX_DESCRIPTOR_LIMIT: u64 = 4;
 const LINUX_POLLIN: u16 = 1;
 const LINUX_POLLOUT: u16 = 4;
 const LINUX_POLLHUP: u16 = 0x10;
@@ -311,12 +313,12 @@ static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_DEVICE_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_EPOLL_ACTIVE: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU8; 2] = [const { AtomicU8::new(0) }; 2];
+static ELF_PROBE_EPOLL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
 static ELF_PROBE_EPOLL_EVENTS: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_EPOLL_DATA: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_DIRECTORY_CURSOR: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_DIRECTORY_CURSORS: [AtomicU8; 2] = [const { AtomicU8::new(0) }; 2];
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
@@ -930,12 +932,16 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         Ordering::SeqCst,
     );
     ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
-    ELF_PROBE_DEVICE_DESCRIPTOR.store(0, Ordering::SeqCst);
-    ELF_PROBE_EPOLL_ACTIVE.store(false, Ordering::SeqCst);
+    for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
+        descriptor.store(0, Ordering::SeqCst);
+    }
+    ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
     ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
-    ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
+    for cursor in &ELF_PROBE_DIRECTORY_CURSORS {
+        cursor.store(0, Ordering::SeqCst);
+    }
     ELF_PROBE_CLOCK_FREQUENCY.store(clock_frequency, Ordering::SeqCst);
     ELF_PROBE_CLOCK_EPOCH.store(timer::timestamp_counter(), Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
@@ -956,14 +962,42 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
+    let descriptor_snapshot = [
+        u64::from(ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_DEVICE_DESCRIPTORS[0].load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_DEVICE_DESCRIPTORS[1].load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_EPOLL_DESCRIPTOR.load(Ordering::SeqCst)),
+        ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst),
+        u64::from(ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst)),
+        ELF_PROBE_EPOLL_DATA.load(Ordering::SeqCst),
+        u64::from(ELF_PROBE_DIRECTORY_CURSORS[0].load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_DIRECTORY_CURSORS[1].load(Ordering::SeqCst)),
+    ];
+    let mut devices_closed = true;
+    for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
+        devices_closed &= descriptor.swap(0, Ordering::SeqCst) == 0;
+    }
+    let mut cursors_reset = true;
+    for cursor in &ELF_PROBE_DIRECTORY_CURSORS {
+        cursors_reset &= cursor.swap(0, Ordering::SeqCst) == 0;
+    }
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
-        && !ELF_PROBE_EPOLL_ACTIVE.swap(false, Ordering::SeqCst)
+        && devices_closed
+        && ELF_PROBE_EPOLL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EPOLL_TARGET.swap(u64::MAX, Ordering::SeqCst) == u64::MAX
         && ELF_PROBE_EPOLL_EVENTS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EPOLL_DATA.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_DIRECTORY_CURSOR.swap(0, Ordering::SeqCst) == 0;
+        && cursors_reset;
+    if !descriptor_state_valid {
+        serial_write("ginux: Linux descriptor state leak:");
+        for value in descriptor_snapshot {
+            serial_write(" ");
+            serial_write_u64(value);
+        }
+        serial_write("\r\n");
+    }
     let clock_state_valid = ELF_PROBE_CLOCK_EPOCH.swap(0, Ordering::SeqCst) != 0
         && ELF_PROBE_CLOCK_FREQUENCY.swap(0, Ordering::SeqCst) == clock_frequency;
     let mmap_inactive = ELF_PROBE_MMAP_PAGES.swap(0, Ordering::SeqCst) == 0;
@@ -1315,7 +1349,7 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_ESPIPE
             } else if device & LINUX_DEVICE_DIRECTORY != 0 {
                 if buffer == 0 && count == 0 {
-                    ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
+                    linux_directory_cursor(first_argument).store(0, Ordering::SeqCst);
                     0
                 } else {
                     LINUX_EINVAL
@@ -2032,22 +2066,20 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
         return LINUX_ENOTDIR;
     }
     let state = kind | (access + 1) as u8;
-    if ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
         return LINUX_EMFILE;
-    }
-    if ELF_PROBE_DEVICE_DESCRIPTOR
-        .compare_exchange(0, state, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return LINUX_EMFILE;
-    }
+    };
+    ELF_PROBE_DEVICE_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+        .store(state, Ordering::SeqCst);
     if flags & LINUX_O_CLOEXEC != 0 {
-        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << 2, Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
     } else {
-        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
     }
-    ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
-    2
+    linux_directory_cursor(descriptor).store(0, Ordering::SeqCst);
+    descriptor
 }
 
 fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {
@@ -2222,24 +2254,28 @@ fn linux_epoll_create1(flags: u64) -> u64 {
     if flags & !LINUX_O_CLOEXEC != 0 {
         return LINUX_EINVAL;
     }
-    if ELF_PROBE_DEVICE_DESCRIPTOR.load(Ordering::SeqCst) != 0
-        || ELF_PROBE_EPOLL_ACTIVE.swap(true, Ordering::SeqCst)
-    {
+    if ELF_PROBE_EPOLL_DESCRIPTOR.load(Ordering::SeqCst) != 0 {
         return LINUX_EMFILE;
     }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    ELF_PROBE_EPOLL_DESCRIPTOR.store(descriptor as u8, Ordering::SeqCst);
     ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
     ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
     if flags & LINUX_O_CLOEXEC != 0 {
-        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << 2, Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
     } else {
-        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
     }
-    2
+    descriptor
 }
 
 fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u64) -> u64 {
-    if epoll != 2 || !ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+    if !linux_epoll_descriptor(epoll) {
         return LINUX_EBADF;
     }
     if descriptor == epoll {
@@ -2283,7 +2319,7 @@ fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u
 }
 
 fn linux_epoll_wait(epoll: u64, address: u64, maximum: u64, timeout: u64) -> u64 {
-    if epoll != 2 || !ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+    if !linux_epoll_descriptor(epoll) {
         return LINUX_EBADF;
     }
     if maximum != 1 {
@@ -2364,7 +2400,18 @@ fn linux_epoll_pwait2(
 fn linux_descriptor_open(descriptor: u64) -> bool {
     linux_console_descriptor_open(descriptor)
         || linux_device_descriptor(descriptor) != 0
-        || descriptor == 2 && ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst)
+        || linux_epoll_descriptor(descriptor)
+}
+
+fn linux_epoll_descriptor(descriptor: u64) -> bool {
+    descriptor >= LINUX_AUX_DESCRIPTOR_FIRST
+        && u64::from(ELF_PROBE_EPOLL_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
+}
+
+fn linux_aux_descriptor_free(descriptor: u64) -> bool {
+    (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor)
+        && linux_device_descriptor(descriptor) == 0
+        && !linux_epoll_descriptor(descriptor)
 }
 
 fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
@@ -2376,7 +2423,7 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
         LINUX_DESCRIPTOR_OUTPUT => return requested & LINUX_POLLOUT,
         _ => {}
     }
-    if descriptor == 2 && ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+    if linux_epoll_descriptor(descriptor) {
         let target = ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst);
         let events = ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst) as u16;
         return if target != u64::MAX && linux_descriptor_poll_events(target as i32, events) != 0 {
@@ -2550,11 +2597,15 @@ fn linux_console_descriptor_open(descriptor: u64) -> bool {
 }
 
 fn linux_device_descriptor(descriptor: u64) -> u8 {
-    if descriptor == 2 {
-        ELF_PROBE_DEVICE_DESCRIPTOR.load(Ordering::SeqCst)
-    } else {
-        0
-    }
+    descriptor
+        .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
+        .and_then(|index| ELF_PROBE_DEVICE_DESCRIPTORS.get(index as usize))
+        .map(|state| state.load(Ordering::SeqCst))
+        .unwrap_or(0)
+}
+
+fn linux_directory_cursor(descriptor: u64) -> &'static AtomicU8 {
+    &ELF_PROBE_DIRECTORY_CURSORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
 }
 
 fn linux_console_descriptor(descriptor: u64) -> u8 {
@@ -2586,21 +2637,25 @@ fn linux_console_close(descriptor: u64) -> u64 {
 }
 
 fn linux_descriptor_close(descriptor: u64) -> u64 {
-    if descriptor != 2 {
+    if !(LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor) {
         return linux_console_close(descriptor);
     }
-    if ELF_PROBE_EPOLL_ACTIVE.swap(false, Ordering::SeqCst) {
+    if linux_epoll_descriptor(descriptor) {
+        ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
         ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
         ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
         ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
-        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
         return 0;
     }
-    if ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0 {
+    if ELF_PROBE_DEVICE_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+        .swap(0, Ordering::SeqCst)
+        == 0
+    {
         return LINUX_EBADF;
     }
-    ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
-    ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
+    linux_directory_cursor(descriptor).store(0, Ordering::SeqCst);
+    ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
     0
 }
 
@@ -2705,7 +2760,7 @@ fn linux_console_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
 fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     let state = linux_device_descriptor(descriptor);
     if state == 0 {
-        if descriptor == 2 && ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+        if linux_epoll_descriptor(descriptor) {
             return match command {
                 LINUX_F_GETFD => {
                     u64::from((ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst) >> descriptor) & 1)
@@ -2746,7 +2801,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     if linux_device_descriptor(descriptor) & LINUX_DEVICE_DIRECTORY == 0 {
         return LINUX_ENOTDIR;
     }
-    if ELF_PROBE_DIRECTORY_CURSOR.load(Ordering::SeqCst) != 0 {
+    if linux_directory_cursor(descriptor).load(Ordering::SeqCst) != 0 {
         return 0;
     }
     let Ok(capacity) = usize::try_from(count) else {
@@ -2772,7 +2827,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     if !copy_to_linux_user(address, &entries[..used]) {
         return LINUX_EFAULT;
     }
-    ELF_PROBE_DIRECTORY_CURSOR.store(1, Ordering::SeqCst);
+    linux_directory_cursor(descriptor).store(1, Ordering::SeqCst);
     used as u64
 }
 
@@ -2803,7 +2858,7 @@ fn append_linux_dirent(
 fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
     let value = match resource {
         LINUX_RLIMIT_STACK => PAGE_SIZE as u64,
-        LINUX_RLIMIT_NOFILE => 3,
+        LINUX_RLIMIT_NOFILE => LINUX_AUX_DESCRIPTOR_LIMIT,
         _ => return None,
     };
     let mut limit = [0_u8; 16];
