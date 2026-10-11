@@ -238,13 +238,8 @@ const LINUX_FILE_DEPENDENCY: u16 = 1 << 7;
 const LINUX_FILE_AUXILIARY_DEPENDENCY: u16 = LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_FILE_ROOT_HOSTNAME: u16 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
 const LINUX_FILE_ROOT_GENERIC: u16 = LINUX_FILE_INIT | LINUX_FILE_DEPENDENCY;
-const LINUX_ROOT_ETC_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT;
+const LINUX_ROOT_MEASURED_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT;
 const LINUX_ROOT_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INTERPRETER;
-const LINUX_ROOT_PROC_DIRECTORY: u16 =
-    LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
-const LINUX_ROOT_SYS_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_DEPENDENCY;
-const LINUX_ROOT_TMP_DIRECTORY: u16 =
-    LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT | LINUX_FILE_DEPENDENCY;
 const LINUX_FILE_MASK: u16 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
@@ -4342,35 +4337,38 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
     match path {
         b"/" => Some(LINUX_ROOT_DIRECTORY),
         b"/dev" => Some(LINUX_DEVICE_DIRECTORY),
-        b"/etc" => Some(LINUX_ROOT_ETC_DIRECTORY),
-        b"/proc" => Some(LINUX_ROOT_PROC_DIRECTORY),
-        b"/sys" => Some(LINUX_ROOT_SYS_DIRECTORY),
-        b"/tmp" => Some(LINUX_ROOT_TMP_DIRECTORY),
-        _ => None,
+        _ => {
+            let name = path.strip_prefix(b"/")?;
+            if name.contains(&b'/') {
+                return None;
+            }
+            let node = initramfs::published_directory_node(name)?;
+            Some(LINUX_ROOT_MEASURED_DIRECTORY | (u16::from(node) << LINUX_ROOT_NODE_SHIFT))
+        }
     }
 }
 
 fn linux_root_directory_inode(kind: u16) -> Option<u64> {
-    match kind & !3 {
-        LINUX_DEVICE_DIRECTORY => Some(4),
-        LINUX_ROOT_ETC_DIRECTORY => Some(10),
-        LINUX_ROOT_DIRECTORY => Some(11),
-        LINUX_ROOT_PROC_DIRECTORY => Some(12),
-        LINUX_ROOT_SYS_DIRECTORY => Some(13),
-        LINUX_ROOT_TMP_DIRECTORY => Some(14),
-        _ => None,
+    let role = kind & (LINUX_DEVICE_DIRECTORY | LINUX_FILE_MASK);
+    if role == LINUX_DEVICE_DIRECTORY {
+        return Some(4);
     }
+    if role == LINUX_ROOT_DIRECTORY {
+        return Some(11);
+    }
+    let node = (kind & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT;
+    (role == LINUX_ROOT_MEASURED_DIRECTORY && node != 0).then_some(64 + u64::from(node))
 }
 
 fn linux_measured_directory_path(kind: u16) -> Option<&'static [u8]> {
-    match kind & !3 {
-        LINUX_ROOT_DIRECTORY => Some(b""),
-        LINUX_ROOT_ETC_DIRECTORY => Some(b"etc"),
-        LINUX_ROOT_PROC_DIRECTORY => Some(b"proc"),
-        LINUX_ROOT_SYS_DIRECTORY => Some(b"sys"),
-        LINUX_ROOT_TMP_DIRECTORY => Some(b"tmp"),
-        _ => None,
+    let role = kind & (LINUX_DEVICE_DIRECTORY | LINUX_FILE_MASK);
+    if role == LINUX_ROOT_DIRECTORY {
+        return Some(b"");
     }
+    let node = ((kind & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT) as u8;
+    (role == LINUX_ROOT_MEASURED_DIRECTORY)
+        .then(|| initramfs::published_directory_by_node(node))
+        .flatten()
 }
 
 fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, u64> {

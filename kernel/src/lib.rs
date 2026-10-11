@@ -893,6 +893,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: generic measured-root Linux file validated\r\n");
     serial_write("ginux: index-driven measured child lookup validated\r\n");
     serial_write("ginux: unlisted measured-root Linux file validated\r\n");
+    serial_write("ginux: indexed measured-root directories validated\r\n");
+    serial_write("ginux: unlisted measured-root directory opened\r\n");
     serial_write("ginux: Linux saved credential queries validated\r\n");
     serial_write("ginux: Linux supplementary root group validated\r\n");
     serial_write("ginux: Linux fixed execution personality validated\r\n");

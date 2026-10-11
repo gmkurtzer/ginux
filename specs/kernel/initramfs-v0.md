@@ -21,7 +21,7 @@ Only regular files, directories, and nonempty symbolic links are admitted.
 Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
-The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, the native
+The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, `var`, the native
 `init` marker, `etc/hostname`, `etc/os-release`, `etc/motd`, and four build-produced Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and
 auxiliary DSO. The hostname is immutable mode `0555` with exact contents
@@ -56,7 +56,7 @@ validates mode `0100555` and size 24, and reads its complete contents. It also
 requires denial through the console capability, rejects `../init`, and rejects
 a null output range without mutating the root. Root enumeration returns one
 fully staged metadata-and-name record per call, rejects regular files as
-directories, and reports end of the six-entry proof root without copying. The
+directories, and reports end of the seven-entry proof root without copying. The
 published allocation remains allocator-owned after the control-plane domain exits.
 
 The bounded Linux syscall profile resolves the three `/etc` regular files
@@ -70,9 +70,11 @@ interpreter also opens `/etc` as an immutable directory and obtains its
 `hostname`, `os-release`, and `motd` children from the retained index through
 `getdents64`. It verifies the `.` and `..` records, file types, exact child names, directory metadata, EOF,
 cursor rewind, and atomic rejection of an undersized output buffer. The
-Linux `/` directory likewise enumerates the six direct measured children in
-archive order. The measured `proc`, `sys`, and `tmp` nodes open as immutable,
-currently empty directories; the proof opens and enumerates `proc`. `dev`
+Linux `/` directory likewise enumerates the seven direct measured children in
+archive order. Measured directory descriptors use their own bounded node
+selectors to recover names from the index. The measured `proc`, `sys`, `tmp`,
+and `var` nodes open as immutable, currently empty directories; the proof
+opens and enumerates the otherwise unlisted `var` node. `dev`
 retains its synthetic device children while its directory node comes from the
 measured root. An open measured-directory descriptor resolves any direct
 regular child by constructing a bounded path and consulting the retained
@@ -80,7 +82,7 @@ index; the fixed root working directory resolves bounded relative paths the
 same way. The proof obtains `motd` metadata without a kernel filename case.
 Nested relative traversal remains unsupported. A regular file descriptor is
 rejected as a lookup base. The
-selector is bounded by the 16-node publication index and is neither a
+file or directory selector is bounded by the 16-node publication index and is neither a
 persistent inode nor a public ABI.
 
 The Linux-visible `/init` and `/lib64/*` names resolve to the four internal

@@ -687,7 +687,7 @@ ginux_linux_interpreter:
     mov edx, 256
     mov eax, 217
     syscall
-    cmp rax, 192
+    cmp rax, 216
     jne .Linvalid_dynamic
     cmp byte ptr [rsp + 66], 4
     jne .Linvalid_dynamic
@@ -703,19 +703,15 @@ ginux_linux_interpreter:
     jne .Linvalid_dynamic
     cmp byte ptr [rsp + 119], 0
     jne .Linvalid_dynamic
-    cmp byte ptr [rsp + 138], 4
+    cmp byte ptr [rsp + 186], 4
     jne .Linvalid_dynamic
-    cmp dword ptr [rsp + 139], 0x00737973
+    cmp dword ptr [rsp + 187], 0x00726176
     jne .Linvalid_dynamic
-    cmp byte ptr [rsp + 162], 4
+    cmp byte ptr [rsp + 210], 8
     jne .Linvalid_dynamic
-    cmp dword ptr [rsp + 163], 0x00706d74
+    cmp dword ptr [rsp + 211], 0x74696e69
     jne .Linvalid_dynamic
-    cmp byte ptr [rsp + 186], 8
-    jne .Linvalid_dynamic
-    cmp dword ptr [rsp + 187], 0x74696e69
-    jne .Linvalid_dynamic
-    cmp byte ptr [rsp + 191], 0
+    cmp byte ptr [rsp + 215], 0
     jne .Linvalid_dynamic
 
     mov edi, 2
@@ -740,7 +736,7 @@ ginux_linux_interpreter:
     jne .Linvalid_dynamic
 
     mov edi, -100
-    lea rsi, [rip + .Lproc_path]
+    lea rsi, [rip + .Lvar_path]
     mov edx, 0x10000
     mov eax, 257
     syscall
@@ -1576,8 +1572,8 @@ ginux_linux_interpreter:
     .asciz "/etc"
 .Lroot_path:
     .asciz "/"
-.Lproc_path:
-    .asciz "/proc"
+.Lvar_path:
+    .asciz "/var"
 .section .data,"aw",@progbits
     .ascii "DYNAMIC!"
 

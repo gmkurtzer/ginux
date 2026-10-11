@@ -213,11 +213,11 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 13
+    archive.entry_count() == 14
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
-        && [b"dev" as &[u8], b"etc", b"proc", b"sys", b"tmp"]
+        && [b"dev" as &[u8], b"etc", b"proc", b"sys", b"tmp", b"var"]
             .iter()
             .all(|name| {
                 archive
@@ -593,10 +593,10 @@ pub(crate) fn published_lookup(name: &[u8]) -> Option<(u32, usize)> {
     Some((entry.mode, entry.data.len()))
 }
 
-pub(crate) fn published_regular_file_node(name: &[u8]) -> Option<u8> {
+fn published_node(name: &[u8], expected_type: u32) -> Option<u8> {
     let root = published_root()?;
     let entry = root.lookup(name)?;
-    if entry.mode & TYPE_MASK != REGULAR {
+    if entry.mode & TYPE_MASK != expected_type {
         return None;
     }
     root.nodes[..root.node_count]
@@ -614,6 +614,26 @@ pub(crate) fn published_regular_file_node(name: &[u8]) -> Option<u8> {
             root.image.bytes().and_then(|bytes| bytes.get(offset..end)) == Some(name)
         })
         .and_then(|index| u8::try_from(index + 1).ok())
+}
+
+pub(crate) fn published_regular_file_node(name: &[u8]) -> Option<u8> {
+    published_node(name, REGULAR)
+}
+
+pub(crate) fn published_directory_node(name: &[u8]) -> Option<u8> {
+    published_node(name, DIRECTORY)
+}
+
+pub(crate) fn published_directory_by_node(node: u8) -> Option<&'static [u8]> {
+    let root = published_root()?;
+    let index = usize::from(node.checked_sub(1)?);
+    let node = root.nodes.get(index).filter(|_| index < root.node_count)?;
+    if node.mode & TYPE_MASK != DIRECTORY {
+        return None;
+    }
+    let start = usize::try_from(node.name_offset).ok()?;
+    let end = start.checked_add(usize::try_from(node.name_size).ok()?)?;
+    root.image.bytes()?.get(start..end)
 }
 
 pub(crate) fn published_file_by_node(node: u8) -> Option<&'static [u8]> {
@@ -694,7 +714,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 13
+    let valid = root.node_count == 14
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -703,7 +723,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
                     (start..start + PAGE_SIZE).contains(&address)
                 })
         })
-        && [b"dev" as &[u8], b"etc", b"proc", b"sys", b"tmp"]
+        && [b"dev" as &[u8], b"etc", b"proc", b"sys", b"tmp", b"var"]
             .iter()
             .all(|name| {
                 root.lookup(name)

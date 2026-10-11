@@ -1808,6 +1808,16 @@ if ! grep -q '^ginux: unlisted measured-root Linux file validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: indexed measured-root directories validated' "$output_file"; then
+    echo "Boot test failed: indexed measured-root directories were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: unlisted measured-root directory opened' "$output_file"; then
+    echo "Boot test failed: an unlisted measured-root directory was not opened." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

@@ -314,11 +314,13 @@ opens return `-EISDIR`, and `O_DIRECTORY` against `/etc/hostname` returns
 `-ENOTDIR`.
 
 Opening `/` with `O_DIRECTORY` exposes `.`, `..`, `dev`, `etc`, `proc`, `sys`,
-`tmp`, and `init`, with the six non-dot entries obtained from the measured-root
+`tmp`, `var`, and `init`, with the seven non-dot entries obtained from the measured-root
 index in archive order. The complete result is staged in a fixed 256-byte
-kernel buffer before copy-out. The measured `/proc`, `/sys`, and `/tmp` nodes
-also open as immutable directories and currently enumerate only `.` and `..`;
-the ring-3 proof exercises `/proc`. `/dev` remains the separately populated
+kernel buffer before copy-out. Measured directory descriptors retain a bounded
+one-based index selector and recover their path from the same immutable index.
+The measured `/proc`, `/sys`, `/tmp`, and `/var` nodes open without individual
+pathname cases and currently enumerate only `.` and `..`; the ring-3 proof
+exercises the otherwise unlisted `/var`. `/dev` remains the separately populated
 synthetic device directory. Directory descriptor metadata and pathname
 metadata use stable profile-local inode numbers. There is no `/lib64` directory
 enumeration. Relative lookup constructs a bounded path from an open measured

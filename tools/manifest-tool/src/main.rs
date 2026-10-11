@@ -104,27 +104,28 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
         (3, 0o040555, "proc", &b""[..]),
         (4, 0o040555, "sys", &b""[..]),
         (5, 0o041777, "tmp", &b""[..]),
-        (6, 0o100555, "init", &b"GINUX_INITRAMFS_INIT_V0\n"[..]),
-        (7, 0o100555, "etc/hostname", &b"ginux\n"[..]),
+        (6, 0o040555, "var", &b""[..]),
+        (7, 0o100555, "init", &b"GINUX_INITRAMFS_INIT_V0\n"[..]),
+        (8, 0o100555, "etc/hostname", &b"ginux\n"[..]),
         (
-            8,
+            9,
             0o100555,
             "etc/os-release",
             &b"NAME=Ginux\nID=ginux\n"[..],
         ),
-        (9, 0o100555, "etc/motd", &b"Welcome to Ginux\n"[..]),
+        (10, 0o100555, "etc/motd", &b"Welcome to Ginux\n"[..]),
     ] {
         append_newc_entry(&mut archive, inode, mode, name, data);
     }
     for (inode, name, data) in [
-        (10, "linux/init", linux_init.as_slice()),
-        (11, "linux/ld-ginux.so", linux_interpreter.as_slice()),
-        (12, "linux/libginux.so", linux_dependency.as_slice()),
-        (13, "linux/libginux-aux.so", linux_auxiliary.as_slice()),
+        (11, "linux/init", linux_init.as_slice()),
+        (12, "linux/ld-ginux.so", linux_interpreter.as_slice()),
+        (13, "linux/libginux.so", linux_dependency.as_slice()),
+        (14, "linux/libginux-aux.so", linux_auxiliary.as_slice()),
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
-    append_newc_entry(&mut archive, 14, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 15, 0, "TRAILER!!!", &[]);
     archive
 }
 
