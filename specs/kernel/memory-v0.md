@@ -54,13 +54,16 @@ reserves two real frames, verifies their complete zero state, dirties both ends
 of both pages, releases and reallocates them, and verifies all bytes are zero
 before the new leases become usable. Boot-service frames use this same
 zero-before-allocation boundary, so stale firmware contents are not exposed to
-their first kernel or domain owner.
+their first kernel or domain owner. Frame contents are zeroed and the recycle
+proof is performed through a bounds-checked supervisor-only higher-half direct
+map; lease values and page-table entries remain physical addresses.
 
 The allocator initializes exactly once and remains live for the kernel lifetime.
 Reinitialization is rejected so no subsystem can reconstruct the UEFI inventory
 and allocate frames that already have owners. Access is serialized only by the
 single-processor, interrupts-disabled bootstrap state; locking or per-CPU
 allocation is required before SMP startup.
+
 Frame leases are kernel-internal values containing a physical address and
 generation; the allocator separately retains their owners. A bounded transfer
 operation changes every live lease owned by one non-kernel domain to another

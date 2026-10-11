@@ -1,6 +1,6 @@
 use crate::{
-    BootInfo, UefiMemoryDescriptor, EFI_BOOT_SERVICES_CODE, EFI_BOOT_SERVICES_DATA,
-    EFI_CONVENTIONAL_MEMORY,
+    arch::x86_64::paging, BootInfo, UefiMemoryDescriptor, EFI_BOOT_SERVICES_CODE,
+    EFI_BOOT_SERVICES_DATA, EFI_CONVENTIONAL_MEMORY,
 };
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -51,6 +51,10 @@ impl FrameOwner {
 impl FrameLease {
     pub(crate) const fn address(self) -> u64 {
         self.address
+    }
+
+    pub(crate) fn direct_map_address(self) -> Option<usize> {
+        paging::direct_map_range_address(self.address, PAGE_SIZE as usize)
     }
 }
 
@@ -352,7 +356,11 @@ pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[Fram
         let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
         let frames = (*allocator).reserve::<N>(owner)?;
         for frame in &frames {
-            core::ptr::write_bytes(frame.address as *mut u8, 0, PAGE_SIZE as usize);
+            let Some(address) = frame.direct_map_address() else {
+                let _ = (*allocator).release(owner, frames);
+                return None;
+            };
+            core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE as usize);
         }
         Some(frames)
     }

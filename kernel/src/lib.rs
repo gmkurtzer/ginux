@@ -283,6 +283,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: higher-half direct-map alias invalid\r\n");
     }
     serial_write("ginux: supervisor-only higher-half direct map active\r\n");
+    if !arch::x86_64::paging::direct_map_translation_is_bounded() {
+        kernel_fail("ginux: direct-map translation bounds invalid\r\n");
+    }
+    serial_write("ginux: bounded direct-map translation verified\r\n");
     serial_write("ginux: PE executable identity pages read-only\r\n");
     serial_write("ginux: PE image section permissions enforced\r\n");
     if !arch::x86_64::paging::identity_range_is_read_only_data(
@@ -881,13 +885,19 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
         return false;
     }
 
+    let (Some(first_mapped), Some(second_mapped)) =
+        (first.direct_map_address(), second.direct_map_address())
+    else {
+        return false;
+    };
+
     // SAFETY: Both frames are conventional UEFI memory, distinct, aligned,
-    // and covered by the active identity map. Volatile accesses prove both
+    // and covered by the checked direct map. Volatile accesses prove both
     // fresh and dirty recycled frames are scrubbed by the allocation boundary.
     unsafe {
-        let first_word = first_address as *mut u64;
-        let second_word = second_address as *mut u64;
-        if !frame_is_zero(first_address) || !frame_is_zero(second_address) {
+        let first_word = first_mapped as *mut u64;
+        let second_word = second_mapped as *mut u64;
+        if !frame_is_zero(first) || !frame_is_zero(second) {
             return false;
         }
         first_word.write_volatile(0x4749_4e55_5800_0001);
@@ -904,7 +914,7 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
         let Some(reused) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL) else {
             return false;
         };
-        let scrubbed = reused.iter().all(|frame| frame_is_zero(frame.address()));
+        let scrubbed = reused.iter().all(|frame| frame_is_zero(*frame));
         scrubbed
             && memory::release_frames(memory::FrameOwner::KERNEL, reused)
             && !memory::initialize(
@@ -914,7 +924,10 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
     }
 }
 
-unsafe fn frame_is_zero(address: u64) -> bool {
+unsafe fn frame_is_zero(frame: memory::FrameLease) -> bool {
+    let Some(address) = frame.direct_map_address() else {
+        return false;
+    };
     let words = address as *const u64;
     (0..PAGE_SIZE / size_of::<u64>()).all(|offset| words.add(offset).read_volatile() == 0)
 }

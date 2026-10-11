@@ -123,6 +123,11 @@ if ! grep -q '^ginux: supervisor-only higher-half direct map active' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded direct-map translation verified' "$output_file"; then
+    echo "Boot test failed: direct-map translation bounds were not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: PE executable identity pages read-only' "$output_file"; then
     echo "Boot test failed: executable PE pages remain writable." >&2
     exit 1

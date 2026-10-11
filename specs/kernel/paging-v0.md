@@ -30,6 +30,13 @@ The kernel verifies the alias after CR3 activation by comparing its PML4 entry
 with the identity entry, excluding only the hardware-maintained Accessed bit,
 and reading the PML4 page through both addresses.
 
+Physical-to-direct-map conversion is checked as a half-open byte range. Empty,
+overflowing, and beyond-4-GiB ranges are rejected. The physical-frame allocator
+uses this conversion to zero every newly leased page, and its fresh/recycled
+frame verifier reads and dirties allocator-owned pages only through the
+higher-half alias. Page-table entries and CR3 continue to contain physical
+addresses.
+
 Physical page zero and the pages immediately below and above the bootstrap,
 privilege-transition, and double-fault stacks are deliberately not present.
 The stack allocations and both boundaries are page-aligned, and the page-table
@@ -87,9 +94,9 @@ This map is intentionally transitional:
 - Most identity-map aliases remain writable, so this revision does not yet make
   kernel text or user-code physical frames immutable through every alias.
 - Addresses above 4 GiB are unavailable.
-- Kernel code and most physical-frame operations still use identity addresses;
-  the higher-half alias is present but is not yet the exclusive physical-memory
-  access path.
+- Kernel code and address-space page-table operations still use identity
+  addresses; allocator-owned frame scrubbing and its verifier now use the
+  higher-half alias.
 - The low identity mapping cannot be replaced by conventional Linux lower-half
   mappings until those kernel accesses migrate to the direct map.
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.

@@ -501,11 +501,30 @@ pub(crate) fn supervisor_write_protect_enabled() -> bool {
     cr0 & CR0_WRITE_PROTECT != 0
 }
 
-pub(crate) fn direct_map_address(physical: usize) -> Option<usize> {
-    if physical >= INITIAL_IDENTITY_LIMIT {
+pub(crate) fn direct_map_range_address(physical: u64, length: usize) -> Option<usize> {
+    if length == 0 {
+        return None;
+    }
+    let physical = usize::try_from(physical).ok()?;
+    let end = physical.checked_add(length)?;
+    if end > INITIAL_IDENTITY_LIMIT {
         return None;
     }
     DIRECT_MAP_BASE.checked_add(physical)
+}
+
+pub(crate) fn direct_map_address(physical: usize) -> Option<usize> {
+    direct_map_range_address(physical as u64, 1)
+}
+
+pub(crate) fn direct_map_translation_is_bounded() -> bool {
+    direct_map_range_address(0, 1) == Some(DIRECT_MAP_BASE)
+        && direct_map_range_address((INITIAL_IDENTITY_LIMIT - 1) as u64, 1)
+            == Some(DIRECT_MAP_BASE + INITIAL_IDENTITY_LIMIT - 1)
+        && direct_map_range_address(0, 0).is_none()
+        && direct_map_range_address(INITIAL_IDENTITY_LIMIT as u64, 1).is_none()
+        && direct_map_range_address((INITIAL_IDENTITY_LIMIT - 1) as u64, 2).is_none()
+        && direct_map_range_address(u64::MAX, 1).is_none()
 }
 
 pub(crate) fn direct_map_alias_is_valid() -> bool {
