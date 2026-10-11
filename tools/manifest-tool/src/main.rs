@@ -97,6 +97,7 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
     let linux_interpreter = read_root_artifact(&artifacts.join("ld-ginux.so"));
     let linux_dependency = read_root_artifact(&artifacts.join("libginux.so"));
     let linux_auxiliary = read_root_artifact(&artifacts.join("libginux-aux.so"));
+    let linux_exec_target = read_root_artifact(&artifacts.join("linux-exec-target.elf"));
     let mut archive = Vec::new();
     for (inode, mode, name, data) in [
         (1, 0o040555, "dev", &b""[..]),
@@ -124,11 +125,12 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
         (14, "linux/ld-ginux.so", linux_interpreter.as_slice()),
         (15, "linux/libginux.so", linux_dependency.as_slice()),
         (16, "linux/libginux-aux.so", linux_auxiliary.as_slice()),
+        (18, "linux/exec-target", linux_exec_target.as_slice()),
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
     append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
-    append_newc_entry(&mut archive, 18, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 19, 0, "TRAILER!!!", &[]);
     archive
 }
 

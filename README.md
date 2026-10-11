@@ -34,8 +34,8 @@ per-filename case. Normalized multi-component paths are bounded and `lib` is
 opened relative to `/var`, while `../lib` is rejected before index lookup.
 The publication index now admits 64 nodes and is exercised beyond its original
 16-node limit. Open, metadata, and access checks share that lookup. The current native
-`init` remains a format marker, not PID 1, but the Linux-visible `/init` and
-`/lib64/*` paths map to internal measured-root entries. The complete dynamic
+`init` remains a format marker, not PID 1, but the Linux-visible `/init`,
+`/lib64/*`, and `/bin/exec-target` paths map to internal measured-root entries. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. The archive
 is not yet a general mount or a system-container image.
 
@@ -495,7 +495,8 @@ static artifact at `build/linux-probe.elf` and the dynamic fixtures at
 `build/linux-dynamic/ld-ginux.so`,
 `build/linux-dynamic/linux-linked-main.elf`, and
 `build/linux-dynamic/libginux.so`. It also emits the bounded dependency-list
-fixtures `linux-linked-graph-main.elf` and `libginux-aux.so` for inspection
+fixtures `linux-linked-graph-main.elf`, `libginux-aux.so`, and
+`linux-exec-target.elf` for inspection
 and the deterministic proof root at `build/initramfs-v0.cpio` without assembling the EFI
 filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and

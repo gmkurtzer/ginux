@@ -90,6 +90,15 @@ entry through the end of its five-page executable mapping. Probe
 growth therefore fails at build time instead of overlapping the writable load
 or silently exceeding the runtime loader profile.
 
+A second LLD-produced static image is retained under the measured-root name
+`linux/exec-target` and exposed as `/bin/exec-target`. Its bounded plan has one
+R/NX header page at `0x3ff000`, one RX page entered at `0x400100`, and one
+RW/NX page at `0x401000`. Boot requires the measured bytes to match the
+build-time artifact exactly and validates the complete plan before any Linux
+workload runs. This establishes the authenticated replacement image for the
+bounded `execve` transition; mapping it over the live process remains the next
+step.
+
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory
 start, accounts for the in-page prefix when bounding page count, and copies file

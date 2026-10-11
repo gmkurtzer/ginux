@@ -618,6 +618,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: persistent read-only root publication failed\r\n");
     }
     serial_write("ginux: measured root published in kernel-owned memory\r\n");
+    let Some(exec_target_node) = initramfs::published_regular_file_node(b"linux/exec-target")
+    else {
+        kernel_fail("ginux: measured Linux exec target missing\r\n");
+    };
+    let Some(exec_target) = initramfs::published_file_by_node(exec_target_node) else {
+        kernel_fail("ginux: measured Linux exec target unreadable\r\n");
+    };
+    if !linux_elf::verify_measured_exec_target(exec_target) {
+        kernel_fail("ginux: measured Linux exec target invalid\r\n");
+    }
+    serial_write("ginux: measured Linux exec target planned\r\n");
     if !linux_elf::verify_parser() {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
     }

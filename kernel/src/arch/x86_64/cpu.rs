@@ -4306,6 +4306,7 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
             LINUX_FILE_AUXILIARY_DEPENDENCY,
             b"linux/libginux-aux.so" as &[u8],
         ),
+        b"/bin/exec-target" => (LINUX_FILE_ROOT_GENERIC, b"linux/exec-target" as &[u8]),
         _ => {
             let root_name = path.strip_prefix(b"/")?;
             if root_name.starts_with(b"linux/") {

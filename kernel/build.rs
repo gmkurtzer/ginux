@@ -16,11 +16,13 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-interpreter.S");
     println!("cargo:rerun-if-changed=linux-dependency.S");
     println!("cargo:rerun-if-changed=linux-auxiliary-dependency.S");
+    println!("cargo:rerun-if-changed=linux-exec-target.S");
     println!("cargo:rerun-if-changed=linux-probe.ld");
     println!("cargo:rerun-if-changed=linux-linked-main.ld");
     println!("cargo:rerun-if-changed=linux-linked-dependency.ld");
     println!("cargo:rerun-if-changed=linux-linked-auxiliary.ld");
     println!("cargo:rerun-if-changed=linux-linked-interpreter.ld");
+    println!("cargo:rerun-if-changed=linux-exec-target.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
     println!("cargo:rerun-if-env-changed=GINUX_LINUX_PROBE_EXPORT");
@@ -231,6 +233,23 @@ fn main() {
         "clang failed to assemble linked Linux interpreter"
     );
 
+    let exec_target_object = output.join("linux-exec-target.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-c",
+            "linux-exec-target.S",
+            "-o",
+        ])
+        .arg(&exec_target_object)
+        .status()
+        .expect("failed to assemble Linux exec target");
+    assert!(
+        status.success(),
+        "clang failed to assemble Linux exec target"
+    );
+
     let linked_dependency = output.join("libginux.so");
     let linked_dependency_script =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
@@ -319,6 +338,33 @@ fn main() {
         .expect("failed to link Linux interpreter");
     assert!(status.success(), "LLD failed to link Linux interpreter");
 
+    let exec_target = output.join("linux-exec-target.elf");
+    let exec_target_script =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+            .join("linux-exec-target.ld");
+    let mut exec_target_link = Command::new(&lld);
+    exec_target_link
+        .args([
+            "-flavor",
+            "gnu",
+            "-m",
+            "elf_x86_64",
+            "-static",
+            "-nostdlib",
+            "-e",
+            "ginux_linux_exec_target",
+            "-T",
+        ])
+        .arg(&exec_target_script)
+        .arg(&exec_target_object)
+        .arg("-o")
+        .arg(&exec_target);
+    configure_linker_library_path(&mut exec_target_link, toolchain_library.as_ref());
+    let status = exec_target_link
+        .status()
+        .expect("failed to link Linux exec target");
+    assert!(status.success(), "LLD failed to link Linux exec target");
+
     let linked_main = output.join("linux-linked-main.elf");
     let linked_main_script =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
@@ -393,6 +439,8 @@ fn main() {
             .expect("failed to export linked Linux auxiliary dependency");
         fs::copy(&linked_interpreter, directory.join("ld-ginux.so"))
             .expect("failed to export linked Linux interpreter");
+        fs::copy(&exec_target, directory.join("linux-exec-target.elf"))
+            .expect("failed to export Linux exec target");
     }
 
     let linked = output.join("linux-probe.elf");

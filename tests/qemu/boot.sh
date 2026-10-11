@@ -588,6 +588,11 @@ if ! grep -q '^ginux: measured root published in kernel-owned memory' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: measured Linux exec target planned' "$output_file"; then
+    echo "Boot test failed: the measured Linux exec target was not planned." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: read-only root capability enforced' "$output_file"; then
     echo "Boot test failed: the root capability boundary was not enforced." >&2
     exit 1

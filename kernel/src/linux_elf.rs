@@ -75,6 +75,8 @@ const LINKED_DYNAMIC_DEPENDENCY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"),
 const LINKED_DYNAMIC_AUXILIARY: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/libginux-aux.so"));
 const LINKED_DYNAMIC_INTERPRETER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ld-ginux.so"));
+const LINKED_EXEC_TARGET: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/linux-exec-target.elf"));
 
 pub(crate) fn runtime_main_bytes() -> &'static [u8] {
     LINKED_DYNAMIC_GRAPH_MAIN
@@ -273,6 +275,41 @@ pub(crate) fn runtime_dependency_bytes() -> &'static [u8] {
 
 pub(crate) fn runtime_auxiliary_dependency_bytes() -> &'static [u8] {
     LINKED_DYNAMIC_AUXILIARY
+}
+
+pub(crate) fn runtime_exec_target_bytes() -> &'static [u8] {
+    LINKED_EXEC_TARGET
+}
+
+pub(crate) fn verify_measured_exec_target(bytes: &[u8]) -> bool {
+    if bytes != LINKED_EXEC_TARGET {
+        return false;
+    }
+    let Some(image) = parse(bytes) else {
+        return false;
+    };
+    let Some(plan) = plan(&image) else {
+        return false;
+    };
+    plan.entry == 0x40_0100
+        && plan.program_headers == 0x3f_f040
+        && plan.read_only.is_some_and(|segment| {
+            segment.virtual_page == 0x3f_f000
+                && segment.page_count == 1
+                && !segment.writable
+                && !segment.executable
+        })
+        && plan.executable.virtual_page == 0x40_0000
+        && plan.executable.page_count == 1
+        && !plan.executable.writable
+        && plan.executable.executable
+        && plan.writable.virtual_page == 0x40_1000
+        && plan.writable.page_count == 1
+        && plan.writable.writable
+        && !plan.writable.executable
+        && plan.relro.is_none()
+        && plan.tls.is_none()
+        && plan.dynamic_relocations.is_none()
 }
 
 pub(crate) fn verify_tls_template_metadata() -> bool {
