@@ -10,6 +10,7 @@ const PF_WRITE: u32 = 2;
 const PF_READ: u32 = 4;
 const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
+const PAGE_SIZE: usize = 4096;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
@@ -22,6 +23,20 @@ pub(crate) struct Segment<'a> {
 pub(crate) struct Image<'a> {
     pub(crate) entry: u64,
     pub(crate) segments: [Segment<'a>; PROGRAM_HEADER_COUNT],
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PlannedSegment<'a> {
+    pub(crate) bytes: &'a [u8],
+    pub(crate) virtual_page: u64,
+    pub(crate) memory_size: usize,
+    pub(crate) writable: bool,
+    pub(crate) executable: bool,
+}
+
+pub(crate) struct LoadPlan<'a> {
+    pub(crate) entry: u64,
+    pub(crate) segments: [PlannedSegment<'a>; PROGRAM_HEADER_COUNT],
 }
 
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
@@ -76,6 +91,35 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         return None;
     }
     Some(Image { entry, segments })
+}
+
+pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
+    let segments = image.segments.map(|segment| {
+        let memory_size = usize::try_from(segment.memory_size).ok()?;
+        (segment.virtual_address.is_multiple_of(PAGE_SIZE as u64)
+            && memory_size <= PAGE_SIZE
+            && segment.bytes.len() <= memory_size)
+            .then_some(PlannedSegment {
+                bytes: segment.bytes,
+                virtual_page: segment.virtual_address,
+                memory_size,
+                writable: segment.flags & PF_WRITE != 0,
+                executable: segment.flags & PF_EXECUTE != 0,
+            })
+    });
+    Some(LoadPlan {
+        entry: image.entry,
+        segments: [segments[0]?, segments[1]?],
+    })
+}
+
+pub(crate) fn materialize(segment: PlannedSegment<'_>, page: &mut [u8; PAGE_SIZE]) -> bool {
+    if segment.memory_size > page.len() || segment.bytes.len() > segment.memory_size {
+        return false;
+    }
+    page.fill(0);
+    page[..segment.bytes.len()].copy_from_slice(segment.bytes);
+    true
 }
 
 fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
@@ -147,6 +191,31 @@ pub(crate) fn verify_parser() -> bool {
         )
         && rejects_u32(&image, ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE, 3)
         && parse(&image[..image.len() - 1]).is_none()
+}
+
+pub(crate) fn verify_load_plan() -> bool {
+    let image = fixture();
+    let Some(parsed) = parse(&image) else {
+        return false;
+    };
+    let Some(plan) = plan(&parsed) else {
+        return false;
+    };
+    let mut executable_page = [0xa5_u8; PAGE_SIZE];
+    let mut writable_page = [0xa5_u8; PAGE_SIZE];
+    materialize(plan.segments[0], &mut executable_page)
+        && materialize(plan.segments[1], &mut writable_page)
+        && plan.entry == 0x40_0000
+        && plan.segments[0].virtual_page == 0x40_0000
+        && plan.segments[0].executable
+        && !plan.segments[0].writable
+        && executable_page[0] == 0xc3
+        && executable_page[1..].iter().all(|byte| *byte == 0)
+        && plan.segments[1].virtual_page == 0x40_1000
+        && plan.segments[1].writable
+        && !plan.segments[1].executable
+        && writable_page[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
+        && writable_page[8..].iter().all(|byte| *byte == 0)
 }
 
 fn fixture() -> [u8; 272] {

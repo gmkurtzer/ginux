@@ -553,6 +553,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
     }
     serial_write("ginux: bounded Linux ELF64 profile validated\r\n");
+    if !linux_elf::verify_load_plan() {
+        kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
+    }
+    serial_write("ginux: Linux ELF64 page images materialized\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

@@ -30,3 +30,22 @@ code, implement Linux syscalls, accept position-independent `ET_DYN`, load
 `PT_INTERP`, perform relocations, or support glibc. Those are separate M4
 milestones. The strict profile prevents unsupported features from being
 silently interpreted with weaker semantics while those pieces are absent.
+
+## Page-image plan
+
+The next bounded loader step accepts only segments whose virtual address is
+page-aligned and whose complete memory image fits in one 4096-byte page. It
+preserves the ELF virtual addresses and derives separate executable/read-only
+and writable/non-executable page metadata. Materialization first zeroes the
+whole destination page and then copies the file bytes, so the writable
+segment's file tail through `p_memsz` and all remaining page bytes are zero.
+The QEMU verifier checks the exact RX instruction byte, RW data bytes, W^X
+metadata, and every zero-filled byte in both pages.
+
+The pages are not installed into a page table yet. The current kernel relies on
+a low identity map in PML4 slot zero, which conflicts with safely mapping a
+normal Linux `ET_EXEC` image at `0x400000` while retaining a stable kernel
+physical-memory view. Ginux must first establish a higher-half kernel mapping
+and/or separate privileged direct map. The loader will not relocate `ET_EXEC`
+images to the existing high test address, because doing so would violate ELF
+semantics and hide this prerequisite.

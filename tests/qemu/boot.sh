@@ -488,6 +488,11 @@ if ! grep -q '^ginux: bounded Linux ELF64 profile validated' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux ELF64 page images materialized' "$output_file"; then
+    echo "Boot test failed: Linux ELF64 page images were not materialized." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1
