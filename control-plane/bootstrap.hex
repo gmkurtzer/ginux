@@ -1,3 +1,24 @@
+# write "BUFFER!\n" from the user code mapping through the bounded-copy call
+eb08
+425546464552210a
+4889cf
+48be0200000080000000
+ba08000000
+b809000000
+cd80
+83f808
+7402
+0f0b
+
+# reject the same bounded-copy call for an unmapped null range
+31f6
+ba08000000
+b809000000
+cd80
+83f8fd
+7402
+0f0b
+
 # mov rdi, rcx; denied host read with console handle
 4889cf
 b801000000
@@ -41,7 +62,7 @@ cd80
 # negotiate call-gate ABI v1 and its nine bootstrap features
 b800000000
 cd80
-3dff010100
+3dff030100
 0f858d000000
 
 # branch context 2 into the isolated service role
@@ -129,7 +150,7 @@ cd80
 # replacement service: negotiate ABI and block for a direct wakeup
 b800000000
 cd80
-3dff010100
+3dff030100
 0f85c5ffffff
 4c89c7
 b808000000

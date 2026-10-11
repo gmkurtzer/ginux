@@ -23,6 +23,7 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 | 6 | service-fault events |
 | 7 | blocking IPC receive |
 | 8 | sticky generation-tagged IPC peer closure |
+| 9 | bounded userspace reads |
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
@@ -64,6 +65,14 @@ the kernel makes the caller ready and operation 8 returns
 `UINT64_MAX - 4`. Cleanup matches both object and endpoint direction; unrelated
 waiters are not released. A caller arriving after teardown receives the same
 result from the sticky closure queue instead of blocking on a dead peer.
+Operation 9 writes one through 64 bytes from the user virtual address in `RSI`,
+with the byte count in `RDX`, and requires write authority on console object 2.
+Before copying, the kernel checks overflow, the lower-canonical bound, and the
+present/user bits at every page-table level for every covered byte. Large-page
+aliases are rejected. With SMAP temporarily opened around only the copy, the
+kernel stages the complete input in a fixed kernel buffer, validates printable
+UTF-8, and emits it only after every check succeeds. It returns the byte count
+or `UINT64_MAX - 2`; invalid ranges produce no partial console output.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
@@ -72,9 +81,11 @@ Unknown operations terminate the proof program without granting an operation.
 At initial entry, `RBX` contains the host-control handle, `RCX` contains the
 console handle, `R8` contains the IPC handle, and `R9` identifies the proof
 context. For the control context, `R10` contains the initial supervised service
-domain ID. The QEMU payload first presents the console write-only handle
-and requires denial. It then presents the manifest-derived host-control handle
-and requires success. The kernel accepts the boot only after observing denial,
+domain ID. The QEMU payload first writes `BUFFER!\n` from its read-only
+executable mapping through operation 9, then requires the same call to reject
+an unmapped null range without output. It then presents the console write-only
+handle to the host-control operation and requires denial before presenting the
+host-control handle and requiring success. The kernel accepts the boot only after observing denial,
 authorization, rejection of IPC, console, and event calls using the wrong
 object, one authorized console record, a FIFO message, receipt of its peer's
 contained-fault event with the expected domain generation, resumption, and

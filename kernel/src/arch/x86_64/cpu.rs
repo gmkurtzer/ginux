@@ -8,6 +8,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use super::timer;
 
 use crate::{
+    address_space,
     capability::Rights,
     domain, ipc, memory, scheduler,
     scheduler::{RuntimeAction, UserFaultFrame, UserTrapFrame},
@@ -20,7 +21,7 @@ const TSS_SELECTOR: u16 = 0x18;
 pub(crate) const USER_DATA_SELECTOR: u16 = 0x2b;
 pub(crate) const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
-const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_01ff;
+const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_03ff;
 const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
@@ -535,7 +536,7 @@ pub(crate) fn verify_user_syscall(
             service_domain,
         )
     };
-    SYSCALL_STATE.load(Ordering::SeqCst) == 7
+    SYSCALL_STATE.load(Ordering::SeqCst) == 15
 }
 
 pub(crate) fn verify_breakpoint() -> bool {
@@ -745,6 +746,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
             }
         }
         8 => blocking_receive(caller_domain, capability, frame),
+        9 => console_write_buffer(caller_domain, capability, frame),
         _ => u64::MAX,
     }
 }
@@ -805,6 +807,35 @@ fn console_write(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -
         return u64::MAX - 2;
     };
     serial_write(message);
+    length as u64
+}
+
+fn console_write_buffer(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(domain_id, capability, 2, Rights::WRITE) {
+        return u64::MAX - 2;
+    }
+    let Ok(length) = usize::try_from(frame.second_argument()) else {
+        return u64::MAX - 2;
+    };
+    if !(1..=64).contains(&length) {
+        return u64::MAX - 2;
+    }
+    let mut bytes = [0_u8; 64];
+    if !address_space::copy_from_current_user(frame.first_argument(), &mut bytes[..length])
+        || !bytes[..length]
+            .iter()
+            .all(|byte| matches!(*byte, b'\n' | b'\r' | 0x20..=0x7e))
+    {
+        return u64::MAX - 2;
+    }
+    let Ok(message) = core::str::from_utf8(&bytes[..length]) else {
+        return u64::MAX - 2;
+    };
+    serial_write(message);
+    SYSCALL_STATE.fetch_or(8, Ordering::SeqCst);
     length as u64
 }
 

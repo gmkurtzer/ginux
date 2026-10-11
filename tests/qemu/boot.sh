@@ -373,6 +373,11 @@ if ! grep -q '^ginux: userspace console capability enforced' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded userspace read enforced' "$output_file"; then
+    echo "Boot test failed: bounded userspace copying failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: ring-3 fault survivor resumed and exited' "$output_file"; then
     echo "Boot test failed: the surviving ring-3 context did not complete." >&2
     exit 1

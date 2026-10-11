@@ -14,11 +14,64 @@ const ENTRY_COUNT: usize = 512;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
+const LARGE_PAGE: u64 = 1 << 7;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const USER_TEST_ADDRESS: usize = 1usize << 39;
-const EXPECTED_FAULT_OFFSET: usize = 333;
+const EXPECTED_FAULT_OFFSET: usize = 396;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
+
+pub(crate) fn copy_from_current_user(address: u64, output: &mut [u8]) -> bool {
+    if output.is_empty() {
+        return false;
+    }
+    let Some(end) = address.checked_add(output.len() as u64) else {
+        return false;
+    };
+    if address >= 1 << 47 || end > 1 << 47 {
+        return false;
+    }
+    let root = current_root();
+    for offset in 0..output.len() {
+        let Some(byte_address) = address.checked_add(offset as u64) else {
+            return false;
+        };
+        if !user_address_is_readable(root, byte_address) {
+            return false;
+        }
+    }
+    unsafe {
+        cpu::with_supervisor_user_access(|| {
+            for (offset, byte) in output.iter_mut().enumerate() {
+                *byte = (address as *const u8).add(offset).read_volatile();
+            }
+        });
+    }
+    true
+}
+
+fn user_address_is_readable(root: u64, address: u64) -> bool {
+    let indexes = [
+        ((address >> 39) & 0x1ff) as usize,
+        ((address >> 30) & 0x1ff) as usize,
+        ((address >> 21) & 0x1ff) as usize,
+        ((address >> 12) & 0x1ff) as usize,
+    ];
+    let mut table = root;
+    for (level, index) in indexes.into_iter().enumerate() {
+        let entry = unsafe { ((table & ADDRESS_MASK) as *const u64).add(index).read() };
+        if entry & (PRESENT | USER) != PRESENT | USER
+            || (level == 1 || level == 2) && entry & LARGE_PAGE != 0
+        {
+            return false;
+        }
+        if level == 3 {
+            return true;
+        }
+        table = entry & ADDRESS_MASK;
+    }
+    false
+}
 
 struct AddressSpace {
     root: u64,

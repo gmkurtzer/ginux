@@ -68,6 +68,12 @@ This is not yet a stable syscall ABI. It has no structured arguments, periodic
 preemption policy, signal model, IPC page, or complete fault-containment policy. The `INT 0x80`
 mechanism is a bring-up gate; the eventual ABI may use `SYSCALL/SYSRET` with a
 safe fallback.
+The first pointer-bearing operation performs a bounded read from a validated
+lower-canonical user range. It rejects absent, supervisor-only, or large-page
+mappings at every level and stages the result before use. This is not yet a
+general copyin/copyout subsystem: mappings cannot mutate concurrently in the
+single-core bootstrap, and there is no exception-table recovery for a race or
+hardware fault during the copy.
 The current executable remains position-fixed and has no relocation policy,
 but its authenticated container supplies checked lengths and distinct control,
 service, and restart entry offsets.
