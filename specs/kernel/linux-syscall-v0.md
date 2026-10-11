@@ -51,9 +51,14 @@ pixel dimensions zero. Unknown descriptors return `-EBADF`, unsupported
 requests return `-ENOTTY`, and invalid destinations return `-EFAULT`. This is a
 fixed early-console contract, not terminal state or a general ioctl mechanism.
 `rax = 3` (`__NR_close`) irreversibly clears descriptor 0 or 1 from the bounded
-process-local console bitmap. Closing an unknown or already closed descriptor
+process-local console table. Closing an unknown or already closed descriptor
 returns `-EBADF`; subsequent `fstat` and `ioctl` calls observe the closure. No
-descriptor allocation, duplication, inheritance, or general table exists yet.
+file, pipe, or socket allocation, inheritance, or general table exists yet.
+`rax = 32` (`__NR_dup`) copies an open console descriptor into the lowest of
+the same two slots, preserving whether it is the input or output endpoint. An
+invalid source returns `-EBADF`; no free slot returns `-EMFILE`. The probe
+closes fd 0, duplicates fd 1 into it, writes through the new fd 0, and closes
+both slots. There is still no general allocation or inherited table.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 2,
@@ -155,7 +160,8 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `writev`, `close`, `fstat`, bounded console `ioctl`, `brk`, `uname`,
+`write`, `writev`, `close`, `dup`, `fstat`, bounded console `ioctl`, `brk`,
+`uname`,
 `getcwd`,
 bounded `readlink`/`readlinkat`,
 bounded read-only `mprotect`,

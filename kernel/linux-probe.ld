@@ -20,7 +20,7 @@ SECTIONS
     {
         *(.text)
         FILL(0)
-        . = ALIGN(4096);
+        . = MAX(., 0x401000);
         BYTE(0)
     } :text
 

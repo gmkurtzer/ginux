@@ -16,7 +16,7 @@ const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
 const MAX_SEGMENT_PAGES: usize = 2;
-const FIXTURE_DATA_OFFSET: usize = 0x1000;
+const FIXTURE_DATA_OFFSET: usize = 0x1100;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
@@ -546,6 +546,7 @@ pub(crate) fn verify_load_plan() -> bool {
         return false;
     };
     let mut executable_page = [0xa5_u8; PAGE_SIZE];
+    let mut executable_tail_page = [0xa5_u8; PAGE_SIZE];
     let mut writable_page = [0xa5_u8; PAGE_SIZE];
     let multi_page_image = image;
     let Some(multi_page_plan) = parse(&multi_page_image).and_then(|image| plan(&image)) else {
@@ -554,13 +555,14 @@ pub(crate) fn verify_load_plan() -> bool {
     let mut writable_tail_page = [0xa5_u8; PAGE_SIZE];
     materialize(current_plan.executable, &mut executable_page)
         && materialize(current_plan.writable, &mut writable_page)
+        && materialize_page(current_plan.executable, 1, &mut executable_tail_page)
         && materialize_page(multi_page_plan.writable, 1, &mut writable_tail_page)
         && current_plan.entry == 0x40_0100
         && current_plan.program_headers == 0x40_0040
         && current_plan.program_header_count == 3
         && current_plan.executable.virtual_page == 0x40_0000
         && current_plan.executable.virtual_address == 0x40_0000
-        && current_plan.executable.page_count == 1
+        && current_plan.executable.page_count == 2
         && current_plan.executable.executable
         && !current_plan.executable.writable
         && current_plan.read_only.is_none()
@@ -568,8 +570,10 @@ pub(crate) fn verify_load_plan() -> bool {
             .relro
             .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
         && executable_page[..4] == *b"\x7fELF"
-        && &executable_page[0x100..0x100 + PROBE_CODE.len()] == PROBE_CODE
-        && executable_page[0x100 + PROBE_CODE.len()..]
+        && executable_page[0x100..] == PROBE_CODE[..PAGE_SIZE - 0x100]
+        && executable_tail_page[..PROBE_CODE.len() - (PAGE_SIZE - 0x100)]
+            == PROBE_CODE[PAGE_SIZE - 0x100..]
+        && executable_tail_page[PROBE_CODE.len() - (PAGE_SIZE - 0x100)..]
             .iter()
             .all(|byte| *byte == 0)
         && current_plan.writable.virtual_page == 0x40_2000
@@ -610,13 +614,14 @@ pub(crate) fn verify_linked_probe() -> bool {
         && materialized_page_matches(read_only, 0, &page);
     let executable_valid = materialize(plan.executable, &mut page)
         && page[..0x100].iter().all(|byte| *byte == 0)
-        && &page[0x100..0x100 + PROBE_CODE.len()] == PROBE_CODE
-        && page[0x100 + PROBE_CODE.len()..]
-            .iter()
-            .all(|byte| *byte == 0)
+        && page[0x100..] == PROBE_CODE[..PAGE_SIZE - 0x100]
         && materialized_page_matches(plan.executable, 0, &page)
         && materialize_page(plan.executable, 1, &mut executable_tail_page)
-        && executable_tail_page.iter().all(|byte| *byte == 0)
+        && executable_tail_page[..PROBE_CODE.len() - (PAGE_SIZE - 0x100)]
+            == PROBE_CODE[PAGE_SIZE - 0x100..]
+        && executable_tail_page[PROBE_CODE.len() - (PAGE_SIZE - 0x100)..]
+            .iter()
+            .all(|byte| *byte == 0)
         && materialized_page_matches(plan.executable, 1, &executable_tail_page);
     let writable_valid = materialize(plan.writable, &mut page)
         && page[..8] == *b"PROBE!!\n"
@@ -698,6 +703,11 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
         8,
         (PAGE_SIZE + 512) as u64,
         PF_READ | PF_WRITE,
+    );
+    write_u64(
+        &mut bytes,
+        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 48,
+        0x100,
     );
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
     write_relro(&mut bytes, stack_header, 0x40_3000, 512);

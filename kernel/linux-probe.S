@@ -793,6 +793,44 @@ ginux_linux_probe:
     cmp rax, 8
     jne failure
 
+    mov edi, 2
+    mov eax, 32
+    syscall
+    cmp rax, -9
+    jne failure
+
+    mov edi, 1
+    mov eax, 32
+    syscall
+    test rax, rax
+    jne failure
+
+    mov edi, 1
+    mov eax, 32
+    syscall
+    cmp rax, -24
+    jne failure
+
+    xor edi, edi
+    lea rsi, [rip + readable_payload]
+    mov edx, 8
+    mov eax, 1
+    syscall
+    cmp rax, 8
+    jne failure
+
+    mov edi, 1
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne failure
+
+    xor edi, edi
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 0x403200
     mov eax, 218
     syscall

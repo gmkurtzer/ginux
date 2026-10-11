@@ -31,7 +31,8 @@ console `write` copy-in and `uname` copy-out operations, and validating a
 `writev` atomically validates and assembles up to four vectors under the same
 aggregate limit before emitting any bytes. A bounded console ioctl reports a
 fixed 80-by-24 geometry, and `close` irreversibly retires either initial console
-descriptor for the process lifetime. It also
+descriptor. Bounded `dup` reuses the lowest closed slot and preserves whether
+the console endpoint is input or output. It also
 configures and queries an FS-relative
 TLS base through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's
 prior FS base afterward. Pointer-bearing calls are constrained to the RW

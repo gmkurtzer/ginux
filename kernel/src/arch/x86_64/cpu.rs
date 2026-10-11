@@ -51,6 +51,7 @@ const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
+const LINUX_DUP_SYSCALL: u64 = 32;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
@@ -87,6 +88,7 @@ const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
+const LINUX_EMFILE: u64 = u64::MAX - 23;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOTTY: u64 = u64::MAX - 24;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
@@ -101,6 +103,8 @@ const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_IOV_LIMIT: usize = 4;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
+const LINUX_DESCRIPTOR_INPUT: u8 = 1;
+const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -771,13 +775,16 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
-    ELF_PROBE_CONSOLE_DESCRIPTORS.store(0b11, Ordering::SeqCst);
+    ELF_PROBE_CONSOLE_DESCRIPTORS.store(
+        LINUX_DESCRIPTOR_INPUT | (LINUX_DESCRIPTOR_OUTPUT << 2),
+        Ordering::SeqCst,
+    );
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
-    let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0b10;
+    let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0;
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
@@ -1127,6 +1134,7 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
+        LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
             let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
@@ -1325,7 +1333,7 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
 }
 
 fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
-    if descriptor != 1 || !linux_console_descriptor_open(descriptor) {
+    if linux_console_descriptor(descriptor) != LINUX_DESCRIPTOR_OUTPUT {
         return LINUX_EBADF;
     }
     let Ok(length) = usize::try_from(count) else {
@@ -1343,7 +1351,7 @@ fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
 }
 
 fn linux_console_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
-    if descriptor != 1 || !linux_console_descriptor_open(descriptor) {
+    if linux_console_descriptor(descriptor) != LINUX_DESCRIPTOR_OUTPUT {
         return LINUX_EBADF;
     }
     let Ok(vector_count) = usize::try_from(count) else {
@@ -1384,19 +1392,66 @@ fn linux_console_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
 }
 
 fn linux_console_descriptor_open(descriptor: u64) -> bool {
-    descriptor < 2
-        && ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst) & (1_u8 << descriptor) != 0
+    linux_console_descriptor(descriptor) != 0
+}
+
+fn linux_console_descriptor(descriptor: u64) -> u8 {
+    if descriptor >= 2 {
+        return 0;
+    }
+    (ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst) >> (descriptor * 2)) & 0b11
 }
 
 fn linux_console_close(descriptor: u64) -> u64 {
     if descriptor >= 2 {
         return LINUX_EBADF;
     }
-    let bit = 1_u8 << descriptor;
-    if ELF_PROBE_CONSOLE_DESCRIPTORS.fetch_and(!bit, Ordering::SeqCst) & bit == 0 {
+    let shift = descriptor * 2;
+    let mask = 0b11_u8 << shift;
+    loop {
+        let current = ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst);
+        if current & mask == 0 {
+            return LINUX_EBADF;
+        }
+        if ELF_PROBE_CONSOLE_DESCRIPTORS
+            .compare_exchange(current, current & !mask, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            return 0;
+        }
+    }
+}
+
+fn linux_console_dup(descriptor: u64) -> u64 {
+    if descriptor >= 2 {
         return LINUX_EBADF;
     }
-    0
+    loop {
+        let current = ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst);
+        let state = (current >> (descriptor * 2)) & 0b11;
+        if state == 0 {
+            return LINUX_EBADF;
+        }
+        let target = if current & 0b11 == 0 {
+            0
+        } else if current & 0b1100 == 0 {
+            1
+        } else {
+            return LINUX_EMFILE;
+        };
+        let shift = target * 2;
+        if ELF_PROBE_CONSOLE_DESCRIPTORS
+            .compare_exchange(
+                current,
+                current | (state << shift),
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+        {
+            return target as u64;
+        }
+    }
 }
 
 fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {

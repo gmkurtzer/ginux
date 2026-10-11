@@ -573,7 +573,7 @@ if ! grep -q '^ginux: Linux atomic vectored console writes validated' "$output_f
     exit 1
 fi
 
-if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 12 ]]; then
+if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 14 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
     exit 1
 fi
@@ -700,6 +700,11 @@ fi
 
 if ! grep -q '^ginux: Linux console descriptor close validated' "$output_file"; then
     echo "Boot test failed: Linux console descriptor close was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux console descriptor duplication validated' "$output_file"; then
+    echo "Boot test failed: Linux console descriptor duplication was not validated." >&2
     exit 1
 fi
 
