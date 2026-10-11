@@ -15,7 +15,11 @@ kernel lifetime.
 
 This proves controlled construction and hardware activation, not process
 isolation completeness. The transitional kernel mapping is still broadly
-writable/executable, the test page is executable, page-table frames are not
-reclaimed, there is no address-space identifier or TLB shootdown protocol, and
-no ring-3 code runs yet. W^X and separate code, stack, guard, IPC, and syscall
-pages are required before launching the control plane.
+writable/executable. A second hardware-tested layout enables `EFER.NXE` and
+provides a user-readable/executable, non-writable code page, an absent guard
+page, and a user-readable/writable, non-executable stack page. The kernel mapping
+remains supervisor-only in both roots.
+
+Page-table frames are not reclaimed, there is no address-space identifier or
+TLB shootdown protocol, and no ring-3 code runs yet. Separate IPC and syscall
+pages plus an entry/exit path are required before launching the control plane.

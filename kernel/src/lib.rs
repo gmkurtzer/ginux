@@ -299,6 +299,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: isolated address-space test failed\r\n");
     }
     serial_write("\r\nginux: isolated address space active");
+    if !address_space::verify_control_plane_wx_layout() {
+        kernel_fail("\r\nginux: control-plane W^X layout failed\r\n");
+    }
+    serial_write("\r\nginux: control-plane W^X mappings active");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
