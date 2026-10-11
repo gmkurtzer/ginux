@@ -683,6 +683,21 @@ if ! grep -q '^ginux: Linux TLS execution context switched and restored' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: stale Linux thread handles rejected' "$output_file"; then
+    echo "Boot test failed: stale Linux thread handles were not rejected." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux thread table reclaimed on exit' "$output_file"; then
+    echo "Boot test failed: Linux thread table was not reclaimed on exit." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: sibling Linux TLS frame scrubbed and released' "$output_file"; then
     echo "Boot test failed: the sibling Linux TLS frame was not scrubbed and released." >&2
     exit 1

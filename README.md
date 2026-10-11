@@ -90,6 +90,16 @@ reads back its FS base, validates its self pointer, proves copy admission moved
 from the initial extent to the sibling extent, and then restores and revalidates
 the initial context. Bootstrap is single-core with interrupts disabled during
 this transition; scheduler-driven Linux TLS switching remains future work.
+A two-slot Linux thread table now binds monotonically assigned TIDs and
+generation-tagged internal handles to those checked TLS contexts. The initial
+thread runs as TID 1; the boot proof reserves TID 2 for the sibling context,
+switches to it and back, rejects a third live reservation, retires it, reuses
+the slot as TID 3 with a new generation, and rejects the stale handle. The
+ring-3 `gettid`, `set_tid_address`, and robust-list lookup paths resolve the
+current table entry rather than embedding TID 1. Process exit retires the
+initial entry and teardown requires the complete table to be empty before
+resetting the process-local TID sequence. There is still no userspace `clone`,
+second Linux stack, or concurrently schedulable Linux thread.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

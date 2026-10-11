@@ -531,9 +531,12 @@ unknown version is replaced with v3 before returning `-EINVAL`. `rax = 126`
 (`__NR_capset`) accepts only an idempotent all-zero v3 set for the current
 process; nonzero capabilities or another PID return `-EPERM`. Container UID 0
 therefore carries no Linux capabilities and still grants no native kernel
-authority. The initial process namespace has
-one process and one thread:
-`getpid` and `gettid` return 1, `getppid` returns 0, and `getpgrp`,
+authority. The initial process namespace has one visible process and one
+runnable thread. `getpid` returns the fixed process ID 1, while `gettid`
+resolves the running entry in the bounded generation-tagged thread table and
+returns its TID 1. Internal lifecycle verification temporarily reserves TIDs 2
+and 3 but retires them before ring-3 entry, so they are never userspace-visible
+or runnable. `getppid` returns 0, and `getpgrp`,
 `getpgid(0)`, and `getsid(0)` return 1. `getpgid` and `getsid` return `-ESRCH`
 for an unknown PID. `rax = 157` (`__NR_prctl`) supports `PR_SET_NAME` and
 `PR_GET_NAME` for this sole thread. The 16-byte name starts as `init`, setters
@@ -548,14 +551,16 @@ arguments and reports it. Rejected calls return `-EINVAL` without changing the
 bit. The proof requires it to remain set through exit. Future exec and
 credential-mutation paths must honor this boundary before they are admitted.
 Next, `rax = 218` (`__NR_set_tid_address`) registers a
-four-byte word inside the declared RW segment and returns TID 1. The bounded
+four-byte word inside the declared RW segment and returns the current table
+entry's TID 1. The bounded
 proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
 registered word;
 because this profile has no second thread or futex support, there is no waiter
 to wake. `rax = 273` (`__NR_set_robust_list`) registers one writable 24-byte
 robust-list head for that thread. Other lengths return `-EINVAL`, and a head
 crossing the declared writable extent returns `-EFAULT`. `rax = 274`
-(`__NR_get_robust_list`) reports the retained head and length for PID 0 or 1;
+(`__NR_get_robust_list`) reports the retained head and length for PID 0 or the
+current table entry's TID;
 foreign PIDs return `-ESRCH`. Both eight-byte output ranges are validated before
 either is changed. Exit discards the registration, but no robust futex traversal
 or recovery is attempted.
@@ -632,8 +637,9 @@ bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,
 `set_tid_address`, bounded robust-list registration/query, `exit`, and
-`exit_group` calls. There is no thread creation, TID allocation,
-clear-child-TID futex wake, or robust futex recovery yet. Every other call
+`exit_group` calls. There is no userspace thread creation, general TID
+allocation, clear-child-TID futex wake, or robust futex recovery yet; the
+two-slot table is exercised only by the bounded kernel lifecycle proof. Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
 remains disarmed outside the proof. The current copy helpers cover only the one

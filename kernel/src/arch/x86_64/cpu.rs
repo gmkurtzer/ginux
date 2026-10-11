@@ -335,6 +335,25 @@ static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_TLS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_TLS_SIZE: AtomicU64 = AtomicU64::new(0);
+const LINUX_THREAD_LIMIT: usize = 2;
+const LINUX_THREAD_FREE: u8 = 0;
+const LINUX_THREAD_READY: u8 = 1;
+const LINUX_THREAD_RUNNING: u8 = 2;
+const LINUX_THREAD_SLOT_NONE: u8 = u8::MAX;
+static LINUX_THREAD_STATES: [AtomicU8; LINUX_THREAD_LIMIT] =
+    [const { AtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_GENERATIONS: [AtomicU32; LINUX_THREAD_LIMIT] =
+    [const { AtomicU32::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_TIDS: [AtomicU32; LINUX_THREAD_LIMIT] =
+    [const { AtomicU32::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_POINTERS: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_TLS_EXTENTS: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_TLS_SIZES: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_CURRENT_THREAD_SLOT: AtomicU8 = AtomicU8::new(LINUX_THREAD_SLOT_NONE);
+static LINUX_NEXT_TID: AtomicU32 = AtomicU32::new(1);
 static ELF_PROBE_RELRO: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_RELRO_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
@@ -1039,6 +1058,13 @@ struct LinuxTlsContext {
     extent_size: usize,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct LinuxThreadHandle {
+    slot: u8,
+    generation: u32,
+    tid: u32,
+}
+
 impl LinuxTlsContext {
     fn is_valid(self) -> bool {
         if self.extent_size == 0 {
@@ -1111,6 +1137,138 @@ pub(crate) fn verify_linux_tls_context_contract() -> bool {
         .is_valid()
 }
 
+fn reserve_linux_thread(context: LinuxTlsContext) -> Option<LinuxThreadHandle> {
+    if !context.is_valid() {
+        return None;
+    }
+    let slot = LINUX_THREAD_STATES
+        .iter()
+        .position(|state| state.load(Ordering::SeqCst) == LINUX_THREAD_FREE)?;
+    let generation = LINUX_THREAD_GENERATIONS[slot]
+        .load(Ordering::SeqCst)
+        .checked_add(1)?;
+    let tid = LINUX_NEXT_TID.load(Ordering::SeqCst);
+    let next_tid = tid.checked_add(1)?;
+    LINUX_THREAD_GENERATIONS[slot].store(generation, Ordering::SeqCst);
+    LINUX_THREAD_TIDS[slot].store(tid, Ordering::SeqCst);
+    LINUX_THREAD_POINTERS[slot].store(context.thread_pointer as u64, Ordering::SeqCst);
+    LINUX_THREAD_TLS_EXTENTS[slot].store(context.extent as u64, Ordering::SeqCst);
+    LINUX_THREAD_TLS_SIZES[slot].store(context.extent_size as u64, Ordering::SeqCst);
+    LINUX_NEXT_TID.store(next_tid, Ordering::SeqCst);
+    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
+    Some(LinuxThreadHandle {
+        slot: slot as u8,
+        generation,
+        tid,
+    })
+}
+
+fn linux_thread_context(handle: LinuxThreadHandle) -> Option<LinuxTlsContext> {
+    let slot = usize::from(handle.slot);
+    if slot >= LINUX_THREAD_LIMIT
+        || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_FREE
+        || LINUX_THREAD_GENERATIONS[slot].load(Ordering::SeqCst) != handle.generation
+        || LINUX_THREAD_TIDS[slot].load(Ordering::SeqCst) != handle.tid
+    {
+        return None;
+    }
+    Some(LinuxTlsContext {
+        thread_pointer: usize::try_from(LINUX_THREAD_POINTERS[slot].load(Ordering::SeqCst)).ok()?,
+        extent: usize::try_from(LINUX_THREAD_TLS_EXTENTS[slot].load(Ordering::SeqCst)).ok()?,
+        extent_size: usize::try_from(LINUX_THREAD_TLS_SIZES[slot].load(Ordering::SeqCst)).ok()?,
+    })
+}
+
+fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
+    let slot = usize::from(handle.slot);
+    let Some(context) = linux_thread_context(handle) else {
+        return false;
+    };
+    if LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_READY
+        || !install_linux_tls_context(context)
+    {
+        return false;
+    }
+    let prior = LINUX_CURRENT_THREAD_SLOT.load(Ordering::SeqCst);
+    if prior != LINUX_THREAD_SLOT_NONE {
+        let prior = usize::from(prior);
+        if prior >= LINUX_THREAD_LIMIT
+            || LINUX_THREAD_STATES[prior].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
+        {
+            return false;
+        }
+        LINUX_THREAD_STATES[prior].store(LINUX_THREAD_READY, Ordering::SeqCst);
+    }
+    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_RUNNING, Ordering::SeqCst);
+    LINUX_CURRENT_THREAD_SLOT.store(handle.slot, Ordering::SeqCst);
+    true
+}
+
+fn retire_linux_thread(handle: LinuxThreadHandle) -> bool {
+    let slot = usize::from(handle.slot);
+    if linux_thread_context(handle).is_none()
+        || LINUX_CURRENT_THREAD_SLOT.load(Ordering::SeqCst) == handle.slot
+        || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_READY
+    {
+        return false;
+    }
+    clear_linux_thread_slot(slot);
+    true
+}
+
+fn retire_current_linux_thread() -> bool {
+    let slot = LINUX_CURRENT_THREAD_SLOT.swap(LINUX_THREAD_SLOT_NONE, Ordering::SeqCst);
+    let slot = usize::from(slot);
+    if slot >= LINUX_THREAD_LIMIT
+        || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
+    {
+        return false;
+    }
+    clear_linux_thread_slot(slot);
+    true
+}
+
+fn clear_linux_thread_slot(slot: usize) {
+    LINUX_THREAD_TIDS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_POINTERS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_TLS_EXTENTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_TLS_SIZES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_FREE, Ordering::SeqCst);
+}
+
+fn current_linux_tid() -> Option<u32> {
+    let slot = usize::from(LINUX_CURRENT_THREAD_SLOT.load(Ordering::SeqCst));
+    (slot < LINUX_THREAD_LIMIT
+        && LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_RUNNING)
+        .then(|| LINUX_THREAD_TIDS[slot].load(Ordering::SeqCst))
+        .filter(|tid| *tid != 0)
+}
+
+fn finish_linux_thread_table() -> bool {
+    let clean = LINUX_CURRENT_THREAD_SLOT.load(Ordering::SeqCst) == LINUX_THREAD_SLOT_NONE
+        && LINUX_THREAD_STATES
+            .iter()
+            .all(|state| state.load(Ordering::SeqCst) == LINUX_THREAD_FREE)
+        && LINUX_THREAD_TIDS
+            .iter()
+            .all(|tid| tid.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_POINTERS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_TLS_EXTENTS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_TLS_SIZES
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0);
+    for slot in 0..LINUX_THREAD_LIMIT {
+        clear_linux_thread_slot(slot);
+    }
+    LINUX_CURRENT_THREAD_SLOT.store(LINUX_THREAD_SLOT_NONE, Ordering::SeqCst);
+    LINUX_NEXT_TID.store(1, Ordering::SeqCst);
+    clean
+}
+
 pub(crate) struct LinuxElfResult {
     pub(crate) valid: bool,
     pub(crate) dependency_bases: [u64; LINUX_DEPENDENCY_COUNT],
@@ -1167,8 +1325,40 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     };
-    if !install_linux_tls_context(initial_tls) {
+    let linux_thread_lifecycle_valid = finish_linux_thread_table()
+        && (|| -> Option<bool> {
+            let initial_thread = reserve_linux_thread(initial_tls)?;
+            if initial_thread.tid != 1 || !switch_linux_thread(initial_thread) {
+                return Some(false);
+            }
+            if execution.tls_size == 0 {
+                return Some(true);
+            }
+            let sibling_thread = reserve_linux_thread(sibling_tls)?;
+            let capacity_bounded = reserve_linux_thread(sibling_tls).is_none();
+            if sibling_thread.tid != 2
+                || !capacity_bounded
+                || !switch_linux_thread(sibling_thread)
+                || current_linux_tid() != Some(2)
+                || !switch_linux_thread(initial_thread)
+                || current_linux_tid() != Some(1)
+                || !retire_linux_thread(sibling_thread)
+            {
+                return Some(false);
+            }
+            let replacement = reserve_linux_thread(sibling_tls)?;
+            Some(
+                replacement.tid == 3
+                    && replacement.slot == sibling_thread.slot
+                    && replacement.generation != sibling_thread.generation
+                    && !switch_linux_thread(sibling_thread)
+                    && retire_linux_thread(replacement),
+            )
+        })()
+        .unwrap_or(false);
+    if !linux_thread_lifecycle_valid {
         let _ = restore_linux_syscall(saved_msrs);
+        let _ = finish_linux_thread_table();
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
@@ -1328,6 +1518,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     };
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
+    let linux_thread_table_released = finish_linux_thread_table();
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
@@ -1579,6 +1770,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         && tls_state_valid
         && tls_copy_bounds_valid
         && tls_context_switch_valid
+        && linux_thread_table_released
         && process_name_restored
         && no_new_privileges_enforced
         && signal_mask_restored
@@ -2043,7 +2235,8 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_RT_SIGPROCMASK_SYSCALL => {
             linux_rt_sigprocmask(first_argument, buffer, count, register(0))
         }
-        LINUX_GETPID_SYSCALL | LINUX_GETTID_SYSCALL => 1,
+        LINUX_GETPID_SYSCALL => 1,
+        LINUX_GETTID_SYSCALL => current_linux_tid().map_or(LINUX_ESRCH, u64::from),
         LINUX_GETPPID_SYSCALL => 0,
         LINUX_GETPGRP_SYSCALL => 1,
         LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => {
@@ -2059,7 +2252,7 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_EFAULT;
             }
             ELF_PROBE_CLEAR_CHILD_TID.store(first_argument, Ordering::SeqCst);
-            1
+            current_linux_tid().map_or(LINUX_ESRCH, u64::from)
         }
         LINUX_SET_ROBUST_LIST_SYSCALL => {
             if buffer != LINUX_ROBUST_LIST_HEAD_SIZE as u64 {
@@ -2072,7 +2265,8 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_GET_ROBUST_LIST_SYSCALL => {
-            if !matches!(first_argument, 0 | 1) {
+            let current_tid = current_linux_tid().map_or(0, u64::from);
+            if first_argument != 0 && first_argument != current_tid {
                 return LINUX_ESRCH;
             }
             if !copy_linux_robust_list(buffer, count) {
@@ -2336,6 +2530,9 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_EFAULT;
             }
             ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
+            if !retire_current_linux_thread() {
+                return LINUX_ESRCH;
+            }
             ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
             LINUX_RETURN_TO_KERNEL
