@@ -2,7 +2,6 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_THREADS: usize = 8;
-const INITIAL_SYSCALL_BUDGET: u16 = 12;
 
 static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut RUNTIME: MaybeUninit<Runtime> = MaybeUninit::uninit();
@@ -25,7 +24,6 @@ struct Thread {
     domain: u64,
     state: State,
     context: UserContext,
-    syscall_budget: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -222,7 +220,6 @@ struct Runtime {
     scheduler: Scheduler,
     yields: u8,
     exits: u8,
-    syscalls: u16,
     address_space_switches: u8,
     faults: u8,
     expected_fault_instruction: u64,
@@ -267,7 +264,6 @@ impl Scheduler {
             domain,
             state: State::Ready,
             context,
-            syscall_budget: INITIAL_SYSCALL_BUDGET,
         });
         Some(id)
     }
@@ -397,7 +393,6 @@ pub(crate) fn initialize_runtime(
             scheduler,
             yields: 0,
             exits: 0,
-            syscalls: 0,
             address_space_switches: 0,
             faults: 0,
             expected_fault_instruction: expected_fault_instruction as u64,
@@ -480,27 +475,6 @@ pub(crate) fn fault_runtime(
     } else {
         RuntimeAction::Complete
     }
-}
-
-pub(crate) fn charge_runtime_call() -> bool {
-    let Some(runtime) = runtime_mut() else {
-        return false;
-    };
-    let Some(current) = runtime.scheduler.current else {
-        return false;
-    };
-    let Some(thread) = runtime.scheduler.thread_mut(current) else {
-        return false;
-    };
-    let Some(remaining) = thread.syscall_budget.checked_sub(1) else {
-        return false;
-    };
-    let Some(syscalls) = runtime.syscalls.checked_add(1) else {
-        return false;
-    };
-    thread.syscall_budget = remaining;
-    runtime.syscalls = syscalls;
-    true
 }
 
 pub(crate) fn yield_runtime(
@@ -599,7 +573,6 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.faults == 1
         && runtime.restarts == 1
         && runtime.expected_fault_observed
-        && runtime.syscalls == 17
         && runtime.address_space_switches == 3
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)

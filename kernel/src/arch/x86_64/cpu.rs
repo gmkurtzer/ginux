@@ -16,6 +16,7 @@ const USER_DATA_SELECTOR: u16 = 0x2b;
 const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
 const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_007f;
+const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
@@ -537,12 +538,13 @@ extern "sysv64" fn breakpoint_handler() {
 }
 
 extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
-    if !scheduler::charge_runtime_call() {
-        return u64::MAX;
-    }
     let Some(caller_domain) = scheduler::current_domain() else {
         return u64::MAX;
     };
+    // Termination must remain available after a domain exhausts its budget.
+    if number != 2 && !domain::charge_call(caller_domain) {
+        return CALL_BUDGET_EXHAUSTED;
+    }
     match number {
         0 => CONTROL_ABI_V1_FEATURES,
         1 => {

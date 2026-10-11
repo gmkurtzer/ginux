@@ -40,16 +40,18 @@ negotiates the ABI and exits cleanly. The boot succeeds only after exactly one
 yield, one contained fault, two normal exits, one restart, and three cross-root
 dispatches.
 
-Each created thread also receives a fixed ten-call bootstrap budget. Every
-call-gate entry is charged before dispatch, including denied operations, yield,
-and exit. Exhaustion rejects further dispatch. The ring-3 proof accounts for
-exactly fifteen calls across its three contexts, demonstrating that scheduling
-does not merge their budgets.
+Call budgets belong to domains rather than threads. The control domain receives
+11 charged calls and each service generation receives three. Every call-gate
+entry except thread exit is charged before dispatch, including denied
+operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
+available so a depleted domain is not trapped. The ring-3 proof accounts for
+exactly 15 charged calls, deliberately exhausts the control domain, and requires
+its next discovery call to be rejected before it exits.
 
 This revision uses one guarded TSS privilege stack because execution is
 single-CPU and syscalls cannot nest. It stores no priority, CPU-time budget,
 affinity, wait reason, or timer deadline and provides
-no preemption. The syscall counter is a bring-up resource bound, not a complete
+no preemption. The call budget is a bring-up resource bound, not a complete
 resource-accounting policy. Address-space switching currently flushes the local
 TLB through CR3 reload; PCID, TLB shootdown, and multi-CPU ownership are not
 defined.

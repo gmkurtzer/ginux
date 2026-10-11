@@ -41,6 +41,9 @@ Operation 7 consumes the pending service-fault event and requires manage
 authority on host-control object 1. It returns event kind 1 for a contained
 service fault, or `UINT64_MAX - 2` on denial or when no event is pending. This
 bootstrap revision holds at most one such event.
+Any charged operation returns `UINT64_MAX - 3` without dispatch when its
+domain's call budget is exhausted. Operation 2 remains available so the caller
+can exit after exhaustion.
 Unknown operations terminate the proof program without granting an operation.
 
 At initial entry, `RBX` contains the host-control handle, `RCX` contains the

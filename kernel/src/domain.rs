@@ -5,6 +5,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
+const CONTROL_CALL_BUDGET: u16 = 11;
+const SERVICE_CALL_BUDGET: u16 = 3;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_MANAGER: MaybeUninit<Manager> = MaybeUninit::uninit();
@@ -45,6 +47,7 @@ struct Domain {
     capabilities: CapabilityTable,
     boot_roots: [Option<Handle>; MAX_BOOT_GRANTS],
     boot_root_count: usize,
+    remaining_calls: u16,
 }
 
 pub(crate) struct Manager {
@@ -56,6 +59,7 @@ pub(crate) struct Manager {
     last_retired_service_id: Option<DomainId>,
     pending_service_fault: Option<DomainId>,
     last_delivered_service_fault: Option<DomainId>,
+    total_calls: u16,
 }
 
 impl Manager {
@@ -69,6 +73,7 @@ impl Manager {
             last_retired_service_id: None,
             pending_service_fault: None,
             last_delivered_service_fault: None,
+            total_calls: 0,
         }
     }
 
@@ -97,6 +102,7 @@ impl Manager {
             capabilities,
             boot_roots,
             boot_root_count: grants.len(),
+            remaining_calls: CONTROL_CALL_BUDGET,
         });
         self.control_plane_created = true;
         self.control_plane_id = Some(id);
@@ -139,6 +145,7 @@ impl Manager {
             capabilities,
             boot_roots,
             boot_root_count: 1,
+            remaining_calls: SERVICE_CALL_BUDGET,
         });
         self.service_id = Some(id);
         Some(id)
@@ -250,6 +257,42 @@ pub(crate) fn handle_permits(domain_raw: u64, raw: u64, object: u64, rights: Rig
         return false;
     };
     domain.capabilities.permits(handle, object, rights)
+}
+
+pub(crate) fn charge_call(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    let Some(total_calls) = manager.total_calls.checked_add(1) else {
+        return false;
+    };
+    let Some(domain) = manager
+        .domains
+        .get_mut(usize::from(id.slot))
+        .and_then(Option::as_mut)
+        .filter(|domain| domain.id == id)
+    else {
+        return false;
+    };
+    let Some(remaining_calls) = domain.remaining_calls.checked_sub(1) else {
+        return false;
+    };
+    domain.remaining_calls = remaining_calls;
+    manager.total_calls = total_calls;
+    true
+}
+
+pub(crate) fn call_budget_proof_complete() -> bool {
+    let Some(manager) = global_manager() else {
+        return false;
+    };
+    let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
+        return false;
+    };
+    control.remaining_calls == 0 && manager.total_calls == 15
 }
 
 pub(crate) fn is_service_domain(domain_raw: u64) -> bool {

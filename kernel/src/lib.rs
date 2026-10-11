@@ -419,6 +419,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
+        || !domain::call_budget_proof_complete()
         || domain::handle_permits(
             service_domain,
             service_ipc_handle,
@@ -451,7 +452,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: service fault event delivered to control plane");
     serial_write("\r\nginux: service domain generation reuse verified");
     serial_write("\r\nginux: replacement service context executed");
-    serial_write("\r\nginux: per-thread syscall budgets enforced");
+    serial_write("\r\nginux: per-domain syscall budgets enforced");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }

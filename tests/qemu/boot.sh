@@ -318,8 +318,8 @@ if ! grep -q '^ginux: replacement service context executed' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: per-thread syscall budgets enforced' "$output_file"; then
-    echo "Boot test failed: per-thread syscall accounting failed." >&2
+if ! grep -q '^ginux: per-domain syscall budgets enforced' "$output_file"; then
+    echo "Boot test failed: per-domain syscall accounting failed." >&2
     exit 1
 fi
 

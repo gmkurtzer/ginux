@@ -36,3 +36,9 @@ and clean exit, then retires it again. General restart policy and
 outstanding-operation cleanup remain undefined. The fault path also publishes a
 single capability-gated service-fault event to the control plane before reusing
 the service slot.
+
+Each domain also owns a fixed bootstrap call budget. Charging resolves the
+current generation-tagged domain before dispatch, so threads cannot gain calls
+by yielding or creating another thread. A restarted service receives the new
+domain generation's independent budget. Exit is deliberately uncharged and
+remains available after exhaustion.
