@@ -238,6 +238,11 @@ if ! grep -q '^ginux: atomic frame reservations verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: tracked frame release ownership verified' "$output_file"; then
+    echo "Boot test failed: physical-frame release ownership failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated address space active' "$output_file"; then
     echo "Boot test failed: isolated address-space activation failed." >&2
     exit 1

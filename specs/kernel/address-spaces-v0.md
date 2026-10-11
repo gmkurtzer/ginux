@@ -20,8 +20,10 @@ provides a user-readable/executable, non-writable code page and two
 user-readable/writable, non-executable stack pages, each preceded by an absent
 guard page. The kernel mapping remains supervisor-only in both roots.
 
-Page-table frames are not reclaimed, there is no address-space identifier or
-TLB shootdown protocol, and the kernel mapping remains transitional.
+Completed proof address-space page-table and data frames are cleared and
+returned through the allocator's live-ownership check. There is no
+address-space identifier or TLB shootdown protocol, and the kernel mapping
+remains transitional.
 
 ## Ring-3 entry proof
 

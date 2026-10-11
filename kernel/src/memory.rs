@@ -6,6 +6,7 @@ const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 64;
 const MAX_RECYCLED_FRAMES: usize = 128;
+const MAX_LIVE_FRAMES: usize = 128;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_ALLOCATOR: MaybeUninit<FrameAllocator> = MaybeUninit::uninit();
@@ -24,6 +25,8 @@ pub(crate) struct FrameAllocator {
     range_count: usize,
     active_range: usize,
     allocated_frames: u64,
+    live_frames: [u64; MAX_LIVE_FRAMES],
+    live_count: usize,
     recycled: [u64; MAX_RECYCLED_FRAMES],
     recycled_count: usize,
 }
@@ -35,6 +38,8 @@ impl FrameAllocator {
             range_count: 0,
             active_range: 0,
             allocated_frames: 0,
+            live_frames: [0; MAX_LIVE_FRAMES],
+            live_count: 0,
             recycled: [0; MAX_RECYCLED_FRAMES],
             recycled_count: 0,
         };
@@ -80,11 +85,14 @@ impl FrameAllocator {
     }
 
     fn allocate_one(&mut self) -> Option<u64> {
+        if self.live_count == MAX_LIVE_FRAMES {
+            return None;
+        }
         if self.recycled_count != 0 {
             self.recycled_count -= 1;
             let frame = self.recycled[self.recycled_count];
             self.recycled[self.recycled_count] = 0;
-            self.allocated_frames = self.allocated_frames.checked_add(1)?;
+            self.record_live(frame)?;
             return Some(frame);
         }
         while self.active_range < self.range_count {
@@ -92,7 +100,7 @@ impl FrameAllocator {
             if range.next < range.end {
                 let frame = range.next;
                 range.next += PAGE_SIZE;
-                self.allocated_frames = self.allocated_frames.checked_add(1)?;
+                self.record_live(frame)?;
                 return Some(frame);
             }
             self.active_range += 1;
@@ -107,6 +115,7 @@ impl FrameAllocator {
                 .checked_add(N)
                 .is_none_or(|count| count > MAX_RECYCLED_FRAMES)
             || self.allocated_frames < N as u64
+            || self.live_count < N
         {
             return false;
         }
@@ -115,18 +124,41 @@ impl FrameAllocator {
                 || *frame % PAGE_SIZE != 0
                 || frames[..index].contains(frame)
                 || self.recycled[..self.recycled_count].contains(frame)
+                || !self.live_frames[..self.live_count].contains(frame)
             {
                 return false;
             }
         }
         let mut staged = *self;
         for frame in frames {
+            let Some(index) = staged.live_frames[..staged.live_count]
+                .iter()
+                .position(|live| *live == frame)
+            else {
+                return false;
+            };
+            staged.live_count -= 1;
+            staged.live_frames[index] = staged.live_frames[staged.live_count];
+            staged.live_frames[staged.live_count] = 0;
             staged.recycled[staged.recycled_count] = frame;
             staged.recycled_count += 1;
         }
         staged.allocated_frames -= N as u64;
         *self = staged;
         true
+    }
+
+    fn record_live(&mut self, frame: u64) -> Option<()> {
+        if self.live_count == MAX_LIVE_FRAMES
+            || self.live_frames[..self.live_count].contains(&frame)
+        {
+            return None;
+        }
+        let allocated = self.allocated_frames.checked_add(1)?;
+        self.live_frames[self.live_count] = frame;
+        self.live_count += 1;
+        self.allocated_frames = allocated;
+        Some(())
     }
 
     fn available_frames(&self) -> u64 {
@@ -206,6 +238,8 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         range_count: 2,
         active_range: 0,
         allocated_frames: 0,
+        live_frames: [0; MAX_LIVE_FRAMES],
+        live_count: 0,
         recycled: [0; MAX_RECYCLED_FRAMES],
         recycled_count: 0,
     };
@@ -229,6 +263,11 @@ pub(crate) fn verify_reservation_invariants() -> bool {
     let Some(last) = allocator.reserve::<1>() else {
         return false;
     };
+    let before_forged_release = allocator;
+    let forged_release_rejected = !allocator.release([0x30_0000])
+        && allocator.allocated_frames == before_forged_release.allocated_frames
+        && allocator.live_count == before_forged_release.live_count
+        && allocator.recycled_count == before_forged_release.recycled_count;
     let released = allocator.release(first);
     let duplicate_rejected = !allocator.release(first);
     let reused = allocator.reserve::<2>();
@@ -236,10 +275,12 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         && failed
         && failure_was_atomic
         && last == [0x20_0000]
+        && forged_release_rejected
         && released
         && duplicate_rejected
         && reused == Some([0x10_1000, 0x10_0000])
         && allocator.allocated_frames == 3
+        && allocator.live_count == 3
         && allocator.available_frames() == 0
         && allocator.reserve::<0>().is_none()
 }
