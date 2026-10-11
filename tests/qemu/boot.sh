@@ -608,6 +608,11 @@ if ! grep -q '^ginux: Linux platform auxiliary vector validated' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux conservative hardware capabilities validated' "$output_file"; then
+    echo "Boot test failed: Linux hardware capability vectors were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux FS base query validated' "$output_file"; then
     echo "Boot test failed: Linux FS base query was not validated." >&2
     exit 1

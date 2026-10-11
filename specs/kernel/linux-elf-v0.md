@@ -153,11 +153,14 @@ to `GINUX=1`, a null `envp` terminator,
 for the static image, `AT_FLAGS = 0`, `AT_UID = 0`, `AT_EUID = 0`, `AT_GID = 0`,
 `AT_EGID = 0`, `AT_SECURE = 0`, `AT_EXECFN` pointing to `/init`, `AT_ENTRY`
 equal to the ELF entry, `AT_CLKTCK = 100`, `AT_PLATFORM` pointing to `x86_64`,
-and `AT_NULL`. These credentials are container-local
-and do not grant native kernel capabilities. The probe dereferences and validates
-`argv[0]`, `envp[0]`, `AT_BASE`, `AT_FLAGS`, `AT_SECURE`, `AT_EXECFN`, and
-`AT_ENTRY`, and `AT_PLATFORM` from CPL3 before its syscall sequence. Credential
-queries include
+conservative `AT_HWCAP = 0` and `AT_HWCAP2 = 0` declarations, and `AT_NULL`.
+The zero hardware masks intentionally make no optional instruction-set promise
+until the kernel has a maintained Linux feature-bit translation. These
+credentials are container-local and do not grant native kernel capabilities.
+The probe dereferences and validates `argv[0]`, `envp[0]`, `AT_BASE`,
+`AT_FLAGS`, `AT_SECURE`, `AT_EXECFN`, `AT_ENTRY`, `AT_PLATFORM`, `AT_HWCAP`,
+and `AT_HWCAP2` from CPL3 before its
+syscall sequence. Credential queries include
 atomic copy-out of real/effective/saved UID and GID triples, all zero in the
 container namespace. `AT_RANDOM` remains absent
 until the boot path supplies a cryptographically suitable entropy source.

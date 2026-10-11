@@ -277,7 +277,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - 44 * size_of::<u64>();
+            let stack_offset = PAGE_SIZE - 48 * size_of::<u64>();
             let platform_offset = PAGE_SIZE - 6 * size_of::<u64>();
             let environment_offset = PAGE_SIZE - 4 * size_of::<u64>();
             let argument_offset = PAGE_SIZE - 2 * size_of::<u64>();
@@ -321,6 +321,10 @@ pub(crate) fn verify_linux_elf_mapping(
                 100,
                 15,
                 platform_address,
+                16,
+                0,
+                26,
+                0,
                 0,
                 0,
             ]
@@ -441,8 +445,12 @@ pub(crate) fn verify_linux_elf_mapping(
                 && stack_words.add(32).read() == 100
                 && stack_words.add(33).read() == 15
                 && stack_words.add(34).read() == platform_address
-                && stack_words.add(35).read() == 0
+                && stack_words.add(35).read() == 16
                 && stack_words.add(36).read() == 0
+                && stack_words.add(37).read() == 26
+                && stack_words.add(38).read() == 0
+                && stack_words.add(39).read() == 0
+                && stack_words.add(40).read() == 0
                 && core::slice::from_raw_parts(
                     stack_bytes.add(platform_offset),
                     LINUX_PLATFORM.len(),
