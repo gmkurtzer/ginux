@@ -16,7 +16,7 @@ const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
 const MAX_SEGMENT_PAGES: usize = 2;
-const FIXTURE_DATA_OFFSET: usize = 0x1100;
+const FIXTURE_DATA_OFFSET: usize = 0x2000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
@@ -398,42 +398,6 @@ fn parse_relro(bytes: &[u8], header: usize) -> Option<Relro> {
 
 pub(crate) fn verify_parser() -> bool {
     let image = fixture();
-    let mut without_stack = image;
-    write_u16(&mut without_stack, 56, MIN_LOAD_SEGMENT_COUNT as u16);
-    let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
-    let phdr_header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
-    let mut with_phdr = image;
-    write_phdr(&mut with_phdr, stack_header, 3);
-    let mut with_phdr_and_stack = image;
-    let extended_phdr_header = ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE;
-    write_u16(&mut with_phdr_and_stack, 56, 5);
-    write_gnu_stack(&mut with_phdr_and_stack, phdr_header);
-    write_phdr(&mut with_phdr_and_stack, extended_phdr_header, 5);
-    let mut reordered = with_phdr_and_stack;
-    swap_program_headers(&mut reordered, ELF_HEADER_SIZE, extended_phdr_header);
-    let mut duplicate_stack = with_phdr_and_stack;
-    write_gnu_stack(&mut duplicate_stack, extended_phdr_header);
-    let mut duplicate_phdr = with_phdr_and_stack;
-    write_phdr(&mut duplicate_phdr, stack_header, 5);
-    let mut bad_phdr_address = with_phdr;
-    write_u64(&mut bad_phdr_address, stack_header + 16, 0x40_0048);
-    let mut bad_phdr_size = with_phdr;
-    write_u64(&mut bad_phdr_size, stack_header + 32, 1);
-    let mut conventional_addresses = with_phdr_and_stack;
-    write_u64(&mut conventional_addresses, ELF_HEADER_SIZE + 24, 0x40_0000);
-    write_u64(
-        &mut conventional_addresses,
-        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 24,
-        0x40_2000,
-    );
-    write_u64(
-        &mut conventional_addresses,
-        extended_phdr_header + 24,
-        0x40_0040,
-    );
-    let mut zero_aligned_stack = image;
-    write_gnu_stack(&mut zero_aligned_stack, stack_header);
-    write_u64(&mut zero_aligned_stack, stack_header + 48, 0);
     let Some(parsed) = parse(&image) else {
         return false;
     };
@@ -455,21 +419,7 @@ pub(crate) fn verify_parser() -> bool {
     {
         return false;
     }
-    let metadata = parse(&without_stack).is_some()
-        && parse(&with_phdr).is_some_and(|image| image.program_headers == 0x40_0040)
-        && parse(&with_phdr_and_stack).is_some()
-        && parse(&reordered).is_some_and(|image| {
-            image.executable.flags == PF_READ | PF_EXECUTE
-                && image.writable.flags == PF_READ | PF_WRITE
-        })
-        && parse(&duplicate_stack).is_none()
-        && parse(&duplicate_phdr).is_none()
-        && parse(&bad_phdr_address).is_none()
-        && parse(&bad_phdr_size).is_none()
-        && parse(&conventional_addresses).is_some()
-        && parse(&zero_aligned_stack).is_some()
-        && verify_relro_parser();
-    if !metadata {
+    if !verify_metadata_parser(&image) {
         return false;
     }
     let rejections = rejects(&image, 0, b'X')
@@ -494,6 +444,91 @@ pub(crate) fn verify_parser() -> bool {
         && rejects_u16(&image, 56, (MAX_PROGRAM_HEADER_COUNT + 1) as u16)
         && parse(&image[..image.len() - 1]).is_none();
     rejections
+}
+
+#[inline(never)]
+fn verify_metadata_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
+    let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
+    let extended_phdr_header = ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE;
+    let mut candidate = *image;
+
+    write_u16(&mut candidate, 56, MIN_LOAD_SEGMENT_COUNT as u16);
+    if parse(&candidate).is_none() {
+        return false;
+    }
+
+    candidate = *image;
+    write_phdr(&mut candidate, stack_header, 3);
+    if parse(&candidate).is_none_or(|image| image.program_headers != 0x40_0040) {
+        return false;
+    }
+
+    candidate = *image;
+    configure_extended_metadata(&mut candidate);
+    if parse(&candidate).is_none() {
+        return false;
+    }
+
+    swap_program_headers(&mut candidate, ELF_HEADER_SIZE, extended_phdr_header);
+    if parse(&candidate).is_none_or(|image| {
+        image.executable.flags != PF_READ | PF_EXECUTE || image.writable.flags != PF_READ | PF_WRITE
+    }) {
+        return false;
+    }
+
+    candidate = *image;
+    configure_extended_metadata(&mut candidate);
+    write_gnu_stack(&mut candidate, extended_phdr_header);
+    if parse(&candidate).is_some() {
+        return false;
+    }
+
+    candidate = *image;
+    configure_extended_metadata(&mut candidate);
+    write_phdr(&mut candidate, stack_header, 5);
+    if parse(&candidate).is_some() {
+        return false;
+    }
+
+    candidate = *image;
+    write_phdr(&mut candidate, stack_header, 3);
+    write_u64(&mut candidate, stack_header + 16, 0x40_0048);
+    if parse(&candidate).is_some() {
+        return false;
+    }
+
+    candidate = *image;
+    write_phdr(&mut candidate, stack_header, 3);
+    write_u64(&mut candidate, stack_header + 32, 1);
+    if parse(&candidate).is_some() {
+        return false;
+    }
+
+    candidate = *image;
+    configure_extended_metadata(&mut candidate);
+    write_u64(&mut candidate, ELF_HEADER_SIZE + 24, 0x40_0000);
+    write_u64(
+        &mut candidate,
+        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 24,
+        0x40_2000,
+    );
+    write_u64(&mut candidate, extended_phdr_header + 24, 0x40_0040);
+    if parse(&candidate).is_none() {
+        return false;
+    }
+
+    candidate = *image;
+    write_gnu_stack(&mut candidate, stack_header);
+    write_u64(&mut candidate, stack_header + 48, 0);
+    parse(&candidate).is_some() && verify_relro_parser()
+}
+
+fn configure_extended_metadata(bytes: &mut [u8]) {
+    let phdr_header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
+    let extended_phdr_header = ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE;
+    write_u16(bytes, 56, 5);
+    write_gnu_stack(bytes, phdr_header);
+    write_phdr(bytes, extended_phdr_header, 5);
 }
 
 #[inline(never)]
@@ -703,11 +738,6 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
         8,
         (PAGE_SIZE + 512) as u64,
         PF_READ | PF_WRITE,
-    );
-    write_u64(
-        &mut bytes,
-        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 48,
-        0x100,
     );
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
     write_relro(&mut bytes, stack_header, 0x40_3000, 512);

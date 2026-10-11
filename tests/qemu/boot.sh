@@ -518,6 +518,11 @@ if ! grep -q '^ginux: bounded Linux ELF metadata headers validated' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux ELF verifier stack usage validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux ELF verifier stack usage was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux GNU RELRO metadata validated' "$output_file"; then
     echo "Boot test failed: bounded Linux GNU RELRO metadata was not validated." >&2
     exit 1

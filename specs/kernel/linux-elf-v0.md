@@ -44,7 +44,9 @@ bad magic, wrong class, non-executable file type, wrong machine, an out-of-range
 entry point, W+X flags, overflowing file size, overlapping virtual ranges, an
 executable GNU stack, malformed or duplicate metadata, unsupported header
 types, and truncation. Images with neither metadata header, either one, or both
-are accepted when their declarations are valid.
+are accepted when their declarations are valid. The boot verifier reuses one
+mutation buffer across metadata cases so larger bounded fixtures do not
+multiply its early-boot stack footprint.
 
 The build also feeds the same assembly through the Rust toolchain's LLD to
 produce a genuine static ELF with separate read-only header, RX text, and RW
