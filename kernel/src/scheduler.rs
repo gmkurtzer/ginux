@@ -314,6 +314,7 @@ struct Runtime {
     expected_fault_instruction: u64,
     expected_fault_observed: bool,
     service_restart_context: UserContext,
+    service_address_space_owner: u64,
     restarts: u8,
     blocks: u8,
     wakes: u8,
@@ -578,6 +579,7 @@ pub(crate) fn initialize_runtime(
             expected_fault_instruction: expected_fault_instruction as u64,
             expected_fault_observed: false,
             service_restart_context,
+            service_address_space_owner: second_domain,
             restarts: 0,
             blocks: 0,
             wakes: 0,
@@ -606,12 +608,17 @@ pub(crate) fn queue_service_restart(domain: u64, ipc_handle: u64) -> bool {
         return false;
     }
     runtime.restarts = 1;
+    runtime.service_address_space_owner = domain;
     true
 }
 
 pub(crate) fn service_restart_stack_mapping() -> Option<(u64, u64)> {
     let context = runtime_mut()?.service_restart_context;
     Some((context.address_space_root, context.rsp))
+}
+
+pub(crate) fn service_address_space_owner() -> Option<u64> {
+    Some(runtime_mut()?.service_address_space_owner)
 }
 
 pub(crate) fn current_domain() -> Option<u64> {

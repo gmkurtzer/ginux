@@ -388,6 +388,11 @@ if ! grep -q '^ginux: failed service stack scrubbed before restart' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: service frame ownership transferred to replacement' "$output_file"; then
+    echo "Boot test failed: service frame ownership was not transferred." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: replacement service context executed' "$output_file"; then
     echo "Boot test failed: replacement service context did not execute." >&2
     exit 1

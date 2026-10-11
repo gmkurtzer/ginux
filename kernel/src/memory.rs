@@ -25,6 +25,21 @@ pub(crate) struct FrameLease {
     generation: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FrameOwner(u64);
+
+impl FrameOwner {
+    pub(crate) const KERNEL: Self = Self(0);
+
+    pub(crate) const fn domain(raw: u64) -> Option<Self> {
+        if raw == 0 || raw >> 48 != 0 {
+            None
+        } else {
+            Some(Self(raw))
+        }
+    }
+}
+
 impl FrameLease {
     pub(crate) const fn address(self) -> u64 {
         self.address
@@ -43,6 +58,7 @@ pub(crate) struct FrameAllocator {
     active_range: usize,
     allocated_frames: u64,
     live_frames: [FrameLease; MAX_LIVE_FRAMES],
+    live_owners: [FrameOwner; MAX_LIVE_FRAMES],
     live_count: usize,
     recycled: [FrameLease; MAX_RECYCLED_FRAMES],
     recycled_count: usize,
@@ -56,6 +72,7 @@ impl FrameAllocator {
             active_range: 0,
             allocated_frames: 0,
             live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
+            live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
             live_count: 0,
             recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
             recycled_count: 0,
@@ -88,20 +105,20 @@ impl FrameAllocator {
         (allocator.range_count != 0).then_some(allocator)
     }
 
-    pub(crate) fn reserve<const N: usize>(&mut self) -> Option<[FrameLease; N]> {
+    pub(crate) fn reserve<const N: usize>(&mut self, owner: FrameOwner) -> Option<[FrameLease; N]> {
         if N == 0 {
             return None;
         }
         let mut staged = *self;
         let mut frames = [EMPTY_LEASE; N];
         for frame in &mut frames {
-            *frame = staged.allocate_one()?;
+            *frame = staged.allocate_one(owner)?;
         }
         *self = staged;
         Some(frames)
     }
 
-    fn allocate_one(&mut self) -> Option<FrameLease> {
+    fn allocate_one(&mut self, owner: FrameOwner) -> Option<FrameLease> {
         if self.live_count == MAX_LIVE_FRAMES {
             return None;
         }
@@ -113,7 +130,7 @@ impl FrameAllocator {
                 address: prior.address,
                 generation: prior.generation.checked_add(1)?,
             };
-            self.record_live(lease)?;
+            self.record_live(lease, owner)?;
             return Some(lease);
         }
         while self.active_range < self.range_count {
@@ -125,7 +142,7 @@ impl FrameAllocator {
                     address,
                     generation: 1,
                 };
-                self.record_live(lease)?;
+                self.record_live(lease, owner)?;
                 return Some(lease);
             }
             self.active_range += 1;
@@ -133,7 +150,11 @@ impl FrameAllocator {
         None
     }
 
-    pub(crate) fn release<const N: usize>(&mut self, frames: [FrameLease; N]) -> bool {
+    pub(crate) fn release<const N: usize>(
+        &mut self,
+        owner: FrameOwner,
+        frames: [FrameLease; N],
+    ) -> bool {
         if N == 0
             || self
                 .recycled_count
@@ -154,7 +175,10 @@ impl FrameAllocator {
                 || self.recycled[..self.recycled_count]
                     .iter()
                     .any(|recycled| recycled.address == frame.address)
-                || !self.live_frames[..self.live_count].contains(frame)
+                || !self.live_frames[..self.live_count]
+                    .iter()
+                    .zip(&self.live_owners[..self.live_count])
+                    .any(|(live, live_owner)| live == frame && *live_owner == owner)
             {
                 return false;
             }
@@ -169,7 +193,9 @@ impl FrameAllocator {
             };
             staged.live_count -= 1;
             staged.live_frames[index] = staged.live_frames[staged.live_count];
+            staged.live_owners[index] = staged.live_owners[staged.live_count];
             staged.live_frames[staged.live_count] = EMPTY_LEASE;
+            staged.live_owners[staged.live_count] = FrameOwner::KERNEL;
             staged.recycled[staged.recycled_count] = frame;
             staged.recycled_count += 1;
         }
@@ -178,7 +204,7 @@ impl FrameAllocator {
         true
     }
 
-    fn record_live(&mut self, frame: FrameLease) -> Option<()> {
+    fn record_live(&mut self, frame: FrameLease, owner: FrameOwner) -> Option<()> {
         if self.live_count == MAX_LIVE_FRAMES
             || self.live_frames[..self.live_count]
                 .iter()
@@ -188,9 +214,38 @@ impl FrameAllocator {
         }
         let allocated = self.allocated_frames.checked_add(1)?;
         self.live_frames[self.live_count] = frame;
+        self.live_owners[self.live_count] = owner;
         self.live_count += 1;
         self.allocated_frames = allocated;
         Some(())
+    }
+
+    fn transfer_owner(&mut self, from: FrameOwner, to: FrameOwner) -> Option<usize> {
+        if from == to || from == FrameOwner::KERNEL || to == FrameOwner::KERNEL {
+            return None;
+        }
+        let count = self.live_owners[..self.live_count]
+            .iter()
+            .filter(|owner| **owner == from)
+            .count();
+        if count == 0 {
+            return None;
+        }
+        for owner in &mut self.live_owners[..self.live_count] {
+            if *owner == from {
+                *owner = to;
+            }
+        }
+        Some(count)
+    }
+
+    fn owns<const N: usize>(&self, owner: FrameOwner, frames: &[FrameLease; N]) -> bool {
+        frames.iter().all(|frame| {
+            self.live_frames[..self.live_count]
+                .iter()
+                .zip(&self.live_owners[..self.live_count])
+                .any(|(live, live_owner)| live == frame && *live_owner == owner)
+        })
     }
 
     fn available_frames(&self) -> u64 {
@@ -241,7 +296,7 @@ pub(crate) fn initialize(boot_info: &BootInfo, ceiling: u64) -> bool {
     true
 }
 
-pub(crate) fn allocate_frames<const N: usize>() -> Option<[FrameLease; N]> {
+pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[FrameLease; N]> {
     if !INITIALIZED.load(Ordering::Acquire) {
         return None;
     }
@@ -250,17 +305,37 @@ pub(crate) fn allocate_frames<const N: usize>() -> Option<[FrameLease; N]> {
     // serialized until an SMP-safe allocator replaces this path.
     unsafe {
         let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
-        (*allocator).reserve::<N>()
+        (*allocator).reserve::<N>(owner)
     }
 }
 
-pub(crate) fn release_frames<const N: usize>(frames: [FrameLease; N]) -> bool {
+pub(crate) fn release_frames<const N: usize>(owner: FrameOwner, frames: [FrameLease; N]) -> bool {
     if !INITIALIZED.load(Ordering::Acquire) {
         return false;
     }
     unsafe {
         let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
-        (*allocator).release(frames)
+        (*allocator).release(owner, frames)
+    }
+}
+
+pub(crate) fn transfer_frame_owner(from: FrameOwner, to: FrameOwner) -> Option<usize> {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        (*allocator).transfer_owner(from, to)
+    }
+}
+
+pub(crate) fn frames_owned_by<const N: usize>(owner: FrameOwner, frames: &[FrameLease; N]) -> bool {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return false;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        (*allocator).owns(owner, frames)
     }
 }
 
@@ -271,6 +346,7 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         active_range: 0,
         allocated_frames: 0,
         live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
+        live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
         live_count: 0,
         recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
         recycled_count: 0,
@@ -283,42 +359,53 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         next: 0x20_0000,
         end: 0x20_1000,
     };
-    let Some(first) = allocator.reserve::<2>() else {
+    let owner = FrameOwner(1);
+    let other_owner = FrameOwner(2);
+    let Some(first) = allocator.reserve::<2>(owner) else {
         return false;
     };
     let before_failure = allocator;
-    let failed = allocator.reserve::<2>().is_none();
+    let failed = allocator.reserve::<2>(owner).is_none();
     let failure_was_atomic = allocator.active_range == before_failure.active_range
         && allocator.ranges[0].next == before_failure.ranges[0].next
         && allocator.ranges[1].next == before_failure.ranges[1].next
         && allocator.allocated_frames == before_failure.allocated_frames;
-    let Some(last) = allocator.reserve::<1>() else {
+    let Some(last) = allocator.reserve::<1>(owner) else {
         return false;
     };
     let before_forged_release = allocator;
-    let forged_release_rejected = !allocator.release([FrameLease {
-        address: 0x30_0000,
-        generation: 1,
-    }]) && allocator.allocated_frames
+    let forged_release_rejected = !allocator.release(
+        owner,
+        [FrameLease {
+            address: 0x30_0000,
+            generation: 1,
+        }],
+    ) && allocator.allocated_frames
         == before_forged_release.allocated_frames
         && allocator.live_count == before_forged_release.live_count
         && allocator.recycled_count == before_forged_release.recycled_count;
-    let released = allocator.release(first);
-    let duplicate_rejected = !allocator.release(first);
-    let reused = allocator.reserve::<2>();
-    let stale_release_rejected = !allocator.release(first);
+    let wrong_owner_rejected = !allocator.release(other_owner, first);
+    let released = allocator.release(owner, first);
+    let duplicate_rejected = !allocator.release(owner, first);
+    let reused = allocator.reserve::<2>(other_owner);
+    let stale_release_rejected = !allocator.release(other_owner, first);
+    let ownership_transferred = allocator.transfer_owner(owner, other_owner) == Some(1)
+        && !allocator.owns(owner, &last)
+        && allocator.owns(other_owner, &last);
     first.map(FrameLease::address) == [0x10_0000, 0x10_1000]
         && failed
         && failure_was_atomic
         && last.map(FrameLease::address) == [0x20_0000]
         && forged_release_rejected
+        && wrong_owner_rejected
         && released
         && duplicate_rejected
         && reused.map(|leases| leases.map(FrameLease::address)) == Some([0x10_1000, 0x10_0000])
         && reused.is_some_and(|leases| leases.iter().all(|lease| lease.generation == 2))
         && stale_release_rejected
+        && ownership_transferred
         && allocator.allocated_frames == 3
         && allocator.live_count == 3
         && allocator.available_frames() == 0
-        && allocator.reserve::<0>().is_none()
+        && allocator.reserve::<0>(owner).is_none()
 }

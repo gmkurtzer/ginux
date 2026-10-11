@@ -447,6 +447,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
         || !arch::x86_64::cpu::service_restart_stack_was_scrubbed()
+        || !arch::x86_64::cpu::service_address_space_frames_were_transferred()
         || !domain::call_budget_proof_complete()
         || !domain::thread_budget_proof_complete()
         || domain::handle_permits(
@@ -489,6 +490,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: service fault event generation matched");
     serial_write("\r\nginux: service domain generation reuse verified");
     serial_write("\r\nginux: failed service stack scrubbed before restart");
+    serial_write("\r\nginux: service frame ownership transferred to replacement");
     serial_write("\r\nginux: replacement service context executed");
     serial_write("\r\nginux: per-domain syscall budgets enforced");
     serial_write("\r\nginux: per-domain thread budgets enforced");
@@ -562,7 +564,7 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
     if !memory::verify_reservation_invariants() {
         return false;
     }
-    let Some([first, second]) = memory::allocate_frames::<2>() else {
+    let Some([first, second]) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let first_address = first.address();
@@ -584,7 +586,7 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
         first_word.write_volatile(0);
         second_word.write_volatile(0);
         valid
-            && memory::release_frames([first, second])
+            && memory::release_frames(memory::FrameOwner::KERNEL, [first, second])
             && !memory::initialize(
                 boot_info,
                 arch::x86_64::paging::INITIAL_IDENTITY_LIMIT as u64,

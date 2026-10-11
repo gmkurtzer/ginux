@@ -6,7 +6,7 @@ use super::timer;
 
 use crate::{
     capability::Rights,
-    domain, ipc, scheduler,
+    domain, ipc, memory, scheduler,
     scheduler::{RuntimeAction, UserFaultFrame, UserTrapFrame},
     serial_write, serial_write_u64,
 };
@@ -84,6 +84,7 @@ struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
+static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
@@ -759,11 +760,26 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             let _ = domain::retire_service(replacement_domain);
             return u64::MAX;
         }
-        if !scheduler::queue_service_restart(replacement_domain, replacement_handle) {
+        let (Some(old_owner), Some(replacement_owner)) = (
+            memory::FrameOwner::domain(fault_domain),
+            memory::FrameOwner::domain(replacement_domain),
+        ) else {
+            let _ = ipc::retire_service(replacement_domain);
+            let _ = domain::retire_service(replacement_domain);
+            return u64::MAX;
+        };
+        if memory::transfer_frame_owner(old_owner, replacement_owner) != Some(7) {
             let _ = ipc::retire_service(replacement_domain);
             let _ = domain::retire_service(replacement_domain);
             return u64::MAX;
         }
+        if !scheduler::queue_service_restart(replacement_domain, replacement_handle) {
+            let _ = memory::transfer_frame_owner(replacement_owner, old_owner);
+            let _ = ipc::retire_service(replacement_domain);
+            let _ = domain::retire_service(replacement_domain);
+            return u64::MAX;
+        }
+        SERVICE_FRAMES_TRANSFERRED.store(true, Ordering::Release);
         if !timer::rearm_scheduler_preemption() {
             return u64::MAX;
         }
@@ -803,6 +819,10 @@ fn scrub_service_restart_stack() -> bool {
 
 pub(crate) fn service_restart_stack_was_scrubbed() -> bool {
     SERVICE_STACK_SCRUBBED.load(Ordering::Acquire)
+}
+
+pub(crate) fn service_address_space_frames_were_transferred() -> bool {
+    SERVICE_FRAMES_TRANSFERRED.load(Ordering::Acquire)
 }
 
 fn resume_action(action: RuntimeAction) -> u64 {

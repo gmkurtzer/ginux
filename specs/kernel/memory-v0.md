@@ -33,8 +33,11 @@ over-capacity batches. A bounded live-allocation ledger additionally requires
 every submitted generation-tagged frame lease to be currently allocated; a
 caller cannot turn an aligned but never-owned address into reusable memory.
 Reallocation increments the lease generation, so an old owner cannot release
-a newer allocation that reused the same address. Validation and ledger removal
-are staged atomically before accepted frames enter the bounded
+a newer allocation that reused the same address. Every live lease also records
+either the kernel or an exact generation-tagged domain owner. Release requires
+both the current lease and current owner; knowing a valid lease from another
+domain is insufficient. Validation and ledger removal are staged atomically
+before accepted frames enter the bounded
 128-frame reuse pool. Completed proof address spaces are zeroed and released
 only after the kernel CR3 is active again. The QEMU gate verifies rollback,
 forged-release rejection, duplicate-release rejection, stale-generation
@@ -48,8 +51,14 @@ and allocate frames that already have owners. Access is serialized only by the
 single-processor, interrupts-disabled bootstrap state; locking or per-CPU
 allocation is required before SMP startup.
 Frame leases are kernel-internal values containing a physical address and
-generation; address-space owners retain the complete lease until atomic
-release. The live ledger is currently limited to 128 simultaneous allocations
-and fails closed at capacity.
+generation; the allocator separately retains their owners. A bounded transfer
+operation changes every live lease owned by one non-kernel domain to another
+non-kernel domain or changes nothing. The service restart path uses it to move
+all seven retained address-space leases from the failed generation to its
+replacement. Its local address-space record adopts the new owner only after
+verifying all seven ledger entries, and final release requires that owner. The
+live ledger is currently limited to 128 simultaneous allocations and fails
+closed at capacity. General per-domain quotas and partial resource transfer are
+not yet defined.
 
 Loader regions containing the unified image, handoff map, page tables, and kernel stacks are never admitted because only `EfiConventionalMemory` ranges enter the allocator.

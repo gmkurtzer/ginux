@@ -52,8 +52,12 @@ userspace.
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3
 is still active, the exception path clears and verifies the entire stack page
-before a replacement domain or context is created. General mutable-region
-inventory and fresh-address-space restart remain future work.
+before a replacement domain or context is created. The seven frame leases are
+then transferred atomically from the failed domain generation to the
+replacement. Completion verifies the local address-space record against the
+allocator's new owner and reclaims the frames using that owner. General
+mutable-region inventory, shared ownership, and fresh-address-space restart
+remain future work.
 
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate

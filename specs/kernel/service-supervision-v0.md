@@ -38,8 +38,12 @@ endpoint to that generation, and queues a fresh context on the retained
 service address space. Before creating that generation, the fault path verifies
 that the failed service's CR3 is still active, clears every byte of the retained
 user stack page with volatile writes, and reads the full page back as zero.
-Replacement creation fails closed if this scrub cannot be completed. Requests
-left for the failed generation are cleared;
+Replacement creation fails closed if this scrub cannot be completed. After the
+new domain is created, the allocator atomically changes the owner of all seven
+retained address-space frame leases from the failed generation to the
+replacement. A wrong-generation release is rejected, and the boot proof must
+reclaim the address space under the replacement owner. Requests left for the
+failed generation are cleared;
 its already-produced reply remains available to the control client. The kernel
 rearms the APIC one-shot, returns to the client, and then
 preempts that client to run the replacement. The replacement negotiates ABI

@@ -33,7 +33,7 @@ struct AddressSpace {
 
 impl AddressSpace {
     fn with_single_user_page(kernel_root: u64) -> Option<Self> {
-        let frames = memory::allocate_frames::<5>()?;
+        let frames = memory::allocate_frames::<5>(memory::FrameOwner::KERNEL)?;
         let addresses = frames.map(memory::FrameLease::address);
         let [root, user_pdpt, user_directory, user_table, user_frame] = addresses;
         if addresses.iter().any(|frame| frame % PAGE_SIZE as u64 != 0) {
@@ -103,7 +103,7 @@ impl AddressSpace {
                 zero_frame(frame.address());
             }
         }
-        memory::release_frames(frames)
+        memory::release_frames(memory::FrameOwner::KERNEL, frames)
     }
 }
 
@@ -138,7 +138,7 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
         return false;
     }
     let kernel_root = current_root();
-    let Some(space) = WxAddressSpace::new(kernel_root) else {
+    let Some(space) = WxAddressSpace::new(kernel_root, memory::FrameOwner::KERNEL) else {
         return false;
     };
     if !space.permissions_are_valid(kernel_root) {
@@ -181,10 +181,17 @@ pub(crate) fn verify_ring3_control_plane(
         return false;
     }
     let kernel_root = current_root();
-    let (Some(first_space), Some(second_space)) = (
-        WxAddressSpace::new(kernel_root),
-        WxAddressSpace::new(kernel_root),
+    let (Some(control_owner), Some(service_owner)) = (
+        memory::FrameOwner::domain(domains[0]),
+        memory::FrameOwner::domain(domains[1]),
     ) else {
+        return false;
+    };
+    let Some(first_space) = WxAddressSpace::new(kernel_root, control_owner) else {
+        return false;
+    };
+    let Some(mut second_space) = WxAddressSpace::new(kernel_root, service_owner) else {
+        let _ = first_space.release();
         return false;
     };
     if !first_space.permissions_are_valid(kernel_root)
@@ -274,7 +281,10 @@ pub(crate) fn verify_ring3_control_plane(
             && ipc::is_empty()
             && current_root() == kernel_root
             && preemption_complete;
-        valid && first_space.release() && second_space.release()
+        let owner_adopted = scheduler::service_address_space_owner()
+            .and_then(memory::FrameOwner::domain)
+            .is_some_and(|owner| second_space.adopt_transferred_owner(owner));
+        valid && owner_adopted && first_space.release() && second_space.release()
     }
 }
 
@@ -284,11 +294,12 @@ struct WxAddressSpace {
     first_stack_frame: *mut u8,
     second_stack_frame: *mut u8,
     frames: [memory::FrameLease; 7],
+    owner: memory::FrameOwner,
 }
 
 impl WxAddressSpace {
-    fn new(kernel_root: u64) -> Option<Self> {
-        let frames = memory::allocate_frames::<7>()?;
+    fn new(kernel_root: u64, owner: memory::FrameOwner) -> Option<Self> {
+        let frames = memory::allocate_frames::<7>(owner)?;
         let addresses = frames.map(memory::FrameLease::address);
         let [root, pdpt, directory, table, code, first_stack, second_stack] = addresses;
         for left in 0..addresses.len() {
@@ -324,6 +335,7 @@ impl WxAddressSpace {
             first_stack_frame: first_stack as *mut u8,
             second_stack_frame: second_stack as *mut u8,
             frames,
+            owner,
         })
     }
 
@@ -362,6 +374,14 @@ impl WxAddressSpace {
             && self.second_stack_frame != other.second_stack_frame
     }
 
+    fn adopt_transferred_owner(&mut self, owner: memory::FrameOwner) -> bool {
+        if !memory::frames_owned_by(owner, &self.frames) {
+            return false;
+        }
+        self.owner = owner;
+        true
+    }
+
     fn release(self) -> bool {
         let frames = self.frames;
         unsafe {
@@ -369,7 +389,7 @@ impl WxAddressSpace {
                 zero_frame(frame.address());
             }
         }
-        memory::release_frames(frames)
+        memory::release_frames(self.owner, frames)
     }
 }
 
