@@ -602,6 +602,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux robust-list registration validated\r\n");
     serial_write("ginux: Linux read-only memory transition validated\r\n");
     serial_write("ginux: Linux initial process namespace identity validated\r\n");
+    serial_write("ginux: Linux bounded process name state validated\r\n");
     serial_write("ginux: Linux static executable metadata validated\r\n");
     serial_write("ginux: Linux bounded brk heap validated\r\n");
     serial_write("ginux: Linux heap copy bounds validated\r\n");

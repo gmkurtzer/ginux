@@ -74,6 +74,7 @@ const LINUX_GETRESUID_SYSCALL: u64 = 118;
 const LINUX_GETRESGID_SYSCALL: u64 = 120;
 const LINUX_GETPGID_SYSCALL: u64 = 121;
 const LINUX_GETSID_SYSCALL: u64 = 124;
+const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
@@ -118,6 +119,10 @@ const LINUX_F_SETFD: u64 = 2;
 const LINUX_F_GETFL: u64 = 3;
 const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
+const LINUX_PR_SET_NAME: u64 = 15;
+const LINUX_PR_GET_NAME: u64 = 16;
+const LINUX_PROCESS_NAME_SIZE: usize = 16;
+const LINUX_INITIAL_PROCESS_NAME: u64 = 0x7469_6e69;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -211,6 +216,8 @@ static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -794,6 +801,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         Ordering::SeqCst,
     );
     ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
+    ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
+    ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -801,6 +810,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0;
+    let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
+        == LINUX_INITIAL_PROCESS_NAME
+        && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
@@ -832,6 +844,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && heap_written
         && umask_restored
         && descriptor_state_valid
+        && process_name_restored
         && msrs_restored
 }
 
@@ -1233,6 +1246,11 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_PRCTL_SYSCALL => match first_argument {
+            LINUX_PR_SET_NAME => linux_set_process_name(buffer),
+            LINUX_PR_GET_NAME => linux_get_process_name(buffer),
+            _ => LINUX_EINVAL,
+        },
         LINUX_ARCH_PRCTL_SYSCALL
             if first_argument == LINUX_ARCH_SET_FS
                 && buffer == ELF_PROBE_DATA.load(Ordering::SeqCst) =>
@@ -1713,6 +1731,47 @@ fn copy_linux_root_id_triple(first: u64, second: u64, third: u64) -> bool {
     copy_to_linux_user(first, &root)
         && copy_to_linux_user(second, &root)
         && copy_to_linux_user(third, &root)
+}
+
+fn linux_set_process_name(address: u64) -> u64 {
+    let mut name = [0_u8; LINUX_PROCESS_NAME_SIZE];
+    for index in 0..LINUX_PROCESS_NAME_SIZE - 1 {
+        let Some(source) = address.checked_add(index as u64) else {
+            return LINUX_EFAULT;
+        };
+        if !copy_from_linux_user(source, &mut name[index..=index]) {
+            return LINUX_EFAULT;
+        }
+        if name[index] == 0 {
+            break;
+        }
+    }
+    let mut low = [0_u8; 8];
+    let mut high = [0_u8; 8];
+    low.copy_from_slice(&name[..8]);
+    high.copy_from_slice(&name[8..]);
+    ELF_PROBE_PROCESS_NAME_LOW.store(u64::from_ne_bytes(low), Ordering::SeqCst);
+    ELF_PROBE_PROCESS_NAME_HIGH.store(u64::from_ne_bytes(high), Ordering::SeqCst);
+    0
+}
+
+fn linux_get_process_name(address: u64) -> u64 {
+    let mut name = [0_u8; LINUX_PROCESS_NAME_SIZE];
+    name[..8].copy_from_slice(
+        &ELF_PROBE_PROCESS_NAME_LOW
+            .load(Ordering::SeqCst)
+            .to_ne_bytes(),
+    );
+    name[8..].copy_from_slice(
+        &ELF_PROBE_PROCESS_NAME_HIGH
+            .load(Ordering::SeqCst)
+            .to_ne_bytes(),
+    );
+    if copy_to_linux_user(address, &name) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
 }
 
 fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {

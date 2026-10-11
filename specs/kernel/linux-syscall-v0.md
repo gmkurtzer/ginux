@@ -137,7 +137,13 @@ third pointer cannot leave a partial result. The initial process namespace has
 one process and one thread:
 `getpid` and `gettid` return 1, `getppid` returns 0, and `getpgrp`,
 `getpgid(0)`, and `getsid(0)` return 1. `getpgid` and `getsid` return `-ESRCH`
-for an unknown PID. Next, `rax = 218` (`__NR_set_tid_address`) registers a
+for an unknown PID. `rax = 157` (`__NR_prctl`) supports `PR_SET_NAME` and
+`PR_GET_NAME` for this sole thread. The 16-byte name starts as `init`, setters
+copy at most 15 bytes and always retain a trailing NUL, and getters atomically
+copy all 16 bytes. Invalid user pointers return `-EFAULT`, unknown operations
+return `-EINVAL`, and the proof restores `init` before exit so teardown can
+verify process-local state. Other `prctl` policy and security controls are not
+yet implemented. Next, `rax = 218` (`__NR_set_tid_address`) registers a
 four-byte word inside the declared RW segment and returns TID 1. The bounded
 proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
 registered word;
@@ -190,13 +196,15 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `writev`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, console
-`ioctl`, `brk`, `uname`, `getcwd`, bounded `readlink`/`readlinkat`,
+`read`, `write`, `writev`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`,
+`lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
+`readlink`/`readlinkat`,
 bounded read-only `mprotect`,
 `umask`, read-only `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
-credential queries, the bounded process/session identity queries above,
+credential queries, bounded `prctl` process names, the bounded process/session
+identity queries above,
 `set_tid_address`, bounded robust-list registration/query, `exit`, and
 `exit_group` calls. There is no thread creation, TID allocation,
 clear-child-TID futex wake, or robust futex recovery yet. Every other call
