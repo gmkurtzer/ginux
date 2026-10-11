@@ -34,6 +34,9 @@ be silently changed within version 1; incompatible changes require a new
 version and an overlap period when practical. The scalar discovery word and
 structured descriptor are encoded from the same kernel constants so their
 version, feature bitmap, and bounded-console limit cannot drift independently.
+Those constants also drive symbolic expansion in the signed ring-3 proof
+workload, preventing its discovery and descriptor expectations from drifting
+from the kernel.
 
 Operation 1 is a ping requiring read authority on host-control object 1. It
 returns `0x4758` when authorized and `UINT64_MAX - 1` when denied. Operation 2

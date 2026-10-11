@@ -28,8 +28,10 @@ make build
 digest, and Ed25519 signature from `boot/manifest-v0.conf` and
 `control-plane/bootstrap.hex`, with its authenticated role entries declared in
 `control-plane/bootstrap-v0.conf`. Run `make manifest` directly when working on
-those inputs. The checked-in key is an RFC test identity and must not be treated
-as a production trust root.
+those inputs. Kernel and proof-workload ABI constants share the machine-readable
+`specs/abi/control-v1.rs` source, and the manifest builder expands its symbolic
+feature and descriptor words before signing. The checked-in key is an RFC test
+identity and must not be treated as a production trust root.
 
 The result is placed at:
 

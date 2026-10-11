@@ -1,10 +1,6 @@
-pub(crate) const VERSION: u16 = 1;
-pub(crate) const FEATURES: u16 = 0x1fff;
+include!("../../specs/abi/control-v1.rs");
+
 pub(crate) const DISCOVERY_WORD: u64 = ((VERSION as u64) << 16) | FEATURES as u64;
-pub(crate) const MAX_BUFFERED_CONSOLE_BYTES: u32 = 64;
-pub(crate) const DESCRIPTOR_SIZE: usize = 16;
-pub(crate) const FAULT_DESCRIPTOR_SIZE: usize = 48;
-pub(crate) const LIFECYCLE_DESCRIPTOR_SIZE: usize = 24;
 
 pub(crate) fn descriptor() -> [u8; DESCRIPTOR_SIZE] {
     let mut bytes = [0_u8; DESCRIPTOR_SIZE];

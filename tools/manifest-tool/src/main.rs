@@ -6,6 +6,11 @@ use std::path::Path;
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
+#[allow(dead_code)]
+mod control_abi {
+    include!("../../../specs/abi/control-v1.rs");
+}
+
 const MAGIC: &[u8; 8] = b"GINXMNF\0";
 const VERSION: u16 = 2;
 const HEADER_SIZE: u16 = 72;
@@ -177,8 +182,22 @@ fn parse_integer(value: &str) -> Option<u64> {
 }
 
 fn decode_hex(source: &str) -> Vec<u8> {
+    let discovery_word =
+        ((u64::from(control_abi::VERSION)) << 16) | u64::from(control_abi::FEATURES);
+    let descriptor_header = (control_abi::DESCRIPTOR_SIZE as u64)
+        | ((u64::from(control_abi::VERSION)) << 32)
+        | ((u64::from(control_abi::FEATURES)) << 48);
+    let expanded = source
+        .replace(
+            "@DISCOVERY_WORD_LE32",
+            &little_endian_hex(discovery_word, 4),
+        )
+        .replace(
+            "@ABI_DESCRIPTOR_HEADER_LE64",
+            &little_endian_hex(descriptor_header, 8),
+        );
     let mut digits = String::new();
-    for line in source.lines() {
+    for line in expanded.lines() {
         digits.extend(
             line.split('#')
                 .next()
@@ -194,6 +213,14 @@ fn decode_hex(source: &str) -> Vec<u8> {
         .step_by(2)
         .map(|offset| u8::from_str_radix(&digits[offset..offset + 2], 16).unwrap())
         .collect()
+}
+
+fn little_endian_hex(value: u64, width: usize) -> String {
+    let mut encoded = String::with_capacity(width * 2);
+    for byte in &value.to_le_bytes()[..width] {
+        write!(encoded, "{byte:02x}").unwrap();
+    }
+    encoded
 }
 
 fn render(manifest: &[u8], digest: &[u8; 32], signature: &[u8; 64], bundle: &[u8]) -> String {
