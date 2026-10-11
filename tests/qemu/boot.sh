@@ -608,6 +608,11 @@ if ! grep -q '^ginux: bounded static network route retained' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: coherent network state snapshot copied' "$output_file"; then
+    echo "Boot test failed: coherent network state snapshot was not copied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: network device capability revoked on exit' "$output_file"; then
     echo "Boot test failed: network device authority survived service exit." >&2
     exit 1

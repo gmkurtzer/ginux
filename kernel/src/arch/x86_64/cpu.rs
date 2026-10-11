@@ -987,6 +987,16 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
         {
             query_network_route(argument)
         }
+        control_abi::NETWORK_DEVICE_QUERY_SNAPSHOT
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::NETWORK_DEVICE_OBJECT,
+                Rights::READ,
+            ) =>
+        {
+            query_network_snapshot(argument)
+        }
         _ => u64::MAX - 2,
     }
 }
@@ -1027,6 +1037,27 @@ fn query_network_route(address: u64) -> u64 {
         return u64::MAX - 2;
     }
     control_abi::NETWORK_ROUTE_RECORD_SIZE as u64
+}
+
+fn query_network_snapshot(address: u64) -> u64 {
+    let words = [
+        control_abi::NETWORK_SNAPSHOT_VERSION,
+        NETWORK_CONFIGURATION_GENERATION.load(Ordering::Acquire),
+        u64::from(NETWORK_LINK_UP.load(Ordering::Acquire)),
+        NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire),
+        NETWORK_IPV4_GATEWAY.load(Ordering::Acquire),
+        NETWORK_ROUTE_DESTINATION.load(Ordering::Acquire),
+        NETWORK_ROUTE_GATEWAY.load(Ordering::Acquire),
+    ];
+    let mut snapshot = [0_u8; control_abi::NETWORK_SNAPSHOT_SIZE];
+    for (index, word) in words.iter().enumerate() {
+        let offset = index * core::mem::size_of::<u64>();
+        snapshot[offset..offset + 8].copy_from_slice(&word.to_le_bytes());
+    }
+    if !address_space::copy_to_current_user(address, &snapshot) {
+        return u64::MAX - 2;
+    }
+    control_abi::NETWORK_SNAPSHOT_SIZE as u64
 }
 
 fn valid_network_route(destination: u32, prefix: u8, gateway: u32) -> bool {

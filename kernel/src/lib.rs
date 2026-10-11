@@ -690,6 +690,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: network configuration generation tracked");
     serial_write("\r\nginux: network gateway invalidated on address change");
     serial_write("\r\nginux: bounded static network route retained");
+    serial_write("\r\nginux: coherent network state snapshot copied");
     serial_write("\r\nginux: network device capability revoked on exit");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");

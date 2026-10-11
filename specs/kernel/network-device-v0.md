@@ -7,7 +7,7 @@ development manifest grants the control plane read/write authority, and the
 kernel delegates that bounded authority to an isolated stop-only service.
 Control ABI v2 operation 16 uses `RSI` as a command and `RDX` as its argument.
 Read-authorized command 0 requires a zero reserved argument and returns a fixed
-descriptor word containing device-contract version 7, MTU 1500, and one queue.
+descriptor word containing device-contract version 8, MTU 1500, and one queue.
 Read-authorized command 1 returns zero for link down or one for link up.
 Write-authorized command 2 accepts only zero or one and changes that link state.
 Write-authorized command 3 stores one packed IPv4 address and prefix: bits 0-31
@@ -38,6 +38,12 @@ usable on-link next-hop; an all-zero record clears it. Read-authorized command 9
 copies the record to caller-owned writable memory and returns 16. The proof
 rejects noncanonical `192.168.50.1/24`, installs `192.168.50.0/24` via
 `10.0.4.2`, reads it back, and observes exactly one generation advance.
+Read-authorized command 10 copies one coherent, version-1 56-byte snapshot to
+caller-owned writable memory. It contains seven little-endian 64-bit words:
+snapshot version, generation, link, IPv4 configuration, default gateway, packed
+route destination/prefix, and route next-hop. The ring-3 proof validates every
+word. Coherence currently relies on the documented single-CPU, non-nested call
+gate and must be revisited before concurrent device calls are introduced.
 Unknown commands, nonzero
 reserved arguments, a domain ID, or any other non-capability are rejected
 before device state is observed.

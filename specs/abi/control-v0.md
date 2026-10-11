@@ -272,7 +272,7 @@ can exit after exhaustion.
 Operation 16 is the v2 network-device call. It requires `READ` authority on
 network-device object 4. `RSI` is the command and `RDX` its argument. Command 0
 requires argument zero and returns the fixed discovery word
-`0x0000000105dc0007`: descriptor version 7 in bits 0-15, MTU 1500 in bits
+`0x0000000105dc0008`: descriptor version 8 in bits 0-15, MTU 1500 in bits
 16-31, and one queue in bits 32-63. Read-authorized command 1 requires argument
 zero and returns the current link-state bit. Write-authorized command 2 accepts
 only zero or one and updates that bit. Write-authorized command 3 stores a
@@ -298,6 +298,12 @@ current record to the writable user address in the argument and returns 16.
 Only one such route exists, and an effective route change advances the same
 configuration generation. IPv4 reconfiguration also clears the route when its
 next-hop is no longer on-link.
+Read-authorized command 10 copies a version-1, 56-byte snapshot to the writable
+user address in the argument and returns 56. Its seven little-endian 64-bit
+words are snapshot version, configuration generation, link state, packed IPv4
+configuration, default gateway, packed route destination/prefix, and route
+next-hop. The current single-CPU non-nested call gate serializes the copy with
+all configuration mutations.
 Unknown commands, invalid arguments, and
 denial return `UINT64_MAX - 2`. This is a
 device-authorization skeleton only; it exposes no packets, general route table,
