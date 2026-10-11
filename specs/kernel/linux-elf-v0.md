@@ -465,9 +465,17 @@ bits clear. Successful construction stores RIP, RSP, RFLAGS, child `rax = 0`,
 and the child-clear-TID address in the generation-tagged slot, and returns the
 child TID as the future parent result. Invalid flags and stack bounds are
 rejected before slot mutation. Retirement clears every saved field, and the
-same slot's next generation must begin with an empty context. This is context
-construction only: no TID word is published, no userspace `clone` syscall is
-enabled, and the child is not runnable.
+same slot's next generation must begin with an empty context.
+
+The internal publication transaction constructs that context before copying the
+child TID to the exact parent-TID word. A target admitted by the request extent
+but denied by the active current-thread copy boundary forces all saved execution
+state and the child-clear-TID registration back to zero. A valid publication is
+read back through SMAP-controlled access while the child context remains ready;
+the proof then restores the original parent stack word and retires the child.
+`CLONE_CHILD_CLEARTID` registers but does not write the child-TID word. This is
+an atomicity proof only: no userspace `clone` syscall is enabled and the child
+is not runnable.
 
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns

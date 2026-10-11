@@ -708,6 +708,21 @@ if ! grep -q '^ginux: Linux child context cleared on slot reuse' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: failed Linux clone publication rolled back' "$output_file"; then
+    echo "Boot test failed: failed Linux clone publication did not roll back." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux parent TID publication validated' "$output_file"; then
+    echo "Boot test failed: Linux parent TID publication was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: unpublished Linux child retired cleanly' "$output_file"; then
+    echo "Boot test failed: the unpublished Linux child did not retire cleanly." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
     exit 1

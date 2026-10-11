@@ -657,6 +657,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux clone contract validated\r\n");
     serial_write("ginux: Linux child return context constructed\r\n");
     serial_write("ginux: Linux child context cleared on slot reuse\r\n");
+    serial_write("ginux: failed Linux clone publication rolled back\r\n");
+    serial_write("ginux: Linux parent TID publication validated\r\n");
+    serial_write("ginux: unpublished Linux child retired cleanly\r\n");
     serial_write("ginux: bounded Linux TID lifecycle validated\r\n");
     serial_write("ginux: stale Linux thread handles rejected\r\n");
     serial_write("ginux: Linux per-thread exit state isolated\r\n");

@@ -112,8 +112,12 @@ the sibling TLS pointer, aligned TID words inside the parent's writable stack,
 and a safe return RIP/RFLAGS pair. It records a child context that resumes after
 the eventual syscall with `rax = 0`, while the parent result is the child's TID.
 Malformed flags and stack bounds fail without changing the slot, and retirement
-clears the saved context before generation reuse. There is still no userspace
-`clone` entry, TID publication, or concurrently schedulable Linux thread.
+clears the saved context before generation reuse. An internal publication proof
+then exercises the current-thread copy boundary: denial rolls the entire child
+execution state back to empty, while success writes the child TID to the exact
+parent-TID word only after the complete context exists. The proof restores the
+initial stack word and retires the unpublished child. There is still no
+userspace `clone` entry or concurrently schedulable Linux thread.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.

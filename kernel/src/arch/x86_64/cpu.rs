@@ -1315,6 +1315,30 @@ fn construct_linux_clone_context(
     })
 }
 
+fn publish_linux_clone(
+    handle: LinuxThreadHandle,
+    request: LinuxCloneRequest,
+    return_rip: u64,
+    return_rflags: u64,
+    parent_writable_base: u64,
+    parent_writable_size: usize,
+) -> Option<LinuxCloneResult> {
+    let result = construct_linux_clone_context(
+        handle,
+        request,
+        return_rip,
+        return_rflags,
+        parent_writable_base,
+        parent_writable_size,
+    )?;
+    let tid = handle.tid;
+    if !copy_to_linux_user(request.parent_tid, &tid.to_ne_bytes()) {
+        clear_linux_thread_execution(usize::from(handle.slot));
+        return None;
+    }
+    Some(result)
+}
+
 fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
     let slot = usize::from(handle.slot);
     let Some(context) = linux_thread_context(handle) else {
@@ -1371,13 +1395,17 @@ fn clear_linux_thread_slot(slot: usize) {
     LINUX_THREAD_TLS_SIZES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_STACK_BASES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_STACK_SIZES[slot].store(0, Ordering::SeqCst);
+    clear_linux_thread_execution(slot);
+    LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_FREE, Ordering::SeqCst);
+}
+
+fn clear_linux_thread_execution(slot: usize) {
     LINUX_THREAD_RIPS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RSPS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RFLAGS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RAXS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(0, Ordering::SeqCst);
-    LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
-    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_FREE, Ordering::SeqCst);
 }
 
 fn current_linux_thread_slot() -> Option<usize> {
@@ -1783,6 +1811,83 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+    let linux_clone_publication_valid = if execution.tls_size == 0 {
+        true
+    } else {
+        (|| -> Option<bool> {
+            let initial_stack = execution.stack & !(PAGE_SIZE - 1);
+            let parent_tid = initial_stack.checked_add(128)? as u64;
+            let child_tid = initial_stack.checked_add(132)? as u64;
+            let child = reserve_linux_thread(sibling_tls, execution.sibling_stack, PAGE_SIZE)?;
+            let request = LinuxCloneRequest {
+                flags: LINUX_BOUNDED_THREAD_CLONE_FLAGS,
+                child_stack: execution.sibling_stack.checked_add(PAGE_SIZE)? as u64,
+                parent_tid,
+                child_tid,
+                tls: execution.sibling_fs_base as u64,
+            };
+            let rollback_request = LinuxCloneRequest {
+                parent_tid: execution.sibling_stack as u64,
+                child_tid: execution.sibling_stack.checked_add(4)? as u64,
+                ..request
+            };
+            let rollback_rejected = publish_linux_clone(
+                child,
+                rollback_request,
+                execution.entry as u64,
+                0x202,
+                execution.sibling_stack as u64,
+                PAGE_SIZE,
+            )
+            .is_none();
+            let slot = usize::from(child.slot);
+            let rollback_clean = LINUX_THREAD_RIPS[slot].load(Ordering::SeqCst) == 0
+                && LINUX_THREAD_RSPS[slot].load(Ordering::SeqCst) == 0
+                && LINUX_THREAD_RFLAGS[slot].load(Ordering::SeqCst) == 0
+                && LINUX_THREAD_RAXS[slot].load(Ordering::SeqCst) == 0
+                && LINUX_THREAD_CLEAR_CHILD_TIDS[slot].load(Ordering::SeqCst) == 0;
+            // SAFETY: both words are inside the live initial stack mapping and
+            // SMAP is relaxed only for these bounded reads and writes.
+            let (saved_parent_tid, saved_child_tid) = unsafe {
+                with_supervisor_user_access(|| {
+                    (
+                        (parent_tid as *const u32).read_volatile(),
+                        (child_tid as *const u32).read_volatile(),
+                    )
+                })
+            };
+            let published = publish_linux_clone(
+                child,
+                request,
+                execution.entry as u64,
+                0x202,
+                initial_stack as u64,
+                PAGE_SIZE,
+            )?;
+            // SAFETY: the same two live, bounded stack words are inspected and
+            // restored before userspace receives its initial stack.
+            let publication_visible = unsafe {
+                with_supervisor_user_access(|| {
+                    let visible = (parent_tid as *const u32).read_volatile() == child.tid
+                        && (child_tid as *const u32).read_volatile() == saved_child_tid;
+                    (parent_tid as *mut u32).write_volatile(saved_parent_tid);
+                    (child_tid as *mut u32).write_volatile(saved_child_tid);
+                    visible
+                })
+            };
+            Some(
+                rollback_rejected
+                    && rollback_clean
+                    && published.parent_rax == u64::from(child.tid)
+                    && publication_visible
+                    && LINUX_THREAD_CLEAR_CHILD_TIDS[slot].load(Ordering::SeqCst) == child_tid
+                    && retire_linux_thread(child)
+                    && LINUX_THREAD_RIPS[slot].load(Ordering::SeqCst) == 0
+                    && LINUX_THREAD_CLEAR_CHILD_TIDS[slot].load(Ordering::SeqCst) == 0,
+            )
+        })()
+        .unwrap_or(false)
+    };
     let tls_copy_bounds_valid = execution.tls_size == 0
         || linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
             && !linux_writable_user_range_contains(
@@ -2072,6 +2177,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         && tls_state_valid
         && tls_copy_bounds_valid
         && tls_context_switch_valid
+        && linux_clone_publication_valid
         && linux_thread_table_released
         && process_name_restored
         && no_new_privileges_enforced
