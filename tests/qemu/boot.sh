@@ -203,6 +203,11 @@ if ! grep -q '^ginux: scheduler context lifecycle verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bootstrap SHA-256 known answers verified' "$output_file"; then
+    echo "Boot test failed: bootstrap SHA-256 known-answer tests failed." >&2
+    exit 1
+fi
+
 if grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
     echo "Boot test failed: a panic marker was emitted." >&2
     exit 1

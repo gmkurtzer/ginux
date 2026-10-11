@@ -3,6 +3,7 @@
 mod address_space;
 mod arch;
 mod capability;
+mod crypto;
 mod domain;
 mod memory;
 mod scheduler;
@@ -312,6 +313,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }
     serial_write("\r\nginux: scheduler context lifecycle verified");
+    if !crypto::verify_sha256_known_answers() {
+        kernel_fail("\r\nginux: bootstrap SHA-256 self-test failed\r\n");
+    }
+    serial_write("\r\nginux: bootstrap SHA-256 known answers verified");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
