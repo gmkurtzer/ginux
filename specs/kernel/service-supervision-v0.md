@@ -58,7 +58,7 @@ Event kind occupies the low eight bits and the generation-tagged domain ID
 occupies the next 48 bits.
 
 After the fault, the kernel creates one replacement domain generation with the
-same IPC-only delegation, explicitly rebinds the service side of the IPC
+same logical service identity and IPC-only delegation, explicitly rebinds the service side of the IPC
 endpoint to that generation, and queues a fresh context on the retained
 service address space. Before creating that generation, the fault path verifies
 that the failed service's CR3 is still active, clears every byte of the retained

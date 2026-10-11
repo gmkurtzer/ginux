@@ -12,12 +12,19 @@ const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
 const SERVICE_RESTART_BUDGET: u16 = 1;
 const EVENT_CAPACITY: usize = 4;
 const MAX_AUXILIARY_SERVICES: usize = MAX_DOMAINS - 2;
+const MAX_SERVICE_IDENTITIES: usize = 1 + MAX_AUXILIARY_SERVICES;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_MANAGER: MaybeUninit<Manager> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DomainId {
+    slot: u16,
+    generation: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ServiceId {
     slot: u16,
     generation: u32,
 }
@@ -49,6 +56,7 @@ impl BootGrant {
 
 struct Domain {
     id: DomainId,
+    service: Option<ServiceId>,
     role: Role,
     state: State,
     capabilities: CapabilityTable,
@@ -81,6 +89,7 @@ struct DelegationGrant {
 struct LifecycleEvent {
     kind: u8,
     domain: DomainId,
+    service: Option<ServiceId>,
     detail: u8,
     fault: Option<FaultMetadata>,
     sequence: u64,
@@ -97,6 +106,7 @@ pub(crate) struct FaultMetadata {
 #[derive(Clone, Copy)]
 struct EventOverflow {
     first_domain: DomainId,
+    first_service: Option<ServiceId>,
     first_sequence: u64,
     dropped: u8,
 }
@@ -135,6 +145,7 @@ impl EventQueue {
         if self.len == EVENT_CAPACITY {
             self.overflow = Some(EventOverflow {
                 first_domain: event.domain,
+                first_service: event.service,
                 first_sequence: event.sequence,
                 dropped: 1,
             });
@@ -154,6 +165,7 @@ impl EventQueue {
             LifecycleEvent {
                 kind: crate::control_abi::LIFECYCLE_OVERFLOW,
                 domain: overflow.first_domain,
+                service: overflow.first_service,
                 detail: overflow.dropped,
                 fault: None,
                 sequence: overflow.first_sequence,
@@ -179,9 +191,11 @@ impl EventQueue {
 pub(crate) struct Manager {
     domains: [Option<Domain>; MAX_DOMAINS],
     generations: [u32; MAX_DOMAINS],
+    service_generations: [u32; MAX_SERVICE_IDENTITIES],
     control_plane_created: bool,
     control_plane_id: Option<DomainId>,
     service_id: Option<DomainId>,
+    primary_service_identity: Option<ServiceId>,
     auxiliary_service_ids: [Option<DomainId>; MAX_AUXILIARY_SERVICES],
     last_retired_service_id: Option<DomainId>,
     lifecycle_events: EventQueue,
@@ -199,9 +213,11 @@ impl Manager {
         Self {
             domains: [const { None }; MAX_DOMAINS],
             generations: [0; MAX_DOMAINS],
+            service_generations: [0; MAX_SERVICE_IDENTITIES],
             control_plane_created: false,
             control_plane_id: None,
             service_id: None,
+            primary_service_identity: None,
             auxiliary_service_ids: [None; MAX_AUXILIARY_SERVICES],
             last_retired_service_id: None,
             lifecycle_events: EventQueue::new(),
@@ -235,6 +251,7 @@ impl Manager {
         self.generations[slot] = generation;
         self.domains[slot] = Some(Domain {
             id,
+            service: None,
             role: Role::ControlPlane,
             state: State::Ready,
             capabilities,
@@ -260,6 +277,14 @@ impl Manager {
             .filter(|domain| domain.id == id)
     }
 
+    fn next_service_identity(&self, slot: usize) -> Option<ServiceId> {
+        let generation = self.service_generations.get(slot)?.checked_add(1)?;
+        Some(ServiceId {
+            slot: u16::try_from(slot).ok()?,
+            generation,
+        })
+    }
+
     fn create_service(&mut self) -> Option<DomainId> {
         const IPC_OBJECT: u64 = 3;
         let rights = Rights::READ.union(Rights::WRITE);
@@ -277,7 +302,17 @@ impl Manager {
         if grants.is_empty() || grants.len() > MAX_BOOT_GRANTS || self.service_id.is_some() {
             return None;
         }
-        let id = self.construct_service_domain(grants, Role::SupervisedService)?;
+        let new_identity = self.primary_service_identity.is_none();
+        let identity = if let Some(identity) = self.primary_service_identity {
+            identity
+        } else {
+            self.next_service_identity(0)?
+        };
+        let id = self.construct_service_domain(grants, Role::SupervisedService, identity)?;
+        if new_identity {
+            self.service_generations[0] = identity.generation;
+            self.primary_service_identity = Some(identity);
+        }
         self.service_id = Some(id);
         Some(id)
     }
@@ -290,7 +325,10 @@ impl Manager {
             .auxiliary_service_ids
             .iter()
             .position(Option::is_none)?;
-        let id = self.construct_service_domain(grants, Role::AuxiliaryService)?;
+        let identity_slot = registry_slot.checked_add(1)?;
+        let identity = self.next_service_identity(identity_slot)?;
+        let id = self.construct_service_domain(grants, Role::AuxiliaryService, identity)?;
+        self.service_generations[identity_slot] = identity.generation;
         self.auxiliary_service_ids[registry_slot] = Some(id);
         Some(id)
     }
@@ -299,6 +337,7 @@ impl Manager {
         &mut self,
         grants: &[DelegationGrant],
         role: Role,
+        identity: ServiceId,
     ) -> Option<DomainId> {
         if grants.is_empty() || grants.len() > MAX_BOOT_GRANTS {
             return None;
@@ -339,6 +378,7 @@ impl Manager {
         self.generations[slot] = generation;
         self.domains[slot] = Some(Domain {
             id,
+            service: Some(identity),
             role,
             state: State::Ready,
             capabilities,
@@ -540,17 +580,22 @@ impl Manager {
         else {
             return false;
         };
-        if self.domain(id).is_none_or(|domain| {
-            domain.role != Role::AuxiliaryService
-                || domain.state != State::Stopping
-                || domain.active_threads != 0
-                || domain.active_operations != 0
-        }) {
+        let Some(service) = self
+            .domain(id)
+            .filter(|domain| {
+                domain.role == Role::AuxiliaryService
+                    && domain.state == State::Stopping
+                    && domain.active_threads == 0
+                    && domain.active_operations == 0
+            })
+            .and_then(|domain| domain.service)
+        else {
             return false;
-        }
+        };
         if !self.lifecycle_events.push(LifecycleEvent {
             kind: crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED,
             domain: id,
+            service: Some(service),
             detail: 0,
             fault: None,
             sequence: 0,
@@ -697,6 +742,7 @@ pub(crate) fn initialize_boot_service_restart() -> Option<u64> {
 fn validate_boot_service(manager: &Manager, id: DomainId) -> Option<u64> {
     let service = manager.domain(id)?;
     (service.role == Role::SupervisedService
+        && service.service == manager.primary_service_identity
         && service.state == State::Ready
         && service.boot_root_count == 1
         && service.capabilities.boot_authority_is_sealed())
@@ -711,6 +757,17 @@ pub(crate) fn service_boot_handle() -> Option<u64> {
 
 pub(crate) fn control_plane_id() -> Option<u64> {
     Some(encode_id(global_manager()?.control_plane_id?))
+}
+
+pub(crate) fn primary_service_identity() -> Option<u64> {
+    Some(encode_service_id(
+        global_manager()?.primary_service_identity?,
+    ))
+}
+
+pub(crate) fn domain_service_identity(domain_raw: u64) -> Option<u64> {
+    let id = decode_id(domain_raw)?;
+    Some(encode_service_id(global_manager()?.domain(id)?.service?))
 }
 
 pub(crate) fn handle_permits(domain_raw: u64, raw: u64, object: u64, rights: Rights) -> bool {
@@ -901,10 +958,12 @@ fn verify_auxiliary_retirement_overflow_invariants_inner() -> Option<bool> {
         object: 1,
         rights: Rights::READ,
     }])?;
+    let auxiliary_identity = manager.domain(auxiliary)?.service?;
     for kind in 10..14 {
         if !manager.lifecycle_events.push(LifecycleEvent {
             kind,
             domain: control,
+            service: None,
             detail: 0,
             fault: None,
             sequence: 0,
@@ -928,6 +987,7 @@ fn verify_auxiliary_retirement_overflow_invariants_inner() -> Option<bool> {
     Some(
         overflow.kind == crate::control_abi::LIFECYCLE_OVERFLOW
             && overflow.domain == auxiliary
+            && overflow.service == Some(auxiliary_identity)
             && overflow.detail == 1
             && overflow.fault.is_none()
             && overflow.sequence == 5
@@ -957,12 +1017,17 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
         object: 1,
         rights: Rights::READ,
     }])?;
+    let primary_identity = manager.domain(primary)?.service?;
+    let console_identity = manager.domain(console_service)?.service?;
+    let host_identity = manager.domain(host_service)?.service?;
     let console_handle = manager.domain(console_service)?.boot_roots[0]?;
     let host_handle = manager.domain(host_service)?.boot_roots[0]?;
     if manager.service_id != Some(primary)
         || manager.domain(primary)?.role != Role::SupervisedService
+        || Some(primary_identity) != manager.primary_service_identity
         || manager.domain(primary)?.thread_limit != BOOTSTRAP_THREAD_LIMIT
         || manager.domain(console_service)?.role != Role::AuxiliaryService
+        || console_identity.slot == host_identity.slot
         || manager.domain(console_service)?.thread_limit != 0
         || manager.domain(host_service)?.role != Role::AuxiliaryService
         || manager.domain(host_service)?.thread_limit != 0
@@ -998,8 +1063,11 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     }
     let replacement = manager.create_auxiliary_service_with_delegations(&[console_grant])?;
     let replacement_handle = manager.domain(replacement)?.boot_roots[0]?;
+    let replacement_identity = manager.domain(replacement)?.service?;
     if replacement == console_service
         || replacement.slot != console_service.slot
+        || replacement_identity.slot != console_identity.slot
+        || replacement_identity.generation <= console_identity.generation
         || manager.auxiliary_service_ids != [Some(replacement), Some(host_service)]
         || !manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
         || manager.permits(console_service, console_handle, 2, Rights::WRITE)
@@ -1019,11 +1087,13 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     let second_retirement = manager.lifecycle_events.pop()?;
     if first_retirement.kind != crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
         || first_retirement.domain != console_service
+        || first_retirement.service != Some(console_identity)
         || first_retirement.detail != 0
         || first_retirement.fault.is_some()
         || first_retirement.sequence != 1
         || second_retirement.kind != crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
         || second_retirement.domain != replacement
+        || second_retirement.service != Some(replacement_identity)
         || second_retirement.detail != 0
         || second_retirement.fault.is_some()
         || second_retirement.sequence != 2
@@ -1082,6 +1152,7 @@ fn verify_service_restart_budget_invariants_inner() -> Option<bool> {
     let mut manager = Manager::new();
     manager.create_control_plane(&grants)?;
     let service = manager.create_initial_service()?;
+    let service_identity = manager.domain(service)?.service?;
     if manager.create_initial_service().is_some() || manager.restart_service().is_some() {
         return Some(false);
     }
@@ -1089,7 +1160,11 @@ fn verify_service_restart_budget_invariants_inner() -> Option<bool> {
         return Some(false);
     }
     let replacement = manager.restart_service()?;
-    if replacement == service || !manager.discard_unstarted_service(replacement) {
+    let replacement_identity = manager.domain(replacement)?.service?;
+    if replacement == service
+        || replacement_identity != service_identity
+        || !manager.discard_unstarted_service(replacement)
+    {
         return Some(false);
     }
     Some(
@@ -1097,6 +1172,7 @@ fn verify_service_restart_budget_invariants_inner() -> Option<bool> {
             && manager.create_initial_service().is_none()
             && manager.domain(replacement).is_none()
             && manager.last_retired_service_id == Some(service)
+            && manager.primary_service_identity == Some(service_identity)
             && manager.remaining_service_restarts == 0
             && manager.total_service_restarts == SERVICE_RESTART_BUDGET,
     )
@@ -1328,16 +1404,20 @@ pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> boo
     let Some(manager) = global_manager_mut() else {
         return false;
     };
-    if manager.service_id != Some(id)
-        || manager
-            .domain(id)
-            .is_none_or(|domain| domain.role != Role::SupervisedService)
-    {
+    let Some(service) = manager
+        .domain(id)
+        .filter(|domain| domain.role == Role::SupervisedService)
+        .and_then(|domain| domain.service)
+    else {
+        return false;
+    };
+    if manager.service_id != Some(id) {
         return false;
     }
     manager.lifecycle_events.push(LifecycleEvent {
         kind: crate::control_abi::LIFECYCLE_SERVICE_FAULT,
         domain: id,
+        service: Some(service),
         detail: 0,
         fault: Some(fault),
         sequence: 0,
@@ -1360,6 +1440,7 @@ pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
             && manager.last_delivered_lifecycle_event.is_some_and(|event| {
                 event.kind == crate::control_abi::LIFECYCLE_SERVICE_FAULT
                     && event.domain == id
+                    && event.service == manager.primary_service_identity
                     && event.fault.is_some()
             })
     })
@@ -1373,6 +1454,7 @@ pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMe
         manager.last_delivered_lifecycle_event.is_some_and(|event| {
             event.kind == crate::control_abi::LIFECYCLE_SERVICE_FAULT
                 && event.domain == id
+                && event.service == manager.primary_service_identity
                 && event.detail == 0
                 && event.fault == Some(expected)
         })
@@ -1400,6 +1482,12 @@ pub(crate) fn last_lifecycle_event_audit() -> Option<(u8, u64, u64)> {
     Some((event.kind, encode_id(event.domain), event.sequence))
 }
 
+pub(crate) fn last_lifecycle_service_identity() -> Option<u64> {
+    Some(encode_service_id(
+        global_manager()?.last_delivered_lifecycle_event?.service?,
+    ))
+}
+
 pub(crate) fn delivered_lifecycle_event_descriptor(
 ) -> Option<[u8; crate::control_abi::LIFECYCLE_DESCRIPTOR_SIZE]> {
     let event = global_manager()?.last_delivered_lifecycle_event?;
@@ -1418,6 +1506,10 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
             slot: 1,
             generation: 7,
         },
+        service: Some(ServiceId {
+            slot: 0,
+            generation: 3,
+        }),
         detail: 0,
         fault: Some(FaultMetadata {
             vector: 14,
@@ -1453,6 +1545,7 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
         && queue.push(LifecycleEvent {
             kind: 2,
             domain: first.domain,
+            service: first.service,
             detail: 0,
             fault: None,
             sequence: 0,
@@ -1460,6 +1553,7 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
         && queue.push(LifecycleEvent {
             kind: 3,
             domain: first.domain,
+            service: first.service,
             detail: 0,
             fault: None,
             sequence: 0,
@@ -1467,6 +1561,7 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
         && queue.push(LifecycleEvent {
             kind: 4,
             domain: first.domain,
+            service: first.service,
             detail: 0,
             fault: None,
             sequence: 0,
@@ -1474,6 +1569,7 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
         && queue.push(LifecycleEvent {
             kind: 5,
             domain: first.domain,
+            service: first.service,
             detail: 0,
             fault: None,
             sequence: 0,
@@ -1484,6 +1580,10 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
                 slot: 2,
                 generation: 9,
             },
+            service: Some(ServiceId {
+                slot: 2,
+                generation: 11,
+            }),
             detail: 0,
             fault: None,
             sequence: 0,
@@ -1498,6 +1598,7 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
         && queue.push(LifecycleEvent {
             kind: 7,
             domain: first.domain,
+            service: first.service,
             detail: 0,
             fault: None,
             sequence: 0,
@@ -1550,6 +1651,10 @@ fn global_manager_mut() -> Option<&'static mut Manager> {
 }
 
 const fn encode_id(id: DomainId) -> u64 {
+    (id.generation as u64) << 16 | id.slot as u64
+}
+
+const fn encode_service_id(id: ServiceId) -> u64 {
     (id.generation as u64) << 16 | id.slot as u64
 }
 

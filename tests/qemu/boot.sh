@@ -668,6 +668,11 @@ if ! grep -q '^ginux: service domain generation reuse verified' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: stable service identity survived restart' "$output_file"; then
+    echo "Boot test failed: stable service identity did not survive restart." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: service restart budget exhausted' "$output_file"; then
     echo "Boot test failed: service restart budget was not exhausted." >&2
     exit 1

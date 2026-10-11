@@ -469,6 +469,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(service_domain) = domain::initialize_boot_service() else {
         kernel_fail("ginux: isolated service domain construction failed\r\n");
     };
+    let Some(service_identity) = domain::domain_service_identity(service_domain) else {
+        kernel_fail("ginux: stable service identity unavailable\r\n");
+    };
+    if domain::primary_service_identity() != Some(service_identity) {
+        kernel_fail("ginux: primary service identity mismatch\r\n");
+    }
     serial_write("ginux: IPC-only service domain ID: ");
     serial_write_u64(service_domain);
     serial_write("\r\n");
@@ -562,6 +568,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
         || domain::last_lifecycle_event_audit() != Some((1, service_domain, 1))
+        || domain::last_lifecycle_service_identity() != Some(service_identity)
+        || domain::primary_service_identity() != Some(service_identity)
         || !domain::delivered_service_fault_matches(
             service_domain,
             domain::FaultMetadata {
@@ -668,6 +676,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: structured service fault delivered");
     serial_write("\r\nginux: service fault diagnostic authority enforced");
     serial_write("\r\nginux: service domain generation reuse verified");
+    serial_write("\r\nginux: stable service identity survived restart");
     serial_write("\r\nginux: service restart budget exhausted");
     serial_write("\r\nginux: service restart rollback invariants verified");
     serial_write("\r\nginux: failed service stack scrubbed before restart");

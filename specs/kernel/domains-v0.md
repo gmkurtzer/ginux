@@ -16,6 +16,15 @@ table. The control plane has no parent; each bootstrap service is its direct
 child. Ancestry walks are bounded by the fixed domain table and reject missing,
 stale, and self relationships; malformed chains cannot loop indefinitely.
 
+Service identity is separate from domain identity. The primary logical service
+keeps one generation-tagged service ID across its initial and replacement
+domain generations. Auxiliary registry slots have independent service-ID
+generations, so retiring an auxiliary service and registering unrelated work in
+the same slot creates a new logical identity. Lifecycle records retain both the
+logical service ID and the exact domain instance ID. The current public
+lifecycle descriptor exposes only the domain instance; a future additive ABI
+feature must expose the logical ID before auxiliary management is made public.
+
 Initial control-plane authority is a finite list of boot grants. Each grant
 becomes a root capability, after which the capability table's boot-authority
 path is permanently sealed. The domain manager likewise refuses a second
