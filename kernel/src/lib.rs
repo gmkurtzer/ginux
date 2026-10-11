@@ -1037,8 +1037,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }
+    if !arch::x86_64::cpu::verify_user_fs_base_installation() {
+        kernel_fail("\r\nginux: per-thread FS base installation failed\r\n");
+    }
     serial_write("\r\nginux: scheduler context lifecycle verified");
     serial_write("\r\nginux: preemptible user context flags enforced");
+    serial_write("\r\nginux: per-thread FS base context preserved");
     if !crypto::verify_sha256_known_answers() {
         kernel_fail("\r\nginux: bootstrap SHA-256 self-test failed\r\n");
     }

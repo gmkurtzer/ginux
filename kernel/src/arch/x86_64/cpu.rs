@@ -922,6 +922,9 @@ pub(crate) fn verify_user_syscall(
     let Some(service_identity) = domain::domain_service_identity(service_domain) else {
         return false;
     };
+    if !install_current_scheduler_fs_base() {
+        return false;
+    }
     // SAFETY: The caller supplies mapped ring-3 code and stack addresses. The
     // syscall gate abandons the user frame and returns on the saved kernel
     // stack, with interrupts disabled throughout.
@@ -947,6 +950,9 @@ pub(crate) fn execute_auxiliary(
     domain_id: u64,
     service_identity: u64,
 ) {
+    if !install_current_scheduler_fs_base() {
+        return;
+    }
     unsafe {
         ginux_user_enter(
             entry,
@@ -5459,6 +5465,7 @@ fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) 
             service_side,
             peer_domain,
         },
+        active_fs_base(),
     );
     if matches!(action, RuntimeAction::Invalid) {
         u64::MAX - 2
@@ -5629,7 +5636,12 @@ fn runtime_result(frame: *mut UserTrapFrame) -> u64 {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX;
     };
-    let action = scheduler::yield_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
+    let action = scheduler::yield_runtime(
+        frame,
+        USER_CODE_SELECTOR,
+        USER_DATA_SELECTOR,
+        active_fs_base(),
+    );
     resume_action(action)
 }
 
@@ -5884,10 +5896,39 @@ fn resume_action(action: RuntimeAction) -> u64 {
         RuntimeAction::Resume {
             result,
             address_space_root,
-        } if activate_user_root(address_space_root) => result,
+            fs_base,
+        } if activate_user_context(address_space_root, fs_base) => result,
         RuntimeAction::Resume { .. } => u64::MAX,
         RuntimeAction::Complete | RuntimeAction::Invalid => u64::MAX,
     }
+}
+
+pub(crate) fn active_fs_base() -> u64 {
+    unsafe { read_msr(FS_BASE_MSR) }
+}
+
+pub(crate) fn verify_user_fs_base_installation() -> bool {
+    let saved = active_fs_base();
+    let first_installed = install_user_fs_base(0x1110);
+    let second_installed = install_user_fs_base(0x2220);
+    unsafe { write_msr(FS_BASE_MSR, saved) };
+    first_installed && second_installed && active_fs_base() == saved
+}
+
+fn install_current_scheduler_fs_base() -> bool {
+    scheduler::current_fs_base().is_some_and(install_user_fs_base)
+}
+
+fn install_user_fs_base(fs_base: u64) -> bool {
+    if fs_base >= 1 << 47 {
+        return false;
+    }
+    unsafe { write_msr(FS_BASE_MSR, fs_base) };
+    active_fs_base() == fs_base
+}
+
+pub(crate) fn activate_user_context(root: u64, fs_base: u64) -> bool {
+    fs_base < 1 << 47 && activate_user_root(root) && install_user_fs_base(fs_base)
 }
 
 pub(crate) fn activate_user_root(root: u64) -> bool {

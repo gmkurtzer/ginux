@@ -64,6 +64,7 @@ struct UserContext {
     rsp: u64,
     rflags: u64,
     address_space_root: u64,
+    fs_base: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -162,7 +163,7 @@ impl UserInterruptFrame {
         self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
     }
 
-    fn saved_context(&self, address_space_root: u64) -> UserContext {
+    fn saved_context(&self, address_space_root: u64, fs_base: u64) -> UserContext {
         UserContext {
             rax: self.rax,
             rbx: self.rbx,
@@ -183,6 +184,7 @@ impl UserInterruptFrame {
             rsp: self.rsp,
             rflags: self.rflags,
             address_space_root,
+            fs_base,
         }
     }
 
@@ -252,7 +254,7 @@ impl UserTrapFrame {
         self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
     }
 
-    fn saved_context(&self, result: u64, address_space_root: u64) -> UserContext {
+    fn saved_context(&self, result: u64, address_space_root: u64, fs_base: u64) -> UserContext {
         UserContext {
             rax: result,
             rbx: self.rbx,
@@ -273,6 +275,7 @@ impl UserTrapFrame {
             rsp: self.rsp,
             rflags: self.rflags,
             address_space_root,
+            fs_base,
         }
     }
 
@@ -315,6 +318,7 @@ impl UserContext {
             && self.rflags & (IOPL | NESTED_TASK | VIRTUAL_8086) == 0
             && self.address_space_root != 0
             && self.address_space_root.is_multiple_of(4096)
+            && self.fs_base <= LOWER_CANONICAL_END
     }
 }
 
@@ -355,6 +359,7 @@ pub(crate) enum RuntimeAction {
     Resume {
         result: u64,
         address_space_root: u64,
+        fs_base: u64,
     },
     Complete,
     Invalid,
@@ -881,6 +886,15 @@ pub(crate) fn current_instruction_and_stack() -> Option<(u64, u64)> {
     Some((context.rip, context.rsp))
 }
 
+pub(crate) fn current_fs_base() -> Option<u64> {
+    let runtime = runtime_mut()?;
+    let current = runtime.scheduler.current?;
+    runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.fs_base)
+}
+
 pub(crate) fn fault_runtime(
     frame: &mut UserFaultFrame,
     fault_address: u64,
@@ -938,6 +952,7 @@ pub(crate) fn fault_runtime(
         RuntimeAction::Resume {
             result: next.context.rax,
             address_space_root: next.context.address_space_root,
+            fs_base: next.context.fs_base,
         }
     } else {
         RuntimeAction::Complete
@@ -948,6 +963,7 @@ pub(crate) fn yield_runtime(
     frame: &mut UserTrapFrame,
     code_selector: u16,
     data_selector: u16,
+    fs_base: u64,
 ) -> RuntimeAction {
     if !frame.selectors_match(code_selector, data_selector) {
         return RuntimeAction::Invalid;
@@ -965,7 +981,7 @@ pub(crate) fn yield_runtime(
     else {
         return RuntimeAction::Invalid;
     };
-    let saved = frame.saved_context(0, root);
+    let saved = frame.saved_context(0, root, fs_base);
     let Some(next) = runtime.scheduler.yield_current(current, saved) else {
         return RuntimeAction::Invalid;
     };
@@ -983,6 +999,7 @@ pub(crate) fn yield_runtime(
     RuntimeAction::Resume {
         result: next.context.rax,
         address_space_root: next.context.address_space_root,
+        fs_base: next.context.fs_base,
     }
 }
 
@@ -990,6 +1007,7 @@ pub(crate) fn preempt_runtime(
     frame: &mut UserInterruptFrame,
     code_selector: u16,
     data_selector: u16,
+    fs_base: u64,
 ) -> RuntimeAction {
     if !frame.selectors_match(code_selector, data_selector) {
         return RuntimeAction::Invalid;
@@ -1007,7 +1025,7 @@ pub(crate) fn preempt_runtime(
     else {
         return RuntimeAction::Invalid;
     };
-    let saved = frame.saved_context(root);
+    let saved = frame.saved_context(root, fs_base);
     let Some(next) = runtime.scheduler.yield_current(current, saved) else {
         return RuntimeAction::Invalid;
     };
@@ -1025,6 +1043,7 @@ pub(crate) fn preempt_runtime(
     RuntimeAction::Resume {
         result: next.context.rax,
         address_space_root: next.context.address_space_root,
+        fs_base: next.context.fs_base,
     }
 }
 
@@ -1033,6 +1052,7 @@ pub(crate) fn block_runtime(
     code_selector: u16,
     data_selector: u16,
     reason: WaitReason,
+    fs_base: u64,
 ) -> RuntimeAction {
     if !frame.selectors_match(code_selector, data_selector) {
         return RuntimeAction::Invalid;
@@ -1050,7 +1070,7 @@ pub(crate) fn block_runtime(
     else {
         return RuntimeAction::Invalid;
     };
-    let saved = frame.saved_context(0, root);
+    let saved = frame.saved_context(0, root, fs_base);
     let Some(next) = runtime.scheduler.block_current(current, saved, reason) else {
         return RuntimeAction::Invalid;
     };
@@ -1068,6 +1088,7 @@ pub(crate) fn block_runtime(
     RuntimeAction::Resume {
         result: next.context.rax,
         address_space_root: next.context.address_space_root,
+        fs_base: next.context.fs_base,
     }
 }
 
@@ -1154,6 +1175,7 @@ pub(crate) fn exit_runtime(
         RuntimeAction::Resume {
             result: next.context.rax,
             address_space_root: next.context.address_space_root,
+            fs_base: next.context.fs_base,
         }
     } else if runtime.scheduler.threads.iter().all(Option::is_none) {
         RuntimeAction::Complete
@@ -1219,6 +1241,7 @@ fn initial_context(
         rsp: stack as u64,
         rflags: 2 | (1 << 9),
         address_space_root,
+        fs_base: 0,
     }
 }
 
@@ -1227,8 +1250,8 @@ pub(crate) fn verify_scheduler_invariants() -> bool {
 }
 
 fn verify_scheduler_invariants_inner() -> Option<bool> {
-    let first_context = test_context(10, 0x1000, 0x3000, 0x100000);
-    let second_context = test_context(20, 0x5000, 0x7000, 0x200000);
+    let first_context = test_context(10, 0x1000, 0x3000, 0x100000, 0x1110);
+    let second_context = test_context(20, 0x5000, 0x7000, 0x200000, 0x2220);
     let mut scheduler = Scheduler::new();
     if scheduler.create(0, first_context).is_some()
         || scheduler
@@ -1236,6 +1259,15 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
                 1,
                 UserContext {
                     rip: 0,
+                    ..first_context
+                },
+            )
+            .is_some()
+        || scheduler
+            .create(
+                1,
+                UserContext {
+                    fs_base: 1 << 47,
                     ..first_context
                 },
             )
@@ -1405,7 +1437,7 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     )
 }
 
-const fn test_context(rax: u64, rip: u64, rsp: u64, root: u64) -> UserContext {
+const fn test_context(rax: u64, rip: u64, rsp: u64, root: u64, fs_base: u64) -> UserContext {
     UserContext {
         rax,
         rbx: 0,
@@ -1426,5 +1458,6 @@ const fn test_context(rax: u64, rip: u64, rsp: u64, root: u64) -> UserContext {
         rsp,
         rflags: 2 | (1 << 9),
         address_space_root: root,
+        fs_base,
     }
 }

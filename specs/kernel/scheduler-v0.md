@@ -32,14 +32,20 @@ match the saved wait key. Object, direction, or generation mismatches leave the
 waiter unchanged. Waking does not grant authority or attach a new thread.
 
 Each thread owns a C-layout saved context containing all general-purpose
-registers, user RIP/RSP/RFLAGS, and its page-table root. Creation and yield
+registers, user RIP/RSP/RFLAGS, its page-table root, and its lower-canonical
+FS base. Creation and yield
 reject null or non-lower-canonical instruction/stack pointers, a missing
 mandatory RFLAGS bit, a cleared interrupt-enable flag, user I/O privilege,
-nested-task or virtual-8086 state, and null or unaligned roots. Requiring IF at
+nested-task or virtual-8086 state, null or unaligned roots, and a noncanonical
+FS base. Requiring IF at
 creation and every saved-context transition prevents the kernel from admitting
 a user context that cannot be preempted by maskable interrupts. Yield
 atomically replaces the current thread's saved context before choosing another
-thread.
+thread. Trap and timer-preemption paths capture the active `IA32_FS_BASE` with
+the general context. Every scheduler resume returns the selected FS base with
+its page-table root; the architecture boundary validates, programs, and reads
+back both before returning to ring 3. Initial control, service, and auxiliary
+entries likewise install the selected scheduler context's FS base.
 Every scheduler-driven address-space activation also validates the selected
 context's saved RIP and RSP against the fixed executable and stack mappings in
 that root. Structurally valid pointers into guards, absent pages, or a stack's
@@ -49,7 +55,9 @@ subsequent user fault.
 The QEMU boot gate covers two-thread ordering, rejected non-current yield,
 single-running-thread state, exit selection, idle behavior, slot reuse, domain
 ownership, stale-ID rejection, invalid-context rejection, and preservation of a
-modified register context across another thread's run and exit.
+modified register context and distinct FS bases across another thread's run and
+exit. The current native payloads use FS base zero; Linux scheduler integration
+with the nonzero static-TLS execution contexts remains a separate milestone.
 
 Scheduler capacity does not grant permission to create a thread. Runtime
 creation first reserves a slot from the generation-checked owning domain; exit

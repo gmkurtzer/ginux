@@ -396,13 +396,19 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return;
     };
-    let action =
-        scheduler::preempt_runtime(frame, cpu::USER_CODE_SELECTOR, cpu::USER_DATA_SELECTOR);
+    let action = scheduler::preempt_runtime(
+        frame,
+        cpu::USER_CODE_SELECTOR,
+        cpu::USER_DATA_SELECTOR,
+        cpu::active_fs_base(),
+    );
     if let RuntimeAction::Resume {
-        address_space_root, ..
+        address_space_root,
+        fs_base,
+        ..
     } = action
     {
-        if cpu::activate_user_root(address_space_root) {
+        if cpu::activate_user_context(address_space_root, fs_base) {
             PREEMPTION_COUNT.fetch_add(1, Ordering::SeqCst);
         }
     }

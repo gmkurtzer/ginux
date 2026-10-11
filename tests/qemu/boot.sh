@@ -2028,6 +2028,11 @@ if ! grep -q '^ginux: preemptible user context flags enforced' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: per-thread FS base context preserved' "$output_file"; then
+    echo "Boot test failed: scheduler did not preserve per-thread FS base state." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bootstrap SHA-256 known answers verified' "$output_file"; then
     echo "Boot test failed: bootstrap SHA-256 known-answer tests failed." >&2
     exit 1
