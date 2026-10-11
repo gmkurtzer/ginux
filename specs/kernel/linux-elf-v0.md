@@ -239,8 +239,12 @@ extent, preserving the existing `0x404000..0x405200` data contract.
 A separate LLD-produced main fixture carries ordered `DT_NEEDED` entries for
 `libginux.so` and `libginux-aux.so`. The parser validates both names and the
 auxiliary DSO's matching `DT_SONAME`, bounded GNU hash, symbol, and relocation
-metadata. This fixture establishes the dependency-list input for the next
-loader milestone; it does not yet map or execute the auxiliary DSO.
+metadata. Two independent authority records bind the ordered names to exact
+SHA-256 digests and page-aligned canonical biases. Planning authenticates both
+files before parsing, requires both SONAMEs, and rejects digest substitution or
+any pairwise overlap among the main, interpreter, and two dependency plans.
+This fixture establishes the dependency-graph input for the next loader
+milestone; it does not yet map or execute the auxiliary DSO.
 After applying its self-relocation, the linked interpreter enters the syscall
 gate only after consuming the initial stack metadata. It walks at most eight
 environment pointers and 32 auxiliary-vector pairs, requires nonzero

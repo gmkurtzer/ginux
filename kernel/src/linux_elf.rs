@@ -71,6 +71,7 @@ pub(crate) fn runtime_main_bytes() -> &'static [u8] {
 }
 
 pub(crate) fn verify_dependency_list_metadata() -> bool {
+    const INTERPRETER_PATH: &[u8] = b"/lib64/ld-ginux.so";
     const PRIMARY: &[u8] = b"libginux.so";
     const AUXILIARY: &[u8] = b"libginux-aux.so";
     let Some(main) = parse(LINKED_DYNAMIC_GRAPH_MAIN) else {
@@ -81,6 +82,38 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
         crate::serial_write_bytes(b"\r\nginux: auxiliary dependency parse failed");
         return false;
     };
+    let interpreter_authority = InterpreterAuthority {
+        path: INTERPRETER_PATH,
+        sha256: crate::crypto::sha256(LINKED_DYNAMIC_INTERPRETER),
+    };
+    let dependency_authorities = [
+        DependencyAuthority {
+            name: PRIMARY,
+            sha256: crate::crypto::sha256(LINKED_DYNAMIC_DEPENDENCY),
+            load_bias: 0x61_0000,
+        },
+        DependencyAuthority {
+            name: AUXILIARY,
+            sha256: crate::crypto::sha256(LINKED_DYNAMIC_AUXILIARY),
+            load_bias: 0x63_0000,
+        },
+    ];
+    let Some(plan) = plan_authenticated_pie_dependency_graph(
+        &main,
+        0x3f_f000,
+        &interpreter_authority,
+        LINKED_DYNAMIC_INTERPRETER,
+        0x60_0000,
+        &dependency_authorities,
+        [LINKED_DYNAMIC_DEPENDENCY, LINKED_DYNAMIC_AUXILIARY],
+    ) else {
+        crate::serial_write_bytes(b"\r\nginux: dependency graph authentication failed");
+        return false;
+    };
+    let mut wrong_digest_authorities = dependency_authorities;
+    wrong_digest_authorities[1].sha256[0] ^= 1;
+    let mut overlapping_authorities = dependency_authorities;
+    overlapping_authorities[1].load_bias = dependency_authorities[0].load_bias;
     let valid = main.needed_libraries == [Some(PRIMARY), Some(AUXILIARY)]
         && auxiliary.soname == Some(AUXILIARY)
         && auxiliary.needed_libraries == [None; 2]
@@ -89,7 +122,31 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
             dynamic.symbol_defined
                 && dynamic.symbol_relocation.is_some()
                 && dynamic.jump_slot_relocation.is_some()
-        });
+        })
+        && plan.dependency_bases == [0x61_0000, 0x63_0000]
+        && plan.process.main_entry == 0x40_0100
+        && plan.dependencies[0].entry == 0x61_0100
+        && plan.dependencies[1].entry == 0x63_0100
+        && plan_authenticated_pie_dependency_graph(
+            &main,
+            0x3f_f000,
+            &interpreter_authority,
+            LINKED_DYNAMIC_INTERPRETER,
+            0x60_0000,
+            &wrong_digest_authorities,
+            [LINKED_DYNAMIC_DEPENDENCY, LINKED_DYNAMIC_AUXILIARY],
+        )
+        .is_none()
+        && plan_authenticated_pie_dependency_graph(
+            &main,
+            0x3f_f000,
+            &interpreter_authority,
+            LINKED_DYNAMIC_INTERPRETER,
+            0x60_0000,
+            &overlapping_authorities,
+            [LINKED_DYNAMIC_DEPENDENCY, LINKED_DYNAMIC_AUXILIARY],
+        )
+        .is_none();
     if !valid {
         crate::serial_write_bytes(b"\r\nginux: auxiliary dependency metadata mismatch");
     }
@@ -230,6 +287,12 @@ pub(crate) struct DependencyLoadPlan<'main, 'interpreter, 'dependency> {
     pub(crate) process: InterpretedLoadPlan<'main, 'interpreter>,
     pub(crate) dependency_base: u64,
     pub(crate) dependency: LoadPlan<'dependency>,
+}
+
+pub(crate) struct DependencyGraphLoadPlan<'main, 'interpreter, 'dependency> {
+    pub(crate) process: InterpretedLoadPlan<'main, 'interpreter>,
+    pub(crate) dependency_bases: [u64; 2],
+    pub(crate) dependencies: [LoadPlan<'dependency>; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -509,6 +572,85 @@ fn plan_authenticated_pie_dependency<'main, 'interpreter, 'dependency>(
         dependency_authority,
         dependency_bytes,
     )
+}
+
+pub(crate) fn plan_authenticated_pie_dependency_graph<'main, 'interpreter, 'dependency>(
+    main: &Image<'main>,
+    main_base: u64,
+    interpreter_authority: &InterpreterAuthority<'_>,
+    interpreter_bytes: &'interpreter [u8],
+    interpreter_base: u64,
+    dependency_authorities: &[DependencyAuthority<'_>; 2],
+    dependency_bytes: [&'dependency [u8]; 2],
+) -> Option<DependencyGraphLoadPlan<'main, 'interpreter, 'dependency>> {
+    if dependency_authorities[0].name == dependency_authorities[1].name
+        || main.interpreter != Some(interpreter_authority.path)
+        || main.needed_libraries
+            != [
+                Some(dependency_authorities[0].name),
+                Some(dependency_authorities[1].name),
+            ]
+        || crate::crypto::sha256(interpreter_bytes) != interpreter_authority.sha256
+        || dependency_bytes
+            .iter()
+            .zip(dependency_authorities)
+            .any(|(bytes, authority)| crate::crypto::sha256(bytes) != authority.sha256)
+    {
+        return None;
+    }
+    let interpreter = parse(interpreter_bytes)?;
+    let dependency_images = [parse(dependency_bytes[0])?, parse(dependency_bytes[1])?];
+    let main_dynamic = main.dynamic_relocations?;
+    if main.program_headers == 0
+        || interpreter.program_headers == 0
+        || interpreter.needed_libraries != [None; 2]
+        || main.dynamic_symbol.is_none()
+        || main_dynamic.symbol_defined
+        || main.dynamic_symbol != dependency_images[0].dynamic_symbol
+        || dependency_images[0].dynamic_symbol == dependency_images[1].dynamic_symbol
+    {
+        return None;
+    }
+    for (image, authority) in dependency_images.iter().zip(dependency_authorities) {
+        if image.needed_libraries != [None; 2]
+            || image.soname != Some(authority.name)
+            || !image
+                .dynamic_relocations
+                .is_some_and(|dynamic| dynamic.symbol_defined)
+        {
+            return None;
+        }
+    }
+    let main_plan = plan_position_independent_at(main, main_base, true)?;
+    let interpreter_plan = plan_position_independent(&interpreter, interpreter_base)?;
+    let dependency_plans = [
+        plan_position_independent(&dependency_images[0], dependency_authorities[0].load_bias)?,
+        plan_position_independent(&dependency_images[1], dependency_authorities[1].load_bias)?,
+    ];
+    let all_plans = [
+        &main_plan,
+        &interpreter_plan,
+        &dependency_plans[0],
+        &dependency_plans[1],
+    ];
+    if all_plans.iter().enumerate().any(|(index, plan)| {
+        all_plans[index + 1..]
+            .iter()
+            .any(|other| plans_overlap(plan, other))
+    }) {
+        return None;
+    }
+    Some(DependencyGraphLoadPlan {
+        process: InterpretedLoadPlan {
+            initial_entry: interpreter_plan.entry,
+            main_entry: main_plan.entry,
+            interpreter_base,
+            main: main_plan,
+            interpreter: interpreter_plan,
+        },
+        dependency_bases: dependency_authorities.map(|authority| authority.load_bias),
+        dependencies: dependency_plans,
+    })
 }
 
 fn plan_authenticated_dependency_at<'main, 'interpreter, 'dependency>(

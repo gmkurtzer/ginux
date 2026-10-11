@@ -588,6 +588,11 @@ if ! grep -q '^ginux: bounded Linux dependency list validated' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux dependency authority graph validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux dependency authority graph was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: four-page Linux executable mapping validated' "$output_file"; then
     echo "Boot test failed: four-page Linux executable mapping was not validated." >&2
     exit 1

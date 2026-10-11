@@ -18,8 +18,10 @@ one-bucket/one-word-bloom `DT_GNU_HASH`, and one
 global function symbol used by `R_X86_64_GLOB_DAT` and
 `R_X86_64_JUMP_SLOT`. The parser admits an ordered list of at most two distinct
 `DT_NEEDED` names and rejects overflow or duplicates. A separate LLD-produced
-metadata fixture proves both names and the second DSO's `DT_SONAME`; executable
-loading remains intentionally limited to the first dependency. Its undefined
+metadata fixture proves both names and the second DSO's `DT_SONAME`. Independent
+authority records bind both ordered names to their SHA-256 digests and canonical
+load biases, with pairwise overlap rejection; executable loading remains
+intentionally limited to the first dependency. Its undefined
 main-image symbol is matched to the same defined symbol in one authenticated
 `ET_DYN` dependency.
 Images whose expanded
