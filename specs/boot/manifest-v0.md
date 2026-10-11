@@ -38,3 +38,12 @@ Every QEMU boot also invokes the canonical parser directly on malformed copies
 of the authenticated bytes. The negative gate requires rejection of truncation,
 nonzero reserved data, unknown rights, and duplicate object grants, independent
 of the outer digest and signature checks.
+
+## Development generation
+
+`make manifest` reads `boot/manifest-v0.conf` and
+`control-plane/bootstrap.hex`, builds the canonical bytes, hashes the bundle and
+manifest, signs the manifest with the documented RFC test seed, and regenerates
+`boot/efi/src/generated_boot.rs`. Normal build, check, run, and test targets
+regenerate this file first. Production signing must use a separate tool and
+non-repository key source after the trust-root policy is defined.

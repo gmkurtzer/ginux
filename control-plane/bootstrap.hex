@@ -1,0 +1,18 @@
+# mov rdi, rcx; denied host read with console handle
+4889cf
+b801000000
+cd80
+3dfeffffff
+7518
+
+# mov rdi, rbx; allowed host read with host-control handle
+4889df
+b801000000
+cd80
+3d58470000
+7507
+
+# exit; ud2 if exit unexpectedly returns
+b802000000
+cd80
+0f0b

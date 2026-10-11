@@ -9,12 +9,13 @@ EFI_DESTINATION := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor build run test check fmt clean
+.PHONY: help doctor manifest build run test check fmt clean
 
 help:
 	@echo "Ginux development targets"
 	@echo
 	@echo "  make doctor  Check the local development prerequisites"
+	@echo "  make manifest Regenerate the signed development boot inputs"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build and boot Ginux in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
@@ -25,7 +26,10 @@ help:
 doctor:
 	@tools/qemu/doctor.sh
 
-build:
+manifest:
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex boot/efi/src/generated_boot.rs
+
+build: manifest
 	@echo "Building Ginux for $(TARGET) ($(PROFILE))"
 	@cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
 	@mkdir -p "$(dir $(EFI_DESTINATION))"
@@ -38,11 +42,12 @@ run: build
 test: build
 	@tests/qemu/boot.sh
 
-check:
+check: manifest
 	@cargo fmt --all -- --check
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
+	@cargo clippy --package ginux-manifest-tool -- -D warnings
 
-fmt:
+fmt: manifest
 	@cargo fmt --all
 
 clean:
