@@ -1003,41 +1003,96 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         return u64::MAX;
     }
     if service_fault {
-        let Some(replacement_domain) = domain::initialize_boot_service_restart() else {
-            return resume_action(action);
-        };
-        let Some(replacement_handle) = domain::service_boot_handle() else {
-            return u64::MAX;
-        };
-        if !ipc::bind_service(replacement_domain) {
-            let _ = domain::retire_service(replacement_domain);
-            return u64::MAX;
-        }
-        let (Some(old_owner), Some(replacement_owner)) = (
-            memory::FrameOwner::domain(fault_domain),
-            memory::FrameOwner::domain(replacement_domain),
-        ) else {
-            let _ = ipc::retire_service(replacement_domain);
-            let _ = domain::retire_service(replacement_domain);
-            return u64::MAX;
-        };
-        if memory::transfer_frame_owner(old_owner, replacement_owner) != Some(7) {
-            let _ = ipc::retire_service(replacement_domain);
-            let _ = domain::retire_service(replacement_domain);
-            return u64::MAX;
-        }
-        if !scheduler::queue_service_restart(replacement_domain, replacement_handle) {
-            let _ = memory::transfer_frame_owner(replacement_owner, old_owner);
-            let _ = ipc::retire_service(replacement_domain);
-            let _ = domain::retire_service(replacement_domain);
-            return u64::MAX;
-        }
-        SERVICE_FRAMES_TRANSFERRED.store(true, Ordering::Release);
-        if !timer::rearm_scheduler_preemption() {
-            return u64::MAX;
+        match setup_service_restart(fault_domain) {
+            ServiceRestartSetup::Started => {}
+            ServiceRestartSetup::Unavailable => return resume_action(action),
+            ServiceRestartSetup::RollbackFailed => return u64::MAX,
         }
     }
     resume_action(action)
+}
+
+enum ServiceRestartSetup {
+    Started,
+    Unavailable,
+    RollbackFailed,
+}
+
+fn setup_service_restart(fault_domain: u64) -> ServiceRestartSetup {
+    let Some(replacement_domain) = domain::initialize_boot_service_restart() else {
+        return ServiceRestartSetup::Unavailable;
+    };
+    let Some(replacement_handle) = domain::service_boot_handle() else {
+        return if domain::discard_unstarted_service(replacement_domain) {
+            ServiceRestartSetup::Unavailable
+        } else {
+            ServiceRestartSetup::RollbackFailed
+        };
+    };
+    if !ipc::bind_service(replacement_domain) {
+        return if domain::discard_unstarted_service(replacement_domain) {
+            ServiceRestartSetup::Unavailable
+        } else {
+            ServiceRestartSetup::RollbackFailed
+        };
+    }
+    let (Some(old_owner), Some(replacement_owner)) = (
+        memory::FrameOwner::domain(fault_domain),
+        memory::FrameOwner::domain(replacement_domain),
+    ) else {
+        return rollback_unstarted_replacement(replacement_domain, true);
+    };
+    if memory::transfer_frame_owner(old_owner, replacement_owner) != Some(7) {
+        return rollback_unstarted_replacement(replacement_domain, true);
+    }
+    if !scheduler::queue_service_restart(replacement_domain, replacement_handle) {
+        return rollback_transferred_replacement(
+            replacement_domain,
+            fault_domain,
+            old_owner,
+            replacement_owner,
+            false,
+        );
+    }
+    if !timer::rearm_scheduler_preemption() {
+        return rollback_transferred_replacement(
+            replacement_domain,
+            fault_domain,
+            old_owner,
+            replacement_owner,
+            true,
+        );
+    }
+    SERVICE_FRAMES_TRANSFERRED.store(true, Ordering::Release);
+    ServiceRestartSetup::Started
+}
+
+fn rollback_unstarted_replacement(replacement_domain: u64, bound: bool) -> ServiceRestartSetup {
+    if (!bound || ipc::rollback_service_binding(replacement_domain))
+        && domain::discard_unstarted_service(replacement_domain)
+    {
+        ServiceRestartSetup::Unavailable
+    } else {
+        ServiceRestartSetup::RollbackFailed
+    }
+}
+
+fn rollback_transferred_replacement(
+    replacement_domain: u64,
+    fault_domain: u64,
+    old_owner: memory::FrameOwner,
+    replacement_owner: memory::FrameOwner,
+    queued: bool,
+) -> ServiceRestartSetup {
+    if (!queued || scheduler::rollback_service_restart(replacement_domain, fault_domain))
+        && memory::transfer_frame_owner(replacement_owner, old_owner) == Some(7)
+        && ipc::rollback_service_binding(replacement_domain)
+        && domain::discard_unstarted_service(replacement_domain)
+    {
+        ServiceRestartSetup::Unavailable
+    } else {
+        ServiceRestartSetup::RollbackFailed
+    }
 }
 
 fn scrub_service_restart_stack() -> bool {

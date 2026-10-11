@@ -628,6 +628,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: service fault diagnostic authority enforced");
     serial_write("\r\nginux: service domain generation reuse verified");
     serial_write("\r\nginux: service restart budget exhausted");
+    serial_write("\r\nginux: service restart rollback invariants verified");
     serial_write("\r\nginux: failed service stack scrubbed before restart");
     serial_write("\r\nginux: service frame ownership transferred to replacement");
     serial_write("\r\nginux: replacement service context executed");

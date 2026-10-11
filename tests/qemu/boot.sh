@@ -548,6 +548,11 @@ if ! grep -q '^ginux: service restart budget exhausted' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: service restart rollback invariants verified' "$output_file"; then
+    echo "Boot test failed: service restart rollback invariants failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed service stack scrubbed before restart' "$output_file"; then
     echo "Boot test failed: failed service stack was not scrubbed." >&2
     exit 1

@@ -81,6 +81,14 @@ impl Duplex {
         true
     }
 
+    fn rollback_service_binding(&mut self, domain: u64) -> bool {
+        if self.service_domain != Some(domain) || self.requests.len != 0 {
+            return false;
+        }
+        self.service_domain = None;
+        true
+    }
+
     fn service_side(&self, domain: u64) -> Option<bool> {
         if self.service_domain == Some(domain) {
             Some(true)
@@ -173,6 +181,10 @@ pub(crate) fn bind_service(domain: u64) -> bool {
     channel_mut().is_some_and(|channel| channel.bind_service(domain))
 }
 
+pub(crate) fn rollback_service_binding(domain: u64) -> bool {
+    channel_mut().is_some_and(|channel| channel.rollback_service_binding(domain))
+}
+
 pub(crate) fn is_empty() -> bool {
     channel_mut().is_some_and(|channel| channel.is_empty())
 }
@@ -215,6 +227,10 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.bind_service(replacement)
         && channel.service_side(replacement) == Some(true)
         && !channel.bind_service(service)
+        && channel.rollback_service_binding(replacement)
+        && channel.service_side(replacement).is_none()
+        && channel.receive(control) == Receive::Empty
+        && channel.bind_service(replacement)
         && channel.receive(replacement) == Receive::Empty
         && channel.send(control, 100)
         && channel.receive(replacement) == Receive::Message(100)

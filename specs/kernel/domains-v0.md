@@ -55,6 +55,10 @@ service record. Failed setup is fail-closed and does not restore the attempt.
 An exhausted budget rejects replacement construction without changing the
 manager, while fault teardown remains valid and the scheduler may resume a
 surviving peer.
+An unstarted replacement can also be discarded transactionally while its
+thread count is zero. Unlike retirement, discard does not overwrite the last
+genuinely retired service identity; the consumed restart attempt remains
+consumed.
 General restart policy and
 outstanding-operation cleanup remain undefined. The fault path also publishes a
 capability-gated service-fault event to a four-record FIFO before reusing the

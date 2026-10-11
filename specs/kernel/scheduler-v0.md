@@ -66,6 +66,10 @@ exhaustion, and exits. The awakened replacement observes the message and exits
 cleanly. The boot succeeds only after exactly two preemptions, no cooperative
 yields, one contained fault, two normal exits, one restart, one block/wake
 pair, and five cross-root dispatches.
+Before the replacement becomes runnable, restart setup may remove its exact
+ready context as a rollback operation. This also reverses the domain thread
+charge and restores the retained address-space owner recorded by the scheduler;
+it cannot remove a running, blocked, ambiguous, or wrong-domain context.
 
 Call budgets belong to domains rather than threads. The control domain receives
 11 charged calls and each service generation receives three. Every call-gate

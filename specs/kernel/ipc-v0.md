@@ -59,6 +59,10 @@ receiver cannot confuse restart with an empty live channel. The QEMU gate
 observes the original and replacement generations in order after both have
 retired, then requires the closure FIFO to be empty. Retirement fails closed if
 the FIFO is full rather than discarding an unobserved closure.
+The restart transaction has a separate exact-generation rollback operation for
+a replacement that was bound but never scheduled. It requires an empty request
+direction, removes only that binding, and deliberately emits no peer-closure
+record for a service that never became observable.
 
 This revision transfers only an immediate word and has no capability transfer,
 cancellation request, timeout, or cleanup of queued replies after domain

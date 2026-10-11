@@ -352,6 +352,19 @@ impl Manager {
         self.last_retired_service_id = Some(id);
         true
     }
+
+    fn discard_unstarted_service(&mut self, id: DomainId) -> bool {
+        if self.service_id != Some(id)
+            || self
+                .domain(id)
+                .is_none_or(|domain| domain.role != Role::Service || domain.active_threads != 0)
+        {
+            return false;
+        }
+        self.domains[usize::from(id.slot)] = None;
+        self.service_id = None;
+        true
+    }
 }
 
 pub(crate) fn initialize_control_plane(manifest: &Manifest) -> Option<u64> {
@@ -555,12 +568,14 @@ fn verify_service_restart_budget_invariants_inner() -> Option<bool> {
         return Some(false);
     }
     let replacement = manager.restart_service()?;
-    if replacement == service || !manager.retire_service(replacement) {
+    if replacement == service || !manager.discard_unstarted_service(replacement) {
         return Some(false);
     }
     Some(
         manager.restart_service().is_none()
             && manager.create_initial_service().is_none()
+            && manager.domain(replacement).is_none()
+            && manager.last_retired_service_id == Some(service)
             && manager.remaining_service_restarts == 0
             && manager.total_service_restarts == SERVICE_RESTART_BUDGET,
     )
@@ -698,6 +713,16 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
         return false;
     };
     manager.retire_service(id)
+}
+
+pub(crate) fn discard_unstarted_service(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    manager.discard_unstarted_service(id)
 }
 
 pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> bool {

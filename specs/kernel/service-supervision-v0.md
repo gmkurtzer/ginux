@@ -80,3 +80,12 @@ and a saturating count, allowing teardown to continue. The control plane sees
 that notification after the concrete FIFO records. There is no blocking wait,
 subscription, recovery of the dropped record contents, or persistence.
 Those semantics must be defined before more than one request can be in flight.
+
+Replacement setup is a staged transaction across the domain manager, IPC
+binding, frame-owner ledger, scheduler, and APIC rearm. Failure before scheduler
+insertion quietly removes the new binding and domain without emitting a peer
+closure for a service that never ran. Failure after insertion removes the exact
+ready context and thread charge, restores all seven frames to the failed
+generation, then removes the binding and domain. The consumed restart attempt
+is not refunded. A rollback primitive that cannot prove its expected state
+fails the exception path rather than masking inconsistent kernel metadata.

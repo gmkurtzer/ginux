@@ -504,6 +504,23 @@ impl Scheduler {
         self.schedule_next()
     }
 
+    fn remove_ready_domain(&mut self, domain: u64) -> bool {
+        let mut slot = None;
+        for (index, thread) in self.threads.iter().enumerate() {
+            if thread.is_some_and(|thread| thread.domain == domain) {
+                if slot.is_some() || thread.is_some_and(|thread| thread.state != State::Ready) {
+                    return false;
+                }
+                slot = Some(index);
+            }
+        }
+        let Some(slot) = slot else {
+            return false;
+        };
+        self.threads[slot] = None;
+        true
+    }
+
     fn thread(&self, id: ThreadId) -> Option<&Thread> {
         self.threads
             .get(usize::from(id.slot))?
@@ -626,6 +643,22 @@ pub(crate) fn queue_service_restart(domain: u64, ipc_handle: u64) -> bool {
     }
     runtime.restarts = 1;
     runtime.service_address_space_owner = domain;
+    true
+}
+
+pub(crate) fn rollback_service_restart(domain: u64, prior_owner: u64) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    if runtime.restarts != 1
+        || runtime.service_address_space_owner != domain
+        || !runtime.scheduler.remove_ready_domain(domain)
+        || !domain::detach_thread(domain)
+    {
+        return false;
+    }
+    runtime.restarts = 0;
+    runtime.service_address_space_owner = prior_owner;
     true
 }
 
@@ -1128,7 +1161,15 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && lone.current == Some(lone_id)
         && lone.thread(lone_id)?.state == State::Running
         && lone.thread(lone_id)?.wait.is_none();
-    Some(generation_valid && rollback)
+    let mut restart_rollback = Scheduler::new();
+    let survivor = restart_rollback.create(1, first_context)?;
+    let replacement = restart_rollback.create(2, second_context)?;
+    let replacement_removed = restart_rollback.schedule_next()?.id == survivor
+        && restart_rollback.remove_ready_domain(2)
+        && restart_rollback.thread(replacement).is_none()
+        && restart_rollback.current == Some(survivor)
+        && !restart_rollback.remove_ready_domain(2);
+    Some(generation_valid && rollback && replacement_removed)
 }
 
 const fn test_context(rax: u64, rip: u64, rsp: u64, root: u64) -> UserContext {
