@@ -28,6 +28,7 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 | 11 | structured service-fault details |
 | 12 | structured lifecycle-event details |
 | 13 | structured IPC delivery details |
+| 14 | structured lifecycle service identity |
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
@@ -144,6 +145,16 @@ The ring-3 proof rejects console authority, then validates the original
 service generation, reply sequence one, and value 2 using IPC read authority.
 Service-side descriptor state is cleared at retirement and must be empty when
 a replacement generation binds; channel-wide sequence counters continue.
+Operation 14 requires host-management authority and writes a 32-byte
+little-endian descriptor for the most recently consumed lifecycle event. Its
+first 24 bytes preserve operation 12's size/version/kind/detail, exact domain
+generation, and lifecycle sequence layout, except that the size field is 32.
+The final `u64` is the stable logical service ID. The primary service retains
+that ID across replacement domain generations; an unrelated auxiliary
+registration receives a new service generation. `RDX` must equal 32, bounded
+writable-range validation applies, and denial returns `UINT64_MAX - 2` without
+altering the retained event. The proof rejects console authority and validates
+the original faulted domain, sequence one, and logical service ID.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
@@ -170,7 +181,7 @@ Unknown operations terminate the proof program without granting an operation.
 At initial entry, `RBX` contains the host-control handle, `RCX` contains the
 console handle, `R8` contains the IPC handle, and `R9` identifies the proof
 context. For the control context, `R10` contains the initial supervised service
-domain ID. The QEMU payload first writes `BUFFER!\n` from its read-only
+domain ID and `R11` contains its logical service ID. The QEMU payload first writes `BUFFER!\n` from its read-only
 executable mapping through operation 9, then requires the same call to reject
 an unmapped null range without output. It also fetches and validates the
 structured ABI descriptor. It then presents the console write-only

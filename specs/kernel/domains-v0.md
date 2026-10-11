@@ -21,9 +21,8 @@ keeps one generation-tagged service ID across its initial and replacement
 domain generations. Auxiliary registry slots have independent service-ID
 generations, so retiring an auxiliary service and registering unrelated work in
 the same slot creates a new logical identity. Lifecycle records retain both the
-logical service ID and the exact domain instance ID. The current public
-lifecycle descriptor exposes only the domain instance; a future additive ABI
-feature must expose the logical ID before auxiliary management is made public.
+logical service ID and the exact domain instance ID. Additive call-gate
+operation 14 exposes both without changing the existing operation 12 layout.
 
 Initial control-plane authority is a finite list of boot grants. Each grant
 becomes a root capability, after which the capability table's boot-authority

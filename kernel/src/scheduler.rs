@@ -562,6 +562,9 @@ pub(crate) fn initialize_runtime(
     {
         return false;
     }
+    let Some(service_identity) = domain::domain_service_identity(second_domain) else {
+        return false;
+    };
     let mut scheduler = Scheduler::new();
     let mut first = initial_context(
         first_address_space_root,
@@ -573,6 +576,7 @@ pub(crate) fn initialize_runtime(
         1,
     );
     first.r10 = second_domain;
+    first.r11 = service_identity;
     let second = initial_context(
         second_address_space_root,
         second_entry,

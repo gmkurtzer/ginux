@@ -45,6 +45,24 @@ pub(crate) fn lifecycle_descriptor(
     bytes
 }
 
+pub(crate) fn lifecycle_identity_descriptor(
+    kind: u8,
+    detail: u8,
+    domain: u64,
+    sequence: u64,
+    service: u64,
+) -> [u8; LIFECYCLE_IDENTITY_DESCRIPTOR_SIZE] {
+    let mut bytes = [0_u8; LIFECYCLE_IDENTITY_DESCRIPTOR_SIZE];
+    bytes[0..4].copy_from_slice(&(LIFECYCLE_IDENTITY_DESCRIPTOR_SIZE as u32).to_le_bytes());
+    bytes[4..6].copy_from_slice(&VERSION.to_le_bytes());
+    bytes[6] = kind;
+    bytes[7] = detail;
+    bytes[8..16].copy_from_slice(&domain.to_le_bytes());
+    bytes[16..24].copy_from_slice(&sequence.to_le_bytes());
+    bytes[24..32].copy_from_slice(&service.to_le_bytes());
+    bytes
+}
+
 pub(crate) fn ipc_delivery_descriptor(
     kind: u8,
     source: u64,

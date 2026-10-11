@@ -643,6 +643,11 @@ if ! grep -q '^ginux: structured lifecycle event delivered' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: structured lifecycle service identity delivered' "$output_file"; then
+    echo "Boot test failed: lifecycle service identity was not delivered." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: lifecycle diagnostic authority enforced' "$output_file"; then
     echo "Boot test failed: lifecycle diagnostic authority was not enforced." >&2
     exit 1

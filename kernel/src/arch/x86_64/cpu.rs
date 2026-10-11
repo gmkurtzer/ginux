@@ -318,6 +318,7 @@ ginux_exception_entries:
     .global ginux_user_enter
 ginux_user_enter:
     mov r10, [rsp + 8]
+    mov r11, [rsp + 16]
     push rbx
     push rbp
     push r12
@@ -409,6 +410,7 @@ extern "sysv64" {
         ipc_handle: u64,
         identity: u64,
         service_domain: u64,
+        service_identity: u64,
     );
 }
 
@@ -556,6 +558,9 @@ pub(crate) fn verify_user_syscall(
         return false;
     }
     SYSCALL_STATE.store(0, Ordering::SeqCst);
+    let Some(service_identity) = domain::domain_service_identity(service_domain) else {
+        return false;
+    };
     // SAFETY: The caller supplies mapped ring-3 code and stack addresses. The
     // syscall gate abandons the user frame and returns on the saved kernel
     // stack, with interrupts disabled throughout.
@@ -568,6 +573,7 @@ pub(crate) fn verify_user_syscall(
             ipc_handle,
             1,
             service_domain,
+            service_identity,
         )
     };
     SYSCALL_STATE.load(Ordering::SeqCst) == 31
@@ -825,6 +831,7 @@ fn dispatch_charged_call(
         11 => write_fault_descriptor(caller_domain, capability, frame),
         12 => write_lifecycle_descriptor(caller_domain, capability, frame),
         13 => write_ipc_delivery_descriptor(caller_domain, capability, frame),
+        14 => write_lifecycle_identity_descriptor(caller_domain, capability, frame),
         _ => u64::MAX,
     }
 }
@@ -985,6 +992,28 @@ fn write_ipc_delivery_descriptor(
         return u64::MAX - 2;
     }
     let Some(descriptor) = ipc::delivery_descriptor(domain_id) else {
+        return u64::MAX - 2;
+    };
+    if !address_space::copy_to_current_user(frame.first_argument(), &descriptor) {
+        return u64::MAX - 2;
+    }
+    descriptor.len() as u64
+}
+
+fn write_lifecycle_identity_descriptor(
+    domain_id: u64,
+    capability: u64,
+    frame: *const UserTrapFrame,
+) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(domain_id, capability, 1, Rights::MANAGE)
+        || frame.second_argument() != control_abi::LIFECYCLE_IDENTITY_DESCRIPTOR_SIZE as u64
+    {
+        return u64::MAX - 2;
+    }
+    let Some(descriptor) = domain::delivered_lifecycle_identity_descriptor() else {
         return u64::MAX - 2;
     };
     if !address_space::copy_to_current_user(frame.first_argument(), &descriptor) {

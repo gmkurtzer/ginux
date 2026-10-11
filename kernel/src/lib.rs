@@ -671,6 +671,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: service fault event generation matched");
     serial_write("\r\nginux: monotonic lifecycle events verified");
     serial_write("\r\nginux: structured lifecycle event delivered");
+    serial_write("\r\nginux: structured lifecycle service identity delivered");
     serial_write("\r\nginux: lifecycle diagnostic authority enforced");
     serial_write("\r\nginux: service fault metadata matched");
     serial_write("\r\nginux: structured service fault delivered");

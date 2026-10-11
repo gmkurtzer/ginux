@@ -96,7 +96,7 @@ cd80
 83f808
 0f859f000000
 
-# negotiate call-gate ABI v1 and its fourteen bootstrap features
+# negotiate call-gate ABI v1 and its fifteen bootstrap features
 @entry service
 b800000000
 cd80
@@ -295,6 +295,43 @@ cd80
 0f0b
 488b4618
 4883f802
+7402
+0f0b
+
+# reject lifecycle identity access through the console capability
+4889cf
+48bee020000080000000
+ba20000000
+b80e000000
+cd80
+83f8fd
+7402
+0f0b
+
+# fetch and validate the lifecycle identity through manage authority
+4889df
+48bee020000080000000
+ba20000000
+b80e000000
+cd80
+83f820
+7402
+0f0b
+488b06
+48bd2000000001000100
+4839e8
+7402
+0f0b
+488b4608
+4c39d0
+7402
+0f0b
+488b4610
+4883f801
+7402
+0f0b
+488b4618
+4c39d8
 7402
 0f0b
 
