@@ -622,6 +622,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: toolchain-linked Linux interpreter executed\r\n");
     serial_write("ginux: userspace Linux runtime files discovered\r\n");
     serial_write("ginux: userspace Linux PT_LOAD mappings derived\r\n");
+    serial_write("ginux: userspace Linux startup metadata consumed\r\n");
     serial_write("ginux: userspace Linux main segments mapped\r\n");
     serial_write("ginux: userspace Linux DT_NEEDED path resolved\r\n");
     serial_write("ginux: userspace Linux dependency segments mapped\r\n");

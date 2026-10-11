@@ -27,7 +27,58 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], rdx
 
 #ifdef GINUX_LINKED
+    mov qword ptr [rip + .Lmain_phdr], 0
+    mov qword ptr [rip + .Lmain_phnum], 0
+    mov qword ptr [rip + .Lmain_entry], 0
+    mov rdi, rsp
+    mov rcx, qword ptr [rdi]
+    cmp rcx, 8
+    ja .Linvalid_dynamic
+    lea rdi, [rdi + rcx * 8 + 16]
+    mov ecx, 8
+.Lscan_environment:
+    cmp qword ptr [rdi], 0
+    je .Lscan_auxiliary_vector
+    add rdi, 8
+    loop .Lscan_environment
+    jmp .Linvalid_dynamic
+.Lscan_auxiliary_vector:
+    add rdi, 8
+    mov ecx, 32
+.Lscan_auxiliary_entry:
+    mov rax, qword ptr [rdi]
+    mov rdx, qword ptr [rdi + 8]
+    test rax, rax
+    jz .Lauxiliary_vector_ready
+    cmp eax, 3
+    jne .Lauxiliary_phnum
+    mov qword ptr [rip + .Lmain_phdr], rdx
+.Lauxiliary_phnum:
+    cmp eax, 5
+    jne .Lauxiliary_base
+    mov qword ptr [rip + .Lmain_phnum], rdx
+.Lauxiliary_base:
+    cmp eax, 7
+    jne .Lauxiliary_entry
+    cmp rdx, rbx
+    jne .Linvalid_dynamic
+.Lauxiliary_entry:
+    cmp eax, 9
+    jne .Lnext_auxiliary_entry
+    mov qword ptr [rip + .Lmain_entry], rdx
+.Lnext_auxiliary_entry:
+    add rdi, 16
+    loop .Lscan_auxiliary_entry
+    jmp .Linvalid_dynamic
+.Lauxiliary_vector_ready:
+    cmp qword ptr [rip + .Lmain_phdr], 0
+    je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_phnum], 0
+    je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_entry], 0
+    je .Linvalid_dynamic
     call .Ldiscover_main_file
+    jmp .Lmain_dynamic_ready
 #endif
 
     mov edi, 0x405200
@@ -93,6 +144,7 @@ ginux_linux_interpreter:
     pop r8
     pop rsi
     pop rax
+    jmp .Ldependency_dynamic_ready
 #endif
 
     mov edi, 0x613000
@@ -210,7 +262,11 @@ ginux_linux_interpreter:
     add rdx, qword ptr [rbx + 16]
     mov qword ptr [rcx], rdx
 
+#ifdef GINUX_LINKED
+    mov rax, qword ptr [rip + .Lmain_entry]
+#else
     mov eax, 0x400100
+#endif
     jmp rax
 
 .Linvalid_dynamic:
@@ -222,8 +278,11 @@ ginux_linux_interpreter:
     lea rsi, [rip + .Lmain_path]
     call .Linspect_runtime_file
     lea rsi, [rip + .Lmain_path]
-    mov r14d, 0x3ff000
+    mov r14, qword ptr [rip + .Lmain_phdr]
+    mov rax, qword ptr [rip + .Lmain_phnum]
+    mov qword ptr [rip + .Lexpected_phnum], rax
     call .Lload_runtime_file
+    mov r15, r14
     ret
 
 .Ldiscover_dependency_file:
@@ -245,12 +304,15 @@ ginux_linux_interpreter:
     call .Linspect_runtime_file
     lea rsi, [rsp]
     mov r14d, 0x610000
+    mov qword ptr [rip + .Lexpected_phnum], 0
     call .Lload_runtime_file
     add rsp, 32
     ret
 
 .Lload_runtime_file:
     push r15
+    mov qword ptr [rip + .Lloaded_dynamic_address], 0
+    mov qword ptr [rip + .Lloaded_dynamic_count], 0
     mov edi, -100
     xor edx, edx
     mov eax, 257
@@ -279,6 +341,14 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     cmp r13d, 8
     ja .Linvalid_dynamic
+    mov rax, qword ptr [rip + .Lexpected_phnum]
+    test rax, rax
+    jz .Lprogram_header_count_ready
+    cmp r13, rax
+    jne .Linvalid_dynamic
+    sub r14, r12
+    jc .Linvalid_dynamic
+.Lprogram_header_count_ready:
     mov rax, r13
     imul rax, rax, 56
     add rax, r12
@@ -291,7 +361,29 @@ ginux_linux_interpreter:
 
 .Lnext_program_header:
     cmp dword ptr [r12], 1
+    je .Lload_program_header
+    cmp dword ptr [r12], 2
     jne .Ladvance_program_header
+    cmp qword ptr [rip + .Lloaded_dynamic_address], 0
+    jne .Linvalid_dynamic
+    mov rax, qword ptr [r12 + 32]
+    test rax, rax
+    jz .Linvalid_dynamic
+    cmp rax, qword ptr [r12 + 40]
+    jne .Linvalid_dynamic
+    test al, 15
+    jnz .Linvalid_dynamic
+    shr rax, 4
+    cmp rax, 17
+    ja .Linvalid_dynamic
+    mov rcx, qword ptr [r12 + 16]
+    add rcx, r14
+    jc .Linvalid_dynamic
+    mov qword ptr [rip + .Lloaded_dynamic_address], rcx
+    mov qword ptr [rip + .Lloaded_dynamic_count], rax
+    jmp .Ladvance_program_header
+
+.Lload_program_header:
     mov eax, dword ptr [r12 + 4]
     test eax, -8
     jnz .Linvalid_dynamic
@@ -391,6 +483,10 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     cmp r15d, 1
     jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lloaded_dynamic_address], 0
+    je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lloaded_dynamic_count], 0
+    je .Linvalid_dynamic
 
     mov edi, 0x40a000
     mov esi, 8192
@@ -403,6 +499,8 @@ ginux_linux_interpreter:
     syscall
     test rax, rax
     jne .Linvalid_dynamic
+    mov rdi, qword ptr [rip + .Lloaded_dynamic_address]
+    mov rcx, qword ptr [rip + .Lloaded_dynamic_count]
     pop r15
     ret
 
@@ -448,6 +546,21 @@ ginux_linux_interpreter:
 
 .section .data,"aw",@progbits
     .ascii "DYNAMIC!"
+
+.section .bss.loader,"aw",@nobits
+.balign 8
+.Lmain_phdr:
+    .zero 8
+.Lmain_phnum:
+    .zero 8
+.Lmain_entry:
+    .zero 8
+.Lexpected_phnum:
+    .zero 8
+.Lloaded_dynamic_address:
+    .zero 8
+.Lloaded_dynamic_count:
+    .zero 8
 
 .section .data.rel.ro,"aw",@progbits
     .quad ginux_linux_interpreter

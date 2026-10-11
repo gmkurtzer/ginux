@@ -42,8 +42,11 @@ program headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and
 `DT_SONAME`. The kernel authenticates all three linker outputs, applies fixed
 load biases, accepts the dependency's intentionally unmapped ELF headers, and
 executes the complete probe through the linker-generated jump slot.
-After relocating itself, the interpreter now invokes the Linux syscall gate
-from its own RX range and opens `/init`. After inspecting it through a temporary
+After relocating itself, the interpreter bounds and scans its initial stack,
+requires `AT_PHDR`, `AT_PHNUM`, `AT_BASE`, and `AT_ENTRY`, and verifies that
+`AT_BASE` identifies its actual load page. It derives the main load bias from
+`AT_PHDR`, the authenticated file's `e_phoff`, and matching `e_phnum`. It then
+invokes the Linux syscall gate from its own RX range and opens `/init`. After inspecting it through a temporary
 read-only window, the interpreter reopens it, bounds its 56-byte program-header
 table to eight entries in the two-page window, and derives page-aligned mmap
 requests from each readable `PT_LOAD`. It installs the authenticated header,
@@ -53,7 +56,9 @@ constructs `/lib64/<needed-name>` on its bounded stack, inspects that derived
 dependency path, walks that file's `PT_LOAD` entries the same way, and installs
 its RX page at `0x610000` and RW/NX page at `0x613000`. Wrong offsets,
 duplicate placement, and W+X are rejected before it applies
-dependency and main relocations. The kernel installs only the interpreter for
+dependency and main relocations. Both dynamic-table addresses and entry counts
+come from bounded `PT_DYNAMIC` headers, and final transfer uses `AT_ENTRY`
+rather than an embedded main entry address. The kernel installs only the interpreter for
 this stage; it authenticates and plans the main and dependency and reserves
 their zeroed frames, but both images' content and leaves are installed by
 userspace.

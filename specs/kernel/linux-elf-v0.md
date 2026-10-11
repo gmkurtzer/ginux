@@ -227,7 +227,16 @@ values are rejected. The main's linker metadata tail remains mapped for the
 interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
 After applying its self-relocation, the linked interpreter enters the syscall
-gate from its own admitted RX extent and opens `/init`. It first inspects a
+gate only after consuming the initial stack metadata. It walks at most eight
+environment pointers and 32 auxiliary-vector pairs, requires nonzero
+`AT_PHDR`, `AT_PHNUM`, and `AT_ENTRY`, and requires `AT_BASE` to equal its
+observed page-aligned load address. For the main image, the authenticated
+file's `e_phoff` is subtracted from `AT_PHDR` with checked arithmetic and its
+`e_phnum` must equal `AT_PHNUM`; this produces the load bias used by the
+program-header walker. Final control transfer uses `AT_ENTRY`.
+
+The interpreter then enters the syscall gate from its own admitted RX extent
+and opens `/init`. It first inspects a
 temporary read-only window, then reopens the file and walks its ELF program
 headers in userspace. The walker requires a 56-byte `e_phentsize`, one through
 eight headers wholly inside the two-page inspection window, readable
@@ -248,6 +257,15 @@ fully validated by the kernel plan; it is not yet an independent general ELF
 validator. In particular, file identity, ELF class/machine, segment overlap,
 entry validity, dynamic metadata, and the final admitted page set remain
 kernel-enforced contracts.
+
+For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
+file and memory sizes must match, its size must be a multiple of 16 bytes, and
+it may describe at most 17 entries. The interpreter derives the runtime
+dynamic-table address by adding the selected bias to `p_vaddr`; the linked main
+and dependency scans no longer embed their dynamic addresses or entry counts.
+The interpreter keeps its bounded startup scratch in the zero-fill tail after
+its linker-emitted `.dynamic` and relocation target so that the bootstrap
+dynamic-table offset remains invariant.
 
 The main dynamic-table scan then captures the sole `DT_NEEDED` string-table
 offset, requires a nonzero bounded name, and constructs
@@ -272,7 +290,10 @@ restores its own root and scrubs and releases all twenty-one page-table and
 payload frames. This profile performs one exact cross-object name match; it
 does not support multiple dependencies, transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
-lazy binding, a general-purpose dynamic linker, or glibc.
+lazy binding, a general-purpose dynamic linker, or glibc. The main bias and
+entry are startup-metadata-driven, but the sole dependency bias remains the
+profile constant `0x610000` and every resulting page must still match the
+kernel's preauthenticated fixed contract.
 
 ## Page-image plan
 

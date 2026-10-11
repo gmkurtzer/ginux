@@ -28,6 +28,7 @@ SECTIONS
     .data : { *(.data) } :data
     .dynamic : { *(.dynamic) } :data :dynamic
     .data.rel.ro : { *(.data.rel.ro) } :data
+    .bss.loader (NOLOAD) : { *(.bss.loader) } :data
 
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 }
