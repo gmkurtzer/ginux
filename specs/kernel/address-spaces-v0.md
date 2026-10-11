@@ -16,9 +16,9 @@ kernel lifetime.
 This proves controlled construction and hardware activation, not process
 isolation completeness. The transitional kernel mapping is still broadly
 writable/executable. A second hardware-tested layout enables `EFER.NXE` and
-provides a user-readable/executable, non-writable code page, an absent guard
-page, and a user-readable/writable, non-executable stack page. The kernel mapping
-remains supervisor-only in both roots.
+provides a user-readable/executable, non-writable code page and two
+user-readable/writable, non-executable stack pages, each preceded by an absent
+guard page. The kernel mapping remains supervisor-only in both roots.
 
 Page-table frames are not reclaimed, there is no address-space identifier or
 TLB shootdown protocol, and the kernel mapping remains transitional.
@@ -27,18 +27,20 @@ TLB shootdown protocol, and the kernel mapping remains transitional.
 
 The kernel copies only the manifest-measured control-plane bundle into the
 read-only executable page. Its GDT includes user code/data descriptors and TSS
-RSP0 names the bootstrap kernel stack. A DPL3 interrupt gate at vector `0x80` accepts two
-bring-up call numbers. The QEMU program enters CPL3 through `IRETQ`, issues a
-ping call, and verifies the returned value after `IRETQ` resumes the same user
-context. It then issues an exit call, which deliberately abandons the saved
-user frame and returns on a kernel-owned stack. The kernel restores its original
-CR3. The entry stub preserves every non-result general-purpose register.
+RSP0 names a dedicated guarded privilege stack. A DPL3 interrupt gate at vector
+`0x80` accepts three bring-up call numbers. The QEMU program enters CPL3 through
+`IRETQ`, issues a ping call, and verifies the returned value after `IRETQ`
+resumes the same user context. Each of two contexts then yields once and resumes
+before issuing an exit call. The final exit deliberately abandons the saved
+user frame and returns on the suspended kernel stack. The kernel restores its
+original CR3. The entry stub preserves every non-result general-purpose
+register.
 
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate
 manifest-derived grant succeeds.
 
-This is not yet a stable syscall ABI or scheduler. It has no arguments,
+This is not yet a stable syscall ABI. It has no structured arguments,
 preemption, signal model, IPC page, or fault-containment policy. The `INT 0x80`
 mechanism is a bring-up gate; the eventual ABI may use `SYSCALL/SYSRET` with a
 safe fallback.

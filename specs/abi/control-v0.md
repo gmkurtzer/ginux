@@ -10,14 +10,15 @@ The measured ring-3 control-plane bundle invokes interrupt vector `0x80` with:
 
 Operation 1 is a ping requiring read authority on host-control object 1. It
 returns `0x4758` when authorized and `UINT64_MAX - 1` when denied. Operation 2
-exits the bring-up thread and does not return. Unknown operations also terminate
-the proof program without granting an operation.
+exits the calling thread and does not return to that context. Operation 3
+cooperatively yields and returns zero when the context is scheduled again.
+Unknown operations terminate the proof program without granting an operation.
 
 At initial entry, `RBX` contains the host-control handle and `RCX` contains the
 console handle. The QEMU payload first presents the console write-only handle
 and requires denial. It then presents the manifest-derived host-control handle
 and requires success. The kernel accepts the boot only after observing denial,
-authorization, and explicit exit.
+authorization, two resumed yields, and two explicit exits.
 
 Handles encode a private table slot and generation and are meaningful only in
 the calling domain. Stale generations, out-of-range slots, and nonzero reserved

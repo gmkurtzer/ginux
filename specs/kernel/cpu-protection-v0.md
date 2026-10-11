@@ -6,6 +6,7 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
 
 - A GDT containing 64-bit kernel code and data descriptors.
 - A 64-bit TSS loaded through its system descriptor.
+- A guarded 16 KiB privilege stack dedicated to ring-3 entries.
 - A 16 KiB interrupt-stack-table allocation dedicated to double faults.
 - An IDT with present interrupt gates for all 32 architectural exception
   vectors.
@@ -17,6 +18,12 @@ Every other architectural exception enters a common fatal path with a
 normalized vector and error code. The fatal path reports both values, reports
 CR2 for page faults, emits `GINUX_KERNEL_PANIC`, and halts. The double-fault
 gate uses IST1 so it does not depend on the interrupted stack.
+
+TSS RSP0 names a dedicated privilege stack rather than the suspended kernel
+call stack. This prevents repeated user calls from overwriting the kernel
+continuation. Its first page is absent in the active kernel and domain page
+tables. The stack is shared by the single bootstrap CPU and is safe only while
+interrupts remain disabled and calls cannot nest.
 
 The kernel verifies all 32 entries before continuing its boot test. Later
 revisions must capture complete structured fault frames, introduce per-CPU

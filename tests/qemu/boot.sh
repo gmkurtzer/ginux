@@ -223,6 +223,11 @@ if ! grep -q '^ginux: opaque capability handles enforced at call gate' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: two ring-3 contexts yielded and exited' "$output_file"; then
+    echo "Boot test failed: cooperative ring-3 context switching failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: scheduler context lifecycle verified' "$output_file"; then
     echo "Boot test failed: scheduler context lifecycle invariants failed." >&2
     exit 1

@@ -2,7 +2,12 @@ use core::arch::{asm, global_asm};
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use crate::{capability::Rights, domain, serial_write, serial_write_u64};
+use crate::{
+    capability::Rights,
+    domain, scheduler,
+    scheduler::{RuntimeAction, UserTrapFrame},
+    serial_write, serial_write_u64,
+};
 
 const KERNEL_CODE_SELECTOR: u16 = 0x08;
 const KERNEL_DATA_SELECTOR: u16 = 0x10;
@@ -85,6 +90,7 @@ static mut TSS: TaskStateSegment = TaskStateSegment {
     io_map_base: size_of::<TaskStateSegment>() as u16,
 };
 static mut IDT: [IdtEntry; 256] = [IdtEntry::MISSING; 256];
+static mut PRIVILEGE_STACK: ExceptionStack = ExceptionStack([0; EXCEPTION_STACK_STORAGE_SIZE]);
 static mut DOUBLE_FAULT_STACK: ExceptionStack = ExceptionStack([0; EXCEPTION_STACK_STORAGE_SIZE]);
 
 global_asm!(
@@ -200,6 +206,7 @@ ginux_fatal_exception_common:
     mov rdi, [rsp + 120]
     mov rsi, [rsp + 128]
     mov rdx, cr2
+    mov rcx, [rsp + 136]
     and rsp, -16
     call {fatal_exception_handler}
     ud2
@@ -280,6 +287,7 @@ ginux_syscall_entry:
     mov r12, rsp
     mov rdi, rax
     mov rsi, [r12 + 72]
+    mov rdx, r12
     and rsp, -16
     call {syscall_handler}
     cmp rax, -1
@@ -327,11 +335,11 @@ extern "sysv64" {
     fn ginux_user_enter(entry: usize, stack: usize, host_handle: u64, console_handle: u64);
 }
 
-pub(crate) fn install(kernel_stack_top: usize) -> bool {
+pub(crate) fn install() -> bool {
     // SAFETY: Initialization runs once with interrupts disabled and before any
     // other CPU can observe these tables.
     unsafe {
-        install_gdt_and_tss(kernel_stack_top);
+        install_gdt_and_tss();
         install_idt();
     }
     exception_gates_are_valid()
@@ -366,6 +374,14 @@ pub(crate) fn double_fault_guard_page() -> usize {
     core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize
 }
 
+pub(crate) fn privilege_stack_guard_page() -> usize {
+    core::ptr::addr_of!(PRIVILEGE_STACK) as usize
+}
+
+pub(crate) fn privilege_stack_top() -> usize {
+    core::ptr::addr_of!(PRIVILEGE_STACK) as usize + EXCEPTION_STACK_STORAGE_SIZE
+}
+
 /// Installs a non-exception interrupt gate while interrupts are disabled.
 pub(crate) fn install_interrupt_gate(vector: u8, handler: usize) -> bool {
     if vector < 32 || handler == 0 {
@@ -395,12 +411,14 @@ fn install_user_interrupt_gate(vector: u8, handler: usize) -> bool {
     }
 }
 
-unsafe fn install_gdt_and_tss(kernel_stack_top: usize) {
+unsafe fn install_gdt_and_tss() {
     let tss_address = core::ptr::addr_of!(TSS) as u64;
+    let privilege_stack_end =
+        core::ptr::addr_of!(PRIVILEGE_STACK) as u64 + EXCEPTION_STACK_STORAGE_SIZE as u64;
     let exception_stack_end =
         core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64 + EXCEPTION_STACK_STORAGE_SIZE as u64;
     TSS.interrupt_stacks[0] = exception_stack_end;
-    TSS.privilege_stacks[0] = kernel_stack_top as u64;
+    TSS.privilege_stacks[0] = privilege_stack_end;
 
     GDT[0] = 0;
     GDT[1] = 0x00af_9a00_0000_ffff;
@@ -480,7 +498,7 @@ extern "sysv64" fn breakpoint_handler() {
     serial_write("ginux: breakpoint exception handled\r\n");
 }
 
-extern "sysv64" fn syscall_handler(number: u64, capability: u64) -> u64 {
+extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
     match number {
         1 => {
             if domain::control_plane_handle_permits(capability, 1, Rights::READ) {
@@ -493,17 +511,40 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64) -> u64 {
         }
         2 => {
             SYSCALL_STATE.fetch_or(4, Ordering::SeqCst);
-            u64::MAX
+            runtime_result(frame, false)
         }
+        3 => runtime_result(frame, true),
         _ => u64::MAX,
     }
 }
 
-extern "sysv64" fn fatal_exception_handler(vector: u64, error: u64, fault_address: u64) -> ! {
+fn runtime_result(frame: *mut UserTrapFrame, yielding: bool) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return u64::MAX;
+    };
+    let action = if yielding {
+        scheduler::yield_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR)
+    } else {
+        scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR)
+    };
+    match action {
+        RuntimeAction::Resume(result) => result,
+        RuntimeAction::Complete | RuntimeAction::Invalid => u64::MAX,
+    }
+}
+
+extern "sysv64" fn fatal_exception_handler(
+    vector: u64,
+    error: u64,
+    fault_address: u64,
+    instruction: u64,
+) -> ! {
     serial_write("ginux: fatal exception vector: ");
     serial_write_u64(vector);
     serial_write("\r\nginux: exception error code: ");
     serial_write_u64(error);
+    serial_write("\r\nginux: exception instruction: ");
+    serial_write_u64(instruction);
     if vector == 14 {
         serial_write("\r\nginux: page fault address: ");
         serial_write_u64(fault_address);

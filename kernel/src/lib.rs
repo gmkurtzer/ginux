@@ -188,6 +188,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let kernel_stack_guard = stack_start;
     let kernel_stack_start = stack_start + PAGE_SIZE;
     let double_fault_guard = arch::x86_64::cpu::double_fault_guard_page();
+    let privilege_stack_guard = arch::x86_64::cpu::privilege_stack_guard_page();
     let required_addresses = [
         kernel_main as *const () as usize,
         boot_info as *const BootInfo as usize,
@@ -202,8 +203,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.manifest as usize + boot_info.manifest_size - 1,
         boot_info.control_plane_bundle as usize,
         boot_info.control_plane_bundle as usize + boot_info.control_plane_bundle_size - 1,
+        privilege_stack_guard + PAGE_SIZE,
+        arch::x86_64::cpu::privilege_stack_top() - 1,
     ];
-    let guard_pages = [0, kernel_stack_guard, double_fault_guard];
+    let guard_pages = [
+        0,
+        kernel_stack_guard,
+        privilege_stack_guard,
+        double_fault_guard,
+    ];
 
     // SAFETY: The entry trampoline disabled interrupts. The required live
     // addresses and the page-table objects are checked against the complete
@@ -236,7 +244,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(u64::from(platform.first_io_apic_gsi));
     serial_write("\r\n");
 
-    if !arch::x86_64::cpu::install(stack_start + KERNEL_STACK_STORAGE_SIZE) {
+    if !arch::x86_64::cpu::install() {
         kernel_fail("ginux: architectural exception gates invalid\r\n");
     }
     serial_write("ginux: GDT/TSS/IDT active\r\n");
@@ -367,6 +375,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
+    serial_write("\r\nginux: two ring-3 contexts yielded and exited");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }

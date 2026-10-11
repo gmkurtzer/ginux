@@ -1,6 +1,6 @@
 use core::arch::{asm, x86_64::__cpuid};
 
-use crate::{arch::x86_64::cpu, memory};
+use crate::{arch::x86_64::cpu, memory, scheduler};
 
 const PAGE_SIZE: usize = 4096;
 const ENTRY_COUNT: usize = 512;
@@ -128,17 +128,22 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
     // ownership. The kernel mapping is preserved and interrupts are disabled.
     unsafe {
         space.code_frame.cast::<u8>().write_volatile(0x90);
-        space.stack_frame.cast::<u64>().write_volatile(0);
+        space.first_stack_frame.cast::<u64>().write_volatile(0);
+        space.second_stack_frame.cast::<u64>().write_volatile(0);
         activate(space.root);
         let code_visible = (USER_TEST_ADDRESS as *const u8).read_volatile() == 0x90;
-        let stack_address = USER_TEST_ADDRESS + 2 * PAGE_SIZE;
-        (stack_address as *mut u64).write_volatile(TEST_PATTERN);
-        let stack_writable = space.stack_frame.cast::<u64>().read_volatile() == TEST_PATTERN;
+        let first_stack_address = USER_TEST_ADDRESS + 2 * PAGE_SIZE;
+        let second_stack_address = USER_TEST_ADDRESS + 4 * PAGE_SIZE;
+        (first_stack_address as *mut u64).write_volatile(TEST_PATTERN);
+        (second_stack_address as *mut u64).write_volatile(!TEST_PATTERN);
+        let stacks_writable = space.first_stack_frame.cast::<u64>().read_volatile() == TEST_PATTERN
+            && space.second_stack_frame.cast::<u64>().read_volatile() == !TEST_PATTERN;
         activate(kernel_root);
         let restored = current_root() == kernel_root;
         space.code_frame.cast::<u8>().write_volatile(0);
-        space.stack_frame.cast::<u64>().write_volatile(0);
-        code_visible && stack_writable && restored
+        space.first_stack_frame.cast::<u64>().write_volatile(0);
+        space.second_stack_frame.cast::<u64>().write_volatile(0);
+        code_visible && stacks_writable && restored
     }
 }
 
@@ -164,6 +169,16 @@ pub(crate) fn verify_ring3_control_plane(
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
         }
+        if !scheduler::initialize_runtime(
+            space.root,
+            USER_TEST_ADDRESS,
+            USER_TEST_ADDRESS + 3 * PAGE_SIZE,
+            USER_TEST_ADDRESS + 5 * PAGE_SIZE,
+            host_handle,
+            console_handle,
+        ) {
+            return false;
+        }
         activate(space.root);
         let handled = cpu::verify_user_syscall(
             USER_TEST_ADDRESS,
@@ -172,14 +187,15 @@ pub(crate) fn verify_ring3_control_plane(
             console_handle,
         );
         activate(kernel_root);
-        handled && current_root() == kernel_root
+        handled && scheduler::verify_runtime_complete() && current_root() == kernel_root
     }
 }
 
 struct WxAddressSpace {
     root: u64,
     code_frame: *mut u8,
-    stack_frame: *mut u8,
+    first_stack_frame: *mut u8,
+    second_stack_frame: *mut u8,
 }
 
 impl WxAddressSpace {
@@ -189,8 +205,17 @@ impl WxAddressSpace {
         let directory = memory::allocate_frame()?;
         let table = memory::allocate_frame()?;
         let code = memory::allocate_frame()?;
-        let stack = memory::allocate_frame()?;
-        let frames = [root, pdpt, directory, table, code, stack];
+        let first_stack = memory::allocate_frame()?;
+        let second_stack = memory::allocate_frame()?;
+        let frames = [
+            root,
+            pdpt,
+            directory,
+            table,
+            code,
+            first_stack,
+            second_stack,
+        ];
         for left in 0..frames.len() {
             if frames[left] % PAGE_SIZE as u64 != 0 || frames[left + 1..].contains(&frames[left]) {
                 return None;
@@ -210,12 +235,17 @@ impl WxAddressSpace {
             entries.add(1).write(0);
             entries
                 .add(2)
-                .write(stack | PRESENT | WRITABLE | USER | NO_EXECUTE);
+                .write(first_stack | PRESENT | WRITABLE | USER | NO_EXECUTE);
+            entries.add(3).write(0);
+            entries
+                .add(4)
+                .write(second_stack | PRESENT | WRITABLE | USER | NO_EXECUTE);
         }
         Some(Self {
             root,
             code_frame: code as *mut u8,
-            stack_frame: stack as *mut u8,
+            first_stack_frame: first_stack as *mut u8,
+            second_stack_frame: second_stack as *mut u8,
         })
     }
 
@@ -229,15 +259,21 @@ impl WxAddressSpace {
             let directory = (pdpt.read() & ADDRESS_MASK) as *const u64;
             let table = (directory.read() & ADDRESS_MASK) as *const u64;
             let code = table.read();
-            let guard = table.add(1).read();
-            let stack = table.add(2).read();
+            let first_guard = table.add(1).read();
+            let first_stack = table.add(2).read();
+            let second_guard = table.add(3).read();
+            let second_stack = table.add(4).read();
             code & (PRESENT | USER) == (PRESENT | USER)
                 && code & (WRITABLE | NO_EXECUTE) == 0
-                && guard == 0
-                && stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                && first_guard == 0
+                && first_stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                    == (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                && second_guard == 0
+                && second_stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == (PRESENT | WRITABLE | USER | NO_EXECUTE)
                 && code & ADDRESS_MASK == self.code_frame as u64
-                && stack & ADDRESS_MASK == self.stack_frame as u64
+                && first_stack & ADDRESS_MASK == self.first_stack_frame as u64
+                && second_stack & ADDRESS_MASK == self.second_stack_frame as u64
         }
     }
 }

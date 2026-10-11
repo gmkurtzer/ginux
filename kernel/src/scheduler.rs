@@ -1,4 +1,10 @@
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering};
+
 const MAX_THREADS: usize = 8;
+
+static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
+static mut RUNTIME: MaybeUninit<Runtime> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ThreadId {
@@ -44,6 +50,82 @@ struct UserContext {
     address_space_root: u64,
 }
 
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct UserTrapFrame {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    r11: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rbp: u64,
+    rdi: u64,
+    rsi: u64,
+    rdx: u64,
+    rcx: u64,
+    rbx: u64,
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+    rsp: u64,
+    ss: u64,
+}
+
+impl UserTrapFrame {
+    fn selectors_match(&self, code_selector: u16, data_selector: u16) -> bool {
+        self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
+    }
+
+    fn saved_context(&self, result: u64, address_space_root: u64) -> UserContext {
+        UserContext {
+            rax: result,
+            rbx: self.rbx,
+            rcx: self.rcx,
+            rdx: self.rdx,
+            rsi: self.rsi,
+            rdi: self.rdi,
+            rbp: self.rbp,
+            r8: self.r8,
+            r9: self.r9,
+            r10: self.r10,
+            r11: self.r11,
+            r12: self.r12,
+            r13: self.r13,
+            r14: self.r14,
+            r15: self.r15,
+            rip: self.rip,
+            rsp: self.rsp,
+            rflags: self.rflags,
+            address_space_root,
+        }
+    }
+
+    fn restore(&mut self, context: UserContext, code_selector: u16, data_selector: u16) {
+        self.r15 = context.r15;
+        self.r14 = context.r14;
+        self.r13 = context.r13;
+        self.r12 = context.r12;
+        self.r11 = context.r11;
+        self.r10 = context.r10;
+        self.r9 = context.r9;
+        self.r8 = context.r8;
+        self.rbp = context.rbp;
+        self.rdi = context.rdi;
+        self.rsi = context.rsi;
+        self.rdx = context.rdx;
+        self.rcx = context.rcx;
+        self.rbx = context.rbx;
+        self.rip = context.rip;
+        self.cs = u64::from(code_selector);
+        self.rflags = context.rflags;
+        self.rsp = context.rsp;
+        self.ss = u64::from(data_selector);
+    }
+}
+
 impl UserContext {
     fn is_valid(&self) -> bool {
         const LOWER_CANONICAL_END: u64 = (1_u64 << 47) - 1;
@@ -68,6 +150,19 @@ struct Scheduler {
     generations: [u32; MAX_THREADS],
     current: Option<ThreadId>,
     next_slot: usize,
+}
+
+struct Runtime {
+    scheduler: Scheduler,
+    yields: u8,
+    exits: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeAction {
+    Resume(u64),
+    Complete,
+    Invalid,
 }
 
 impl Scheduler {
@@ -165,6 +260,163 @@ impl Scheduler {
             .get_mut(usize::from(id.slot))?
             .as_mut()
             .filter(|thread| thread.id == id)
+    }
+}
+
+pub(crate) fn initialize_runtime(
+    address_space_root: u64,
+    entry: usize,
+    first_stack: usize,
+    second_stack: usize,
+    host_handle: u64,
+    console_handle: u64,
+) -> bool {
+    if RUNTIME_INITIALIZED.load(Ordering::Acquire) {
+        return false;
+    }
+    let mut scheduler = Scheduler::new();
+    let first = initial_context(
+        address_space_root,
+        entry,
+        first_stack,
+        host_handle,
+        console_handle,
+    );
+    let second = initial_context(
+        address_space_root,
+        entry,
+        second_stack,
+        host_handle,
+        console_handle,
+    );
+    if scheduler.create(1, first).is_none()
+        || scheduler.create(1, second).is_none()
+        || scheduler.schedule_next().map(|next| next.context) != Some(first)
+    {
+        return false;
+    }
+
+    // SAFETY: Bootstrap is single-core with interrupts disabled. Publication
+    // happens only after the complete runtime value has been written.
+    unsafe {
+        core::ptr::addr_of_mut!(RUNTIME).write(MaybeUninit::new(Runtime {
+            scheduler,
+            yields: 0,
+            exits: 0,
+        }));
+    }
+    RUNTIME_INITIALIZED.store(true, Ordering::Release);
+    true
+}
+
+pub(crate) fn yield_runtime(
+    frame: &mut UserTrapFrame,
+    code_selector: u16,
+    data_selector: u16,
+) -> RuntimeAction {
+    if !frame.selectors_match(code_selector, data_selector) {
+        return RuntimeAction::Invalid;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(current) = runtime.scheduler.current else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(root) = runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.address_space_root)
+    else {
+        return RuntimeAction::Invalid;
+    };
+    let saved = frame.saved_context(0, root);
+    let Some(next) = runtime.scheduler.yield_current(current, saved) else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(yields) = runtime.yields.checked_add(1) else {
+        return RuntimeAction::Invalid;
+    };
+    runtime.yields = yields;
+    frame.restore(next.context, code_selector, data_selector);
+    RuntimeAction::Resume(next.context.rax)
+}
+
+pub(crate) fn exit_runtime(
+    frame: &mut UserTrapFrame,
+    code_selector: u16,
+    data_selector: u16,
+) -> RuntimeAction {
+    if !frame.selectors_match(code_selector, data_selector) {
+        return RuntimeAction::Invalid;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(current) = runtime.scheduler.current else {
+        return RuntimeAction::Invalid;
+    };
+    let next = runtime.scheduler.exit_current(current);
+    let Some(exits) = runtime.exits.checked_add(1) else {
+        return RuntimeAction::Invalid;
+    };
+    runtime.exits = exits;
+    if let Some(next) = next {
+        frame.restore(next.context, code_selector, data_selector);
+        RuntimeAction::Resume(next.context.rax)
+    } else if runtime.scheduler.threads.iter().all(Option::is_none) {
+        RuntimeAction::Complete
+    } else {
+        RuntimeAction::Invalid
+    }
+}
+
+pub(crate) fn verify_runtime_complete() -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    runtime.yields == 2
+        && runtime.exits == 2
+        && runtime.scheduler.current.is_none()
+        && runtime.scheduler.threads.iter().all(Option::is_none)
+}
+
+fn runtime_mut() -> Option<&'static mut Runtime> {
+    if !RUNTIME_INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    // SAFETY: Initialization publishes exactly once. Bootstrap remains
+    // single-core with interrupts disabled while the runtime is accessed.
+    Some(unsafe { &mut *core::ptr::addr_of_mut!(RUNTIME).cast::<Runtime>() })
+}
+
+fn initial_context(
+    address_space_root: u64,
+    entry: usize,
+    stack: usize,
+    host_handle: u64,
+    console_handle: u64,
+) -> UserContext {
+    UserContext {
+        rax: 0,
+        rbx: host_handle,
+        rcx: console_handle,
+        rdx: 0,
+        rsi: 0,
+        rdi: 0,
+        rbp: 0,
+        r8: 0,
+        r9: 0,
+        r10: 0,
+        r11: 0,
+        r12: 0,
+        r13: 0,
+        r14: 0,
+        r15: 0,
+        rip: entry as u64,
+        rsp: stack as u64,
+        rflags: 2,
+        address_space_root,
     }
 }
 

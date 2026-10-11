@@ -3,16 +3,22 @@
 b801000000
 cd80
 3dfeffffff
-7518
+7523
 
 # mov rdi, rbx; allowed host read with host-control handle
 4889df
 b801000000
 cd80
 3d58470000
+7512
+
+# cooperatively yield once, then require a zero resume result
+b803000000
+cd80
+85c0
 7507
 
-# exit; ud2 if exit unexpectedly returns
+# exit; ud2 if exit unexpectedly returns or a check fails
 b802000000
 cd80
 0f0b

@@ -1,6 +1,6 @@
 # Scheduler State Machine v0
 
-**Status:** Verified metadata state machine; no assembly context switching yet.
+**Status:** Cooperative two-context switching verified in hardware.
 
 The bootstrap scheduler owns eight fixed thread slots. A thread identifier
 contains a slot and generation, and each thread belongs to one native domain.
@@ -25,7 +25,15 @@ single-running-thread state, exit selection, idle behavior, slot reuse, domain
 ownership, stale-ID rejection, invalid-context rejection, and preservation of a
 modified register context across another thread's run and exit.
 
-This revision does not yet own per-thread kernel stacks and stores no priority,
-budget, affinity, wait reason, or timer deadline. It does not preempt or switch
-the ring-3 proof program; assembly save/restore must consume this context without
-weakening the lifecycle invariants defined here.
+The measured ring-3 proof creates two contexts in the control-plane domain.
+They share its code and page-table root but have separate writable,
+non-executable stacks, each preceded by an absent guard page. `INT 0x80` saves
+the hardware trap frame into the current scheduler record. Yield selects the
+other context and restores its registers through `IRETQ`; exit destroys the
+current slot and either resumes the remaining context or returns to the
+kernel. The boot succeeds only after exactly two yields and two exits.
+
+This revision uses one guarded TSS privilege stack because execution is
+single-CPU and syscalls cannot nest. It stores no priority, budget, affinity,
+wait reason, or timer deadline and provides no preemption. Contexts in distinct
+address spaces are not yet switched.
