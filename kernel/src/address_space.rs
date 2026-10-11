@@ -557,6 +557,60 @@ pub(crate) fn verify_ring3_control_plane(
     }
 }
 
+pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
+    const EXIT_PROGRAM: [u8; 7] = [0xb8, 2, 0, 0, 0, 0xcd, 0x80];
+    let Some(auxiliary) =
+        domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)
+    else {
+        return false;
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let Some(space) = WxAddressSpace::new(kernel_root, owner) else {
+        return false;
+    };
+    if !space.permissions_are_valid(kernel_root) {
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in EXIT_PROGRAM.iter().enumerate() {
+            space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let root = space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(auxiliary, space)
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_auxiliary_exit(entry, stack, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && !domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+        && event
+            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
+        && domain::last_lifecycle_event_audit()
+            == Some((
+                crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED,
+                auxiliary,
+                2,
+            ))
+        && domain::last_lifecycle_service_identity() == Some(identity)
+}
+
 struct WxAddressSpace {
     kernel_root: u64,
     root: u64,

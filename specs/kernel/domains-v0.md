@@ -114,8 +114,12 @@ switches from the auxiliary page-table root back to the retained kernel root,
 releases the exact registered address space, verifies that no owned frames
 remain, and only then publishes retirement. The switch requires the active
 root to match the exact-generation registry entry; this prevents clearing an
-active or unrelated hierarchy. Auxiliary contexts are still not queued, so
-this path is connected but not yet exercised as a live workload.
+active or unrelated hierarchy. The QEMU hardware gate now queues one minimal
+exit-only auxiliary context after the primary workload. It requires ring-3
+execution, clean stop-only retirement, exact lifecycle domain/service identity,
+stale capability rejection, an empty address-space registry, and zero remaining
+owned frames. General userspace creation and arbitrary auxiliary programs are
+not yet exposed.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

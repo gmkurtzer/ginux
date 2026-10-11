@@ -579,6 +579,27 @@ pub(crate) fn verify_user_syscall(
     SYSCALL_STATE.load(Ordering::SeqCst) == 31
 }
 
+pub(crate) fn execute_auxiliary_exit(
+    entry: usize,
+    stack: usize,
+    console_handle: u64,
+    domain_id: u64,
+    service_identity: u64,
+) {
+    unsafe {
+        ginux_user_enter(
+            entry,
+            stack,
+            0,
+            console_handle,
+            0,
+            4,
+            domain_id,
+            service_identity,
+        )
+    };
+}
+
 pub(crate) fn user_interrupt_surface_is_minimal() -> bool {
     let idt = core::ptr::addr_of!(IDT).cast::<IdtEntry>();
     for vector in 0..256 {

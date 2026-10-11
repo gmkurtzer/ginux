@@ -660,6 +660,43 @@ pub(crate) fn queue_service_restart(domain: u64, ipc_handle: u64) -> bool {
     true
 }
 
+pub(crate) fn queue_auxiliary(
+    domain_id: u64,
+    address_space_root: u64,
+    entry: usize,
+    stack: usize,
+    console_handle: u64,
+) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    if runtime.scheduler.current.is_some()
+        || runtime.scheduler.threads.iter().any(Option::is_some)
+        || domain::service_failure_policy(domain_id) != Some(domain::ServiceFailurePolicy::StopOnly)
+    {
+        return false;
+    }
+    let Some(service_identity) = domain::domain_service_identity(domain_id) else {
+        return false;
+    };
+    let mut context = initial_context(address_space_root, entry, stack, 0, console_handle, 0, 4);
+    context.r10 = domain_id;
+    context.r11 = service_identity;
+    if !domain::attach_thread(domain_id) {
+        return false;
+    }
+    if runtime.scheduler.create(domain_id, context).is_none() {
+        let _ = domain::detach_thread(domain_id);
+        return false;
+    }
+    let Some(next) = runtime.scheduler.schedule_next() else {
+        let _ = runtime.scheduler.remove_ready_domain(domain_id);
+        let _ = domain::detach_thread(domain_id);
+        return false;
+    };
+    next.context == context
+}
+
 pub(crate) fn rollback_service_restart(domain: u64, prior_owner: u64) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;

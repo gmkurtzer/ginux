@@ -652,6 +652,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: sticky IPC peer closure invariant failed\r\n");
     }
+    if !address_space::verify_ring3_auxiliary_exit() {
+        kernel_fail("\r\nginux: ring-3 auxiliary exit invariant failed\r\n");
+    }
+    serial_write("\r\nginux: stop-only auxiliary context executed and retired");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v1 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
