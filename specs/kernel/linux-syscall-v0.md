@@ -381,29 +381,36 @@ MAP_FIXED_NOREPLACE` requests already authenticated by the kernel plan. For
 `/init`, those contracts are offset `0` at `0x3ff000` with `PROT_READ`, offsets
 `0x1000..0x4000` at `0x400000..0x403000` with `PROT_READ | PROT_EXEC`, and
 offsets `0x5000..0x6000` at `0x404000..0x405000` with `PROT_READ |
-PROT_WRITE`. For `libginux.so`, they are offset `0x1000` at `0x610000` with
-`PROT_READ | PROT_EXEC` and offset `0x2000` at `0x613000` with `PROT_READ |
-PROT_WRITE`.
+PROT_WRITE`. For `libginux.so`, the kernel admits a page-aligned base in the
+half-open range `0x610000..0x620000`. Offset `0x1000` must be RX at relative
+address zero and offset `0x2000` must be RW/NX at relative address `0x3000`.
+The current interpreter selects base `0x618000`, producing mappings at
+`0x618000` and `0x61b000`.
 
 The interpreter derives these requests from each authenticated file's bounded
 `PT_LOAD` table rather than embedding the valid page sequence. It supplies the
-kernel-selected load bias, translates ELF permissions, and issues one request
-per derived page. The kernel contract remains authoritative: a derived address,
-offset, or protection that does not exactly match the authenticated plan is
-rejected. The runtime proof deliberately submits a wrong first-page offset, a
-W+X executable request, and a repeated first-page request and requires
-`-EINVAL`, `-EINVAL`, and `-EEXIST`, respectively.
+main load bias and selects the dependency bias, translates ELF permissions,
+and issues one request per derived page. The first valid dependency request
+atomically binds its candidate bias; later requests must produce that same
+bias from their authenticated relative addresses. The kernel contract remains
+authoritative: a derived address, offset, relative layout, or protection that
+does not match the authenticated plan is rejected. The runtime proof
+deliberately submits a wrong first-page offset, a W+X executable request, a
+repeated first-page request, and a dependency page at a different in-window
+bias and requires `-EINVAL`, `-EINVAL`, `-EEXIST`, and `-EINVAL`, respectively.
 
 The kernel copies each admitted file extent into its exact pre-reserved owned
 frame, zero-fills the remainder, requires the leaf to remain absent, and
-enforces W^X while installing it. Main and dependency mappings persist through
+enforces W^X while installing it. The dependency window is preflighted against
+all other admitted mappings before execution. Main and dependency mappings persist through
 process exit; the admitted RELRO operation may only remove write permission
 from the second main data page. Every required contract must be consumed once
 before successful process completion. A duplicate returns `-EEXIST`; another
 file, address, offset, size, flag, or permission set is rejected. Descriptor
 cursors remain unchanged. This is bounded userspace-owned loading for two
-preauthenticated images, not a general executable allocator or authority to
-map unauthenticated bytes.
+preauthenticated images with pre-reserved frames and one fixed dependency
+window, not ASLR, a general executable allocator, or authority to map
+unauthenticated bytes.
 `rax = 11` (`__NR_munmap`) accepts only the complete active scratch extent, clears its
 hardware leaves, invalidates their TLB entries, and scrubs the physical frames
 before reuse. Repeating a supported exact unmap succeeds. The anonymous probe

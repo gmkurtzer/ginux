@@ -522,13 +522,16 @@ pub(crate) fn verify_linux_elf_mapping(
                     mmap: mmap_virtual_page as usize,
                     mmap_frames: [mmap_page, mmap_tail_page],
                     main_mappings: [cpu::LinuxFileMapping::EMPTY; 7],
-                    dependency_rx: 0,
+                    dependency_base_min: 0,
+                    dependency_base_end: 0,
+                    dependency_rx_relative: 0,
                     dependency_rx_frame: 0,
                     dependency_rx_offset: 0,
-                    dependency_rw: 0,
+                    dependency_rw_relative: 0,
                     dependency_rw_frame: 0,
                     dependency_rw_offset: 0,
-                });
+                })
+                .valid;
             let mapping_removed = table_entries.add(mmap_indexes[3]).read() == 0
                 && table_entries.add(mmap_tail_indexes[3]).read() == 0;
             activate(kernel_root_physical);
@@ -558,6 +561,16 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let interpreter_rw = plan.interpreter.writable;
     let dependency_rx = dependency_plan.dependency.executable;
     let dependency_rw = dependency_plan.dependency.writable;
+    let dependency_base_min = dependency_plan.dependency_base;
+    let Some(dependency_base_end) = dependency_base_min.checked_add(16 * PAGE_SIZE as u64) else {
+        return false;
+    };
+    let (Some(dependency_rx_relative), Some(dependency_rw_relative)) = (
+        dependency_rx.virtual_page.checked_sub(dependency_base_min),
+        dependency_rw.virtual_page.checked_sub(dependency_base_min),
+    ) else {
+        return false;
+    };
     let Some(dependency_entry_offset) = dependency_plan
         .dependency
         .entry
@@ -593,12 +606,6 @@ pub(crate) fn verify_interpreted_elf_mapping(
     ) else {
         return false;
     };
-    let Some(dependency_relative_value) = dependency_plan
-        .dependency_base
-        .checked_add(dependency_dynamic.relocation_addend)
-    else {
-        return false;
-    };
     let Some(interpreter_relocation_value) = plan
         .interpreter_base
         .checked_add(interpreter_dynamic.relocation_addend)
@@ -632,6 +639,18 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let interpreter_rw_indexes = indexes(interpreter_rw.virtual_page);
     let dependency_indexes = indexes(dependency_rx.virtual_page);
     let dependency_rw_indexes = indexes(dependency_rw.virtual_page);
+    let dependency_window_start = dependency_base_min;
+    let Some(dependency_window_end) = dependency_base_end
+        .checked_sub(PAGE_SIZE as u64)
+        .and_then(|last_base| last_base.checked_add(dependency_rw_relative))
+        .and_then(|last_page| last_page.checked_add(PAGE_SIZE as u64))
+    else {
+        return false;
+    };
+    let dependency_window_pages = usize::try_from(
+        dependency_window_end.saturating_sub(dependency_window_start) / PAGE_SIZE as u64,
+    )
+    .unwrap_or(0);
     let heap_indexes = indexes(heap_virtual_page);
     let stack_indexes = indexes(stack_virtual_page);
     let mmap_indexes = indexes(mmap_virtual_page);
@@ -648,6 +667,26 @@ pub(crate) fn verify_interpreted_elf_mapping(
             start < protected_end && protected_start < end
         })
     };
+    let dependency_window_conflicts = (0..dependency_window_pages).any(|offset| {
+        let page = dependency_window_start + (offset * PAGE_SIZE) as u64;
+        let end = page + PAGE_SIZE as u64;
+        let overlaps_segment = |segment: crate::linux_elf::PlannedSegment<'_>| {
+            (0..segment.page_count).any(|segment_page| {
+                page == segment.virtual_page + (segment_page * PAGE_SIZE) as u64
+            })
+        };
+        page < protected_end && protected_start < end
+            || [main_ro, main_rx, main_rw, interpreter_rx, interpreter_rw]
+                .into_iter()
+                .any(overlaps_segment)
+            || [
+                heap_virtual_page,
+                stack_virtual_page,
+                mmap_virtual_page,
+                mmap_tail_virtual_page,
+            ]
+            .contains(&page)
+    });
     if protected_size == 0
         || plan.interpreter.read_only.is_some()
         || main_ro.page_count != 1
@@ -658,6 +697,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || dependency_plan.dependency.read_only.is_some()
         || dependency_rx.page_count != 1
         || dependency_rw.page_count != 1
+        || !dependency_base_min.is_multiple_of(PAGE_SIZE as u64)
+        || !dependency_base_end.is_multiple_of(PAGE_SIZE as u64)
+        || dependency_rx_relative > dependency_rw_relative
+        || !dependency_rx_relative.is_multiple_of(PAGE_SIZE as u64)
+        || !dependency_rw_relative.is_multiple_of(PAGE_SIZE as u64)
+        || !(1..=32).contains(&dependency_window_pages)
         || main_ro_indexes[..2] != main_indexes[..2]
         || main_indexes[..2] != interpreter_indexes[..2]
         || main_ro_indexes[2] == main_indexes[2]
@@ -678,6 +723,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || interpreter_rw_indexes[3] + interpreter_rw.page_count > ENTRY_COUNT
         || dependency_indexes[3] + dependency_rx.page_count > ENTRY_COUNT
         || dependency_rw_indexes[3] + dependency_rw.page_count > ENTRY_COUNT
+        || indexes(dependency_window_start)[..3] != interpreter_indexes[..3]
+        || indexes(dependency_window_end - PAGE_SIZE as u64)[..3] != interpreter_indexes[..3]
+        || dependency_window_conflicts
         || heap_virtual_page == 0
         || stack_virtual_page == 0
         || mmap_virtual_page == 0
@@ -691,8 +739,6 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || overlaps_protected(main_rw)
         || overlaps_protected(interpreter_rx)
         || overlaps_protected(interpreter_rw)
-        || overlaps_protected(dependency_rx)
-        || overlaps_protected(dependency_rw)
         || [
             heap_virtual_page,
             stack_virtual_page,
@@ -835,8 +881,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
             interpreter_entries
                 .add(interpreter_rw_indexes[3])
                 .write(interpreter_data | flags(interpreter_rw));
-            interpreter_entries.add(dependency_indexes[3]).write(0);
-            interpreter_entries.add(dependency_rw_indexes[3]).write(0);
+            for offset in 0..dependency_window_pages {
+                let page = dependency_window_start + (offset * PAGE_SIZE) as u64;
+                interpreter_entries.add(indexes(page)[3]).write(0);
+            }
             main_entries
                 .add(heap_indexes[3])
                 .write(heap_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
@@ -895,8 +943,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 && interpreter_entries.add(interpreter_rw_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == PRESENT | USER | WRITABLE | NO_EXECUTE
-                && interpreter_entries.add(dependency_indexes[3]).read() == 0
-                && interpreter_entries.add(dependency_rw_indexes[3]).read() == 0
+                && (0..dependency_window_pages).all(|offset| {
+                    let page = dependency_window_start + (offset * PAGE_SIZE) as u64;
+                    interpreter_entries.add(indexes(page)[3]).read() == 0
+                })
                 && main_entries.add(heap_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == PRESENT | USER | WRITABLE | NO_EXECUTE
@@ -941,8 +991,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 file_mapping(main_rw, 0, main_data)?,
                 file_mapping(main_rw, 1, main_data_tail)?,
             ];
-            let executed = observed
-                && cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
+            let execution_result = if observed {
+                cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     code: main_rx.virtual_address as usize,
@@ -965,13 +1015,19 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     mmap: mmap_virtual_page as usize,
                     mmap_frames: [mmap_page, mmap_tail_page],
                     main_mappings,
-                    dependency_rx: dependency_rx.virtual_page as usize,
+                    dependency_base_min: dependency_base_min as usize,
+                    dependency_base_end: dependency_base_end as usize,
+                    dependency_rx_relative: dependency_rx_relative as usize,
                     dependency_rx_frame: dependency_page,
                     dependency_rx_offset: dependency_rx.file_page,
-                    dependency_rw: dependency_rw.virtual_page as usize,
+                    dependency_rw_relative: dependency_rw_relative as usize,
                     dependency_rw_frame: dependency_data,
                     dependency_rw_offset: dependency_rw.file_page,
-                });
+                })
+            } else {
+                cpu::LinuxElfResult::FAILED
+            };
+            let executed = observed && execution_result.valid;
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
             let main_permissions_valid = main_ro_entries.add(main_ro_indexes[3]).read()
@@ -991,13 +1047,31 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 && main_entries.add(main_rw_indexes[3] + 1).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == main_data_tail | PRESENT | USER | NO_EXECUTE;
-            let dependency_permissions_valid =
-                interpreter_entries.add(dependency_indexes[3]).read()
+            let selected_dependency_base = execution_result.dependency_base;
+            let actual_dependency_rx_page = selected_dependency_base
+                .checked_add(dependency_rx_relative)
+                .unwrap_or(0);
+            let actual_dependency_rw_page = selected_dependency_base
+                .checked_add(dependency_rw_relative)
+                .unwrap_or(0);
+            let actual_dependency_rx_indexes = indexes(actual_dependency_rx_page);
+            let actual_dependency_rw_indexes = indexes(actual_dependency_rw_page);
+            let dependency_base_valid = executed
+                && selected_dependency_base >= dependency_base_min
+                && selected_dependency_base < dependency_base_end
+                && selected_dependency_base != dependency_plan.dependency_base
+                && selected_dependency_base.is_multiple_of(PAGE_SIZE as u64);
+            let dependency_permissions_valid = dependency_base_valid
+                && interpreter_entries
+                    .add(actual_dependency_rx_indexes[3])
+                    .read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == dependency_page | PRESENT | USER
-                    && interpreter_entries.add(dependency_rw_indexes[3]).read()
-                        & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
-                        == dependency_data | PRESENT | USER | WRITABLE | NO_EXECUTE;
+                && interpreter_entries
+                    .add(actual_dependency_rw_indexes[3])
+                    .read()
+                    & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == dependency_data | PRESENT | USER | WRITABLE | NO_EXECUTE;
             let interpreter_relocated = cpu::with_supervisor_user_access(|| {
                 (interpreter_dynamic.relocation_target as *const u64).read_volatile()
                     == interpreter_relocation_value
@@ -1022,24 +1096,43 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 (0, 0, 0)
             };
             let main_relative_relocated = main_relative_value == plan.main.entry;
-            let main_symbol_relocated = main_symbol_value == dependency_plan.dependency.entry;
-            let main_jump_relocated = main_jump_value == dependency_plan.dependency.entry;
+            let relocate_dependency_address = |address: u64| {
+                address
+                    .checked_sub(dependency_plan.dependency_base)
+                    .and_then(|relative| selected_dependency_base.checked_add(relative))
+            };
+            let actual_dependency_entry =
+                relocate_dependency_address(dependency_plan.dependency.entry).unwrap_or(0);
+            let actual_dependency_relative_value = selected_dependency_base
+                .checked_add(dependency_dynamic.relocation_addend)
+                .unwrap_or(0);
+            let main_symbol_relocated = main_symbol_value == actual_dependency_entry;
+            let main_jump_relocated = main_jump_value == actual_dependency_entry;
             let main_relocated =
                 main_relative_relocated && main_symbol_relocated && main_jump_relocated;
             let dependency_relocated = executed
                 && dependency_permissions_valid
-                && cpu::with_supervisor_user_access(|| {
-                    (dependency_rx.virtual_address as *const u8).read_volatile()
-                        == dependency_rx.bytes[0]
-                        && (dependency_plan.dependency.entry as *const u8).read_volatile()
-                            == dependency_entry_byte
-                        && (dependency_dynamic.relocation_target as *const u64).read_volatile()
-                            == dependency_relative_value
-                        && (dependency_symbol.target as *const u64).read_volatile()
-                            == dependency_symbol.symbol_value
-                        && (dependency_jump_slot.target as *const u64).read_volatile()
-                            == dependency_jump_slot.symbol_value
-                });
+                && relocate_dependency_address(dependency_rx.virtual_address).is_some_and(
+                    |actual_dependency_rx| {
+                        relocate_dependency_address(dependency_dynamic.relocation_target)
+                            .zip(relocate_dependency_address(dependency_symbol.target))
+                            .zip(relocate_dependency_address(dependency_jump_slot.target))
+                            .is_some_and(|((relative_target, symbol_target), jump_target)| {
+                                cpu::with_supervisor_user_access(|| {
+                                    (actual_dependency_rx as *const u8).read_volatile()
+                                        == dependency_rx.bytes[0]
+                                        && (actual_dependency_entry as *const u8).read_volatile()
+                                            == dependency_entry_byte
+                                        && (relative_target as *const u64).read_volatile()
+                                            == actual_dependency_relative_value
+                                        && (symbol_target as *const u64).read_volatile()
+                                            == actual_dependency_entry
+                                        && (jump_target as *const u64).read_volatile()
+                                            == actual_dependency_entry
+                                })
+                            })
+                    },
+                );
             activate(kernel_root_physical);
             if !permissions_valid {
                 crate::serial_write_bytes(b"\r\nginux: linked dynamic permissions invalid");

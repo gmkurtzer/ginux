@@ -223,8 +223,9 @@ validates the interpreter's relocated target through the still-active user root.
 The runtime execution proof replaces the synthetic interpreter, main, and
 dependency containers with LLD outputs. LLD links a five-header interpreter,
 an eight-header `ET_DYN` PIE main with SysV hashing, and a header-unmapped
-`libginux.so` with GNU hashing. The main is
-loaded with bias `0x3ff000`; the dependency retains bias `0x610000`. Their
+`libginux.so` with GNU hashing. The main is loaded with bias `0x3ff000`; the
+dependency is authenticated against canonical bias `0x610000` and loaded at
+userspace-selected bias `0x618000`. Their
 linker-owned GOT/PLT slots and split relocation tables drive the same userspace
 interpreter and the complete syscall workload. The parser admits the exact
 linker metadata used here: an in-range 32-byte `DT_PLTGOT`, zero `DT_DEBUG`,
@@ -277,10 +278,13 @@ The main dynamic-table scan then captures the sole `DT_NEEDED` string-table
 offset, requires a nonzero bounded name, and constructs
 `/lib64/<needed-name>` on the mapped user stack. It inspects that derived file
 before reopening it and applies the same program-header walker at dependency
-bias `0x610000`. The resulting requests map file offset `0x1000` RX at
-`0x610000` and offset `0x2000` RW/NX at `0x613000` through the same fixed
-contract. A repeated first-page
-request returns `-EEXIST`; a W+X executable request returns `-EINVAL`. Only then does
+bias `0x618000`. The resulting requests map file offset `0x1000` RX at
+`0x618000` and offset `0x2000` RW/NX at `0x61b000`. The kernel accepts a
+page-aligned base only within `0x610000..0x620000`, binds the first admitted
+dependency request, and requires the later page to use the same bias while
+preserving its canonical `0x3000` relative displacement. A repeated first-page
+request returns `-EEXIST`; a W+X executable request and an otherwise-valid page
+using another in-window bias return `-EINVAL`. Only then does
 it apply dependency and main relocations. The namespace still admits only
 `libginux.so`, so an altered or unterminated name fails closed. Syscall return
 validation accepts only the declared main and interpreter RX extents. The
@@ -290,16 +294,19 @@ The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
 those bytes. The executable dynamic interpreter, main, and dependency instead
 retain LLD's complete ELF metadata.
-The complete ring-3 probe therefore runs with dynamic `AT_BASE`,
-main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
+The complete ring-3 probe therefore runs with dynamic `AT_BASE`, main-image
+`AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. Dependency dynamic
+metadata, entry, and relocation targets are translated from the authenticated
+canonical plan by the selected bias before validation. The kernel
 restores its own root and scrubs and releases all twenty-one page-table and
 payload frames. This profile performs one exact cross-object name match; it
 does not support multiple dependencies, transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
 lazy binding, a general-purpose dynamic linker, or glibc. The main bias and
-entry are startup-metadata-driven, but the sole dependency bias remains the
-profile constant `0x610000` and every resulting page must still match the
-kernel's preauthenticated fixed contract.
+entry are startup-metadata-driven. The sole dependency now selects among 16
+page-aligned candidate biases in one fixed window, but its frames are still
+pre-reserved and its relative page layout remains a kernel-authenticated
+contract; randomization and general placement are not implemented.
 
 ## Page-image plan
 

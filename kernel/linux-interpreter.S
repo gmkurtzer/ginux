@@ -1,4 +1,9 @@
 .intel_syntax noprefix
+#ifdef GINUX_LINKED
+#define GINUX_DEPENDENCY_BASE qword ptr [rip + .Ldependency_base]
+#else
+#define GINUX_DEPENDENCY_BASE 0x610000
+#endif
 .section .text
 .global ginux_linux_interpreter
 ginux_linux_interpreter:
@@ -235,20 +240,20 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     test rbp, rbp
     jz .Linvalid_dynamic
-    add r9, 0x610000
-    add r10, 0x610000
-    add r11, 0x610000
-    add r14, 0x610000
-    add rbp, 0x610000
+    add r9, GINUX_DEPENDENCY_BASE
+    add r10, GINUX_DEPENDENCY_BASE
+    add r11, GINUX_DEPENDENCY_BASE
+    add r14, GINUX_DEPENDENCY_BASE
+    add rbp, GINUX_DEPENDENCY_BASE
 
     mov rcx, qword ptr [r11]
-    add rcx, 0x610000
+    add rcx, GINUX_DEPENDENCY_BASE
     mov rdx, qword ptr [r11 + 16]
-    add rdx, 0x610000
+    add rdx, GINUX_DEPENDENCY_BASE
     mov qword ptr [rcx], rdx
 
     mov rcx, qword ptr [r11 + 24]
-    add rcx, 0x610000
+    add rcx, GINUX_DEPENDENCY_BASE
     mov rdx, qword ptr [r11 + 32]
     shr rdx, 32
     cmp edx, dword ptr [r10 + 24]
@@ -256,12 +261,12 @@ ginux_linux_interpreter:
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
     mov r12, qword ptr [r9 + rdx + 8]
-    add r12, 0x610000
+    add r12, GINUX_DEPENDENCY_BASE
     add r12, qword ptr [r11 + 40]
     mov qword ptr [rcx], r12
 
     mov rcx, qword ptr [rbp]
-    add rcx, 0x610000
+    add rcx, GINUX_DEPENDENCY_BASE
     mov rdx, qword ptr [rbp + 8]
     shr rdx, 32
     cmp edx, dword ptr [r10 + 24]
@@ -298,7 +303,7 @@ ginux_linux_interpreter:
     test r15b, r15b
     jne .Lcompare_symbol_name
     mov rdx, qword ptr [r9 + rdx + 8]
-    add rdx, 0x610000
+    add rdx, GINUX_DEPENDENCY_BASE
     add rdx, qword ptr [rax + 40]
     mov qword ptr [rcx], rdx
 
@@ -309,7 +314,7 @@ ginux_linux_interpreter:
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
     mov rdx, qword ptr [r9 + rdx + 8]
-    add rdx, 0x610000
+    add rdx, GINUX_DEPENDENCY_BASE
     add rdx, qword ptr [rbx + 16]
     mov qword ptr [rcx], rdx
 
@@ -354,9 +359,36 @@ ginux_linux_interpreter:
     lea rsi, [rsp]
     call .Linspect_runtime_file
     lea rsi, [rsp]
-    mov r14d, 0x610000
+    mov r14d, 0x618000
+    mov qword ptr [rip + .Ldependency_base], r14
     mov qword ptr [rip + .Lexpected_phnum], 0
     call .Lload_runtime_file
+    push rdi
+    push rcx
+    lea rsi, [rsp + 16]
+    mov edi, -100
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne .Linvalid_dynamic
+    mov edi, 0x61c000
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x100002
+    mov r8d, 2
+    mov r9d, 0x2000
+    mov eax, 9
+    syscall
+    cmp rax, -22
+    jne .Linvalid_dynamic
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    pop rcx
+    pop rdi
     add rsp, 32
     ret
 
@@ -605,6 +637,8 @@ ginux_linux_interpreter:
 .Lmain_phnum:
     .zero 8
 .Lmain_entry:
+    .zero 8
+.Ldependency_base:
     .zero 8
 .Lexpected_phnum:
     .zero 8
