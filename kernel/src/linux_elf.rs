@@ -263,7 +263,7 @@ fn plan_executable<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
     if image.kind != ImageKind::Executable {
         return None;
     }
-    Some(LoadPlan {
+    let plan = LoadPlan {
         entry: image.entry,
         program_headers: image.program_headers,
         program_header_count: image.program_header_count,
@@ -274,7 +274,8 @@ fn plan_executable<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
         },
         writable: plan_segment(image.writable)?,
         relro: image.relro,
-    })
+    };
+    (!plan_has_internal_overlap(&plan)).then_some(plan)
 }
 
 pub(crate) fn plan_interpreted<'main, 'interpreter>(
@@ -374,6 +375,20 @@ fn plans_overlap(first: &LoadPlan<'_>, second: &LoadPlan<'_>) -> bool {
     })
 }
 
+fn plan_has_internal_overlap(plan: &LoadPlan<'_>) -> bool {
+    let segments = planned_segments(plan);
+    segments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, segment)| segment.map(|segment| (index, segment)))
+        .any(|(index, first)| {
+            segments[index + 1..]
+                .iter()
+                .flatten()
+                .any(|second| planned_segments_overlap(first, *second))
+        })
+}
+
 fn planned_segments<'a>(plan: &LoadPlan<'a>) -> [Option<PlannedSegment<'a>>; 3] {
     [Some(plan.executable), plan.read_only, Some(plan.writable)]
 }
@@ -416,7 +431,7 @@ pub(crate) fn plan_position_independent<'a>(
         }),
         None => None,
     };
-    Some(LoadPlan {
+    let plan = LoadPlan {
         entry: image.entry.checked_add(load_bias)?,
         program_headers: image.program_headers.checked_add(load_bias)?,
         program_header_count: image.program_header_count,
@@ -427,7 +442,8 @@ pub(crate) fn plan_position_independent<'a>(
         },
         writable: plan_segment(writable)?,
         relro,
-    })
+    };
+    (!plan_has_internal_overlap(&plan)).then_some(plan)
 }
 
 fn relocate_segment(segment: Segment<'_>, load_bias: u64) -> Option<Segment<'_>> {
@@ -925,6 +941,7 @@ pub(crate) fn verify_load_plan() -> bool {
         return false;
     }
     verify_oversized_writable_plan_rejected()
+        && verify_page_aliasing_plan_rejected()
         && verify_position_independent_plan()
         && verify_interpreted_plan()
 }
@@ -1019,6 +1036,35 @@ fn verify_oversized_writable_plan_rejected() -> bool {
     );
     write_u16(&mut oversized, 56, MIN_LOAD_SEGMENT_COUNT as u16);
     parse(&oversized).is_some_and(|image| plan(&image).is_none())
+}
+
+#[inline(never)]
+fn verify_page_aliasing_plan_rejected() -> bool {
+    let static_bytes = fixture();
+    let Some(mut static_image) = parse(&static_bytes) else {
+        return false;
+    };
+    static_image.read_only = Some(Segment {
+        bytes: &static_bytes[..16],
+        file_offset: 0,
+        virtual_address: 0x40_5200,
+        memory_size: 16,
+        flags: PF_READ,
+    });
+    let static_rejected = plan(&static_image).is_none();
+
+    let dynamic_bytes = compact_position_independent_fixture();
+    let Some(mut dynamic_image) = parse(&dynamic_bytes) else {
+        return false;
+    };
+    dynamic_image.read_only = Some(Segment {
+        bytes: &dynamic_bytes[..16],
+        file_offset: 0,
+        virtual_address: 0x3100,
+        memory_size: 16,
+        flags: PF_READ,
+    });
+    static_rejected && plan_position_independent(&dynamic_image, 0x60_0000).is_none()
 }
 
 pub(crate) fn verify_linked_probe() -> bool {

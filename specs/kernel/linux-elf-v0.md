@@ -35,6 +35,10 @@ memory size to represent zero-filled data. Physical addresses may be zero or
 equal to the corresponding virtual address, matching conventional linkers;
 they are otherwise rejected and never used for mapping.
 The segments must not overlap.
+Planning additionally rejects distinct segments whose byte ranges do not
+overlap but whose rounded mappings share a page. This prevents one segment's
+page-table entry from replacing another segment or weakening its permissions;
+the rule applies equally before static mapping and after `ET_DYN` relocation.
 
 The profile requires exactly one executable segment and one writable segment.
 Writable-executable mappings are rejected. The entry point must lie inside the
