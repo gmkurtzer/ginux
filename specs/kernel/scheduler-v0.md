@@ -14,10 +14,10 @@ next ready slot round-robin. Exit is likewise restricted to the current thread,
 removes it, and selects another ready thread. Slot reuse increments generation,
 so stale identifiers cannot observe or control a replacement.
 An auxiliary submitted by a running control-plane context begins `Staged`.
-Involuntary timer preemption leaves staged work ineligible; a voluntary yield,
-block, or exit promotes staged contexts to `Ready` before selection. This gives
-the control plane a deterministic interval in which it can cancel a submitted
-workload. Cancellation removes only an exact `Staged` or `Ready` domain,
+Every scheduler transition leaves staged work ineligible; only an explicit
+management start changes one exact staged context to `Ready`. This gives the
+control plane a deterministic interval in which it can initialize or cancel a
+submitted workload. Cancellation removes only an exact `Staged` or `Ready` domain,
 reverses its thread charge, and cannot remove a running or blocked context.
 A staged auxiliary may receive one bounded private-stack payload. Successful
 initialization sets its saved `RSI` to the target virtual address and `RDX` to
@@ -71,7 +71,8 @@ switches back to context 1. The survivor consumes the reply and fault event,
 then the second preemption dispatches the replacement. It negotiates the ABI
 and blocks on an empty inbound IPC direction, resuming the control context.
 The control context directly wakes it with a message, stages and cancels one
-auxiliary, stages a distinct auxiliary, verifies budget exhaustion, and exits.
+auxiliary, stages, initializes, and explicitly starts a distinct auxiliary,
+verifies budget exhaustion, and exits.
 The awakened replacement and admitted auxiliary both exit cleanly. The boot
 succeeds only after exactly two preemptions, no cooperative yields, one
 contained primary-service fault, three normal exits, one restart, one
@@ -83,11 +84,11 @@ charge and restores the retained address-space owner recorded by the scheduler;
 it cannot remove a running, blocked, ambiguous, or wrong-domain context.
 
 Call budgets belong to domains rather than threads. The control domain receives
-36 charged calls and each service generation receives three. Every call-gate
+37 charged calls and each service generation receives three. Every call-gate
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 41 charged calls across all generations, deliberately exhausts the
+exactly 42 charged calls across all generations, deliberately exhausts the
 control domain, and requires its next discovery call to be rejected before it
 exits.
 

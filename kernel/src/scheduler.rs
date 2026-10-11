@@ -417,12 +417,7 @@ impl Scheduler {
         None
     }
 
-    fn yield_current(
-        &mut self,
-        id: ThreadId,
-        saved: UserContext,
-        admit_staged: bool,
-    ) -> Option<Scheduled> {
+    fn yield_current(&mut self, id: ThreadId, saved: UserContext) -> Option<Scheduled> {
         if self.current != Some(id) {
             return None;
         }
@@ -436,9 +431,6 @@ impl Scheduler {
         thread.context = saved;
         thread.state = State::Ready;
         self.current = None;
-        if admit_staged {
-            self.admit_staged();
-        }
         self.schedule_next()
     }
 
@@ -460,7 +452,6 @@ impl Scheduler {
         thread.state = State::Blocked;
         thread.wait = Some(reason);
         self.current = None;
-        self.admit_staged();
         if let Some(next) = self.schedule_next() {
             return Some(next);
         }
@@ -522,16 +513,7 @@ impl Scheduler {
         }
         self.threads[usize::from(id.slot)] = None;
         self.current = None;
-        self.admit_staged();
         self.schedule_next()
-    }
-
-    fn admit_staged(&mut self) {
-        for thread in self.threads.iter_mut().flatten() {
-            if thread.state == State::Staged {
-                thread.state = State::Ready;
-            }
-        }
     }
 
     fn remove_ready_domain(&mut self, domain: u64) -> bool {
@@ -551,6 +533,23 @@ impl Scheduler {
             return false;
         };
         self.threads[slot] = None;
+        true
+    }
+
+    fn start_staged_domain(&mut self, domain: u64) -> bool {
+        let mut slot = None;
+        for (index, thread) in self.threads.iter().enumerate() {
+            if thread.is_some_and(|thread| thread.domain == domain) {
+                if slot.is_some() || thread.is_some_and(|thread| thread.state != State::Staged) {
+                    return false;
+                }
+                slot = Some(index);
+            }
+        }
+        let Some(thread) = slot.and_then(|slot| self.threads[slot].as_mut()) else {
+            return false;
+        };
+        thread.state = State::Ready;
         true
     }
 
@@ -781,6 +780,13 @@ pub(crate) fn auxiliary_is_staged(domain_id: u64) -> bool {
         && matches.next().is_none()
 }
 
+pub(crate) fn start_staged_auxiliary(domain_id: u64) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    runtime.scheduler.start_staged_domain(domain_id)
+}
+
 pub(crate) fn rollback_service_restart(domain: u64, prior_owner: u64) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;
@@ -913,7 +919,7 @@ pub(crate) fn yield_runtime(
         return RuntimeAction::Invalid;
     };
     let saved = frame.saved_context(0, root);
-    let Some(next) = runtime.scheduler.yield_current(current, saved, true) else {
+    let Some(next) = runtime.scheduler.yield_current(current, saved) else {
         return RuntimeAction::Invalid;
     };
     let Some(yields) = runtime.yields.checked_add(1) else {
@@ -955,7 +961,7 @@ pub(crate) fn preempt_runtime(
         return RuntimeAction::Invalid;
     };
     let saved = frame.saved_context(root);
-    let Some(next) = runtime.scheduler.yield_current(current, saved, false) else {
+    let Some(next) = runtime.scheduler.yield_current(current, saved) else {
         return RuntimeAction::Invalid;
     };
     let Some(preemptions) = runtime.preemptions.checked_add(1) else {
@@ -1216,10 +1222,8 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     if first_run.id != first
         || first_run.context != first_context
         || scheduler.thread(first)?.domain != 1
-        || scheduler
-            .yield_current(second, second_context, true)
-            .is_some()
-        || scheduler.yield_current(first, first_saved, true)?.id != second
+        || scheduler.yield_current(second, second_context).is_some()
+        || scheduler.yield_current(first, first_saved)?.id != second
         || scheduler.thread(first)?.state != State::Ready
         || scheduler.thread(second)?.state != State::Running
         || scheduler.exit_current(second)?.id != first
@@ -1292,7 +1296,7 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             .block_current(waiting_client, first_context, wait)?
             .id
             != unrelated
-        || closing.yield_current(unrelated, first_context, true)?.id != dying_service
+        || closing.yield_current(unrelated, first_context)?.id != dying_service
         || closing.cancel_blocked_peers(
             2,
             WaitReason::IpcReceive {
@@ -1328,7 +1332,24 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && restart_rollback.thread(replacement).is_none()
         && restart_rollback.current == Some(survivor)
         && !restart_rollback.remove_ready_domain(2);
-    Some(generation_valid && rollback && replacement_removed)
+    let mut staged = Scheduler::new();
+    let staging_control = staged.create(1, first_context)?;
+    let staged_workload = staged.create(2, second_context)?;
+    staged.thread_mut(staged_workload)?.state = State::Staged;
+    let staging_run = staged.schedule_next()?;
+    let staged_not_implicitly_admitted = staging_run.id == staging_control
+        && staged.yield_current(staging_control, first_context)?.id == staging_control
+        && staged.thread(staged_workload)?.state == State::Staged;
+    let staged_explicitly_started = staged.start_staged_domain(2)
+        && !staged.start_staged_domain(2)
+        && staged.yield_current(staging_control, first_context)?.id == staged_workload;
+    Some(
+        generation_valid
+            && rollback
+            && replacement_removed
+            && staged_not_implicitly_admitted
+            && staged_explicitly_started,
+    )
 }
 
 const fn test_context(rax: u64, rip: u64, rsp: u64, root: u64) -> UserContext {

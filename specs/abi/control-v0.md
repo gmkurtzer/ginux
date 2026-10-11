@@ -175,7 +175,8 @@ actions must receive new action values and explicitly versioned layouts rather
 than repurposing existing fields.
 Action 2 requests stop of the exact generation in the source field and requires
 the object and rights fields to be zero. An unstarted, resource-free target is
-retired directly. A queued target is accepted only while its context is ready:
+retired directly. A queued target is accepted only while its context is staged
+or ready:
 the scheduler removes it before execution, drains its thread accounting,
 releases its complete W^X hierarchy, revokes every delegated root, and emits
 kind 3. A running target is still rejected. The ring-3 proof stops one
@@ -187,9 +188,9 @@ domain generation, the object field is a readable caller address, and the
 rights field is a byte length from 1 through 4096. The kernel allocates a fresh
 seven-frame W^X hierarchy, copies only that bounded range through the caller's
 validated mapping into the target's initially zeroed RX code frame, binds the
-resource record, and accounts one staged thread. Involuntary preemption does
-not admit a newly staged auxiliary; a voluntary yield, block, or exit makes it
-runnable. Any failed stage releases what it acquired and returns
+resource record, and accounts one staged thread. Scheduler handoff and
+involuntary preemption both leave it ineligible until an explicit action 5.
+Any failed stage releases what it acquired and returns
 `UINT64_MAX - 2`. Action 3 does not jump directly between domains. The hardware
 proof first supplies an unmapped source after
 target allocation, requires failure, then successfully loads the same exact
@@ -204,6 +205,11 @@ stack page, then records its target virtual address in `RSI` and its length in
 contexts. The hardware proof initializes both a subsequently cancelled workload
 and the executed workload; the latter validates the pointer, length, and bytes
 before exiting.
+Action 5 starts a staged auxiliary. The source field is its exact domain
+generation and the object and rights fields must be zero. The scheduler changes
+that one unambiguous context from `Staged` to `Ready`; normal scheduling may
+dispatch it immediately after the management call returns. Repeated starts and
+absent, ready, running, blocked, or wrong-generation targets fail closed.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

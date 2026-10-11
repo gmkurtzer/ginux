@@ -53,9 +53,9 @@ shared with the workload.
 During the primary bootstrap workload, the control plane creates a fresh
 auxiliary generation and submits a payload-validating program through the
 bounded management loader. The scheduler stages exactly one thread against the
-registered root, keeps it staged across involuntary preemption, dispatches it
-after the control plane exits, and handles its exit through the normal syscall
-path.
+registered root, keeps it staged across every scheduler handoff until explicit
+start, dispatches it through normal scheduling, and handles its exit through
+the normal syscall path.
 That path restores the kernel root, clears and releases all seven frames, and
 retires the exact domain generation before returning to the boot verifier.
 A second live auxiliary generation executes `UD2`. The architectural exception

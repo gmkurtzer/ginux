@@ -508,6 +508,18 @@ cd80
 7402
 0f0b
 
+# explicitly admit the fully initialized generation for execution
+66c746060500
+48c7461000000000
+48c7461800000000
+4889df
+ba20000000
+b80f000000
+cd80
+85c0
+7402
+0f0b
+
 # the diagnostics consumed the final budgeted call
 b800000000
 cd80

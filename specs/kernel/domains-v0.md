@@ -133,7 +133,7 @@ lifecycle growth. It creates only an unstarted domain: address-space constructio
 and scheduler admission remain a separate action 3 transaction. The ring-3 proof
 denies creation through a non-managing capability, then delegates attenuated
 host-read authority into the clean-exit workload through the authorized path.
-Management action 2 accepts an unstarted or scheduler-ready exact generation
+Management action 2 accepts an unstarted, staged, or scheduler-ready exact generation
 with zero unused fields. For a queued target it removes the ready context,
 detaches its accounted thread, releases and unbinds its address space, then
 reuses the existing two-phase stop transition to publish normal auxiliary
@@ -144,8 +144,8 @@ Management action 3 performs bounded loading and scheduler admission. It
 accepts an exact ready generation plus a caller-owned source range of at most
 one page, constructs and retains the target's W^X hierarchy, then queues one
 accounted, staged context. Timer preemption cannot admit that context; a
-voluntary yield, block, or exit promotes it to ready. The control-plane proof
-writes a seven-byte exit program,
+separate action 5 is the only staged-to-ready transition. The control-plane
+proof writes a payload-validating program,
 first rejects an unmapped source with full allocation rollback, loads the same
 exact generation through this action, and exits; ordinary scheduler handoff
 dispatches the auxiliary before returning to the kernel verifier.
@@ -154,6 +154,10 @@ for an exact staged generation. The pointer and length are installed in the
 saved `RSI`/`RDX` context only after the complete caller range is validated and
 copied. The executed proof workload compares both values and the expected
 eight-byte payload before requesting normal exit.
+Management action 5 accepts an exact staged generation with zero unused fields
+and changes only its scheduler state to ready. The proof explicitly starts the
+fully initialized generation before exiting the control plane. Repeated start
+and all non-staged states are rejected.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

@@ -916,6 +916,13 @@ fn create_auxiliary_service(
         {
             0
         }
+        control_abi::MANAGEMENT_START_AUXILIARY
+            if request.object == 0
+                && request.rights == 0
+                && scheduler::start_staged_auxiliary(request.source) =>
+        {
+            0
+        }
         _ => u64::MAX - 2,
     }
 }

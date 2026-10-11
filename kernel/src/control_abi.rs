@@ -23,6 +23,7 @@ pub(crate) fn parse_management_request(
                 | MANAGEMENT_STOP_AUXILIARY
                 | MANAGEMENT_LOAD_AUXILIARY
                 | MANAGEMENT_INITIALIZE_AUXILIARY
+                | MANAGEMENT_START_AUXILIARY
         )
     {
         return None;
