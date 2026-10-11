@@ -33,7 +33,10 @@ aggregate limit before emitting any bytes. Bounded `poll` atomically reports
 immediate console and device readiness across four descriptors; a call that
 would wait returns `ENOSYS` until descriptor wait queues exist. `ppoll` adds
 validated timespec and temporary signal-mask inputs without pretending to
-sleep. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
+sleep. A single bounded epoll instance can register one console or device
+descriptor, report immediate level-triggered readiness, and preserve packed
+64-bit user data; waits that would block use the same explicit `ENOSYS`
+boundary. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
 retires either initial console descriptor. Bounded `dup` reuses the lowest closed slot and preserves whether
 the console endpoint is input or output; `dup2` provides exact-slot replacement.
 `fcntl(F_GETFD/F_GETFL)` exposes the bounded descriptor and endpoint flags. It also

@@ -112,6 +112,8 @@ const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
+const LINUX_EPOLL_WAIT_SYSCALL: u64 = 232;
+const LINUX_EPOLL_CTL_SYSCALL: u64 = 233;
 const LINUX_OPENAT_SYSCALL: u64 = 257;
 const LINUX_NEWFSTATAT_SYSCALL: u64 = 262;
 const LINUX_READLINKAT_SYSCALL: u64 = 267;
@@ -119,6 +121,7 @@ const LINUX_FACCESSAT_SYSCALL: u64 = 269;
 const LINUX_PPOLL_SYSCALL: u64 = 271;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
+const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_STATX_SYSCALL: u64 = 332;
@@ -136,6 +139,7 @@ const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EAGAIN: u64 = u64::MAX - 10;
 const LINUX_EACCES: u64 = u64::MAX - 12;
+const LINUX_EEXIST: u64 = u64::MAX - 16;
 const LINUX_ENOTDIR: u64 = u64::MAX - 19;
 const LINUX_EISDIR: u64 = u64::MAX - 20;
 const LINUX_ENOMEM: u64 = u64::MAX - 11;
@@ -165,6 +169,10 @@ const LINUX_POLLIN: u16 = 1;
 const LINUX_POLLOUT: u16 = 4;
 const LINUX_POLLHUP: u16 = 0x10;
 const LINUX_POLLNVAL: u16 = 0x20;
+const LINUX_EPOLL_CTL_ADD: u64 = 1;
+const LINUX_EPOLL_CTL_DEL: u64 = 2;
+const LINUX_EPOLL_CTL_MOD: u64 = 3;
+const LINUX_EPOLL_SUPPORTED_EVENTS: u32 = (LINUX_POLLIN | LINUX_POLLOUT) as u32;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
@@ -302,6 +310,10 @@ static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_DEVICE_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_EPOLL_ACTIVE: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
+static ELF_PROBE_EPOLL_EVENTS: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_EPOLL_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DIRECTORY_CURSOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
@@ -917,6 +929,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     );
     ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
     ELF_PROBE_DEVICE_DESCRIPTOR.store(0, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_ACTIVE.store(false, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
     ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
     ELF_PROBE_CLOCK_FREQUENCY.store(clock_frequency, Ordering::SeqCst);
     ELF_PROBE_CLOCK_EPOCH.store(timer::timestamp_counter(), Ordering::SeqCst);
@@ -941,6 +957,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
+        && !ELF_PROBE_EPOLL_ACTIVE.swap(false, Ordering::SeqCst)
+        && ELF_PROBE_EPOLL_TARGET.swap(u64::MAX, Ordering::SeqCst) == u64::MAX
+        && ELF_PROBE_EPOLL_EVENTS.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_EPOLL_DATA.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_DIRECTORY_CURSOR.swap(0, Ordering::SeqCst) == 0;
     let clock_state_valid = ELF_PROBE_CLOCK_EPOCH.swap(0, Ordering::SeqCst) != 0
         && ELF_PROBE_CLOCK_FREQUENCY.swap(0, Ordering::SeqCst) == clock_frequency;
@@ -1385,6 +1405,8 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
         LINUX_GETITIMER_SYSCALL => linux_getitimer(first_argument, buffer),
         LINUX_SETITIMER_SYSCALL => linux_setitimer(first_argument, buffer, count),
+        LINUX_EPOLL_WAIT_SYSCALL => linux_epoll_wait(first_argument, buffer, count, register(0)),
+        LINUX_EPOLL_CTL_SYSCALL => linux_epoll_ctl(first_argument, buffer, count, register(0)),
         LINUX_FCNTL_SYSCALL => linux_descriptor_fcntl(first_argument, buffer, count),
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
@@ -1593,6 +1615,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             linux_readlink_self(buffer, count, register(0))
         }
+        LINUX_EPOLL_CREATE1_SYSCALL => linux_epoll_create1(first_argument),
         LINUX_PPOLL_SYSCALL => linux_ppoll(first_argument, buffer, count, register(0), register(2)),
         LINUX_FACCESSAT_SYSCALL => linux_faccessat(buffer, count, 0),
         LINUX_FACCESSAT2_SYSCALL => linux_faccessat(buffer, count, register(0)),
@@ -1991,6 +2014,9 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
         return LINUX_ENOTDIR;
     }
     let state = kind | (access + 1) as u8;
+    if ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_EMFILE;
+    }
     if ELF_PROBE_DEVICE_DESCRIPTOR
         .compare_exchange(0, state, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -2174,6 +2200,103 @@ fn linux_ppoll(
     linux_poll(address, count, u64::from(waits))
 }
 
+fn linux_epoll_create1(flags: u64) -> u64 {
+    if flags & !LINUX_O_CLOEXEC != 0 {
+        return LINUX_EINVAL;
+    }
+    if ELF_PROBE_DEVICE_DESCRIPTOR.load(Ordering::SeqCst) != 0
+        || ELF_PROBE_EPOLL_ACTIVE.swap(true, Ordering::SeqCst)
+    {
+        return LINUX_EMFILE;
+    }
+    ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
+    if flags & LINUX_O_CLOEXEC != 0 {
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << 2, Ordering::SeqCst);
+    } else {
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
+    }
+    2
+}
+
+fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u64) -> u64 {
+    if epoll != 2 || !ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_EBADF;
+    }
+    if descriptor == epoll {
+        return LINUX_EINVAL;
+    }
+    if !linux_descriptor_open(descriptor) {
+        return LINUX_EBADF;
+    }
+    let current = ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst);
+    if operation == LINUX_EPOLL_CTL_DEL {
+        if current != descriptor {
+            return LINUX_ENOENT;
+        }
+        ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
+        return 0;
+    }
+    if !matches!(operation, LINUX_EPOLL_CTL_ADD | LINUX_EPOLL_CTL_MOD) {
+        return LINUX_EINVAL;
+    }
+    if operation == LINUX_EPOLL_CTL_ADD && current != u64::MAX {
+        return LINUX_EEXIST;
+    }
+    if operation == LINUX_EPOLL_CTL_MOD && current != descriptor {
+        return LINUX_ENOENT;
+    }
+    let mut event = [0_u8; 12];
+    if !copy_from_linux_user(event_address, &mut event) {
+        return LINUX_EFAULT;
+    }
+    let events = u32::from_ne_bytes(event[..4].try_into().unwrap());
+    if events & !LINUX_EPOLL_SUPPORTED_EVENTS != 0 {
+        return LINUX_EINVAL;
+    }
+    let data = u64::from_ne_bytes(event[4..].try_into().unwrap());
+    ELF_PROBE_EPOLL_EVENTS.store(events, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_DATA.store(data, Ordering::SeqCst);
+    ELF_PROBE_EPOLL_TARGET.store(descriptor, Ordering::SeqCst);
+    0
+}
+
+fn linux_epoll_wait(epoll: u64, address: u64, maximum: u64, timeout: u64) -> u64 {
+    if epoll != 2 || !ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_EBADF;
+    }
+    if maximum != 1 {
+        return LINUX_EINVAL;
+    }
+    let target = ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst);
+    let requested = ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst) as u16;
+    let ready = if target == u64::MAX {
+        0
+    } else {
+        linux_descriptor_poll_events(target as i32, requested)
+            & (LINUX_POLLIN | LINUX_POLLOUT | LINUX_POLLHUP)
+    };
+    if ready == 0 {
+        return if timeout as u32 == 0 { 0 } else { LINUX_ENOSYS };
+    }
+    let mut event = [0_u8; 12];
+    event[..4].copy_from_slice(&u32::from(ready).to_ne_bytes());
+    event[4..].copy_from_slice(&ELF_PROBE_EPOLL_DATA.load(Ordering::SeqCst).to_ne_bytes());
+    if !copy_to_linux_user(address, &event) {
+        return LINUX_EFAULT;
+    }
+    1
+}
+
+fn linux_descriptor_open(descriptor: u64) -> bool {
+    linux_console_descriptor_open(descriptor)
+        || linux_device_descriptor(descriptor) != 0
+        || descriptor == 2 && ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst)
+}
+
 fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
     let Ok(descriptor) = u64::try_from(descriptor) else {
         return 0;
@@ -2182,6 +2305,15 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
         LINUX_DESCRIPTOR_INPUT => return LINUX_POLLHUP,
         LINUX_DESCRIPTOR_OUTPUT => return requested & LINUX_POLLOUT,
         _ => {}
+    }
+    if descriptor == 2 && ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+        let target = ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst);
+        let events = ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst) as u16;
+        return if target != u64::MAX && linux_descriptor_poll_events(target as i32, events) != 0 {
+            requested & LINUX_POLLIN
+        } else {
+            0
+        };
     }
     let device = linux_device_descriptor(descriptor);
     if device == 0 {
@@ -2387,6 +2519,13 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
     if descriptor != 2 {
         return linux_console_close(descriptor);
     }
+    if ELF_PROBE_EPOLL_ACTIVE.swap(false, Ordering::SeqCst) {
+        ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
+        ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
+        return 0;
+    }
     if ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0 {
         return LINUX_EBADF;
     }
@@ -2496,6 +2635,23 @@ fn linux_console_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
 fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     let state = linux_device_descriptor(descriptor);
     if state == 0 {
+        if descriptor == 2 && ELF_PROBE_EPOLL_ACTIVE.load(Ordering::SeqCst) {
+            return match command {
+                LINUX_F_GETFD => {
+                    u64::from((ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst) >> descriptor) & 1)
+                }
+                LINUX_F_SETFD => {
+                    if argument & u64::from(LINUX_FD_CLOEXEC) != 0 {
+                        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
+                    } else {
+                        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+                    }
+                    0
+                }
+                LINUX_F_GETFL => 2,
+                _ => LINUX_EINVAL,
+            };
+        }
         return linux_console_fcntl(descriptor, command, argument);
     }
     match command {

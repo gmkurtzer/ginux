@@ -593,6 +593,11 @@ if ! grep -q '^ginux: Linux bounded ppoll inputs validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded epoll lifecycle validated' "$output_file"; then
+    echo "Boot test failed: Linux bounded epoll lifecycle was not validated." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 14 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
     exit 1

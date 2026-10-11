@@ -1401,6 +1401,13 @@ ginux_linux_probe:
     cmp rax, 2
     jne failure
 
+    xor edi, edi
+    mov eax, 291
+    syscall
+    cmp rax, -24
+    jne failure
+
+    mov edi, 2
     mov esi, 0x405200
     mov edx, 8
     xor eax, eax
@@ -1505,6 +1512,167 @@ ginux_linux_probe:
     mov eax, 3
     syscall
     cmp rax, -9
+    jne failure
+
+    mov edi, 1
+    mov eax, 291
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 0x80000
+    mov eax, 291
+    syscall
+    cmp rax, 2
+    jne failure
+
+    mov edi, 2
+    mov esi, 1
+    mov eax, 72
+    syscall
+    cmp rax, 1
+    jne failure
+
+    xor edi, edi
+    mov eax, 291
+    syscall
+    cmp rax, -24
+    jne failure
+
+    mov edi, 2
+    mov esi, 1
+    mov edx, 2
+    mov r10d, 0x404d00
+    mov eax, 233
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edx, 99
+    mov eax, 233
+    syscall
+    cmp rax, -9
+    jne failure
+
+    mov esi, 99
+    mov edx, 1
+    mov eax, 233
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov dword ptr [0x404d00], 0x80000000
+    mov esi, 1
+    mov eax, 233
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov dword ptr [0x404d00], 4
+    movabs rax, 0x1122334455667788
+    mov qword ptr [0x404d04], rax
+    mov edi, 2
+    mov esi, 1
+    mov edx, 1
+    mov r10d, 0x4051fc
+    mov eax, 233
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov r10d, 0x404d00
+    mov eax, 233
+    syscall
+    test rax, rax
+    jne failure
+    mov eax, 233
+    syscall
+    cmp rax, -17
+    jne failure
+
+    mov edi, 2
+    mov esi, 0x404d20
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 232
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 2
+    mov esi, 0x4051fc
+    mov edx, 1
+    mov r10d, -1
+    mov eax, 232
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov esi, 0x404d20
+    mov eax, 232
+    syscall
+    cmp rax, 1
+    jne failure
+    cmp dword ptr [0x404d20], 4
+    jne failure
+    movabs rax, 0x1122334455667788
+    cmp qword ptr [0x404d24], rax
+    jne failure
+
+    mov dword ptr [0x404d00], 1
+    movabs rax, 0x8877665544332211
+    mov qword ptr [0x404d04], rax
+    mov edi, 2
+    mov esi, 3
+    mov edx, 1
+    mov r10d, 0x404d00
+    mov eax, 233
+    syscall
+    test rax, rax
+    jne failure
+
+    mov esi, 0x404d20
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 232
+    syscall
+    test rax, rax
+    jne failure
+
+    mov edi, 2
+    mov esi, 2
+    mov edx, 1
+    mov r10d, 0x405200
+    mov eax, 233
+    syscall
+    test rax, rax
+    jne failure
+
+    mov esi, 3
+    mov r10d, 0x404d00
+    mov eax, 233
+    syscall
+    cmp rax, -2
+    jne failure
+
+    mov edi, 2
+    mov esi, 0x404d20
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 232
+    syscall
+    test rax, rax
+    jne failure
+    mov r10d, 1
+    mov eax, 232
+    syscall
+    cmp rax, -38
+    jne failure
+
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
     jne failure
 
     movabs rax, 0x72657a2f7665642f

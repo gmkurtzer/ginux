@@ -49,6 +49,23 @@ never blocks. Zero timeouts and immediately ready descriptors behave like
 `poll`; a call that would wait returns `-ENOSYS`. Invalid timespecs or mask
 sizes return `-EINVAL`, invalid input ranges return `-EFAULT`, and the timeout
 is not rewritten.
+`rax = 291` (`__NR_epoll_create1`) allocates one process-local epoll instance
+in fixed descriptor 2 when that slot is free. It accepts only zero or
+`EPOLL_CLOEXEC`; an occupied device or epoll slot returns `-EMFILE`.
+`rax = 233` (`__NR_epoll_ctl`) retains one registration for an open console or
+device descriptor. `EPOLL_CTL_ADD`, `EPOLL_CTL_MOD`, and `EPOLL_CTL_DEL` have
+their Linux duplicate, missing-registration, invalid-descriptor, and
+self-registration errors. ADD and MOD accept only level-triggered `EPOLLIN`
+and `EPOLLOUT`, copy the complete packed 12-byte x86-64 `epoll_event` before
+changing state, and preserve its 64-bit data word. DEL ignores its event
+pointer. `rax = 232` (`__NR_epoll_wait`) accepts exactly one output event and
+atomically copies it only when the registered descriptor is immediately
+ready. A zero-timeout query with no event returns zero; a nonzero or infinite
+wait returns `-ENOSYS` until scheduler-backed wait queues exist. Invalid output
+memory returns `-EFAULT` without consuming the level-triggered event. The epoll
+descriptor participates in `F_GETFD`, `F_SETFD`, `F_GETFL`, `poll`, and
+`close`; closing it clears the registration and releases fixed descriptor 2.
+This is a bounded event-notification proof, not a general epoll interest tree.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded
@@ -398,7 +415,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`read`, `write`, `writev`, bounded `poll`/`ppoll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
+`read`, `write`, `writev`, bounded `poll`/`ppoll`/`epoll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
 bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprotect`,
