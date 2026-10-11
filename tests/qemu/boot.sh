@@ -608,6 +608,11 @@ if ! grep -q '^ginux: Linux process umask state validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
+    echo "Boot test failed: Linux saved credential queries were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

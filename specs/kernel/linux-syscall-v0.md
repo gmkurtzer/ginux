@@ -49,7 +49,10 @@ exit, and reads it back.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
-operation. The initial process namespace has one process and one thread:
+operation. `getresuid` and `getresgid` copy real/effective/saved triples of
+zero. All three destinations are validated before any write, so an invalid
+third pointer cannot leave a partial result. The initial process namespace has
+one process and one thread:
 `getpid` and `gettid` return 1, `getppid` returns 0, and `getpgrp`,
 `getpgid(0)`, and `getsid(0)` return 1. `getpgid` and `getsid` return `-ESRCH`
 for an unknown PID. Next, `rax = 218` (`__NR_set_tid_address`) registers a

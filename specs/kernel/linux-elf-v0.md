@@ -107,7 +107,9 @@ for the static image, `AT_FLAGS = 0`, `AT_UID = 0`, `AT_EUID = 0`, `AT_GID = 0`,
 equal to the ELF entry, and `AT_NULL`. These credentials are container-local
 and do not grant native kernel capabilities. The probe dereferences and validates
 `argv[0]`, `envp[0]`, `AT_BASE`, `AT_FLAGS`, `AT_SECURE`, `AT_EXECFN`, and
-`AT_ENTRY` from CPL3 before its syscall sequence. `AT_RANDOM` remains absent
+`AT_ENTRY` from CPL3 before its syscall sequence. Credential queries include
+atomic copy-out of real/effective/saved UID and GID triples, all zero in the
+container namespace. `AT_RANDOM` remains absent
 until the boot path supplies a cryptographically suitable entropy source.
 Multiple arguments or environment entries, the complete Linux auxiliary
 vector, scheduler ownership, the broader syscall

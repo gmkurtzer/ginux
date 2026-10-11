@@ -28,6 +28,8 @@ Copy-in may also read the declared RX ELF extent, while copy-out rejects it.
 The ring-3 workload verifies each error and continues into valid calls.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
+Real/effective/saved UID and GID triples are also zero and are copied only
+after all three output pointers pass writable-VMA validation.
 Its initial single thread reports PID/TID/process-group/session ID 1 and parent
 PID 0, matching an initial process namespace. A bounded
 `set_tid_address` registration returns TID 1 and clears the registered word as
