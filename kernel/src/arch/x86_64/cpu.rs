@@ -1601,7 +1601,7 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
     let kind = match &path[..path_length] {
         b"/dev/null" => 0,
         b"/dev/zero" => LINUX_DEVICE_ZERO,
-        b"/dev/console" => LINUX_DEVICE_CONSOLE,
+        b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
         _ => return LINUX_ENOENT,
     };
     let access = flags & 3;
@@ -1634,7 +1634,7 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
     };
     if !matches!(
         &path[..path_length],
-        b"/dev/null" | b"/dev/zero" | b"/dev/console"
+        b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty"
     ) {
         return LINUX_ENOENT;
     }
@@ -1655,7 +1655,7 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
     };
     if !matches!(
         &path[..path_length],
-        b"/dev/null" | b"/dev/zero" | b"/dev/console"
+        b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty"
     ) {
         return LINUX_ENOENT;
     }

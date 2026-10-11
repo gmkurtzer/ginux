@@ -92,7 +92,7 @@ other mutation and duplication commands return `-EINVAL`. On the null
 descriptor, `F_GETFD`, `F_SETFD`, and `F_GETFL` expose its close-on-exec bit and
 selected access mode; duplication remains outside this bounded node profile.
 `rax = 257` (`__NR_openat`) recognizes only the absolute paths `/dev/null`,
-`/dev/zero`, and `/dev/console`, and
+`/dev/zero`, `/dev/console`, and `/dev/tty`, and
 allocates fixed descriptor 2 once. It accepts `O_RDONLY`, `O_WRONLY`, or
 `O_RDWR`, optionally with `O_CLOEXEC`; other paths return `-ENOENT`, unsupported
 flags return `-EINVAL`, bad path memory returns `-EFAULT`, and a second open
@@ -102,6 +102,8 @@ not directory traversal or a general VFS. `/dev/zero` reads up to 256 validated
 bytes as zeros and discards writes when its selected access mode permits them.
 `/dev/console` reopens the bounded serial stream with the same write limit,
 EOF input, terminal ioctls, and non-seekable behavior as the inherited console.
+`/dev/tty` is a strict alias of that endpoint; controlling-terminal ownership,
+session attachment, and terminal reassignment remain unsupported.
 `rax = 262` (`__NR_newfstatat`)
 returns the same fixed character-device metadata for either device without
 opening it. Only zero flags are accepted; bad path or output memory returns

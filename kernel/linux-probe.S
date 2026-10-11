@@ -1178,6 +1178,28 @@ ginux_linux_probe:
     test rax, rax
     jne failure
 
+    movabs rax, 0x7974742f7665642f
+    mov qword ptr [0x403340], rax
+    mov byte ptr [0x403348], 0
+    mov edi, -100
+    mov esi, 0x403340
+    mov edx, 2
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne failure
+    mov edi, 2
+    mov esi, 0x404200
+    mov edx, 8
+    xor eax, eax
+    syscall
+    test rax, rax
+    jne failure
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 0x404200
     mov eax, 80
     syscall
