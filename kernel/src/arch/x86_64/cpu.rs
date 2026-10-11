@@ -2,7 +2,7 @@ use core::arch::{asm, global_asm};
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::serial_write;
+use crate::{serial_write, serial_write_u64};
 
 const KERNEL_CODE_SELECTOR: u16 = 0x08;
 const KERNEL_DATA_SELECTOR: u16 = 0x10;
@@ -124,30 +124,134 @@ ginux_breakpoint_entry:
     pop rax
     iretq
 
+    .macro GINUX_EXCEPTION_NO_ERROR vector
+    .global ginux_exception_\vector
+ginux_exception_\vector:
+    push 0
+    push \vector
+    jmp ginux_fatal_exception_common
+    .endm
+
+    .macro GINUX_EXCEPTION_ERROR vector
+    .global ginux_exception_\vector
+ginux_exception_\vector:
+    push \vector
+    jmp ginux_fatal_exception_common
+    .endm
+
+    GINUX_EXCEPTION_NO_ERROR 0
+    GINUX_EXCEPTION_NO_ERROR 1
+    GINUX_EXCEPTION_NO_ERROR 2
+    GINUX_EXCEPTION_NO_ERROR 4
+    GINUX_EXCEPTION_NO_ERROR 5
+    GINUX_EXCEPTION_NO_ERROR 6
+    GINUX_EXCEPTION_NO_ERROR 7
     .global ginux_double_fault_entry
 ginux_double_fault_entry:
+    push 8
+    jmp ginux_fatal_exception_common
+    GINUX_EXCEPTION_NO_ERROR 9
+    GINUX_EXCEPTION_ERROR 10
+    GINUX_EXCEPTION_ERROR 11
+    GINUX_EXCEPTION_ERROR 12
+    GINUX_EXCEPTION_ERROR 13
+    GINUX_EXCEPTION_ERROR 14
+    GINUX_EXCEPTION_NO_ERROR 15
+    GINUX_EXCEPTION_NO_ERROR 16
+    GINUX_EXCEPTION_ERROR 17
+    GINUX_EXCEPTION_NO_ERROR 18
+    GINUX_EXCEPTION_NO_ERROR 19
+    GINUX_EXCEPTION_NO_ERROR 20
+    GINUX_EXCEPTION_ERROR 21
+    GINUX_EXCEPTION_NO_ERROR 22
+    GINUX_EXCEPTION_NO_ERROR 23
+    GINUX_EXCEPTION_NO_ERROR 24
+    GINUX_EXCEPTION_NO_ERROR 25
+    GINUX_EXCEPTION_NO_ERROR 26
+    GINUX_EXCEPTION_NO_ERROR 27
+    GINUX_EXCEPTION_NO_ERROR 28
+    GINUX_EXCEPTION_ERROR 29
+    GINUX_EXCEPTION_ERROR 30
+    GINUX_EXCEPTION_NO_ERROR 31
+
+ginux_fatal_exception_common:
     cli
     cld
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    mov rdi, [rsp + 120]
+    mov rsi, [rsp + 128]
+    mov rdx, cr2
     and rsp, -16
-    call {double_fault_handler}
+    call {fatal_exception_handler}
     ud2
+
+    .section .rodata
+    .align 8
+    .global ginux_exception_entries
+ginux_exception_entries:
+    .quad ginux_exception_0
+    .quad ginux_exception_1
+    .quad ginux_exception_2
+    .quad ginux_breakpoint_entry
+    .quad ginux_exception_4
+    .quad ginux_exception_5
+    .quad ginux_exception_6
+    .quad ginux_exception_7
+    .quad ginux_double_fault_entry
+    .quad ginux_exception_9
+    .quad ginux_exception_10
+    .quad ginux_exception_11
+    .quad ginux_exception_12
+    .quad ginux_exception_13
+    .quad ginux_exception_14
+    .quad ginux_exception_15
+    .quad ginux_exception_16
+    .quad ginux_exception_17
+    .quad ginux_exception_18
+    .quad ginux_exception_19
+    .quad ginux_exception_20
+    .quad ginux_exception_21
+    .quad ginux_exception_22
+    .quad ginux_exception_23
+    .quad ginux_exception_24
+    .quad ginux_exception_25
+    .quad ginux_exception_26
+    .quad ginux_exception_27
+    .quad ginux_exception_28
+    .quad ginux_exception_29
+    .quad ginux_exception_30
+    .quad ginux_exception_31
 "#,
     breakpoint_handler = sym breakpoint_handler,
-    double_fault_handler = sym double_fault_handler,
+    fatal_exception_handler = sym fatal_exception_handler,
 );
 
 extern "C" {
-    fn ginux_breakpoint_entry();
-    fn ginux_double_fault_entry();
+    static ginux_exception_entries: [usize; 32];
 }
 
-pub(crate) fn install() {
+pub(crate) fn install() -> bool {
     // SAFETY: Initialization runs once with interrupts disabled and before any
     // other CPU can observe these tables.
     unsafe {
         install_gdt_and_tss();
         install_idt();
     }
+    exception_gates_are_valid()
 }
 
 pub(crate) fn verify_breakpoint() -> bool {
@@ -206,11 +310,13 @@ unsafe fn install_gdt_and_tss() {
 }
 
 unsafe fn install_idt() {
-    IDT[3] = IdtEntry::interrupt(ginux_breakpoint_entry as *const () as usize, 0);
-    IDT[8] = IdtEntry::interrupt(
-        ginux_double_fault_entry as *const () as usize,
-        DOUBLE_FAULT_IST,
-    );
+    let entries = core::ptr::addr_of!(ginux_exception_entries).cast::<usize>();
+    let idt = core::ptr::addr_of_mut!(IDT).cast::<IdtEntry>();
+    for vector in 0..32 {
+        let ist = if vector == 8 { DOUBLE_FAULT_IST } else { 0 };
+        idt.add(vector)
+            .write(IdtEntry::interrupt(entries.add(vector).read(), ist));
+    }
 
     let pointer = DescriptorTablePointer {
         limit: (size_of::<[IdtEntry; 256]>() - 1) as u16,
@@ -219,13 +325,39 @@ unsafe fn install_idt() {
     asm!("lidt [{}]", in(reg) &pointer, options(readonly, nostack, preserves_flags));
 }
 
+fn exception_gates_are_valid() -> bool {
+    let idt = core::ptr::addr_of!(IDT).cast::<IdtEntry>();
+    for vector in 0..32 {
+        // SAFETY: IDT is initialized before this verifier runs and is never
+        // subsequently mutated on the bootstrap processor.
+        let entry = unsafe { idt.add(vector).read() };
+        let expected_ist = if vector == 8 { DOUBLE_FAULT_IST } else { 0 };
+        if entry.selector != KERNEL_CODE_SELECTOR
+            || entry.attributes != 0x8e
+            || entry.ist != expected_ist
+            || (entry.offset_low == 0 && entry.offset_middle == 0 && entry.offset_high == 0)
+        {
+            return false;
+        }
+    }
+    true
+}
+
 extern "C" fn breakpoint_handler() {
     BREAKPOINT_HANDLED.store(true, Ordering::SeqCst);
     serial_write("ginux: breakpoint exception handled\r\n");
 }
 
-extern "C" fn double_fault_handler() -> ! {
-    serial_write("ginux: double fault\r\nGINUX_KERNEL_PANIC\r\n");
+extern "C" fn fatal_exception_handler(vector: u64, error: u64, fault_address: u64) -> ! {
+    serial_write("ginux: fatal exception vector: ");
+    serial_write_u64(vector);
+    serial_write("\r\nginux: exception error code: ");
+    serial_write_u64(error);
+    if vector == 14 {
+        serial_write("\r\nginux: page fault address: ");
+        serial_write_u64(fault_address);
+    }
+    serial_write("\r\nGINUX_KERNEL_PANIC\r\n");
     loop {
         core::hint::spin_loop();
     }

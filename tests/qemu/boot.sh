@@ -73,6 +73,11 @@ if ! grep -q '^ginux: GDT/TSS/IDT active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: architectural exception gates active' "$output_file"; then
+    echo "Boot test failed: architectural exceptions are not fully covered." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: breakpoint exception handled' "$output_file"; then
     echo "Boot test failed: the recoverable exception test did not return." >&2
     exit 1
