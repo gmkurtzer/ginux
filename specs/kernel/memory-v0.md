@@ -68,6 +68,10 @@ non-kernel domain or changes nothing. The service restart path uses it to move
 all seven retained address-space leases from the failed generation to its
 replacement. Its local address-space record adopts the new owner only after
 verifying all seven ledger entries, and final release requires that owner. The
+CR3 activation boundary independently resolves the complete validated page-table
+hierarchy to seven physical addresses and requires each address to be live under
+the scheduler's current domain generation. Ownership transfer therefore must
+complete before a replacement can execute. The
 live ledger is currently limited to 128 simultaneous allocations and fails
 closed at capacity. Each non-kernel owner is additionally limited to 16 live
 frames in this bootstrap revision. Multi-frame reservation stages the complete

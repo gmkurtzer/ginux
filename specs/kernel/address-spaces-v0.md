@@ -58,8 +58,11 @@ requires exactly one non-large PDPT entry, one non-large directory entry, and
 the fixed code/guard/stack/guard/stack leaf layout with W^X permissions. All
 seven page-table and payload frames must be distinct, nonzero, and below 4 GiB;
 every unmodeled entry must remain absent. The hardware readback still has to
-match after the load. This prevents an internally corrupted or stale scheduler
-root from silently widening a domain's mappings.
+match after the load. Before activation, all seven physical addresses must also
+appear in the allocator's live ledger under the scheduler's exact current
+domain generation. This prevents an internally corrupted or stale scheduler
+root from silently widening a domain's mappings or borrowing another domain's
+frames.
 
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3

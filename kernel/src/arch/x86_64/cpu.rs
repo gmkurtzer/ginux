@@ -1102,8 +1102,16 @@ pub(crate) fn activate_user_root(root: u64) -> bool {
     if root == 0
         || root & !ADDRESS_MASK != 0
         || scheduler::current_address_space_root() != Some(root)
-        || !paging::user_root_has_safe_shape(root)
     {
+        return false;
+    }
+    let Some(owner) = scheduler::current_domain().and_then(memory::FrameOwner::domain) else {
+        return false;
+    };
+    let Some(frames) = paging::validated_user_root_frames(root) else {
+        return false;
+    };
+    if !memory::frame_addresses_owned_by(owner, &frames) {
         return false;
     }
     let active: u64;

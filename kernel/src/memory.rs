@@ -283,6 +283,16 @@ impl FrameAllocator {
         })
     }
 
+    fn owns_addresses(&self, owner: FrameOwner, addresses: &[u64]) -> bool {
+        !addresses.is_empty()
+            && addresses.iter().all(|address| {
+                self.live_frames[..self.live_count]
+                    .iter()
+                    .zip(&self.live_owners[..self.live_count])
+                    .any(|(live, live_owner)| live.address == *address && *live_owner == owner)
+            })
+    }
+
     fn available_frames(&self) -> u64 {
         self.ranges[..self.range_count]
             .iter()
@@ -375,6 +385,16 @@ pub(crate) fn frames_owned_by<const N: usize>(owner: FrameOwner, frames: &[Frame
     unsafe {
         let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
         (*allocator).owns(owner, frames)
+    }
+}
+
+pub(crate) fn frame_addresses_owned_by(owner: FrameOwner, addresses: &[u64]) -> bool {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return false;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        (*allocator).owns_addresses(owner, addresses)
     }
 }
 

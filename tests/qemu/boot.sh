@@ -418,6 +418,11 @@ if ! grep -q '^ginux: bounded user page-table hierarchy validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: scheduler address-space ownership validated' "$output_file"; then
+    echo "Boot test failed: scheduler address-space ownership validation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: one-shot user preemption completed' "$output_file"; then
     echo "Boot test failed: the one-shot user preemption did not complete." >&2
     exit 1

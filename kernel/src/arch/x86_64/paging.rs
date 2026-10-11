@@ -17,10 +17,10 @@ const CR0_WRITE_PROTECT: usize = 1 << 16;
 
 pub(crate) const INITIAL_IDENTITY_LIMIT: usize = 1usize << 32;
 
-pub(crate) fn user_root_has_safe_shape(root: u64) -> bool {
+pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
     if root == 0 || root >= INITIAL_IDENTITY_LIMIT as u64 || !root.is_multiple_of(PAGE_SIZE as u64)
     {
-        return false;
+        return None;
     }
     let entries = root as *const u64;
     let kernel_entry = unsafe { core::ptr::addr_of!(PML4.0).cast::<u64>().read() };
@@ -33,19 +33,15 @@ pub(crate) fn user_root_has_safe_shape(root: u64) -> bool {
         || user & (LARGE_PAGE | NO_EXECUTE) != 0
         || !(2..ENTRY_COUNT).all(|index| unsafe { entries.add(index).read() == 0 })
     {
-        return false;
+        return None;
     }
     let pdpt_address = user & ADDRESS_MASK as u64;
-    let Some(pdpt_entry) = single_user_table_entry(pdpt_address) else {
-        return false;
-    };
+    let pdpt_entry = single_user_table_entry(pdpt_address)?;
     let directory_address = pdpt_entry & ADDRESS_MASK as u64;
-    let Some(directory_entry) = single_user_table_entry(directory_address) else {
-        return false;
-    };
+    let directory_entry = single_user_table_entry(directory_address)?;
     let table_address = directory_entry & ADDRESS_MASK as u64;
     if table_address == 0 || table_address >= INITIAL_IDENTITY_LIMIT as u64 {
-        return false;
+        return None;
     }
     let table = table_address as *const u64;
     let code = unsafe { table.read() };
@@ -65,7 +61,7 @@ pub(crate) fn user_root_has_safe_shape(root: u64) -> bool {
         first_stack_address,
         second_stack_address,
     ];
-    code & (PRESENT | USER) == (PRESENT | USER)
+    (code & (PRESENT | USER) == (PRESENT | USER)
         && code & (WRITABLE | NO_EXECUTE | LARGE_PAGE) == 0
         && first_guard == 0
         && first_stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
@@ -82,7 +78,8 @@ pub(crate) fn user_root_has_safe_shape(root: u64) -> bool {
         && frames
             .iter()
             .enumerate()
-            .all(|(index, frame)| !frames[index + 1..].contains(frame))
+            .all(|(index, frame)| !frames[index + 1..].contains(frame)))
+    .then_some(frames)
 }
 
 fn single_user_table_entry(table_address: u64) -> Option<u64> {
