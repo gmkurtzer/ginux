@@ -591,6 +591,36 @@ cd80
 7402
 0f0b
 
+# fetch and validate the auxiliary's stable logical service identity
+4889df
+48be4022000080000000
+ba20000000
+b80e000000
+cd80
+83f820
+7402
+0f0b
+488b06
+48bd200000000100052a
+4839e8
+7402
+0f0b
+488b4608
+4c39e0
+7402
+0f0b
+488b4610
+4883f804
+7402
+0f0b
+488b4618
+4885c0
+7502
+0f0b
+4c39d8
+7502
+0f0b
+
 # the diagnostics consumed the final budgeted call
 b800000000
 cd80
