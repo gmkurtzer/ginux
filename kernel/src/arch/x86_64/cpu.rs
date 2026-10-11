@@ -1306,15 +1306,13 @@ extern "sysv64" fn linux_syscall_handler(
         ),
         LINUX_MUNMAP_SYSCALL => linux_munmap(first_argument, buffer),
         LINUX_MPROTECT_SYSCALL => {
-            if !first_argument.is_multiple_of(PAGE_SIZE as u64)
-                || buffer != PAGE_SIZE as u64
-                || count != LINUX_PROT_READ
-            {
+            if !first_argument.is_multiple_of(PAGE_SIZE as u64) || count != LINUX_PROT_READ {
                 return LINUX_EINVAL;
             }
             let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
             let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
             if first_argument == relro
+                && buffer == PAGE_SIZE as u64
                 && relro_size != 0
                 && relro_size <= PAGE_SIZE as u64
                 && ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst) == 0
@@ -1324,10 +1322,18 @@ extern "sysv64" fn linux_syscall_handler(
                 return 0;
             }
             let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+            let mapping_pages = ELF_PROBE_MMAP_PAGES.load(Ordering::SeqCst);
             if first_argument == mapping
-                && ELF_PROBE_MMAP_PAGES.load(Ordering::SeqCst) == 1
+                && mapping_pages != 0
+                && buffer == u64::from(mapping_pages) * PAGE_SIZE as u64
                 && ELF_PROBE_MMAP_WRITABLE.load(Ordering::SeqCst)
-                && address_space::protect_current_user_page_read_only(first_argument)
+                && address_space::protect_current_linux_pages_read_only(
+                    first_argument,
+                    &[
+                        ELF_PROBE_MMAP_FRAME.load(Ordering::SeqCst),
+                        ELF_PROBE_MMAP_TAIL_FRAME.load(Ordering::SeqCst),
+                    ][..usize::from(mapping_pages)],
+                )
             {
                 ELF_PROBE_MMAP_WRITABLE.store(false, Ordering::SeqCst);
                 return 0;

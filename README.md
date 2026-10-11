@@ -55,16 +55,17 @@ Bounded `set_robust_list` and `get_robust_list` calls retain and report one
 24-byte thread robust-list head, reject foreign process IDs and invalid ranges,
 and discard the registration during exit. Futex recovery is not implemented.
 Bounded `mprotect` can irreversibly seal the page named by the parsed
-`PT_GNU_RELRO` range or the active anonymous mapping as read-only/NX. The
-page-table permission and syscall copy direction change together: reads
-continue, writes fail, and executable permissions are rejected.
+`PT_GNU_RELRO` range or every page in the active anonymous extent as
+read-only/NX. The page-table permissions and syscall copy direction change
+together: reads continue, writes fail, and executable permissions are rejected.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
-A separate one-page anonymous `mmap` slot is installed RW/NX on demand,
-removed from the hardware page table by `munmap`, scrubbed, and proven zero on
-reuse. Bounded `MADV_DONTNEED` also zeros it in place without widening a sealed
-read-only page, while `mincore` reports the slot resident only while active.
+A separate one- or two-page anonymous `mmap` extent is installed RW/NX on
+demand, removed from the hardware page table by exact `munmap`, scrubbed, and
+proven zero on reuse. Bounded `MADV_DONTNEED` also zeros it in place without
+widening a sealed read-only extent, while `mincore` reports each page resident
+only while active.
 General mapping placement and file-backed mappings are not implemented.
 The initial filesystem view exposes only a working-directory identity of `/`;
 bounded `getcwd` returns it, while undersized and invalid buffers fail.

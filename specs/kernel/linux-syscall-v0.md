@@ -228,11 +228,11 @@ present, user, NX, or writable state. The proof also discards a sealed
 one-page read-only mapping, observes zeroes from ring 3, and unmaps it normally.
 Other advice, ranges, or inactive mappings return `-EINVAL` without changing
 the contents. There is no paging policy, reclamation queue, or lazy refill.
-`rax = 27` (`__NR_mincore`) accepts that exact page and length while active,
-atomically writes the single resident bit to a validated one-byte vector, and
-returns `-ENOMEM` after unmap. Misaligned or different ranges return `-EINVAL`;
-an invalid vector returns `-EFAULT`. It exposes only the fixed slot, not
-arbitrary page-table state or reclaim information.
+`rax = 27` (`__NR_mincore`) accepts the exact active extent and atomically
+writes one resident byte per page to a fully validated vector. It returns
+`-ENOMEM` after unmap. Misaligned, partial, or different ranges return
+`-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only the fixed slot,
+not arbitrary page-table state or reclaim information.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x406000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x407000` follows Linux syscall
@@ -327,18 +327,19 @@ either is changed. Exit discards the registration, but no robust futex traversal
 or recovery is attempted.
 
 `rax = 10` (`__NR_mprotect`) supports one irreversible transition on either the
-page named by the parsed `PT_GNU_RELRO` range or the active anonymous mapping:
-the exact page may become read-only/NX. The RELRO seal lasts for the process
-lifetime; an anonymous seal lasts until unmap, and a later anonymous mapping
-starts from a freshly scrubbed RW/NX frame. The normalized range must be
-present, the address and 4096-byte length must be page-aligned and exact, and
-the only accepted protection is `PROT_READ`. All other requests return
-`-EINVAL`. The kernel clears the hardware leaf's writable bit, invalidates that
-translation, and records the VMA change before resuming userspace. The probe
-confirms that copy-in remains available while `uname` copy-out returns
-`-EFAULT`, repeated sealing is rejected, a read-only mapping can still be
-unmapped, and remapping restores writable state without prior contents. This
-is a bounded write seal, not a general memory-management API. The probe
+page named by the parsed `PT_GNU_RELRO` range or the complete active anonymous
+extent: one or two exact pages may become read-only/NX. The RELRO seal lasts for
+the process lifetime; an anonymous seal lasts until unmap, and a later mapping
+starts from freshly scrubbed RW/NX frames. The normalized range must be
+present, page-aligned, and exact, and the only accepted protection is
+`PROT_READ`. All other requests return `-EINVAL`. Before changing any page, the
+kernel validates ownership and writable/NX permissions for every leaf. It then
+clears every writable bit and invalidates every translation before resuming
+userspace. The probe confirms that copy-in remains available while cross-page
+`uname` copy-out returns `-EFAULT`, repeated and partial sealing are rejected, a
+read-only extent can still be unmapped, and remapping restores writable state
+without prior contents. This is a bounded write seal, not a general
+memory-management API. The probe
 finally uses `rax = 231`
 (`__NR_exit_group`) with `rdi = 42` (status).
 Immediately before entry, the kernel:

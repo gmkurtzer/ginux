@@ -670,6 +670,46 @@ pub(crate) fn protect_current_user_page_read_only(address: u64) -> bool {
     false
 }
 
+pub(crate) fn protect_current_linux_pages_read_only(address: u64, frames: &[u64]) -> bool {
+    if !(1..=2).contains(&frames.len())
+        || address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || frames
+            .iter()
+            .any(|frame| !frame.is_multiple_of(PAGE_SIZE as u64))
+        || !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, frames)
+    {
+        return false;
+    }
+    let mut leaves = [core::ptr::null_mut(); 2];
+    let mut values = [0_u64; 2];
+    for (index, frame) in frames.iter().enumerate() {
+        let page = address + index as u64 * PAGE_SIZE as u64;
+        let Some(leaf) = current_linux_leaf(page) else {
+            return false;
+        };
+        let value = unsafe { leaf.read() };
+        if value & ADDRESS_MASK != *frame
+            || value & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                != PRESENT | WRITABLE | USER | NO_EXECUTE
+        {
+            return false;
+        }
+        leaves[index] = leaf;
+        values[index] = value;
+    }
+    for index in 0..frames.len() {
+        let page = address + index as u64 * PAGE_SIZE as u64;
+        unsafe {
+            leaves[index].write(values[index] & !WRITABLE);
+            asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
+        }
+    }
+    leaves[..frames.len()]
+        .iter()
+        .all(|leaf| unsafe { leaf.read() } & WRITABLE == 0)
+}
+
 pub(crate) fn map_current_linux_page(address: u64, frame: u64) -> bool {
     if address >= 1 << 47
         || !address.is_multiple_of(PAGE_SIZE as u64)

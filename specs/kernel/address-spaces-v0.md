@@ -44,9 +44,9 @@ leaves at `0x40a000` and `0x40b000`. Its bounded anonymous mapping call
 validates an exact one- or two-page RW/NX request before installing any leaf;
 unmap requires the complete active extent, clears its leaves, invalidates the
 local translations, and scrubs both frames before they can be installed again.
-While active, its writable leaf can be irreversibly sealed read-only; copy
-permissions change with the hardware leaf, and unmap accepts either state.
-Bounded discard validates the same owned leaf and zeros its frame in place,
+While active, all leaves in the exact extent can be irreversibly sealed
+read-only after one validation pass; copy permissions change with the hardware
+leaves, and unmap accepts either state. Bounded discard validates the same owned leaf and zeros its frame in place,
 preserving whichever writable state the mapping currently has.
 The matching residency query reports each present page only while this modeled
 extent is active and does not walk or disclose any caller-selected address.
