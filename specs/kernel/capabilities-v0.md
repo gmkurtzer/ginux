@@ -25,10 +25,15 @@ There are three authority-producing operations:
    unsealed. It is not directly callable from userspace. The domain manager
    first resolves a live source capability in the delegating domain and limits
    the new root to that object and rights before sealing the destination table.
+   The destination retains the generation-tagged parent domain and source
+   handle as delegation provenance.
 
 Every derived entry records its parent handle. Revoking an entry recursively
 removes all descendants. Authorization checks require a live generation, the
-same object, and every requested right.
+same object, and every requested right. For delegated domain roots, each check
+also walks the bounded parent-domain chain and revalidates the original object
+and requested rights. Revoking or retiring any parent therefore invalidates the
+child immediately even if the child's local table entry remains allocated.
 
 The current 64-entry table is deliberately fixed and local. It does not yet
 define general userspace-requested transfer, object lifetime, concurrency,
@@ -37,4 +42,6 @@ faulted bootstrap service removes its complete local table before its client
 resumes. The boot test covers rejected
 equal/expanded derivation, least-rights access, recursive revocation, slot
 reuse, stale-generation rejection, one kernel-mediated IPC delegation, and
-cross-domain handle substitution.
+cross-domain handle substitution. A separate manager invariant leaves a child
+handle locally live, revokes its control-plane source, and requires the full
+authorization check to fail.

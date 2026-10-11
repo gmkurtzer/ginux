@@ -52,6 +52,13 @@ struct Domain {
     remaining_calls: u16,
     active_threads: u16,
     thread_limit: u16,
+    delegated_from: Option<Delegation>,
+}
+
+#[derive(Clone, Copy)]
+struct Delegation {
+    domain: DomainId,
+    source: Handle,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -157,6 +164,7 @@ impl Manager {
             remaining_calls: CONTROL_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
+            delegated_from: None,
         });
         self.control_plane_created = true;
         self.control_plane_id = Some(id);
@@ -202,9 +210,39 @@ impl Manager {
             remaining_calls: SERVICE_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
+            delegated_from: Some(Delegation {
+                domain: control_id,
+                source,
+            }),
         });
         self.service_id = Some(id);
         Some(id)
+    }
+
+    fn permits(&self, id: DomainId, handle: Handle, object: u64, rights: Rights) -> bool {
+        let Some(domain) = self.domain(id) else {
+            return false;
+        };
+        if !domain.capabilities.permits(handle, object, rights) {
+            return false;
+        }
+        let mut delegation = domain.delegated_from;
+        for _ in 0..MAX_DOMAINS {
+            let Some(parent) = delegation else {
+                return true;
+            };
+            let Some(parent_domain) = self.domain(parent.domain) else {
+                return false;
+            };
+            if !parent_domain
+                .capabilities
+                .permits(parent.source, object, rights)
+            {
+                return false;
+            }
+            delegation = parent_domain.delegated_from;
+        }
+        false
     }
 }
 
@@ -309,10 +347,39 @@ pub(crate) fn handle_permits(domain_raw: u64, raw: u64, object: u64, rights: Rig
     let Some(manager) = global_manager() else {
         return false;
     };
-    let Some(domain) = manager.domain(domain_id) else {
-        return false;
-    };
-    domain.capabilities.permits(handle, object, rights)
+    manager.permits(domain_id, handle, object, rights)
+}
+
+pub(crate) fn verify_cross_domain_revocation_invariants() -> bool {
+    verify_cross_domain_revocation_invariants_inner().unwrap_or(false)
+}
+
+fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    let control = manager.create_control_plane(&grants)?;
+    let service = manager.create_service()?;
+    let service_handle = manager.domain(service)?.boot_roots[0]?;
+    let parent_handle = manager.domain(control)?.boot_roots[2]?;
+    let rights = Rights::READ.union(Rights::WRITE);
+    if !manager.permits(service, service_handle, 3, rights) {
+        return Some(false);
+    }
+    manager.domains[usize::from(control.slot)]
+        .as_mut()?
+        .capabilities
+        .revoke(parent_handle);
+    Some(
+        manager
+            .domain(service)?
+            .capabilities
+            .permits(service_handle, 3, rights)
+            && !manager.permits(service, service_handle, 3, rights),
+    )
 }
 
 pub(crate) fn charge_call(domain_raw: u64) -> bool {

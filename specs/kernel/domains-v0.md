@@ -23,6 +23,10 @@ no host-control or console handle. Every call-gate authorization resolves the
 opaque handle in the current scheduler domain, never in a global or
 control-plane-default namespace. The boot gate rejects using the service handle
 in the control domain and the control IPC handle in the service domain.
+The service record also retains its parent domain and source capability. Every
+service authorization revalidates that bounded provenance chain, so revoking
+the control-plane source invalidates the child without relying on cooperative
+service cleanup.
 
 The domains own distinct W^X address spaces and scheduler contexts. When the
 service's sole thread faults, the exception path first removes the scheduler
