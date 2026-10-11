@@ -71,7 +71,9 @@ safe fallback.
 The first pointer-bearing operations perform bounded reads and writes against
 validated lower-canonical user ranges. They reject absent, supervisor-only, or
 large-page mappings at every level; writes additionally require effective
-writable permission, while reads stage the result before use. This is not yet
+writable permission, while reads stage the result before use. Each operation
+also requires active CR3 to match the current scheduler record before walking
+the mapping. This is not yet
 a general copyin/copyout subsystem: mappings cannot mutate concurrently in the
 single-core bootstrap, and there is no exception-table recovery for a race or
 hardware fault during a copy.

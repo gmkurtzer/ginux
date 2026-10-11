@@ -32,6 +32,9 @@ pub(crate) fn copy_from_current_user(address: u64, output: &mut [u8]) -> bool {
         return false;
     }
     let root = current_root();
+    if scheduler::current_address_space_root() != Some(root) {
+        return false;
+    }
     for offset in 0..output.len() {
         let Some(byte_address) = address.checked_add(offset as u64) else {
             return false;
@@ -61,6 +64,9 @@ pub(crate) fn copy_to_current_user(address: u64, input: &[u8]) -> bool {
         return false;
     }
     let root = current_root();
+    if scheduler::current_address_space_root() != Some(root) {
+        return false;
+    }
     for offset in 0..input.len() {
         let Some(byte_address) = address.checked_add(offset as u64) else {
             return false;

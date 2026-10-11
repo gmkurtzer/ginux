@@ -627,6 +627,15 @@ pub(crate) fn current_domain() -> Option<u64> {
     Some(runtime.scheduler.thread(current)?.domain)
 }
 
+pub(crate) fn current_address_space_root() -> Option<u64> {
+    let runtime = runtime_mut()?;
+    let current = runtime.scheduler.current?;
+    runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.address_space_root)
+}
+
 pub(crate) fn fault_runtime(
     frame: &mut UserFaultFrame,
     fault_address: u64,
