@@ -1,0 +1,11 @@
+[package]
+name = "ginux-boot"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "ginux-boot"
+path = "src/main.rs"
+
+[dependencies]

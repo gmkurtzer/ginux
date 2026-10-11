@@ -34,9 +34,10 @@ The design is intentionally narrower than Linux in hardware support. A binary co
 ### Initial target
 
 - Architecture: x86-64.
-- First virtual profile: QEMU with KVM acceleration, Q35 machine model, OVMF UEFI, fixed CPU/memory topology, and selected virtio console, block, network, and entropy devices.
-- First Linux compatibility profile: a pinned Rocky Linux 10 x86-64 system-container image.
-- First milestone workload: boot the Rocky system container to a console managed by systemd.
+- First development profile: an Apple Silicon Mac running an x86-64 Q35/OVMF guest under QEMU TCG; UTM may be used as an optional interactive frontend.
+- First accelerated profile: the same x86-64 Q35/OVMF guest and device model under QEMU with KVM acceleration on an x86-64 Linux host.
+- First milestone workload: boot the kernel, seal the authority envelope, create one isolated domain, and start a minimal native control-plane process.
+- First Linux compatibility profile, after the native boot/domain path is established: a pinned Rocky Linux 10 x86-64 system-container image.
 - Later hardware profile: one explicitly selected server with PCIe, IOMMU, NVMe, high-speed Ethernet/RDMA, and an NVIDIA GPU.
 - Later workloads: SSH, package operations, OCI workloads, CUDA, PyTorch, distributed AI training/inference, and HPC applications.
 
