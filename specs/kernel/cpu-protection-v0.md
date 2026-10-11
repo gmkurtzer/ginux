@@ -32,6 +32,11 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
 - User-mode instruction prevention (`CR4.UMIP`) required, enabled, and
   rechecked so ring 3 cannot inspect global/local descriptor tables, the task
   register, or the interrupt descriptor table with the affected instructions.
+- Ring-3 I/O privilege denied in two independent places: scheduler contexts
+  reject nonzero `RFLAGS.IOPL` (as well as nested-task and virtual-8086 state),
+  and the loaded TSS places its I/O-map base beyond the descriptor limit so no
+  user port is authorized. The kernel reads back TR, the busy TSS descriptor,
+  its base and limit, and the live I/O-map offset before entering userspace.
 
 Interrupts remain disabled while kernel bootstrap code runs. The kernel triggers
 `INT3` during every QEMU boot test; the assembly entry stub preserves

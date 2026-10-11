@@ -333,6 +333,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: architectural exception gates invalid\r\n");
     }
     serial_write("ginux: GDT/TSS/IDT active\r\n");
+    if !arch::x86_64::cpu::task_register_denies_user_io() {
+        kernel_fail("ginux: user I/O-port isolation inactive\r\n");
+    }
+    serial_write("ginux: user I/O-port access denied\r\n");
     serial_write("ginux: architectural exception gates active\r\n");
     if !arch::x86_64::cpu::verify_breakpoint() {
         kernel_fail("ginux: breakpoint exception test failed\r\n");

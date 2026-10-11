@@ -408,6 +408,25 @@ pub(crate) fn install() -> bool {
     exception_gates_are_valid()
 }
 
+pub(crate) fn task_register_denies_user_io() -> bool {
+    let selector: u16;
+    unsafe {
+        asm!("str {selector:x}", selector = out(reg) selector, options(nomem, nostack, preserves_flags));
+    }
+    let low = unsafe { core::ptr::addr_of!(GDT).cast::<u64>().add(3).read() };
+    let high = unsafe { core::ptr::addr_of!(GDT).cast::<u64>().add(4).read() };
+    let limit = (low & 0xffff) | ((low >> 32) & 0x000f_0000);
+    let base =
+        ((low >> 16) & 0x00ff_ffff) | ((low >> 32) & 0xff00_0000) | ((high & 0xffff_ffff) << 32);
+    let io_map_base = unsafe { core::ptr::addr_of!(TSS.io_map_base).read_unaligned() };
+    selector == TSS_SELECTOR
+        && low & (1 << 47) != 0
+        && (low >> 40) & 0x0f == 0x0b
+        && limit == (size_of::<TaskStateSegment>() - 1) as u64
+        && base == core::ptr::addr_of!(TSS) as u64
+        && u64::from(io_map_base) > limit
+}
+
 pub(crate) fn enable_supervisor_execution_prevention() -> bool {
     if __cpuid(0).eax < CPUID_STRUCTURED_FEATURES
         || __cpuid_count(CPUID_STRUCTURED_FEATURES, 0).ebx & CPUID_SMEP == 0

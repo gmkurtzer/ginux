@@ -183,6 +183,11 @@ if ! grep -q '^ginux: GDT/TSS/IDT active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: user I/O-port access denied' "$output_file"; then
+    echo "Boot test failed: ring-3 I/O-port access is not denied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: architectural exception gates active' "$output_file"; then
     echo "Boot test failed: architectural exceptions are not fully covered." >&2
     exit 1
