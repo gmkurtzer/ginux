@@ -336,6 +336,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: cross-domain capability revocation verified\r\n");
     serial_write("ginux: per-root delegation provenance verified\r\n");
+    if !domain::verify_domain_ancestry_invariants() {
+        kernel_fail("ginux: domain ancestry invariant failed\r\n");
+    }
+    serial_write("ginux: domain lifecycle ancestry verified\r\n");
     if !domain::verify_lifecycle_event_invariants() {
         kernel_fail("ginux: lifecycle event queue invariant failed\r\n");
     }
@@ -404,6 +408,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     let ipc_rights = capability::Rights::READ.union(capability::Rights::WRITE);
     if domain::control_plane_id() != Some(control_plane)
+        || !domain::control_owns_service(control_plane, service_domain)
         || !domain::handle_permits(service_domain, service_ipc_handle, 3, ipc_rights)
         || domain::handle_permits(
             control_plane,

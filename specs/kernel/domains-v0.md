@@ -6,7 +6,10 @@ The kernel constructs one initial control-plane domain and one isolated service
 domain in a four-slot bootstrap table retained for the kernel lifetime. A domain
 identifier combines a fixed-table slot and generation so stale identifiers
 cannot name a later occupant. The record has an explicit role and lifecycle
-state and owns a domain-local capability table.
+state, a generation-tagged lifecycle parent, and a domain-local capability
+table. The control plane has no parent; each bootstrap service is its direct
+child. Ancestry walks are bounded by the fixed domain table and reject missing,
+stale, and self relationships; malformed chains cannot loop indefinitely.
 
 Initial control-plane authority is a finite list of boot grants. Each grant
 becomes a root capability, after which the capability table's boot-authority
@@ -30,6 +33,13 @@ root's bounded provenance chain, so revoking the control-plane source
 invalidates the root and its derived children without relying on cooperative
 service cleanup. Per-root records prevent a future multi-capability service
 from validating one root through an unrelated source.
+
+Lifecycle ancestry and authority provenance are separate fields with separate
+checks. Being a child of the control plane permits accounting and cleanup, but
+does not grant any host-control capability. The invariant test requires this
+least-authority property, retires a child, rejects its stale ancestry, and then
+requires a replacement generation to be attached to the persistent control
+parent.
 
 The domains own distinct W^X address spaces and scheduler contexts. When the
 service's sole thread faults, the exception path first removes the scheduler

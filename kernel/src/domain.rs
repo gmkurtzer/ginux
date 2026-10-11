@@ -52,6 +52,7 @@ struct Domain {
     remaining_calls: u16,
     active_threads: u16,
     thread_limit: u16,
+    parent: Option<DomainId>,
     delegated_roots: [Option<DelegatedRoot>; MAX_BOOT_GRANTS],
 }
 
@@ -165,6 +166,7 @@ impl Manager {
             remaining_calls: CONTROL_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
+            parent: None,
             delegated_roots: [None; MAX_BOOT_GRANTS],
         });
         self.control_plane_created = true;
@@ -217,6 +219,7 @@ impl Manager {
             remaining_calls: SERVICE_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
+            parent: Some(control_id),
             delegated_roots,
         });
         self.service_id = Some(id);
@@ -257,6 +260,37 @@ impl Manager {
         }
         self.control_plane_id == Some(id)
             && domain.boot_roots[..domain.boot_root_count].contains(&Some(root))
+    }
+
+    fn is_descendant(&self, ancestor: DomainId, child: DomainId) -> bool {
+        if ancestor == child || self.domain(ancestor).is_none() {
+            return false;
+        }
+        let mut current = child;
+        for _ in 0..MAX_DOMAINS {
+            let Some(parent) = self.domain(current).and_then(|domain| domain.parent) else {
+                return false;
+            };
+            if parent == ancestor {
+                return true;
+            }
+            current = parent;
+        }
+        false
+    }
+
+    fn retire_service(&mut self, id: DomainId) -> bool {
+        if self.service_id != Some(id)
+            || self
+                .domain(id)
+                .is_none_or(|domain| domain.role != Role::Service || domain.active_threads != 0)
+        {
+            return false;
+        }
+        self.domains[usize::from(id.slot)] = None;
+        self.service_id = None;
+        self.last_retired_service_id = Some(id);
+        true
     }
 }
 
@@ -404,6 +438,44 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
     )
 }
 
+pub(crate) fn verify_domain_ancestry_invariants() -> bool {
+    verify_domain_ancestry_invariants_inner().unwrap_or(false)
+}
+
+fn verify_domain_ancestry_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    let control = manager.create_control_plane(&grants)?;
+    let service = manager.create_service()?;
+    let service_ipc = manager.domain(service)?.boot_roots[0]?;
+    if !manager.is_descendant(control, service)
+        || manager.is_descendant(service, control)
+        || manager.is_descendant(control, control)
+        || manager.permits(service, service_ipc, 1, Rights::READ)
+        || !manager.retire_service(service)
+        || manager.is_descendant(control, service)
+    {
+        return Some(false);
+    }
+    let replacement = manager.create_service()?;
+    Some(replacement != service && manager.is_descendant(control, replacement))
+}
+
+pub(crate) fn control_owns_service(control_raw: u64, service_raw: u64) -> bool {
+    let (Some(control), Some(service), Some(manager)) = (
+        decode_id(control_raw),
+        decode_id(service_raw),
+        global_manager(),
+    ) else {
+        return false;
+    };
+    manager.is_descendant(control, service)
+}
+
 pub(crate) fn charge_call(domain_raw: u64) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
@@ -516,17 +588,7 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
     let Some(manager) = global_manager_mut() else {
         return false;
     };
-    if manager.service_id != Some(id)
-        || manager
-            .domain(id)
-            .is_none_or(|domain| domain.role != Role::Service || domain.active_threads != 0)
-    {
-        return false;
-    }
-    manager.domains[usize::from(id.slot)] = None;
-    manager.service_id = None;
-    manager.last_retired_service_id = Some(id);
-    true
+    manager.retire_service(id)
 }
 
 pub(crate) fn record_service_fault(domain_raw: u64) -> bool {

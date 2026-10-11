@@ -46,3 +46,9 @@ Control-plane powers are distinct capabilities. Process enumeration, lifecycle c
 ## Initial validation
 
 The first executable milestone boots through UEFI, fixes the authority envelope, creates one minimal domain, launches a control-plane process, and demonstrates that the process cannot invoke an operation absent from its boot-granted capabilities.
+
+The bootstrap implementation records the generation-tagged control domain as
+each service's lifecycle parent independently of per-capability delegation
+provenance. Tests require ancestry to disappear with a retired generation and
+to reattach explicitly for its replacement; neither relationship grants host
+authority.
