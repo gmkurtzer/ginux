@@ -39,6 +39,11 @@ requiring every executable leaf to have a PE/runtime-code justification, every
 PE image leaf to match its effective write policy, and every unsplit region to
 remain NX.
 
+The signed manifest and measured control-plane bundle receive a direct range
+check after activation and after the complete ring-3 workload. Every page
+covering either byte range must be present, read-only, and non-executable; this
+ties boot-policy immutability to hardware mappings rather than Rust constness.
+
 Before writing CR3, the kernel verifies that its current code, stack, boot information, UEFI memory map, shutdown runtime-service entry, and page-table objects all fall within the mapped range. The kernel reads CR3 back and verifies that it identifies the expected PML4.
 
 Immediately after activating the kernel root, the kernel sets and reads back

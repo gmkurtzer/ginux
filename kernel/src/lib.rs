@@ -278,6 +278,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: NX-by-default identity map active\r\n");
     serial_write("ginux: PE executable identity pages read-only\r\n");
     serial_write("ginux: PE image section permissions enforced\r\n");
+    if !arch::x86_64::paging::identity_range_is_read_only_data(
+        boot_info.manifest as usize,
+        boot_info.manifest_size,
+    ) || !arch::x86_64::paging::identity_range_is_read_only_data(
+        boot_info.control_plane_bundle as usize,
+        boot_info.control_plane_bundle_size,
+    ) {
+        kernel_fail("ginux: boot policy inputs remain mutable or executable\r\n");
+    }
+    serial_write("ginux: boot policy inputs immutable and non-executable\r\n");
     if !arch::x86_64::paging::supervisor_write_protect_enabled() {
         kernel_fail("ginux: supervisor write protection inactive\r\n");
     }
@@ -513,6 +523,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !domain::service_fault_was_delivered(service_domain)
         || !arch::x86_64::paging::static_page_tables_are_read_only()
         || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
+        || !arch::x86_64::paging::identity_range_is_read_only_data(
+            boot_info.manifest as usize,
+            boot_info.manifest_size,
+        )
+        || !arch::x86_64::paging::identity_range_is_read_only_data(
+            boot_info.control_plane_bundle as usize,
+            boot_info.control_plane_bundle_size,
+        )
         || !arch::x86_64::cpu::execute_disable_enabled()
         || !arch::x86_64::cpu::supervisor_execution_prevention_enabled()
         || !arch::x86_64::cpu::supervisor_access_prevention_enabled()

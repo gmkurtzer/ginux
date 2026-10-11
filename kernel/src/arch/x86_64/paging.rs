@@ -463,6 +463,55 @@ pub(crate) fn identity_map_obeys_wx(boot_info: &BootInfo, image: &ImageSummary) 
     true
 }
 
+pub(crate) fn identity_range_is_read_only_data(start: usize, length: usize) -> bool {
+    let Some(last) = length
+        .checked_sub(1)
+        .and_then(|offset| start.checked_add(offset))
+    else {
+        return false;
+    };
+    if last >= INITIAL_IDENTITY_LIMIT {
+        return false;
+    }
+    let first_page = start / PAGE_SIZE * PAGE_SIZE;
+    let last_page = last / PAGE_SIZE * PAGE_SIZE;
+    let mut address = first_page;
+    loop {
+        let region = address / LARGE_PAGE_SIZE as usize;
+        let directory = unsafe {
+            core::ptr::addr_of!(PAGE_DIRECTORIES)
+                .cast::<PageTable>()
+                .add(region / ENTRY_COUNT)
+        };
+        let entries = unsafe { core::ptr::addr_of!((*directory).0).cast::<u64>() };
+        let directory_entry = unsafe { entries.add(region % ENTRY_COUNT).read() };
+        let permissions_valid = if directory_entry & LARGE_PAGE != 0 {
+            directory_entry & PRESENT != 0
+                && directory_entry & WRITABLE == 0
+                && directory_entry & NO_EXECUTE != 0
+        } else {
+            let table = (directory_entry as usize & ADDRESS_MASK) as *const u64;
+            if directory_entry & PRESENT == 0 || table.is_null() {
+                false
+            } else {
+                let page = (address % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
+                let leaf = unsafe { table.add(page).read() };
+                leaf & PRESENT != 0 && leaf & WRITABLE == 0 && leaf & NO_EXECUTE != 0
+            }
+        };
+        if !permissions_valid {
+            return false;
+        }
+        if address == last_page {
+            return true;
+        }
+        let Some(next) = address.checked_add(PAGE_SIZE) else {
+            return false;
+        };
+        address = next;
+    }
+}
+
 unsafe fn read_descriptor(boot_info: &BootInfo, index: usize) -> UefiMemoryDescriptor {
     let address = boot_info
         .memory_map

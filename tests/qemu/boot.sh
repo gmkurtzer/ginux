@@ -128,6 +128,11 @@ if ! grep -q '^ginux: PE image section permissions enforced' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: boot policy inputs immutable and non-executable' "$output_file"; then
+    echo "Boot test failed: boot policy inputs remain mutable or executable." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: supervisor write protection active' "$output_file"; then
     echo "Boot test failed: supervisor write protection is inactive." >&2
     exit 1

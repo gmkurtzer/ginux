@@ -25,15 +25,22 @@ manifest authorizes host-control object 1 with read/write/manage and console
 object 2 with write. Object 3 grants read/write access to the bounded bootstrap
 IPC channel. These parsed grants—not parallel hard-coded roots—seed the
 control-plane capability table before its authority insertion path is sealed.
-The bundle range in handoff v2 must exactly match the recorded size and digest;
+The bundle range in handoff v3 must exactly match the recorded size and digest;
 only those verified bytes are copied into the ring-3 executable mapping.
 
 The kernel hashes the exact canonical bytes, requires equality with the digest
-in boot handoff v2, and strictly verifies its Ed25519 signature before parsing.
+in boot handoff v3, and strictly verifies its Ed25519 signature before parsing.
 The pinned key is an RFC test identity, not a deployer trust root. Sequence
 rollback storage, key identifiers and rotation, additional bundle records,
 platform constraints, and independent site policy remain required for a
 production authenticated boot.
+
+After the kernel activates its own page tables, it requires the complete
+manifest and measured bundle byte ranges to resolve through present,
+read-only, non-executable identity leaves. It repeats this check after the
+ring-3 scheduling, fault, and restart workload. Runtime code therefore cannot
+mutate the source policy or payload bytes through their retained identity
+aliases without first subverting the sealed paging hierarchy.
 
 Every QEMU boot also invokes the canonical parser directly on malformed copies
 of the authenticated bytes. The negative gate requires rejection of truncation,
