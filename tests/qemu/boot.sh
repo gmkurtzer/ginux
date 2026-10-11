@@ -43,8 +43,18 @@ qemu_pid=""
 
 cat "$output_file"
 
-if ! grep -q '^GINUX_BOOT_OK' "$output_file"; then
-    echo "Boot test failed: success marker was not emitted." >&2
+if ! grep -q '^GINUX_KERNEL_OK' "$output_file"; then
+    echo "Boot test failed: the post-firmware kernel marker was not emitted." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: memory descriptors: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the kernel did not receive a valid UEFI memory map." >&2
+    exit 1
+fi
+
+if grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
+    echo "Boot test failed: a panic marker was emitted." >&2
     exit 1
 fi
 

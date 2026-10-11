@@ -9,3 +9,4 @@ name = "ginux-boot"
 path = "src/main.rs"
 
 [dependencies]
+ginux-kernel = { path = "../../kernel" }

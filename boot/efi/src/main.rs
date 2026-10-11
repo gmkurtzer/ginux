@@ -4,13 +4,14 @@
 use core::arch::asm;
 use core::ffi::c_void;
 use core::panic::PanicInfo;
+use ginux_kernel::{kernel_entry, BootInfo, ResetSystem};
 
 type EfiHandle = *mut c_void;
 type EfiStatus = usize;
 
 const EFI_SUCCESS: EfiStatus = 0;
-const EFI_RESET_SHUTDOWN: u32 = 2;
 const COM1: u16 = 0x3f8;
+const MEMORY_MAP_CAPACITY: usize = 128 * 1024;
 
 #[repr(C)]
 struct EfiTableHeader {
@@ -41,7 +42,44 @@ struct EfiRuntimeServices {
     get_next_variable_name: usize,
     set_variable: usize,
     get_next_high_monotonic_count: usize,
-    reset_system: unsafe extern "efiapi" fn(u32, EfiStatus, usize, *const c_void),
+    reset_system: ResetSystem,
+}
+
+type GetMemoryMap =
+    unsafe extern "efiapi" fn(*mut usize, *mut u8, *mut usize, *mut usize, *mut u32) -> EfiStatus;
+
+type ExitBootServices = unsafe extern "efiapi" fn(EfiHandle, usize) -> EfiStatus;
+
+#[repr(C)]
+struct EfiBootServices {
+    header: EfiTableHeader,
+    raise_tpl: usize,
+    restore_tpl: usize,
+    allocate_pages: usize,
+    free_pages: usize,
+    get_memory_map: GetMemoryMap,
+    allocate_pool: usize,
+    free_pool: usize,
+    create_event: usize,
+    set_timer: usize,
+    wait_for_event: usize,
+    signal_event: usize,
+    close_event: usize,
+    check_event: usize,
+    install_protocol_interface: usize,
+    reinstall_protocol_interface: usize,
+    uninstall_protocol_interface: usize,
+    handle_protocol: usize,
+    reserved: usize,
+    register_protocol_notify: usize,
+    locate_handle: usize,
+    locate_device_path: usize,
+    install_configuration_table: usize,
+    load_image: usize,
+    start_image: usize,
+    exit: usize,
+    unload_image: usize,
+    exit_boot_services: ExitBootServices,
 }
 
 #[repr(C)]
@@ -56,13 +94,18 @@ struct EfiSystemTable {
     standard_error_handle: EfiHandle,
     standard_error: *mut EfiSimpleTextOutputProtocol,
     runtime_services: *mut EfiRuntimeServices,
-    boot_services: *mut c_void,
+    boot_services: *mut EfiBootServices,
     number_of_table_entries: usize,
     configuration_table: *mut c_void,
 }
 
+#[repr(C, align(16))]
+struct MemoryMapStorage([u8; MEMORY_MAP_CAPACITY]);
+
+static mut MEMORY_MAP_STORAGE: MemoryMapStorage = MemoryMapStorage([0; MEMORY_MAP_CAPACITY]);
+
 #[no_mangle]
-extern "efiapi" fn efi_main(_image: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
+extern "efiapi" fn efi_main(image: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
     serial_init();
     serial_write("ginux: UEFI boot entered\r\n");
 
@@ -97,20 +140,61 @@ extern "efiapi" fn efi_main(_image: EfiHandle, system_table: *mut EfiSystemTable
         }
     }
 
-    serial_write("GINUX_BOOT_OK\r\n");
+    if system_table.is_null() {
+        panic!("UEFI did not provide a system table");
+    }
 
-    if !system_table.is_null() {
-        // SAFETY: The runtime-services pointer is supplied by UEFI. A shutdown
-        // reset gives both interactive and automated runs a clean completion.
-        unsafe {
-            let runtime = (*system_table).runtime_services;
-            if !runtime.is_null() {
-                ((*runtime).reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
-            }
+    // SAFETY: UEFI owns the system and service tables until ExitBootServices.
+    // The handoff function validates the required pointers before using them.
+    let boot_info = unsafe { exit_boot_services(image, system_table) };
+
+    // SAFETY: Boot services have ended, the memory-map storage is static, and
+    // the kernel entry never returns to firmware boot code.
+    unsafe { kernel_entry(core::ptr::addr_of!(boot_info)) }
+}
+
+unsafe fn exit_boot_services(image: EfiHandle, system_table: *mut EfiSystemTable) -> BootInfo {
+    let boot_services = (*system_table).boot_services;
+    let runtime_services = (*system_table).runtime_services;
+    if boot_services.is_null() || runtime_services.is_null() {
+        panic!("UEFI service table is missing");
+    }
+
+    let memory_map = core::ptr::addr_of_mut!(MEMORY_MAP_STORAGE.0).cast::<u8>();
+
+    // ExitBootServices may reject a stale map key if firmware changes its map
+    // between the two calls. Reacquire once without invoking any other firmware
+    // service, as required by the UEFI handoff protocol.
+    for _ in 0..2 {
+        let mut memory_map_size = MEMORY_MAP_CAPACITY;
+        let mut map_key = 0;
+        let mut descriptor_size = 0;
+        let mut descriptor_version = 0;
+
+        let status = ((*boot_services).get_memory_map)(
+            &mut memory_map_size,
+            memory_map,
+            &mut map_key,
+            &mut descriptor_size,
+            &mut descriptor_version,
+        );
+        if status != EFI_SUCCESS {
+            panic!("failed to obtain UEFI memory map");
+        }
+
+        let status = ((*boot_services).exit_boot_services)(image, map_key);
+        if status == EFI_SUCCESS {
+            return BootInfo {
+                memory_map,
+                memory_map_size,
+                memory_descriptor_size: descriptor_size,
+                memory_descriptor_version: descriptor_version,
+                reset_system: (*runtime_services).reset_system,
+            };
         }
     }
 
-    EFI_SUCCESS
+    panic!("failed to exit UEFI boot services");
 }
 
 #[panic_handler]
