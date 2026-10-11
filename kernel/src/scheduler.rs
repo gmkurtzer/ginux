@@ -740,6 +740,47 @@ pub(crate) fn cancel_ready_auxiliary(domain_id: u64) -> bool {
     domain::detach_thread(domain_id)
 }
 
+pub(crate) fn initialize_staged_auxiliary(
+    domain_id: u64,
+    payload_address: u64,
+    payload_length: u64,
+) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let mut matched = None;
+    for thread in runtime.scheduler.threads.iter_mut().flatten() {
+        if thread.domain == domain_id {
+            if matched.is_some() || thread.state != State::Staged {
+                return false;
+            }
+            matched = Some(thread);
+        }
+    }
+    let Some(thread) = matched else {
+        return false;
+    };
+    thread.context.rsi = payload_address;
+    thread.context.rdx = payload_length;
+    true
+}
+
+pub(crate) fn auxiliary_is_staged(domain_id: u64) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let mut matches = runtime
+        .scheduler
+        .threads
+        .iter()
+        .flatten()
+        .filter(|thread| thread.domain == domain_id);
+    matches
+        .next()
+        .is_some_and(|thread| thread.state == State::Staged)
+        && matches.next().is_none()
+}
+
 pub(crate) fn rollback_service_restart(domain: u64, prior_owner: u64) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;

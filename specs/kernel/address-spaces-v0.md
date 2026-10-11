@@ -45,8 +45,13 @@ and requires the registry and allocator ownership count to be empty afterward.
 The userspace stop path may remove a scheduler-ready auxiliary, detach its
 thread reservation, and then release the same registry entry before publishing
 retirement. It cannot release a running address space.
+While an auxiliary remains staged, the control plane may copy one bounded
+payload into the high end of its first private writable, non-executable stack
+page. The scheduler publishes only the resulting target virtual address and
+length in the saved context; no control-plane mapping or physical address is
+shared with the workload.
 During the primary bootstrap workload, the control plane creates a fresh
-auxiliary generation and submits a seven-byte exit-only program through the
+auxiliary generation and submits a payload-validating program through the
 bounded management loader. The scheduler stages exactly one thread against the
 registered root, keeps it staged across involuntary preemption, dispatches it
 after the control plane exits, and handles its exit through the normal syscall

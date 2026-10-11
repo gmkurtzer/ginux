@@ -195,6 +195,15 @@ proof first supplies an unmapped source after
 target allocation, requires failure, then successfully loads the same exact
 generation. The second allocation can succeed only if the failed transaction
 returned every target frame and left no resource binding behind.
+Action 4 initializes a staged auxiliary's private payload. The source field is
+the exact staged domain generation, the object field is a readable caller
+address, and the rights field is a byte length from 1 through 4096. The kernel
+copies the complete bounded range into the high end of the target's private NX
+stack page, then records its target virtual address in `RSI` and its length in
+`RDX`. It rejects absent, running, blocked, ambiguous, or wrong-generation
+contexts. The hardware proof initializes both a subsequently cancelled workload
+and the executed workload; the latter validates the pointer, length, and bytes
+before exiting.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

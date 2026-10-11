@@ -19,6 +19,9 @@ block, or exit promotes staged contexts to `Ready` before selection. This gives
 the control plane a deterministic interval in which it can cancel a submitted
 workload. Cancellation removes only an exact `Staged` or `Ready` domain,
 reverses its thread charge, and cannot remove a running or blocked context.
+A staged auxiliary may receive one bounded private-stack payload. Successful
+initialization sets its saved `RSI` to the target virtual address and `RDX` to
+the byte length without changing readiness or exposing the source mapping.
 
 A blocking IPC receive atomically saves the current context, marks it
 `Blocked`, and selects another ready thread. If none exists, the transition is
@@ -80,11 +83,11 @@ charge and restores the retained address-space owner recorded by the scheduler;
 it cannot remove a running, blocked, ambiguous, or wrong-domain context.
 
 Call budgets belong to domains rather than threads. The control domain receives
-34 charged calls and each service generation receives three. Every call-gate
+36 charged calls and each service generation receives three. Every call-gate
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 39 charged calls across all generations, deliberately exhausts the
+exactly 41 charged calls across all generations, deliberately exhausts the
 control domain, and requires its next discovery call to be rejected before it
 exits.
 

@@ -149,6 +149,11 @@ writes a seven-byte exit program,
 first rejects an unmapped source with full allocation rollback, loads the same
 exact generation through this action, and exits; ordinary scheduler handoff
 dispatches the auxiliary before returning to the kernel verifier.
+Management action 4 initializes at most one page of private NX stack payload
+for an exact staged generation. The pointer and length are installed in the
+saved `RSI`/`RDX` context only after the complete caller range is validated and
+copied. The executed proof workload compares both values and the expected
+eight-byte payload before requesting normal exit.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

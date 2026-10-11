@@ -401,6 +401,39 @@ pub(crate) fn stop_auxiliary_from_current_user(
         && domain::stop_auxiliary_service(supervisor, capability, domain_id)
 }
 
+pub(crate) fn initialize_staged_auxiliary_from_current_user(
+    domain_id: u64,
+    source: u64,
+    length: u64,
+) -> bool {
+    let Ok(length) = usize::try_from(length) else {
+        return false;
+    };
+    if !(1..=PAGE_SIZE).contains(&length) || !scheduler::auxiliary_is_staged(domain_id) {
+        return false;
+    }
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    let offset = PAGE_SIZE - length;
+    // SAFETY: The private stack frame remains owned by this exact staged
+    // domain and the bounded range cannot leave that single NX page.
+    let payload = unsafe {
+        core::slice::from_raw_parts_mut(registered.space.first_stack_frame.add(offset), length)
+    };
+    if !copy_from_current_user(source, payload) {
+        return false;
+    }
+    scheduler::initialize_staged_auxiliary(
+        domain_id,
+        (USER_TEST_ADDRESS + 3 * PAGE_SIZE - length) as u64,
+        length as u64,
+    )
+}
+
 fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(slot) =
