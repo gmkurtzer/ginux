@@ -878,17 +878,24 @@ fn create_auxiliary_service(
     let Some(request) = control_abi::parse_management_request(&bytes) else {
         return u64::MAX - 2;
     };
-    if request.action != control_abi::MANAGEMENT_CREATE_AUXILIARY {
-        return u64::MAX - 2;
+    match request.action {
+        control_abi::MANAGEMENT_CREATE_AUXILIARY => domain::create_auxiliary_service(
+            caller_domain,
+            capability,
+            request.source,
+            request.object,
+            request.rights,
+        )
+        .unwrap_or(u64::MAX - 2),
+        control_abi::MANAGEMENT_STOP_AUXILIARY
+            if request.object == 0
+                && request.rights == 0
+                && domain::stop_auxiliary_service(caller_domain, capability, request.source) =>
+        {
+            0
+        }
+        _ => u64::MAX - 2,
     }
-    domain::create_auxiliary_service(
-        caller_domain,
-        capability,
-        request.source,
-        request.object,
-        request.rights,
-    )
-    .unwrap_or(u64::MAX - 2)
 }
 
 fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {

@@ -173,6 +173,13 @@ through valid authority, creates one attenuated host-read auxiliary through host
 scheduler proof then executes and retires that exact generation. New lifecycle
 actions must receive new action values and explicitly versioned layouts rather
 than repurposing existing fields.
+Action 2 requests stop of the exact generation in the source field and requires
+the object and rights fields to be zero. It immediately revokes the target's
+delegated roots. An unstarted, resource-free target is then retired and emits
+kind 3. Runtime stop is rejected until scheduler cancellation and resource
+drain are integrated with this action. The ring-3 proof stops its first created generation, verifies the
+sequenced retirement in the kernel, then creates a distinct generation for the
+live execution proof.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

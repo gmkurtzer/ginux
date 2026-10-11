@@ -133,6 +133,10 @@ lifecycle growth. It creates only an unstarted domain: address-space constructio
 and scheduler admission remain separate kernel transactions. The ring-3 proof
 denies creation through a non-managing capability, then delegates attenuated
 host-read authority into the clean-exit workload through the authorized path.
+Management action 2 accepts only an unstarted, resource-free exact generation with zero unused fields,
+reuses the existing two-phase stop transition, and publishes normal auxiliary
+retirement. The proof creates and stops one unstarted generation before creating
+the separate generation admitted to hardware execution.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

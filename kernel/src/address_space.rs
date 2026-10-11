@@ -559,6 +559,23 @@ pub(crate) fn verify_ring3_control_plane(
 
 pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
     const EXIT_PROGRAM: [u8; 7] = [0xb8, 2, 0, 0, 0, 0xcd, 0x80];
+    let Some(stopped_event) = domain::take_lifecycle_event() else {
+        return false;
+    };
+    let Some((stopped_kind, stopped_domain, stopped_sequence)) =
+        domain::last_lifecycle_event_audit()
+    else {
+        return false;
+    };
+    if stopped_kind != crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
+        || stopped_sequence != 2
+        || stopped_event
+            != ((stopped_domain << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
+        || domain::last_lifecycle_service_identity().is_none()
+        || !domain::domain_is_retired(stopped_domain)
+    {
+        return false;
+    }
     let Some(auxiliary) = domain::first_ready_auxiliary_service() else {
         return false;
     };
@@ -604,7 +621,7 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
             == Some((
                 crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED,
                 auxiliary,
-                2,
+                3,
             ))
         && domain::last_lifecycle_service_identity() == Some(identity)
 }
@@ -655,7 +672,7 @@ pub(crate) fn verify_ring3_auxiliary_fault() -> bool {
         && event
             == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
         && domain::last_lifecycle_event_audit()
-            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 3))
+            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 4))
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::delivered_fault_matches(
             auxiliary,

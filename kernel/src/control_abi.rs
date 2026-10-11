@@ -17,7 +17,10 @@ pub(crate) fn parse_management_request(
     let action = u16::from_le_bytes(bytes[6..8].try_into().ok()?);
     if size as usize != MANAGEMENT_REQUEST_SIZE
         || version != VERSION
-        || action != MANAGEMENT_CREATE_AUXILIARY
+        || !matches!(
+            action,
+            MANAGEMENT_CREATE_AUXILIARY | MANAGEMENT_STOP_AUXILIARY
+        )
     {
         return None;
     }

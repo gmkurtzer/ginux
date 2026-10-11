@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 27;
+const CONTROL_CALL_BUDGET: u16 = 29;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
@@ -1015,6 +1015,29 @@ pub(crate) fn create_auxiliary_service(
     Some(encode_id(id))
 }
 
+pub(crate) fn stop_auxiliary_service(
+    supervisor_raw: u64,
+    host_capability_raw: u64,
+    target_raw: u64,
+) -> bool {
+    let (Some(supervisor), Some(host_capability), Some(target), Some(owner)) = (
+        decode_id(supervisor_raw),
+        Handle::from_raw(host_capability_raw),
+        decode_id(target_raw),
+        crate::memory::FrameOwner::domain(target_raw),
+    ) else {
+        return false;
+    };
+    if crate::memory::owner_live_frame_count(owner) != Some(0) {
+        return false;
+    }
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    manager.request_auxiliary_stop(supervisor, host_capability, target)
+        && manager.retire_auxiliary_service(target)
+}
+
 pub(crate) fn handle_permits(domain_raw: u64, raw: u64, object: u64, rights: Rights) -> bool {
     let Some(domain_id) = decode_id(domain_raw) else {
         return false;
@@ -1673,7 +1696,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 32
+    control.remaining_calls == 0 && manager.total_calls == 34
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
@@ -1985,13 +2008,12 @@ pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
         return false;
     };
     global_manager().is_some_and(|manager| {
-        manager.lifecycle_events.is_empty()
-            && manager.last_delivered_lifecycle_event.is_some_and(|event| {
-                event.kind == crate::control_abi::LIFECYCLE_SERVICE_FAULT
-                    && event.domain == id
-                    && event.service == manager.primary_service_identity
-                    && event.fault.is_some()
-            })
+        manager.last_delivered_lifecycle_event.is_some_and(|event| {
+            event.kind == crate::control_abi::LIFECYCLE_SERVICE_FAULT
+                && event.domain == id
+                && event.service == manager.primary_service_identity
+                && event.fault.is_some()
+        })
     })
 }
 
