@@ -1000,6 +1000,7 @@ impl LinuxRelativeFileMapping {
 pub(crate) struct LinuxElfExecution {
     pub(crate) entry: usize,
     pub(crate) stack: usize,
+    pub(crate) initial_fs_base: usize,
     pub(crate) code: usize,
     pub(crate) code_size: usize,
     pub(crate) loader_code: usize,
@@ -1053,6 +1054,17 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     };
+    if execution.initial_fs_base >= 1 << 47 {
+        let _ = restore_linux_syscall(saved_msrs);
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return LinuxElfResult::FAILED;
+    }
+    unsafe { write_msr(FS_BASE_MSR, execution.initial_fs_base as u64) };
+    if unsafe { read_msr(FS_BASE_MSR) } != execution.initial_fs_base as u64 {
+        let _ = restore_linux_syscall(saved_msrs);
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return LinuxElfResult::FAILED;
+    }
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     ELF_PROBE_STACK.store(execution.stack as u64, Ordering::SeqCst);
     ELF_PROBE_CODE_BASE.store(execution.code as u64, Ordering::SeqCst);

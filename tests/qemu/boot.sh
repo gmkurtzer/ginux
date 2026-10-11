@@ -598,6 +598,21 @@ if ! grep -q '^ginux: bounded Linux TLS template metadata validated' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated Linux initial TLS materialized' "$output_file"; then
+    echo "Boot test failed: isolated initial Linux TLS was not materialized." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux TLS active before initializers' "$output_file"; then
+    echo "Boot test failed: Linux TLS was not active before initializers." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux TLS frame scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the Linux TLS frame was not scrubbed and released." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: four-page Linux executable mapping validated' "$output_file"; then
     echo "Boot test failed: four-page Linux executable mapping was not validated." >&2
     exit 1

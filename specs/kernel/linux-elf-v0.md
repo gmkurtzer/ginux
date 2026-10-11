@@ -350,11 +350,19 @@ validator. In particular, file identity, ELF class/machine, segment overlap,
 entry validity, dynamic metadata, and the final admitted page set remain
 kernel-enforced contracts.
 
-The current TLS milestone authenticates and load-biases metadata only. It does
-not materialize `.tdata`/`.tbss`, choose an x86-64 TLS variant, establish the
-initial thread pointer, admit TLS relocations, or provide per-thread storage.
-The separate bounded `arch_prctl(ARCH_SET_FS)` syscall proof is not
-loader-managed TLS.
+The initial-thread execution profile allocates a separate owned RW/NX page for
+the main image's TLS. It rounds `p_memsz` up to `p_align`, places that static
+block below a 64-byte-aligned x86-64 variant-II thread pointer, copies `p_filesz`
+bytes from `.tdata`, and retains zeroes through the `.tbss` tail. The following
+16 bytes form a minimal TCB whose first word points to itself and whose second
+word is zero. The kernel programs FS before entering the interpreter. Both the
+main preinitializer and kernel verify the initialized value, zero tail, and
+self pointer. On exit, the prior supervisor FS base is restored and the owned
+TLS frame is zeroed and released; the live-frame count must return to its
+pre-execution value. The later bounded `arch_prctl(ARCH_SET_FS)` proof may
+replace the initial base, but is not the loader's TLS construction mechanism.
+TLS relocations, multiple TLS modules, dynamic TLS, and per-thread allocation
+remain outside this profile.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and

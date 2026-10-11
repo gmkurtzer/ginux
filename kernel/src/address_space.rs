@@ -23,6 +23,8 @@ const NO_EXECUTE: u64 = 1 << 63;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
 const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
+const LINUX_TLS_THREAD_POINTER_OFFSET: usize = PAGE_SIZE - 64;
+const LINUX_TLS_TCB_SIZE: usize = 16;
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
 const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 
@@ -509,6 +511,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 && cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
+                    initial_fs_base: 0,
                     code: first.virtual_address as usize,
                     code_size: first.memory_size,
                     loader_code: 0,
@@ -556,6 +559,27 @@ pub(crate) fn verify_interpreted_elf_mapping(
     };
     let main_rx = plan.main.executable;
     let main_rw = plan.main.writable;
+    let Some(main_tls) = plan.main.tls else {
+        return false;
+    };
+    let (Ok(tls_memory_size), Ok(tls_alignment)) = (
+        usize::try_from(main_tls.memory_size),
+        usize::try_from(main_tls.alignment),
+    ) else {
+        return false;
+    };
+    if tls_memory_size == 0 || tls_alignment == 0 || !tls_alignment.is_power_of_two() {
+        return false;
+    }
+    let Some(tls_block_size) = tls_memory_size
+        .checked_add(tls_alignment - 1)
+        .map(|size| size & !(tls_alignment - 1))
+    else {
+        return false;
+    };
+    let Some(tls_start_offset) = LINUX_TLS_THREAD_POINTER_OFFSET.checked_sub(tls_block_size) else {
+        return false;
+    };
     let interpreter_rx = plan.interpreter.executable;
     let interpreter_rw = plan.interpreter.writable;
     let dependency_rx = dependency_plan.dependencies[0].executable;
@@ -729,6 +753,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
         .checked_add(2 * PAGE_SIZE as u64)
         .unwrap_or(0);
     let mmap_tail_virtual_page = mmap_virtual_page.checked_add(PAGE_SIZE as u64).unwrap_or(0);
+    let tls_virtual_page = mmap_tail_virtual_page
+        .checked_add(PAGE_SIZE as u64)
+        .unwrap_or(0);
+    let tls_base = tls_virtual_page
+        .checked_add(LINUX_TLS_THREAD_POINTER_OFFSET as u64)
+        .unwrap_or(0);
     let indexes = |address: u64| {
         [
             ((address >> 39) & 0x1ff) as usize,
@@ -764,6 +794,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let stack_indexes = indexes(stack_virtual_page);
     let mmap_indexes = indexes(mmap_virtual_page);
     let mmap_tail_indexes = indexes(mmap_tail_virtual_page);
+    let tls_indexes = indexes(tls_virtual_page);
     let Some(protected_end) = protected_start.checked_add(protected_size as u64) else {
         return false;
     };
@@ -794,6 +825,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     stack_virtual_page,
                     mmap_virtual_page,
                     mmap_tail_virtual_page,
+                    tls_virtual_page,
                 ]
                 .contains(&page)
                 || (0..dependency).any(|prior| {
@@ -860,10 +892,13 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || stack_virtual_page == 0
         || mmap_virtual_page == 0
         || mmap_tail_virtual_page == 0
+        || tls_virtual_page == 0
+        || tls_base == 0
         || heap_indexes[..3] != main_indexes[..3]
         || stack_indexes[..3] != main_indexes[..3]
         || mmap_indexes[..3] != main_indexes[..3]
         || mmap_tail_indexes[..3] != main_indexes[..3]
+        || tls_indexes[..3] != main_indexes[..3]
         || overlaps_protected(main_ro)
         || overlaps_protected(main_rx)
         || overlaps_protected(main_rw)
@@ -874,6 +909,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             stack_virtual_page,
             mmap_virtual_page,
             mmap_tail_virtual_page,
+            tls_virtual_page,
         ]
         .into_iter()
         .any(|page| page < protected_end && protected_start < page.saturating_add(PAGE_SIZE as u64))
@@ -900,15 +936,22 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     .read_only
                     .is_some_and(|segment| segment.writable || segment.executable)
         })
+        || tls_memory_size == 0
+        || tls_alignment == 0
+        || !tls_alignment.is_power_of_two()
+        || tls_block_size > LINUX_TLS_THREAD_POINTER_OFFSET
+        || main_tls.bytes.len() > tls_memory_size
+        || !(tls_virtual_page as usize + tls_start_offset).is_multiple_of(tls_alignment)
+        || LINUX_TLS_THREAD_POINTER_OFFSET + LINUX_TLS_TCB_SIZE > PAGE_SIZE
     {
         return false;
     }
 
-    let Some(frames) = memory::allocate_frames::<13>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<14>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, interpreter_page, interpreter_tail_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page] =
+    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, interpreter_page, interpreter_tail_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page, tls_page] =
         addresses;
     let kernel_root_physical = current_root();
     let mut main_frames = [None; 7];
@@ -991,6 +1034,21 @@ pub(crate) fn verify_interpreted_elf_mapping(
             zero_frame(stack_page)?;
             zero_frame(mmap_page)?;
             zero_frame(mmap_tail_page)?;
+            zero_frame(tls_page)?;
+            let tls_bytes = mapped_frame::<u8>(tls_page)?;
+            core::ptr::copy_nonoverlapping(
+                main_tls.bytes.as_ptr(),
+                tls_bytes.add(tls_start_offset),
+                main_tls.bytes.len(),
+            );
+            tls_bytes
+                .add(LINUX_TLS_THREAD_POINTER_OFFSET)
+                .cast::<u64>()
+                .write(tls_base);
+            tls_bytes
+                .add(LINUX_TLS_THREAD_POINTER_OFFSET + size_of::<u64>())
+                .cast::<u64>()
+                .write(0);
             let flags = |segment: crate::linux_elf::PlannedSegment<'_>| {
                 PRESENT
                     | USER
@@ -1027,6 +1085,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
             main_entries.add(mmap_indexes[3]).write(0);
             main_entries.add(mmap_tail_indexes[3]).write(0);
+            main_entries
+                .add(tls_indexes[3])
+                .write(tls_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
             let stack_offset = PAGE_SIZE - 48 * size_of::<u64>();
@@ -1096,6 +1157,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     == PRESENT | USER | WRITABLE | NO_EXECUTE
                 && main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0
+                && main_entries.add(tls_indexes[3]).read()
+                    & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
                 && stack_words.add(6).read() == startup.program_headers
                 && stack_words.add(10).read() == u64::from(startup.program_header_count)
                 && stack_words.add(14).read() == startup.interpreter_base
@@ -1110,6 +1174,19 @@ pub(crate) fn verify_interpreted_elf_mapping(
                             == interpreter_rx.bytes[PAGE_SIZE]
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
+                        && core::slice::from_raw_parts(
+                            (tls_virtual_page as usize + tls_start_offset) as *const u8,
+                            main_tls.bytes.len(),
+                        ) == main_tls.bytes
+                        && core::slice::from_raw_parts(
+                            (tls_virtual_page as usize + tls_start_offset + main_tls.bytes.len())
+                                as *const u8,
+                            tls_memory_size - main_tls.bytes.len(),
+                        )
+                        .iter()
+                        .all(|byte| *byte == 0)
+                        && (tls_base as *const u64).read_volatile() == tls_base
+                        && ((tls_base + size_of::<u64>() as u64) as *const u64).read_volatile() == 0
                 });
             let file_mapping = |segment: crate::linux_elf::PlannedSegment<'_>, page| {
                 Some(cpu::LinuxFileMapping {
@@ -1138,6 +1215,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
+                    initial_fs_base: tls_base as usize,
                     code: main_rx.virtual_address as usize,
                     code_size: main_rx.memory_size,
                     loader_code: interpreter_rx.virtual_address as usize,
@@ -1170,6 +1248,24 @@ pub(crate) fn verify_interpreted_elf_mapping(
             let executed = observed && execution_result.valid;
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
+            let tls_runtime_valid = executed
+                && main_entries.add(tls_indexes[3]).read()
+                    & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
+                && cpu::with_supervisor_user_access(|| {
+                    core::slice::from_raw_parts(
+                        (tls_virtual_page as usize + tls_start_offset) as *const u8,
+                        main_tls.bytes.len(),
+                    ) == main_tls.bytes
+                        && core::slice::from_raw_parts(
+                            (tls_virtual_page as usize + tls_start_offset + main_tls.bytes.len())
+                                as *const u8,
+                            tls_memory_size - main_tls.bytes.len(),
+                        )
+                        .iter()
+                        .all(|byte| *byte == 0)
+                        && (tls_base as *const u64).read_volatile() == tls_base
+                });
             let main_frame_addresses = execution_result
                 .main_frames
                 .map(|frame| frame.map(memory::FrameLease::address).unwrap_or(0));
@@ -1340,6 +1436,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             if !mapping_removed {
                 crate::serial_write_bytes(b"\r\nginux: linked dynamic mmap teardown incomplete");
             }
+            if !tls_runtime_valid {
+                crate::serial_write_bytes(b"\r\nginux: initial Linux TLS runtime invalid");
+            }
             if !main_permissions_valid {
                 crate::serial_write_bytes(b"\r\nginux: userspace main mapping invalid");
             }
@@ -1377,6 +1476,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 permissions_valid
                     && executed
                     && mapping_removed
+                    && tls_runtime_valid
                     && main_permissions_valid
                     && main_image_valid
                     && dependency_permissions_valid

@@ -3354,8 +3354,7 @@ linked_file_mmap_test:
 .hidden ginux_linux_init
 .type ginux_linux_init,@function
 ginux_linux_init:
-    inc qword ptr [rip + ginux_main_init_state]
-    ret
+    jmp .Linitialize_main_tls
 
 .type ginux_linux_initialize,@function
 ginux_linux_initialize:
@@ -3383,6 +3382,21 @@ ginux_linux_initialize:
 .Lmain_initialize_done:
     ret
 .section .text
+
+.Linitialize_main_tls:
+    mov rax, qword ptr fs:[0]
+    test rax, rax
+    jz .Lmain_init_done
+    cmp qword ptr [rax], rax
+    jne .Lmain_init_done
+    movabs rcx, 0x534c5458554e4947
+    cmp qword ptr fs:[-16], rcx
+    jne .Lmain_init_done
+    cmp qword ptr fs:[-8], 0
+    jne .Lmain_init_done
+    inc qword ptr [rip + ginux_main_init_state]
+.Lmain_init_done:
+    ret
 
 .Lvalidate_main_startup:
     xor eax, eax

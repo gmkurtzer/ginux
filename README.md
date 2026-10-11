@@ -34,8 +34,14 @@ of its writable load: eight initialized bytes, sixteen total bytes, and
 eight-byte alignment. The parser caps both TLS size and alignment at 64 bytes,
 requires matching file and virtual displacement inside the writable load, and
 rejects malformed or duplicate declarations. Planning preserves the template
-and applies the PIE bias, but this milestone does not yet allocate a TLS block,
-establish a thread pointer, or execute a TLS access.
+and applies the PIE bias. The interpreted execution proof allocates a separate
+owned RW/NX page, copies `.tdata`, leaves `.tbss` zero, and places the bounded
+static block below a 64-byte-aligned x86-64 variant-II thread pointer. A minimal
+16-byte TCB contains its own address. FS is activated before the interpreter,
+and the main preinitializer refuses to advance unless its TLS template, zero
+tail, and self pointer are correct. Teardown scrubs and releases the TLS frame
+and restores the supervisor's prior FS base. TLS relocations, multiple modules,
+and per-thread allocation remain unimplemented.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

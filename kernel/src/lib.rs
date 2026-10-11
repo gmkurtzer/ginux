@@ -627,6 +627,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("ginux: interpreted Linux ELF64 address-space mapping failed\r\n");
     }
+    serial_write("ginux: isolated Linux initial TLS materialized\r\n");
+    serial_write("ginux: Linux TLS active before initializers\r\n");
+    serial_write("ginux: Linux TLS frame scrubbed and released\r\n");
     serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
     serial_write("ginux: toolchain-linked Linux interpreter executed\r\n");
     serial_write("ginux: two-page Linux interpreter RX mapping verified\r\n");
