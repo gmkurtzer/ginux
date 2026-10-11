@@ -16,7 +16,8 @@ const CPUID_ADVANCED_POWER: u32 = 0x8000_0007;
 const TSC_DEADLINE: u32 = 1 << 24;
 const INVARIANT_TSC: u32 = 1 << 8;
 const HERTZ_PER_MHZ: u64 = 1_000_000;
-const SCHEDULER_PROOF_PREEMPTIONS_PER_SECOND: u64 = 10_000;
+const SCHEDULER_PROOF_INITIAL_PREEMPTIONS_PER_SECOND: u64 = 2_000;
+const SCHEDULER_PROOF_RELOAD_PREEMPTIONS_PER_SECOND: u64 = 10_000;
 const APIC_LVT_TIMER: u32 = 0x320;
 const APIC_INITIAL_COUNT: u32 = 0x380;
 const APIC_CURRENT_COUNT: u32 = 0x390;
@@ -333,9 +334,11 @@ pub(crate) unsafe fn arm_scheduler_preemption(
     TIMER_FIRED.store(false, Ordering::SeqCst);
     apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
     apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
-    let initial_count = (calibration.counter_hz / SCHEDULER_PROOF_PREEMPTIONS_PER_SECOND)
+    let initial_count = (calibration.counter_hz / SCHEDULER_PROOF_INITIAL_PREEMPTIONS_PER_SECOND)
         .clamp(1, u64::from(u32::MAX)) as u32;
-    PREEMPTION_RELOAD.store(initial_count, Ordering::SeqCst);
+    let reload_count = (calibration.counter_hz / SCHEDULER_PROOF_RELOAD_PREEMPTIONS_PER_SECOND)
+        .clamp(1, u64::from(u32::MAX)) as u32;
+    PREEMPTION_RELOAD.store(reload_count, Ordering::SeqCst);
     apic.write(APIC_INITIAL_COUNT, initial_count);
     true
 }
