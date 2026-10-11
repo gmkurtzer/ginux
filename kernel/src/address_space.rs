@@ -148,7 +148,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - 30 * size_of::<u64>();
+            let stack_offset = PAGE_SIZE - 36 * size_of::<u64>();
             let environment_offset = PAGE_SIZE - 3 * size_of::<u64>();
             let argument_offset = PAGE_SIZE - size_of::<u64>();
             let environment_address = stack_virtual_page + environment_offset as u64;
@@ -168,6 +168,10 @@ pub(crate) fn verify_linux_elf_mapping(
                 u64::from(plan.program_header_count),
                 6,
                 PAGE_SIZE as u64,
+                7,
+                0,
+                8,
+                0,
                 11,
                 0,
                 12,
@@ -178,6 +182,8 @@ pub(crate) fn verify_linux_elf_mapping(
                 0,
                 23,
                 0,
+                31,
+                argument_address,
                 9,
                 plan.entry,
                 0,
@@ -231,18 +237,24 @@ pub(crate) fn verify_linux_elf_mapping(
                 && stack_words.add(10).read() == u64::from(plan.program_header_count)
                 && stack_words.add(11).read() == 6
                 && stack_words.add(12).read() == PAGE_SIZE as u64
-                && stack_words.add(13).read() == 11
+                && stack_words.add(13).read() == 7
                 && stack_words.add(14).read() == 0
-                && stack_words.add(15).read() == 12
+                && stack_words.add(15).read() == 8
                 && stack_words.add(16).read() == 0
-                && stack_words.add(17).read() == 13
+                && stack_words.add(17).read() == 11
                 && stack_words.add(18).read() == 0
-                && stack_words.add(19).read() == 14
+                && stack_words.add(19).read() == 12
                 && stack_words.add(20).read() == 0
-                && stack_words.add(21).read() == 23
+                && stack_words.add(21).read() == 13
                 && stack_words.add(22).read() == 0
-                && stack_words.add(23).read() == 9
-                && stack_words.add(24).read() == plan.entry
+                && stack_words.add(23).read() == 14
+                && stack_words.add(24).read() == 0
+                && stack_words.add(25).read() == 23
+                && stack_words.add(26).read() == 0
+                && stack_words.add(27).read() == 31
+                && stack_words.add(28).read() == argument_address
+                && stack_words.add(29).read() == 9
+                && stack_words.add(30).read() == plan.entry
                 && core::slice::from_raw_parts(
                     stack_bytes.add(environment_offset),
                     LINUX_INIT_ENVIRONMENT.len(),

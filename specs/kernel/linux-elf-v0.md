@@ -91,13 +91,16 @@ pointer is 16-byte aligned and names `argc = 1`, an `argv[0]` pointer to the
 NUL-terminated `/init` string, a null `argv` terminator, an `envp[0]` pointer
 to `GINUX=1`, a null `envp` terminator,
 `AT_PHDR` pointing at the mapped program-header table, `AT_PHENT = 56`,
-`AT_PHNUM` matching the parsed header count, `AT_PAGESZ = 4096`, `AT_UID = 0`,
-`AT_EUID = 0`, `AT_GID = 0`, `AT_EGID = 0`, `AT_SECURE = 0`, `AT_ENTRY` equal
-to the ELF entry, and `AT_NULL`. These credentials are container-local and do
-not grant native kernel capabilities. The probe dereferences and validates
-`argv[0]`, `envp[0]`, `AT_SECURE`, and `AT_ENTRY` from CPL3 before its syscall
-sequence. Multiple arguments or environment entries, the complete Linux
-auxiliary vector, scheduler ownership, the broader syscall
+`AT_PHNUM` matching the parsed header count, `AT_PAGESZ = 4096`, `AT_BASE = 0`
+for the static image, `AT_FLAGS = 0`, `AT_UID = 0`, `AT_EUID = 0`, `AT_GID = 0`,
+`AT_EGID = 0`, `AT_SECURE = 0`, `AT_EXECFN` pointing to `/init`, `AT_ENTRY`
+equal to the ELF entry, and `AT_NULL`. These credentials are container-local
+and do not grant native kernel capabilities. The probe dereferences and validates
+`argv[0]`, `envp[0]`, `AT_BASE`, `AT_FLAGS`, `AT_SECURE`, `AT_EXECFN`, and
+`AT_ENTRY` from CPL3 before its syscall sequence. `AT_RANDOM` remains absent
+until the boot path supplies a cryptographically suitable entropy source.
+Multiple arguments or environment entries, the complete Linux auxiliary
+vector, scheduler ownership, the broader syscall
 surface, and general collision policy beyond the loaded kernel image are not
 defined yet. The loader does not relocate `ET_EXEC` images to the existing high
 test address, because doing so would violate ELF semantics and hide these
