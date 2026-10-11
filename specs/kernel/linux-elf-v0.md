@@ -46,7 +46,9 @@ data/BSS loads, populated section-header metadata, `PT_PHDR`, and
 `PT_GNU_STACK`. The boot verifier parses that linked artifact, checks its entry,
 header-table address/count, exact code and initialized data, 4608-byte data/BSS
 extent, and confirms that the current runtime mapper still rejects the third
-load.
+load. The checked-in linker script fixes the read-only header load at
+`0x3ff000`, the non-page-base text entry at `0x400100`, and the data/BSS load at
+`0x401000`; this is the input contract for the next multi-table mapping step.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory

@@ -2,6 +2,7 @@ use std::{env, ffi::OsString, fs, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=linux-probe.S");
+    println!("cargo:rerun-if-changed=linux-probe.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
 
@@ -20,6 +21,8 @@ fn main() {
     fs::write(output.join("linux-probe.bin"), text).expect("failed to write Linux probe bytes");
 
     let linked = output.join("linux-probe.elf");
+    let link_script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+        .join("linux-probe.ld");
     let (lld, toolchain_library) = linker();
     let mut link = Command::new(lld);
     link.args([
@@ -31,11 +34,9 @@ fn main() {
         "-nostdlib",
         "-e",
         "ginux_linux_probe",
-        "-Ttext",
-        "0x400100",
-        "-Tdata",
-        "0x402000",
+        "-T",
     ])
+    .arg(&link_script)
     .arg(&object)
     .arg("-o")
     .arg(&linked);

@@ -537,20 +537,20 @@ pub(crate) fn verify_linked_probe() -> bool {
         && materialize_page(plan.writable, 1, &mut page)
         && page.iter().all(|byte| *byte == 0);
     image.entry == 0x40_0100
-        && image.program_headers == 0x20_0040
+        && image.program_headers == 0x3f_f040
         && image.program_header_count == 5
         && image.executable.virtual_address == 0x40_0100
         && image.executable.bytes == PROBE_CODE
         && image
             .read_only
-            .is_some_and(|segment| segment.virtual_address == 0x20_0000)
-        && image.writable.virtual_address == 0x40_2000
+            .is_some_and(|segment| segment.virtual_address == 0x3f_f000)
+        && image.writable.virtual_address == 0x40_1000
         && image.writable.bytes == [1, 2, 3, 4, 5, 6, 7, 8]
         && image.writable.memory_size == 4608
         && plan.executable.virtual_page == 0x40_0000
         && plan.executable.virtual_address == 0x40_0100
         && plan.executable.page_count == 1
-        && read_only.virtual_page == 0x20_0000
+        && read_only.virtual_page == 0x3f_f000
         && plan.writable.page_count == 2
         && read_only_valid
         && executable_valid
