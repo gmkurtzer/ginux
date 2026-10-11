@@ -649,7 +649,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
     }
-    if ipc::last_message_audit() != Some(((replacement_domain, 3), (control_plane, 3))) {
+    if ipc::last_message_audit() != Some(((replacement_domain, 4), (control_plane, 4))) {
         kernel_fail("\r\nginux: IPC message provenance invariant failed\r\n");
     }
     if ipc::receive(control_plane) != ipc::Receive::PeerClosed(service_domain)
@@ -739,6 +739,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: replacement service context executed");
     serial_write("\r\nginux: replacement service request-reply completed");
     serial_write("\r\nginux: volatile storage service round-trip completed");
+    serial_write("\r\nginux: volatile storage invalid command rejected");
     serial_write("\r\nginux: replacement service readiness delivered");
     serial_write("\r\nginux: replacement service clean exit delivered");
     serial_write("\r\nginux: per-domain syscall budgets enforced");

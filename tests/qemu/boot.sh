@@ -868,6 +868,11 @@ if ! grep -q '^ginux: volatile storage service round-trip completed' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: volatile storage invalid command rejected' "$output_file"; then
+    echo "Boot test failed: volatile storage invalid command was not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: replacement service readiness delivered' "$output_file"; then
     echo "Boot test failed: replacement service readiness was not delivered." >&2
     exit 1

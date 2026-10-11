@@ -72,16 +72,17 @@ then the second preemption dispatches the replacement. It negotiates the ABI
 and blocks on an empty inbound IPC direction, resuming the control context.
 The control context directly wakes it with request 3, yields until it receives
 acknowledgement 4, then wakes it again with GET command 5 and requires the
-retained value 3 before it stages and cancels one
+retained value 3. A third wake sends unsupported command 6 and requires an
+explicit error before it stages and cancels one
 auxiliary, stages, initializes, and explicitly starts a distinct auxiliary,
 then voluntarily yields. After the replacement and auxiliary finish, the
 control context resumes, consumes the auxiliary's exit record, verifies budget
 exhaustion, and exits.
 The awakened replacement replies and exits cleanly; the admitted auxiliary validates its
 private payload and exits with status 42. The boot
-succeeds only after exactly two preemptions, five cooperative yields, one
-contained primary-service fault, three normal exits, one restart, two
-block/wake pairs, and eleven or twelve cross-root dispatches depending on the valid
+succeeds only after exactly two preemptions, six cooperative yields, one
+contained primary-service fault, three normal exits, one restart, three
+block/wake pairs, and thirteen or fourteen cross-root dispatches depending on the valid
 timer interleaving.
 Before the replacement becomes runnable, restart setup may remove its exact
 ready context as a rollback operation. This also reverses the domain thread
@@ -89,11 +90,11 @@ charge and restores the retained address-space owner recorded by the scheduler;
 it cannot remove a running, blocked, ambiguous, or wrong-domain context.
 
 Call budgets belong to domains rather than threads. The control domain receives
-67 charged calls and each service generation receives five. Every call-gate
+70 charged calls and each service generation receives seven. Every call-gate
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 77 charged calls across all generations, deliberately exhausts the
+exactly 82 charged calls across all generations, deliberately exhausts the
 control domain, and requires its next discovery call to be rejected before it
 exits.
 

@@ -43,7 +43,7 @@ waking a waiter, changing audit state, or inserting a record.
 The local invariant injects zero and out-of-order envelopes, verifies that a
 full-queue send does not advance the counter, and proves that sequencing
 continues across service replacement. After one exchange with the original
-generation and two with its replacement, the QEMU proof audits sequence three
+generation and three with its replacement, the QEMU proof audits sequence four
 in both directions and binds the final reply to the replacement generation.
 
 The channel is object 3 in the signed boot authority manifest. Sending requires
@@ -58,7 +58,9 @@ requires reply 4 from the new exact service generation. Direction is selected fr
 generation-checked domain role after capability validation; callers cannot
 choose it as an argument. The replacement then accepts fixed command 5 and
 returns the retained value 3, proving a second exchange with the same live
-generation. The boot gate also requires both queues to be empty at completion.
+generation. It then sends unsupported command 6 and requires the service's
+explicit `UINT64_MAX - 2` reply. The boot gate also requires both queues to be
+empty at completion.
 
 Operation 8 adds one blocking receive path. If its inbound queue is empty, the
 current context becomes blocked only when another context can run. A peer send

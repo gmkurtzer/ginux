@@ -160,7 +160,7 @@ cd80
 85c0
 
 # jump to the appended structured-fault diagnostic before exhausting the budget
-e999000000
+e9bf000000
 cd80
 4883f8fc
 7507
@@ -217,7 +217,19 @@ cd80
 b804000000
 cd80
 
-# replacement exits after serving both operations
+# reject unsupported command 6 with the standard operation error
+4c89c7
+b808000000
+cd80
+4883f806
+7402
+0f0b
+48befdffffffffffffff
+4c89c7
+b804000000
+cd80
+
+# replacement exits after the valid and invalid-command exchanges
 b802000000
 cd80
 0f0b
@@ -252,6 +264,27 @@ cd80
 b805000000
 cd80
 4883f803
+7402
+0f0b
+
+# send unsupported command 6 and require an explicit error reply
+4c89c7
+6a06
+5e
+b804000000
+cd80
+85c0
+7402
+0f0b
+b803000000
+cd80
+85c0
+7402
+0f0b
+4c89c7
+b805000000
+cd80
+4883f8fd
 7402
 0f0b
 
@@ -343,11 +376,11 @@ cd80
 7502
 0f0b
 488b4610
-4883f803
+4883f804
 7402
 0f0b
 488b4618
-4883f803
+4883f8fd
 7402
 0f0b
 

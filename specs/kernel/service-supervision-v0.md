@@ -89,7 +89,8 @@ preempts that client to run the replacement. The replacement negotiates ABI
 v1 and blocks on an empty request direction. The client wakes it directly with
 request 3, yields, and requires acknowledgement 4. The replacement retains 3
 as volatile state, blocks again, accepts fixed GET command 5, and returns 3
-before exiting cleanly and retiring its capability table. This proves that
+before rejecting unsupported command 6 with `UINT64_MAX - 2`. It then exits
+cleanly and retires its capability table. This proves that
 restart restores a stateful multi-request service, rather than merely creating
 a context that can exit. When the replacement first blocks on its empty request
 endpoint, the kernel publishes lifecycle kind 6 exactly once. The control plane

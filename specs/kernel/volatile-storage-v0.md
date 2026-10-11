@@ -6,13 +6,18 @@ The restarted supervised service implements the first bounded storage-shaped
 userspace workload. It receives value 3, retains that word in its private CPU
 context, and returns acknowledgement 4. It then blocks for fixed GET command 5
 and returns the retained value 3. The control plane validates both replies and
-the kernel audits the final request and reply as sequence three from the exact
+the storage round trip occupies request and reply sequence three for the exact
 replacement generation.
 
 After returning the value, the service exits normally. Supervision publishes a
 kind 7 clean-exit record for that exact generation, distinct from the original
 generation's kind 1 fault, and the control plane validates its structured
 descriptor.
+
+Command 6 is deliberately unsupported. The service remains isolated and
+responsive, returns `UINT64_MAX - 2`, and then exits cleanly. The control plane
+requires that exact error and audits the fourth request/reply sequence, proving
+that malformed protocol input is rejected without a service fault or hang.
 
 This is an execution and isolation proof, not a filesystem or stable storage
 ABI. The value is lost when the service exits or faults. There is one fixed
