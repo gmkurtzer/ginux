@@ -98,6 +98,26 @@ if ! grep -Eq '^ginux: local APIC physical base: [1-9][0-9]*' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: timer capabilities discovered' "$output_file"; then
+    echo "Boot test failed: timer capabilities were not discovered." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: invariant TSC: (advertised|not-advertised)' "$output_file"; then
+    echo "Boot test failed: invariant-TSC capability is invalid." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: TSC deadline timer: (supported|unsupported)' "$output_file"; then
+    echo "Boot test failed: TSC-deadline capability is invalid." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: TSC frequency source: (architectural-ratio|nominal-processor-frequency|unavailable)' "$output_file"; then
+    echo "Boot test failed: TSC frequency source is invalid." >&2
+    exit 1
+fi
+
 if ! grep -Eq '^ginux: usable memory MiB: [1-9][0-9]*' "$output_file"; then
     echo "Boot test failed: the kernel did not inventory usable physical memory." >&2
     exit 1

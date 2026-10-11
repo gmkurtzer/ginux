@@ -171,6 +171,35 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(local_apic.physical_base);
     serial_write("\r\n");
 
+    let timers = arch::x86_64::timer::discover();
+    serial_write("ginux: timer capabilities discovered\r\nginux: invariant TSC: ");
+    serial_write(if timers.invariant_tsc {
+        "advertised"
+    } else {
+        "not-advertised"
+    });
+    serial_write("\r\nginux: TSC deadline timer: ");
+    serial_write(if timers.tsc_deadline {
+        "supported"
+    } else {
+        "unsupported"
+    });
+    serial_write("\r\nginux: TSC frequency source: ");
+    match timers.frequency_source {
+        arch::x86_64::timer::FrequencySource::ArchitecturalRatio => {
+            serial_write("architectural-ratio")
+        }
+        arch::x86_64::timer::FrequencySource::NominalProcessorFrequency => {
+            serial_write("nominal-processor-frequency")
+        }
+        arch::x86_64::timer::FrequencySource::Unavailable => serial_write("unavailable"),
+    }
+    if let Some(frequency) = timers.frequency_hz {
+        serial_write("\r\nginux: reported TSC Hz: ");
+        serial_write_u64(frequency);
+    }
+    serial_write("\r\n");
+
     let summary = summarize_memory(boot_info);
     serial_write("ginux: memory descriptors: ");
     serial_write_usize(summary.descriptors);
