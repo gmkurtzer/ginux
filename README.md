@@ -123,6 +123,12 @@ The Linux `SYSCALL` entry now captures and restores `rbx`, `rbp`, and
 indices remain unchanged for dispatch. This makes the complete preserved user
 register set available on the kernel stack for a future thread switch; the
 current path still returns to the same thread.
+The assembly layout is now represented by one `repr(C)` syscall-frame type
+rather than an untyped word slice. Clone construction copies all twelve saved
+registers into generation-bound per-thread storage alongside RIP, RSP, RFLAGS,
+RAX, and FS base. A checked selector reconstructs the complete return context
+only for the matching live handle; retired handles and newly reused slots have
+no selectable context. Selection is not yet connected to `SYSRETQ`.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.

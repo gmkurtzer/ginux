@@ -728,6 +728,21 @@ if ! grep -q '^ginux: full Linux syscall register frame preserved' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: typed Linux syscall frame validated' "$output_file"; then
+    echo "Boot test failed: the typed Linux syscall frame was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: complete Linux child context persisted' "$output_file"; then
+    echo "Boot test failed: the complete Linux child context was not persisted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: stale Linux return contexts rejected' "$output_file"; then
+    echo "Boot test failed: a stale or empty Linux return context was accepted." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
     exit 1

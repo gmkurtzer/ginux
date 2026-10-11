@@ -528,6 +528,12 @@ addition to `rdi`, `rsi`, `rdx`, `r8`, `r9`, and `r10`; dispatch retains its
 original six argument indexes. All twelve values are restored before `SYSRETQ`.
 This supplies the preserved general-register input required by a later thread
 switch, but the current handler does not select a different return context.
+The entry frame has one `repr(C)` Rust representation with the same twelve-word
+order as the assembly pushes. Clone construction persists all twelve words plus
+RIP, RSP, RFLAGS, RAX, and FS base in the generation-tagged child slot. A
+checked lookup reconstructs the state only for a matching live handle and
+rejects zeroed, retired, or stale-generation contexts. This lookup remains an
+internal proof; `SYSRETQ` still restores the calling thread's frame.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control

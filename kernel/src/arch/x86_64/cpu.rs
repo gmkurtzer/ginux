@@ -359,6 +359,7 @@ const LINUX_THREAD_FREE: u8 = 0;
 const LINUX_THREAD_READY: u8 = 1;
 const LINUX_THREAD_RUNNING: u8 = 2;
 const LINUX_THREAD_SLOT_NONE: u8 = u8::MAX;
+const LINUX_SYSCALL_FRAME_REGISTERS: usize = 12;
 static LINUX_THREAD_STATES: [AtomicU8; LINUX_THREAD_LIMIT] =
     [const { AtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_GENERATIONS: [AtomicU32; LINUX_THREAD_LIMIT] =
@@ -383,6 +384,8 @@ static LINUX_THREAD_RFLAGS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_RAXS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_REGISTERS: [[AtomicU64; LINUX_SYSCALL_FRAME_REGISTERS]; LINUX_THREAD_LIMIT] =
+    [const { [const { AtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS] }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_CLEAR_CHILD_TIDS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_ROBUST_LISTS: [AtomicU64; LINUX_THREAD_LIMIT] =
@@ -1122,8 +1125,58 @@ struct LinuxCloneRequest {
     tls: u64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[repr(C)]
+struct LinuxSyscallFrame {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    rbp: u64,
+    rbx: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+}
+
+impl LinuxSyscallFrame {
+    const ZERO: Self = Self::from_array([0; LINUX_SYSCALL_FRAME_REGISTERS]);
+
+    const fn from_array(registers: [u64; LINUX_SYSCALL_FRAME_REGISTERS]) -> Self {
+        Self {
+            r15: registers[0],
+            r14: registers[1],
+            r13: registers[2],
+            r12: registers[3],
+            rbp: registers[4],
+            rbx: registers[5],
+            r10: registers[6],
+            r9: registers[7],
+            r8: registers[8],
+            rdx: registers[9],
+            rsi: registers[10],
+            rdi: registers[11],
+        }
+    }
+
+    const fn into_array(self) -> [u64; LINUX_SYSCALL_FRAME_REGISTERS] {
+        [
+            self.r15, self.r14, self.r13, self.r12, self.rbp, self.rbx, self.r10, self.r9, self.r8,
+            self.rdx, self.rsi, self.rdi,
+        ]
+    }
+
+    fn argument(self, index: usize) -> Option<u64> {
+        self.into_array().get(index.checked_add(6)?).copied()
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 struct LinuxUserContext {
+    registers: LinuxSyscallFrame,
     rip: u64,
     rsp: u64,
     rflags: u64,
@@ -1135,6 +1188,20 @@ struct LinuxUserContext {
 struct LinuxCloneResult {
     parent_rax: u64,
     child: LinuxUserContext,
+}
+
+impl LinuxUserContext {
+    fn is_valid(self) -> bool {
+        const REQUIRED_RFLAGS: u64 = (1 << 1) | (1 << 9);
+        const FORBIDDEN_RFLAGS: u64 = (3 << 12) | (1 << 14) | (1 << 17);
+        self.rip != 0
+            && self.rip < 1 << 47
+            && self.rsp != 0
+            && self.rsp < 1 << 47
+            && self.rflags & REQUIRED_RFLAGS == REQUIRED_RFLAGS
+            && self.rflags & FORBIDDEN_RFLAGS == 0
+            && self.fs_base < 1 << 47
+    }
 }
 
 impl LinuxTlsContext {
@@ -1269,23 +1336,18 @@ fn linux_thread_context(handle: LinuxThreadHandle) -> Option<LinuxTlsContext> {
 fn construct_linux_clone_context(
     handle: LinuxThreadHandle,
     request: LinuxCloneRequest,
+    parent_registers: LinuxSyscallFrame,
     return_rip: u64,
     return_rflags: u64,
     parent_writable_base: u64,
     parent_writable_size: usize,
 ) -> Option<LinuxCloneResult> {
-    const REQUIRED_RFLAGS: u64 = (1 << 1) | (1 << 9);
-    const FORBIDDEN_RFLAGS: u64 = (3 << 12) | (1 << 14) | (1 << 17);
     let slot = usize::from(handle.slot);
     let context = linux_thread_context(handle)?;
     if request.flags != LINUX_BOUNDED_THREAD_CLONE_FLAGS
         || slot >= LINUX_THREAD_LIMIT
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_READY
         || current_linux_thread_slot() == Some(slot)
-        || return_rip == 0
-        || return_rip >= 1 << 47
-        || return_rflags & REQUIRED_RFLAGS != REQUIRED_RFLAGS
-        || return_rflags & FORBIDDEN_RFLAGS != 0
         || request.tls != context.thread_pointer as u64
         || request.child_stack & 15 != 0
         || LINUX_THREAD_STACK_BASES[slot]
@@ -1310,12 +1372,22 @@ fn construct_linux_clone_context(
         return None;
     }
     let child = LinuxUserContext {
+        registers: parent_registers,
         rip: return_rip,
         rsp: request.child_stack,
         rflags: return_rflags,
         rax: 0,
         fs_base: request.tls,
     };
+    if !child.is_valid() {
+        return None;
+    }
+    for (saved, value) in LINUX_THREAD_REGISTERS[slot]
+        .iter()
+        .zip(child.registers.into_array())
+    {
+        saved.store(value, Ordering::SeqCst);
+    }
     LINUX_THREAD_RIPS[slot].store(child.rip, Ordering::SeqCst);
     LINUX_THREAD_RSPS[slot].store(child.rsp, Ordering::SeqCst);
     LINUX_THREAD_RFLAGS[slot].store(child.rflags, Ordering::SeqCst);
@@ -1330,6 +1402,7 @@ fn construct_linux_clone_context(
 fn publish_linux_clone(
     handle: LinuxThreadHandle,
     request: LinuxCloneRequest,
+    parent_registers: LinuxSyscallFrame,
     return_rip: u64,
     return_rflags: u64,
     parent_writable_base: u64,
@@ -1338,6 +1411,7 @@ fn publish_linux_clone(
     let result = construct_linux_clone_context(
         handle,
         request,
+        parent_registers,
         return_rip,
         return_rflags,
         parent_writable_base,
@@ -1349,6 +1423,24 @@ fn publish_linux_clone(
         return None;
     }
     Some(result)
+}
+
+fn linux_thread_return_context(handle: LinuxThreadHandle) -> Option<LinuxUserContext> {
+    let slot = usize::from(handle.slot);
+    let tls = linux_thread_context(handle)?;
+    let mut registers = [0_u64; LINUX_SYSCALL_FRAME_REGISTERS];
+    for (value, saved) in registers.iter_mut().zip(&LINUX_THREAD_REGISTERS[slot]) {
+        *value = saved.load(Ordering::SeqCst);
+    }
+    let context = LinuxUserContext {
+        registers: LinuxSyscallFrame::from_array(registers),
+        rip: LINUX_THREAD_RIPS[slot].load(Ordering::SeqCst),
+        rsp: LINUX_THREAD_RSPS[slot].load(Ordering::SeqCst),
+        rflags: LINUX_THREAD_RFLAGS[slot].load(Ordering::SeqCst),
+        rax: LINUX_THREAD_RAXS[slot].load(Ordering::SeqCst),
+        fs_base: tls.thread_pointer as u64,
+    };
+    context.is_valid().then_some(context)
 }
 
 fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
@@ -1413,6 +1505,9 @@ fn clear_linux_thread_slot(slot: usize) {
 }
 
 fn clear_linux_thread_execution(slot: usize) {
+    for register in &LINUX_THREAD_REGISTERS[slot] {
+        register.store(0, Ordering::SeqCst);
+    }
     LINUX_THREAD_RIPS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RSPS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RFLAGS[slot].store(0, Ordering::SeqCst);
@@ -1491,6 +1586,11 @@ fn finish_linux_thread_table() -> bool {
         && LINUX_THREAD_RAXS
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_REGISTERS.iter().all(|registers| {
+            registers
+                .iter()
+                .all(|value| value.load(Ordering::SeqCst) == 0)
+        })
         && LINUX_THREAD_CLEAR_CHILD_TIDS
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
@@ -1620,12 +1720,27 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 child_tid: initial_stack.checked_add(68)? as u64,
                 tls: execution.sibling_fs_base as u64,
             };
+            let proof_registers = LinuxSyscallFrame::from_array([
+                0x15,
+                0x14,
+                0x13,
+                0x12,
+                0xb0,
+                0xb1,
+                0x10,
+                9,
+                8,
+                clone_request.parent_tid,
+                clone_request.child_stack,
+                clone_request.flags,
+            ]);
             let invalid_flags_rejected = construct_linux_clone_context(
                 sibling_thread,
                 LinuxCloneRequest {
                     flags: clone_request.flags | (1 << 63),
                     ..clone_request
                 },
+                proof_registers,
                 execution.entry as u64,
                 0x202,
                 initial_stack as u64,
@@ -1638,6 +1753,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                     child_stack: clone_request.child_stack - 16,
                     ..clone_request
                 },
+                proof_registers,
                 execution.entry as u64,
                 0x202,
                 initial_stack as u64,
@@ -1647,11 +1763,13 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             let clone = construct_linux_clone_context(
                 sibling_thread,
                 clone_request,
+                proof_registers,
                 execution.entry as u64,
                 0x202,
                 initial_stack as u64,
                 PAGE_SIZE,
             )?;
+            let selected = linux_thread_return_context(sibling_thread)?;
             let sibling_slot = usize::from(sibling_thread.slot);
             if !invalid_flags_rejected
                 || !invalid_stack_rejected
@@ -1661,6 +1779,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 || clone.child.rflags != 0x202
                 || clone.child.rax != 0
                 || clone.child.fs_base != execution.sibling_fs_base as u64
+                || clone.child.registers != proof_registers
+                || selected != clone.child
                 || LINUX_THREAD_RIPS[sibling_slot].load(Ordering::SeqCst) != clone.child.rip
                 || LINUX_THREAD_RSPS[sibling_slot].load(Ordering::SeqCst) != clone.child.rsp
                 || LINUX_THREAD_RFLAGS[sibling_slot].load(Ordering::SeqCst) != clone.child.rflags
@@ -1691,6 +1811,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                     && LINUX_THREAD_RFLAGS[usize::from(replacement.slot)].load(Ordering::SeqCst)
                         == 0
                     && LINUX_THREAD_RAXS[usize::from(replacement.slot)].load(Ordering::SeqCst) == 0
+                    && linux_thread_return_context(sibling_thread).is_none()
+                    && linux_thread_return_context(replacement).is_none()
                     && !switch_linux_thread(sibling_thread)
                     && retire_linux_thread(replacement),
             )
@@ -1846,6 +1968,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             let rollback_rejected = publish_linux_clone(
                 child,
                 rollback_request,
+                LinuxSyscallFrame::ZERO,
                 execution.entry as u64,
                 0x202,
                 execution.sibling_stack as u64,
@@ -1857,7 +1980,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 && LINUX_THREAD_RSPS[slot].load(Ordering::SeqCst) == 0
                 && LINUX_THREAD_RFLAGS[slot].load(Ordering::SeqCst) == 0
                 && LINUX_THREAD_RAXS[slot].load(Ordering::SeqCst) == 0
-                && LINUX_THREAD_CLEAR_CHILD_TIDS[slot].load(Ordering::SeqCst) == 0;
+                && LINUX_THREAD_CLEAR_CHILD_TIDS[slot].load(Ordering::SeqCst) == 0
+                && LINUX_THREAD_REGISTERS[slot]
+                    .iter()
+                    .all(|register| register.load(Ordering::SeqCst) == 0);
             // SAFETY: both words are inside the live initial stack mapping and
             // SMAP is relaxed only for these bounded reads and writes.
             let (saved_parent_tid, saved_child_tid) = unsafe {
@@ -1871,11 +1997,13 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             let published = publish_linux_clone(
                 child,
                 request,
+                LinuxSyscallFrame::ZERO,
                 execution.entry as u64,
                 0x202,
                 initial_stack as u64,
                 PAGE_SIZE,
             )?;
+            let selected = linux_thread_return_context(child)?;
             // SAFETY: the same two live, bounded stack words are inspected and
             // restored before userspace receives its initial stack.
             let publication_visible = unsafe {
@@ -1891,6 +2019,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 rollback_rejected
                     && rollback_clean
                     && published.parent_rax == u64::from(child.tid)
+                    && selected == published.child
                     && publication_visible
                     && LINUX_THREAD_CLEAR_CHILD_TIDS[slot].load(Ordering::SeqCst) == child_tid
                     && retire_linux_thread(child)
@@ -2467,7 +2596,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
 
 extern "sysv64" fn linux_syscall_handler(
     number: u64,
-    registers: *const u64,
+    registers: *const LinuxSyscallFrame,
     user_stack: u64,
     user_rip: u64,
     user_rflags: u64,
@@ -2476,10 +2605,10 @@ extern "sysv64" fn linux_syscall_handler(
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;
     }
-    // SAFETY: the assembly entry stub passes six callee-saved registers followed
-    // by the six syscall argument registers in their established order.
-    let registers = unsafe { core::slice::from_raw_parts(registers, 12) };
-    let register = |index: usize| registers[index + 6];
+    // SAFETY: the assembly entry stub passes the aligned base of the exact
+    // twelve-register frame represented by LinuxSyscallFrame.
+    let registers = unsafe { registers.read() };
+    let register = |index: usize| registers.argument(index).unwrap_or(0);
     let count = register(3);
     let buffer = register(4);
     let first_argument = register(5);

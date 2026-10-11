@@ -477,6 +477,16 @@ the proof then restores the original parent stack word and retires the child.
 an atomicity proof only: no userspace `clone` syscall is enabled and the child
 is not runnable.
 
+The child slot persists the complete typed x86-64 syscall frame: `r15`, `r14`,
+`r13`, `r12`, `rbp`, `rbx`, `r10`, `r9`, `r8`, `rdx`, `rsi`, and `rdi`, followed
+by the separately retained RIP, RSP, RFLAGS, RAX, and FS base. The layout
+matches the entry assembly and retains the existing six-argument syscall index
+contract. Return-context lookup first resolves the generation-tagged handle,
+then reconstructs and validates canonical instruction, stack, and FS values and
+safe flags. Retirement zeroes every register. A stale handle and an empty
+replacement generation cannot select a context. The selector is not yet wired
+to the hardware return path.
+
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns
 different nonzero sentinel values to TIDs 1 and 2, switches between them, and
