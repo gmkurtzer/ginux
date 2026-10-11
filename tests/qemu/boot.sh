@@ -728,6 +728,11 @@ if ! grep -q '^ginux: bounded Linux dependency page contracts applied' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux dependency mapping slots isolated' "$output_file"; then
+    echo "Boot test failed: bounded Linux dependency mapping slots were not isolated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux read-only dependency segment mapped' "$output_file"; then
     echo "Boot test failed: the read-only dependency segment was not mapped." >&2
     exit 1

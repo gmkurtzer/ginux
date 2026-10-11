@@ -398,7 +398,12 @@ The interpreter derives these requests from each authenticated file's bounded
 main load bias and selects the dependency bias, translates ELF permissions,
 and issues one request per derived page. The kernel represents up to eight
 dependency pages as authenticated relative-address, file-offset, file-size,
-and protection contracts rather than special-casing RX and RW segments. The
+and protection contracts rather than special-casing RX and RW segments. Two
+ordered dependency slots retain independent base windows, selected biases,
+mapping masks, eight-entry contract tables, and generation-tracked leases. The
+current executable proof populates the first slot and requires the unused
+second slot to remain empty; auxiliary executable mapping is the next profile
+revision. The
 first valid dependency request
 atomically binds its candidate bias; later requests must produce that same
 bias from their authenticated relative addresses. The kernel contract remains

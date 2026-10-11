@@ -636,6 +636,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux dependency frames allocated on demand\r\n");
     serial_write("ginux: Linux executable frames allocated on demand\r\n");
     serial_write("ginux: bounded Linux dependency page contracts applied\r\n");
+    serial_write("ginux: bounded Linux dependency mapping slots isolated\r\n");
     serial_write("ginux: Linux read-only dependency segment mapped\r\n");
     serial_write("ginux: toolchain-linked Linux PIE and shared object executed\r\n");
     serial_write("ginux: linker-emitted Linux dynamic tags validated\r\n");

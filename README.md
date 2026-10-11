@@ -69,6 +69,10 @@ valid request, and requires every later dependency page to preserve the
 authenticated relative layout at that bias. A bounded eight-entry contract
 table is derived from the dependency's authenticated page plan; the current
 fixture consumes four entries and exercises every admitted permission class.
+Kernel execution state now provides two isolated dependency slots, each with
+its own base window, selected bias, eight-entry contract table, mapping mask,
+generation leases, and cleanup validation. The running interpreter populates
+only the first slot until auxiliary executable loading is connected.
 Wrong offsets, duplicate
 placement, a mixed bias, and W+X are rejected before it applies
 dependency and main relocations. Both dynamic-table addresses and entry counts
