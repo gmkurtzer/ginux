@@ -733,6 +733,11 @@ if ! grep -q '^ginux: bounded Linux dependency mapping slots isolated' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux auxiliary dependency mapped' "$output_file"; then
+    echo "Boot test failed: the auxiliary Linux dependency was not mapped by userspace." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux read-only dependency segment mapped' "$output_file"; then
     echo "Boot test failed: the read-only dependency segment was not mapped." >&2
     exit 1
@@ -805,6 +810,16 @@ fi
 
 if ! grep -q '^ginux: userspace Linux dependency self-relocations applied' "$output_file"; then
     echo "Boot test failed: Linux dependency self-relocations were not applied." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: userspace Linux auxiliary dependency self-relocations applied' "$output_file"; then
+    echo "Boot test failed: auxiliary Linux dependency self-relocations were not applied." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux auxiliary dependency entry executed' "$output_file"; then
+    echo "Boot test failed: the auxiliary Linux dependency entry was not executed." >&2
     exit 1
 fi
 

@@ -57,8 +57,6 @@ const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.
 const INTERPRETER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-interpreter.bin"));
 const DEPENDENCY_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-dependency.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
-const LINKED_DYNAMIC_MAIN: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/linux-linked-main.elf"));
 const LINKED_DYNAMIC_GRAPH_MAIN: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/linux-linked-graph-main.elf"));
 const LINKED_DYNAMIC_DEPENDENCY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libginux.so"));
@@ -67,7 +65,7 @@ const LINKED_DYNAMIC_AUXILIARY: &[u8] =
 const LINKED_DYNAMIC_INTERPRETER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ld-ginux.so"));
 
 pub(crate) fn runtime_main_bytes() -> &'static [u8] {
-    LINKED_DYNAMIC_MAIN
+    LINKED_DYNAMIC_GRAPH_MAIN
 }
 
 pub(crate) fn verify_dependency_list_metadata() -> bool {
@@ -114,6 +112,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
     wrong_digest_authorities[1].sha256[0] ^= 1;
     let mut overlapping_authorities = dependency_authorities;
     overlapping_authorities[1].load_bias = dependency_authorities[0].load_bias;
+    let reversed_authorities = [dependency_authorities[1], dependency_authorities[0]];
     let valid = main.needed_libraries == [Some(PRIMARY), Some(AUXILIARY)]
         && auxiliary.soname == Some(AUXILIARY)
         && auxiliary.needed_libraries == [None; 2]
@@ -145,6 +144,16 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
             0x60_0000,
             &overlapping_authorities,
             [LINKED_DYNAMIC_DEPENDENCY, LINKED_DYNAMIC_AUXILIARY],
+        )
+        .is_none()
+        && plan_authenticated_pie_dependency_graph(
+            &main,
+            0x3f_f000,
+            &interpreter_authority,
+            LINKED_DYNAMIC_INTERPRETER,
+            0x60_0000,
+            &reversed_authorities,
+            [LINKED_DYNAMIC_AUXILIARY, LINKED_DYNAMIC_DEPENDENCY],
         )
         .is_none();
     if !valid {
@@ -550,26 +559,6 @@ pub(crate) fn plan_authenticated_dependency<'main, 'interpreter, 'dependency>(
     plan_authenticated_dependency_at(
         main,
         None,
-        interpreter_authority,
-        interpreter_bytes,
-        interpreter_base,
-        dependency_authority,
-        dependency_bytes,
-    )
-}
-
-fn plan_authenticated_pie_dependency<'main, 'interpreter, 'dependency>(
-    main: &Image<'main>,
-    main_base: u64,
-    interpreter_authority: &InterpreterAuthority<'_>,
-    interpreter_bytes: &'interpreter [u8],
-    interpreter_base: u64,
-    dependency_authority: &DependencyAuthority<'_>,
-    dependency_bytes: &'dependency [u8],
-) -> Option<DependencyLoadPlan<'main, 'interpreter, 'dependency>> {
-    plan_authenticated_dependency_at(
-        main,
-        Some(main_base),
         interpreter_authority,
         interpreter_bytes,
         interpreter_base,
@@ -2583,8 +2572,9 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
 pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_size: usize) -> bool {
     const PATH: &[u8] = b"/lib64/ld-ginux.so";
     const DEPENDENCY: &[u8] = b"libginux.so";
+    const AUXILIARY: &[u8] = b"libginux-aux.so";
     let interpreter_bytes = LINKED_DYNAMIC_INTERPRETER;
-    let Some(main) = parse(LINKED_DYNAMIC_MAIN) else {
+    let Some(main) = parse(LINKED_DYNAMIC_GRAPH_MAIN) else {
         crate::serial_write_bytes(b"\r\nginux: linked dynamic main parse failed");
         return false;
     };
@@ -2600,17 +2590,24 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         path: PATH,
         sha256: crate::crypto::sha256(interpreter_bytes),
     };
-    let dependency_authority = DependencyAuthority {
-        name: DEPENDENCY,
-        sha256: crate::crypto::sha256(LINKED_DYNAMIC_DEPENDENCY),
-        load_bias: 0x61_0000,
-    };
+    let dependency_authorities = [
+        DependencyAuthority {
+            name: DEPENDENCY,
+            sha256: crate::crypto::sha256(LINKED_DYNAMIC_DEPENDENCY),
+            load_bias: 0x61_0000,
+        },
+        DependencyAuthority {
+            name: AUXILIARY,
+            sha256: crate::crypto::sha256(LINKED_DYNAMIC_AUXILIARY),
+            load_bias: 0x63_0000,
+        },
+    ];
     if main.dynamic_symbol != dependency.dynamic_symbol {
         crate::serial_write_bytes(b"\r\nginux: linked dynamic symbol mismatch");
         return false;
     }
     if main.interpreter != Some(PATH)
-        || main.needed_libraries != [Some(DEPENDENCY), None]
+        || main.needed_libraries != [Some(DEPENDENCY), Some(AUXILIARY)]
         || dependency.soname != Some(DEPENDENCY)
     {
         crate::serial_write_bytes(b"\r\nginux: linked dynamic identity mismatch");
@@ -2644,24 +2641,25 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         crate::serial_write_bytes(b"\r\nginux: linked DSO planning failed");
         return false;
     }
-    let Some(plan) = plan_authenticated_pie_dependency(
+    let Some(plan) = plan_authenticated_pie_dependency_graph(
         &main,
         0x3f_f000,
         &authority,
         interpreter_bytes,
         0x60_0000,
-        &dependency_authority,
-        LINKED_DYNAMIC_DEPENDENCY,
+        &dependency_authorities,
+        [LINKED_DYNAMIC_DEPENDENCY, LINKED_DYNAMIC_AUXILIARY],
     ) else {
         crate::serial_write_bytes(b"\r\nginux: linked dynamic dependency plan failed");
         return false;
     };
-    if plan.dependency.executable.page_count != 2
-        || plan.dependency.writable.page_count != 1
-        || !plan
-            .dependency
+    if plan.dependencies[0].executable.page_count != 2
+        || plan.dependencies[0].writable.page_count != 1
+        || !plan.dependencies[0]
             .read_only
             .is_some_and(|segment| segment.page_count == 1)
+        || plan.dependencies[1].executable.page_count != 1
+        || plan.dependencies[1].writable.page_count != 1
     {
         crate::serial_write_bytes(b"\r\nginux: linked DSO page-contract fixture mismatch");
         return false;

@@ -637,6 +637,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux executable frames allocated on demand\r\n");
     serial_write("ginux: bounded Linux dependency page contracts applied\r\n");
     serial_write("ginux: bounded Linux dependency mapping slots isolated\r\n");
+    serial_write("ginux: userspace Linux auxiliary dependency mapped\r\n");
     serial_write("ginux: Linux read-only dependency segment mapped\r\n");
     serial_write("ginux: toolchain-linked Linux PIE and shared object executed\r\n");
     serial_write("ginux: linker-emitted Linux dynamic tags validated\r\n");
@@ -652,6 +653,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: userspace Linux cross-object symbol resolved\r\n");
     serial_write("ginux: Linux JUMP_SLOT dependency call executed\r\n");
     serial_write("ginux: userspace Linux dependency self-relocations applied\r\n");
+    serial_write("ginux: userspace Linux auxiliary dependency self-relocations applied\r\n");
+    serial_write("ginux: Linux auxiliary dependency entry executed\r\n");
     serial_write("ginux: metadata-driven Linux relative relocations applied\r\n");
     serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
     serial_write("ginux: Linux proof workload assembled from source\r\n");

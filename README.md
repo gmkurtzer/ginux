@@ -20,14 +20,14 @@ global function symbol used by `R_X86_64_GLOB_DAT` and
 `DT_NEEDED` names and rejects overflow or duplicates. A separate LLD-produced
 metadata fixture proves both names and the second DSO's `DT_SONAME`. Independent
 authority records bind both ordered names to their SHA-256 digests and canonical
-load biases, with pairwise overlap rejection; executable loading remains
-intentionally limited to the first dependency. Its undefined
+load biases, with pairwise overlap rejection. Both dependencies are mapped and
+self-relocated by the userspace interpreter. The main image's undefined
 main-image symbol is matched to the same defined symbol in one authenticated
 `ET_DYN` dependency.
 Images whose expanded
 program-header table covers the entry point are rejected. A bounded proof maps
-a resolved `ET_EXEC` main image, relocated `ET_DYN` interpreter, and one
-relocated dependency into separate W^X regions, builds the dynamic startup
+a resolved `ET_EXEC` main image, relocated `ET_DYN` interpreter, and two
+relocated dependencies into separate W^X regions, builds the dynamic startup
 stack, and enters the interpreter first.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
@@ -42,10 +42,11 @@ target. The kernel then restores its root and scrubs every owned frame.
 The build rejects unresolved ELF relocation records in all three raw embedded
 text payloads before extracting their bytes.
 The executable QEMU path now goes beyond the synthetic metadata fixtures: LLD
-produces an `ET_DYN` interpreter, PIE main, and separate `libginux.so`, including
+produces an `ET_DYN` interpreter, PIE main, `libginux.so`, and
+`libginux-aux.so`, including
 program headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and
-`DT_SONAME`. The kernel authenticates all three linker outputs, applies fixed
-load biases, accepts the dependency's intentionally unmapped ELF headers, and
+`DT_SONAME`. The kernel authenticates all four linker outputs, applies fixed
+load biases, accepts the dependencies' intentionally unmapped ELF headers, and
 executes the complete probe through the linker-generated jump slot.
 Before relocating itself, the linked interpreter validates its mapped ELF
 header and bounded program-header table and derives its sole `PT_DYNAMIC`
@@ -59,11 +60,12 @@ read-only window, the interpreter reopens it, bounds its 56-byte program-header
 table to eight entries in the two-page window, and derives page-aligned mmap
 requests from each readable `PT_LOAD`. It installs the authenticated header,
 four RX, and two RW/NX pages through exact `MAP_FIXED_NOREPLACE` contracts. It
-then captures the main image's sole `DT_NEEDED` string,
-constructs `/lib64/<needed-name>` on its bounded stack, inspects that derived
-dependency path, walks that file's `PT_LOAD` entries the same way, and installs
+then captures the main image's two ordered `DT_NEEDED` strings, constructs each
+`/lib64/<needed-name>` on its bounded stack, inspects those derived dependency
+paths, walks both files' `PT_LOAD` entries the same way, and installs
 RX pages at `0x618000..0x61a000`, an R/NX page at `0x61a000`, and an RW/NX page
-at `0x61b000`. The kernel admits a
+at `0x61b000` for the primary DSO. The auxiliary DSO receives RX at `0x638000`
+and RW/NX at `0x63b000`. The kernel admits a
 page-aligned dependency bias only within `0x610000..0x620000`, binds the first
 valid request, and requires every later dependency page to preserve the
 authenticated relative layout at that bias. A bounded eight-entry contract
@@ -72,16 +74,17 @@ fixture consumes four entries and exercises every admitted permission class.
 Kernel execution state now provides two isolated dependency slots, each with
 its own base window, selected bias, eight-entry contract table, mapping mask,
 generation leases, and cleanup validation. The running interpreter populates
-only the first slot until auxiliary executable loading is connected.
+both slots, applies all three admitted relocations in each DSO, and directly
+executes a checked auxiliary entry before transferring to the main workload.
 Wrong offsets, duplicate
 placement, a mixed bias, and W+X are rejected before it applies
 dependency and main relocations. Both dynamic-table addresses and entry counts
 come from bounded `PT_DYNAMIC` headers, and final transfer uses `AT_ENTRY`
 rather than an embedded main entry address. The kernel installs only the interpreter for
-this stage; it authenticates and plans the main and dependency and reserves
+this stage; it authenticates and plans the main and both dependencies and reserves
 only the address-space infrastructure and interpreter frames initially. Main
 and dependency payload frames are allocated only when their authenticated mmap
-requests arrive. Both images' content and leaves are installed by userspace,
+requests arrive. All three images' content and leaves are installed by userspace,
 and every executable-page lease is scrubbed and released after the process
 root is deactivated.
 Linker-private metadata remains mapped but outside the probe's bounded
@@ -183,13 +186,13 @@ Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 An immutable runtime-file view exposes the exact authenticated `/init`,
 `/lib64/ld-ginux.so`, `/lib64/libginux.so`, and `/lib64/libginux-aux.so` bytes
 as read-only regular files. The linked main opens the auxiliary DSO, reads and
-validates its ELF magic, and closes its independent descriptor; executable
-mapping of that fourth file remains outside the current runtime profile.
+validates its ELF magic, and closes its independent descriptor. The interpreter
+also derives, inspects, and executable-maps both DSO paths.
 Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, private
 read-only `mmap`, metadata, and access checks operate on those files. This is
 not directory traversal, a general VFS, or general `execve` loading. The kernel
-still authenticates and plans the fixed runtime trio; the interpreter installs
-the authenticated main and dependency segments admitted by that exact plan.
+authenticates and plans the fixed four-image graph; the interpreter installs
+the authenticated main and both dependency segments admitted by that exact plan.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
 Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and

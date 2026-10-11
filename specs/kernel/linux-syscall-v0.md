@@ -289,10 +289,10 @@ seeks and reads it again, verifies metadata, rejects writes and writable opens,
 maps the interpreter through the bounded read-only file-mapping profile below,
 and closes the descriptor. There is no `/lib64` directory enumeration,
 pathname traversal, general VFS, or userspace `execve`; the kernel authenticates
-and plans the three executable images plus the separately admitted auxiliary
-dependency. The kernel installs the
-interpreter needed to bootstrap ring 3; that interpreter installs the main and
-dependency's admitted segments through the fixed mapping contract below.
+and plans the fixed interpreter, main, and two-DSO executable graph. The kernel
+installs the interpreter needed to bootstrap ring 3; that interpreter installs
+the main and both dependencies' admitted segments through the fixed mapping
+contract below.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 4,
@@ -379,8 +379,8 @@ into allocator-owned read-only/NX frames and zero-fills a partial final page.
 Descriptor cursors are unaffected. Unsupported arguments return `-EINVAL`, a
 non-file descriptor returns `-ENODEV`, an invalid descriptor returns `-EBADF`,
 and a request while the sole extent is occupied returns `-ENOMEM`.
-The executable-install profile accepts only open `/init` or
-`/lib64/libginux.so` descriptors and exact one-page `MAP_PRIVATE |
+The executable-install profile accepts only open `/init`,
+`/lib64/libginux.so`, or `/lib64/libginux-aux.so` descriptors and exact one-page `MAP_PRIVATE |
 MAP_FIXED_NOREPLACE` requests already authenticated by the kernel plan. For
 `/init`, those contracts are offset `0` at `0x3ff000` with `PROT_READ`, offsets
 `0x1000..0x4000` at `0x400000..0x403000` with `PROT_READ | PROT_EXEC`, and
@@ -392,6 +392,10 @@ offset `0x3000` must be R/NX at relative address `0x2000`; offset `0x4000` must
 be RW/NX at relative address `0x3000`. The current
 interpreter selects base `0x618000`, producing mappings at `0x618000`,
 `0x619000`, `0x61a000`, and `0x61b000`.
+For `libginux-aux.so`, the independent half-open base range is
+`0x630000..0x640000`. Offset `0x1000` must be RX at relative address zero and
+offset `0x2000` must be RW/NX at relative address `0x3000`. The interpreter
+selects base `0x638000`, producing mappings at `0x638000` and `0x63b000`.
 
 The interpreter derives these requests from each authenticated file's bounded
 `PT_LOAD` table rather than embedding the valid page sequence. It supplies the
@@ -401,9 +405,7 @@ dependency pages as authenticated relative-address, file-offset, file-size,
 and protection contracts rather than special-casing RX and RW segments. Two
 ordered dependency slots retain independent base windows, selected biases,
 mapping masks, eight-entry contract tables, and generation-tracked leases. The
-current executable proof populates the first slot and requires the unused
-second slot to remain empty; auxiliary executable mapping is the next profile
-revision. The
+current executable proof populates and validates both slots. The
 first valid dependency request
 atomically binds its candidate bias; later requests must produce that same
 bias from their authenticated relative addresses. The kernel contract remains
@@ -412,6 +414,10 @@ does not match the authenticated plan is rejected. The runtime proof
 deliberately submits a wrong first-page offset, a W+X executable request, a
 repeated first-page request, and a dependency page at a different in-window
 bias and requires `-EINVAL`, `-EINVAL`, `-EEXIST`, and `-EINVAL`, respectively.
+The common file walker repeats its bad-offset, W+X, and duplicate-placement
+checks while loading the auxiliary DSO. Exit validates generation ownership,
+scrubs and releases every lease in both slots, and restores the kernel-owned
+live-frame count.
 
 Each admitted main or dependency page receives a generation-tracked kernel
 frame on demand. The kernel copies only its authenticated file extent,

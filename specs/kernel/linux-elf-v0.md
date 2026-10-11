@@ -119,9 +119,10 @@ authority record is currently a synthetic proof input rather than a
 production-signed package manifest. The parser accepts an ordered list of at
 most two distinct `DT_NEEDED` names, rejects a third or a duplicate, and
 preserves their dynamic-table order. The executable profile currently requires
-exactly one name. That dependency must declare one
-nonempty `DT_SONAME`; a dependency authority record binds that exact string to
-a SHA-256 digest and fixed page-aligned load bias.
+exactly two names for the LLD runtime graph; the compact synthetic fixture keeps
+one. Each dependency must declare one nonempty `DT_SONAME`; an ordered
+dependency authority record binds each exact string to a SHA-256 digest and
+fixed page-aligned canonical bias.
 The kernel authenticates the bytes before parsing or mapping the dependency,
 requires a non-interpreted `ET_DYN` image with no nested `DT_NEEDED`, and rejects
 page-granular overlap among all main, interpreter, and dependency loads. Wrong
@@ -178,10 +179,11 @@ encoder using that common contract, and the interpreted proof checks the exact
 word positions of its dynamic values. A bounded execution proof installs only
 the interpreter's separate RX and RW/NX pages in the initial user root. It
 keeps absent leaves for the main image's read-only/NX header page, four RX
-pages, two RW/NX pages, and the dependency's two RX, one read-only/NX, and one
-RW page. It allocates each of those eleven payload frames only when the matching authenticated mmap request
+pages, two RW/NX pages, the primary dependency's two RX, one read-only/NX, and
+one RW page, and the auxiliary dependency's one RX and one RW page. It
+allocates each of those thirteen payload frames only when the matching authenticated mmap request
 arrives. It also owns bounded heap, stack, and two `mmap` payload frames. The
-proof verifies that the main and dependency leaves begin absent, validates
+proof verifies that the main and both dependency leaves begin absent, validates
 their userspace-installed contents and permissions after execution, and
 constructs the dynamic-process stack with the common auxiliary-vector encoder.
 The compact planning fixture records an entry
@@ -236,15 +238,20 @@ linker metadata used here: an in-range 32-byte `DT_PLTGOT`, zero `DT_DEBUG`,
 values are rejected. The main's linker metadata tail remains mapped for the
 interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
-A separate LLD-produced main fixture carries ordered `DT_NEEDED` entries for
+The executable LLD-produced main carries ordered `DT_NEEDED` entries for
 `libginux.so` and `libginux-aux.so`. The parser validates both names and the
 auxiliary DSO's matching `DT_SONAME`, bounded GNU hash, symbol, and relocation
 metadata. Two independent authority records bind the ordered names to exact
 SHA-256 digests and page-aligned canonical biases. Planning authenticates both
 files before parsing, requires both SONAMEs, and rejects digest substitution or
 any pairwise overlap among the main, interpreter, and two dependency plans.
-This fixture establishes the dependency-graph input for the next loader
-milestone; it does not yet map or execute the auxiliary DSO.
+The userspace interpreter preserves that order, derives both runtime paths,
+maps each DSO in its independent authenticated slot, applies each DSO's
+`RELATIVE`, `GLOB_DAT`, and eager `JUMP_SLOT` relocations, and calls the
+auxiliary entry before transferring to the main workload. The auxiliary return
+value is checked in ring 3; the kernel independently checks both DSO mapping
+permissions, code and entry bytes, all six relocation targets, lease cleanup,
+frame scrubbing, and restoration of the pre-execution live-frame count.
 After applying its self-relocation, the linked interpreter enters the syscall
 gate only after consuming the initial stack metadata. It walks at most eight
 environment pointers and 32 auxiliary-vector pairs, requires nonzero
@@ -286,11 +293,11 @@ The interpreter keeps its bounded startup scratch in the zero-fill tail after
 its linker-emitted `.dynamic` and relocation target so that the bootstrap
 dynamic-table offset remains invariant.
 
-The main dynamic-table scan then captures the sole `DT_NEEDED` string-table
-offset, requires a nonzero bounded name, and constructs
-`/lib64/<needed-name>` on the mapped user stack. It inspects that derived file
-before reopening it and applies the same program-header walker at dependency
-bias `0x618000`. The resulting requests map file offset `0x1000` RX at
+The main dynamic-table scan captures two ordered `DT_NEEDED` string-table
+offsets, requires both bounded names, and constructs each
+`/lib64/<needed-name>` on the mapped user stack. It inspects each derived file
+before reopening it and applies the same program-header walker at selected
+biases `0x618000` and `0x638000`. The primary requests map file offset `0x1000` RX at
 `0x618000`, offset `0x2000` RX at `0x619000`, offset `0x3000` R/NX at
 `0x61a000`, and offset `0x4000` RW/NX at `0x61b000`. The kernel accepts a
 page-aligned base only within `0x610000..0x620000`, binds the first admitted
@@ -299,30 +306,33 @@ preserving every relative displacement from a bounded eight-entry page
 contract table derived from the authenticated plan. The current fixture
 consumes four entries and proves RX, R/NX, and RW/NX mappings. A repeated first-page
 request returns `-EEXIST`; a W+X executable request and an otherwise-valid page
-using another in-window bias return `-EINVAL`. Only then does
-it apply dependency and main relocations. The namespace still admits only
-`libginux.so`, so an altered or unterminated name fails closed. Syscall return
+using another in-window bias return `-EINVAL`. The auxiliary requests map file
+offset `0x1000` RX at `0x638000` and offset `0x2000` RW/NX at `0x63b000`.
+Only then does it apply both dependencies' and the main relocations. The
+executable namespace admits exactly `libginux.so` and `libginux-aux.so`, so an
+altered, reordered, or unterminated name fails closed. Syscall return
 validation accepts only the declared main and interpreter RX extents. The
 kernel authenticates and plans all images. Main and dependency payload frames
 are allocated from the tracked kernel pool only when their admitted mmap
 requests arrive; their content and leaf installation are userspace-driven.
 The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
-those bytes. The executable dynamic interpreter, main, and dependency instead
+those bytes. The executable dynamic interpreter, main, and dependencies instead
 retain LLD's complete ELF metadata.
 The complete ring-3 probe therefore runs with dynamic `AT_BASE`, main-image
 `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. Dependency dynamic
 metadata, entry, and relocation targets are translated from the authenticated
 canonical plan by the selected bias before validation. The kernel
-restores its own root, scrubs every payload, releases all eleven demand-allocated
+restores its own root, scrubs every payload, releases all thirteen demand-allocated
 main and dependency leases, and requires the kernel-owned live-frame count to
-return to its pre-execution value. This profile performs one exact cross-object name match; it
-does not yet execute multiple dependencies or support transitive dependency graphs, search
+return to its pre-execution value. This profile performs one exact cross-object
+name match against the primary dependency and a direct checked call into the
+auxiliary dependency. It does not support transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
 lazy binding, a general-purpose dynamic linker, or glibc. The main bias and
-entry are startup-metadata-driven. The sole dependency now selects among 16
-page-aligned candidate biases in one fixed window and receives frames on
-demand, but its relative page layout remains a kernel-authenticated contract;
+entry are startup-metadata-driven. Each dependency selects among 16
+page-aligned candidate biases in its own fixed window and receives frames on
+demand, but each relative page layout remains a kernel-authenticated contract;
 randomization and general placement are not implemented.
 
 ## Page-image plan
