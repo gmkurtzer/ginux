@@ -351,13 +351,15 @@ entry validity, dynamic metadata, and the final admitted page set remain
 kernel-enforced contracts.
 
 The initial-thread execution profile allocates a separate owned RW/NX page for
-the main image's TLS. It rounds `p_memsz` up to `p_align`, places that static
-block below a 64-byte-aligned x86-64 variant-II thread pointer, copies `p_filesz`
-bytes from `.tdata`, and retains zeroes through the `.tbss` tail. The following
-16 bytes form a minimal TCB whose first word points to itself and whose second
-word is zero. The kernel programs FS before entering the interpreter. Both the
-main preinitializer and kernel verify the initialized value, zero tail, and
-self pointer. The preinitializer names both hidden TLS symbols through
+the main image and primary DSO TLS templates. It rounds each `p_memsz` up to
+`p_align` and constructs one deterministic x86-64 variant-II static layout:
+the primary DSO occupies `TP-32..TP-16`, the main occupies `TP-16..TP`, and the
+thread pointer remains 64-byte aligned. The loader copies each `p_filesz`
+region from `.tdata` and retains zeroes through both `.tbss` tails. The
+following 16 bytes form a minimal TCB whose first word points to itself and
+whose second word is zero. The kernel programs FS before entering the
+interpreter. The main preinitializer and kernel verify the main initialized
+value, zero tail, and self pointer. The preinitializer names both hidden TLS symbols through
 `R_X86_64_TPOFF32`. The build requires exactly two such object relocations, and
 LLD resolves them to `-16` and `-8` without adding a dynamic relocation type.
 Only the live static-block-plus-TCB extent is added to the syscall-copy
@@ -369,14 +371,16 @@ On exit, the prior supervisor FS base is restored and the owned
 TLS frame is zeroed and released; the live-frame count must return to its
 pre-execution value. The later bounded `arch_prctl(ARCH_SET_FS)` proof may
 replace the initial base, but is not the loader's TLS construction mechanism.
-TLS relocations, multiple TLS modules, dynamic TLS, and per-thread allocation
-remain outside the execution profile. The primary authenticated DSO does carry
-a second bounded `PT_TLS` template with the eight-byte `DSOTLS!\n` value,
-sixteen total bytes, and eight-byte alignment. Parsing binds it to the DSO's
-digest and `DT_SONAME`, and planning relocates its metadata by the canonical
-dependency bias. It is not yet included in the materialized static block; this
-metadata-only step makes that limitation explicit rather than ignoring a DSO
-TLS declaration.
+The primary authenticated DSO carries a second bounded `PT_TLS` template with
+the eight-byte `DSOTLS!\n` value, sixteen total bytes, and eight-byte alignment.
+Parsing binds it to the DSO's digest and `DT_SONAME`, and planning relocates its
+metadata by the canonical dependency bias. Its direct initializer reads the
+assigned `TP-32` initialized value and `TP-24` zero tail before allowing its
+constructor to advance, so successful execution proves dependency TLS is live
+before constructors. That access still encodes the bounded module offset
+directly. Toolchain-generated dependency TLS relocations, additional TLS
+modules, dynamic TLS, and per-thread allocation remain outside the execution
+profile.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and

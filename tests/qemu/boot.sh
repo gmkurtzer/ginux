@@ -603,13 +603,18 @@ if ! grep -q '^ginux: bounded Linux TLS template metadata validated' "$output_fi
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated Linux initial TLS materialized' "$output_file"; then
-    echo "Boot test failed: isolated initial Linux TLS was not materialized." >&2
+if ! grep -q '^ginux: combined Linux static TLS materialized' "$output_file"; then
+    echo "Boot test failed: combined Linux static TLS was not materialized." >&2
     exit 1
 fi
 
 if ! grep -q '^ginux: Linux TLS active before initializers' "$output_file"; then
     echo "Boot test failed: Linux TLS was not active before initializers." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux dependency TLS active before constructors' "$output_file"; then
+    echo "Boot test failed: Linux dependency TLS was not active before constructors." >&2
     exit 1
 fi
 

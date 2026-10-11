@@ -564,25 +564,49 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let Some(main_tls) = plan.main.tls else {
         return false;
     };
-    let (Ok(tls_memory_size), Ok(tls_alignment)) = (
-        usize::try_from(main_tls.memory_size),
-        usize::try_from(main_tls.alignment),
-    ) else {
+    let Some(dependency_tls) = dependency_plan.dependencies[0].tls else {
         return false;
     };
-    if tls_memory_size == 0 || tls_alignment == 0 || !tls_alignment.is_power_of_two() {
+    if dependency_plan.dependencies[1].tls.is_some() {
         return false;
     }
-    let Some(tls_block_size) = tls_memory_size
-        .checked_add(tls_alignment - 1)
-        .map(|size| size & !(tls_alignment - 1))
+    let tls_layout = |template: crate::linux_elf::TlsTemplate<'_>| {
+        let memory_size = usize::try_from(template.memory_size).ok()?;
+        let alignment = usize::try_from(template.alignment).ok()?;
+        if memory_size == 0 || alignment == 0 || !alignment.is_power_of_two() {
+            return None;
+        }
+        let block_size = memory_size
+            .checked_add(alignment - 1)
+            .map(|size| size & !(alignment - 1))?;
+        Some((memory_size, alignment, block_size))
+    };
+    let Some((main_tls_memory_size, main_tls_alignment, main_tls_block_size)) =
+        tls_layout(main_tls)
     else {
         return false;
     };
-    let Some(tls_start_offset) = LINUX_TLS_THREAD_POINTER_OFFSET.checked_sub(tls_block_size) else {
+    let Some((dependency_tls_memory_size, dependency_tls_alignment, dependency_tls_block_size)) =
+        tls_layout(dependency_tls)
+    else {
         return false;
     };
-    let Some(tls_extent_size) = tls_block_size.checked_add(LINUX_TLS_TCB_SIZE) else {
+    let Some(combined_tls_block_size) = main_tls_block_size.checked_add(dependency_tls_block_size)
+    else {
+        return false;
+    };
+    let Some(tls_start_offset) =
+        LINUX_TLS_THREAD_POINTER_OFFSET.checked_sub(combined_tls_block_size)
+    else {
+        return false;
+    };
+    let Some(main_tls_start_offset) =
+        LINUX_TLS_THREAD_POINTER_OFFSET.checked_sub(main_tls_block_size)
+    else {
+        return false;
+    };
+    let dependency_tls_start_offset = tls_start_offset;
+    let Some(tls_extent_size) = combined_tls_block_size.checked_add(LINUX_TLS_TCB_SIZE) else {
         return false;
     };
     let interpreter_rx = plan.interpreter.executable;
@@ -941,12 +965,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     .read_only
                     .is_some_and(|segment| segment.writable || segment.executable)
         })
-        || tls_memory_size == 0
-        || tls_alignment == 0
-        || !tls_alignment.is_power_of_two()
-        || tls_block_size > LINUX_TLS_THREAD_POINTER_OFFSET
-        || main_tls.bytes.len() > tls_memory_size
-        || !(tls_virtual_page as usize + tls_start_offset).is_multiple_of(tls_alignment)
+        || combined_tls_block_size > LINUX_TLS_THREAD_POINTER_OFFSET
+        || main_tls.bytes.len() > main_tls_memory_size
+        || dependency_tls.bytes.len() > dependency_tls_memory_size
+        || !(tls_virtual_page as usize + main_tls_start_offset).is_multiple_of(main_tls_alignment)
+        || !(tls_virtual_page as usize + dependency_tls_start_offset)
+            .is_multiple_of(dependency_tls_alignment)
         || LINUX_TLS_THREAD_POINTER_OFFSET + LINUX_TLS_TCB_SIZE > PAGE_SIZE
     {
         return false;
@@ -1042,8 +1066,13 @@ pub(crate) fn verify_interpreted_elf_mapping(
             zero_frame(tls_page)?;
             let tls_bytes = mapped_frame::<u8>(tls_page)?;
             core::ptr::copy_nonoverlapping(
+                dependency_tls.bytes.as_ptr(),
+                tls_bytes.add(dependency_tls_start_offset),
+                dependency_tls.bytes.len(),
+            );
+            core::ptr::copy_nonoverlapping(
                 main_tls.bytes.as_ptr(),
-                tls_bytes.add(tls_start_offset),
+                tls_bytes.add(main_tls_start_offset),
                 main_tls.bytes.len(),
             );
             tls_bytes
@@ -1180,13 +1209,27 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
                         && core::slice::from_raw_parts(
-                            (tls_virtual_page as usize + tls_start_offset) as *const u8,
+                            (tls_virtual_page as usize + dependency_tls_start_offset) as *const u8,
+                            dependency_tls.bytes.len(),
+                        ) == dependency_tls.bytes
+                        && core::slice::from_raw_parts(
+                            (tls_virtual_page as usize
+                                + dependency_tls_start_offset
+                                + dependency_tls.bytes.len())
+                                as *const u8,
+                            dependency_tls_memory_size - dependency_tls.bytes.len(),
+                        )
+                        .iter()
+                        .all(|byte| *byte == 0)
+                        && core::slice::from_raw_parts(
+                            (tls_virtual_page as usize + main_tls_start_offset) as *const u8,
                             main_tls.bytes.len(),
                         ) == main_tls.bytes
                         && core::slice::from_raw_parts(
-                            (tls_virtual_page as usize + tls_start_offset + main_tls.bytes.len())
-                                as *const u8,
-                            tls_memory_size - main_tls.bytes.len(),
+                            (tls_virtual_page as usize
+                                + main_tls_start_offset
+                                + main_tls.bytes.len()) as *const u8,
+                            main_tls_memory_size - main_tls.bytes.len(),
                         )
                         .iter()
                         .all(|byte| *byte == 0)
@@ -1261,13 +1304,27 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     == tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
                 && cpu::with_supervisor_user_access(|| {
                     core::slice::from_raw_parts(
-                        (tls_virtual_page as usize + tls_start_offset) as *const u8,
-                        main_tls.bytes.len(),
-                    ) == main_tls.bytes
+                        (tls_virtual_page as usize + dependency_tls_start_offset) as *const u8,
+                        dependency_tls.bytes.len(),
+                    ) == dependency_tls.bytes
                         && core::slice::from_raw_parts(
-                            (tls_virtual_page as usize + tls_start_offset + main_tls.bytes.len())
+                            (tls_virtual_page as usize
+                                + dependency_tls_start_offset
+                                + dependency_tls.bytes.len())
                                 as *const u8,
-                            tls_memory_size - main_tls.bytes.len(),
+                            dependency_tls_memory_size - dependency_tls.bytes.len(),
+                        )
+                        .iter()
+                        .all(|byte| *byte == 0)
+                        && core::slice::from_raw_parts(
+                            (tls_virtual_page as usize + main_tls_start_offset) as *const u8,
+                            main_tls.bytes.len(),
+                        ) == main_tls.bytes
+                        && core::slice::from_raw_parts(
+                            (tls_virtual_page as usize
+                                + main_tls_start_offset
+                                + main_tls.bytes.len()) as *const u8,
+                            main_tls_memory_size - main_tls.bytes.len(),
                         )
                         .iter()
                         .all(|byte| *byte == 0)

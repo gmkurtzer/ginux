@@ -33,13 +33,17 @@ The linker-produced main also carries an authenticated read-only `PT_TLS` view
 of its writable load: eight initialized bytes, sixteen total bytes, and
 eight-byte alignment. The parser caps both TLS size and alignment at 64 bytes,
 requires matching file and virtual displacement inside the writable load, and
-rejects malformed or duplicate declarations. Planning preserves the template
-and applies the PIE bias. The interpreted execution proof allocates a separate
-owned RW/NX page, copies `.tdata`, leaves `.tbss` zero, and places the bounded
-static block below a 64-byte-aligned x86-64 variant-II thread pointer. A minimal
+rejects malformed or duplicate declarations. Planning preserves both templates
+and applies the main and dependency biases. The interpreted execution proof
+allocates a separate owned RW/NX page and constructs a deterministic two-module
+static layout: the primary DSO occupies `TP-32..TP-16`, the main occupies
+`TP-16..TP`, and both initialized `.tdata` regions retain zeroed `.tbss` tails.
+A minimal
 16-byte TCB contains its own address. FS is activated before the interpreter,
 and the main preinitializer refuses to advance unless its TLS template, zero
-tail, and self pointer are correct. Its accesses name the hidden TLS symbols
+tail, and self pointer are correct. The primary DSO's direct initializer also
+refuses to advance unless its initialized and zero-filled regions are correct.
+The main accesses name the hidden TLS symbols
 through `R_X86_64_TPOFF32`; LLD resolves both offsets without adding a dynamic
 relocation class, proving the toolchain layout matches the loader. Teardown
 scrubs and releases the TLS frame and restores the supervisor's prior FS base.
@@ -47,11 +51,10 @@ The kernel admits only the live static-block-plus-TCB extent to syscall copy
 validation; the interpreter writes the initialized `TLS_OK!` value directly
 from FS-relative storage before invoking the preinitializer, while one-byte
 underflow and overflow ranges are rejected internally.
-TLS relocations, multiple modules, and per-thread allocation remain
-unimplemented at execution time. The authenticated primary DSO now carries its
-own bounded `PT_TLS` template and planning applies its canonical dependency
-bias, but the initial TLS block deliberately materializes only the main module
-until a combined layout and module-offset contract are implemented.
+Dynamic TLS relocations, additional TLS modules, and per-thread allocation
+remain unimplemented. The primary DSO currently validates its assigned static
+offsets directly; toolchain-generated dependency TLS relocation is the next
+compatibility step.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

@@ -31,6 +31,11 @@ ginux_dependency_symbol:
 ginux_dependency_init:
     cmp qword ptr [0x404008], 1
     jne .Ldependency_init_done
+    movabs rax, 0x0a21534c544f5344
+    cmp qword ptr fs:[-32], rax
+    jne .Ldependency_init_done
+    cmp qword ptr fs:[-24], 0
+    jne .Ldependency_init_done
     mov qword ptr [rip + .Ldependency_initialized], 0x47
 .Ldependency_init_done:
     ret
