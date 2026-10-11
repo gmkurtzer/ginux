@@ -14,9 +14,9 @@ zero-filled BSS, including ELF and program headers in the first load page. The
 runtime proof owns every mapped frame, preserves per-page W^X permissions, and
 rejects larger plans. The planner materializes a conventional third read-only
 load and non-page-base segments. The mapper owns its frame and a separate leaf
-table, activates the root, observes all three segments, and tears them down.
-The two-load proof additionally
-activates the collision-checked page-table root and
+table, activates the root, and executes the toolchain-linked image through the
+full syscall workload before tearing every frame down. The synthetic two-load
+proof also activates the collision-checked page-table root and
 executes a non-page-base verification entry at ring 3. This
 entry receives a distinct RW/NX stack containing `argc`, `argv[0]`, `envp[0]`,
 and bounded Linux `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_PAGESZ`, static-loader,

@@ -55,10 +55,11 @@ loads explicitly. It aligns each mapping downward, retains the declared memory
 start, accounts for the in-page prefix when bounding page count, and copies file
 bytes at the correct page offset while zeroing the prefix, BSS, and page tails.
 The runtime mapper owns a separate leaf table and payload frame for the third
-read-only load, installs it read-only/NX, activates the root, observes all three
-segments under SMAP, restores the kernel root, and scrubs every owned frame.
-Execution remains limited to the two-load proof until syscall copy bounds use
-the linked image's exact non-page-base RX extent.
+read-only load, installs it read-only/NX, activates the root, and executes the
+toolchain-linked image. Syscall return validation remains bounded to its mapped
+RX page while readable-code copy bounds begin at the exact non-page-base
+`0x400100` memory extent. The proof restores the kernel root and scrubs every
+owned frame after exit.
 
 The strict profile prevents unsupported features from being silently
 interpreted with weaker semantics. It does not accept position-independent
@@ -81,9 +82,10 @@ exact RX instructions, RW data bytes, W^X metadata, and every zero-filled tail
 byte. Runtime address-space installation owns and tears down every planned
 page, including a second BSS-only RW/NX page.
 
-Before the executable proof, QEMU maps the toolchain-linked read-only header at
-`0x3ff000` through a separately cloned 2 MiB leaf table and validates it beside
-the RX and RW/NX loads. The executable proof installs an RX page at `0x400000` and two RW/NX pages at
+QEMU maps the toolchain-linked read-only header at `0x3ff000` through a
+separately cloned 2 MiB leaf table, validates it beside the RX and RW/NX loads,
+and runs the linked entry. The synthetic proof also installs an RX page at
+`0x400000` and two RW/NX pages at
 `0x401000` and `0x402000` into a newly allocated x86-64 root. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
 segment ranges; retains the supervisor-only higher-half direct map; and verifies

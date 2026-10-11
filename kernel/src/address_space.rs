@@ -443,18 +443,16 @@ pub(crate) fn verify_linux_elf_mapping(
             });
             let executed = activated
                 && observed
-                && match header {
-                    Some(_) => true,
-                    None => cpu::verify_linux_elf_entry(
-                        plan.entry as usize,
-                        (stack_virtual_page + stack_offset as u64) as usize,
-                        first.memory_size,
-                        second.virtual_page as usize,
-                        second.memory_size,
-                        heap_virtual_page as usize,
-                        PAGE_SIZE,
-                    ),
-                };
+                && cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
+                    entry: plan.entry as usize,
+                    stack: (stack_virtual_page + stack_offset as u64) as usize,
+                    code: first.virtual_address as usize,
+                    code_size: first.memory_size,
+                    data: second.virtual_page as usize,
+                    data_size: second.memory_size,
+                    heap: heap_virtual_page as usize,
+                    heap_size: PAGE_SIZE,
+                });
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
             Some(executed && restored)

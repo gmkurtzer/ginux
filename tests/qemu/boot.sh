@@ -523,8 +523,8 @@ if ! grep -q '^ginux: three-load Linux ELF runtime mapping verified' "$output_fi
     exit 1
 fi
 
-if ! grep -q '^ginux: toolchain-linked static Linux ELF accepted' "$output_file"; then
-    echo "Boot test failed: toolchain-linked static Linux ELF was not accepted." >&2
+if ! grep -q '^ginux: toolchain-linked static Linux ELF executed' "$output_file"; then
+    echo "Boot test failed: toolchain-linked static Linux ELF was not executed." >&2
     exit 1
 fi
 

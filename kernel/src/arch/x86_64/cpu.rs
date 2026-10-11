@@ -164,6 +164,7 @@ static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ENTRY: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_CODE_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
@@ -711,16 +712,19 @@ pub(crate) fn execute_auxiliary(
     };
 }
 
-pub(crate) fn verify_linux_elf_entry(
-    entry: usize,
-    stack: usize,
-    code_size: usize,
-    data: usize,
-    data_size: usize,
-    heap: usize,
-    heap_size: usize,
-) -> bool {
-    let Some(heap_limit) = heap.checked_add(heap_size) else {
+pub(crate) struct LinuxElfExecution {
+    pub(crate) entry: usize,
+    pub(crate) stack: usize,
+    pub(crate) code: usize,
+    pub(crate) code_size: usize,
+    pub(crate) data: usize,
+    pub(crate) data_size: usize,
+    pub(crate) heap: usize,
+    pub(crate) heap_size: usize,
+}
+
+pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
+    let Some(heap_limit) = execution.heap.checked_add(execution.heap_size) else {
         return false;
     };
     if ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst) {
@@ -731,34 +735,39 @@ pub(crate) fn verify_linux_elf_entry(
         return false;
     };
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
-    ELF_PROBE_STACK.store(stack as u64, Ordering::SeqCst);
-    ELF_PROBE_ENTRY.store((entry & !(PAGE_SIZE - 1)) as u64, Ordering::SeqCst);
-    ELF_PROBE_CODE_SIZE.store(code_size as u64, Ordering::SeqCst);
-    ELF_PROBE_DATA.store(data as u64, Ordering::SeqCst);
-    ELF_PROBE_DATA_SIZE.store(data_size as u64, Ordering::SeqCst);
-    ELF_PROBE_BRK.store(heap as u64, Ordering::SeqCst);
+    ELF_PROBE_STACK.store(execution.stack as u64, Ordering::SeqCst);
+    ELF_PROBE_ENTRY.store(
+        (execution.entry & !(PAGE_SIZE - 1)) as u64,
+        Ordering::SeqCst,
+    );
+    ELF_PROBE_CODE_BASE.store(execution.code as u64, Ordering::SeqCst);
+    ELF_PROBE_CODE_SIZE.store(execution.code_size as u64, Ordering::SeqCst);
+    ELF_PROBE_DATA.store(execution.data as u64, Ordering::SeqCst);
+    ELF_PROBE_DATA_SIZE.store(execution.data_size as u64, Ordering::SeqCst);
+    ELF_PROBE_BRK.store(execution.heap as u64, Ordering::SeqCst);
     ELF_PROBE_BRK_LIMIT.store(heap_limit as u64, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
-    unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
+    unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
     let mut cleared_tid = [0xff_u8; size_of::<u32>()];
-    let child_tid_cleared = clear_child_tid == data as u64 + LINUX_CLEAR_CHILD_TID_OFFSET
+    let child_tid_cleared = clear_child_tid == execution.data as u64 + LINUX_CLEAR_CHILD_TID_OFFSET
         && copy_from_linux_user(clear_child_tid, &mut cleared_tid)
         && cleared_tid == [0; size_of::<u32>()];
     // SAFETY: the loader owns and retains the mapped heap page through this
     // verification, and SMAP access is enabled only around the bounded read.
     let heap_written = unsafe {
         with_supervisor_user_access(|| {
-            (heap as *const u64).read_volatile() == 0x4845_4150_4252_4b21
+            (execution.heap as *const u64).read_volatile() == 0x4845_4150_4252_4b21
         })
     };
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
+    ELF_PROBE_CODE_BASE.store(0, Ordering::SeqCst);
     ELF_PROBE_CODE_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
@@ -1274,7 +1283,7 @@ pub(crate) fn verify_linux_copy_bounds(base: u64, size: usize) -> bool {
 }
 
 fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
-    let code_base = ELF_PROBE_ENTRY.load(Ordering::SeqCst);
+    let code_base = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
     let code_size = ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst);
     if !linux_range_contains(code_base, code_size, address, output.len())
         && !linux_writable_user_range_contains(address, output.len())
