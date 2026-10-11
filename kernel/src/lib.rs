@@ -427,6 +427,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: domain ancestry invariant failed\r\n");
     }
     serial_write("ginux: domain lifecycle ancestry verified\r\n");
+    if !domain::verify_service_restart_budget_invariants() {
+        kernel_fail("ginux: service restart budget invariant failed\r\n");
+    }
+    serial_write("ginux: bounded service restart policy verified\r\n");
     if !domain::verify_lifecycle_event_invariants() {
         kernel_fail("ginux: lifecycle event queue invariant failed\r\n");
     }
@@ -577,6 +581,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if replacement_domain == service_domain
         || domain::service_boot_handle().is_some()
         || !domain::domain_is_retired(replacement_domain)
+        || !domain::service_restart_budget_proof_complete()
     {
         kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
     }
@@ -618,6 +623,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: structured service fault delivered");
     serial_write("\r\nginux: service fault diagnostic authority enforced");
     serial_write("\r\nginux: service domain generation reuse verified");
+    serial_write("\r\nginux: service restart budget exhausted");
     serial_write("\r\nginux: failed service stack scrubbed before restart");
     serial_write("\r\nginux: service frame ownership transferred to replacement");
     serial_write("\r\nginux: replacement service context executed");

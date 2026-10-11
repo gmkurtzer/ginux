@@ -8,6 +8,7 @@ const MAX_BOOT_GRANTS: usize = 8;
 const CONTROL_CALL_BUDGET: u16 = 18;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
+const SERVICE_RESTART_BUDGET: u16 = 1;
 const EVENT_CAPACITY: usize = 4;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -152,6 +153,9 @@ pub(crate) struct Manager {
     last_delivered_service_fault: Option<LifecycleEvent>,
     total_calls: u16,
     total_thread_attaches: u16,
+    service_started: bool,
+    remaining_service_restarts: u16,
+    total_service_restarts: u16,
 }
 
 impl Manager {
@@ -167,6 +171,9 @@ impl Manager {
             last_delivered_service_fault: None,
             total_calls: 0,
             total_thread_attaches: 0,
+            service_started: false,
+            remaining_service_restarts: SERVICE_RESTART_BUDGET,
+            total_service_restarts: 0,
         }
     }
 
@@ -255,6 +262,27 @@ impl Manager {
             delegated_roots,
         });
         self.service_id = Some(id);
+        Some(id)
+    }
+
+    fn create_initial_service(&mut self) -> Option<DomainId> {
+        if self.service_started {
+            return None;
+        }
+        let id = self.create_service()?;
+        self.service_started = true;
+        Some(id)
+    }
+
+    fn restart_service(&mut self) -> Option<DomainId> {
+        if !self.service_started {
+            return None;
+        }
+        let remaining = self.remaining_service_restarts.checked_sub(1)?;
+        let total = self.total_service_restarts.checked_add(1)?;
+        let id = self.create_service()?;
+        self.remaining_service_restarts = remaining;
+        self.total_service_restarts = total;
         Some(id)
     }
 
@@ -398,7 +426,17 @@ pub(crate) fn control_plane_boot_handle(root_index: usize) -> Option<u64> {
 
 pub(crate) fn initialize_boot_service() -> Option<u64> {
     let manager = global_manager_mut()?;
-    let id = manager.create_service()?;
+    let id = manager.create_initial_service()?;
+    validate_boot_service(manager, id)
+}
+
+pub(crate) fn initialize_boot_service_restart() -> Option<u64> {
+    let manager = global_manager_mut()?;
+    let id = manager.restart_service()?;
+    validate_boot_service(manager, id)
+}
+
+fn validate_boot_service(manager: &Manager, id: DomainId) -> Option<u64> {
     let service = manager.domain(id)?;
     (service.role == Role::Service
         && service.state == State::Ready
@@ -495,6 +533,37 @@ fn verify_domain_ancestry_invariants_inner() -> Option<bool> {
     }
     let replacement = manager.create_service()?;
     Some(replacement != service && manager.is_descendant(control, replacement))
+}
+
+pub(crate) fn verify_service_restart_budget_invariants() -> bool {
+    verify_service_restart_budget_invariants_inner().unwrap_or(false)
+}
+
+fn verify_service_restart_budget_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    manager.create_control_plane(&grants)?;
+    let service = manager.create_initial_service()?;
+    if manager.create_initial_service().is_some() || manager.restart_service().is_some() {
+        return Some(false);
+    }
+    if !manager.retire_service(service) {
+        return Some(false);
+    }
+    let replacement = manager.restart_service()?;
+    if replacement == service || !manager.retire_service(replacement) {
+        return Some(false);
+    }
+    Some(
+        manager.restart_service().is_none()
+            && manager.create_initial_service().is_none()
+            && manager.remaining_service_restarts == 0
+            && manager.total_service_restarts == SERVICE_RESTART_BUDGET,
+    )
 }
 
 pub(crate) fn control_owns_service(control_raw: u64, service_raw: u64) -> bool {
@@ -602,6 +671,14 @@ pub(crate) fn thread_budget_proof_complete() -> bool {
     control.active_threads == 0
         && control.thread_limit == BOOTSTRAP_THREAD_LIMIT
         && manager.total_thread_attaches == 3
+}
+
+pub(crate) fn service_restart_budget_proof_complete() -> bool {
+    global_manager().is_some_and(|manager| {
+        manager.service_started
+            && manager.remaining_service_restarts == 0
+            && manager.total_service_restarts == SERVICE_RESTART_BUDGET
+    })
 }
 
 pub(crate) fn is_service_domain(domain_raw: u64) -> bool {

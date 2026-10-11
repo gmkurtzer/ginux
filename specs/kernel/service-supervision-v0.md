@@ -61,9 +61,11 @@ preempts that client to run the replacement. The replacement negotiates ABI
 v1 and blocks on an empty request direction. The client wakes it with a direct
 message, exhausts its call budget, and exits. The replacement then observes the
 message, exits cleanly, and has its capability table retired. The single
-restart is a fixed
-proof action, not a production policy. There is no backoff, configurable
-restart budget, state recovery, service identity separate from thread identity,
+restart consumes the persistent control plane's fixed one-attempt bootstrap
+budget. The initial service creation does not consume that budget, and failed
+replacement setup does not refund it. A later service generation therefore
+cannot create an unbounded restart loop. This is not yet a configurable
+production policy. There is no backoff, state recovery, service identity separate from thread identity,
 request ID, replay protection, cancellation, outstanding-call cleanup, or
 health protocol. The four-record FIFO never overwrites queued events. Additional
 records set a sticky overflow notification containing the first dropped domain

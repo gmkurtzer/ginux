@@ -1005,7 +1005,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         return u64::MAX;
     }
     if service_fault {
-        let Some(replacement_domain) = domain::initialize_boot_service() else {
+        let Some(replacement_domain) = domain::initialize_boot_service_restart() else {
             return u64::MAX;
         };
         let Some(replacement_handle) = domain::service_boot_handle() else {

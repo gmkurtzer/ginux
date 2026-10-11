@@ -268,6 +268,11 @@ if ! grep -q '^ginux: domain lifecycle ancestry verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded service restart policy verified' "$output_file"; then
+    echo "Boot test failed: service restart policy validation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded lifecycle event queue verified' "$output_file"; then
     echo "Boot test failed: lifecycle event queue invariants failed." >&2
     exit 1
@@ -520,6 +525,11 @@ fi
 
 if ! grep -q '^ginux: service domain generation reuse verified' "$output_file"; then
     echo "Boot test failed: service-domain slot reuse accepted stale identity." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: service restart budget exhausted' "$output_file"; then
+    echo "Boot test failed: service restart budget was not exhausted." >&2
     exit 1
 fi
 
