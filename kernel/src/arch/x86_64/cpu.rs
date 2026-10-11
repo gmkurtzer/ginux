@@ -52,6 +52,10 @@ const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
 const LINUX_GETEGID_SYSCALL: u64 = 108;
+const LINUX_GETPPID_SYSCALL: u64 = 110;
+const LINUX_GETPGRP_SYSCALL: u64 = 111;
+const LINUX_GETPGID_SYSCALL: u64 = 121;
+const LINUX_GETSID_SYSCALL: u64 = 124;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
@@ -60,6 +64,7 @@ const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 const LINUX_EBADF: u64 = u64::MAX - 8;
+const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
@@ -1002,6 +1007,15 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_GETPID_SYSCALL | LINUX_GETTID_SYSCALL => 1,
+        LINUX_GETPPID_SYSCALL => 0,
+        LINUX_GETPGRP_SYSCALL => 1,
+        LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => {
+            if matches!(first_argument, 0 | 1) {
+                1
+            } else {
+                LINUX_ESRCH
+            }
+        }
         LINUX_SET_TID_ADDRESS_SYSCALL => {
             if !linux_user_range_contains(first_argument, size_of::<u32>()) {
                 return LINUX_EFAULT;

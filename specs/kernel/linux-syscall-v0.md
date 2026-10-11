@@ -25,11 +25,13 @@ exit, and reads it back.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
-operation. The probe then uses `rax = 39` (`__NR_getpid`), requires PID 1 after
-resumption, and `rax = 186` (`__NR_gettid`), which returns TID 1 for the only
-thread. Next, `rax = 218` (`__NR_set_tid_address`) registers a four-byte word
-inside the declared RW segment and returns TID 1. The bounded proof rejects an
-out-of-segment registration with `-EFAULT`. Exit zeroes the registered word;
+operation. The initial process namespace has one process and one thread:
+`getpid` and `gettid` return 1, `getppid` returns 0, and `getpgrp`,
+`getpgid(0)`, and `getsid(0)` return 1. `getpgid` and `getsid` return `-ESRCH`
+for an unknown PID. Next, `rax = 218` (`__NR_set_tid_address`) registers a
+four-byte word inside the declared RW segment and returns TID 1. The bounded
+proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
+registered word;
 because this profile has no second thread or futex support, there is no waiter
 to wake. The probe finally uses `rax = 231` (`__NR_exit_group`) with `rdi = 42`
 (status).
@@ -61,8 +63,9 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, output
 streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `uname`, `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`, credential queries, `getpid`,
-`gettid`, `set_tid_address`, `exit`, and `exit_group` calls. There is no thread
+`write`, `uname`, `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`, credential queries,
+the bounded process/session identity queries above, `set_tid_address`, `exit`,
+and `exit_group` calls. There is no thread
 creation, TID allocation, or clear-child-TID futex wake yet. Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path

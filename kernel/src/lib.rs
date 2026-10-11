@@ -583,6 +583,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux credential auxiliary vector validated\r\n");
     serial_write("ginux: Linux FS base query validated\r\n");
     serial_write("ginux: Linux clear-child-TID exit action validated\r\n");
+    serial_write("ginux: Linux initial process namespace identity validated\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

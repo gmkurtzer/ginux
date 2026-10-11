@@ -563,6 +563,11 @@ if ! grep -q '^ginux: Linux clear-child-TID exit action validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux initial process namespace identity validated' "$output_file"; then
+    echo "Boot test failed: Linux initial process namespace identity was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

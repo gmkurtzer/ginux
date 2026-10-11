@@ -114,6 +114,38 @@ ginux_linux_probe:
     cmp rax, 1
     jne failure
 
+    mov eax, 110
+    syscall
+    test rax, rax
+    jne failure
+
+    mov eax, 111
+    syscall
+    cmp rax, 1
+    jne failure
+
+    xor edi, edi
+    mov eax, 121
+    syscall
+    cmp rax, 1
+    jne failure
+    mov edi, 2
+    mov eax, 121
+    syscall
+    cmp rax, -3
+    jne failure
+
+    xor edi, edi
+    mov eax, 124
+    syscall
+    cmp rax, 1
+    jne failure
+    mov edi, 2
+    mov eax, 124
+    syscall
+    cmp rax, -3
+    jne failure
+
     mov edi, 0x401200
     mov eax, 218
     syscall
