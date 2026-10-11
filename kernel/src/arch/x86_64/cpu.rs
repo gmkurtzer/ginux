@@ -1,6 +1,6 @@
 use core::arch::{asm, global_asm};
 use core::mem::size_of;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crate::{serial_write, serial_write_u64};
 
@@ -72,7 +72,7 @@ struct DescriptorTablePointer {
 struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
-static SYSCALL_HANDLED: AtomicBool = AtomicBool::new(false);
+static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static mut USER_RETURN_STACK: u64 = 0;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
@@ -256,9 +256,43 @@ ginux_user_enter:
 ginux_syscall_entry:
     cli
     cld
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r12, rsp
     mov rdi, rax
     and rsp, -16
     call {syscall_handler}
+    cmp rax, -1
+    je 3f
+    mov rsp, r12
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    iretq
+3:
     mov rsp, [rip + {user_return_stack}]
     ret
 "#,
@@ -293,12 +327,12 @@ pub(crate) fn verify_user_syscall(entry: usize, stack: usize) -> bool {
     if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize) {
         return false;
     }
-    SYSCALL_HANDLED.store(false, Ordering::SeqCst);
+    SYSCALL_STATE.store(0, Ordering::SeqCst);
     // SAFETY: The caller supplies mapped ring-3 code and stack addresses. The
     // syscall gate abandons the user frame and returns on the saved kernel
     // stack, with interrupts disabled throughout.
     unsafe { ginux_user_enter(entry, stack) };
-    SYSCALL_HANDLED.load(Ordering::SeqCst)
+    SYSCALL_STATE.load(Ordering::SeqCst) == 3
 }
 
 pub(crate) fn verify_breakpoint() -> bool {
@@ -427,8 +461,18 @@ extern "sysv64" fn breakpoint_handler() {
     serial_write("ginux: breakpoint exception handled\r\n");
 }
 
-extern "sysv64" fn syscall_handler(number: u64) {
-    SYSCALL_HANDLED.store(number == 1, Ordering::SeqCst);
+extern "sysv64" fn syscall_handler(number: u64) -> u64 {
+    match number {
+        1 => {
+            SYSCALL_STATE.fetch_or(1, Ordering::SeqCst);
+            0x4758
+        }
+        2 => {
+            SYSCALL_STATE.fetch_or(2, Ordering::SeqCst);
+            u64::MAX
+        }
+        _ => u64::MAX,
+    }
 }
 
 extern "sysv64" fn fatal_exception_handler(vector: u64, error: u64, fault_address: u64) -> ! {

@@ -306,7 +306,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !address_space::verify_ring3_control_plane() {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
-    serial_write("\r\nginux: ring-3 control-plane syscall handled");
+    serial_write("\r\nginux: ring-3 syscall round trip and exit handled");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());

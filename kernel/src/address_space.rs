@@ -153,7 +153,15 @@ pub(crate) fn verify_ring3_control_plane() -> bool {
     if !space.permissions_are_valid(kernel_root) {
         return false;
     }
-    let program = [0xb8, 1, 0, 0, 0, 0xcd, 0x80, 0x0f, 0x0b];
+    let program = [
+        0xb8, 1, 0, 0, 0, // mov eax, 1: ping
+        0xcd, 0x80, // int 0x80
+        0x3d, 0x58, 0x47, 0, 0, // cmp eax, 0x4758
+        0x75, 0x07, // jne failure
+        0xb8, 2, 0, 0, 0, // mov eax, 2: exit
+        0xcd, 0x80, // int 0x80
+        0x0f, 0x0b, // failure/should-not-return: ud2
+    ];
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
