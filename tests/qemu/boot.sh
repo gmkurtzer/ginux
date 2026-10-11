@@ -243,6 +243,11 @@ if ! grep -q '^ginux: tracked frame release ownership verified' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: stale frame leases rejected' "$output_file"; then
+    echo "Boot test failed: stale physical-frame leases were accepted." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated address space active' "$output_file"; then
     echo "Boot test failed: isolated address-space activation failed." >&2
     exit 1

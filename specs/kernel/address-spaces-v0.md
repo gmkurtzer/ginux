@@ -10,8 +10,8 @@ entry in that region is absent.
 
 The QEMU gate switches CR3 to this root, verifies the user virtual address
 aliases the owned physical frame, restores the kernel root, and confirms the
-restoration. Page-table and data frames are distinct and remain owned for the
-kernel lifetime.
+restoration. Page-table and data frames are distinct and remain owned under
+generation-tagged leases until the proof address space is released.
 
 This proves controlled construction and hardware activation, not process
 isolation completeness. The transitional kernel mapping is still broadly
@@ -21,7 +21,8 @@ user-readable/writable, non-executable stack pages, each preceded by an absent
 guard page. The kernel mapping remains supervisor-only in both roots.
 
 Completed proof address-space page-table and data frames are cleared and
-returned through the allocator's live-ownership check. There is no
+returned through the allocator's generation-checked live-ownership ledger.
+There is no
 address-space identifier or TLB shootdown protocol, and the kernel mapping
 remains transitional.
 

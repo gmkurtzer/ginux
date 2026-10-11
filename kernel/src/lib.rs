@@ -375,6 +375,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: physical frame allocator active");
     serial_write("\r\nginux: atomic frame reservations verified");
     serial_write("\r\nginux: tracked frame release ownership verified");
+    serial_write("\r\nginux: stale frame leases rejected");
     if !address_space::verify_isolated_user_mapping() {
         kernel_fail("\r\nginux: isolated address-space test failed\r\n");
     }
@@ -552,7 +553,9 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
     let Some([first, second]) = memory::allocate_frames::<2>() else {
         return false;
     };
-    if first == second || first % 4096 != 0 || second % 4096 != 0 {
+    let first_address = first.address();
+    let second_address = second.address();
+    if first_address == second_address || first_address % 4096 != 0 || second_address % 4096 != 0 {
         return false;
     }
 
@@ -560,8 +563,8 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
     // and covered by the active identity map. Volatile accesses prove they
     // are writable without letting the compiler remove the test.
     unsafe {
-        let first_word = first as *mut u64;
-        let second_word = second as *mut u64;
+        let first_word = first_address as *mut u64;
+        let second_word = second_address as *mut u64;
         first_word.write_volatile(0x4749_4e55_5800_0001);
         second_word.write_volatile(0x4749_4e55_5800_0002);
         let valid = first_word.read_volatile() == 0x4749_4e55_5800_0001

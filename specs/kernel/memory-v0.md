@@ -30,23 +30,26 @@ before writing any page table.
 
 Atomic release rejects zero-length, misaligned, duplicate, already-free, or
 over-capacity batches. A bounded live-allocation ledger additionally requires
-every submitted physical address to be currently allocated; a caller cannot
-turn an aligned but never-owned address into reusable memory. Validation and
-ledger removal are staged atomically before accepted frames enter the bounded
+every submitted generation-tagged frame lease to be currently allocated; a
+caller cannot turn an aligned but never-owned address into reusable memory.
+Reallocation increments the lease generation, so an old owner cannot release
+a newer allocation that reused the same address. Validation and ledger removal
+are staged atomically before accepted frames enter the bounded
 128-frame reuse pool. Completed proof address spaces are zeroed and released
 only after the kernel CR3 is active again. The QEMU gate verifies rollback,
-forged-release rejection, duplicate-release rejection, and reuse across
-discontiguous ranges, then reserves, writes, clears, and releases two real
-frames. Boot-service-memory reclamation is not yet supported.
+forged-release rejection, duplicate-release rejection, stale-generation
+rejection after address reuse, and reuse across discontiguous ranges, then
+reserves, writes, clears, and releases two real frames. Boot-service-memory
+reclamation is not yet supported.
 
 The allocator initializes exactly once and remains live for the kernel lifetime.
 Reinitialization is rejected so no subsystem can reconstruct the UEFI inventory
 and allocate frames that already have owners. Access is serialized only by the
 single-processor, interrupts-disabled bootstrap state; locking or per-CPU
 allocation is required before SMP startup.
-Release relies on unique kernel ownership rather than generation-tagged frame
-leases; internal callers must consume an owner exactly once. The live ledger
-is currently limited to 128 simultaneous allocations and fails closed at
-capacity.
+Frame leases are kernel-internal values containing a physical address and
+generation; address-space owners retain the complete lease until atomic
+release. The live ledger is currently limited to 128 simultaneous allocations
+and fails closed at capacity.
 
 Loader regions containing the unified image, handoff map, page tables, and kernel stacks are never admitted because only `EfiConventionalMemory` ranges enter the allocator.

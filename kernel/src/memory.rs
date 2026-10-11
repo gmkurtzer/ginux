@@ -19,15 +19,32 @@ struct Range {
 
 const EMPTY_RANGE: Range = Range { next: 0, end: 0 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FrameLease {
+    address: u64,
+    generation: u32,
+}
+
+impl FrameLease {
+    pub(crate) const fn address(self) -> u64 {
+        self.address
+    }
+}
+
+const EMPTY_LEASE: FrameLease = FrameLease {
+    address: 0,
+    generation: 0,
+};
+
 #[derive(Clone, Copy)]
 pub(crate) struct FrameAllocator {
     ranges: [Range; MAX_RANGES],
     range_count: usize,
     active_range: usize,
     allocated_frames: u64,
-    live_frames: [u64; MAX_LIVE_FRAMES],
+    live_frames: [FrameLease; MAX_LIVE_FRAMES],
     live_count: usize,
-    recycled: [u64; MAX_RECYCLED_FRAMES],
+    recycled: [FrameLease; MAX_RECYCLED_FRAMES],
     recycled_count: usize,
 }
 
@@ -38,9 +55,9 @@ impl FrameAllocator {
             range_count: 0,
             active_range: 0,
             allocated_frames: 0,
-            live_frames: [0; MAX_LIVE_FRAMES],
+            live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
             live_count: 0,
-            recycled: [0; MAX_RECYCLED_FRAMES],
+            recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
             recycled_count: 0,
         };
         let count = boot_info.memory_map_size / boot_info.memory_descriptor_size;
@@ -71,12 +88,12 @@ impl FrameAllocator {
         (allocator.range_count != 0).then_some(allocator)
     }
 
-    pub(crate) fn reserve<const N: usize>(&mut self) -> Option<[u64; N]> {
+    pub(crate) fn reserve<const N: usize>(&mut self) -> Option<[FrameLease; N]> {
         if N == 0 {
             return None;
         }
         let mut staged = *self;
-        let mut frames = [0_u64; N];
+        let mut frames = [EMPTY_LEASE; N];
         for frame in &mut frames {
             *frame = staged.allocate_one()?;
         }
@@ -84,31 +101,39 @@ impl FrameAllocator {
         Some(frames)
     }
 
-    fn allocate_one(&mut self) -> Option<u64> {
+    fn allocate_one(&mut self) -> Option<FrameLease> {
         if self.live_count == MAX_LIVE_FRAMES {
             return None;
         }
         if self.recycled_count != 0 {
             self.recycled_count -= 1;
-            let frame = self.recycled[self.recycled_count];
-            self.recycled[self.recycled_count] = 0;
-            self.record_live(frame)?;
-            return Some(frame);
+            let prior = self.recycled[self.recycled_count];
+            self.recycled[self.recycled_count] = EMPTY_LEASE;
+            let lease = FrameLease {
+                address: prior.address,
+                generation: prior.generation.checked_add(1)?,
+            };
+            self.record_live(lease)?;
+            return Some(lease);
         }
         while self.active_range < self.range_count {
             let range = &mut self.ranges[self.active_range];
             if range.next < range.end {
-                let frame = range.next;
+                let address = range.next;
                 range.next += PAGE_SIZE;
-                self.record_live(frame)?;
-                return Some(frame);
+                let lease = FrameLease {
+                    address,
+                    generation: 1,
+                };
+                self.record_live(lease)?;
+                return Some(lease);
             }
             self.active_range += 1;
         }
         None
     }
 
-    pub(crate) fn release<const N: usize>(&mut self, frames: [u64; N]) -> bool {
+    pub(crate) fn release<const N: usize>(&mut self, frames: [FrameLease; N]) -> bool {
         if N == 0
             || self
                 .recycled_count
@@ -120,10 +145,15 @@ impl FrameAllocator {
             return false;
         }
         for (index, frame) in frames.iter().enumerate() {
-            if *frame < LOW_MEMORY_LIMIT
-                || *frame % PAGE_SIZE != 0
-                || frames[..index].contains(frame)
-                || self.recycled[..self.recycled_count].contains(frame)
+            if frame.address < LOW_MEMORY_LIMIT
+                || frame.address % PAGE_SIZE != 0
+                || frame.generation == 0
+                || frames[..index]
+                    .iter()
+                    .any(|prior| prior.address == frame.address)
+                || self.recycled[..self.recycled_count]
+                    .iter()
+                    .any(|recycled| recycled.address == frame.address)
                 || !self.live_frames[..self.live_count].contains(frame)
             {
                 return false;
@@ -139,7 +169,7 @@ impl FrameAllocator {
             };
             staged.live_count -= 1;
             staged.live_frames[index] = staged.live_frames[staged.live_count];
-            staged.live_frames[staged.live_count] = 0;
+            staged.live_frames[staged.live_count] = EMPTY_LEASE;
             staged.recycled[staged.recycled_count] = frame;
             staged.recycled_count += 1;
         }
@@ -148,9 +178,11 @@ impl FrameAllocator {
         true
     }
 
-    fn record_live(&mut self, frame: u64) -> Option<()> {
+    fn record_live(&mut self, frame: FrameLease) -> Option<()> {
         if self.live_count == MAX_LIVE_FRAMES
-            || self.live_frames[..self.live_count].contains(&frame)
+            || self.live_frames[..self.live_count]
+                .iter()
+                .any(|live| live.address == frame.address)
         {
             return None;
         }
@@ -209,7 +241,7 @@ pub(crate) fn initialize(boot_info: &BootInfo, ceiling: u64) -> bool {
     true
 }
 
-pub(crate) fn allocate_frames<const N: usize>() -> Option<[u64; N]> {
+pub(crate) fn allocate_frames<const N: usize>() -> Option<[FrameLease; N]> {
     if !INITIALIZED.load(Ordering::Acquire) {
         return None;
     }
@@ -222,7 +254,7 @@ pub(crate) fn allocate_frames<const N: usize>() -> Option<[u64; N]> {
     }
 }
 
-pub(crate) fn release_frames<const N: usize>(frames: [u64; N]) -> bool {
+pub(crate) fn release_frames<const N: usize>(frames: [FrameLease; N]) -> bool {
     if !INITIALIZED.load(Ordering::Acquire) {
         return false;
     }
@@ -238,9 +270,9 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         range_count: 2,
         active_range: 0,
         allocated_frames: 0,
-        live_frames: [0; MAX_LIVE_FRAMES],
+        live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
         live_count: 0,
-        recycled: [0; MAX_RECYCLED_FRAMES],
+        recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
         recycled_count: 0,
     };
     allocator.ranges[0] = Range {
@@ -264,21 +296,27 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         return false;
     };
     let before_forged_release = allocator;
-    let forged_release_rejected = !allocator.release([0x30_0000])
-        && allocator.allocated_frames == before_forged_release.allocated_frames
+    let forged_release_rejected = !allocator.release([FrameLease {
+        address: 0x30_0000,
+        generation: 1,
+    }]) && allocator.allocated_frames
+        == before_forged_release.allocated_frames
         && allocator.live_count == before_forged_release.live_count
         && allocator.recycled_count == before_forged_release.recycled_count;
     let released = allocator.release(first);
     let duplicate_rejected = !allocator.release(first);
     let reused = allocator.reserve::<2>();
-    first == [0x10_0000, 0x10_1000]
+    let stale_release_rejected = !allocator.release(first);
+    first.map(FrameLease::address) == [0x10_0000, 0x10_1000]
         && failed
         && failure_was_atomic
-        && last == [0x20_0000]
+        && last.map(FrameLease::address) == [0x20_0000]
         && forged_release_rejected
         && released
         && duplicate_rejected
-        && reused == Some([0x10_1000, 0x10_0000])
+        && reused.map(|leases| leases.map(FrameLease::address)) == Some([0x10_1000, 0x10_0000])
+        && reused.is_some_and(|leases| leases.iter().all(|lease| lease.generation == 2))
+        && stale_release_rejected
         && allocator.allocated_frames == 3
         && allocator.live_count == 3
         && allocator.available_frames() == 0

@@ -28,25 +28,25 @@ const EFER_NXE: u64 = 1 << 11;
 struct AddressSpace {
     root: u64,
     user_frame: u64,
-    frames: [u64; 5],
+    frames: [memory::FrameLease; 5],
 }
 
 impl AddressSpace {
     fn with_single_user_page(kernel_root: u64) -> Option<Self> {
-        let [root, user_pdpt, user_directory, user_table, user_frame] =
-            memory::allocate_frames::<5>()?;
-        let frames = [root, user_pdpt, user_directory, user_table, user_frame];
-        if frames.iter().any(|frame| frame % PAGE_SIZE as u64 != 0) {
+        let frames = memory::allocate_frames::<5>()?;
+        let addresses = frames.map(memory::FrameLease::address);
+        let [root, user_pdpt, user_directory, user_table, user_frame] = addresses;
+        if addresses.iter().any(|frame| frame % PAGE_SIZE as u64 != 0) {
             return None;
         }
-        for left in 0..frames.len() {
-            if frames[left + 1..].contains(&frames[left]) {
+        for left in 0..addresses.len() {
+            if addresses[left + 1..].contains(&addresses[left]) {
                 return None;
             }
         }
 
-        // SAFETY: Every frame was uniquely allocated from mapped conventional
-        // memory. They remain owned by this address space for kernel lifetime.
+        // SAFETY: Every frame was uniquely leased from mapped conventional
+        // memory and remains owned until this address space is released.
         unsafe {
             for frame in [root, user_pdpt, user_directory, user_table] {
                 zero_frame(frame);
@@ -100,7 +100,7 @@ impl AddressSpace {
         let frames = self.frames;
         unsafe {
             for frame in &frames {
-                zero_frame(*frame);
+                zero_frame(frame.address());
             }
         }
         memory::release_frames(frames)
@@ -145,8 +145,8 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
         return false;
     }
 
-    // SAFETY: Both mapped pages and all page tables have unique lifetime-long
-    // ownership. The kernel mapping is preserved and interrupts are disabled.
+    // SAFETY: Both mapped pages and all page tables have unique leases until
+    // release. The kernel mapping is preserved and interrupts are disabled.
     let valid = unsafe {
         space.code_frame.cast::<u8>().write_volatile(0x90);
         space.first_stack_frame.cast::<u64>().write_volatile(0);
@@ -283,24 +283,18 @@ struct WxAddressSpace {
     code_frame: *mut u8,
     first_stack_frame: *mut u8,
     second_stack_frame: *mut u8,
-    frames: [u64; 7],
+    frames: [memory::FrameLease; 7],
 }
 
 impl WxAddressSpace {
     fn new(kernel_root: u64) -> Option<Self> {
-        let [root, pdpt, directory, table, code, first_stack, second_stack] =
-            memory::allocate_frames::<7>()?;
-        let frames = [
-            root,
-            pdpt,
-            directory,
-            table,
-            code,
-            first_stack,
-            second_stack,
-        ];
-        for left in 0..frames.len() {
-            if frames[left] % PAGE_SIZE as u64 != 0 || frames[left + 1..].contains(&frames[left]) {
+        let frames = memory::allocate_frames::<7>()?;
+        let addresses = frames.map(memory::FrameLease::address);
+        let [root, pdpt, directory, table, code, first_stack, second_stack] = addresses;
+        for left in 0..addresses.len() {
+            if addresses[left] % PAGE_SIZE as u64 != 0
+                || addresses[left + 1..].contains(&addresses[left])
+            {
                 return None;
             }
         }
@@ -372,7 +366,7 @@ impl WxAddressSpace {
         let frames = self.frames;
         unsafe {
             for frame in &frames {
-                zero_frame(*frame);
+                zero_frame(frame.address());
             }
         }
         memory::release_frames(frames)
