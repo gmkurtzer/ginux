@@ -140,6 +140,7 @@ const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_DESCRIPTOR_INPUT: u8 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
 const LINUX_DEVICE_ZERO: u8 = 1 << 2;
+const LINUX_DEVICE_CONSOLE: u8 = 1 << 3;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_SETFD: u64 = 2;
@@ -1211,7 +1212,10 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_LSEEK_SYSCALL => {
-            if linux_device_descriptor(first_argument) != 0 {
+            let device = linux_device_descriptor(first_argument);
+            if device & LINUX_DEVICE_CONSOLE != 0 {
+                LINUX_ESPIPE
+            } else if device != 0 {
                 0
             } else if linux_console_descriptor_open(first_argument) {
                 LINUX_ESPIPE
@@ -1241,10 +1245,11 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_IOCTL_SYSCALL => {
-            if linux_device_descriptor(first_argument) != 0 {
+            let device = linux_device_descriptor(first_argument);
+            if device != 0 && device & LINUX_DEVICE_CONSOLE == 0 {
                 return LINUX_ENOTTY;
             }
-            if !linux_console_descriptor_open(first_argument) {
+            if device == 0 && !linux_console_descriptor_open(first_argument) {
                 return LINUX_EBADF;
             }
             match buffer {
@@ -1596,6 +1601,7 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
     let kind = match &path[..path_length] {
         b"/dev/null" => 0,
         b"/dev/zero" => LINUX_DEVICE_ZERO,
+        b"/dev/console" => LINUX_DEVICE_CONSOLE,
         _ => return LINUX_ENOENT,
     };
     let access = flags & 3;
@@ -1626,7 +1632,10 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
         Ok(length) => length,
         Err(error) => return error,
     };
-    if !matches!(&path[..path_length], b"/dev/null" | b"/dev/zero") {
+    if !matches!(
+        &path[..path_length],
+        b"/dev/null" | b"/dev/zero" | b"/dev/console"
+    ) {
         return LINUX_ENOENT;
     }
     if !copy_to_linux_user(stat_address, &linux_console_stat()) {
@@ -1644,7 +1653,10 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
         Ok(length) => length,
         Err(error) => return error,
     };
-    if !matches!(&path[..path_length], b"/dev/null" | b"/dev/zero") {
+    if !matches!(
+        &path[..path_length],
+        b"/dev/null" | b"/dev/zero" | b"/dev/console"
+    ) {
         return LINUX_ENOENT;
     }
     if mode & 1 != 0 {
@@ -1679,9 +1691,14 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
 }
 
 fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
-    let access = linux_device_descriptor(descriptor) & 3;
+    let device = linux_device_descriptor(descriptor);
+    let access = device & 3;
     if access == LINUX_DESCRIPTOR_OUTPUT || access == 3 {
-        count
+        if device & LINUX_DEVICE_CONSOLE != 0 {
+            linux_bounded_console_write(address, count)
+        } else {
+            count
+        }
     } else {
         linux_console_write(descriptor, address, count)
     }
@@ -1691,6 +1708,10 @@ fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
     if linux_console_descriptor(descriptor) != LINUX_DESCRIPTOR_OUTPUT {
         return LINUX_EBADF;
     }
+    linux_bounded_console_write(address, count)
+}
+
+fn linux_bounded_console_write(address: u64, count: u64) -> u64 {
     let Ok(length) = usize::try_from(count) else {
         return LINUX_EINVAL;
     };
