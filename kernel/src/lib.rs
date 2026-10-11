@@ -151,10 +151,51 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(summary.boot_service_pages);
     serial_write("\r\nginux: reserved loader pages: ");
     serial_write_u64(summary.loader_pages);
+    if !verify_initial_frame_allocation(boot_info) {
+        kernel_fail("ginux: physical frame allocation test failed\r\n");
+    }
+    serial_write("\r\nginux: conventional frame probe passed");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
     kernel_fail("ginux: firmware shutdown returned unexpectedly\r\n");
+}
+
+fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
+    let descriptors = boot_info.memory_map_size / boot_info.memory_descriptor_size;
+    for index in 0..descriptors {
+        let descriptor = unsafe {
+            let address = boot_info
+                .memory_map
+                .add(index * boot_info.memory_descriptor_size);
+            core::ptr::read_unaligned(address.cast::<UefiMemoryDescriptor>())
+        };
+        if descriptor.memory_type != EFI_CONVENTIONAL_MEMORY || descriptor.page_count < 2 {
+            continue;
+        }
+
+        let first = descriptor.physical_start;
+        let second = first.saturating_add(4096);
+        if first < 1024 * 1024 || second >= arch::x86_64::paging::INITIAL_IDENTITY_LIMIT as u64 {
+            continue;
+        }
+
+        // SAFETY: Both frames are conventional UEFI memory, distinct, aligned,
+        // and covered by the active identity map. Volatile accesses prove they
+        // are writable without letting the compiler remove the test.
+        unsafe {
+            let first_word = first as *mut u64;
+            let second_word = second as *mut u64;
+            first_word.write_volatile(0x4749_4e55_5800_0001);
+            second_word.write_volatile(0x4749_4e55_5800_0002);
+            let valid = first_word.read_volatile() == 0x4749_4e55_5800_0001
+                && second_word.read_volatile() == 0x4749_4e55_5800_0002;
+            first_word.write_volatile(0);
+            second_word.write_volatile(0);
+            return valid;
+        }
+    }
+    false
 }
 
 fn kernel_stack_is_active() -> bool {
