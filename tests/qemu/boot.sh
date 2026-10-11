@@ -858,6 +858,11 @@ if ! grep -q '^ginux: bounded Linux dependency init arrays validated' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux init arrays bound to relocations' "$output_file"; then
+    echo "Boot test failed: userspace Linux init arrays were not bound to their relocations." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace Linux dependency constructors executed' "$output_file"; then
     echo "Boot test failed: userspace Linux dependency constructors were not executed." >&2
     exit 1

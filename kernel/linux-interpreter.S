@@ -390,6 +390,12 @@ ginux_linux_interpreter:
 
     mov rcx, qword ptr [r11]
     add rcx, GINUX_DEPENDENCY_BASE
+#ifdef GINUX_LINKED
+    mov rdx, qword ptr [rip + .Lprimary_init_array]
+    add rdx, GINUX_DEPENDENCY_BASE
+    cmp rcx, rdx
+    jne .Linvalid_dynamic
+#endif
     mov rdx, qword ptr [r11 + 16]
     add rdx, GINUX_DEPENDENCY_BASE
     mov qword ptr [rcx], rdx
@@ -432,6 +438,12 @@ ginux_linux_interpreter:
 
     mov rcx, qword ptr [rax + 24]
     add rcx, r15
+#ifdef GINUX_LINKED
+    mov rdx, qword ptr [rip + .Lmain_init_array]
+    add rdx, r15
+    cmp rcx, rdx
+    jne .Linvalid_dynamic
+#endif
     mov rdx, qword ptr [rax + 40]
     add rdx, r15
     mov qword ptr [rcx], rdx
@@ -706,6 +718,10 @@ ginux_linux_interpreter:
 
     mov rcx, qword ptr [r11]
     add rcx, GINUX_AUXILIARY_BASE
+    mov rdx, qword ptr [rip + .Lauxiliary_init_array]
+    add rdx, GINUX_AUXILIARY_BASE
+    cmp rcx, rdx
+    jne .Linvalid_dynamic
     mov rdx, qword ptr [r11 + 16]
     add rdx, GINUX_AUXILIARY_BASE
     mov qword ptr [rcx], rdx

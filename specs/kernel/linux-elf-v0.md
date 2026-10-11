@@ -288,7 +288,9 @@ map each DSO in its independent authenticated slot, and apply each DSO's
 authenticated `DT_INIT` function followed by its relocated one-entry
 `DT_INIT_ARRAY`. After resolving every main relocation, it calls the main's
 `DT_INIT` function followed by its one-entry `DT_INIT_ARRAY` before transferring
-to the main entry.
+to the main entry. For both dependencies and the main, the userspace
+interpreter requires the load-biased `DT_INIT_ARRAY` address to equal the
+relative-relocation target before writing or invoking it.
 Each provider's direct init function requires the main preinit phase before it
 can record its own first phase. Each provider records initialization in private writable data and its exported
 function fails until that state is present, making constructor-before-use order

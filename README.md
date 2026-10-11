@@ -42,6 +42,9 @@ relocation target, then relocates and calls the preinitializer
 before loading either dependency, calls each dependency's direct init function
 and constructor in order, resolves the main, and then calls the main's direct
 init function and constructor before transferring control to its entry.
+Before applying any init-array relative relocation, the interpreter also
+requires the runtime `DT_INIT_ARRAY` address to equal that relocation target
+for both dependencies and the main.
 Each exported function refuses to succeed before its dependency constructor
 runs; each constructor requires its image's direct init phase, and the main
 constructor calls both exports before recording initialization,
