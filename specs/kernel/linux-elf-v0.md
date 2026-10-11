@@ -52,11 +52,11 @@ pages remain supervisor-only. Before changing CR3, the proof rejects either
 segment target page if it overlaps the
 loaded kernel PE image. It then activates the root, observes both pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
-entry. The synthetic instruction stream issues one boot-only reserved
-verification call through the existing `INT 0x80` gate. That call is accepted
-only while an atomic probe flag is armed and returns directly to the saved
-kernel stack. The proof restores and reads back the kernel root, then clears
-and releases all seven root/table/payload/stack frames.
+entry. The synthetic instruction stream issues Linux `exit(42)` through the
+architectural x86-64 `SYSCALL` instruction. That call is accepted only while an
+atomic probe flag is armed and returns directly to the saved kernel stack. The
+proof restores and reads back the kernel root, then clears and releases all
+seven root/table/payload/stack frames.
 
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the
@@ -68,3 +68,6 @@ the supported syscall surface, and general collision policy beyond the loaded
 kernel image are not defined yet. The loader does not relocate `ET_EXEC` images
 to the existing high test address, because doing so would violate ELF semantics
 and hide these remaining prerequisites.
+
+The syscall transition is specified separately in
+[Linux Syscall Entry v0](linux-syscall-v0.md).

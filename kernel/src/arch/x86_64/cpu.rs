@@ -3,7 +3,7 @@ use core::arch::{
     x86_64::{__cpuid, __cpuid_count},
 };
 use core::mem::size_of;
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
 use super::{paging, timer};
 
@@ -38,7 +38,13 @@ const CR4_UMIP: u64 = 1 << 11;
 const CR4_SMEP: u64 = 1 << 20;
 const CR4_SMAP: u64 = 1 << 21;
 const EFER_MSR: u32 = 0xc000_0080;
+const STAR_MSR: u32 = 0xc000_0081;
+const LSTAR_MSR: u32 = 0xc000_0082;
+const FMASK_MSR: u32 = 0xc000_0084;
+const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
+const LINUX_EXIT_SYSCALL: u64 = 60;
+const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -114,6 +120,7 @@ static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -379,6 +386,19 @@ ginux_syscall_entry:
     pop rcx
     pop rbx
     iretq
+
+    .global ginux_linux_syscall_entry
+ginux_linux_syscall_entry:
+    cli
+    clac
+    cld
+    mov rdx, rsp
+    mov rsi, rdi
+    mov rdi, rax
+    mov rsp, [rip + {user_return_stack}]
+    and rsp, -16
+    call {linux_syscall_handler}
+    jmp ginux_user_return_kernel
 ginux_user_return_kernel:
     mov rsp, [rip + {user_return_stack}]
     pop r15
@@ -393,6 +413,7 @@ ginux_user_return_kernel:
     fatal_exception_handler = sym fatal_exception_handler,
     user_fault_handler = sym user_fault_handler,
     syscall_handler = sym syscall_handler,
+    linux_syscall_handler = sym linux_syscall_handler,
     user_return_stack = sym USER_RETURN_STACK,
     user_data = const USER_DATA_SELECTOR as u64,
     user_code = const USER_CODE_SELECTOR as u64,
@@ -401,6 +422,7 @@ ginux_user_return_kernel:
 extern "C" {
     static ginux_exception_entries: [usize; 32];
     fn ginux_syscall_entry();
+    fn ginux_linux_syscall_entry();
 }
 
 extern "sysv64" {
@@ -603,16 +625,58 @@ pub(crate) fn execute_auxiliary(
 }
 
 pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize) -> bool {
-    if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
-        || !user_interrupt_surface_is_minimal()
-        || ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst)
-    {
+    if ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst) {
         return false;
     }
+    let Some(saved_msrs) = configure_linux_syscall() else {
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return false;
+    };
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
+    ELF_PROBE_STACK.store(stack as u64, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
+    restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
-    inactive && ELF_PROBE_COMPLETED.load(Ordering::SeqCst)
+    let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
+    ELF_PROBE_STACK.store(0, Ordering::SeqCst);
+    inactive && completed
+}
+
+fn configure_linux_syscall() -> Option<[u64; 4]> {
+    let star = (0x20_u64 << 48) | (u64::from(KERNEL_CODE_SELECTOR) << 32);
+    let lstar = ginux_linux_syscall_entry as *const () as u64;
+    let fmask = (1_u64 << 9) | (1_u64 << 10) | (1_u64 << 18);
+    unsafe {
+        let saved = [
+            read_msr(EFER_MSR),
+            read_msr(STAR_MSR),
+            read_msr(LSTAR_MSR),
+            read_msr(FMASK_MSR),
+        ];
+        write_msr(STAR_MSR, star);
+        write_msr(LSTAR_MSR, lstar);
+        write_msr(FMASK_MSR, fmask);
+        write_msr(EFER_MSR, read_msr(EFER_MSR) | EFER_SCE);
+        let valid = read_msr(STAR_MSR) == star
+            && read_msr(LSTAR_MSR) == lstar
+            && read_msr(FMASK_MSR) == fmask
+            && read_msr(EFER_MSR) & EFER_SCE != 0;
+        if valid {
+            Some(saved)
+        } else {
+            restore_linux_syscall(saved);
+            None
+        }
+    }
+}
+
+fn restore_linux_syscall(saved: [u64; 4]) {
+    unsafe {
+        write_msr(FMASK_MSR, saved[3]);
+        write_msr(LSTAR_MSR, saved[2]);
+        write_msr(STAR_MSR, saved[1]);
+        write_msr(EFER_MSR, saved[0]);
+    }
 }
 
 pub(crate) fn user_interrupt_surface_is_minimal() -> bool {
@@ -787,13 +851,6 @@ extern "sysv64" fn breakpoint_handler() {
 }
 
 extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
-    if ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
-        && number == u64::from(crate::linux_elf::PROBE_EXIT_CALL)
-    {
-        ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
-        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-        return u64::MAX;
-    }
     let Some(caller_domain) = scheduler::current_domain() else {
         return u64::MAX;
     };
@@ -814,6 +871,17 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         return u64::MAX;
     }
     result
+}
+
+extern "sysv64" fn linux_syscall_handler(number: u64, status: u64, user_stack: u64) {
+    if ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
+        && number == LINUX_EXIT_SYSCALL
+        && status == LINUX_PROBE_EXIT_STATUS
+        && user_stack == ELF_PROBE_STACK.load(Ordering::SeqCst)
+    {
+        ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
+    }
+    ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
 }
 
 fn dispatch_charged_call(
