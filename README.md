@@ -51,6 +51,16 @@ make test
 
 The test succeeds only after the post-firmware kernel validates the UEFI memory map and emits `GINUX_KERNEL_OK` over the serial console.
 
+Before committing a milestone, run the complete clean gate:
+
+```sh
+make gate
+```
+
+This formats the workspace, removes prior artifacts, runs lint checks, rebuilds
+the EFI image, executes the QEMU boot assertions, and checks the working diff
+for whitespace errors.
+
 `make help` lists all supported development targets.
 
 ## Virtualization profiles

@@ -9,7 +9,7 @@ EFI_DESTINATION := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest build run test check fmt clean
+.PHONY: help doctor manifest build run test check fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -21,6 +21,7 @@ help:
 	@echo "  make test    Build and verify the automated QEMU boot test"
 	@echo "  make check   Run formatting and lint checks"
 	@echo "  make fmt     Format Rust sources"
+	@echo "  make gate    Run the clean reproducible build and QEMU test gate"
 	@echo "  make clean   Remove generated build artifacts"
 
 doctor:
@@ -49,6 +50,14 @@ check: manifest
 
 fmt: manifest
 	@cargo fmt --all
+
+gate:
+	@$(MAKE) fmt
+	@$(MAKE) clean
+	@$(MAKE) check
+	@$(MAKE) test
+	@git diff --check
+	@echo "Clean build and QEMU test gate passed"
 
 clean:
 	@cargo clean
