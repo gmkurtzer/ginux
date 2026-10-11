@@ -116,6 +116,7 @@ static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static NETWORK_LINK_UP: AtomicBool = AtomicBool::new(false);
 static NETWORK_IPV4_CONFIGURATION: AtomicU64 = AtomicU64::new(0);
+static NETWORK_IPV4_GATEWAY: AtomicU64 = AtomicU64::new(0);
 static mut USER_RETURN_STACK: u64 = 0;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
@@ -925,6 +926,29 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
         {
             NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire)
         }
+        control_abi::NETWORK_DEVICE_SET_GATEWAY
+            if valid_ipv4_gateway(argument)
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::WRITE,
+                ) =>
+        {
+            NETWORK_IPV4_GATEWAY.store(argument, Ordering::Release);
+            0
+        }
+        control_abi::NETWORK_DEVICE_QUERY_GATEWAY
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            NETWORK_IPV4_GATEWAY.load(Ordering::Acquire)
+        }
         _ => u64::MAX - 2,
     }
 }
@@ -935,12 +959,36 @@ fn valid_ipv4_configuration(configuration: u64) -> bool {
     configuration >> 40 == 0 && prefix <= 32 && (address != 0 || prefix == 0)
 }
 
+fn valid_ipv4_gateway(gateway: u64) -> bool {
+    if gateway >> 32 != 0 {
+        return false;
+    }
+    let gateway = gateway as u32;
+    if gateway == 0 {
+        return true;
+    }
+    let configuration = NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire);
+    let address = configuration as u32;
+    let prefix = (configuration >> 32) as u8;
+    if address == 0 || prefix == 0 {
+        return false;
+    }
+    let mask = u32::MAX << (32 - u32::from(prefix));
+    let network = address & mask;
+    let broadcast = network | !mask;
+    gateway & mask == network && gateway != address && gateway != network && gateway != broadcast
+}
+
 pub(crate) fn network_link_is_up() -> bool {
     NETWORK_LINK_UP.load(Ordering::Acquire)
 }
 
 pub(crate) fn network_ipv4_configuration() -> u64 {
     NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire)
+}
+
+pub(crate) fn network_ipv4_gateway() -> u64 {
+    NETWORK_IPV4_GATEWAY.load(Ordering::Acquire)
 }
 
 fn create_auxiliary_service(

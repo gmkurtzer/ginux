@@ -588,6 +588,11 @@ if ! grep -q '^ginux: network IPv4 configuration retained' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: network default gateway validated' "$output_file"; then
+    echo "Boot test failed: network default gateway validation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: network device capability revoked on exit' "$output_file"; then
     echo "Boot test failed: network device authority survived service exit." >&2
     exit 1
