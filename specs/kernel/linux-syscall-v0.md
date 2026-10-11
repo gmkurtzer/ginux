@@ -167,7 +167,14 @@ list, because this profile's container credentials are immutable. `rax = 135`
 (`__NR_personality`) reports `PER_LINUX` for the query value `0xffffffff` and
 accepts an idempotent `PER_LINUX` selection. Every flag and alternate execution
 domain returns `-EINVAL`, so a process cannot weaken the fixed execution policy
-through personality state. The initial process namespace has
+through personality state. `rax = 125` (`__NR_capget`) accepts Linux capability
+ABI v3 for PID 0 or 1 and reports two all-zero capability records. A null data
+pointer performs a version/PID query, invalid output returns `-EFAULT`, and an
+unknown version is replaced with v3 before returning `-EINVAL`. `rax = 126`
+(`__NR_capset`) accepts only an idempotent all-zero v3 set for the current
+process; nonzero capabilities or another PID return `-EPERM`. Container UID 0
+therefore carries no Linux capabilities and still grants no native kernel
+authority. The initial process namespace has
 one process and one thread:
 `getpid` and `gettid` return 1, `getppid` returns 0, and `getpgrp`,
 `getpgid(0)`, and `getsid(0)` return 1. `getpgid` and `getsid` return `-ESRCH`
@@ -244,7 +251,7 @@ bounded read-only `mprotect`,
 `getrlimit`/`prlimit64`,
 `sched_yield`, `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
-credential and supplementary-group queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
+credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,
 `set_tid_address`, bounded robust-list registration/query, `exit`, and
 `exit_group` calls. There is no thread creation, TID allocation,

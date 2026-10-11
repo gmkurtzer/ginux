@@ -79,6 +79,8 @@ const LINUX_GETRESUID_SYSCALL: u64 = 118;
 const LINUX_GETRESGID_SYSCALL: u64 = 120;
 const LINUX_GETPGID_SYSCALL: u64 = 121;
 const LINUX_GETSID_SYSCALL: u64 = 124;
+const LINUX_CAPGET_SYSCALL: u64 = 125;
+const LINUX_CAPSET_SYSCALL: u64 = 126;
 const LINUX_SIGALTSTACK_SYSCALL: u64 = 131;
 const LINUX_PERSONALITY_SYSCALL: u64 = 135;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
@@ -95,6 +97,8 @@ const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
+const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+const LINUX_CAPABILITY_DATA_SIZE: usize = 24;
 const LINUX_RETURN_TO_KERNEL: u64 = (-4096_i64) as u64;
 const LINUX_EPERM: u64 = u64::MAX;
 const LINUX_EBADF: u64 = u64::MAX - 8;
@@ -1330,6 +1334,8 @@ extern "sysv64" fn linux_syscall_handler(
             0 | 0xffff_ffff => 0,
             _ => LINUX_EINVAL,
         },
+        LINUX_CAPGET_SYSCALL => linux_capget(first_argument, buffer),
+        LINUX_CAPSET_SYSCALL => linux_capset(first_argument, buffer),
         LINUX_PRCTL_SYSCALL => match first_argument {
             LINUX_PR_SET_NAME => linux_set_process_name(buffer),
             LINUX_PR_GET_NAME => linux_get_process_name(buffer),
@@ -1828,6 +1834,51 @@ fn copy_linux_root_id_triple(first: u64, second: u64, third: u64) -> bool {
     copy_to_linux_user(first, &root)
         && copy_to_linux_user(second, &root)
         && copy_to_linux_user(third, &root)
+}
+
+fn linux_capget(header_address: u64, data_address: u64) -> u64 {
+    let mut header = [0_u8; 8];
+    if !copy_from_linux_user(header_address, &mut header) {
+        return LINUX_EFAULT;
+    }
+    let version = u32::from_ne_bytes(header[..4].try_into().unwrap());
+    if version != LINUX_CAPABILITY_VERSION_3 {
+        return if copy_to_linux_user(header_address, &LINUX_CAPABILITY_VERSION_3.to_ne_bytes()) {
+            LINUX_EINVAL
+        } else {
+            LINUX_EFAULT
+        };
+    }
+    let pid = i32::from_ne_bytes(header[4..].try_into().unwrap());
+    if !matches!(pid, 0 | 1) {
+        return LINUX_ESRCH;
+    }
+    if data_address != 0 && !copy_to_linux_user(data_address, &[0_u8; LINUX_CAPABILITY_DATA_SIZE]) {
+        return LINUX_EFAULT;
+    }
+    0
+}
+
+fn linux_capset(header_address: u64, data_address: u64) -> u64 {
+    let mut header = [0_u8; 8];
+    if !copy_from_linux_user(header_address, &mut header) {
+        return LINUX_EFAULT;
+    }
+    if u32::from_ne_bytes(header[..4].try_into().unwrap()) != LINUX_CAPABILITY_VERSION_3 {
+        return LINUX_EINVAL;
+    }
+    if i32::from_ne_bytes(header[4..].try_into().unwrap()) != 0 {
+        return LINUX_EPERM;
+    }
+    let mut data = [0_u8; LINUX_CAPABILITY_DATA_SIZE];
+    if !copy_from_linux_user(data_address, &mut data) {
+        return LINUX_EFAULT;
+    }
+    if data.iter().any(|byte| *byte != 0) {
+        LINUX_EPERM
+    } else {
+        0
+    }
 }
 
 fn linux_set_process_name(address: u64) -> u64 {
