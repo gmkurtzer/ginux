@@ -8,6 +8,7 @@ const MAX_BOOT_GRANTS: usize = 8;
 const CONTROL_CALL_BUDGET: u16 = 18;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
+const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
 const SERVICE_RESTART_BUDGET: u16 = 1;
 const EVENT_CAPACITY: usize = 4;
 
@@ -53,6 +54,7 @@ struct Domain {
     remaining_calls: u16,
     active_threads: u16,
     thread_limit: u16,
+    active_operations: u16,
     parent: Option<DomainId>,
     delegated_roots: [Option<DelegatedRoot>; MAX_BOOT_GRANTS],
 }
@@ -207,6 +209,7 @@ impl Manager {
             remaining_calls: CONTROL_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
+            active_operations: 0,
             parent: None,
             delegated_roots: [None; MAX_BOOT_GRANTS],
         });
@@ -260,6 +263,7 @@ impl Manager {
             remaining_calls: SERVICE_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
+            active_operations: 0,
             parent: Some(control_id),
             delegated_roots,
         });
@@ -341,11 +345,45 @@ impl Manager {
         false
     }
 
+    fn begin_operation(&mut self, id: DomainId) -> bool {
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if domain.active_operations >= BOOTSTRAP_OPERATION_LIMIT {
+            return false;
+        }
+        domain.active_operations += 1;
+        true
+    }
+
+    fn end_operation(&mut self, id: DomainId) -> bool {
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        let Some(active) = domain.active_operations.checked_sub(1) else {
+            return false;
+        };
+        domain.active_operations = active;
+        true
+    }
+
     fn retire_service(&mut self, id: DomainId) -> bool {
         if self.service_id != Some(id)
-            || self
-                .domain(id)
-                .is_none_or(|domain| domain.role != Role::Service || domain.active_threads != 0)
+            || self.domain(id).is_none_or(|domain| {
+                domain.role != Role::Service
+                    || domain.active_threads != 0
+                    || domain.active_operations != 0
+            })
         {
             return false;
         }
@@ -357,9 +395,11 @@ impl Manager {
 
     fn discard_unstarted_service(&mut self, id: DomainId) -> bool {
         if self.service_id != Some(id)
-            || self
-                .domain(id)
-                .is_none_or(|domain| domain.role != Role::Service || domain.active_threads != 0)
+            || self.domain(id).is_none_or(|domain| {
+                domain.role != Role::Service
+                    || domain.active_threads != 0
+                    || domain.active_operations != 0
+            })
         {
             return false;
         }
@@ -546,6 +586,10 @@ fn verify_domain_ancestry_invariants_inner() -> Option<bool> {
         || manager.is_descendant(service, control)
         || manager.is_descendant(control, control)
         || manager.permits(service, service_ipc, 1, Rights::READ)
+        || !manager.begin_operation(service)
+        || manager.begin_operation(service)
+        || manager.retire_service(service)
+        || !manager.end_operation(service)
         || !manager.retire_service(service)
         || manager.is_descendant(control, service)
     {
@@ -623,6 +667,30 @@ pub(crate) fn charge_call(domain_raw: u64) -> bool {
     domain.remaining_calls = remaining_calls;
     manager.total_calls = total_calls;
     true
+}
+
+pub(crate) fn begin_operation(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager_mut().is_some_and(|manager| manager.begin_operation(id))
+}
+
+pub(crate) fn end_operation(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager_mut().is_some_and(|manager| manager.end_operation(id))
+}
+
+pub(crate) fn operation_accounting_proof_complete() -> bool {
+    global_manager().is_some_and(|manager| {
+        manager
+            .domains
+            .iter()
+            .flatten()
+            .all(|domain| domain.active_operations == 0)
+    })
 }
 
 pub(crate) fn call_budget_proof_complete() -> bool {

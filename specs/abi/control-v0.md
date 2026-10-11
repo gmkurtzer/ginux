@@ -104,6 +104,12 @@ exhausting its call budget. A denied request does not alter the retained record.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
+Each charged entry first acquires a bounded in-flight operation reference on
+the exact caller generation and releases it before returning through the call
+gate, even when dispatch is denied, the budget is exhausted, or the scheduler
+selects another context. A service capability table cannot be retired while
+such a reference remains. Operation 2 is uncharged and unreferenced so it can
+remove the current thread before retiring the service.
 Before either bounded copy direction touches user memory, the kernel requires
 active CR3 to equal the scheduler's current root, revalidates the complete
 fixed page-table hierarchy, and confirms every page-table and payload frame is

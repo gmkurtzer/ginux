@@ -567,6 +567,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !arch::x86_64::paging::verify_user_context_layout_invariants()
         || !domain::call_budget_proof_complete()
         || !domain::thread_budget_proof_complete()
+        || !domain::operation_accounting_proof_complete()
         || !domain::service_frame_quarantine_is_clear()
         || domain::handle_permits(
             service_domain,
@@ -636,6 +637,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: replacement service context executed");
     serial_write("\r\nginux: per-domain syscall budgets enforced");
     serial_write("\r\nginux: per-domain thread budgets enforced");
+    serial_write("\r\nginux: in-flight domain operations drained");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }

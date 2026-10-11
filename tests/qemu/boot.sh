@@ -583,6 +583,11 @@ if ! grep -q '^ginux: per-domain thread budgets enforced' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: in-flight domain operations drained' "$output_file"; then
+    echo "Boot test failed: in-flight domain operation accounting failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: scheduler context lifecycle verified' "$output_file"; then
     echo "Boot test failed: scheduler context lifecycle invariants failed." >&2
     exit 1

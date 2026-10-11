@@ -749,9 +749,30 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         return u64::MAX;
     };
     // Termination must remain available after a domain exhausts its budget.
-    if number != 2 && !domain::charge_call(caller_domain) {
-        return CALL_BUDGET_EXHAUSTED;
+    if number == 2 {
+        SYSCALL_STATE.fetch_or(4, Ordering::SeqCst);
+        return exit_result(caller_domain, frame);
     }
+    if !domain::begin_operation(caller_domain) {
+        return u64::MAX;
+    }
+    let result = if !domain::charge_call(caller_domain) {
+        CALL_BUDGET_EXHAUSTED
+    } else {
+        dispatch_charged_call(number, capability, caller_domain, frame)
+    };
+    if !domain::end_operation(caller_domain) {
+        return u64::MAX;
+    }
+    result
+}
+
+fn dispatch_charged_call(
+    number: u64,
+    capability: u64,
+    caller_domain: u64,
+    frame: *mut UserTrapFrame,
+) -> u64 {
     match number {
         0 => control_abi::DISCOVERY_WORD,
         1 => {
@@ -762,10 +783,6 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
                 SYSCALL_STATE.fetch_or(1, Ordering::SeqCst);
                 u64::MAX - 1
             }
-        }
-        2 => {
-            SYSCALL_STATE.fetch_or(4, Ordering::SeqCst);
-            exit_result(caller_domain, frame)
         }
         3 => runtime_result(frame),
         4 => {

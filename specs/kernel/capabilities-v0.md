@@ -41,10 +41,11 @@ follow that root's specific cross-domain chain. An authorization chain longer
 than the fixed domain table is rejected.
 
 The current 64-entry table is deliberately fixed and local. It does not yet
-define general userspace-requested transfer, object lifetime, concurrency,
-resource charging, or synchronization with in-flight operations. Retiring the
-faulted bootstrap service removes its complete local table before its client
-resumes. The boot test covers rejected
+define general userspace-requested transfer, object lifetime, concurrent table
+mutation, or cancellation of in-flight operations. Charged call-gate dispatch
+holds a bounded generation-specific operation reference, and retirement
+requires that count to reach zero before removing the complete table. The boot
+test covers rejected
 equal/expanded derivation, least-rights access, recursive revocation, slot
 reuse, stale-generation rejection, one kernel-mediated IPC delegation, and
 cross-domain handle substitution. A separate manager invariant leaves a child

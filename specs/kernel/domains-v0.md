@@ -88,6 +88,16 @@ while any thread remains attached. The QEMU proof rejects a second control
 thread and accounts for the control, original service, and replacement service
 attachments independently.
 
+Every charged call-gate dispatch also holds one bounded in-flight operation
+reference against the exact caller generation. A second simultaneous operation
+is rejected in this bootstrap policy, and every return path—including denial,
+budget exhaustion, blocking, and context switching—must release the reference.
+Service retirement and unstarted-domain discard both require the count to be
+zero before removing the capability table. Thread exit is deliberately outside
+this accounting so it remains available after call-budget exhaustion; it
+performs retirement only after the scheduler has removed the thread. The QEMU
+gate requires all surviving domain records to have zero in-flight operations.
+
 Domain retirement is also reconciled with the physical-frame ledger at the end
 of the bounded boot workload. The failed service must own zero frames after its
 address-space leases transfer to the replacement, and the control, failed, and
