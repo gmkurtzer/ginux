@@ -3,14 +3,14 @@
 b801000000
 cd80
 3dfeffffff
-0f85f0000000
+0f85fb000000
 
 # mov rdi, rbx; allowed host read with host-control handle
 4889df
 b801000000
 cd80
 3d58470000
-0f85db000000
+0f85e6000000
 
 # reject IPC send through a capability for the wrong object
 4889cf
@@ -18,7 +18,7 @@ cd80
 b804000000
 cd80
 3dfdffffff
-0f85c3000000
+0f85ce000000
 
 # reject console write through the host-control capability
 4889df
@@ -27,7 +27,7 @@ ba08000000
 b806000000
 cd80
 3dfdffffff
-0f859f000000
+0f85aa000000
 
 # write "USER_OK\n" through the console capability
 4889cf
@@ -36,17 +36,17 @@ ba08000000
 b806000000
 cd80
 83f808
-0f857d000000
+0f8588000000
 
 # negotiate call-gate ABI v1 and its seven bootstrap features
 b800000000
 cd80
 3d7f000100
-0f856b000000
+0f8576000000
 
 # branch context 2 into the isolated service role
 4983f902
-7467
+7472
 
 # enqueue this context's identity through the IPC capability
 4c89c7
@@ -54,7 +54,7 @@ cd80
 b804000000
 cd80
 85c0
-7554
+755f
 
 # wait for the kernel's calibrated one-shot to preempt this context
 b900000001
@@ -67,21 +67,27 @@ e2fc
 b805000000
 cd80
 4883f802
-7539
+7544
 
 # reject fault-event receipt through the console capability
 4889cf
 b807000000
 cd80
 3dfdffffff
-0f851e000000
+0f852f000000
 
 # consume the service-fault event through host-control manage authority
 4889df
 b807000000
 cd80
 4883f801
-7514
+751f
+
+# wait for the rearmed one-shot to dispatch the replacement service
+b900000001
+f390
+e2fc
+31c0
 
 # require the exhausted control-domain call budget to reject another call
 b800000000

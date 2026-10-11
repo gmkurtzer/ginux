@@ -32,8 +32,10 @@ RSP0 names a dedicated guarded privilege stack. A DPL3 interrupt gate at vector
 `IRETQ`, issues a ping call, and verifies the returned value after `IRETQ`
 resumes the same user context. A calibrated APIC one-shot preempts context 1
 and switches to context 2, whose deliberate invalid-opcode fault is contained
-by the scheduler. Context 1 then resumes at its interrupted instruction and
-exits. The final exit deliberately abandons the saved user frame and returns on
+by the scheduler. Context 1 then resumes at its interrupted instruction. A
+rearmed one-shot later dispatches the replacement service generation and
+returns to context 1 after that service exits. The final control exit
+deliberately abandons the saved user frame and returns on
 the suspended kernel stack. The kernel restores its original CR3. The entry
 stub preserves every non-result general-purpose register.
 

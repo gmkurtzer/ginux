@@ -710,12 +710,12 @@ pub(crate) fn verify_runtime_complete() -> bool {
         return false;
     };
     runtime.yields == 0
-        && runtime.preemptions == 1
+        && runtime.preemptions == 2
         && runtime.exits == 2
         && runtime.faults == 1
         && runtime.restarts == 1
         && runtime.expected_fault_observed
-        && runtime.address_space_switches == 3
+        && runtime.address_space_switches == 4
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)
 }

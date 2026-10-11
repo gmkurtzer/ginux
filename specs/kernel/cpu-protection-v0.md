@@ -30,7 +30,7 @@ TSS RSP0 names a dedicated privilege stack rather than the suspended kernel
 call stack. This prevents repeated user calls from overwriting the kernel
 continuation. Its first page is absent in the active kernel and domain page
 tables. The stack is shared by the single bootstrap CPU. Ring-3 execution
-admits one APIC timer interrupt, whose interrupt gate clears IF; kernel handlers
+admits two non-nested APIC timer interrupts, whose interrupt gate clears IF; kernel handlers
 never re-enable interrupts, so privilege-stack uses cannot nest in this proof.
 
 The kernel verifies all 32 entries before continuing its boot test. Later

@@ -1,5 +1,5 @@
 use core::arch::{asm, global_asm, x86_64::__cpuid};
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 use super::{
     apic::{LocalApic, Mode},
@@ -41,7 +41,8 @@ const INTERRUPT_POLL_LIMIT: usize = 100_000_000;
 
 static TIMER_FIRED: AtomicBool = AtomicBool::new(false);
 static PREEMPTION_ARMED: AtomicBool = AtomicBool::new(false);
-static PREEMPTION_SUCCEEDED: AtomicBool = AtomicBool::new(false);
+static PREEMPTION_COUNT: AtomicU8 = AtomicU8::new(0);
+static PREEMPTION_RELOAD: AtomicU32 = AtomicU32::new(0);
 static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 
@@ -282,12 +283,38 @@ pub(crate) unsafe fn arm_scheduler_preemption(
         PREEMPTION_ARMED.store(false, Ordering::SeqCst);
         return false;
     }
-    PREEMPTION_SUCCEEDED.store(false, Ordering::SeqCst);
+    PREEMPTION_COUNT.store(0, Ordering::SeqCst);
     TIMER_FIRED.store(false, Ordering::SeqCst);
     apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
     apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
     let initial_count = (calibration.counter_hz / 1_000).clamp(1, u64::from(u32::MAX)) as u32;
+    PREEMPTION_RELOAD.store(initial_count, Ordering::SeqCst);
     apic.write(APIC_INITIAL_COUNT, initial_count);
+    true
+}
+
+pub(crate) fn rearm_scheduler_preemption() -> bool {
+    let reload = PREEMPTION_RELOAD.load(Ordering::SeqCst);
+    if reload == 0
+        || PREEMPTION_COUNT.load(Ordering::SeqCst) != 1
+        || PREEMPTION_ARMED.swap(true, Ordering::SeqCst)
+    {
+        PREEMPTION_ARMED.store(false, Ordering::SeqCst);
+        return false;
+    }
+    let apic = LocalApic {
+        id: 0,
+        mode: if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+            Mode::X2Apic
+        } else {
+            Mode::XApic
+        },
+        physical_base: INTERRUPT_APIC_BASE.load(Ordering::SeqCst),
+    };
+    unsafe {
+        apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
+        apic.write(APIC_INITIAL_COUNT, reload);
+    }
     true
 }
 
@@ -296,7 +323,7 @@ pub(crate) unsafe fn finish_scheduler_preemption(apic: &LocalApic) -> bool {
     apic.write(APIC_INITIAL_COUNT, 0);
     !PREEMPTION_ARMED.load(Ordering::SeqCst)
         && TIMER_FIRED.load(Ordering::SeqCst)
-        && PREEMPTION_SUCCEEDED.load(Ordering::SeqCst)
+        && PREEMPTION_COUNT.load(Ordering::SeqCst) == 2
 }
 
 extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
@@ -325,10 +352,9 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
         address_space_root, ..
     } = action
     {
-        PREEMPTION_SUCCEEDED.store(
-            cpu::activate_user_root(address_space_root),
-            Ordering::SeqCst,
-        );
+        if cpu::activate_user_root(address_space_root) {
+            PREEMPTION_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 

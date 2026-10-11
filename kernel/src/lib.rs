@@ -448,6 +448,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: user invalid-opcode fault contained");
     serial_write("\r\nginux: isolated scheduler address spaces switched");
     serial_write("\r\nginux: one-shot user preemption completed");
+    serial_write("\r\nginux: restarted service preemption completed");
     serial_write("\r\nginux: completed address-space frames reclaimed");
     serial_write("\r\nginux: capability-gated bounded IPC verified");
     serial_write("\r\nginux: isolated service request-reply completed");

@@ -283,6 +283,11 @@ if ! grep -q '^ginux: one-shot user preemption completed' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: restarted service preemption completed' "$output_file"; then
+    echo "Boot test failed: the restarted service was not reached by preemption." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: completed address-space frames reclaimed' "$output_file"; then
     echo "Boot test failed: completed address-space frames were not reclaimed." >&2
     exit 1

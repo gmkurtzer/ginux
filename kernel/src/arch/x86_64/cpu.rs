@@ -2,6 +2,8 @@ use core::arch::{asm, global_asm};
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
+use super::timer;
+
 use crate::{
     capability::Rights,
     domain, ipc, scheduler,
@@ -673,6 +675,9 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         };
         if !scheduler::queue_service_restart(replacement_domain, replacement_handle) {
             let _ = domain::retire_service(replacement_domain);
+            return u64::MAX;
+        }
+        if !timer::rearm_scheduler_preemption() {
             return u64::MAX;
         }
     }
