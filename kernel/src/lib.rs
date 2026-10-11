@@ -189,7 +189,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(u64::from(platform.first_io_apic_gsi));
     serial_write("\r\n");
 
-    if !arch::x86_64::cpu::install() {
+    if !arch::x86_64::cpu::install(stack_start + KERNEL_STACK_STORAGE_SIZE) {
         kernel_fail("ginux: architectural exception gates invalid\r\n");
     }
     serial_write("ginux: GDT/TSS/IDT active\r\n");
@@ -303,6 +303,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: control-plane W^X layout failed\r\n");
     }
     serial_write("\r\nginux: control-plane W^X mappings active");
+    if !address_space::verify_ring3_control_plane() {
+        kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
+    }
+    serial_write("\r\nginux: ring-3 control-plane syscall handled");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());

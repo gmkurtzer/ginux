@@ -7,6 +7,9 @@ use crate::{serial_write, serial_write_u64};
 const KERNEL_CODE_SELECTOR: u16 = 0x08;
 const KERNEL_DATA_SELECTOR: u16 = 0x10;
 const TSS_SELECTOR: u16 = 0x18;
+const USER_DATA_SELECTOR: u16 = 0x2b;
+const USER_CODE_SELECTOR: u16 = 0x33;
+const SYSCALL_VECTOR: u8 = 0x80;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
@@ -69,7 +72,9 @@ struct DescriptorTablePointer {
 struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
-static mut GDT: [u64; 5] = [0; 5];
+static SYSCALL_HANDLED: AtomicBool = AtomicBool::new(false);
+static mut USER_RETURN_STACK: u64 = 0;
+static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
     reserved0: 0,
     privilege_stacks: [0; 3],
@@ -235,23 +240,65 @@ ginux_exception_entries:
     .quad ginux_exception_29
     .quad ginux_exception_30
     .quad ginux_exception_31
+
+    .text
+    .global ginux_user_enter
+ginux_user_enter:
+    mov [rip + {user_return_stack}], rsp
+    push {user_data}
+    push rsi
+    push 2
+    push {user_code}
+    push rdi
+    iretq
+
+    .global ginux_syscall_entry
+ginux_syscall_entry:
+    cli
+    cld
+    mov rdi, rax
+    and rsp, -16
+    call {syscall_handler}
+    mov rsp, [rip + {user_return_stack}]
+    ret
 "#,
     breakpoint_handler = sym breakpoint_handler,
     fatal_exception_handler = sym fatal_exception_handler,
+    syscall_handler = sym syscall_handler,
+    user_return_stack = sym USER_RETURN_STACK,
+    user_data = const USER_DATA_SELECTOR as u64,
+    user_code = const USER_CODE_SELECTOR as u64,
 );
 
 extern "C" {
     static ginux_exception_entries: [usize; 32];
+    fn ginux_syscall_entry();
 }
 
-pub(crate) fn install() -> bool {
+extern "sysv64" {
+    fn ginux_user_enter(entry: usize, stack: usize);
+}
+
+pub(crate) fn install(kernel_stack_top: usize) -> bool {
     // SAFETY: Initialization runs once with interrupts disabled and before any
     // other CPU can observe these tables.
     unsafe {
-        install_gdt_and_tss();
+        install_gdt_and_tss(kernel_stack_top);
         install_idt();
     }
     exception_gates_are_valid()
+}
+
+pub(crate) fn verify_user_syscall(entry: usize, stack: usize) -> bool {
+    if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize) {
+        return false;
+    }
+    SYSCALL_HANDLED.store(false, Ordering::SeqCst);
+    // SAFETY: The caller supplies mapped ring-3 code and stack addresses. The
+    // syscall gate abandons the user frame and returns on the saved kernel
+    // stack, with interrupts disabled throughout.
+    unsafe { ginux_user_enter(entry, stack) };
+    SYSCALL_HANDLED.load(Ordering::SeqCst)
 }
 
 pub(crate) fn verify_breakpoint() -> bool {
@@ -282,11 +329,25 @@ pub(crate) fn install_interrupt_gate(vector: u8, handler: usize) -> bool {
     }
 }
 
-unsafe fn install_gdt_and_tss() {
+fn install_user_interrupt_gate(vector: u8, handler: usize) -> bool {
+    if vector < 32 || handler == 0 {
+        return false;
+    }
+    let idt = core::ptr::addr_of_mut!(IDT).cast::<IdtEntry>();
+    unsafe {
+        let mut entry = IdtEntry::interrupt(handler, 0);
+        entry.attributes = 0xee;
+        idt.add(usize::from(vector)).write(entry);
+        idt.add(usize::from(vector)).read().attributes == 0xee
+    }
+}
+
+unsafe fn install_gdt_and_tss(kernel_stack_top: usize) {
     let tss_address = core::ptr::addr_of!(TSS) as u64;
     let exception_stack_end =
         core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64 + EXCEPTION_STACK_STORAGE_SIZE as u64;
     TSS.interrupt_stacks[0] = exception_stack_end;
+    TSS.privilege_stacks[0] = kernel_stack_top as u64;
 
     GDT[0] = 0;
     GDT[1] = 0x00af_9a00_0000_ffff;
@@ -298,9 +359,11 @@ unsafe fn install_gdt_and_tss() {
         | (((limit >> 16) & 0x0f) << 48)
         | (((tss_address >> 24) & 0xff) << 56);
     GDT[4] = tss_address >> 32;
+    GDT[5] = 0x00cf_f200_0000_ffff;
+    GDT[6] = 0x00af_fa00_0000_ffff;
 
     let pointer = DescriptorTablePointer {
-        limit: (size_of::<[u64; 5]>() - 1) as u16,
+        limit: (size_of::<[u64; 7]>() - 1) as u16,
         base: core::ptr::addr_of!(GDT) as u64,
     };
 
@@ -359,12 +422,16 @@ fn exception_gates_are_valid() -> bool {
     true
 }
 
-extern "C" fn breakpoint_handler() {
+extern "sysv64" fn breakpoint_handler() {
     BREAKPOINT_HANDLED.store(true, Ordering::SeqCst);
     serial_write("ginux: breakpoint exception handled\r\n");
 }
 
-extern "C" fn fatal_exception_handler(vector: u64, error: u64, fault_address: u64) -> ! {
+extern "sysv64" fn syscall_handler(number: u64) {
+    SYSCALL_HANDLED.store(number == 1, Ordering::SeqCst);
+}
+
+extern "sysv64" fn fatal_exception_handler(vector: u64, error: u64, fault_address: u64) -> ! {
     serial_write("ginux: fatal exception vector: ");
     serial_write_u64(vector);
     serial_write("\r\nginux: exception error code: ");

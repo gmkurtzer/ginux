@@ -193,6 +193,11 @@ if ! grep -q '^ginux: control-plane W\^X mappings active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: ring-3 control-plane syscall handled' "$output_file"; then
+    echo "Boot test failed: ring-3 control-plane entry did not return through the syscall gate." >&2
+    exit 1
+fi
+
 if grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
     echo "Boot test failed: a panic marker was emitted." >&2
     exit 1

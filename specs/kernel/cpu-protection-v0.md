@@ -22,3 +22,6 @@ The kernel verifies all 32 entries before continuing its boot test. Later
 revisions must capture complete structured fault frames, introduce per-CPU
 GDT/TSS/IDT state, and test fatal paths without making the normal suite depend
 on a reset or timeout.
+
+All assembly-to-Rust callbacks use the explicit `sysv64` ABI. The UEFI target's
+default C ABI is Microsoft x64 and must not be assumed by handwritten stubs.

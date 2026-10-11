@@ -1,6 +1,6 @@
 use core::arch::{asm, x86_64::__cpuid};
 
-use crate::memory;
+use crate::{arch::x86_64::cpu, memory};
 
 const PAGE_SIZE: usize = 4096;
 const ENTRY_COUNT: usize = 512;
@@ -139,6 +139,30 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
         space.code_frame.cast::<u8>().write_volatile(0);
         space.stack_frame.cast::<u64>().write_volatile(0);
         code_visible && stack_writable && restored
+    }
+}
+
+pub(crate) fn verify_ring3_control_plane() -> bool {
+    if !enable_execute_disable() {
+        return false;
+    }
+    let kernel_root = current_root();
+    let Some(space) = WxAddressSpace::new(kernel_root) else {
+        return false;
+    };
+    if !space.permissions_are_valid(kernel_root) {
+        return false;
+    }
+    let program = [0xb8, 1, 0, 0, 0, 0xcd, 0x80, 0x0f, 0x0b];
+    unsafe {
+        for (offset, byte) in program.iter().enumerate() {
+            space.code_frame.add(offset).write(*byte);
+        }
+        activate(space.root);
+        let handled =
+            cpu::verify_user_syscall(USER_TEST_ADDRESS, USER_TEST_ADDRESS + 3 * PAGE_SIZE);
+        activate(kernel_root);
+        handled && current_root() == kernel_root
     }
 }
 

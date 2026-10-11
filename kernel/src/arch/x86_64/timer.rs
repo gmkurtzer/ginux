@@ -263,7 +263,7 @@ pub(crate) unsafe fn verify_local_apic_interrupt(
     TIMER_FIRED.load(Ordering::SeqCst)
 }
 
-extern "C" fn timer_interrupt_handler() {
+extern "sysv64" fn timer_interrupt_handler() {
     TIMER_FIRED.store(true, Ordering::SeqCst);
     let apic = LocalApic {
         id: 0,
