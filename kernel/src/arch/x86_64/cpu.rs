@@ -56,6 +56,7 @@ const LINUX_DUP2_SYSCALL: u64 = 33;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
+const LINUX_FCNTL_SYSCALL: u64 = 72;
 const LINUX_GETCWD_SYSCALL: u64 = 79;
 const LINUX_READLINK_SYSCALL: u64 = 89;
 const LINUX_UMASK_SYSCALL: u64 = 95;
@@ -106,6 +107,8 @@ const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_DESCRIPTOR_INPUT: u8 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
+const LINUX_F_GETFD: u64 = 1;
+const LINUX_F_GETFL: u64 = 3;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1137,6 +1140,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
+        LINUX_FCNTL_SYSCALL => linux_console_fcntl(first_argument, buffer),
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
             let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
@@ -1482,6 +1486,19 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
         {
             return target;
         }
+    }
+}
+
+fn linux_console_fcntl(descriptor: u64, command: u64) -> u64 {
+    let state = linux_console_descriptor(descriptor);
+    if state == 0 {
+        return LINUX_EBADF;
+    }
+    match command {
+        LINUX_F_GETFD => 0,
+        LINUX_F_GETFL if state == LINUX_DESCRIPTOR_INPUT => 0,
+        LINUX_F_GETFL if state == LINUX_DESCRIPTOR_OUTPUT => 1,
+        _ => LINUX_EINVAL,
     }
 }
 

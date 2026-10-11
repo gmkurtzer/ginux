@@ -847,6 +847,20 @@ ginux_linux_probe:
     cmp rax, -9
     jne failure
 
+    xor edi, edi
+    mov esi, 3
+    mov eax, 72
+    syscall
+    cmp rax, 1
+    jne failure
+
+    mov edi, 1
+    mov esi, 1
+    mov eax, 72
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 1
     mov eax, 3
     syscall
