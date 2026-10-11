@@ -28,12 +28,17 @@ const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
 const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE + PAGE_SIZE;
 const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
 const CPUID_STRUCTURED_FEATURES: u32 = 7;
+const CPUID_EXTENDED_MAX: u32 = 0x8000_0000;
+const CPUID_EXTENDED_FEATURES: u32 = 0x8000_0001;
+const CPUID_NX: u32 = 1 << 20;
 const CPUID_SMEP: u32 = 1 << 7;
 const CPUID_SMAP: u32 = 1 << 20;
 const CPUID_UMIP: u32 = 1 << 2;
 const CR4_UMIP: u64 = 1 << 11;
 const CR4_SMEP: u64 = 1 << 20;
 const CR4_SMAP: u64 = 1 << 21;
+const EFER_MSR: u32 = 0xc000_0080;
+const EFER_NXE: u64 = 1 << 11;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -416,6 +421,26 @@ pub(crate) fn enable_supervisor_execution_prevention() -> bool {
         asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack, preserves_flags));
     }
     supervisor_execution_prevention_enabled()
+}
+
+pub(crate) fn enable_execute_disable() -> bool {
+    if __cpuid(CPUID_EXTENDED_MAX).eax < CPUID_EXTENDED_FEATURES
+        || __cpuid(CPUID_EXTENDED_FEATURES).edx & CPUID_NX == 0
+    {
+        return false;
+    }
+    unsafe {
+        let efer = read_msr(EFER_MSR);
+        write_msr(EFER_MSR, efer | EFER_NXE);
+        read_msr(EFER_MSR) & EFER_NXE != 0
+    }
+}
+
+pub(crate) fn execute_disable_enabled() -> bool {
+    if __cpuid(CPUID_EXTENDED_MAX).eax < CPUID_EXTENDED_FEATURES {
+        return false;
+    }
+    unsafe { read_msr(EFER_MSR) & EFER_NXE != 0 }
 }
 
 pub(crate) fn supervisor_execution_prevention_enabled() -> bool {
@@ -947,6 +972,17 @@ pub(crate) fn activate_user_root(root: u64) -> bool {
         asm!("mov {}, cr3", out(reg) active, options(nomem, nostack, preserves_flags));
     }
     active & ADDRESS_MASK == root
+}
+
+unsafe fn read_msr(msr: u32) -> u64 {
+    let low: u32;
+    let high: u32;
+    asm!("rdmsr", in("ecx") msr, out("eax") low, out("edx") high, options(nomem, nostack, preserves_flags));
+    (u64::from(high) << 32) | u64::from(low)
+}
+
+unsafe fn write_msr(msr: u32, value: u64) {
+    asm!("wrmsr", in("ecx") msr, in("eax") value as u32, in("edx") (value >> 32) as u32, options(nomem, nostack, preserves_flags));
 }
 
 extern "sysv64" fn fatal_exception_handler(

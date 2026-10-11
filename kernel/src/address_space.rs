@@ -1,4 +1,4 @@
-use core::arch::{asm, x86_64::__cpuid};
+use core::arch::asm;
 
 use crate::{
     arch::x86_64::{
@@ -19,11 +19,6 @@ const USER_TEST_ADDRESS: usize = 1usize << 39;
 const EXPECTED_FAULT_OFFSET: usize = 333;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
-const EXTENDED_CPUID_MAX: u32 = 0x8000_0000;
-const EXTENDED_FEATURES: u32 = 0x8000_0001;
-const NX_FEATURE: u32 = 1 << 20;
-const EFER_MSR: u32 = 0xc000_0080;
-const EFER_NXE: u64 = 1 << 11;
 
 struct AddressSpace {
     root: u64,
@@ -136,7 +131,7 @@ pub(crate) fn verify_isolated_user_mapping() -> bool {
 }
 
 pub(crate) fn verify_control_plane_wx_layout() -> bool {
-    if !enable_execute_disable() {
+    if !cpu::execute_disable_enabled() {
         return false;
     }
     let kernel_root = current_root();
@@ -182,7 +177,7 @@ pub(crate) fn verify_ring3_control_plane(
     local_apic: &LocalApic,
     apic_timer: &LocalApicCalibration,
 ) -> bool {
-    if !enable_execute_disable() {
+    if !cpu::execute_disable_enabled() {
         return false;
     }
     let kernel_root = current_root();
@@ -412,30 +407,6 @@ impl WxAddressSpace {
         }
         memory::release_frames(self.owner, frames)
     }
-}
-
-fn enable_execute_disable() -> bool {
-    if __cpuid(EXTENDED_CPUID_MAX).eax < EXTENDED_FEATURES
-        || __cpuid(EXTENDED_FEATURES).edx & NX_FEATURE == 0
-    {
-        return false;
-    }
-    unsafe {
-        let efer = read_msr(EFER_MSR);
-        write_msr(EFER_MSR, efer | EFER_NXE);
-        read_msr(EFER_MSR) & EFER_NXE != 0
-    }
-}
-
-unsafe fn read_msr(msr: u32) -> u64 {
-    let low: u32;
-    let high: u32;
-    asm!("rdmsr", in("ecx") msr, out("eax") low, out("edx") high, options(nomem, nostack, preserves_flags));
-    (u64::from(high) << 32) | u64::from(low)
-}
-
-unsafe fn write_msr(msr: u32, value: u64) {
-    asm!("wrmsr", in("ecx") msr, in("eax") value as u32, in("edx") (value >> 32) as u32, options(nomem, nostack, preserves_flags));
 }
 
 fn current_root() -> u64 {

@@ -18,10 +18,11 @@ use core::mem::size_of;
 const COM1: u16 = 0x3f8;
 const EFI_RESET_SHUTDOWN: u32 = 2;
 const EFI_SUCCESS: usize = 0;
-const EFI_LOADER_CODE: u32 = 1;
+pub(crate) const EFI_LOADER_CODE: u32 = 1;
 const EFI_LOADER_DATA: u32 = 2;
 const EFI_BOOT_SERVICES_CODE: u32 = 3;
 const EFI_BOOT_SERVICES_DATA: u32 = 4;
+pub(crate) const EFI_RUNTIME_SERVICES_CODE: u32 = 5;
 const EFI_CONVENTIONAL_MEMORY: u32 = 7;
 const UEFI_PAGES_PER_MIB: u64 = 256;
 const PAGE_SIZE: usize = 4096;
@@ -83,12 +84,12 @@ pub struct BootInfo {
 }
 
 #[repr(C)]
-struct UefiMemoryDescriptor {
-    memory_type: u32,
+pub(crate) struct UefiMemoryDescriptor {
+    pub(crate) memory_type: u32,
     padding: u32,
-    physical_start: u64,
+    pub(crate) physical_start: u64,
     virtual_start: u64,
-    page_count: u64,
+    pub(crate) page_count: u64,
     attributes: u64,
 }
 
@@ -224,17 +225,31 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         double_fault_upper_guard,
     ];
 
+    if !arch::x86_64::cpu::enable_execute_disable() {
+        kernel_fail("ginux: execute-disable unavailable or inactive\r\n");
+    }
+
     // SAFETY: The entry trampoline disabled interrupts. The required live
     // addresses and the page-table objects are checked against the complete
     // transitional identity-map range before CR3 is changed.
     if unsafe {
-        arch::x86_64::paging::install_initial_identity_map(&required_addresses, &guard_pages)
+        arch::x86_64::paging::install_initial_identity_map(
+            boot_info,
+            &required_addresses,
+            &guard_pages,
+        )
     }
     .is_err()
     {
         kernel_fail("ginux: page-table transition failed\r\n");
     }
     serial_write("ginux: kernel page tables active\r\n");
+    if !arch::x86_64::cpu::execute_disable_enabled()
+        || !arch::x86_64::paging::identity_map_is_nx_by_default(boot_info)
+    {
+        kernel_fail("ginux: NX-by-default identity map inactive\r\n");
+    }
+    serial_write("ginux: NX-by-default identity map active\r\n");
     if !arch::x86_64::paging::supervisor_write_protect_enabled() {
         kernel_fail("ginux: supervisor write protection inactive\r\n");
     }
@@ -469,6 +484,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
         || !arch::x86_64::paging::static_page_tables_are_read_only()
+        || !arch::x86_64::paging::identity_map_is_nx_by_default(boot_info)
+        || !arch::x86_64::cpu::execute_disable_enabled()
         || !arch::x86_64::cpu::supervisor_execution_prevention_enabled()
         || !arch::x86_64::cpu::supervisor_access_prevention_enabled()
         || !arch::x86_64::cpu::user_mode_instruction_prevention_enabled()

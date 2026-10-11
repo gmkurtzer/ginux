@@ -98,6 +98,11 @@ if ! grep -q '^ginux: kernel page tables active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: NX-by-default identity map active' "$output_file"; then
+    echo "Boot test failed: non-code identity mappings remain executable." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: supervisor write protection active' "$output_file"; then
     echo "Boot test failed: supervisor write protection is inactive." >&2
     exit 1
