@@ -19,6 +19,9 @@ replacement generation receives nothing until the kernel explicitly binds its
 new ID. The local invariant covers stale access and empty replacement input;
 the ring-3 path preserves the original service's reply across retirement while
 requiring the replacement to block until a new control request arrives.
+Direct delivery to a blocked receiver and creation of a blocking wait use the
+same endpoint lookup before touching scheduler state; neither path can bypass
+the generation binding merely because no queue operation is needed.
 
 The channel is object 3 in the signed boot authority manifest. Sending requires
 `WRITE`; receiving requires `READ`. The call gate resolves the supplied opaque

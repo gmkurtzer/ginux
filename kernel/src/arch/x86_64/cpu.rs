@@ -581,7 +581,9 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
                 return u64::MAX;
             };
             let message = frame.first_argument();
-            let from_service = domain::is_service_domain(caller_domain);
+            let Some(from_service) = ipc::service_side(caller_domain) else {
+                return u64::MAX - 2;
+            };
             if domain::handle_permits(caller_domain, capability, 3, Rights::WRITE)
                 && (scheduler::wake_ipc_peer(caller_domain, 3, !from_service, message)
                     || ipc::send(caller_domain, message))
@@ -618,6 +620,9 @@ fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) 
     if let Some(message) = ipc::receive(domain_id) {
         return message;
     }
+    let Some(service_side) = ipc::service_side(domain_id) else {
+        return u64::MAX - 2;
+    };
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX;
     };
@@ -627,7 +632,7 @@ fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) 
         USER_DATA_SELECTOR,
         scheduler::WaitReason::IpcReceive {
             object: 3,
-            service_side: domain::is_service_domain(domain_id),
+            service_side,
         },
     );
     if matches!(action, RuntimeAction::Invalid) {

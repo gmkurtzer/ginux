@@ -27,9 +27,9 @@ impl Duplex {
     }
 
     fn send(&mut self, domain: u64, message: u64) -> bool {
-        if self.service_domain == Some(domain) {
+        if self.service_side(domain) == Some(true) {
             self.replies.send(message)
-        } else if self.control_domain == domain && self.service_domain.is_some() {
+        } else if self.service_side(domain) == Some(false) && self.service_domain.is_some() {
             self.requests.send(message)
         } else {
             false
@@ -37,9 +37,9 @@ impl Duplex {
     }
 
     fn receive(&mut self, domain: u64) -> Option<u64> {
-        if self.service_domain == Some(domain) {
+        if self.service_side(domain) == Some(true) {
             self.requests.receive()
-        } else if self.control_domain == domain {
+        } else if self.service_side(domain) == Some(false) {
             self.replies.receive()
         } else {
             None
@@ -61,6 +61,16 @@ impl Duplex {
         }
         self.service_domain = Some(domain);
         true
+    }
+
+    fn service_side(&self, domain: u64) -> Option<bool> {
+        if self.service_domain == Some(domain) {
+            Some(true)
+        } else if self.control_domain == domain {
+            Some(false)
+        } else {
+            None
+        }
     }
 
     const fn is_empty(&self) -> bool {
@@ -133,6 +143,10 @@ pub(crate) fn receive(domain: u64) -> Option<u64> {
     channel_mut()?.receive(domain)
 }
 
+pub(crate) fn service_side(domain: u64) -> Option<bool> {
+    channel_mut()?.service_side(domain)
+}
+
 pub(crate) fn retire_service(domain: u64) -> bool {
     channel_mut().is_some_and(|channel| channel.retire_service(domain))
 }
@@ -152,6 +166,9 @@ pub(crate) fn verify_channel_invariants() -> bool {
     };
     channel.receive(control).is_none()
         && channel.receive(service).is_none()
+        && channel.service_side(control) == Some(false)
+        && channel.service_side(service) == Some(true)
+        && channel.service_side(replacement).is_none()
         && channel.send(control, 10)
         && channel.send(control, 20)
         && channel.send(control, 30)
@@ -172,10 +189,12 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.retire_service(service)
         && !channel.retire_service(service)
         && !channel.send(service, 90)
+        && channel.service_side(service).is_none()
         && channel.receive(service).is_none()
         && !channel.send(control, 90)
         && channel.receive(control) == Some(80)
         && channel.bind_service(replacement)
+        && channel.service_side(replacement) == Some(true)
         && !channel.bind_service(service)
         && channel.receive(replacement).is_none()
         && channel.send(control, 100)
