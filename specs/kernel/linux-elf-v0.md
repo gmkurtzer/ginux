@@ -116,8 +116,10 @@ the exact `PT_INTERP` path to a SHA-256 digest. The kernel requires both to matc
 the resolved bytes before it parses, plans, maps, or executes the interpreter;
 wrong-path, wrong-digest, mutated, and truncated candidates are rejected. The
 authority record is currently a synthetic proof input rather than a
-production-signed package manifest. An interpreted main image may additionally
-name exactly one dependency with `DT_NEEDED`. The dependency must declare one
+production-signed package manifest. The parser accepts an ordered list of at
+most two distinct `DT_NEEDED` names, rejects a third or a duplicate, and
+preserves their dynamic-table order. The executable profile currently requires
+exactly one name. That dependency must declare one
 nonempty `DT_SONAME`; a dependency authority record binds that exact string to
 a SHA-256 digest and fixed page-aligned load bias.
 The kernel authenticates the bytes before parsing or mapping the dependency,
@@ -195,7 +197,7 @@ executable window. At runtime
 the linked interpreter first validates its mapped ELF magic, requires a
 56-byte program-header entry size, and bounds one through eight headers to its
 first 4096-byte RX page. It accepts exactly one nonempty `PT_DYNAMIC` whose
-equal file/memory size is a multiple of 16 bytes and contains at most 17
+equal file/memory size is a multiple of 16 bytes and contains at most 18
 entries, then derives that table's runtime address with checked addition. The
 compact fixture retains its fixed synthetic table offset to remain within its
 768-byte raw-text bound. Both forms derive their page-aligned load bias and scan each bounded dynamic table for
@@ -234,6 +236,11 @@ linker metadata used here: an in-range 32-byte `DT_PLTGOT`, zero `DT_DEBUG`,
 values are rejected. The main's linker metadata tail remains mapped for the
 interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
+A separate LLD-produced main fixture carries ordered `DT_NEEDED` entries for
+`libginux.so` and `libginux-aux.so`. The parser validates both names and the
+auxiliary DSO's matching `DT_SONAME`, bounded GNU hash, symbol, and relocation
+metadata. This fixture establishes the dependency-list input for the next
+loader milestone; it does not yet map or execute the auxiliary DSO.
 After applying its self-relocation, the linked interpreter enters the syscall
 gate only after consuming the initial stack metadata. It walks at most eight
 environment pointers and 32 auxiliary-vector pairs, requires nonzero
@@ -268,7 +275,7 @@ kernel-enforced contracts.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
-it may describe at most 17 entries. The interpreter derives the runtime
+it may describe at most 18 entries. The interpreter derives the runtime
 dynamic-table address by adding the selected bias to `p_vaddr`; the linked main
 and dependency scans no longer embed their dynamic addresses or entry counts.
 The interpreter keeps its bounded startup scratch in the zero-fill tail after
@@ -306,7 +313,7 @@ canonical plan by the selected bias before validation. The kernel
 restores its own root, scrubs every payload, releases all eleven demand-allocated
 main and dependency leases, and requires the kernel-owned live-frame count to
 return to its pre-execution value. This profile performs one exact cross-object name match; it
-does not support multiple dependencies, transitive dependency graphs, search
+does not yet execute multiple dependencies or support transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
 lazy binding, a general-purpose dynamic linker, or glibc. The main bias and
 entry are startup-metadata-driven. The sole dependency now selects among 16

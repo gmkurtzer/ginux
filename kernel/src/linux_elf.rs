@@ -59,11 +59,41 @@ const DEPENDENCY_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-d
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
 const LINKED_DYNAMIC_MAIN: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/linux-linked-main.elf"));
+const LINKED_DYNAMIC_GRAPH_MAIN: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/linux-linked-graph-main.elf"));
 const LINKED_DYNAMIC_DEPENDENCY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libginux.so"));
+const LINKED_DYNAMIC_AUXILIARY: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/libginux-aux.so"));
 const LINKED_DYNAMIC_INTERPRETER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ld-ginux.so"));
 
 pub(crate) fn runtime_main_bytes() -> &'static [u8] {
     LINKED_DYNAMIC_MAIN
+}
+
+pub(crate) fn verify_dependency_list_metadata() -> bool {
+    const PRIMARY: &[u8] = b"libginux.so";
+    const AUXILIARY: &[u8] = b"libginux-aux.so";
+    let Some(main) = parse(LINKED_DYNAMIC_GRAPH_MAIN) else {
+        crate::serial_write_bytes(b"\r\nginux: dependency-list main parse failed");
+        return false;
+    };
+    let Some(auxiliary) = parse(LINKED_DYNAMIC_AUXILIARY) else {
+        crate::serial_write_bytes(b"\r\nginux: auxiliary dependency parse failed");
+        return false;
+    };
+    let valid = main.needed_libraries == [Some(PRIMARY), Some(AUXILIARY)]
+        && auxiliary.soname == Some(AUXILIARY)
+        && auxiliary.needed_libraries == [None; 2]
+        && auxiliary.dynamic_symbol == Some(b"ginux_auxiliary_symbol")
+        && auxiliary.dynamic_relocations.is_some_and(|dynamic| {
+            dynamic.symbol_defined
+                && dynamic.symbol_relocation.is_some()
+                && dynamic.jump_slot_relocation.is_some()
+        });
+    if !valid {
+        crate::serial_write_bytes(b"\r\nginux: auxiliary dependency metadata mismatch");
+    }
+    valid
 }
 
 pub(crate) fn runtime_interpreter_bytes() -> &'static [u8] {
@@ -95,7 +125,7 @@ pub(crate) struct Image<'a> {
     pub(crate) interpreter: Option<&'a [u8]>,
     pub(crate) dynamic_relocations: Option<DynamicRelocations>,
     pub(crate) dynamic_symbol: Option<&'a [u8]>,
-    pub(crate) needed_library: Option<&'a [u8]>,
+    pub(crate) needed_libraries: [Option<&'a [u8]>; 2],
     pub(crate) soname: Option<&'a [u8]>,
 }
 
@@ -133,7 +163,7 @@ pub(crate) struct DynamicRelocations {
 struct DynamicMetadata<'a> {
     relocations: DynamicRelocations,
     symbol_name: Option<&'a [u8]>,
-    needed_library: Option<&'a [u8]>,
+    needed_libraries: [Option<&'a [u8]>; 2],
     soname: Option<&'a [u8]>,
 }
 
@@ -384,7 +414,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         interpreter,
         dynamic_relocations,
         dynamic_symbol: dynamic_metadata.and_then(|metadata| metadata.symbol_name),
-        needed_library: dynamic_metadata.and_then(|metadata| metadata.needed_library),
+        needed_libraries: dynamic_metadata
+            .map(|metadata| metadata.needed_libraries)
+            .unwrap_or([None; 2]),
         soname: dynamic_metadata.and_then(|metadata| metadata.soname),
     })
 }
@@ -489,7 +521,7 @@ fn plan_authenticated_dependency_at<'main, 'interpreter, 'dependency>(
     dependency_bytes: &'dependency [u8],
 ) -> Option<DependencyLoadPlan<'main, 'interpreter, 'dependency>> {
     if main.interpreter != Some(interpreter_authority.path)
-        || main.needed_library != Some(dependency_authority.name)
+        || main.needed_libraries != [Some(dependency_authority.name), None]
         || crate::crypto::sha256(interpreter_bytes) != interpreter_authority.sha256
         || crate::crypto::sha256(dependency_bytes) != dependency_authority.sha256
     {
@@ -505,7 +537,7 @@ fn plan_authenticated_dependency_at<'main, 'interpreter, 'dependency>(
         || main.dynamic_symbol != dependency_image.dynamic_symbol
         || main_dynamic.symbol_defined
         || !dependency_dynamic.symbol_defined
-        || dependency_image.needed_library.is_some()
+        || dependency_image.needed_libraries != [None; 2]
         || dependency_image.soname != Some(dependency_authority.name)
     {
         return None;
@@ -978,7 +1010,7 @@ fn parse_dynamic_table(bytes: &[u8], header: usize) -> Option<DynamicTable<'_>> 
     if read_u32(bytes, header + 4)? != PF_READ | PF_WRITE
         || physical_address != 0 && physical_address != virtual_address
         || file_size != memory_size
-        || !(2..=17).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
+        || !(2..=18).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
         || !file_size.is_multiple_of(DYNAMIC_ENTRY_SIZE)
         || alignment != 8
         || file_offset % alignment != virtual_address % alignment
@@ -1015,7 +1047,7 @@ fn parse_dynamic_relocations<'a>(
     let mut symbol_entry_size = None;
     let mut hash_table_address = None;
     let mut hash_is_gnu = false;
-    let mut needed_name_offset = None;
+    let mut needed_name_offsets = [None; 2];
     let mut soname_offset = None;
     let mut jump_relocation_address = None;
     let mut jump_relocation_size = None;
@@ -1045,7 +1077,12 @@ fn parse_dynamic_relocations<'a>(
             DT_GNU_HASH if hash_table_address.replace(value).is_none() => {
                 hash_is_gnu = true;
             }
-            DT_NEEDED if needed_name_offset.replace(value).is_none() => {}
+            DT_NEEDED => {
+                let slot = needed_name_offsets
+                    .iter_mut()
+                    .find(|offset| offset.is_none())?;
+                *slot = Some(value);
+            }
             DT_SONAME if soname_offset.replace(value).is_none() => {}
             DT_JMPREL if jump_relocation_address.replace(value).is_none() => {}
             DT_PLTRELSZ if jump_relocation_size.replace(value).is_none() => {}
@@ -1124,7 +1161,6 @@ fn parse_dynamic_relocations<'a>(
         string_table_size,
         symbol_entry_size,
         hash_table_address,
-        needed_name_offset,
         soname_offset,
     );
     let (
@@ -1135,15 +1171,17 @@ fn parse_dynamic_relocations<'a>(
         symbol_relocation,
         jump_slot_relocation,
         symbol_name,
-        needed_library,
+        needed_libraries,
         soname,
         symbol_defined,
     ) = match (relocation_count, symbol_metadata) {
-        (1, (None, None, None, None, None, None, None)) => {
-            (None, None, 0, None, None, None, None, None, None, false)
-        }
-        (1, (Some(symbols), Some(strings), Some(1), Some(symbol_size), Some(hash), None, None))
-            if symbol_size == SYMBOL_ENTRY_SIZE as u64 && hash_is_gnu =>
+        (1, (None, None, None, None, None, None)) if needed_name_offsets == [None; 2] => (
+            None, None, 0, None, None, None, None, [None; 2], None, false,
+        ),
+        (1, (Some(symbols), Some(strings), Some(1), Some(symbol_size), Some(hash), None))
+            if symbol_size == SYMBOL_ENTRY_SIZE as u64
+                && hash_is_gnu
+                && needed_name_offsets == [None; 2] =>
         {
             let symbol = virtual_file_bytes(loads, symbols, SYMBOL_ENTRY_SIZE)?;
             let string = virtual_file_bytes(loads, strings, 1)?;
@@ -1161,7 +1199,7 @@ fn parse_dynamic_relocations<'a>(
                 None,
                 None,
                 None,
-                None,
+                [None; 2],
                 None,
                 false,
             )
@@ -1174,7 +1212,6 @@ fn parse_dynamic_relocations<'a>(
                 Some(string_size),
                 Some(symbol_size),
                 Some(hash),
-                needed_offset,
                 soname_offset,
             ),
         ) if symbol_size == SYMBOL_ENTRY_SIZE as u64
@@ -1216,15 +1253,24 @@ fn parse_dynamic_relocations<'a>(
             let name = string_table.get(name_offset_usize..)?;
             let name_length = name.iter().position(|byte| *byte == 0)?;
             let name = &name[..name_length];
-            let needed_library = match needed_offset {
-                Some(offset) => {
-                    let offset = usize::try_from(offset).ok()?;
-                    let candidate = string_table.get(offset..)?;
-                    let length = candidate.iter().position(|byte| *byte == 0)?;
-                    (length != 0).then_some(&candidate[..length])
+            let parse_name = |offset| -> Option<Option<&[u8]>> {
+                match offset {
+                    Some(offset) => {
+                        let offset = usize::try_from(offset).ok()?;
+                        let candidate = string_table.get(offset..)?;
+                        let length = candidate.iter().position(|byte| *byte == 0)?;
+                        Some((length != 0).then_some(&candidate[..length]))
+                    }
+                    None => Some(None),
                 }
-                None => None,
             };
+            let needed_libraries = [
+                parse_name(needed_name_offsets[0])?,
+                parse_name(needed_name_offsets[1])?,
+            ];
+            if needed_libraries[0].is_some() && needed_libraries[0] == needed_libraries[1] {
+                return None;
+            }
             let soname = match soname_offset {
                 Some(offset) => {
                     let offset = usize::try_from(offset).ok()?;
@@ -1257,11 +1303,11 @@ fn parse_dynamic_relocations<'a>(
                         || symbol_value >= executable_end
                         || symbol_size > executable_end.checked_sub(symbol_value)?)
                 || !symbol_defined
-                    && (needed_library.is_none()
+                    && (needed_libraries[0].is_none()
                         || soname.is_some()
                         || symbol_value != 0
                         || symbol_size != 0)
-                || symbol_defined && needed_library.is_some()
+                || symbol_defined && needed_libraries.iter().any(Option::is_some)
             {
                 return None;
             }
@@ -1309,7 +1355,7 @@ fn parse_dynamic_relocations<'a>(
                 Some(symbol_relocation),
                 jump_slot_relocation,
                 Some(name),
-                needed_library,
+                needed_libraries,
                 soname,
                 symbol_defined,
             )
@@ -1334,7 +1380,7 @@ fn parse_dynamic_relocations<'a>(
             symbol_defined,
         },
         symbol_name,
-        needed_library,
+        needed_libraries,
         soname,
     })
 }
@@ -2418,7 +2464,7 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         return false;
     }
     if main.interpreter != Some(PATH)
-        || main.needed_library != Some(DEPENDENCY)
+        || main.needed_libraries != [Some(DEPENDENCY), None]
         || dependency.soname != Some(DEPENDENCY)
     {
         crate::serial_write_bytes(b"\r\nginux: linked dynamic identity mismatch");
@@ -2427,7 +2473,7 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
     if interpreter.entry != 0x200
         || interpreter.program_header_count != 5
         || interpreter.interpreter.is_some()
-        || interpreter.needed_library.is_some()
+        || interpreter.needed_libraries != [None; 2]
         || interpreter.soname.is_some()
         || !interpreter.dynamic_relocations.is_some_and(|dynamic| {
             dynamic.relocation_count == 1

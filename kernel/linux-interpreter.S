@@ -43,7 +43,7 @@ ginux_linux_interpreter:
     test al, 15
     jnz .Linvalid_dynamic
     shr rax, 4
-    cmp rax, 17
+    cmp rax, 18
     ja .Linvalid_dynamic
     mov r14, qword ptr [r12 + 16]
     add r14, rbx
@@ -457,7 +457,7 @@ ginux_linux_interpreter:
     test al, 15
     jnz .Linvalid_dynamic
     shr rax, 4
-    cmp rax, 17
+    cmp rax, 18
     ja .Linvalid_dynamic
     mov rcx, qword ptr [r12 + 16]
     add rcx, r14

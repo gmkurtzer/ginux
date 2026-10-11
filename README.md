@@ -16,9 +16,12 @@ conventional split. The symbol profile validates a two-entry symbol-table
 prefix, bounded string table, either a one-bucket legacy SysV `DT_HASH` or a
 one-bucket/one-word-bloom `DT_GNU_HASH`, and one
 global function symbol used by `R_X86_64_GLOB_DAT` and
-`R_X86_64_JUMP_SLOT`. The interpreted proof admits exactly one `DT_NEEDED`
-name. Its undefined main-image symbol is matched to the same defined symbol in
-one authenticated `ET_DYN` dependency.
+`R_X86_64_JUMP_SLOT`. The parser admits an ordered list of at most two distinct
+`DT_NEEDED` names and rejects overflow or duplicates. A separate LLD-produced
+metadata fixture proves both names and the second DSO's `DT_SONAME`; executable
+loading remains intentionally limited to the first dependency. Its undefined
+main-image symbol is matched to the same defined symbol in one authenticated
+`ET_DYN` dependency.
 Images whose expanded
 program-header table covers the entry point are rejected. A bounded proof maps
 a resolved `ET_EXEC` main image, relocated `ET_DYN` interpreter, and one
@@ -255,10 +258,12 @@ read-only headers at `0x3ff000`, a four-page RX load with entry at `0x400100`,
 and RW data/BSS at `0x404000`, matching the ring-3 workload's bounded layout.
 This tests ordinary
 linker metadata on both macOS and Linux hosts. `make linux-probe` builds the
-static artifact at `build/linux-probe.elf` and the executable dynamic trio at
+static artifact at `build/linux-probe.elf` and the dynamic fixtures at
 `build/linux-dynamic/ld-ginux.so`,
 `build/linux-dynamic/linux-linked-main.elf`, and
-`build/linux-dynamic/libginux.so` for inspection without assembling the EFI
+`build/linux-dynamic/libginux.so`. It also emits the bounded dependency-list
+fixtures `linux-linked-graph-main.elf` and `libginux-aux.so` for inspection
+without assembling the EFI
 filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and
 proof-workload ABI constants share the machine-readable

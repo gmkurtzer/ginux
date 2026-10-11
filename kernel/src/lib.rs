@@ -609,6 +609,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux auxiliary vector encoding validated\r\n");
     serial_write("ginux: Linux page-aliasing ELF segments rejected\r\n");
     serial_write("ginux: Linux ELF entry metadata overlap rejected\r\n");
+    if !linux_elf::verify_dependency_list_metadata() {
+        kernel_fail("ginux: bounded Linux dependency-list metadata invalid\r\n");
+    }
+    serial_write("ginux: bounded Linux dependency list validated\r\n");
     if !linux_elf::verify_mapped_load_plan(boot_info.image_base as u64, boot_info.image_size) {
         kernel_fail("ginux: Linux ELF64 address-space mapping failed\r\n");
     }

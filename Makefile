@@ -18,7 +18,7 @@ help:
 	@echo
 	@echo "  make doctor  Check the local development prerequisites"
 	@echo "  make manifest Regenerate the signed development boot inputs"
-	@echo "  make linux-probe Build the static probe and dynamic Linux ELF trio"
+	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build and boot Ginux in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
@@ -38,7 +38,9 @@ linux-probe:
 	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-kernel --target $(TARGET) $(CARGO_PROFILE_FLAG)
 	@test -f "$(LINUX_PROBE)"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-main.elf"
+	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-graph-main.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/libginux.so"
+	@test -f "$(LINUX_DYNAMIC_DIR)/libginux-aux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/ld-ginux.so"
 	@echo "Built $(LINUX_PROBE) and $(LINUX_DYNAMIC_DIR)"
 
