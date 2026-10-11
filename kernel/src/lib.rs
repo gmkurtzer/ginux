@@ -567,6 +567,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !arch::x86_64::paging::verify_user_context_layout_invariants()
         || !domain::call_budget_proof_complete()
         || !domain::thread_budget_proof_complete()
+        || !domain::service_frame_quarantine_is_clear()
         || domain::handle_permits(
             service_domain,
             service_ipc_handle,
@@ -611,6 +612,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: restarted service preemption completed");
     serial_write("\r\nginux: completed address-space frames reclaimed");
     serial_write("\r\nginux: retired domain frame ownership cleared");
+    serial_write("\r\nginux: retired service frame quarantine cleared");
     serial_write("\r\nginux: capability-gated bounded IPC verified");
     serial_write("\r\nginux: directional IPC endpoints isolated");
     serial_write("\r\nginux: generation-bound IPC endpoints verified");

@@ -156,6 +156,7 @@ pub(crate) struct Manager {
     service_started: bool,
     remaining_service_restarts: u16,
     total_service_restarts: u16,
+    quarantined_frame_owner: Option<DomainId>,
 }
 
 impl Manager {
@@ -174,6 +175,7 @@ impl Manager {
             service_started: false,
             remaining_service_restarts: SERVICE_RESTART_BUDGET,
             total_service_restarts: 0,
+            quarantined_frame_owner: None,
         }
     }
 
@@ -445,6 +447,7 @@ pub(crate) fn initialize_boot_service() -> Option<u64> {
 
 pub(crate) fn initialize_boot_service_restart() -> Option<u64> {
     let manager = global_manager_mut()?;
+    manager.quarantined_frame_owner?;
     let id = manager.restart_service()?;
     validate_boot_service(manager, id)
 }
@@ -709,10 +712,89 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
+    let Some(owner) = crate::memory::FrameOwner::domain(domain_raw) else {
+        return false;
+    };
+    if crate::memory::owner_live_frame_count(owner) != Some(7) {
+        return false;
+    }
     let Some(manager) = global_manager_mut() else {
         return false;
     };
-    manager.retire_service(id)
+    if manager.quarantined_frame_owner.is_some() || !manager.retire_service(id) {
+        return false;
+    }
+    manager.quarantined_frame_owner = Some(id);
+    true
+}
+
+pub(crate) fn adopt_quarantined_service_frames(retired_raw: u64, replacement_raw: u64) -> bool {
+    let (Some(retired), Some(replacement), Some(retired_owner), Some(replacement_owner)) = (
+        decode_id(retired_raw),
+        decode_id(replacement_raw),
+        crate::memory::FrameOwner::domain(retired_raw),
+        crate::memory::FrameOwner::domain(replacement_raw),
+    ) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    if manager.quarantined_frame_owner != Some(retired)
+        || manager.service_id != Some(replacement)
+        || crate::memory::owner_live_frame_count(retired_owner) != Some(0)
+        || crate::memory::owner_live_frame_count(replacement_owner) != Some(7)
+    {
+        return false;
+    }
+    manager.quarantined_frame_owner = None;
+    true
+}
+
+pub(crate) fn restore_quarantined_service_frames(retired_raw: u64, replacement_raw: u64) -> bool {
+    let (Some(retired), Some(replacement), Some(retired_owner), Some(replacement_owner)) = (
+        decode_id(retired_raw),
+        decode_id(replacement_raw),
+        crate::memory::FrameOwner::domain(retired_raw),
+        crate::memory::FrameOwner::domain(replacement_raw),
+    ) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    if manager.quarantined_frame_owner.is_some()
+        || manager.service_id != Some(replacement)
+        || crate::memory::owner_live_frame_count(retired_owner) != Some(7)
+        || crate::memory::owner_live_frame_count(replacement_owner) != Some(0)
+    {
+        return false;
+    }
+    manager.quarantined_frame_owner = Some(retired);
+    true
+}
+
+pub(crate) fn complete_service_frame_quarantine(retired_raw: u64) -> bool {
+    let (Some(retired), Some(owner)) = (
+        decode_id(retired_raw),
+        crate::memory::FrameOwner::domain(retired_raw),
+    ) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    if manager.quarantined_frame_owner != Some(retired)
+        || crate::memory::owner_live_frame_count(owner) != Some(0)
+    {
+        return false;
+    }
+    manager.quarantined_frame_owner = None;
+    true
+}
+
+pub(crate) fn service_frame_quarantine_is_clear() -> bool {
+    global_manager().is_some_and(|manager| manager.quarantined_frame_owner.is_none())
 }
 
 pub(crate) fn discard_unstarted_service(domain_raw: u64) -> bool {

@@ -90,4 +90,12 @@ Domain retirement is also reconciled with the physical-frame ledger at the end
 of the bounded boot workload. The failed service must own zero frames after its
 address-space leases transfer to the replacement, and the control, failed, and
 replacement generations must all own zero frames after final address-space
-release. Retirement does not yet invoke a general object graph destructor.
+release. A service retirement is now accepted only when the allocator reports
+exactly the seven frames in its fixed address-space layout. The manager records
+that retired generation in a single quarantine slot until an explicitly named
+replacement owns all seven leases or final release reduces the retired owner's
+live count to zero. Replacement setup rollback restores the prior quarantine
+record after returning ownership. The boot gate requires the slot to be clear
+at completion. This prevents a retired service's known frame inventory from
+becoming untracked, but it is a fixed-layout precursor to a general object graph
+destructor rather than one.

@@ -463,6 +463,11 @@ if ! grep -q '^ginux: retired domain frame ownership cleared' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: retired service frame quarantine cleared' "$output_file"; then
+    echo "Boot test failed: retired service frame quarantine remained live." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: capability-gated bounded IPC verified' "$output_file"; then
     echo "Boot test failed: bounded IPC authority or FIFO behavior failed." >&2
     exit 1

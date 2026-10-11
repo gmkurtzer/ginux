@@ -89,7 +89,12 @@ its replacement and releases both address spaces, the boot gate requires zero
 live frames for the control domain, the failed service generation, and the
 replacement generation. A retired generation therefore cannot pass the proof
 while silently retaining an allocator lease. This is a bounded bootstrap audit,
-not yet a general resource destructor for every future kernel object.
+not yet a general resource destructor for every future kernel object. Service
+retirement additionally places the exact generation in the domain manager's
+single retained-frame quarantine until the seven leases are adopted by a
+replacement or released. Allocator ownership itself never changes to an
+anonymous quarantine identity, preserving generation checks throughout the
+handoff.
 
 Loader regions remain excluded even after boot-service reclamation. They may
 contain the unified image, handoff map, transitional page tables, or kernel

@@ -89,3 +89,8 @@ ready context and thread charge, restores all seven frames to the failed
 generation, then removes the binding and domain. The consumed restart attempt
 is not refunded. A rollback primitive that cannot prove its expected state
 fails the exception path rather than masking inconsistent kernel metadata.
+The failed generation remains named by the domain manager's retained-frame
+quarantine between retirement and successful transfer. Adoption clears that
+record only after the allocator proves zero frames remain under the failed
+generation and exactly seven belong to the replacement. A normally exiting
+replacement enters the same quarantine until final address-space release.

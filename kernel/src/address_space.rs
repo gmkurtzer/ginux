@@ -6,7 +6,7 @@ use crate::{
         cpu, paging,
         timer::{self, LocalApicCalibration},
     },
-    ipc, memory, scheduler,
+    domain, ipc, memory, scheduler,
 };
 
 const PAGE_SIZE: usize = 4096;
@@ -405,9 +405,10 @@ pub(crate) fn verify_ring3_control_plane(
             && ipc::is_empty()
             && current_root() == kernel_root
             && preemption_complete;
-        let Some(replacement_owner) =
-            scheduler::service_address_space_owner().and_then(memory::FrameOwner::domain)
-        else {
+        let Some(service_owner_domain) = scheduler::service_address_space_owner() else {
+            return false;
+        };
+        let Some(replacement_owner) = memory::FrameOwner::domain(service_owner_domain) else {
             return false;
         };
         if !valid
@@ -415,6 +416,7 @@ pub(crate) fn verify_ring3_control_plane(
             || memory::owner_live_frame_count(service_owner) != Some(0)
             || !first_space.release()
             || !second_space.release()
+            || !domain::complete_service_frame_quarantine(service_owner_domain)
         {
             return false;
         }
