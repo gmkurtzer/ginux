@@ -11,19 +11,26 @@ const PF_READ: u32 = 4;
 const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
-const PROBE_CODE: [u8; 103] = [
+const PROBE_CODE: [u8; 128] = [
     0x48, 0x83, 0x3c, 0x24, 0x00, // cmp qword ptr [rsp], 0 (argc)
-    0x75, 0x5e, // jne fallback UD2
+    0x75, 0x77, // jne fallback UD2
     0xb8, 0xe7, 0x03, 0x00, 0x00, // mov eax, 999 (unsupported syscall)
     0x0f, 0x05, // syscall
     0x48, 0x83, 0xf8, 0xda, // cmp rax, -ENOSYS (-38)
-    0x75, 0x51, // jne fallback UD2
+    0x75, 0x6a, // jne fallback UD2
     0xbf, 0x01, 0x00, 0x00, 0x00, // mov edi, 1 (stdout)
     0xbe, 0x00, 0x10, 0x40, 0x00, // mov esi, 0x401000 (buffer)
     0xba, 0x08, 0x00, 0x00, 0x00, // mov edx, 8 (length)
     0xb8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (__NR_write)
     0x0f, 0x05, // syscall
     0x48, 0x83, 0xf8, 0x08, // cmp rax, 8
+    0x75, 0x4e, // jne fallback UD2
+    0xbf, 0x00, 0x10, 0x40, 0x00, // mov edi, 0x401000 (utsname)
+    0xb8, 0x3f, 0x00, 0x00, 0x00, // mov eax, 63 (__NR_uname)
+    0x0f, 0x05, // syscall
+    0x48, 0x85, 0xc0, // test rax, rax
+    0x75, 0x3d, // jne fallback UD2
+    0x81, 0x3f, 0x47, 0x69, 0x6e, 0x75, // cmp dword ptr [rdi], "Ginu"
     0x75, 0x35, // jne fallback UD2
     0x41, 0xba, 0x78, 0x56, 0x34, 0x12, // mov r10d, 0x12345678
     0xbf, 0x44, 0x33, 0x22, 0x11, // mov edi, 0x11223344
@@ -201,7 +208,7 @@ pub(crate) fn verify_parser() -> bool {
         || parsed.segments[0].flags != PF_READ | PF_EXECUTE
         || parsed.segments[1].bytes != [1, 2, 3, 4, 5, 6, 7, 8]
         || parsed.segments[1].virtual_address != 0x40_1000
-        || parsed.segments[1].memory_size != 16
+        || parsed.segments[1].memory_size != 512
         || parsed.segments[1].flags != PF_READ | PF_WRITE
     {
         return false;
@@ -289,7 +296,7 @@ fn fixture() -> [u8; 392] {
         0x180,
         0x40_1000,
         8,
-        16,
+        512,
         PF_READ | PF_WRITE,
     );
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(&PROBE_CODE);

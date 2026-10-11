@@ -46,8 +46,10 @@ const EFER_NXE: u64 = 1 << 11;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
+const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
+const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -965,6 +967,27 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_GETPID_SYSCALL => 1,
+        LINUX_UNAME_SYSCALL if first_argument == ELF_PROBE_DATA.load(Ordering::SeqCst) => {
+            let mut name = [0_u8; LINUX_UTSNAME_SIZE];
+            name[..6].copy_from_slice(b"Ginux\0");
+            name[65..71].copy_from_slice(b"ginux\0");
+            name[130..136].copy_from_slice(b"0.1.0\0");
+            name[195..198].copy_from_slice(b"#1\0");
+            name[260..267].copy_from_slice(b"x86_64\0");
+            name[325..337].copy_from_slice(b"localdomain\0");
+            // SAFETY: the proof accepts only the declared RW segment base, and
+            // its ELF memory size contains the complete fixed Linux structure.
+            unsafe {
+                with_supervisor_user_access(|| {
+                    core::ptr::copy_nonoverlapping(
+                        name.as_ptr(),
+                        first_argument as *mut u8,
+                        name.len(),
+                    );
+                });
+            }
+            0
+        }
         LINUX_EXIT_SYSCALL if first_argument == LINUX_PROBE_EXIT_STATUS => {
             ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);

@@ -1,7 +1,7 @@
 # Linux x86-64 Syscall Entry v0
 
-**Status:** Bounded error/`write`/`getpid`/`exit` transitions verified in QEMU;
-not a general syscall ABI.
+**Status:** Bounded error/`write`/`uname`/`getpid`/`exit` transitions verified in
+QEMU; not a general syscall ABI.
 
 The bounded static ELF proof invokes the architectural x86-64 `SYSCALL`
 instruction with Linux register conventions. It first submits unsupported call
@@ -9,9 +9,13 @@ instruction with Linux register conventions. It first submits unsupported call
 (`__NR_write`) with fd 1, the declared RW segment address, and an eight-byte
 length. The kernel validates all three arguments, enables supervisor access to
 user memory only around the bounded copy-in, verifies the expected bytes, and
-returns 8. The probe then uses `rax = 39` (`__NR_getpid`), requires PID 1 in
-`rax` after resumption, and finally uses `rax = 60` (`__NR_exit`) with `rdi =
-42` (status). Immediately before entry, the kernel:
+returns 8. Next, `rax = 63` (`__NR_uname`) and the exact RW segment base request
+a fixed 390-byte Linux `utsname`. The kernel zero-initializes every byte, fills
+all six 65-byte fields, and enables supervisor access to user memory only for
+the bounded copy-out. The probe checks success and the `Ginux` system name. It
+then uses `rax = 39` (`__NR_getpid`), requires PID 1 in `rax` after resumption,
+and finally uses `rax = 60` (`__NR_exit`) with `rdi = 42` (status). Immediately
+before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;
 - programs `STAR` for the existing kernel and user GDT selectors;
@@ -36,7 +40,7 @@ This milestone proves the hardware transition and Linux argument registers. It
 does not provide persistent per-thread kernel stacks, `IRETQ` fallback, signal
 interruption, restartable syscalls, scheduler integration, credentials, a
 general file-descriptor table, output streams, arbitrary user buffers,
-`exit_group`, or any syscall other than the exact bounded `write`, `getpid`, and
-exit calls. Every other call returns `-ENOSYS` without disarming the task, so a
-caller can handle the error and continue. The entire path remains disarmed
-outside the proof.
+`exit_group`, or any syscall other than the exact bounded `write`, `uname`,
+`getpid`, and exit calls. Every other call returns `-ENOSYS` without disarming
+the task, so a caller can handle the error and continue. The entire path
+remains disarmed outside the proof.

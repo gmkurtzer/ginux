@@ -19,7 +19,7 @@ data. Physical addresses must be zero. The segments must not overlap.
 The profile requires exactly one executable segment and one writable segment.
 Writable-executable mappings are rejected. The entry point must lie inside the
 executable segment. The boot verifier accepts a synthetic image with a bounded
-RX segment and an eight-byte file/sixteen-byte memory RW segment, then rejects
+RX segment and an eight-byte file/512-byte memory RW segment, then rejects
 bad magic, wrong class, non-executable file type, wrong machine, an out-of-range
 entry point, W+X flags, overflowing file size, overlapping virtual ranges, a
 non-load program header, and truncation.
@@ -51,7 +51,9 @@ loaded kernel PE image. It then activates the root, observes both pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
 entry. The synthetic instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
-Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload,
+Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. A
+bounded `uname(0x401000)` then copies a complete zero-initialized `utsname` into
+the declared data segment, where the probe validates the system name. It next
 issues `getpid`, verifies PID 1 after the kernel resumes it through `SYSRETQ`,
 verifies preserved first and fourth argument registers, and issues Linux
 `exit(42)`. Those calls are
