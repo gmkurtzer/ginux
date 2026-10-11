@@ -237,6 +237,7 @@ const LINUX_FILE_INTERPRETER: u8 = 1 << 6;
 const LINUX_FILE_DEPENDENCY: u8 = 1 << 7;
 const LINUX_FILE_AUXILIARY_DEPENDENCY: u8 = LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_FILE_ROOT_HOSTNAME: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
+const LINUX_ROOT_ETC_DIRECTORY: u8 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT;
 const LINUX_FILE_MASK: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
@@ -4324,6 +4325,7 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
         b"/dev/zero" => LINUX_DEVICE_ZERO,
         b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
         b"/dev" => LINUX_DEVICE_DIRECTORY,
+        b"/etc" => LINUX_ROOT_ETC_DIRECTORY,
         path => match linux_runtime_file_kind(path) {
             Some(kind) => kind,
             None => return LINUX_ENOENT,
@@ -4373,6 +4375,7 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
             linux_stat(LINUX_STAT_CHARACTER_DEVICE_MODE, 1)
         }
         b"/dev" => linux_stat(LINUX_STAT_DIRECTORY_MODE, 2),
+        b"/etc" => linux_stat(LINUX_STAT_DIRECTORY_MODE, 10),
         path => match linux_runtime_file_kind(path) {
             Some(kind) => linux_regular_file_stat(kind),
             None => return LINUX_ENOENT,
@@ -4395,7 +4398,7 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
     };
     let directory = match &path[..path_length] {
         b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => false,
-        b"/dev" => true,
+        b"/dev" | b"/etc" => true,
         path if linux_runtime_file_kind(path).is_some() => {
             if mode & 2 != 0 {
                 return LINUX_EACCES;
@@ -4426,6 +4429,7 @@ fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u
         b"/dev/console" => (3, 1, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
         b"/dev/tty" => (3, 0, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
         b"/dev" => (4, 0, LINUX_STAT_DIRECTORY_MODE, 0),
+        b"/etc" => (10, 0, LINUX_STAT_DIRECTORY_MODE, 0),
         path => match linux_runtime_file_kind(path) {
             Some(kind) => (
                 linux_regular_file_inode(kind).unwrap_or(0),
@@ -5566,6 +5570,9 @@ fn linux_device_descriptor(descriptor: u64) -> u8 {
 }
 
 fn linux_regular_file(state: u8) -> Option<&'static [u8]> {
+    if state & LINUX_DEVICE_DIRECTORY != 0 {
+        return None;
+    }
     match state & LINUX_FILE_MASK {
         LINUX_FILE_INIT => Some(crate::linux_elf::runtime_main_bytes()),
         LINUX_FILE_INTERPRETER => Some(crate::linux_elf::runtime_interpreter_bytes()),
@@ -5579,6 +5586,9 @@ fn linux_regular_file(state: u8) -> Option<&'static [u8]> {
 }
 
 fn linux_regular_file_inode(state: u8) -> Option<u64> {
+    if state & LINUX_DEVICE_DIRECTORY != 0 {
+        return None;
+    }
     match state & LINUX_FILE_MASK {
         LINUX_FILE_INIT => Some(5),
         LINUX_FILE_INTERPRETER => Some(6),
@@ -5925,7 +5935,8 @@ fn linux_descriptor_set_nonblocking(flags: &AtomicU32, argument: u64) -> u64 {
 }
 
 fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
-    if linux_device_descriptor(descriptor) & LINUX_DEVICE_DIRECTORY == 0 {
+    let state = linux_device_descriptor(descriptor);
+    if state & LINUX_DEVICE_DIRECTORY == 0 {
         return LINUX_ENOTDIR;
     }
     if linux_descriptor_offset(descriptor).load(Ordering::SeqCst) != 0 {
@@ -5936,16 +5947,47 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     };
     let mut entries = [0_u8; 152];
     let mut used = 0_usize;
-    for (inode, next, kind, name) in [
-        (4_u64, 1_i64, 4_u8, &b"."[..]),
-        (4, 2, 4, &b".."[..]),
-        (1, 3, 2, &b"null"[..]),
-        (2, 4, 2, &b"zero"[..]),
-        (3, 5, 2, &b"console"[..]),
-        (3, 6, 2, &b"tty"[..]),
-    ] {
-        if !append_linux_dirent(&mut entries, &mut used, inode, next, kind, name) {
-            return LINUX_EINVAL;
+    if state & !3 == LINUX_ROOT_ETC_DIRECTORY {
+        for (inode, next, name) in [(10_u64, 1_i64, &b"."[..]), (10, 2, &b".."[..])] {
+            if !append_linux_dirent(&mut entries, &mut used, inode, next, 4, name) {
+                return LINUX_EINVAL;
+            }
+        }
+        let mut cursor = 0;
+        let mut inode = 9_u64;
+        let mut next = 3_i64;
+        loop {
+            let Some(child) = initramfs::published_next_child(b"etc", cursor) else {
+                return LINUX_EINVAL;
+            };
+            let Some(child) = child else {
+                break;
+            };
+            let kind = match child.mode & 0o170000 {
+                0o040000 => 4,
+                0o100000 => 8,
+                0o120000 => 10,
+                _ => return LINUX_EINVAL,
+            };
+            if !append_linux_dirent(&mut entries, &mut used, inode, next, kind, child.name) {
+                return LINUX_EINVAL;
+            }
+            cursor = child.next_cursor;
+            inode += 1;
+            next += 1;
+        }
+    } else {
+        for (inode, next, kind, name) in [
+            (4_u64, 1_i64, 4_u8, &b"."[..]),
+            (4, 2, 4, &b".."[..]),
+            (1, 3, 2, &b"null"[..]),
+            (2, 4, 2, &b"zero"[..]),
+            (3, 5, 2, &b"console"[..]),
+            (3, 6, 2, &b"tty"[..]),
+        ] {
+            if !append_linux_dirent(&mut entries, &mut used, inode, next, kind, name) {
+                return LINUX_EINVAL;
+            }
         }
     }
     if capacity < used {
@@ -6013,10 +6055,15 @@ fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
     }
     let device = linux_device_descriptor(descriptor);
     (device != 0).then(|| {
-        if device & LINUX_FILE_MASK != 0 {
+        if device & LINUX_DEVICE_DIRECTORY != 0 {
+            let inode = if device & !3 == LINUX_ROOT_ETC_DIRECTORY {
+                10
+            } else {
+                2
+            };
+            linux_stat(LINUX_STAT_DIRECTORY_MODE, inode)
+        } else if device & LINUX_FILE_MASK != 0 {
             linux_regular_file_stat(device)
-        } else if device & LINUX_DEVICE_DIRECTORY != 0 {
-            linux_stat(LINUX_STAT_DIRECTORY_MODE, 2)
         } else {
             linux_console_stat()
         }

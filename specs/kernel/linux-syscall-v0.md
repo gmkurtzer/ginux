@@ -293,8 +293,16 @@ maps the interpreter through the bounded read-only file-mapping profile below,
 and closes the descriptor. Before that executable discovery, the interpreter
 opens `/etc/hostname`, validates all six bytes, mode `0555`, size 6, and
 `SEEK_END`, then requires a write to return `-EBADF` and a writable open to
-return `-EACCES`. The measured-root file is not executable or mappable. There
-is no `/etc` or `/lib64` directory enumeration,
+return `-EACCES`. The measured-root file is not executable or mappable.
+
+The same profile opens `/etc` read-only with `O_DIRECTORY`. Its `getdents64`
+result is staged atomically and contains `.`, `..`, and the `hostname` regular
+file derived from the retained measured-root index. A second call returns EOF;
+`lseek(fd, 0, SEEK_SET)` rewinds the one-shot cursor. A buffer below the exact
+80-byte result returns `-EINVAL` without advancing that cursor. `fstat`,
+`newfstatat`, and `statx` expose immutable directory mode `0555`; writable
+opens return `-EISDIR`, and `O_DIRECTORY` against `/etc/hostname` returns
+`-ENOTDIR`. There is no root or `/lib64` directory enumeration,
 pathname traversal, general VFS, or userspace `execve`; the kernel authenticates
 and plans the fixed interpreter, main, and two-DSO executable graph. The kernel
 installs the interpreter needed to bootstrap ring 3; that interpreter installs

@@ -880,6 +880,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured-root Linux file content validated\r\n");
     serial_write("ginux: measured-root Linux file metadata validated\r\n");
     serial_write("ginux: measured-root Linux file mutation denied\r\n");
+    serial_write("ginux: measured-root Linux directory enumerated\r\n");
+    serial_write("ginux: measured-root Linux directory cursor validated\r\n");
     serial_write("ginux: Linux saved credential queries validated\r\n");
     serial_write("ginux: Linux supplementary root group validated\r\n");
     serial_write("ginux: Linux fixed execution personality validated\r\n");

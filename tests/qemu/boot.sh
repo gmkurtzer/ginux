@@ -1743,6 +1743,16 @@ if ! grep -q '^ginux: measured-root Linux file mutation denied' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: measured-root Linux directory enumerated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux directory was not enumerated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured-root Linux directory cursor validated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux directory cursor was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1
