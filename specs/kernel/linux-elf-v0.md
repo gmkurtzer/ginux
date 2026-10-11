@@ -45,12 +45,16 @@ produce a genuine static ELF with separate read-only header, RX text, and RW
 data/BSS loads, populated section-header metadata, `PT_PHDR`, and
 `PT_GNU_STACK`. The boot verifier parses that linked artifact, checks its entry,
 header-table address/count, exact code and initialized data, 4608-byte data/BSS
-extent, and confirms that planning still rejects the unsupported third load.
+extent, and confirms that the current runtime mapper still rejects the third
+load.
 
-The current page-image planner and runtime mapper deliberately accept only the
-two-load executable/writable form. A parsed third read-only load fails planning
-closed until a later mapping milestone owns, maps, verifies, and tears down its
-frames. Parser acceptance therefore cannot silently omit the read-only load.
+The page-image planner represents executable, optional read-only, and writable
+loads explicitly. It aligns each mapping downward, retains the declared memory
+start, accounts for the in-page prefix when bounding page count, and copies file
+bytes at the correct page offset while zeroing the prefix, BSS, and page tails.
+The current runtime mapper still rejects a third read-only load until a later
+milestone owns, maps, verifies, and tears down its frames. Planner acceptance
+therefore cannot silently omit the load.
 
 The strict profile prevents unsupported features from being silently
 interpreted with weaker semantics. It does not accept position-independent

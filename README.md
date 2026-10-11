@@ -12,8 +12,9 @@ declarations. The profile is validated during boot,
 plans and installs up to two RX/RW pages per segment with independently
 zero-filled BSS, including ELF and program headers in the first load page. The
 runtime proof owns every mapped frame, preserves per-page W^X permissions, and
-rejects larger plans. The parser recognizes a conventional third read-only
-load, but runtime planning fails closed until the mapper owns its frame. The
+rejects larger plans. The planner materializes a conventional third read-only
+load and non-page-base segments, but runtime mapping fails closed until the
+mapper owns the third segment's frame. The
 two-load proof activates the collision-checked page-table root and
 executes a non-page-base verification entry at ring 3. This
 entry receives a distinct RW/NX stack containing `argc`, `argv[0]`, `envp[0]`,

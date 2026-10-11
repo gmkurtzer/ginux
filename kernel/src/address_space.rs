@@ -33,7 +33,11 @@ pub(crate) fn verify_linux_elf_mapping(
     protected_start: u64,
     protected_size: usize,
 ) -> bool {
-    let [first, second] = plan.segments;
+    if plan.read_only.is_some() {
+        return false;
+    }
+    let first = plan.executable;
+    let second = plan.writable;
     let indexes = |address: u64| {
         [
             ((address >> 39) & 0x1ff) as usize,
@@ -88,6 +92,8 @@ pub(crate) fn verify_linux_elf_mapping(
         || stack_indexes[..3] != first_indexes[..3]
         || first_indexes[0] != 0
         || first_indexes[1] != 0
+        || first.virtual_address != first.virtual_page
+        || second.virtual_address != second.virtual_page
         || first.writable
         || !first.executable
         || !second.writable
@@ -261,18 +267,6 @@ pub(crate) fn verify_linux_elf_mapping(
             let stack_entry = table_entries.add(stack_indexes[3]).read();
             let lower_guard = table_entries.add(stack_indexes[3] - 1).read();
             let upper_guard = table_entries.add(stack_indexes[3] + 1).read();
-            let page_matches = |segment: crate::linux_elf::PlannedSegment<'_>,
-                                page_index: usize,
-                                page: &[u8; PAGE_SIZE]| {
-                let file_start = page_index * PAGE_SIZE;
-                if file_start >= segment.bytes.len() {
-                    return page.iter().all(|byte| *byte == 0);
-                }
-                let file_end = segment.bytes.len().min(file_start + PAGE_SIZE);
-                let file_length = file_end - file_start;
-                page[..file_length] == segment.bytes[file_start..file_end]
-                    && page[file_length..].iter().all(|byte| *byte == 0)
-            };
             let entries_valid = root_entries.add(256).read() == kernel_root.add(256).read()
                 && root_entries.add(256).read() & USER == 0
                 && first_entry & (PRESENT | USER) == PRESENT | USER
@@ -291,10 +285,12 @@ pub(crate) fn verify_linux_elf_mapping(
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
                 && lower_guard & USER == 0
                 && upper_guard & USER == 0
-                && page_matches(first, 0, first_bytes)
-                && (first.page_count == 1 || page_matches(first, 1, first_tail_bytes))
-                && page_matches(second, 0, second_bytes)
-                && (second.page_count == 1 || page_matches(second, 1, second_tail_bytes))
+                && crate::linux_elf::materialized_page_matches(first, 0, first_bytes)
+                && (first.page_count == 1
+                    || crate::linux_elf::materialized_page_matches(first, 1, first_tail_bytes))
+                && crate::linux_elf::materialized_page_matches(second, 0, second_bytes)
+                && (second.page_count == 1
+                    || crate::linux_elf::materialized_page_matches(second, 1, second_tail_bytes))
                 && heap_bytes.iter().all(|byte| *byte == 0)
                 && stack_words.read() == 1
                 && stack_words.add(1).read() == argument_address

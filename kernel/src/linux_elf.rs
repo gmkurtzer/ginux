@@ -1,6 +1,6 @@
 const ELF_HEADER_SIZE: usize = 64;
 pub(crate) const PROGRAM_HEADER_SIZE: usize = 56;
-const RUNTIME_LOAD_SEGMENT_COUNT: usize = 2;
+const MIN_LOAD_SEGMENT_COUNT: usize = 2;
 const MAX_LOAD_SEGMENT_COUNT: usize = 3;
 const MAX_PROGRAM_HEADER_COUNT: usize = 5;
 const PT_LOAD: u32 = 1;
@@ -41,6 +41,7 @@ pub(crate) struct Image<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct PlannedSegment<'a> {
     pub(crate) bytes: &'a [u8],
+    pub(crate) virtual_address: u64,
     pub(crate) virtual_page: u64,
     pub(crate) memory_size: usize,
     pub(crate) page_count: usize,
@@ -52,11 +53,13 @@ pub(crate) struct LoadPlan<'a> {
     pub(crate) entry: u64,
     pub(crate) program_headers: u64,
     pub(crate) program_header_count: u16,
-    pub(crate) segments: [PlannedSegment<'a>; RUNTIME_LOAD_SEGMENT_COUNT],
+    pub(crate) executable: PlannedSegment<'a>,
+    pub(crate) read_only: Option<PlannedSegment<'a>>,
+    pub(crate) writable: PlannedSegment<'a>,
 }
 
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
-    if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * RUNTIME_LOAD_SEGMENT_COUNT
+    if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * MIN_LOAD_SEGMENT_COUNT
         || bytes.get(0..4)? != b"\x7fELF"
         || bytes[4] != 2
         || bytes[5] != 1
@@ -75,7 +78,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         return None;
     }
     let program_header_count = usize::from(read_u16(bytes, 56)?);
-    if !(RUNTIME_LOAD_SEGMENT_COUNT..=MAX_PROGRAM_HEADER_COUNT).contains(&program_header_count) {
+    if !(MIN_LOAD_SEGMENT_COUNT..=MAX_PROGRAM_HEADER_COUNT).contains(&program_header_count) {
         return None;
     }
     let program_table_end =
@@ -104,7 +107,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
             _ => return None,
         }
     }
-    if !(RUNTIME_LOAD_SEGMENT_COUNT..=MAX_LOAD_SEGMENT_COUNT).contains(&load_count) {
+    if !(MIN_LOAD_SEGMENT_COUNT..=MAX_LOAD_SEGMENT_COUNT).contains(&load_count) {
         return None;
     }
     let loads = &loads[..load_count];
@@ -181,30 +184,36 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
 }
 
 pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
-    if image.read_only.is_some() {
-        return None;
-    }
-    let segments = [image.executable, image.writable].map(|segment| {
-        let memory_size = usize::try_from(segment.memory_size).ok()?;
-        let page_count = memory_size.checked_add(PAGE_SIZE - 1)? / PAGE_SIZE;
-        (segment.virtual_address.is_multiple_of(PAGE_SIZE as u64)
-            && (1..=MAX_SEGMENT_PAGES).contains(&page_count)
-            && segment.bytes.len() <= memory_size)
-            .then_some(PlannedSegment {
-                bytes: segment.bytes,
-                virtual_page: segment.virtual_address,
-                memory_size,
-                page_count,
-                writable: segment.flags & PF_WRITE != 0,
-                executable: segment.flags & PF_EXECUTE != 0,
-            })
-    });
     Some(LoadPlan {
         entry: image.entry,
         program_headers: image.program_headers,
         program_header_count: image.program_header_count,
-        segments: [segments[0]?, segments[1]?],
+        executable: plan_segment(image.executable)?,
+        read_only: match image.read_only {
+            Some(segment) => Some(plan_segment(segment)?),
+            None => None,
+        },
+        writable: plan_segment(image.writable)?,
     })
+}
+
+fn plan_segment(segment: Segment<'_>) -> Option<PlannedSegment<'_>> {
+    let memory_size = usize::try_from(segment.memory_size).ok()?;
+    let virtual_page = segment.virtual_address & !(PAGE_SIZE as u64 - 1);
+    let page_offset = usize::try_from(segment.virtual_address - virtual_page).ok()?;
+    let mapped_size = page_offset.checked_add(memory_size)?;
+    let page_count = mapped_size.checked_add(PAGE_SIZE - 1)? / PAGE_SIZE;
+    ((1..=MAX_SEGMENT_PAGES).contains(&page_count) && segment.bytes.len() <= memory_size).then_some(
+        PlannedSegment {
+            bytes: segment.bytes,
+            virtual_address: segment.virtual_address,
+            virtual_page,
+            memory_size,
+            page_count,
+            writable: segment.flags & PF_WRITE != 0,
+            executable: segment.flags & PF_EXECUTE != 0,
+        },
+    )
 }
 
 pub(crate) fn materialize(segment: PlannedSegment<'_>, page: &mut [u8; PAGE_SIZE]) -> bool {
@@ -220,18 +229,67 @@ pub(crate) fn materialize_page(
         return false;
     }
     page.fill(0);
-    let Some(segment_offset) = page_index.checked_mul(PAGE_SIZE) else {
+    let Some(page_start) = segment
+        .virtual_page
+        .checked_add((page_index * PAGE_SIZE) as u64)
+    else {
         return false;
     };
-    if segment_offset < segment.bytes.len() {
-        let file_end = segment
-            .bytes
-            .len()
-            .min(segment_offset.saturating_add(PAGE_SIZE));
-        let file_bytes = &segment.bytes[segment_offset..file_end];
-        page[..file_bytes.len()].copy_from_slice(file_bytes);
+    let Some(file_end) = segment
+        .virtual_address
+        .checked_add(segment.bytes.len() as u64)
+    else {
+        return false;
+    };
+    let copy_start = page_start.max(segment.virtual_address);
+    let copy_end = page_start.saturating_add(PAGE_SIZE as u64).min(file_end);
+    if copy_start < copy_end {
+        let source_start =
+            usize::try_from(copy_start - segment.virtual_address).unwrap_or(usize::MAX);
+        let destination_start = usize::try_from(copy_start - page_start).unwrap_or(usize::MAX);
+        let length = usize::try_from(copy_end - copy_start).unwrap_or(usize::MAX);
+        let Some(source_end) = source_start.checked_add(length) else {
+            return false;
+        };
+        let Some(destination_end) = destination_start.checked_add(length) else {
+            return false;
+        };
+        let Some(source) = segment.bytes.get(source_start..source_end) else {
+            return false;
+        };
+        let Some(destination) = page.get_mut(destination_start..destination_end) else {
+            return false;
+        };
+        destination.copy_from_slice(source);
     }
     true
+}
+
+pub(crate) fn materialized_page_matches(
+    segment: PlannedSegment<'_>,
+    page_index: usize,
+    page: &[u8; PAGE_SIZE],
+) -> bool {
+    if page_index >= segment.page_count {
+        return false;
+    }
+    let Some(page_start) = segment
+        .virtual_page
+        .checked_add((page_index * PAGE_SIZE) as u64)
+    else {
+        return false;
+    };
+    page.iter().enumerate().all(|(offset, byte)| {
+        let address = page_start + offset as u64;
+        let source = address
+            .checked_sub(segment.virtual_address)
+            .and_then(|offset| {
+                usize::try_from(offset)
+                    .ok()
+                    .and_then(|offset| segment.bytes.get(offset))
+            });
+        *byte == source.copied().unwrap_or(0)
+    })
 }
 
 fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
@@ -297,7 +355,7 @@ fn parse_phdr(bytes: &[u8], header: usize, program_header_count: usize) -> Optio
 pub(crate) fn verify_parser() -> bool {
     let image = fixture();
     let mut without_stack = image;
-    write_u16(&mut without_stack, 56, RUNTIME_LOAD_SEGMENT_COUNT as u16);
+    write_u16(&mut without_stack, 56, MIN_LOAD_SEGMENT_COUNT as u16);
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
     let phdr_header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
     let mut with_phdr = image;
@@ -375,7 +433,10 @@ pub(crate) fn verify_parser() -> bool {
         && parse(&three_loads).is_some_and(|image| {
             image.read_only.is_some_and(|segment| {
                 segment.flags == PF_READ && segment.virtual_address == 0x40_3000
-            }) && plan(&image).is_none()
+            }) && plan(&image).is_some_and(|plan| {
+                plan.read_only
+                    .is_some_and(|segment| segment.virtual_page == 0x40_3000)
+            })
         })
         && rejects(&image, 0, b'X')
         && rejects(&image, 4, 1)
@@ -415,28 +476,31 @@ pub(crate) fn verify_load_plan() -> bool {
         return false;
     };
     let mut writable_tail_page = [0xa5_u8; PAGE_SIZE];
-    materialize(current_plan.segments[0], &mut executable_page)
-        && materialize(current_plan.segments[1], &mut writable_page)
-        && materialize_page(multi_page_plan.segments[1], 1, &mut writable_tail_page)
+    materialize(current_plan.executable, &mut executable_page)
+        && materialize(current_plan.writable, &mut writable_page)
+        && materialize_page(multi_page_plan.writable, 1, &mut writable_tail_page)
         && current_plan.entry == 0x40_0100
         && current_plan.program_headers == 0x40_0040
         && current_plan.program_header_count == 3
-        && current_plan.segments[0].virtual_page == 0x40_0000
-        && current_plan.segments[0].page_count == 1
-        && current_plan.segments[0].executable
-        && !current_plan.segments[0].writable
+        && current_plan.executable.virtual_page == 0x40_0000
+        && current_plan.executable.virtual_address == 0x40_0000
+        && current_plan.executable.page_count == 1
+        && current_plan.executable.executable
+        && !current_plan.executable.writable
+        && current_plan.read_only.is_none()
         && executable_page[..4] == *b"\x7fELF"
         && &executable_page[0x100..0x100 + PROBE_CODE.len()] == PROBE_CODE
         && executable_page[0x100 + PROBE_CODE.len()..]
             .iter()
             .all(|byte| *byte == 0)
-        && current_plan.segments[1].virtual_page == 0x40_1000
-        && current_plan.segments[1].page_count == 2
-        && current_plan.segments[1].writable
-        && !current_plan.segments[1].executable
+        && current_plan.writable.virtual_page == 0x40_1000
+        && current_plan.writable.virtual_address == 0x40_1000
+        && current_plan.writable.page_count == 2
+        && current_plan.writable.writable
+        && !current_plan.writable.executable
         && writable_page[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
         && writable_page[8..].iter().all(|byte| *byte == 0)
-        && multi_page_plan.segments[1].page_count == 2
+        && multi_page_plan.writable.page_count == 2
         && writable_tail_page.iter().all(|byte| *byte == 0)
         && {
             let mut oversized = multi_page_image;
@@ -453,6 +517,25 @@ pub(crate) fn verify_linked_probe() -> bool {
     let Some(image) = parse(LINKED_PROBE) else {
         return false;
     };
+    let Some(plan) = plan(&image) else {
+        return false;
+    };
+    let Some(read_only) = plan.read_only else {
+        return false;
+    };
+    let mut page = [0xa5_u8; PAGE_SIZE];
+    let read_only_valid = materialize(read_only, &mut page)
+        && page[..4] == *b"\x7fELF"
+        && materialized_page_matches(read_only, 0, &page);
+    let executable_valid = materialize(plan.executable, &mut page)
+        && page[..0x100].iter().all(|byte| *byte == 0)
+        && &page[0x100..0x100 + PROBE_CODE.len()] == PROBE_CODE
+        && materialized_page_matches(plan.executable, 0, &page);
+    let writable_valid = materialize(plan.writable, &mut page)
+        && page[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
+        && page[8..].iter().all(|byte| *byte == 0)
+        && materialize_page(plan.writable, 1, &mut page)
+        && page.iter().all(|byte| *byte == 0);
     image.entry == 0x40_0100
         && image.program_headers == 0x20_0040
         && image.program_header_count == 5
@@ -464,7 +547,15 @@ pub(crate) fn verify_linked_probe() -> bool {
         && image.writable.virtual_address == 0x40_2000
         && image.writable.bytes == [1, 2, 3, 4, 5, 6, 7, 8]
         && image.writable.memory_size == 4608
-        && plan(&image).is_none()
+        && plan.executable.virtual_page == 0x40_0000
+        && plan.executable.virtual_address == 0x40_0100
+        && plan.executable.page_count == 1
+        && read_only.virtual_page == 0x20_0000
+        && plan.writable.page_count == 2
+        && read_only_valid
+        && executable_valid
+        && writable_valid
+        && !crate::address_space::verify_linux_elf_mapping(&plan, 1, 1)
 }
 
 pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usize) -> bool {
@@ -491,7 +582,7 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
     write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
     write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
     write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
-    write_u16(&mut bytes, 56, (RUNTIME_LOAD_SEGMENT_COUNT + 1) as u16);
+    write_u16(&mut bytes, 56, (MIN_LOAD_SEGMENT_COUNT + 1) as u16);
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE,
