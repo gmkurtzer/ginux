@@ -39,6 +39,13 @@ CPL3 entry/return on a distinct RW/NX stack page with supervisor-only neighbors
 before restoring the kernel root. General Linux process execution and collision
 policy remain separate milestones.
 
+That Linux proof also reserves one physical frame behind an initially absent
+leaf at `0x409000`. Its bounded anonymous mapping call validates an exact
+RW/NX request before installing the leaf; unmap clears the leaf, invalidates
+the local translation, and scrubs the frame before it can be installed again.
+The gate observes the leaf absent after ring-3 exit. This is a single-core,
+single-slot lifecycle, not a general VMA allocator or TLB-shootdown protocol.
+
 Completed proof address-space page-table and data frames are cleared and
 returned through the allocator's generation-checked live-ownership ledger.
 The boot gate also constructs both supported zero-thread auxiliary domains and

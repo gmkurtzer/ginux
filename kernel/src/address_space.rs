@@ -75,8 +75,12 @@ pub(crate) fn verify_linux_elf_mapping(
     let stack_virtual_page = heap_virtual_page
         .checked_add(2 * PAGE_SIZE as u64)
         .unwrap_or(0);
+    let mmap_virtual_page = stack_virtual_page
+        .checked_add(2 * PAGE_SIZE as u64)
+        .unwrap_or(0);
     let heap_indexes = indexes(heap_virtual_page);
     let stack_indexes = indexes(stack_virtual_page);
+    let mmap_indexes = indexes(mmap_virtual_page);
     let Some(protected_end) = protected_start.checked_add(protected_size as u64) else {
         return false;
     };
@@ -106,13 +110,16 @@ pub(crate) fn verify_linux_elf_mapping(
         || second_last_page == 0
         || heap_virtual_page == 0
         || stack_virtual_page == 0
+        || mmap_virtual_page == 0
         || overlaps_protected(heap_virtual_page)
         || overlaps_protected(stack_virtual_page)
+        || overlaps_protected(mmap_virtual_page)
         || first_indexes[..3] != second_indexes[..3]
         || first_last_indexes[..3] != first_indexes[..3]
         || second_last_indexes[..3] != first_indexes[..3]
         || heap_indexes[..3] != first_indexes[..3]
         || stack_indexes[..3] != first_indexes[..3]
+        || mmap_indexes[..3] != first_indexes[..3]
         || first_indexes[0] != 0
         || first_indexes[1] != 0
         || second.virtual_address != second.virtual_page
@@ -133,11 +140,11 @@ pub(crate) fn verify_linux_elf_mapping(
     {
         return false;
     }
-    let Some(frames) = memory::allocate_frames::<14>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<15>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page] =
+    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page] =
         addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
@@ -237,6 +244,7 @@ pub(crate) fn verify_linux_elf_mapping(
                             && !crate::linux_elf::materialize_page(segment, 1, header_tail_bytes)
                 })
                 || zero_frame(heap_page).is_none()
+                || zero_frame(mmap_page).is_none()
             {
                 return None;
             }
@@ -284,6 +292,7 @@ pub(crate) fn verify_linux_elf_mapping(
             table_entries
                 .add(stack_indexes[3])
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
+            table_entries.add(mmap_indexes[3]).write(0);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
             let stack_offset = PAGE_SIZE - 48 * size_of::<u64>();
@@ -385,6 +394,7 @@ pub(crate) fn verify_linux_elf_mapping(
             let stack_entry = table_entries.add(stack_indexes[3]).read();
             let lower_guard = table_entries.add(stack_indexes[3] - 1).read();
             let upper_guard = table_entries.add(stack_indexes[3] + 1).read();
+            let mmap_entry = table_entries.add(mmap_indexes[3]).read();
             let header_entries_valid = header.is_none_or(|segment| {
                 header_entry & (PRESENT | USER | NO_EXECUTE) == PRESENT | USER | NO_EXECUTE
                     && header_entry & WRITABLE == 0
@@ -421,6 +431,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
                 && lower_guard & USER == 0
                 && upper_guard & USER == 0
+                && mmap_entry == 0
                 && header_entries_valid
                 && crate::linux_elf::materialized_page_matches(first, 0, first_bytes)
                 && (first.page_count == 1
@@ -509,10 +520,13 @@ pub(crate) fn verify_linux_elf_mapping(
                     relro_size: relro.memory_size as usize,
                     heap: heap_virtual_page as usize,
                     heap_size: PAGE_SIZE,
+                    mmap: mmap_virtual_page as usize,
+                    mmap_frame: mmap_page,
                 });
+            let mapping_removed = table_entries.add(mmap_indexes[3]).read() == 0;
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
-            Some(executed && restored)
+            Some(executed && mapping_removed && restored)
         }
     })()
     .unwrap_or(false);
@@ -622,6 +636,80 @@ pub(crate) fn protect_current_user_page_read_only(address: u64) -> bool {
         table = entry & ADDRESS_MASK;
     }
     false
+}
+
+pub(crate) fn map_current_linux_page(address: u64, frame: u64) -> bool {
+    if address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || !frame.is_multiple_of(PAGE_SIZE as u64)
+        || !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return false;
+    }
+    let Some(entry) = current_linux_leaf(address) else {
+        return false;
+    };
+    unsafe {
+        if entry.read() != 0 {
+            return false;
+        }
+        entry.write(frame | PRESENT | WRITABLE | USER | NO_EXECUTE);
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
+            == (frame | PRESENT | WRITABLE | USER | NO_EXECUTE)
+    }
+}
+
+pub(crate) fn unmap_current_linux_page(address: u64, frame: u64) -> bool {
+    if address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || !frame.is_multiple_of(PAGE_SIZE as u64)
+        || !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return false;
+    }
+    let Some(entry) = current_linux_leaf(address) else {
+        return false;
+    };
+    unsafe {
+        let value = entry.read();
+        if value & ADDRESS_MASK != frame
+            || value & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                != PRESENT | WRITABLE | USER | NO_EXECUTE
+        {
+            return false;
+        }
+        entry.write(0);
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+        entry.read() == 0 && zero_frame(frame).is_some()
+    }
+}
+
+fn current_linux_leaf(address: u64) -> Option<*mut u64> {
+    let indexes = [
+        ((address >> 39) & 0x1ff) as usize,
+        ((address >> 30) & 0x1ff) as usize,
+        ((address >> 21) & 0x1ff) as usize,
+        ((address >> 12) & 0x1ff) as usize,
+    ];
+    let mut table = current_root();
+    for (level, index) in indexes.into_iter().enumerate() {
+        if !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[table & ADDRESS_MASK]) {
+            return None;
+        }
+        let entries = mapped_frame::<u64>(table & ADDRESS_MASK)?;
+        if level == 3 {
+            return Some(unsafe { entries.add(index) });
+        }
+        let entry = unsafe { entries.add(index).read() };
+        if entry & (PRESENT | USER) != PRESENT | USER
+            || (level == 1 || level == 2) && entry & LARGE_PAGE != 0
+        {
+            return None;
+        }
+        table = entry & ADDRESS_MASK;
+    }
+    None
 }
 
 fn current_user_root_is_owned(root: u64) -> bool {

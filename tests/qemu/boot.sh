@@ -688,6 +688,11 @@ if ! grep -q '^ginux: Linux bounded brk heap validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded anonymous mapping lifecycle validated' "$output_file"; then
+    echo "Boot test failed: Linux anonymous mapping lifecycle was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux heap copy bounds validated' "$output_file"; then
     echo "Boot test failed: Linux heap copy bounds were not validated." >&2
     exit 1

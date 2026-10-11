@@ -183,6 +183,19 @@ adjustment, and a vDSO remain unsupported.
 resolution, rounded up to a normalized `timespec`. A null result pointer is a
 valid support query. Clock selection and copy errors match `clock_gettime`, and
 the complete result is validated before copy-out.
+`rax = 9` (`__NR_mmap`) admits one anonymous private 4096-byte RW/NX mapping at
+fixed kernel-selected address `0x409000`. It requires a null hint, exact page
+length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and
+offset zero. Unsupported arguments return `-EINVAL`; a request while the sole
+slot is occupied returns `-ENOMEM`. The kernel installs an allocator-owned,
+zero-filled frame only after validating the whole request. `rax = 11`
+(`__NR_munmap`) accepts only that exact address and length, clears the hardware
+leaf, invalidates its TLB entry, and scrubs the physical frame before reuse.
+Repeating that exact unmap succeeds. The probe writes through the mapping,
+uses it for syscall copy-out, proves copy-in rejects it after unmap, remaps it
+to observe zeroes, and exits with the leaf absent. This is not a general VMA
+allocator: hints, fixed mappings, files, sharing, partial ranges, multiple
+mappings, executable memory, and mapping growth are unsupported.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x405000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x406000` follows Linux syscall
@@ -319,7 +332,7 @@ threads, general TLS state, or any syscall other than the exact bounded
 `read`, `write`, `writev`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
-bounded read-only `mprotect`,
+bounded anonymous `mmap`/`munmap`, bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,

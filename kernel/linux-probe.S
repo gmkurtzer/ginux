@@ -117,6 +117,92 @@ ginux_linux_probe:
     cmp rax, 0x405040
     jne failure
 
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 7
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, -22
+    jne failure
+
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x409000
+    jne failure
+    cmp qword ptr [0x409000], 0
+    jne failure
+
+    mov edi, 0x409000
+    mov eax, 63
+    syscall
+    test rax, rax
+    jne failure
+    cmp dword ptr [0x409000], 0x756e6947
+    jne failure
+
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, -12
+    jne failure
+
+    mov edi, 0x409000
+    mov esi, 4095
+    mov eax, 11
+    syscall
+    cmp rax, -22
+    jne failure
+    mov esi, 4096
+    mov eax, 11
+    syscall
+    test rax, rax
+    jne failure
+
+    mov edi, 1
+    mov esi, 0x409000
+    mov edx, 8
+    mov eax, 1
+    syscall
+    cmp rax, -14
+    jne failure
+
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x409000
+    jne failure
+    cmp qword ptr [0x409000], 0
+    jne failure
+    mov edi, 0x409000
+    mov esi, 4096
+    mov eax, 11
+    syscall
+    test rax, rax
+    jne failure
+    mov eax, 11
+    syscall
+    test rax, rax
+    jne failure
+
     mov eax, 999
     syscall
     cmp rax, -38

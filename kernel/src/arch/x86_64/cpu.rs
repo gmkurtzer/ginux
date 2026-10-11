@@ -49,7 +49,9 @@ const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_FSTAT_SYSCALL: u64 = 5;
 const LINUX_LSEEK_SYSCALL: u64 = 8;
+const LINUX_MMAP_SYSCALL: u64 = 9;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
+const LINUX_MUNMAP_SYSCALL: u64 = 11;
 const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_RT_SIGACTION_SYSCALL: u64 = 13;
 const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
@@ -137,6 +139,9 @@ const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_PROT_READ: u64 = 1;
+const LINUX_PROT_WRITE: u64 = 2;
+const LINUX_MAP_PRIVATE: u64 = 2;
+const LINUX_MAP_ANONYMOUS: u64 = 0x20;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
@@ -266,6 +271,9 @@ static ELF_PROBE_RELRO: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_RELRO_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_MMAP: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_MMAP_FRAME: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_MMAP_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
@@ -842,6 +850,8 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) relro_size: usize,
     pub(crate) heap: usize,
     pub(crate) heap_size: usize,
+    pub(crate) mmap: usize,
+    pub(crate) mmap_frame: u64,
 }
 
 pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
@@ -871,6 +881,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_RELRO_SIZE.store(execution.relro_size as u64, Ordering::SeqCst);
     ELF_PROBE_BRK.store(execution.heap as u64, Ordering::SeqCst);
     ELF_PROBE_BRK_LIMIT.store(heap_limit as u64, Ordering::SeqCst);
+    ELF_PROBE_MMAP.store(execution.mmap as u64, Ordering::SeqCst);
+    ELF_PROBE_MMAP_FRAME.store(execution.mmap_frame, Ordering::SeqCst);
+    ELF_PROBE_MMAP_ACTIVE.store(false, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
     ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
@@ -908,6 +921,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && ELF_PROBE_DIRECTORY_CURSOR.swap(0, Ordering::SeqCst) == 0;
     let clock_state_valid = ELF_PROBE_CLOCK_EPOCH.swap(0, Ordering::SeqCst) != 0
         && ELF_PROBE_CLOCK_FREQUENCY.swap(0, Ordering::SeqCst) == clock_frequency;
+    let mmap_state_valid = !ELF_PROBE_MMAP_ACTIVE.swap(false, Ordering::SeqCst)
+        && ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64
+        && ELF_PROBE_MMAP_FRAME.swap(0, Ordering::SeqCst) == execution.mmap_frame;
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
         == LINUX_INITIAL_PROCESS_NAME
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
@@ -954,6 +970,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && umask_restored
         && descriptor_state_valid
         && clock_state_valid
+        && mmap_state_valid
         && process_name_restored
         && no_new_privileges_enforced
         && signal_mask_restored
@@ -1260,6 +1277,15 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EBADF
             }
         }
+        LINUX_MMAP_SYSCALL => linux_mmap(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+        ),
+        LINUX_MUNMAP_SYSCALL => linux_munmap(first_argument, buffer),
         LINUX_MPROTECT_SYSCALL => {
             let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
             let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
@@ -1621,6 +1647,44 @@ fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
     if !copy_to_linux_user(output_address, &timespec) {
         return LINUX_EFAULT;
     }
+    0
+}
+
+fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, offset: u64) -> u64 {
+    if address != 0
+        || length != PAGE_SIZE as u64
+        || protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
+        || flags != (LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS)
+        || fd != u64::MAX
+        || offset != 0
+    {
+        return LINUX_EINVAL;
+    }
+    if ELF_PROBE_MMAP_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_ENOMEM;
+    }
+    let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+    let frame = ELF_PROBE_MMAP_FRAME.load(Ordering::SeqCst);
+    if mapping == 0 || frame == 0 || !address_space::map_current_linux_page(mapping, frame) {
+        return LINUX_ENOMEM;
+    }
+    ELF_PROBE_MMAP_ACTIVE.store(true, Ordering::SeqCst);
+    mapping
+}
+
+fn linux_munmap(address: u64, length: u64) -> u64 {
+    let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+    if address != mapping || length != PAGE_SIZE as u64 {
+        return LINUX_EINVAL;
+    }
+    if !ELF_PROBE_MMAP_ACTIVE.load(Ordering::SeqCst) {
+        return 0;
+    }
+    let frame = ELF_PROBE_MMAP_FRAME.load(Ordering::SeqCst);
+    if !address_space::unmap_current_linux_page(mapping, frame) {
+        return LINUX_EINVAL;
+    }
+    ELF_PROBE_MMAP_ACTIVE.store(false, Ordering::SeqCst);
     0
 }
 
@@ -2256,6 +2320,12 @@ fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {
     }
     let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
     if linux_range_contains(stack_base, PAGE_SIZE as u64, address, length) {
+        return true;
+    }
+    let mmap_base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+    if ELF_PROBE_MMAP_ACTIVE.load(Ordering::SeqCst)
+        && linux_range_contains(mmap_base, PAGE_SIZE as u64, address, length)
+    {
         return true;
     }
     let brk = ELF_PROBE_BRK.load(Ordering::SeqCst);

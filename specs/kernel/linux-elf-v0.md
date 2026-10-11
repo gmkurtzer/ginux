@@ -109,7 +109,9 @@ segment ranges; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
 map. An owned page at `0x405000` supplies one zero-filled RW/NX heap page. The
 page at `0x406000` remains an unmapped lower stack guard, and an owned page at
-`0x407000` supplies a RW/NX stack; `0x408000` remains an upper guard. Before
+`0x407000` supplies a RW/NX stack; `0x408000` remains an upper guard. A final
+owned frame is initially absent at `0x409000` and is installed only for the
+bounded anonymous `mmap` lifecycle. Before
 changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.
 It then activates the root, observes the declared ELF mappings through their
@@ -130,8 +132,9 @@ copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 4608-byte `p_memsz`, rather
 than the rest of its final mapped page. Copy helpers also accept heap bytes
-strictly below the current break, not the entire mapped heap page, and ranges
-wholly inside the user stack page. Copy-in additionally permits the declared
+strictly below the current break, not the entire mapped heap page, ranges
+wholly inside the user stack page, and ranges inside the active anonymous
+mapping. Copy-in additionally permits the declared
 RX ELF memory extent; copy-out does not. The proof reads an embedded RX payload
 through `write` and requires `-EFAULT` when `uname` targets that read-only page.
 Ranges crossing a stack guard page are rejected before SMAP access. Bounded
@@ -147,7 +150,7 @@ ring 3. Those calls are
 accepted only while an atomic probe flag is armed; exit returns directly to the
 saved kernel stack. The kernel verifies a ring-3 heap write after exit. The
 proof restores and reads back the kernel root, then clears and releases all
-thirteen root/table/reserved-segment/heap/stack frames.
+fifteen root/table/reserved-segment/heap/stack/mapping frames.
 
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the

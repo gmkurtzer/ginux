@@ -37,9 +37,9 @@ the console endpoint is input or output; `dup2` provides exact-slot replacement.
 configures and queries an FS-relative
 TLS base through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's
 prior FS base afterward. Pointer-bearing calls are constrained to the RW
-segment's declared ELF memory extent or allocated heap bytes below the current
-break, plus the mapped user stack. They cannot cross the stack's guard-page
-boundaries. Invalid ranges and write arguments return Linux `-EFAULT`,
+segment's declared ELF memory extent, allocated heap bytes below the current
+break, the mapped user stack, or the active anonymous page. They cannot cross
+the stack's guard-page boundaries. Invalid ranges and write arguments return Linux `-EFAULT`,
 `-EBADF`, or `-EINVAL`.
 Copy-in may also read the declared RX ELF extent, while copy-out rejects it.
 The ring-3 workload verifies each error and continues into valid calls.
@@ -61,6 +61,9 @@ permissions are rejected.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
+A separate one-page anonymous `mmap` slot is installed RW/NX on demand,
+removed from the hardware page table by `munmap`, scrubbed, and proven zero on
+reuse. General mapping placement and file-backed mappings are not implemented.
 The initial filesystem view exposes only a working-directory identity of `/`;
 bounded `getcwd` returns it, while undersized and invalid buffers fail.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
