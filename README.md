@@ -118,6 +118,11 @@ execution state back to empty, while success writes the child TID to the exact
 parent-TID word only after the complete context exists. The proof restores the
 initial stack word and retires the unpublished child. There is still no
 userspace `clone` entry or concurrently schedulable Linux thread.
+The Linux `SYSCALL` entry now captures and restores `rbx`, `rbp`, and
+`r12`-`r15` alongside all six syscall argument registers. Existing argument
+indices remain unchanged for dispatch. This makes the complete preserved user
+register set available on the kernel stack for a future thread switch; the
+current path still returns to the same thread.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.

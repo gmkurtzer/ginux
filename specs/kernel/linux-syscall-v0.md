@@ -523,6 +523,11 @@ when that copy is denied, and leaves the child-TID word untouched as required by
 ring-3 entry. The path is not reachable as `clone(2)` and does not make the
 child runnable. This does not yet make syscall state generally per-thread or
 connect Linux TLS switching to scheduler preemption.
+The x86-64 `SYSCALL` entry frame now includes `rbx`, `rbp`, and `r12`-`r15` in
+addition to `rdi`, `rsi`, `rdx`, `r8`, `r9`, and `r10`; dispatch retains its
+original six argument indexes. All twelve values are restored before `SYSRETQ`.
+This supplies the preserved general-register input required by a later thread
+switch, but the current handler does not select a different return context.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control

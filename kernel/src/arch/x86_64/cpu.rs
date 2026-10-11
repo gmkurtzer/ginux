@@ -761,6 +761,12 @@ ginux_linux_syscall_entry:
     push r8
     push r9
     push r10
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
     mov [rip + {linux_kernel_frame}], rsp
     mov rdi, rax
     mov rsi, rsp
@@ -773,6 +779,12 @@ ginux_linux_syscall_entry:
     je ginux_user_return_kernel
     mov [rip + {linux_syscall_result}], rax
     mov rsp, [rip + {linux_kernel_frame}]
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
     pop r10
     pop r9
     pop r8
@@ -2464,9 +2476,10 @@ extern "sysv64" fn linux_syscall_handler(
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;
     }
-    // SAFETY: the assembly entry stub passes the base of six saved registers.
-    let registers = unsafe { core::slice::from_raw_parts(registers, 6) };
-    let register = |index: usize| registers[index];
+    // SAFETY: the assembly entry stub passes six callee-saved registers followed
+    // by the six syscall argument registers in their established order.
+    let registers = unsafe { core::slice::from_raw_parts(registers, 12) };
+    let register = |index: usize| registers[index + 6];
     let count = register(3);
     let buffer = register(4);
     let first_argument = register(5);

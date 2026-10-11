@@ -723,6 +723,11 @@ if ! grep -q '^ginux: unpublished Linux child retired cleanly' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: full Linux syscall register frame preserved' "$output_file"; then
+    echo "Boot test failed: the full Linux syscall register frame was not preserved." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
     exit 1
