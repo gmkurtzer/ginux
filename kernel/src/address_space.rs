@@ -649,7 +649,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let Some(main_dynamic) = plan.main.dynamic_relocations else {
         return false;
     };
-    if main_dynamic.init_array != Some(main_dynamic.relocation_target) {
+    if main_dynamic.init_function.is_none()
+        || main_dynamic.init_array != Some(main_dynamic.relocation_target)
+    {
         return false;
     }
     let (Some(main_symbol), Some(main_jump_slot)) = (
@@ -673,7 +675,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
     ) else {
         return false;
     };
-    if dependency_dynamic.init_array != Some(dependency_dynamic.relocation_target) {
+    if dependency_dynamic.init_function.is_none()
+        || dependency_dynamic.init_array != Some(dependency_dynamic.relocation_target)
+    {
         return false;
     }
     let Some(auxiliary_dynamic) = dependency_plan.dependencies[1].dynamic_relocations else {
@@ -685,7 +689,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
     ) else {
         return false;
     };
-    if auxiliary_dynamic.init_array != Some(auxiliary_dynamic.relocation_target) {
+    if auxiliary_dynamic.init_function.is_none()
+        || auxiliary_dynamic.init_array != Some(auxiliary_dynamic.relocation_target)
+    {
         return false;
     }
     let Some(interpreter_relocation_value) = plan

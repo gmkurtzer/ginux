@@ -33,11 +33,13 @@ bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The
 symbol relocations resolve to the authenticated dependencies, and the interpreter
 also applies both dependencies' own relative and self-symbol relocations. Each
-DSO and the main expose one authenticated eight-byte `DT_INIT_ARRAY`. The
-interpreter calls both relocated dependency constructors, resolves the main,
-and then calls the main constructor before transferring control to its entry.
+DSO and the main expose one authenticated `DT_INIT` function and one eight-byte
+`DT_INIT_ARRAY`. The interpreter calls each dependency's direct init function
+and constructor in order, resolves the main, and then calls the main's direct
+init function and constructor before transferring control to its entry.
 Each exported function refuses to succeed before its dependency constructor
-runs; the main constructor calls both exports before recording initialization,
+runs; each constructor requires its image's direct init phase, and the main
+constructor calls both exports before recording initialization,
 and the main entry refuses to continue without that record. All three
 constructors receive the original `argc`, `argv`, and `envp` context and require
 the bounded `/init` and `GINUX=1` vectors before recording initialization. The main workload calls through the
@@ -80,9 +82,10 @@ fixture consumes four entries and exercises every admitted permission class.
 Kernel execution state now provides two isolated dependency slots, each with
 its own base window, selected bias, eight-entry contract table, mapping mask,
 generation leases, and cleanup validation. The running interpreter populates
-both slots, applies all three admitted relocations in each DSO, executes both
-one-entry dependency init arrays, resolves the main, and executes its one-entry
-init array before transferring to the main entry.
+both slots, applies all three admitted relocations in each DSO, executes each
+dependency's `DT_INIT` function and one-entry init array, resolves the main, and
+executes its `DT_INIT` function and one-entry init array before transferring to
+the main entry.
 Wrong offsets, duplicate
 placement, a mixed bias, and W+X are rejected before it applies
 dependency and main relocations. Both dynamic-table addresses and entry counts

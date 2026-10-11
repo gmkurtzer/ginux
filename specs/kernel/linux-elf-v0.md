@@ -177,7 +177,9 @@ exact one-entry, eight-byte array wholly inside writable memory. Its address
 must equal the image's sole relative-relocation target, and the authenticated
 addend must point inside that image's executable segment. Duplicate, partial,
 empty, multi-entry, unaligned, non-writable, or non-executable-target forms are
-rejected. The execution-oriented planning fixture uses a
+rejected. An optional, unique `DT_INIT` value must point directly inside the
+same executable segment; zero, duplicate, and out-of-range values are rejected.
+The execution-oriented planning fixture uses a
 six-header main image: a dedicated read-only header load at `0x3ff000`, RX text
 stored from file offset `0x200` with entry `0x400100`, RW/RELRO data, and
 `PT_INTERP`. Its program-header table therefore remains readable at `0x3ff040`
@@ -212,7 +214,7 @@ executable window. At runtime
 the linked interpreter first validates its mapped ELF magic, requires a
 56-byte program-header entry size, and bounds one through eight headers to its
 first 4096-byte RX page. It accepts exactly one nonempty `PT_DYNAMIC` whose
-equal file/memory size is a multiple of 16 bytes and contains at most 20
+equal file/memory size is a multiple of 16 bytes and contains at most 21
 entries, then derives that table's runtime address with checked addition. The
 compact fixture retains its fixed synthetic table offset to remain within its
 768-byte raw-text bound. Both forms derive their page-aligned load bias and scan each bounded dynamic table for
@@ -265,12 +267,14 @@ any pairwise overlap among the main, interpreter, and two dependency plans.
 The userspace interpreter preserves that order, derives both runtime paths,
 maps each DSO in its independent authenticated slot, applies each DSO's
 `RELATIVE`, `GLOB_DAT`, and eager `JUMP_SLOT` relocations, then calls each
-relocated one-entry `DT_INIT_ARRAY`. After resolving every main relocation, it
-calls the main's one-entry `DT_INIT_ARRAY` before transferring to the main
-entry.
+authenticated `DT_INIT` function followed by its relocated one-entry
+`DT_INIT_ARRAY`. After resolving every main relocation, it calls the main's
+`DT_INIT` function followed by its one-entry `DT_INIT_ARRAY` before transferring
+to the main entry.
 Each provider records initialization in private writable data and its exported
 function fails until that state is present, making constructor-before-use order
-observable in ring 3. The main constructor calls both providers and records its
+observable in ring 3. Each direct init function records a first phase that its
+init array requires before recording completion. The main constructor calls both providers and records its
 own private initialization state only if both calls succeed; the main entry
 requires that state. This proves dependency constructors run before the main
 constructor, which runs before the main entry. The interpreter retains the
@@ -318,7 +322,7 @@ kernel-enforced contracts.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
-it may describe at most 20 entries. The interpreter derives the runtime
+it may describe at most 21 entries. The interpreter derives the runtime
 dynamic-table address by adding the selected bias to `p_vaddr`; the linked main
 and dependency scans no longer embed their dynamic addresses or entry counts.
 The interpreter keeps its bounded startup scratch in the zero-fill tail after

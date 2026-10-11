@@ -224,6 +224,7 @@ fn main() {
             "--soname",
             "libginux.so",
             "--hash-style=gnu",
+            "--init=ginux_dependency_init",
             "-T",
         ])
         .arg(&linked_dependency_script)
@@ -252,6 +253,7 @@ fn main() {
             "--soname",
             "libginux-aux.so",
             "--hash-style=gnu",
+            "--init=ginux_auxiliary_init",
             "-T",
         ])
         .arg(&linked_auxiliary_script)
@@ -333,6 +335,7 @@ fn main() {
             "--dynamic-linker",
             "/lib64/ld-ginux.so",
             "--hash-style=sysv",
+            "--init=ginux_linux_init",
             "-T",
         ])
         .arg(&linked_main_script)

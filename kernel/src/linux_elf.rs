@@ -42,6 +42,7 @@ const DT_RELASZ: u64 = 8;
 const DT_RELAENT: u64 = 9;
 const DT_STRSZ: u64 = 10;
 const DT_SYMENT: u64 = 11;
+const DT_INIT: u64 = 12;
 const DT_SONAME: u64 = 14;
 const DT_PLTREL: u64 = 20;
 const DT_DEBUG: u64 = 21;
@@ -122,6 +123,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
             dynamic.relocation_count == 5
                 && !dynamic.symbol_defined
                 && !dynamic.secondary_symbol_defined
+                && dynamic.init_function.is_some()
                 && dynamic.init_array == Some(dynamic.relocation_target)
                 && dynamic
                     .symbol_relocation
@@ -141,6 +143,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
         && auxiliary.dynamic_symbol == Some(b"ginux_auxiliary_symbol")
         && auxiliary.dynamic_relocations.is_some_and(|dynamic| {
             dynamic.symbol_defined
+                && dynamic.init_function.is_some()
                 && dynamic.symbol_relocation.is_some()
                 && dynamic.jump_slot_relocation.is_some()
                 && dynamic.init_array == Some(dynamic.relocation_target)
@@ -248,6 +251,7 @@ pub(crate) struct DynamicRelocations {
     pub(crate) string_table_size: usize,
     pub(crate) hash_table_address: Option<u64>,
     pub(crate) hash_is_gnu: bool,
+    pub(crate) init_function: Option<u64>,
     pub(crate) init_array: Option<u64>,
     pub(crate) symbol_relocation: Option<SymbolRelocation>,
     pub(crate) jump_slot_relocation: Option<SymbolRelocation>,
@@ -552,6 +556,7 @@ pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
         string_table_size: 0,
         hash_table_address: None,
         hash_is_gnu: false,
+        init_function: None,
         init_array: None,
         symbol_relocation: None,
         jump_slot_relocation: None,
@@ -636,6 +641,7 @@ pub(crate) fn plan_authenticated_pie_dependency_graph<'main, 'interpreter, 'depe
         || main.secondary_dynamic_symbol.is_none()
         || main_dynamic.symbol_defined
         || main_dynamic.secondary_symbol_defined
+        || main_dynamic.init_function.is_none()
         || main_dynamic.init_array != Some(main_dynamic.relocation_target)
         || main.dynamic_symbol != dependency_images[0].dynamic_symbol
         || main.secondary_dynamic_symbol != dependency_images[1].dynamic_symbol
@@ -649,7 +655,7 @@ pub(crate) fn plan_authenticated_pie_dependency_graph<'main, 'interpreter, 'depe
             || image.soname != Some(authority.name)
             || !image
                 .dynamic_relocations
-                .is_some_and(|dynamic| dynamic.symbol_defined)
+                .is_some_and(|dynamic| dynamic.symbol_defined && dynamic.init_function.is_some())
         {
             return None;
         }
@@ -907,6 +913,10 @@ fn plan_position_independent_at<'a>(
                 None => None,
             },
             hash_is_gnu: dynamic.hash_is_gnu,
+            init_function: match dynamic.init_function {
+                Some(address) => Some(address.checked_add(load_bias)?),
+                None => None,
+            },
             init_array: match dynamic.init_array {
                 Some(address) => Some(address.checked_add(load_bias)?),
                 None => None,
@@ -1215,7 +1225,7 @@ fn parse_dynamic_table(bytes: &[u8], header: usize) -> Option<DynamicTable<'_>> 
     if read_u32(bytes, header + 4)? != PF_READ | PF_WRITE
         || physical_address != 0 && physical_address != virtual_address
         || file_size != memory_size
-        || !(2..=20).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
+        || !(2..=21).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
         || !file_size.is_multiple_of(DYNAMIC_ENTRY_SIZE)
         || alignment != 8
         || file_offset % alignment != virtual_address % alignment
@@ -1261,6 +1271,7 @@ fn parse_dynamic_relocations<'a>(
     let mut debug = None;
     let mut flags_1 = None;
     let mut relative_count = None;
+    let mut init_function = None;
     let mut init_array = None;
     let mut init_array_size = None;
     let mut terminated = false;
@@ -1298,6 +1309,7 @@ fn parse_dynamic_relocations<'a>(
             DT_DEBUG if debug.replace(value).is_none() => {}
             DT_FLAGS_1 if flags_1.replace(value).is_none() => {}
             DT_RELACOUNT if relative_count.replace(value).is_none() => {}
+            DT_INIT if init_function.replace(value).is_none() => {}
             DT_INIT_ARRAY if init_array.replace(value).is_none() => {}
             DT_INIT_ARRAYSZ if init_array_size.replace(value).is_none() => {}
             _ => return None,
@@ -1399,6 +1411,22 @@ fn parse_dynamic_relocations<'a>(
             Some(address)
         }
         _ => return None,
+    };
+    let init_function = match init_function {
+        Some(address) => {
+            let executable = loads
+                .iter()
+                .flatten()
+                .find(|segment| segment.flags & PF_EXECUTE != 0)?;
+            let executable_end = executable
+                .virtual_address
+                .checked_add(executable.memory_size)?;
+            if address == 0 || address < executable.virtual_address || address >= executable_end {
+                return None;
+            }
+            Some(address)
+        }
+        None => None,
     };
     let symbol_metadata = (
         symbol_table_address,
@@ -1762,6 +1790,7 @@ fn parse_dynamic_relocations<'a>(
             string_table_size,
             hash_table_address,
             hash_is_gnu,
+            init_function,
             init_array,
             symbol_relocation,
             jump_slot_relocation,

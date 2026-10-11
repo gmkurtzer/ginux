@@ -3350,8 +3350,17 @@ linked_file_mmap_test:
 
 #ifdef GINUX_GRAPH
 .section .text.file_mmap,"ax",@progbits
+.global ginux_linux_init
+.hidden ginux_linux_init
+.type ginux_linux_init,@function
+ginux_linux_init:
+    mov qword ptr [rip + ginux_main_init_state], 0x49
+    ret
+
 .type ginux_linux_initialize,@function
 ginux_linux_initialize:
+    cmp qword ptr [rip + ginux_main_init_state], 0x49
+    jne .Lmain_initialize_done
     call .Lvalidate_main_startup
     test eax, eax
     jz .Lmain_initialize_done

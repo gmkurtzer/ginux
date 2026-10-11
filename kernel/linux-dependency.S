@@ -25,12 +25,21 @@ ginux_dependency_symbol:
     ret
 
 #ifdef GINUX_LINKED
+.global ginux_dependency_init
+.hidden ginux_dependency_init
+.type ginux_dependency_init,@function
+ginux_dependency_init:
+    mov qword ptr [rip + .Ldependency_initialized], 0x47
+    ret
+
 .Ldependency_anchor:
     mov rax, qword ptr [rip + ginux_dependency_symbol@GOTPCREL]
     call ginux_dependency_symbol@PLT
     ret
 
 .Ldependency_initialize:
+    cmp qword ptr [rip + .Ldependency_initialized], 0x47
+    jne .Ldependency_initialize_done
     cmp edi, 1
     jne .Ldependency_initialize_done
     cmp qword ptr [rsi + 8], 0

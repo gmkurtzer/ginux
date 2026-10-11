@@ -12,7 +12,16 @@ ginux_auxiliary_symbol:
     xor eax, eax
     ret
 
+.global ginux_auxiliary_init
+.hidden ginux_auxiliary_init
+.type ginux_auxiliary_init,@function
+ginux_auxiliary_init:
+    mov qword ptr [rip + .Lauxiliary_initialized], 0x47
+    ret
+
 .Lauxiliary_initialize:
+    cmp qword ptr [rip + .Lauxiliary_initialized], 0x47
+    jne .Lauxiliary_initialize_done
     cmp edi, 1
     jne .Lauxiliary_initialize_done
     cmp qword ptr [rsi + 8], 0

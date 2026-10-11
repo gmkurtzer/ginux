@@ -858,6 +858,21 @@ if ! grep -q '^ginux: userspace Linux constructor startup context delivered' "$o
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux DT_INIT functions validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux DT_INIT functions were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: userspace Linux DT_INIT functions executed' "$output_file"; then
+    echo "Boot test failed: userspace Linux DT_INIT functions were not executed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux DT_INIT-before-init-array ordering enforced' "$output_file"; then
+    echo "Boot test failed: Linux DT_INIT-before-init-array ordering was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux auxiliary dependency entry executed' "$output_file"; then
     echo "Boot test failed: the auxiliary Linux dependency entry was not executed." >&2
     exit 1
