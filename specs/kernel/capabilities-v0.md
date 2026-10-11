@@ -56,4 +56,8 @@ cross-domain handle substitution. A separate manager invariant leaves a child
 handle locally live, revokes its control-plane source, and requires the full
 authorization check to fail. The same invariant derives a read-only child from
 the delegated root, verifies attenuation, and requires parent revocation to
-invalidate both local handles.
+invalidate both local handles. It exhaustively checks all nonempty requested
+rights against both the delegated read/write root and its read-only child,
+rejects a different-object parent substituted into the delegation record, then
+reuses the revoked parent's table slot and proves the stale parent generation
+still cannot authorize either child.

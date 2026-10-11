@@ -268,6 +268,11 @@ if ! grep -q '^ginux: per-root delegation provenance verified' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: exhaustive delegated attenuation verified' "$output_file"; then
+    echo "Boot test failed: delegated capability attenuation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: domain lifecycle ancestry verified' "$output_file"; then
     echo "Boot test failed: domain lifecycle ancestry failed." >&2
     exit 1

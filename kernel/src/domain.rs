@@ -575,15 +575,46 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
     {
         return Some(false);
     }
+    for request_bits in 1..=0x0f {
+        let requested = Rights::from_bits(request_bits)?;
+        let root_expected = request_bits & 0x03 == request_bits;
+        let read_expected = request_bits == 0x01;
+        if manager.permits(service, service_handle, 3, requested) != root_expected
+            || manager.permits(service, service_read, 3, requested) != read_expected
+            || manager.permits(service, service_handle, 2, requested)
+        {
+            return Some(false);
+        }
+    }
+    let unrelated_source = manager.domain(control)?.boot_roots[0]?;
+    manager.domains[usize::from(service.slot)]
+        .as_mut()?
+        .delegated_roots[0]
+        .as_mut()?
+        .source = unrelated_source;
+    if manager.permits(service, service_handle, 3, Rights::READ) {
+        return Some(false);
+    }
+    manager.domains[usize::from(service.slot)]
+        .as_mut()?
+        .delegated_roots[0]
+        .as_mut()?
+        .source = parent_handle;
     manager.domains[usize::from(control.slot)]
         .as_mut()?
         .capabilities
         .revoke(parent_handle);
+    let replacement_source = manager.domains[usize::from(control.slot)]
+        .as_mut()?
+        .capabilities
+        .derive(unrelated_source, Rights::READ)?;
     Some(
-        manager
-            .domain(service)?
-            .capabilities
-            .permits(service_handle, 3, rights)
+        replacement_source != parent_handle
+            && manager.permits(control, replacement_source, 1, Rights::READ)
+            && manager
+                .domain(service)?
+                .capabilities
+                .permits(service_handle, 3, rights)
             && !manager.permits(service, service_handle, 3, rights)
             && !manager.permits(service, service_read, 3, Rights::READ),
     )
