@@ -36,7 +36,7 @@ ginux_linux_probe:
     cmp rax, -14
     jne failure
 
-    movabs rax, 0x0807060504030201
+    movabs rax, 0x0a212145424f5250
     mov qword ptr [rsp - 16], rax
     mov edi, 1
     lea rsi, [rsp - 16]
@@ -63,7 +63,7 @@ ginux_linux_probe:
     syscall
     cmp rax, 0x403080
     jne failure
-    movabs rax, 0x0807060504030201
+    movabs rax, 0x0a212145424f5250
     mov qword ptr [0x403000], rax
     mov edi, 1
     mov esi, 0x403000
@@ -107,7 +107,7 @@ ginux_linux_probe:
 
     mov edi, 1
     mov esi, 0x401000
-    mov edx, 7
+    mov edx, 257
     mov eax, 1
     syscall
     cmp rax, -22
@@ -128,7 +128,7 @@ ginux_linux_probe:
     test rax, rax
     jne failure
     mov rbx, qword ptr fs:[0]
-    movabs rax, 0x0807060504030201
+    movabs rax, 0x0a212145424f5250
     cmp rbx, rax
     jne failure
 
@@ -586,7 +586,7 @@ ginux_linux_probe:
     cmp rax, -22
     jne failure
 
-    movabs rax, 0x0807060504030201
+    movabs rax, 0x0a212145424f5250
     mov qword ptr [0x402000], rax
     mov edi, 0x402000
     mov esi, 4096
@@ -650,7 +650,7 @@ failure:
 
 .balign 8
 readable_payload:
-    .byte 1, 2, 3, 4, 5, 6, 7, 8
+    .ascii "PROBE!!\n"
 proc_self_exe:
     .asciz "/proc/self/exe"
 
@@ -658,7 +658,7 @@ proc_self_exe:
 .balign 8
 .global ginux_linux_probe_data
 ginux_linux_probe_data:
-    .byte 1, 2, 3, 4, 5, 6, 7, 8
+    .ascii "PROBE!!\n"
 
 .section .bss
 .balign 8

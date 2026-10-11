@@ -92,6 +92,7 @@ const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_PROT_READ: u64 = 1;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
+const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1074,18 +1075,18 @@ extern "sysv64" fn linux_syscall_handler(
             if first_argument != 1 {
                 return LINUX_EBADF;
             }
-            if count != 8 {
+            let Ok(length) = usize::try_from(count) else {
+                return LINUX_EINVAL;
+            };
+            if !(1..=LINUX_WRITE_LIMIT).contains(&length) {
                 return LINUX_EINVAL;
             }
-            let mut bytes = [0_u8; 8];
-            if !copy_from_linux_user(buffer, &mut bytes) {
+            let mut bytes = [0_u8; LINUX_WRITE_LIMIT];
+            if !copy_from_linux_user(buffer, &mut bytes[..length]) {
                 return LINUX_EFAULT;
             }
-            if bytes == [1, 2, 3, 4, 5, 6, 7, 8] {
-                8
-            } else {
-                LINUX_EFAULT
-            }
+            crate::serial_write_bytes(&bytes[..length]);
+            count
         }
         LINUX_FSTAT_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {

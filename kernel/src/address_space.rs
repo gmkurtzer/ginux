@@ -442,7 +442,7 @@ pub(crate) fn verify_linux_elf_mapping(
             let observed = cpu::with_supervisor_user_access(|| {
                 (first.virtual_address as *const u8).read_volatile() == first.bytes[0]
                     && (second.virtual_address as *const u64).read_volatile()
-                        == u64::from_le_bytes([1, 2, 3, 4, 5, 6, 7, 8])
+                        == u64::from_le_bytes(*b"PROBE!!\n")
                     && header.is_none_or(|segment| {
                         (segment.virtual_address as *const u8).read_volatile() == segment.bytes[0]
                     })

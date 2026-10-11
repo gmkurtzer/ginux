@@ -445,7 +445,7 @@ pub(crate) fn verify_parser() -> bool {
         || parsed.executable.memory_size != (0x100 + PROBE_CODE.len()) as u64
         || parsed.executable.flags != PF_READ | PF_EXECUTE
         || parsed.read_only.is_some()
-        || parsed.writable.bytes != [1, 2, 3, 4, 5, 6, 7, 8]
+        || parsed.writable.bytes != *b"PROBE!!\n"
         || parsed.writable.virtual_address != 0x40_1000
         || parsed.writable.memory_size != (PAGE_SIZE + 512) as u64
         || parsed.writable.flags != PF_READ | PF_WRITE
@@ -577,7 +577,7 @@ pub(crate) fn verify_load_plan() -> bool {
         && current_plan.writable.page_count == 2
         && current_plan.writable.writable
         && !current_plan.writable.executable
-        && writable_page[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
+        && writable_page[..8] == *b"PROBE!!\n"
         && writable_page[8..].iter().all(|byte| *byte == 0)
         && multi_page_plan.writable.page_count == 2
         && writable_tail_page.iter().all(|byte| *byte == 0)
@@ -612,7 +612,7 @@ pub(crate) fn verify_linked_probe() -> bool {
         && &page[0x100..0x100 + PROBE_CODE.len()] == PROBE_CODE
         && materialized_page_matches(plan.executable, 0, &page);
     let writable_valid = materialize(plan.writable, &mut page)
-        && page[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
+        && page[..8] == *b"PROBE!!\n"
         && page[8..].iter().all(|byte| *byte == 0)
         && materialize_page(plan.writable, 1, &mut page)
         && page.iter().all(|byte| *byte == 0);
@@ -626,7 +626,7 @@ pub(crate) fn verify_linked_probe() -> bool {
             .is_some_and(|segment| segment.virtual_address == 0x3f_f000)
         && image.writable.virtual_address == 0x40_1000
         && image.writable.bytes.len() == 4608
-        && image.writable.bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
+        && image.writable.bytes[..8] == *b"PROBE!!\n"
         && image.writable.bytes[8..].iter().all(|byte| *byte == 0)
         && image.writable.memory_size == 4608
         && image
@@ -692,7 +692,7 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
     write_relro(&mut bytes, stack_header, 0x40_2000, 512);
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
-    bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(b"PROBE!!\n");
     bytes
 }
 

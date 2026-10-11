@@ -7,9 +7,10 @@ The bounded static ELF proof invokes the architectural x86-64 `SYSCALL`
 instruction with Linux register conventions. It submits unsupported call
 999 and requires Linux `-ENOSYS` (-38) after resumption. It then uses `rax = 1`
 (`__NR_write`) with fd 1, the declared RW segment address, and an eight-byte
-length. The kernel validates all three arguments, enables supervisor access to
-user memory only around a copy-in constrained by the RW segment's declared ELF
-memory extent, verifies the expected bytes, and returns 8. Next, `rax = 63`
+length. The kernel accepts 1 through 256 bytes, validates the descriptor and
+complete readable VMA range, enables supervisor access only around the bounded
+copy-in, emits the exact bytes to the pinned console, and returns the requested
+length. A zero or larger request returns `-EINVAL`. Next, `rax = 63`
 (`__NR_uname`) and the exact RW segment base request
 a fixed 390-byte Linux `utsname`. The kernel zero-initializes every byte, fills
 all six 65-byte fields, and enables supervisor access to user memory only for
@@ -130,8 +131,8 @@ workload executes.
 This milestone proves the hardware transition and Linux argument registers. It
 does not provide persistent per-thread kernel stacks, `IRETQ` fallback, signal
 interruption, restartable syscalls, scheduler integration, mutable credentials
-or credential-based permissions, a general file-descriptor table, output
-streams, arbitrary user buffers,
+or credential-based permissions, a general file-descriptor table, arbitrary
+user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
 `write`, `fstat`, `brk`, `uname`, `getcwd`, bounded `readlink`,
 bounded read-only `mprotect`,
@@ -148,10 +149,10 @@ remains disarmed outside the proof. The current copy helpers cover only the one
 declared RW segment and the bounded heap below its current break; general
 stack-page ranges are also accepted. General VM-area lookup and cross-area
 copies remain future work.
-Invalid `write` descriptors return `-EBADF`, unsupported bounded lengths return
+Invalid `write` descriptors return `-EBADF`, unsupported lengths return
 `-EINVAL`, and a `write` or `uname` range outside that segment returns
 `-EFAULT`. Boot verification covers the exact lower and upper boundaries, the
 first byte beyond the segment, and address-addition overflow. The ring-3 probe
-also submits fd 2, a seven-byte write, and `uname` at the first mapped address
+also submits fd 2, a 257-byte write, and `uname` at the first mapped address
 beyond `p_memsz`; it requires the three errors above and then completes the
 valid syscall sequence, proving errors do not silently terminate the task.

@@ -585,6 +585,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded multi-page Linux ELF mapping verified\r\n");
     serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
     serial_write("ginux: Linux proof workload assembled from source\r\n");
+    serial_write("ginux: Linux bounded console writes validated\r\n");
     serial_write("ginux: Linux container-local root credentials verified\r\n");
     serial_write("ginux: Linux errno recovery verified in ring 3\r\n");
     serial_write("ginux: Linux single-thread process identity verified\r\n");
@@ -1053,7 +1054,11 @@ fn serial_init() {
 }
 
 fn serial_write(message: &str) {
-    for byte in message.bytes() {
+    serial_write_bytes(message.as_bytes());
+}
+
+pub(crate) fn serial_write_bytes(bytes: &[u8]) {
+    for byte in bytes.iter().copied() {
         while unsafe { inb(COM1 + 5) } & 0x20 == 0 {
             core::hint::spin_loop();
         }
