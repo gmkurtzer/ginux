@@ -674,7 +674,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux clone return values validated\r\n");
     serial_write("ginux: Linux clone child TID cleared on exit\r\n");
     serial_write("ginux: Linux clone parent TID preserved on child exit\r\n");
-    serial_write("ginux: bounded Linux futex waiter blocked\r\n");
+    serial_write("ginux: Linux parent and child futex waits blocked\r\n");
+    serial_write("ginux: explicit Linux futex wake restored child\r\n");
     serial_write("ginux: Linux clear-child-TID wake restored parent\r\n");
     serial_write("ginux: Linux futex waiter state reclaimed\r\n");
     serial_write("ginux: per-thread Linux syscall stacks validated\r\n");
@@ -685,6 +686,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux thread table reclaimed on exit\r\n");
     serial_write("ginux: sibling Linux TLS frame scrubbed and released\r\n");
     serial_write("ginux: Linux sibling stack scrubbed and released\r\n");
+    serial_write("ginux: retired Linux thread stacks scrubbed\r\n");
     serial_write("ginux: Linux TLS frame scrubbed and released\r\n");
     serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
     serial_write("ginux: toolchain-linked Linux interpreter executed\r\n");

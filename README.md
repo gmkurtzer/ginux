@@ -101,8 +101,9 @@ initial entry and teardown requires the complete table to be empty before
 resetting the process-local TID sequence.
 The sibling slot also owns a separate, zeroed, RW/NX page between two unmapped
 guard pages. Its exact bounds follow the slot across TID 2 retirement and TID 3
-reuse. The current-thread syscall-copy contract rejects that whole page, and
-teardown verifies it is scrubbed before releasing its frame. This establishes
+reuse. The current-thread syscall-copy contract rejects that whole page. Thread
+retirement scrubs the page while running on the kernel stack, and teardown
+verifies it remains zero before releasing its frame. This establishes
 bounded stack ownership and cleanup, not memory isolation within the shared
 process address space.
 An internal clone constructor now accepts exactly the bounded shared-VM,
@@ -148,13 +149,14 @@ The call accepts only the authenticated sibling TLS pointer, guarded stack top,
 and distinct aligned parent- and child-TID words in the main writable mapping.
 Both words receive the monotonically allocated child TID before either thread
 returns to ring 3; the parent receives that same value, while the child resumes
-after the syscall with `rax = 0`. The parent then performs a matching
-`FUTEX_WAIT` on the child-TID word. The kernel persists its complete frame,
-marks its generation-tagged slot blocked on that exact address, and selects the
-ready child through `SYSRETQ`. The child calls `exit(42)`, clears only its
-child-TID word, wakes the matching parent, leaves the parent-TID word intact,
-retires itself, and restores the parent's registers, FS base, and copy
-ownership. The resumed wait returns zero. Malformed requests return `EINVAL`, inaccessible TID writes
+after the syscall with `rax = 0`. The parent first yields to the child, which
+blocks in `FUTEX_WAIT` on the parent-TID word and restores the parent. An
+explicit `FUTEX_WAKE` makes the child ready. The parent then waits on the
+child-TID word, selecting the child again; its first wait resumes with zero.
+The child calls `exit(42)`, clears only its child-TID word, wakes the matching
+parent, leaves the parent-TID word intact, retires itself, and restores the
+parent's registers, FS base, and copy ownership. Both resumed waits return
+zero. Malformed requests return `EINVAL`, inaccessible TID writes
 return `EFAULT`, and occupied capacity returns `EAGAIN`. This remains a fixed
 two-slot, one-child profile without arbitrary allocation, simultaneous
 execution, preemption, futex timeouts, multiple waiters, requeue operations, or
@@ -322,10 +324,11 @@ part of exit.
 Bounded `set_robust_list` and `get_robust_list` calls retain and report one
 24-byte thread robust-list head, reject foreign process IDs and invalid ranges,
 and discard the registration during exit. A bounded matching futex wait may
-block the initial thread only when its one clone child is ready; child exit
-clears the registered word and wakes that exact waiter. Mismatches return
-`EAGAIN`, and a matching wait without another runnable thread returns `ENOSYS`.
-General futex queues, timeouts, and robust futex recovery are not implemented.
+block either of the two threads only while its peer is ready. Explicit wake
+restores the blocked child; child exit clears its registered word and restores
+the blocked parent. Mismatches return `EAGAIN`, and a matching wait without
+another runnable thread returns `ENOSYS`. General futex queues, timeouts, and
+robust futex recovery are not implemented.
 Bounded `mprotect` can irreversibly seal the page named by the parsed
 `PT_GNU_RELRO` range or every page in the active anonymous extent as
 read-only/NX. The page-table permissions and syscall copy direction change

@@ -793,8 +793,13 @@ if ! grep -q '^ginux: Linux clone parent TID preserved on child exit' "$output_f
     exit 1
 fi
 
-if ! grep -q '^ginux: bounded Linux futex waiter blocked' "$output_file"; then
-    echo "Boot test failed: the bounded Linux futex waiter did not block." >&2
+if ! grep -q '^ginux: Linux parent and child futex waits blocked' "$output_file"; then
+    echo "Boot test failed: Linux parent and child futex waits did not block." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: explicit Linux futex wake restored child' "$output_file"; then
+    echo "Boot test failed: explicit Linux futex wake did not restore the child." >&2
     exit 1
 fi
 
@@ -845,6 +850,11 @@ fi
 
 if ! grep -q '^ginux: Linux sibling stack scrubbed and released' "$output_file"; then
     echo "Boot test failed: the sibling Linux stack was not scrubbed and released." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: retired Linux thread stacks scrubbed' "$output_file"; then
+    echo "Boot test failed: retired Linux thread stacks were not scrubbed." >&2
     exit 1
 fi
 

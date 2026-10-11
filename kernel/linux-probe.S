@@ -515,6 +515,14 @@ valid_interpreter_base:
     jne failure
     mov ebx, eax
     mov ebp, edx
+    mov eax, 24
+    call syscall_expect_zero
+    mov rdi, rbp
+    xor esi, esi
+    inc esi
+    mov edx, esi
+    mov eax, 202
+    call syscall_expect_one
     mov rdi, r8
     xor esi, esi
     mov edx, ebx
@@ -560,11 +568,6 @@ valid_interpreter_base:
     mov eax, 140
     syscall
     cmp rax, 20
-    jne failure
-    mov esi, 2
-    mov eax, 140
-    syscall
-    cmp rax, -3
     jne failure
     mov edi, 1
     xor esi, esi
@@ -3143,14 +3146,6 @@ resolution_valid:
     mov eax, 202
     call syscall_expect_enosys
 
-    mov esi, 1
-    mov edx, 1
-    mov eax, 202
-    call syscall_expect_zero
-    mov esi, 129
-    mov eax, 202
-    call syscall_expect_zero
-
     movabs rax, 0x1122334455667788
     mov qword ptr [0x404ff0], rax
     mov qword ptr [0x404ff8], rax
@@ -3222,6 +3217,11 @@ resolution_valid:
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
 child_thread_probe:
+    mov rdi, rdx
+    xor esi, esi
+    mov edx, dword ptr [rdi]
+    mov eax, 202
+    call syscall_expect_zero
     mov edi, 42
     mov eax, 60
     syscall

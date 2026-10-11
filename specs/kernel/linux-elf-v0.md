@@ -449,8 +449,9 @@ monotonic across these proofs.
 The sibling stack is a separately leased, zeroed RW/NX page between explicit
 unmapped lower and upper guard pages. Its bounds are bound to TID 2 and retained
 when that slot is reused as TID 3. The active initial-thread syscall-copy check
-rejects the complete sibling stack extent. Teardown zeroes the page, verifies
-the physical frame contains only zeroes, and releases it with the other
+rejects the complete sibling stack extent. Slot retirement zeroes the page
+while executing on the kernel stack; teardown verifies the physical frame still
+contains only zeroes and releases it with the other
 execution frames. The mapping is still directly accessible to code sharing the
 same process address space; this proves bounded ownership, guarded layout, and
 cleanup rather than intra-process memory isolation.
@@ -501,17 +502,19 @@ flags, authenticated sibling TLS pointer, guarded stack top, and distinct
 aligned parent- and child-TID words in the main writable segment. Publication
 makes the complete child context ready before writing the allocated TID to both
 words. The parent observes the same TID as its return value, while the child
-later resumes after the syscall with `rax = 0`. A matching `FUTEX_WAIT`
-persists the parent, records the exact child-TID address in its
-generation-tagged slot, marks it blocked, and selects the ready child through
-`SYSRETQ`. Its authenticated trampoline calls `exit(42)`; the kernel zeroes the
-registered child-TID word, wakes the matching parent, leaves the parent-TID word
-unchanged, retires the child slot, and restores the parent's saved registers,
-RIP/RSP/RFLAGS, FS base, and copy extent. The resumed wait returns zero and the
-parent verifies both TID words. Teardown requires every waiter address to be
-zero. This proves one complete userspace clone-wait-child-wake-parent sequence,
-not repeated creation, simultaneous execution, timed waits, or general
-scheduling.
+later resumes after the syscall with `rax = 0`. The parent yields once; the
+child performs a matching `FUTEX_WAIT` on the parent-TID word, persists its
+context, records that exact address, and restores the parent. Explicit
+`FUTEX_WAKE` makes the child ready. The parent then waits on the child-TID word,
+which selects the child and resumes its first wait with zero. Its authenticated
+trampoline calls `exit(42)`; the kernel zeroes the registered child-TID word,
+wakes the matching parent, leaves the parent-TID word unchanged, retires the
+child slot, scrubs its user stack, and restores the parent's saved registers,
+RIP/RSP/RFLAGS, FS base, and copy extent. The resumed parent wait returns zero
+and verifies both TID words. Teardown requires every waiter address and retired
+stack byte to be zero. This proves one complete explicit-wake and exit-wake
+sequence, not repeated creation, simultaneous execution, timed waits, or
+general scheduling.
 
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns

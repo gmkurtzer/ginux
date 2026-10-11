@@ -553,12 +553,13 @@ For the interpreted profile, syscall 56 accepts only the exact bounded pthread
 flag set, fixed sibling TLS pointer, guarded stack top, and distinct aligned
 parent- and child-TID words in the authenticated writable mapping. It publishes
 the next monotonic TID to both words and returns that same value to the parent;
-the child context retains a zero return. A subsequent matching `FUTEX_WAIT`
-saves the parent, records the exact wait address, marks its slot blocked, and
-redirects the live frame to the ready child. The child `exit(42)` clears only
-the child-TID word, wakes the matching parent, preserves the parent-TID word,
-retires only the child slot, and returns the parent through the same live-frame
-path. The resumed wait returns zero.
+the child context retains a zero return. Yield selects the child, whose matching
+`FUTEX_WAIT` saves it and restores the parent. An explicit wake readies the
+child; the parent's matching wait then selects it and resumes the child wait
+with zero. Child `exit(42)` clears only the child-TID word, wakes the matching
+parent, preserves the parent-TID word, retires and scrubs only the child slot,
+and returns the parent through the same live-frame path. The parent wait also
+resumes with zero.
 `exit_group(42)` remains final process teardown. Repeated creation, parallel
 execution, timer preemption, and general Linux-thread scheduling are undefined.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
@@ -622,12 +623,13 @@ current-thread selection, and proves retirement clears them before slot reuse.
 `rax = 202` (`__NR_futex`) supports a bounded one-waiter lifecycle. Aligned,
 readable `FUTEX_WAIT` and `FUTEX_WAIT_PRIVATE` compare one 32-bit word and return
 `-EAGAIN` when it differs from the expected value. When the fixed clone child is
-ready, a match saves the current parent frame, records the wait address in that
-generation-tagged slot, marks it blocked, and selects the child. `FUTEX_WAKE`
+ready, a match saves the current frame, records the wait address in that
+generation-tagged slot, marks it blocked, and selects the peer. `FUTEX_WAKE`
 and `FUTEX_WAKE_PRIVATE` move up to the requested number of exact address
-matches back to ready state. Child clear-child-TID performs the same one-waiter
-wake after zeroing the word, then restores the parent; the resumed wait returns
-zero. A matching wait with no other ready thread returns `-ENOSYS` instead of
+matches back to ready state. The proof blocks the child and explicitly wakes
+it, then blocks the parent before child clear-child-TID performs the second wake
+after zeroing the word. Both resumed waits return zero. A matching wait with no
+other ready thread returns `-ENOSYS` instead of
 deadlocking. Invalid operations or alignment return `-EINVAL`, and an invalid
 word returns `-EFAULT`. Timeouts, bitsets, requeueing, priority inheritance,
 multiple waiters, and cross-process keys remain undefined.
@@ -700,8 +702,9 @@ identity queries above,
 `CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID`,
 the fixed sibling stack and TLS resources, and distinct writable aligned parent-
 and child-TID words. It publishes the TID to both words and returns it to the
-parent. A matching futex wait runs the zero-return child; child exit clears its
-word, wakes the blocked parent, and resumes the wait with zero. There is no
+parent. Explicit wake first resumes a blocked child; a second matching wait
+runs it again, and child exit clears its word, wakes the blocked parent, and
+resumes that wait with zero. There is no
 general TID allocation, repeated or parallel thread creation, general futex
 queue, or robust futex recovery yet. Every other call
 returns `-ENOSYS` without disarming
