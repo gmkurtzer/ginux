@@ -40,7 +40,7 @@ before restoring the kernel root. General Linux process execution and collision
 policy remain separate milestones.
 
 That Linux proof also reserves two physical frames behind initially absent
-leaves at `0x40a000` and `0x40b000`. Its bounded anonymous mapping call
+leaves at `0x40b000` and `0x40c000`. Its bounded anonymous mapping call
 validates an exact one- or two-page RW/NX request before installing any leaf;
 unmap requires the complete active extent, clears its leaves, invalidates the
 local translations, and scrubs both frames before they can be installed again.

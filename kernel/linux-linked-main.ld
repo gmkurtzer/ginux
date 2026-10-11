@@ -29,14 +29,18 @@ SECTIONS
 
     . = 0x1100;
     .text : { *(.text) *(.text.*) } :text
+    .plt : { *(.plt) *(.plt.*) } :text
+    ASSERT(. <= 0x5fff, "Linux linked probe exceeds reserved five-page executable profile")
+    . = 0x5fff;
+    .text.boundary : { BYTE(0) } :text
 
-    . = 0x5000;
+    . = 0x6000;
     .data : { *(.data) } :data
     .tdata : { *(.tdata) } :data :tls
     .tbss (NOLOAD) : { *(.tbss) } :data :tls
     .bss : { *(.bss) } :data
 
-    . = 0x6000;
+    . = 0x7000;
     .data.rel.ro.head : { *(.data.rel.ro.head) } :data :relro
     .preinit_array : { *(.preinit_array) } :data :relro
     .init_array : { *(.init_array) } :data :relro

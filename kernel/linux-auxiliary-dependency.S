@@ -16,7 +16,7 @@ ginux_auxiliary_symbol:
 .hidden ginux_auxiliary_init
 .type ginux_auxiliary_init,@function
 ginux_auxiliary_init:
-    cmp qword ptr [0x404008], 1
+    cmp qword ptr [0x405008], 1
     jne .Lauxiliary_init_done
     mov rdx, qword ptr [rip + ginux_auxiliary_tls_template@GOTTPOFF]
     movabs rax, 0x0a21534c54585541

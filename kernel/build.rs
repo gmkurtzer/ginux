@@ -2,7 +2,7 @@ use std::{env, ffi::OsString, fs, path::PathBuf, process::Command};
 
 const PAGE_SIZE: usize = 4096;
 const LINUX_PROBE_ENTRY_OFFSET: usize = 0x100;
-const LINUX_PROBE_EXECUTABLE_PAGES: usize = 4;
+const LINUX_PROBE_EXECUTABLE_PAGES: usize = 5;
 const LINUX_PROBE_MAX_TEXT_SIZE: usize =
     LINUX_PROBE_EXECUTABLE_PAGES * PAGE_SIZE - LINUX_PROBE_ENTRY_OFFSET;
 const LINUX_INTERPRETER_ENTRY_OFFSET: usize = 0x100;
@@ -45,7 +45,7 @@ fn main() {
     );
     assert!(
         text.len() <= LINUX_PROBE_MAX_TEXT_SIZE,
-        "Linux probe .text is {} bytes; the four-page executable profile permits at most {} bytes",
+        "Linux probe .text is {} bytes; the five-page executable profile permits at most {} bytes",
         text.len(),
         LINUX_PROBE_MAX_TEXT_SIZE
     );

@@ -29,7 +29,7 @@ ginux_dependency_symbol:
 .hidden ginux_dependency_init
 .type ginux_dependency_init,@function
 ginux_dependency_init:
-    cmp qword ptr [0x404008], 1
+    cmp qword ptr [0x405008], 1
     jne .Ldependency_init_done
     mov rdx, qword ptr [rip + ginux_dependency_tls_template@GOTTPOFF]
     movabs rax, 0x0a21534c544f5344

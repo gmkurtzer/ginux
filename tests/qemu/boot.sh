@@ -888,8 +888,8 @@ if ! grep -q '^ginux: Linux TLS frame scrubbed and released' "$output_file"; the
     exit 1
 fi
 
-if ! grep -q '^ginux: four-page Linux executable mapping validated' "$output_file"; then
-    echo "Boot test failed: four-page Linux executable mapping was not validated." >&2
+if ! grep -q '^ginux: five-page Linux executable mapping validated' "$output_file"; then
+    echo "Boot test failed: five-page Linux executable mapping was not validated." >&2
     exit 1
 fi
 

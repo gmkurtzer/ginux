@@ -366,7 +366,7 @@ selectors return `-EINVAL`; invalid complete input or output ranges return
 `-EFAULT`, and rejected requests do not partially change the old-value output.
 `rax = 9` (`__NR_mmap`) has a scratch-window profile and one authenticated
 executable-install profile. The scratch window admits one private one- or
-two-page extent at kernel-selected address `0x40a000`. Its anonymous form requires a null hint, an
+two-page extent at kernel-selected address `0x40b000`. Its anonymous form requires a null hint, an
 exact 4096- or 8192-byte length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
 MAP_ANONYMOUS`, fd -1, and offset zero, and installs zero-filled RW/NX frames.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
@@ -383,8 +383,8 @@ The executable-install profile accepts only open `/init`,
 `/lib64/libginux.so`, or `/lib64/libginux-aux.so` descriptors and exact one-page `MAP_PRIVATE |
 MAP_FIXED_NOREPLACE` requests already authenticated by the kernel plan. For
 `/init`, those contracts are offset `0` at `0x3ff000` with `PROT_READ`, offsets
-`0x1000..0x4000` at `0x400000..0x403000` with `PROT_READ | PROT_EXEC`, and
-offsets `0x5000..0x6000` at `0x404000..0x405000` with `PROT_READ |
+`0x1000..0x5000` at `0x400000..0x404000` with `PROT_READ | PROT_EXEC`, and
+offsets `0x6000..0x7000` at `0x405000..0x406000` with `PROT_READ |
 PROT_WRITE`. For `libginux.so`, the kernel admits a page-aligned base in the
 half-open range `0x610000..0x620000`. Offset `0x1000` must be RX at relative
 address zero, offset `0x2000` must be RX at relative address `0x1000`, and
@@ -461,9 +461,9 @@ atomically writes one resident byte per page to a fully validated vector. It ret
 `-ENOMEM` after unmap. Misaligned, partial, or different ranges return
 `-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only the fixed slot,
 not arbitrary page-table state or reclaim information.
-The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x406000`,
+The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x407000`,
 grow within one separately owned zero-filled RW/NX page, write through that
-mapping, and shrink the break. A request beyond `0x407000` follows Linux syscall
+mapping, and shrink the break. A request beyond `0x408000` follows Linux syscall
 semantics by returning the unchanged current break rather than a negative
 error. The page remains mapped for the lifetime of this bounded process and is
 scrubbed during teardown. A valid `write` copies from the grown heap. A second

@@ -20,15 +20,15 @@ SECTIONS
     {
         *(.text)
         FILL(0)
-        . = MAX(., 0x403001);
+        . = MAX(., 0x404001);
     } :text
-    ASSERT(SIZEOF(.text) <= 0x3e80, "Linux probe exceeds reserved four-page executable profile")
+    ASSERT(SIZEOF(.text) <= 0x4e80, "Linux probe exceeds reserved five-page executable profile")
 
-    . = 0x404000;
+    . = 0x405000;
     .data : { *(.data) } :data
     .bss : { *(.bss) } :data
 
-    . = 0x405000;
+    . = 0x406000;
     .data.rel.ro : { *(.data.rel.ro) } :data :relro
 
     /DISCARD/ : { *(.comment) *(.note*) }

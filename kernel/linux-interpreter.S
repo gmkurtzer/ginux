@@ -139,10 +139,10 @@ ginux_linux_interpreter:
     jmp .Lmain_dynamic_ready
 #endif
 
-    mov edi, 0x405200
+    mov edi, 0x406200
     cmp qword ptr [rdi], 1
     je .Llinked_main_dynamic
-    mov edi, 0x404008
+    mov edi, 0x405008
     mov ecx, 13
     xor r15d, r15d
     jmp .Lmain_dynamic_ready
@@ -938,14 +938,14 @@ ginux_linux_interpreter:
     xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, 0x40a000
+    cmp rax, 0x40b000
     jne .Linvalid_dynamic
-    cmp dword ptr [0x40a000], 0x464c457f
+    cmp dword ptr [0x40b000], 0x464c457f
     jne .Linvalid_dynamic
 
-    mov r12, qword ptr [0x40a020]
-    movzx r13d, word ptr [0x40a038]
-    cmp word ptr [0x40a036], 56
+    mov r12, qword ptr [0x40b020]
+    movzx r13d, word ptr [0x40b038]
+    cmp word ptr [0x40b036], 56
     jne .Linvalid_dynamic
     test r13d, r13d
     jz .Linvalid_dynamic
@@ -965,7 +965,7 @@ ginux_linux_interpreter:
     jc .Linvalid_dynamic
     cmp rax, 8192
     ja .Linvalid_dynamic
-    add r12, 0x40a000
+    add r12, 0x40b000
     xor ebp, ebp
     xor r15d, r15d
 
@@ -1025,7 +1025,7 @@ ginux_linux_interpreter:
     shr rbx, 12
     test rbx, rbx
     jz .Linvalid_dynamic
-    cmp rbx, 4
+    cmp rbx, 5
     ja .Linvalid_dynamic
 
     xor edx, edx
@@ -1098,7 +1098,7 @@ ginux_linux_interpreter:
     cmp qword ptr [rip + .Lloaded_dynamic_count], 0
     je .Linvalid_dynamic
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 8192
     mov eax, 11
     syscall
@@ -1130,14 +1130,14 @@ ginux_linux_interpreter:
     xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, 0x40a000
+    cmp rax, 0x40b000
     jne .Linvalid_dynamic
-    cmp dword ptr [0x40a000], 0x464c457f
+    cmp dword ptr [0x40b000], 0x464c457f
     jne .Linvalid_dynamic
-    cmp byte ptr [0x40b100], 0x48
+    cmp byte ptr [0x40c100], 0x48
     jne .Linvalid_dynamic
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 8192
     mov eax, 11
     syscall

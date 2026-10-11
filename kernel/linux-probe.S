@@ -61,24 +61,24 @@ ginux_linux_probe:
     cmp rax, 0x600000
     jne failure
 #ifndef GINUX_LINKED
-    cmp qword ptr [0x405100], 0x400100
+    cmp qword ptr [0x406100], 0x400100
     jne failure
-    cmp qword ptr [0x405108], 0x610100
+    cmp qword ptr [0x406108], 0x610100
     jne failure
-    cmp qword ptr [0x405110], 0x610100
+    cmp qword ptr [0x406110], 0x610100
     jne failure
-    call qword ptr [0x405110]
+    call qword ptr [0x406110]
     movabs rcx, 0x59434e45444e4947
     cmp rax, rcx
     jne failure
 #endif
     jmp valid_interpreter_base
 static_relocation_state:
-    cmp qword ptr [0x405100], 0
+    cmp qword ptr [0x406100], 0
     jne failure
-    cmp qword ptr [0x405108], 0
+    cmp qword ptr [0x406108], 0
     jne failure
-    cmp qword ptr [0x405110], 0
+    cmp qword ptr [0x406110], 0
     jne failure
 valid_interpreter_base:
     cmp qword ptr [rsp + 128], 0
@@ -134,7 +134,7 @@ valid_interpreter_base:
     mov eax, 1
     call syscall_expect_eight
     mov edi, 1
-    mov esi, 0x408ff9
+    mov esi, 0x409ff9
     mov edx, 8
     mov eax, 1
     call syscall_expect_efault
@@ -148,93 +148,93 @@ valid_interpreter_base:
     mov eax, 7
     call syscall_expect_enosys
 
-    mov edi, 0x404c80
+    mov edi, 0x405c80
     mov esi, 5
     xor edx, edx
     mov eax, 7
     call syscall_expect_einval
-    mov edi, 0x4051fc
+    mov edi, 0x4061fc
     mov esi, 1
     mov eax, 7
     call syscall_expect_efault
 
-    mov dword ptr [0x404c80], 0
-    mov word ptr [0x404c84], 1
-    mov word ptr [0x404c86], -1
-    mov dword ptr [0x404c88], 1
-    mov word ptr [0x404c8c], 4
-    mov word ptr [0x404c8e], -1
-    mov dword ptr [0x404c90], 99
-    mov word ptr [0x404c94], 0
-    mov word ptr [0x404c96], -1
-    mov dword ptr [0x404c98], -1
-    mov word ptr [0x404c9c], -1
-    mov word ptr [0x404c9e], -1
-    mov edi, 0x404c80
+    mov dword ptr [0x405c80], 0
+    mov word ptr [0x405c84], 1
+    mov word ptr [0x405c86], -1
+    mov dword ptr [0x405c88], 1
+    mov word ptr [0x405c8c], 4
+    mov word ptr [0x405c8e], -1
+    mov dword ptr [0x405c90], 99
+    mov word ptr [0x405c94], 0
+    mov word ptr [0x405c96], -1
+    mov dword ptr [0x405c98], -1
+    mov word ptr [0x405c9c], -1
+    mov word ptr [0x405c9e], -1
+    mov edi, 0x405c80
     mov esi, 4
     mov edx, -1
     mov eax, 7
     call syscall_expect_three
-    cmp word ptr [0x404c86], 0x10
+    cmp word ptr [0x405c86], 0x10
     jne failure
-    cmp word ptr [0x404c8e], 4
+    cmp word ptr [0x405c8e], 4
     jne failure
-    cmp word ptr [0x404c96], 0x20
+    cmp word ptr [0x405c96], 0x20
     jne failure
-    cmp word ptr [0x404c9e], 0
+    cmp word ptr [0x405c9e], 0
     jne failure
 
-    mov dword ptr [0x404ca0], 1
-    mov word ptr [0x404ca4], 0
-    mov word ptr [0x404ca6], 0x7777
-    mov edi, 0x404ca0
+    mov dword ptr [0x405ca0], 1
+    mov word ptr [0x405ca4], 0
+    mov word ptr [0x405ca6], 0x7777
+    mov edi, 0x405ca0
     mov esi, 1
     xor edx, edx
     mov eax, 7
     call syscall_expect_zero
-    cmp word ptr [0x404ca6], 0
+    cmp word ptr [0x405ca6], 0
     jne failure
-    mov word ptr [0x404ca6], 0x7777
+    mov word ptr [0x405ca6], 0x7777
     mov edx, 1
     mov eax, 7
     call syscall_expect_enosys
-    cmp word ptr [0x404ca6], 0x7777
+    cmp word ptr [0x405ca6], 0x7777
     jne failure
 
     xor edi, edi
     xor esi, esi
-    mov edx, 0x405200
+    mov edx, 0x406200
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 271
     call syscall_expect_efault
 
-    mov qword ptr [0x404cc0], 0
-    mov qword ptr [0x404cc8], 1000000000
-    mov edx, 0x404cc0
+    mov qword ptr [0x405cc0], 0
+    mov qword ptr [0x405cc8], 1000000000
+    mov edx, 0x405cc0
     mov eax, 271
     call syscall_expect_einval
 
-    mov qword ptr [0x404cc8], 0
-    mov edi, 0x404ca0
+    mov qword ptr [0x405cc8], 0
+    mov edi, 0x405ca0
     mov esi, 1
     mov eax, 271
     call syscall_expect_zero
-    cmp word ptr [0x404ca6], 0
+    cmp word ptr [0x405ca6], 0
     jne failure
 
-    mov qword ptr [0x404cc8], 1
-    mov word ptr [0x404ca6], 0x7777
+    mov qword ptr [0x405cc8], 1
+    mov word ptr [0x405ca6], 0x7777
     mov eax, 271
     call syscall_expect_enosys
-    cmp word ptr [0x404ca6], 0x7777
+    cmp word ptr [0x405ca6], 0x7777
     jne failure
 
-    mov qword ptr [0x404cd0], 0
-    mov edi, 0x404c80
+    mov qword ptr [0x405cd0], 0
+    mov edi, 0x405c80
     mov esi, 4
     xor edx, edx
-    mov r10d, 0x404cd0
+    mov r10d, 0x405cd0
     mov r8d, 7
     mov eax, 271
     call syscall_expect_einval
@@ -245,36 +245,36 @@ valid_interpreter_base:
     xor edi, edi
     mov eax, 12
     syscall
-    cmp rax, 0x406000
+    cmp rax, 0x407000
     jne failure
-    mov edi, 0x406080
+    mov edi, 0x407080
     mov eax, 12
     syscall
-    cmp rax, 0x406080
+    cmp rax, 0x407080
     jne failure
     movabs rax, 0x0a212145424f5250
-    mov qword ptr [0x406000], rax
+    mov qword ptr [0x407000], rax
     mov edi, 1
-    mov esi, 0x406000
+    mov esi, 0x407000
     mov edx, 8
     mov eax, 1
     call syscall_expect_eight
     mov edi, 1
-    mov esi, 0x406079
+    mov esi, 0x407079
     mov edx, 8
     mov eax, 1
     call syscall_expect_efault
     movabs rax, 0x4845415042524b21
-    mov qword ptr [0x406000], rax
-    mov edi, 0x407001
+    mov qword ptr [0x407000], rax
+    mov edi, 0x408001
     mov eax, 12
     syscall
-    cmp rax, 0x406080
+    cmp rax, 0x407080
     jne failure
-    mov edi, 0x406040
+    mov edi, 0x407040
     mov eax, 12
     syscall
-    cmp rax, 0x406040
+    cmp rax, 0x407040
     jne failure
 
     xor edi, edi
@@ -294,15 +294,15 @@ valid_interpreter_base:
     xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, 0x40a000
+    cmp rax, 0x40b000
     jne failure
-    cmp qword ptr [0x40a000], 0
+    cmp qword ptr [0x40b000], 0
     jne failure
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov eax, 63
     call syscall_expect_zero
-    cmp dword ptr [0x40a000], 0x756e6947
+    cmp dword ptr [0x40b000], 0x756e6947
     jne failure
 
     xor edi, edi
@@ -316,7 +316,7 @@ valid_interpreter_base:
     cmp rax, -12
     jne failure
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 4095
     mov eax, 11
     call syscall_expect_einval
@@ -325,7 +325,7 @@ valid_interpreter_base:
     call syscall_expect_zero
 
     mov edi, 1
-    mov esi, 0x40a000
+    mov esi, 0x40b000
     mov edx, 8
     mov eax, 1
     call syscall_expect_efault
@@ -338,13 +338,13 @@ valid_interpreter_base:
     xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, 0x40a000
+    cmp rax, 0x40b000
     jne failure
-    cmp qword ptr [0x40a000], 0
+    cmp qword ptr [0x40b000], 0
     jne failure
-    mov qword ptr [0x40a000], 2
+    mov qword ptr [0x40b000], 2
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 4096
     mov edx, 1
     mov eax, 10
@@ -352,35 +352,35 @@ valid_interpreter_base:
     mov eax, 10
     call syscall_expect_einval
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov eax, 63
     call syscall_expect_efault
 
     mov edi, 2
-    mov esi, 0x40a000
+    mov esi, 0x40b000
     xor edx, edx
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    mov qword ptr [0x404940], 0
-    mov esi, 0x404940
+    mov qword ptr [0x405940], 0
+    mov esi, 0x405940
     mov eax, 14
     call syscall_expect_zero
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 4096
     mov edx, 3
     mov eax, 28
     call syscall_expect_einval
-    cmp qword ptr [0x40a000], 2
+    cmp qword ptr [0x40b000], 2
     jne failure
     mov edx, 4
     mov eax, 28
     call syscall_expect_zero
-    cmp qword ptr [0x40a000], 0
+    cmp qword ptr [0x40b000], 0
     jne failure
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 4096
     mov eax, 11
     call syscall_expect_zero
@@ -393,35 +393,35 @@ valid_interpreter_base:
     xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, 0x40a000
+    cmp rax, 0x40b000
     jne failure
-    cmp qword ptr [0x40a000], 0
+    cmp qword ptr [0x40b000], 0
     jne failure
 
-    mov edi, 0x40a001
+    mov edi, 0x40b001
     mov esi, 4096
-    mov edx, 0x404948
+    mov edx, 0x405948
     mov eax, 27
     call syscall_expect_einval
-    mov edi, 0x40a000
-    mov edx, 0x405200
+    mov edi, 0x40b000
+    mov edx, 0x406200
     mov eax, 27
     call syscall_expect_efault
-    mov byte ptr [0x404948], 0
-    mov edx, 0x404948
+    mov byte ptr [0x405948], 0
+    mov edx, 0x405948
     mov eax, 27
     call syscall_expect_zero
-    cmp byte ptr [0x404948], 1
+    cmp byte ptr [0x405948], 1
     jne failure
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov eax, 63
     call syscall_expect_zero
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 4096
     mov eax, 11
     call syscall_expect_zero
-    mov edx, 0x404948
+    mov edx, 0x405948
     mov eax, 27
     syscall
     cmp rax, -12
@@ -437,55 +437,55 @@ valid_interpreter_base:
     xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, 0x40a000
-    jne failure
-    cmp qword ptr [0x40a000], 0
+    cmp rax, 0x40b000
     jne failure
     cmp qword ptr [0x40b000], 0
     jne failure
+    cmp qword ptr [0x40c000], 0
+    jne failure
 
-    mov qword ptr [0x40b000], -1
-    mov edi, 0x40af80
+    mov qword ptr [0x40c000], -1
+    mov edi, 0x40bf80
     mov eax, 63
     call syscall_expect_zero
-    cmp dword ptr [0x40af80], 0x756e6947
+    cmp dword ptr [0x40bf80], 0x756e6947
     jne failure
-    cmp word ptr [0x40b000], 0
+    cmp word ptr [0x40c000], 0
     jne failure
 
-    mov byte ptr [0x40494a], 0
-    mov byte ptr [0x40494b], 0
-    mov edi, 0x40a000
+    mov byte ptr [0x40594a], 0
+    mov byte ptr [0x40594b], 0
+    mov edi, 0x40b000
     mov esi, 8192
-    mov edx, 0x40494a
+    mov edx, 0x40594a
     mov eax, 27
     call syscall_expect_zero
-    cmp byte ptr [0x40494a], 1
+    cmp byte ptr [0x40594a], 1
     jne failure
-    cmp byte ptr [0x40494b], 1
+    cmp byte ptr [0x40594b], 1
     jne failure
 
-    mov qword ptr [0x40a000], 1
-    mov qword ptr [0x40b000], 2
+    mov qword ptr [0x40b000], 1
+    mov qword ptr [0x40c000], 2
     mov edx, 4
     mov eax, 28
     call syscall_expect_zero
-    cmp qword ptr [0x40a000], 0
-    jne failure
     cmp qword ptr [0x40b000], 0
     jne failure
+    cmp qword ptr [0x40c000], 0
+    jne failure
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 8192
     mov edx, 1
     mov eax, 10
     call syscall_expect_zero
     mov eax, 10
     call syscall_expect_einval
-    mov edi, 0x40af80
+    mov edi, 0x40bf80
     mov eax, 63
     call syscall_expect_efault
-    mov edi, 0x40a000
+    mov edi, 0x40b000
 
     mov esi, 4096
     mov eax, 11
@@ -494,7 +494,7 @@ valid_interpreter_base:
     mov eax, 11
     call syscall_expect_zero
     mov edi, 1
-    mov esi, 0x40b000
+    mov esi, 0x40c000
     mov edx, 8
     mov eax, 1
     call syscall_expect_efault
@@ -503,10 +503,10 @@ valid_interpreter_base:
     mov r14d, 2
 linux_clone_repeat:
     mov edi, 0x13d0f00
-    mov esi, 0x410000
-    mov edx, 0x404194
+    mov esi, 0x411000
+    mov edx, 0x405194
     lea r8d, [edx + 4]
-    mov r9d, 0x40dfc0
+    mov r9d, 0x40efc0
     mov eax, 56
     syscall
     test rax, rax
@@ -545,11 +545,11 @@ linux_clone_repeat:
     mov eax, 145
     call syscall_expect_zero
 
-    mov dword ptr [0x404060], 0x12345678
-    mov esi, 0x404060
+    mov dword ptr [0x405060], 0x12345678
+    mov esi, 0x405060
     mov eax, 143
     call syscall_expect_zero
-    cmp dword ptr [0x404060], 0
+    cmp dword ptr [0x405060], 0
     jne failure
 
     xor edi, edi
@@ -558,12 +558,12 @@ linux_clone_repeat:
     mov eax, 147
     call syscall_expect_zero
 
-    mov dword ptr [0x404060], 0
-    mov esi, 0x404060
+    mov dword ptr [0x405060], 0
+    mov esi, 0x405060
     mov eax, 142
     call syscall_expect_zero
     xor esi, esi
-    mov edx, 0x404060
+    mov edx, 0x405060
     mov eax, 144
     call syscall_expect_zero
 
@@ -580,72 +580,72 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     mov edi, 2
-    mov esi, 0x404000
+    mov esi, 0x405000
     mov edx, 8
     mov eax, 1
     call syscall_expect_ebadf
 
     mov edi, 1
-    mov esi, 0x404000
+    mov esi, 0x405000
     mov edx, 257
     mov eax, 1
     call syscall_expect_einval
 
-    mov qword ptr [0x4040c0], 0x40102
+    mov qword ptr [0x4050c0], 0x40102
     mov edi, 99
     xor esi, esi
-    mov edx, 0x4040e0
+    mov edx, 0x4050e0
     mov r10d, 7
     mov eax, 14
     call syscall_expect_einval
 
     mov edi, 99
     xor esi, esi
-    mov edx, 0x4040e0
+    mov edx, 0x4050e0
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4040e0], 0
+    cmp qword ptr [0x4050e0], 0
     jne failure
 
     xor edi, edi
-    mov esi, 0x4040c0
-    mov edx, 0x4040e0
+    mov esi, 0x4050c0
+    mov edx, 0x4050e0
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4040e0], 0
+    cmp qword ptr [0x4050e0], 0
     jne failure
 
     mov edi, 99
     xor esi, esi
-    mov edx, 0x4040e0
+    mov edx, 0x4050e0
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4040e0], 2
+    cmp qword ptr [0x4050e0], 2
     jne failure
 
-    mov qword ptr [0x4040c0], 8
+    mov qword ptr [0x4050c0], 8
     xor edi, edi
-    mov esi, 0x4040c0
-    mov edx, 0x405200
+    mov esi, 0x4050c0
+    mov edx, 0x406200
     mov r10d, 8
     mov eax, 14
     call syscall_expect_efault
 
     mov edi, 99
     xor esi, esi
-    mov edx, 0x4040e0
+    mov edx, 0x4050e0
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4040e0], 2
+    cmp qword ptr [0x4050e0], 2
     jne failure
 
-    mov qword ptr [0x4040c0], 2
+    mov qword ptr [0x4050c0], 2
     mov edi, 1
-    mov esi, 0x4040c0
+    mov esi, 0x4050c0
     xor edx, edx
     mov r10d, 8
     mov eax, 14
@@ -653,15 +653,15 @@ linux_clone_repeat:
 
     mov edi, 99
     xor esi, esi
-    mov edx, 0x4040e0
+    mov edx, 0x4050e0
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4040e0], 0
+    cmp qword ptr [0x4050e0], 0
     jne failure
 
     xor edi, edi
-    mov esi, 0x405200
+    mov esi, 0x406200
     xor edx, edx
     mov r10d, 8
     mov eax, 14
@@ -681,148 +681,148 @@ linux_clone_repeat:
     mov eax, 13
     call syscall_expect_einval
 
-    mov qword ptr [0x404100], 1
-    mov qword ptr [0x404108], 0x1234
-    mov qword ptr [0x404110], 0x400100
-    mov qword ptr [0x404118], 0x40102
+    mov qword ptr [0x405100], 1
+    mov qword ptr [0x405108], 0x1234
+    mov qword ptr [0x405110], 0x400100
+    mov qword ptr [0x405118], 0x40102
     mov edi, 9
-    mov esi, 0x404100
+    mov esi, 0x405100
     xor edx, edx
     mov r10d, 8
     mov eax, 13
     call syscall_expect_einval
 
     mov edi, 10
-    mov esi, 0x405200
+    mov esi, 0x406200
     xor edx, edx
     mov r10d, 8
     mov eax, 13
     call syscall_expect_efault
 
     mov edi, 10
-    mov esi, 0x404100
-    mov edx, 0x404120
+    mov esi, 0x405100
+    mov edx, 0x405120
     mov r10d, 8
     mov eax, 13
     call syscall_expect_zero
-    cmp qword ptr [0x404120], 0
+    cmp qword ptr [0x405120], 0
     jne failure
-    cmp qword ptr [0x404138], 0
+    cmp qword ptr [0x405138], 0
     jne failure
 
     mov edi, 10
     xor esi, esi
-    mov edx, 0x404120
+    mov edx, 0x405120
     mov r10d, 8
     mov eax, 13
     call syscall_expect_zero
-    cmp qword ptr [0x404120], 1
+    cmp qword ptr [0x405120], 1
     jne failure
-    cmp qword ptr [0x404128], 0x1234
+    cmp qword ptr [0x405128], 0x1234
     jne failure
-    cmp qword ptr [0x404130], 0x400100
+    cmp qword ptr [0x405130], 0x400100
     jne failure
-    cmp qword ptr [0x404138], 2
+    cmp qword ptr [0x405138], 2
     jne failure
 
-    mov qword ptr [0x404100], 0
-    mov qword ptr [0x404108], 0
-    mov qword ptr [0x404110], 0
-    mov qword ptr [0x404118], 0
+    mov qword ptr [0x405100], 0
+    mov qword ptr [0x405108], 0
+    mov qword ptr [0x405110], 0
+    mov qword ptr [0x405118], 0
     mov edi, 10
-    mov esi, 0x404100
-    mov edx, 0x405200
+    mov esi, 0x405100
+    mov edx, 0x406200
     mov r10d, 8
     mov eax, 13
     call syscall_expect_efault
 
     mov edi, 10
     xor esi, esi
-    mov edx, 0x404120
+    mov edx, 0x405120
     mov r10d, 8
     mov eax, 13
     call syscall_expect_zero
-    cmp qword ptr [0x404120], 1
+    cmp qword ptr [0x405120], 1
     jne failure
 
     mov edi, 10
-    mov esi, 0x404100
+    mov esi, 0x405100
     xor edx, edx
     mov r10d, 8
     mov eax, 13
     call syscall_expect_zero
 
     xor edi, edi
-    mov esi, 0x404158
+    mov esi, 0x405158
     mov eax, 131
     call syscall_expect_zero
-    cmp qword ptr [0x404158], 0
+    cmp qword ptr [0x405158], 0
     jne failure
-    cmp dword ptr [0x404160], 2
+    cmp dword ptr [0x405160], 2
     jne failure
-    cmp qword ptr [0x404168], 0
+    cmp qword ptr [0x405168], 0
     jne failure
 
     xor edi, edi
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov eax, 131
     call syscall_expect_efault
 
-    mov qword ptr [0x404140], 0x404800
-    mov qword ptr [0x404148], 0
-    mov qword ptr [0x404150], 2048
-    mov edi, 0x404140
-    mov esi, 0x404158
+    mov qword ptr [0x405140], 0x405800
+    mov qword ptr [0x405148], 0
+    mov qword ptr [0x405150], 2048
+    mov edi, 0x405140
+    mov esi, 0x405158
     mov eax, 131
     call syscall_expect_zero
-    cmp dword ptr [0x404160], 2
+    cmp dword ptr [0x405160], 2
     jne failure
 
     xor edi, edi
-    mov esi, 0x404158
+    mov esi, 0x405158
     mov eax, 131
     call syscall_expect_zero
-    cmp qword ptr [0x404158], 0x404800
+    cmp qword ptr [0x405158], 0x405800
     jne failure
-    cmp dword ptr [0x404160], 0
+    cmp dword ptr [0x405160], 0
     jne failure
-    cmp qword ptr [0x404168], 2048
+    cmp qword ptr [0x405168], 2048
     jne failure
 
-    mov qword ptr [0x404140], 0x405000
-    mov qword ptr [0x404148], 0
-    mov qword ptr [0x404150], 2048
-    mov edi, 0x404140
+    mov qword ptr [0x405140], 0x406000
+    mov qword ptr [0x405148], 0
+    mov qword ptr [0x405150], 2048
+    mov edi, 0x405140
     xor esi, esi
     mov eax, 131
     call syscall_expect_efault
 
-    mov qword ptr [0x404140], 0x404800
-    mov qword ptr [0x404148], 0
-    mov qword ptr [0x404150], 1024
-    mov edi, 0x404140
+    mov qword ptr [0x405140], 0x405800
+    mov qword ptr [0x405148], 0
+    mov qword ptr [0x405150], 1024
+    mov edi, 0x405140
     xor esi, esi
     mov eax, 131
     syscall
     cmp rax, -12
     jne failure
 
-    mov qword ptr [0x404140], 0
-    mov qword ptr [0x404148], 2
-    mov qword ptr [0x404150], 0
-    mov edi, 0x404140
+    mov qword ptr [0x405140], 0
+    mov qword ptr [0x405148], 2
+    mov qword ptr [0x405150], 0
+    mov edi, 0x405140
     xor esi, esi
     mov eax, 131
     call syscall_expect_zero
 
     mov edi, 1
-    mov esi, 0x404000
+    mov esi, 0x405000
     mov edx, 8
     mov eax, 1
     call syscall_expect_eight
 
     mov edi, 0x1002
-    mov esi, 0x404000
+    mov esi, 0x405000
     mov eax, 158
     call syscall_expect_zero
     mov rbx, qword ptr fs:[0]
@@ -831,7 +831,7 @@ linux_clone_repeat:
     jne failure
 
     mov edi, 0x1003
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov eax, 158
     call syscall_expect_efault
 
@@ -841,82 +841,82 @@ linux_clone_repeat:
     call syscall_expect_einval
 
     mov edi, 0x1003
-    mov esi, 0x404008
+    mov esi, 0x405008
     mov eax, 158
     call syscall_expect_zero
-    cmp qword ptr [0x404008], 0x404000
+    cmp qword ptr [0x405008], 0x405000
     jne failure
 
-    mov edi, 0x404020
+    mov edi, 0x405020
     mov esi, 1
     mov eax, 79
     syscall
     cmp rax, -34
     jne failure
-    mov edi, 0x405200
+    mov edi, 0x406200
     mov esi, 2
     mov eax, 79
     call syscall_expect_efault
-    mov edi, 0x404020
+    mov edi, 0x405020
     mov esi, 2
     mov eax, 79
     call syscall_expect_two
-    cmp word ptr [0x404020], 0x002f
+    cmp word ptr [0x405020], 0x002f
     jne failure
 
     lea rdi, [rip + proc_self_exe]
-    mov esi, 0x404040
+    mov esi, 0x405040
     xor edx, edx
     mov eax, 89
     call syscall_expect_einval
-    mov edi, 0x409000
-    mov esi, 0x404040
+    mov edi, 0x40a000
+    mov esi, 0x405040
     mov edx, 5
     mov eax, 89
     call syscall_expect_efault
     lea rdi, [rip + proc_self_exe]
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov edx, 5
     mov eax, 89
     call syscall_expect_efault
     lea rdi, [rip + proc_self_exe]
-    mov esi, 0x404040
+    mov esi, 0x405040
     mov edx, 5
     mov eax, 89
     call syscall_expect_five
-    cmp dword ptr [0x404040], 0x696e692f
+    cmp dword ptr [0x405040], 0x696e692f
     jne failure
-    cmp byte ptr [0x404044], 't'
+    cmp byte ptr [0x405044], 't'
     jne failure
 
     mov edi, -100
     lea rsi, [rip + proc_self_exe]
-    mov edx, 0x404040
+    mov edx, 0x405040
     mov r10d, 5
     mov eax, 267
     call syscall_expect_five
-    cmp dword ptr [0x404040], 0x696e692f
+    cmp dword ptr [0x405040], 0x696e692f
     jne failure
-    cmp byte ptr [0x404044], 't'
+    cmp byte ptr [0x405044], 't'
     jne failure
 
     mov edi, -99
     lea rsi, [rip + proc_self_exe]
-    mov edx, 0x404040
+    mov edx, 0x405040
     mov r10d, 5
     mov eax, 267
     call syscall_expect_ebadf
 
     mov edi, -100
     lea rsi, [rip + proc_self_exe]
-    mov edx, 0x404040
+    mov edx, 0x405040
     xor r10d, r10d
     mov eax, 267
     call syscall_expect_einval
 
     mov edi, -100
     lea rsi, [rip + proc_self_exe]
-    mov edx, 0x405200
+    mov edx, 0x406200
     mov r10d, 5
     mov eax, 267
     call syscall_expect_efault
@@ -937,51 +937,51 @@ linux_clone_repeat:
     cmp rax, 0x9c
     jne failure
 
-    mov edi, 0x405200
+    mov edi, 0x406200
     mov eax, 63
     call syscall_expect_efault
 
-    mov edi, 0x404000
+    mov edi, 0x405000
     mov eax, 63
     call syscall_expect_zero
     cmp dword ptr [rdi], 0x756e6947
     jne failure
 
     mov edi, 2
-    mov esi, 0x404200
+    mov esi, 0x405200
     mov eax, 5
     call syscall_expect_ebadf
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x4051c0], rax
+    mov qword ptr [0x4061c0], rax
     mov edi, 1
-    mov esi, 0x4051c0
+    mov esi, 0x4061c0
     mov eax, 5
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x4051c0], rax
+    cmp qword ptr [0x4061c0], rax
     jne failure
 
     mov edi, 1
-    mov esi, 0x404200
+    mov esi, 0x405200
     mov eax, 5
     call syscall_expect_zero
-    cmp qword ptr [0x404210], 1
+    cmp qword ptr [0x405210], 1
     jne failure
-    cmp dword ptr [0x404218], 0x2180
+    cmp dword ptr [0x405218], 0x2180
     jne failure
-    cmp qword ptr [0x404238], 4096
+    cmp qword ptr [0x405238], 4096
     jne failure
 
     mov edi, 2
     mov esi, 0x5413
-    mov edx, 0x404280
+    mov edx, 0x405280
     mov eax, 16
     call syscall_expect_ebadf
 
     mov edi, 1
     mov esi, 0x5402
-    mov edx, 0x404280
+    mov edx, 0x405280
     mov eax, 16
     syscall
     cmp rax, -25
@@ -989,20 +989,20 @@ linux_clone_repeat:
 
     mov edi, 1
     mov esi, 0x5413
-    mov edx, 0x4051fc
+    mov edx, 0x4061fc
     mov eax, 16
     call syscall_expect_efault
 
     mov edi, 1
     mov esi, 0x5413
-    mov edx, 0x404280
+    mov edx, 0x405280
     mov eax, 16
     call syscall_expect_zero
-    cmp word ptr [0x404280], 24
+    cmp word ptr [0x405280], 24
     jne failure
-    cmp word ptr [0x404282], 80
+    cmp word ptr [0x405282], 80
     jne failure
-    cmp dword ptr [0x404284], 0
+    cmp dword ptr [0x405284], 0
     jne failure
 
     mov edi, 2
@@ -1020,64 +1020,64 @@ linux_clone_repeat:
     jne failure
 
     lea rax, [rip + readable_payload]
-    mov qword ptr [0x404300], rax
-    mov qword ptr [0x404308], 4
-    mov qword ptr [0x404310], 0x405200
-    mov qword ptr [0x404318], 4
+    mov qword ptr [0x405300], rax
+    mov qword ptr [0x405308], 4
+    mov qword ptr [0x405310], 0x406200
+    mov qword ptr [0x405318], 4
     mov edi, 1
-    mov esi, 0x404300
+    mov esi, 0x405300
     mov edx, 2
     mov eax, 20
     call syscall_expect_efault
 
     lea rax, [rip + readable_payload + 4]
-    mov qword ptr [0x404310], rax
+    mov qword ptr [0x405310], rax
     mov edi, 2
-    mov esi, 0x404300
+    mov esi, 0x405300
     mov edx, 2
     mov eax, 20
     call syscall_expect_ebadf
 
     mov edi, 1
-    mov esi, 0x404300
+    mov esi, 0x405300
     mov edx, 5
     mov eax, 20
     call syscall_expect_einval
 
     mov edi, 1
-    mov esi, 0x404300
+    mov esi, 0x405300
     mov edx, 2
     mov eax, 20
     call syscall_expect_eight
 
     mov edi, 99
-    mov esi, 0x404080
+    mov esi, 0x405080
     mov eax, 97
     call syscall_expect_einval
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x4051f8], rax
+    mov qword ptr [0x4061f8], rax
     mov edi, 3
-    mov esi, 0x4051f8
+    mov esi, 0x4061f8
     mov eax, 97
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x4051f8], rax
+    cmp qword ptr [0x4061f8], rax
     jne failure
 
     mov edi, 3
-    mov esi, 0x404080
+    mov esi, 0x405080
     mov eax, 97
     call syscall_expect_zero
-    cmp qword ptr [0x404080], 0x1000
+    cmp qword ptr [0x405080], 0x1000
     jne failure
-    cmp qword ptr [0x404088], 0x1000
+    cmp qword ptr [0x405088], 0x1000
     jne failure
 
     mov edi, 2
     mov esi, 7
     xor edx, edx
-    mov r10d, 0x404090
+    mov r10d, 0x405090
     mov eax, 302
     syscall
     cmp rax, -3
@@ -1086,13 +1086,13 @@ linux_clone_repeat:
     xor edi, edi
     mov esi, 99
     xor edx, edx
-    mov r10d, 0x404090
+    mov r10d, 0x405090
     mov eax, 302
     call syscall_expect_einval
 
     xor edi, edi
     mov esi, 7
-    mov edx, 0x404080
+    mov edx, 0x405080
     xor r10d, r10d
     mov eax, 302
     syscall
@@ -1100,31 +1100,31 @@ linux_clone_repeat:
     jne failure
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x4051f8], rax
+    mov qword ptr [0x4061f8], rax
     xor edi, edi
     mov esi, 7
     xor edx, edx
-    mov r10d, 0x4051f8
+    mov r10d, 0x4061f8
     mov eax, 302
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x4051f8], rax
+    cmp qword ptr [0x4061f8], rax
     jne failure
 
     xor edi, edi
     mov esi, 7
     xor edx, edx
-    mov r10d, 0x404090
+    mov r10d, 0x405090
     mov eax, 302
     call syscall_expect_zero
-    cmp qword ptr [0x404090], 6
+    cmp qword ptr [0x405090], 6
     jne failure
-    cmp qword ptr [0x404098], 6
+    cmp qword ptr [0x405098], 6
     jne failure
 
     mov edi, 2
     mov esi, 8
-    mov edx, 0x4040a0
+    mov edx, 0x4050a0
     mov eax, 204
     syscall
     cmp rax, -3
@@ -1132,69 +1132,69 @@ linux_clone_repeat:
 
     xor edi, edi
     mov esi, 7
-    mov edx, 0x4040a0
+    mov edx, 0x4050a0
     mov eax, 204
     call syscall_expect_einval
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x4051fc], rax
+    mov qword ptr [0x4061fc], rax
     xor edi, edi
     mov esi, 8
-    mov edx, 0x4051fc
+    mov edx, 0x4061fc
     mov eax, 204
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x4051fc], rax
+    cmp qword ptr [0x4061fc], rax
     jne failure
 
     xor edi, edi
     mov esi, 8
-    mov edx, 0x4040a0
+    mov edx, 0x4050a0
     mov eax, 204
     call syscall_expect_eight
-    cmp qword ptr [0x4040a0], 1
+    cmp qword ptr [0x4050a0], 1
     jne failure
 
     mov eax, 203
     call syscall_expect_zero
-    mov qword ptr [0x4040a0], 0
+    mov qword ptr [0x4050a0], 0
     mov eax, 203
     call syscall_expect_einval
-    mov edx, 0x405200
+    mov edx, 0x406200
     mov eax, 203
     call syscall_expect_efault
-    mov qword ptr [0x4040a0], 1
+    mov qword ptr [0x4050a0], 1
 
-    mov dword ptr [0x4040a8], 0x12345678
-    mov edi, 0x4040a8
-    mov esi, 0x405200
+    mov dword ptr [0x4050a8], 0x12345678
+    mov edi, 0x4050a8
+    mov esi, 0x406200
     mov edx, 0xdeadbeef
     mov eax, 309
     call syscall_expect_efault
-    cmp dword ptr [0x4040a8], 0x12345678
+    cmp dword ptr [0x4050a8], 0x12345678
     jne failure
 
-    mov edi, 0x4040a8
-    mov esi, 0x4040ac
+    mov edi, 0x4050a8
+    mov esi, 0x4050ac
     mov edx, 0xdeadbeef
     mov eax, 309
     call syscall_expect_zero
-    cmp dword ptr [0x4040a8], 0
+    cmp dword ptr [0x4050a8], 0
     jne failure
-    cmp dword ptr [0x4040ac], 0
+    cmp dword ptr [0x4050ac], 0
     jne failure
 
     mov edi, -100
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov edx, 0x80002
     mov eax, 257
     call syscall_expect_efault
 
     movabs rax, 0x6c756e2f7665642f
-    mov qword ptr [0x404340], rax
-    mov word ptr [0x404348], 0x006c
+    mov qword ptr [0x405340], rax
+    mov word ptr [0x405348], 0x006c
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 0x80002
     mov eax, 257
     call syscall_expect_two
@@ -1219,11 +1219,11 @@ linux_clone_repeat:
     mov eax, 284
     call syscall_expect_three
     mov edi, 3
-    mov esi, 0x404d90
+    mov esi, 0x405d90
     mov edx, 8
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404d90], 7
+    cmp qword ptr [0x405d90], 7
     jne failure
     mov eax, 3
     call syscall_expect_zero
@@ -1233,15 +1233,15 @@ linux_clone_repeat:
     mov eax, 290
     call syscall_expect_three
     mov edi, 3
-    mov esi, 0x404d90
+    mov esi, 0x405d90
     mov edx, 8
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404d90], 1
+    cmp qword ptr [0x405d90], 1
     jne failure
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404d90], 1
+    cmp qword ptr [0x405d90], 1
     jne failure
     xor eax, eax
     call syscall_expect_eagain
@@ -1249,7 +1249,7 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     mov edi, 2
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov edx, 8
     xor eax, eax
     call syscall_expect_zero
@@ -1258,14 +1258,14 @@ linux_clone_repeat:
 
     mov eax, 8
     call syscall_expect_zero
-    mov esi, 0x404350
+    mov esi, 0x405350
     mov eax, 5
     call syscall_expect_zero
-    cmp dword ptr [0x404368], 0x2180
+    cmp dword ptr [0x405368], 0x2180
     jne failure
 
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 2
     mov eax, 257
     call syscall_expect_three
@@ -1290,27 +1290,27 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     mov edi, -100
-    mov esi, 0x405200
-    mov edx, 0x404350
+    mov esi, 0x406200
+    mov edx, 0x405350
     xor r10d, r10d
     mov eax, 262
     call syscall_expect_efault
-    mov esi, 0x404340
-    mov edx, 0x405200
+    mov esi, 0x405340
+    mov edx, 0x406200
     mov eax, 262
     call syscall_expect_efault
-    mov edx, 0x404350
+    mov edx, 0x405350
     mov r10d, 1
     mov eax, 262
     call syscall_expect_einval
     xor r10d, r10d
     mov eax, 262
     call syscall_expect_zero
-    cmp dword ptr [0x404368], 0x2180
+    cmp dword ptr [0x405368], 0x2180
     jne failure
 
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 6
     mov eax, 269
     call syscall_expect_zero
@@ -1319,11 +1319,11 @@ linux_clone_repeat:
     syscall
     cmp rax, -13
     jne failure
-    mov esi, 0x405200
+    mov esi, 0x406200
     xor edx, edx
     mov eax, 269
     call syscall_expect_efault
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 8
     mov eax, 269
     call syscall_expect_einval
@@ -1383,7 +1383,7 @@ linux_clone_repeat:
     mov edx, 2
     mov eax, 72
     call syscall_expect_zero
-    mov esi, 0x404d90
+    mov esi, 0x405d90
     mov edx, 8
     xor eax, eax
     call syscall_expect_enosys
@@ -1392,83 +1392,83 @@ linux_clone_repeat:
     mov eax, 72
     call syscall_expect_zero
     mov edi, 2
-    mov esi, 0x404350
+    mov esi, 0x405350
     mov eax, 5
     call syscall_expect_zero
-    cmp dword ptr [0x404368], 0x180
+    cmp dword ptr [0x405368], 0x180
     jne failure
     mov edi, 3
     mov eax, 5
     call syscall_expect_zero
-    cmp dword ptr [0x404368], 0x180
+    cmp dword ptr [0x405368], 0x180
     jne failure
     mov eax, 8
     syscall
     cmp rax, -29
     jne failure
 
-    mov dword ptr [0x404d00], 1
+    mov dword ptr [0x405d00], 1
     movabs rax, 0xaabbccddeeff0011
-    mov qword ptr [0x404d04], rax
+    mov qword ptr [0x405d04], rax
     mov edi, 2
     mov esi, 1
     mov edx, 3
-    mov r10d, 0x404d00
+    mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_zero
 
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
 
-    mov qword ptr [0x404d80], 5
+    mov qword ptr [0x405d80], 5
     mov edi, 3
-    mov esi, 0x404d80
+    mov esi, 0x405d80
     mov edx, 8
     mov eax, 1
     call syscall_expect_eight
 
     mov edi, 2
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_one
-    cmp dword ptr [0x404d20], 1
+    cmp dword ptr [0x405d20], 1
     jne failure
     movabs rax, 0xaabbccddeeff0011
-    cmp qword ptr [0x404d24], rax
+    cmp qword ptr [0x405d24], rax
     jne failure
 
     mov edi, 3
-    mov esi, 0x4051fc
+    mov esi, 0x4061fc
     mov edx, 8
     xor eax, eax
     call syscall_expect_efault
 
-    mov esi, 0x404d90
+    mov esi, 0x405d90
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404d90], 5
+    cmp qword ptr [0x405d90], 5
     jne failure
 
     mov edi, 2
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
 
     mov edi, 3
-    mov esi, 0x404d90
+    mov esi, 0x405d90
     mov edx, 8
     xor eax, eax
     call syscall_expect_eagain
 
-    mov qword ptr [0x404d80], -1
-    mov esi, 0x404d80
+    mov qword ptr [0x405d80], -1
+    mov esi, 0x405d80
     mov edx, 7
     mov eax, 1
     call syscall_expect_einval
@@ -1476,32 +1476,32 @@ linux_clone_repeat:
     mov eax, 1
     call syscall_expect_einval
 
-    mov qword ptr [0x404d80], -2
+    mov qword ptr [0x405d80], -2
     mov eax, 1
     call syscall_expect_eight
 
-    mov dword ptr [0x404da0], 3
-    mov word ptr [0x404da4], 4
-    mov word ptr [0x404da6], -1
-    mov edi, 0x404da0
+    mov dword ptr [0x405da0], 3
+    mov word ptr [0x405da4], 4
+    mov word ptr [0x405da6], -1
+    mov edi, 0x405da0
     mov esi, 1
     xor edx, edx
     mov eax, 7
     call syscall_expect_zero
-    cmp word ptr [0x404da6], 0
+    cmp word ptr [0x405da6], 0
     jne failure
 
-    mov qword ptr [0x404d80], 1
+    mov qword ptr [0x405d80], 1
     mov edi, 3
-    mov esi, 0x404d80
+    mov esi, 0x405d80
     mov edx, 8
     mov eax, 1
     call syscall_expect_eagain
 
-    mov esi, 0x404d90
+    mov esi, 0x405d90
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404d90], -2
+    cmp qword ptr [0x405d90], -2
     jne failure
 
     mov edi, 2
@@ -1518,7 +1518,7 @@ linux_clone_repeat:
     mov edi, 2
     mov esi, 1
     mov edx, 2
-    mov r10d, 0x404d00
+    mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_einval
 
@@ -1531,22 +1531,22 @@ linux_clone_repeat:
     mov eax, 233
     call syscall_expect_einval
 
-    mov dword ptr [0x404d00], 0x80000000
+    mov dword ptr [0x405d00], 0x80000000
     mov esi, 1
     mov eax, 233
     call syscall_expect_einval
 
-    mov dword ptr [0x404d00], 4
+    mov dword ptr [0x405d00], 4
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x404d04], rax
+    mov qword ptr [0x405d04], rax
     mov edi, 2
     mov esi, 1
     mov edx, 1
-    mov r10d, 0x4051fc
+    mov r10d, 0x4061fc
     mov eax, 233
     call syscall_expect_efault
 
-    mov r10d, 0x404d00
+    mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_zero
     mov eax, 233
@@ -1555,82 +1555,82 @@ linux_clone_repeat:
     jne failure
 
     mov edi, 2
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     xor edx, edx
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_einval
 
-    mov qword ptr [0x404d40], 0
+    mov qword ptr [0x405d40], 0
     mov edi, 2
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     mov r10d, -1
-    mov r8d, 0x404d40
+    mov r8d, 0x405d40
     mov r9d, 7
     mov eax, 281
     call syscall_expect_einval
 
-    mov r8d, 0x405200
+    mov r8d, 0x406200
     mov r9d, 8
     mov eax, 281
     call syscall_expect_efault
 
-    mov r8d, 0x404d40
+    mov r8d, 0x405d40
     mov eax, 281
     call syscall_expect_one
-    cmp dword ptr [0x404d20], 4
+    cmp dword ptr [0x405d20], 4
     jne failure
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x404d24], rax
+    cmp qword ptr [0x405d24], rax
     jne failure
 
-    mov qword ptr [0x404d60], 0
-    mov qword ptr [0x404d68], 1000000000
+    mov qword ptr [0x405d60], 0
+    mov qword ptr [0x405d68], 1000000000
     mov edi, 2
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
-    mov r10d, 0x404d60
-    mov r8d, 0x404d40
+    mov r10d, 0x405d60
+    mov r8d, 0x405d40
     mov r9d, 8
     mov eax, 441
     call syscall_expect_einval
 
-    mov qword ptr [0x404d68], 0
+    mov qword ptr [0x405d68], 0
     mov eax, 441
     call syscall_expect_one
 
-    mov r10d, 0x4051fc
+    mov r10d, 0x4061fc
     mov eax, 441
     call syscall_expect_efault
 
     mov edi, 2
-    mov esi, 0x4051fc
+    mov esi, 0x4061fc
     mov edx, 1
     mov r10d, -1
     mov eax, 232
     call syscall_expect_efault
 
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov eax, 232
     call syscall_expect_one
-    cmp dword ptr [0x404d20], 4
+    cmp dword ptr [0x405d20], 4
     jne failure
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x404d24], rax
+    cmp qword ptr [0x405d24], rax
     jne failure
 
-    mov dword ptr [0x404d00], 1
+    mov dword ptr [0x405d00], 1
     movabs rax, 0x8877665544332211
-    mov qword ptr [0x404d04], rax
+    mov qword ptr [0x405d04], rax
     mov edi, 2
     mov esi, 3
     mov edx, 1
-    mov r10d, 0x404d00
+    mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_zero
 
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
@@ -1639,19 +1639,19 @@ linux_clone_repeat:
     mov edi, 2
     mov esi, 2
     mov edx, 1
-    mov r10d, 0x405200
+    mov r10d, 0x406200
     mov eax, 233
     call syscall_expect_zero
 
     mov esi, 3
-    mov r10d, 0x404d00
+    mov r10d, 0x405d00
     mov eax, 233
     syscall
     cmp rax, -2
     jne failure
 
     mov edi, 2
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
@@ -1698,7 +1698,7 @@ linux_clone_repeat:
     mov edx, 2
     mov eax, 72
     call syscall_expect_zero
-    mov esi, 0x404e00
+    mov esi, 0x405e00
     mov edx, 8
     xor eax, eax
     call syscall_expect_enosys
@@ -1706,127 +1706,127 @@ linux_clone_repeat:
     mov edx, 0x802
     mov eax, 72
     call syscall_expect_zero
-    mov esi, 0x404350
+    mov esi, 0x405350
     mov eax, 5
     call syscall_expect_zero
-    cmp dword ptr [0x404368], 0x180
+    cmp dword ptr [0x405368], 0x180
     jne failure
     mov eax, 8
     syscall
     cmp rax, -29
     jne failure
-    mov esi, 0x404e00
+    mov esi, 0x405e00
     mov edx, 8
     mov eax, 1
     call syscall_expect_einval
 
-    mov esi, 0x404e20
+    mov esi, 0x405e20
     mov eax, 287
     call syscall_expect_zero
-    cmp qword ptr [0x404e20], 0
+    cmp qword ptr [0x405e20], 0
     jne failure
-    cmp qword ptr [0x404e38], 0
+    cmp qword ptr [0x405e38], 0
     jne failure
-    mov esi, 0x404e00
+    mov esi, 0x405e00
     xor eax, eax
     call syscall_expect_eagain
 
     xor esi, esi
-    mov edx, 0x405200
+    mov edx, 0x406200
     xor r10d, r10d
     mov eax, 286
     call syscall_expect_efault
-    mov qword ptr [0x404e00], 0
-    mov qword ptr [0x404e08], 1000000000
-    mov qword ptr [0x404e10], 0
-    mov qword ptr [0x404e18], 1
-    mov edx, 0x404e00
+    mov qword ptr [0x405e00], 0
+    mov qword ptr [0x405e08], 1000000000
+    mov qword ptr [0x405e10], 0
+    mov qword ptr [0x405e18], 1
+    mov edx, 0x405e00
     mov eax, 286
     call syscall_expect_einval
 
-    mov qword ptr [0x404e08], 0
-    mov r10d, 0x404e40
+    mov qword ptr [0x405e08], 0
+    mov r10d, 0x405e40
     mov eax, 286
     call syscall_expect_zero
-    cmp qword ptr [0x404e40], 0
+    cmp qword ptr [0x405e40], 0
     jne failure
-    cmp qword ptr [0x404e58], 0
+    cmp qword ptr [0x405e58], 0
     jne failure
 
-    mov dword ptr [0x404d00], 1
+    mov dword ptr [0x405d00], 1
     movabs rax, 0x54494d4552464433
-    mov qword ptr [0x404d04], rax
+    mov qword ptr [0x405d04], rax
     mov edi, 2
     mov esi, 1
     mov edx, 3
-    mov r10d, 0x404d00
+    mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_zero
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_one
     movabs rax, 0x54494d4552464433
-    cmp qword ptr [0x404d24], rax
+    cmp qword ptr [0x405d24], rax
     jne failure
 
     mov edi, 3
-    mov esi, 0x4051fc
+    mov esi, 0x4061fc
     mov edx, 8
     xor eax, eax
     call syscall_expect_efault
-    mov esi, 0x404e60
+    mov esi, 0x405e60
     mov edx, 8
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404e60], 1
+    cmp qword ptr [0x405e60], 1
     jne failure
     mov edi, 2
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
     mov edi, 3
-    mov esi, 0x404e60
+    mov esi, 0x405e60
     mov edx, 8
     xor eax, eax
     call syscall_expect_eagain
 
-    mov qword ptr [0x404e08], 1
-    mov qword ptr [0x404e18], 1
+    mov qword ptr [0x405e08], 1
+    mov qword ptr [0x405e18], 1
     xor esi, esi
-    mov edx, 0x404e00
-    mov r10d, 0x404e40
+    mov edx, 0x405e00
+    mov r10d, 0x405e40
     mov eax, 286
     call syscall_expect_zero
-    cmp qword ptr [0x404e48], 0
+    cmp qword ptr [0x405e48], 0
     jne failure
-    mov esi, 0x404e20
+    mov esi, 0x405e20
     mov eax, 287
     call syscall_expect_zero
-    cmp qword ptr [0x404e28], 1
+    cmp qword ptr [0x405e28], 1
     jne failure
-    mov esi, 0x404e60
+    mov esi, 0x405e60
     mov edx, 8
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404e60], 0
+    cmp qword ptr [0x405e60], 0
     je failure
 
     mov edi, 3
-    mov qword ptr [0x404e08], 0
+    mov qword ptr [0x405e08], 0
     mov esi, 1
-    mov edx, 0x404e00
+    mov edx, 0x405e00
     xor r10d, r10d
     mov eax, 286
     call syscall_expect_zero
-    mov esi, 0x404e60
+    mov esi, 0x405e60
     mov edx, 8
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404e60], 0
+    cmp qword ptr [0x405e60], 0
     je failure
 
     mov edi, 2
@@ -1842,11 +1842,11 @@ linux_clone_repeat:
     mov eax, 3
     call syscall_expect_zero
 
-    mov edi, 0x405200
+    mov edi, 0x406200
     xor esi, esi
     mov eax, 293
     call syscall_expect_efault
-    mov edi, 0x404e80
+    mov edi, 0x405e80
     mov esi, 2
     mov eax, 293
     call syscall_expect_einval
@@ -1854,13 +1854,13 @@ linux_clone_repeat:
     xor edi, edi
     mov eax, 291
     call syscall_expect_two
-    mov edi, 0x404e80
+    mov edi, 0x405e80
     mov esi, 0x80800
     mov eax, 293
     call syscall_expect_zero
-    cmp dword ptr [0x404e80], 3
+    cmp dword ptr [0x405e80], 3
     jne failure
-    cmp dword ptr [0x404e84], 4
+    cmp dword ptr [0x405e84], 4
     jne failure
     mov eax, 293
     syscall
@@ -1899,7 +1899,7 @@ linux_clone_repeat:
     mov edx, 0x4000
     mov eax, 72
     call syscall_expect_einval
-    mov esi, 0x404eb0
+    mov esi, 0x405eb0
     mov edx, 1
     xor eax, eax
     call syscall_expect_enosys
@@ -1912,128 +1912,128 @@ linux_clone_repeat:
     cmp rax, -29
     jne failure
 
-    mov dword ptr [0x404d00], 1
+    mov dword ptr [0x405d00], 1
     movabs rax, 0x5049504552454144
-    mov qword ptr [0x404d04], rax
+    mov qword ptr [0x405d04], rax
     mov edi, 2
     mov esi, 1
     mov edx, 3
-    mov r10d, 0x404d00
+    mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_zero
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
 
     mov edi, 4
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov edx, 8
     mov eax, 1
     call syscall_expect_efault
 
     movabs rax, 0x4847464544434241
-    mov qword ptr [0x404ea0], rax
+    mov qword ptr [0x405ea0], rax
     mov edi, 4
-    mov esi, 0x404ea0
+    mov esi, 0x405ea0
     mov edx, 8
     mov eax, 1
     call syscall_expect_eight
     mov edi, 2
-    mov esi, 0x404d20
+    mov esi, 0x405d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_one
     movabs rax, 0x5049504552454144
-    cmp qword ptr [0x404d24], rax
+    cmp qword ptr [0x405d24], rax
     jne failure
 
     mov edi, 3
-    mov esi, 0x404350
+    mov esi, 0x405350
     mov eax, 5
     call syscall_expect_zero
-    cmp dword ptr [0x404368], 0x1180
+    cmp dword ptr [0x405368], 0x1180
     jne failure
     mov esi, 0x541b
-    mov edx, 0x404ec0
+    mov edx, 0x405ec0
     mov eax, 16
     call syscall_expect_zero
-    cmp dword ptr [0x404ec0], 8
+    cmp dword ptr [0x405ec0], 8
     jne failure
-    mov edx, 0x405200
+    mov edx, 0x406200
     mov eax, 16
     call syscall_expect_efault
 
     mov edi, 3
-    mov esi, 0x4051fc
+    mov esi, 0x4061fc
     mov edx, 8
     xor eax, eax
     call syscall_expect_efault
-    mov esi, 0x404eb0
+    mov esi, 0x405eb0
     mov edx, 3
     xor eax, eax
     call syscall_expect_three
-    cmp byte ptr [0x404eb0], 0x41
+    cmp byte ptr [0x405eb0], 0x41
     jne failure
-    cmp byte ptr [0x404eb2], 0x43
+    cmp byte ptr [0x405eb2], 0x43
     jne failure
     mov esi, 0x541b
-    mov edx, 0x404ec0
+    mov edx, 0x405ec0
     mov eax, 16
     call syscall_expect_zero
-    cmp dword ptr [0x404ec0], 5
+    cmp dword ptr [0x405ec0], 5
     jne failure
     mov edi, 3
-    mov esi, 0x404eb8
+    mov esi, 0x405eb8
     mov edx, 5
     xor eax, eax
     call syscall_expect_five
-    cmp byte ptr [0x404eb8], 0x44
+    cmp byte ptr [0x405eb8], 0x44
     jne failure
-    cmp byte ptr [0x404ebc], 0x48
+    cmp byte ptr [0x405ebc], 0x48
     jne failure
-    mov esi, 0x404eb0
+    mov esi, 0x405eb0
     mov edx, 1
     xor eax, eax
     call syscall_expect_eagain
 
-    mov qword ptr [0x404f00], 0x404ea0
-    mov qword ptr [0x404f08], 3
-    mov qword ptr [0x404f10], 0x405200
-    mov qword ptr [0x404f18], 5
+    mov qword ptr [0x405f00], 0x405ea0
+    mov qword ptr [0x405f08], 3
+    mov qword ptr [0x405f10], 0x406200
+    mov qword ptr [0x405f18], 5
     mov edi, 4
-    mov esi, 0x404f00
+    mov esi, 0x405f00
     mov edx, 2
     mov eax, 20
     call syscall_expect_efault
-    mov qword ptr [0x404f10], 0x404ea3
+    mov qword ptr [0x405f10], 0x405ea3
     mov eax, 20
     call syscall_expect_eight
 
-    mov qword ptr [0x404f20], 0x404eb0
-    mov qword ptr [0x404f28], 3
-    mov qword ptr [0x404f30], 0x405200
-    mov qword ptr [0x404f38], 5
+    mov qword ptr [0x405f20], 0x405eb0
+    mov qword ptr [0x405f28], 3
+    mov qword ptr [0x405f30], 0x406200
+    mov qword ptr [0x405f38], 5
     mov edi, 3
-    mov esi, 0x404f20
+    mov esi, 0x405f20
     mov eax, 19
     call syscall_expect_efault
-    mov qword ptr [0x404f30], 0x404eb8
+    mov qword ptr [0x405f30], 0x405eb8
     mov eax, 19
     call syscall_expect_eight
-    cmp byte ptr [0x404eb0], 0x41
+    cmp byte ptr [0x405eb0], 0x41
     jne failure
-    cmp byte ptr [0x404eb2], 0x43
+    cmp byte ptr [0x405eb2], 0x43
     jne failure
-    cmp byte ptr [0x404eb8], 0x44
+    cmp byte ptr [0x405eb8], 0x44
     jne failure
-    cmp byte ptr [0x404ebc], 0x48
+    cmp byte ptr [0x405ebc], 0x48
     jne failure
 
     mov edi, 4
-    mov esi, 0x404e00
+    mov esi, 0x405e00
     mov edx, 256
     mov eax, 1
     call syscall_expect_256
@@ -2041,49 +2041,49 @@ linux_clone_repeat:
     mov eax, 1
     call syscall_expect_eagain
     mov edi, 3
-    mov esi, 0x404e00
+    mov esi, 0x405e00
     mov edx, 256
     xor eax, eax
     call syscall_expect_256
 
     mov edi, 4
-    mov esi, 0x404ea0
+    mov esi, 0x405ea0
     mov edx, 1
     mov eax, 1
     call syscall_expect_one
     mov edi, 4
     mov eax, 3
     call syscall_expect_zero
-    mov dword ptr [0x404da0], 3
-    mov word ptr [0x404da4], 1
-    mov word ptr [0x404da6], -1
-    mov edi, 0x404da0
+    mov dword ptr [0x405da0], 3
+    mov word ptr [0x405da4], 1
+    mov word ptr [0x405da6], -1
+    mov edi, 0x405da0
     mov esi, 1
     xor edx, edx
     mov eax, 7
     call syscall_expect_one
-    cmp word ptr [0x404da6], 0x11
+    cmp word ptr [0x405da6], 0x11
     jne failure
     mov edi, 3
-    mov esi, 0x404eb0
+    mov esi, 0x405eb0
     mov edx, 1
     xor eax, eax
     call syscall_expect_one
-    cmp byte ptr [0x404eb0], 0x41
+    cmp byte ptr [0x405eb0], 0x41
     jne failure
     xor eax, eax
     call syscall_expect_zero
     mov eax, 3
     call syscall_expect_zero
 
-    mov edi, 0x404e80
+    mov edi, 0x405e80
     mov eax, 22
     call syscall_expect_zero
     mov edi, 3
     mov eax, 3
     call syscall_expect_zero
     mov edi, 4
-    mov esi, 0x404ea0
+    mov esi, 0x405ea0
     mov edx, 1
     mov eax, 1
     syscall
@@ -2096,26 +2096,26 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     movabs rax, 0x72657a2f7665642f
-    mov qword ptr [0x404340], rax
-    mov word ptr [0x404348], 0x006f
+    mov qword ptr [0x405340], rax
+    mov word ptr [0x405348], 0x006f
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     xor edx, edx
     mov eax, 257
     call syscall_expect_two
-    mov qword ptr [0x404380], -1
+    mov qword ptr [0x405380], -1
     mov edi, 2
-    mov esi, 0x404380
+    mov esi, 0x405380
     mov edx, 8
     xor eax, eax
     call syscall_expect_eight
-    cmp qword ptr [0x404380], 0
+    cmp qword ptr [0x405380], 0
     jne failure
     mov eax, 1
     call syscall_expect_ebadf
     mov edi, -100
-    mov esi, 0x404340
-    mov edx, 0x404350
+    mov esi, 0x405340
+    mov edx, 0x405350
     xor r10d, r10d
     mov eax, 262
     call syscall_expect_zero
@@ -2124,31 +2124,31 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     movabs rax, 0x6e6f632f7665642f
-    mov qword ptr [0x404340], rax
-    mov dword ptr [0x404348], 0x656c6f73
-    mov byte ptr [0x40434c], 0
+    mov qword ptr [0x405340], rax
+    mov dword ptr [0x405348], 0x656c6f73
+    mov byte ptr [0x40534c], 0
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 1
     mov eax, 257
     call syscall_expect_two
     movabs rax, 0x2121454349564544
-    mov qword ptr [0x404380], rax
-    mov byte ptr [0x404388], 10
+    mov qword ptr [0x405380], rax
+    mov byte ptr [0x405388], 10
     mov edi, 2
-    mov esi, 0x404380
+    mov esi, 0x405380
     mov edx, 9
     mov eax, 1
     syscall
     cmp rax, 9
     jne failure
     mov esi, 0x5413
-    mov edx, 0x404390
+    mov edx, 0x405390
     mov eax, 16
     call syscall_expect_zero
-    cmp word ptr [0x404390], 24
+    cmp word ptr [0x405390], 24
     jne failure
-    cmp word ptr [0x404392], 80
+    cmp word ptr [0x405392], 80
     jne failure
     mov eax, 8
     syscall
@@ -2158,15 +2158,15 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     movabs rax, 0x7974742f7665642f
-    mov qword ptr [0x404340], rax
-    mov byte ptr [0x404348], 0
+    mov qword ptr [0x405340], rax
+    mov byte ptr [0x405348], 0
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 2
     mov eax, 257
     call syscall_expect_two
     mov edi, 2
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov edx, 8
     xor eax, eax
     call syscall_expect_zero
@@ -2174,69 +2174,69 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     xor edx, edx
     mov r10d, 0x7ff
-    mov r8d, 0x405200
+    mov r8d, 0x406200
     mov eax, 332
     call syscall_expect_efault
-    mov r8d, 0x404400
+    mov r8d, 0x405400
     mov eax, 332
     call syscall_expect_zero
-    cmp dword ptr [0x404400], 0x7ff
+    cmp dword ptr [0x405400], 0x7ff
     jne failure
-    cmp word ptr [0x40441c], 0x2180
+    cmp word ptr [0x40541c], 0x2180
     jne failure
-    cmp qword ptr [0x404420], 3
+    cmp qword ptr [0x405420], 3
     jne failure
     mov r10d, 0x80000000
     mov eax, 332
     call syscall_expect_einval
 
     movabs rax, 0x72657a2f7665642f
-    mov qword ptr [0x404340], rax
-    mov word ptr [0x404348], 0x006f
+    mov qword ptr [0x405340], rax
+    mov word ptr [0x405348], 0x006f
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     xor edx, edx
     mov eax, 257
     call syscall_expect_two
-    mov qword ptr [0x404540], -1
-    mov qword ptr [0x404550], -1
-    mov qword ptr [0x404500], 0x404540
-    mov qword ptr [0x404508], 4
-    mov qword ptr [0x404510], 0x405200
-    mov qword ptr [0x404518], 4
+    mov qword ptr [0x405540], -1
+    mov qword ptr [0x405550], -1
+    mov qword ptr [0x405500], 0x405540
+    mov qword ptr [0x405508], 4
+    mov qword ptr [0x405510], 0x406200
+    mov qword ptr [0x405518], 4
     mov edi, 2
-    mov esi, 0x404500
+    mov esi, 0x405500
     mov edx, 2
     mov eax, 19
     call syscall_expect_efault
-    cmp qword ptr [0x404540], -1
+    cmp qword ptr [0x405540], -1
     jne failure
-    mov qword ptr [0x404510], 0x404550
+    mov qword ptr [0x405510], 0x405550
     mov eax, 19
     call syscall_expect_eight
-    cmp dword ptr [0x404540], 0
+    cmp dword ptr [0x405540], 0
     jne failure
-    cmp dword ptr [0x404550], 0
+    cmp dword ptr [0x405550], 0
     jne failure
     mov edi, 2
     mov eax, 3
     call syscall_expect_zero
 
     movabs rax, 0x6c756e2f7665642f
-    mov qword ptr [0x404340], rax
-    mov word ptr [0x404348], 0x006c
+    mov qword ptr [0x405340], rax
+    mov word ptr [0x405348], 0x006c
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 1
     mov eax, 257
     call syscall_expect_two
-    mov qword ptr [0x404500], 0x405200
-    mov qword ptr [0x404508], 8
+    mov qword ptr [0x405500], 0x406200
+    mov qword ptr [0x405508], 8
     mov edi, 2
-    mov esi, 0x404500
+    mov esi, 0x405500
     mov edx, 1
     mov eax, 20
     call syscall_expect_eight
@@ -2244,33 +2244,33 @@ linux_clone_repeat:
     mov eax, 3
     call syscall_expect_zero
 
-    mov dword ptr [0x404340], 0x7665642f
-    mov byte ptr [0x404344], 0
+    mov dword ptr [0x405340], 0x7665642f
+    mov byte ptr [0x405344], 0
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 0x10000
     mov eax, 257
     call syscall_expect_two
     mov edi, 2
-    mov esi, 0x404700
+    mov esi, 0x405700
     mov eax, 5
     call syscall_expect_zero
-    cmp dword ptr [0x404718], 0x416d
+    cmp dword ptr [0x405718], 0x416d
     jne failure
-    mov esi, 0x404800
+    mov esi, 0x405800
     mov edx, 151
     mov eax, 217
     call syscall_expect_einval
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov edx, 152
     mov eax, 217
     call syscall_expect_efault
-    mov esi, 0x404800
+    mov esi, 0x405800
     mov eax, 217
     call syscall_expect_152
-    cmp byte ptr [0x404813], '.'
+    cmp byte ptr [0x405813], '.'
     jne failure
-    cmp byte ptr [0x404843], 'n'
+    cmp byte ptr [0x405843], 'n'
     jne failure
     mov eax, 217
     call syscall_expect_zero
@@ -2278,7 +2278,7 @@ linux_clone_repeat:
     xor edx, edx
     mov eax, 8
     call syscall_expect_zero
-    mov esi, 0x404800
+    mov esi, 0x405800
     mov edx, 152
     mov eax, 217
     call syscall_expect_152
@@ -2286,12 +2286,12 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     movabs rax, 0x6c2f343662696c2f
-    mov qword ptr [0x404340], rax
+    mov qword ptr [0x405340], rax
     movabs rax, 0x2e78756e69672d64
-    mov qword ptr [0x404348], rax
-    mov dword ptr [0x404350], 0x00006f73
+    mov qword ptr [0x405348], rax
+    mov dword ptr [0x405350], 0x00006f73
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     xor edx, edx
     mov eax, 257
     call syscall_expect_two
@@ -2301,21 +2301,21 @@ linux_clone_repeat:
 #endif
 
     mov edi, 2
-    mov esi, 0x404380
+    mov esi, 0x405380
     mov edx, 4
     xor eax, eax
     syscall
     cmp rax, 4
     jne failure
-    cmp dword ptr [0x404380], 0x464c457f
+    cmp dword ptr [0x405380], 0x464c457f
     jne failure
 
-    mov esi, 0x404384
+    mov esi, 0x405384
     mov edx, 1
     mov r10d, 0x200
     mov eax, 17
     call syscall_expect_one
-    cmp byte ptr [0x404384], 0x48
+    cmp byte ptr [0x405384], 0x48
     jne failure
 
     mov esi, 0x200
@@ -2324,22 +2324,22 @@ linux_clone_repeat:
     syscall
     cmp rax, 0x200
     jne failure
-    mov esi, 0x404384
+    mov esi, 0x405384
     mov edx, 1
     xor eax, eax
     call syscall_expect_one
-    cmp byte ptr [0x404384], 0x48
+    cmp byte ptr [0x405384], 0x48
     jne failure
 
-    mov esi, 0x404700
+    mov esi, 0x405700
     mov eax, 5
     call syscall_expect_zero
-    cmp dword ptr [0x404718], 0x816d
+    cmp dword ptr [0x405718], 0x816d
     jne failure
-    cmp qword ptr [0x404730], 0
+    cmp qword ptr [0x405730], 0
     je failure
 
-    mov esi, 0x404380
+    mov esi, 0x405380
     mov edx, 1
     mov eax, 1
     call syscall_expect_ebadf
@@ -2347,7 +2347,7 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     mov edi, -100
-    mov esi, 0x404340
+    mov esi, 0x405340
     mov edx, 1
     mov eax, 257
     syscall
@@ -2359,80 +2359,80 @@ linux_clone_repeat:
     cmp rax, -20
     jne failure
 
-    mov edx, 0x404700
+    mov edx, 0x405700
     xor r10d, r10d
     mov eax, 262
     call syscall_expect_zero
-    cmp dword ptr [0x404718], 0x816d
+    cmp dword ptr [0x405718], 0x816d
     jne failure
-    cmp qword ptr [0x404730], 0
+    cmp qword ptr [0x405730], 0
     je failure
 
-    mov edi, 0x405200
+    mov edi, 0x406200
     mov eax, 80
     call syscall_expect_efault
 
-    mov word ptr [0x4040b0], 0x2f
-    mov edi, 0x4040b0
+    mov word ptr [0x4050b0], 0x2f
+    mov edi, 0x4050b0
     mov eax, 80
     call syscall_expect_zero
 
     movabs rax, 0x676e697373696d2f
-    mov qword ptr [0x4040b0], rax
-    mov byte ptr [0x4040b8], 0
-    mov edi, 0x4040b0
+    mov qword ptr [0x4050b0], rax
+    mov byte ptr [0x4050b8], 0
+    mov edi, 0x4050b0
     mov eax, 80
     syscall
     cmp rax, -2
     jne failure
 
     mov edi, 16
-    mov esi, 0x4040d0
+    mov esi, 0x4050d0
     mov eax, 157
     call syscall_expect_zero
-    cmp dword ptr [0x4040d0], 0x74696e69
+    cmp dword ptr [0x4050d0], 0x74696e69
     jne failure
-    cmp dword ptr [0x4040d4], 0
+    cmp dword ptr [0x4050d4], 0
     jne failure
 
     mov edi, 15
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov eax, 157
     call syscall_expect_efault
 
     movabs rax, 0x72702d78756e6967
-    mov qword ptr [0x4040c0], rax
-    mov dword ptr [0x4040c8], 0x0065626f
+    mov qword ptr [0x4050c0], rax
+    mov dword ptr [0x4050c8], 0x0065626f
     mov edi, 15
-    mov esi, 0x4040c0
+    mov esi, 0x4050c0
     mov eax, 157
     call syscall_expect_zero
 
     mov edi, 16
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov eax, 157
     call syscall_expect_efault
 
     mov edi, 16
-    mov esi, 0x4040d0
+    mov esi, 0x4050d0
     mov eax, 157
     call syscall_expect_zero
     movabs rax, 0x72702d78756e6967
-    cmp qword ptr [0x4040d0], rax
+    cmp qword ptr [0x4050d0], rax
     jne failure
-    cmp dword ptr [0x4040d8], 0x0065626f
+    cmp dword ptr [0x4050d8], 0x0065626f
     jne failure
-    cmp dword ptr [0x4040dc], 0
+    cmp dword ptr [0x4050dc], 0
     jne failure
 
     mov edi, 99
     mov eax, 157
     call syscall_expect_einval
 
-    mov dword ptr [0x4040c0], 0x74696e69
-    mov byte ptr [0x4040c4], 0
+    mov dword ptr [0x4050c0], 0x74696e69
+    mov byte ptr [0x4050c4], 0
     mov edi, 15
-    mov esi, 0x4040c0
+    mov esi, 0x4050c0
     mov eax, 157
     call syscall_expect_zero
 
@@ -2509,13 +2509,13 @@ linux_clone_repeat:
     call syscall_expect_einval
 
     mov edi, 1
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov rdx, -1
     xor eax, eax
     call syscall_expect_ebadf
 
     xor edi, edi
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov rdx, -1
     xor eax, eax
     call syscall_expect_zero
@@ -2533,13 +2533,13 @@ linux_clone_repeat:
     call syscall_expect_ebadf
 
     xor edi, edi
-    mov esi, 0x404200
+    mov esi, 0x405200
     mov eax, 5
     call syscall_expect_ebadf
 
     xor edi, edi
     mov esi, 0x5413
-    mov edx, 0x404280
+    mov edx, 0x405280
     mov eax, 16
     call syscall_expect_ebadf
 
@@ -2558,23 +2558,23 @@ linux_clone_repeat:
     call syscall_expect_einval
 
     xor edi, edi
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov eax, 115
     call syscall_expect_one
 
-    mov dword ptr [0x404060], 0x12345678
+    mov dword ptr [0x405060], 0x12345678
     mov edi, 1
-    mov esi, 0x405200
+    mov esi, 0x406200
     mov eax, 115
     call syscall_expect_efault
-    cmp dword ptr [0x404060], 0x12345678
+    cmp dword ptr [0x405060], 0x12345678
     jne failure
 
     mov edi, 1
-    mov esi, 0x404060
+    mov esi, 0x405060
     mov eax, 115
     call syscall_expect_one
-    cmp dword ptr [0x404060], 0
+    cmp dword ptr [0x405060], 0
     jne failure
 
     mov edi, -1
@@ -2589,53 +2589,53 @@ linux_clone_repeat:
     mov eax, 135
     call syscall_expect_einval
 
-    mov dword ptr [0x404060], 0x20080522
-    mov dword ptr [0x404064], 0
-    mov dword ptr [0x404068], 0x12345678
-    mov edi, 0x404060
-    mov esi, 0x405200
+    mov dword ptr [0x405060], 0x20080522
+    mov dword ptr [0x405064], 0
+    mov dword ptr [0x405068], 0x12345678
+    mov edi, 0x405060
+    mov esi, 0x406200
     mov eax, 125
     call syscall_expect_efault
-    cmp dword ptr [0x404068], 0x12345678
+    cmp dword ptr [0x405068], 0x12345678
     jne failure
 
-    mov edi, 0x404060
-    mov esi, 0x404068
+    mov edi, 0x405060
+    mov esi, 0x405068
     mov eax, 125
     call syscall_expect_zero
-    mov eax, dword ptr [0x404068]
-    or eax, dword ptr [0x40406c]
-    or eax, dword ptr [0x404070]
-    or eax, dword ptr [0x404074]
-    or eax, dword ptr [0x404078]
-    or eax, dword ptr [0x40407c]
+    mov eax, dword ptr [0x405068]
+    or eax, dword ptr [0x40506c]
+    or eax, dword ptr [0x405070]
+    or eax, dword ptr [0x405074]
+    or eax, dword ptr [0x405078]
+    or eax, dword ptr [0x40507c]
     jne failure
 
-    mov dword ptr [0x404060], 0
-    mov edi, 0x404060
+    mov dword ptr [0x405060], 0
+    mov edi, 0x405060
     xor esi, esi
     mov eax, 125
     call syscall_expect_einval
-    cmp dword ptr [0x404060], 0x20080522
+    cmp dword ptr [0x405060], 0x20080522
     jne failure
 
-    mov dword ptr [0x404064], 2
+    mov dword ptr [0x405064], 2
     mov eax, 125
     syscall
     cmp rax, -3
     jne failure
 
-    mov dword ptr [0x404064], 0
-    mov edi, 0x404060
-    mov esi, 0x404068
+    mov dword ptr [0x405064], 0
+    mov edi, 0x405060
+    mov esi, 0x405068
     mov eax, 126
     call syscall_expect_zero
-    mov dword ptr [0x404068], 1
+    mov dword ptr [0x405068], 1
     mov eax, 126
     syscall
     cmp rax, -1
     jne failure
-    mov dword ptr [0x404068], 0
+    mov dword ptr [0x405068], 0
 
     xor edi, edi
     xor esi, esi
@@ -2644,43 +2644,43 @@ linux_clone_repeat:
     cmp rax, -1
     jne failure
 
-    mov dword ptr [0x404060], 0x12345678
-    mov dword ptr [0x404064], 0x12345678
-    mov edi, 0x404060
-    mov esi, 0x404064
-    mov edx, 0x405200
+    mov dword ptr [0x405060], 0x12345678
+    mov dword ptr [0x405064], 0x12345678
+    mov edi, 0x405060
+    mov esi, 0x405064
+    mov edx, 0x406200
     mov eax, 118
     call syscall_expect_efault
-    cmp dword ptr [0x404060], 0x12345678
+    cmp dword ptr [0x405060], 0x12345678
     jne failure
-    cmp dword ptr [0x404064], 0x12345678
+    cmp dword ptr [0x405064], 0x12345678
     jne failure
 
-    mov edi, 0x404060
-    mov esi, 0x404064
-    mov edx, 0x404068
+    mov edi, 0x405060
+    mov esi, 0x405064
+    mov edx, 0x405068
     mov eax, 118
     call syscall_expect_zero
-    cmp dword ptr [0x404060], 0
+    cmp dword ptr [0x405060], 0
     jne failure
-    cmp dword ptr [0x404064], 0
+    cmp dword ptr [0x405064], 0
     jne failure
-    cmp dword ptr [0x404068], 0
+    cmp dword ptr [0x405068], 0
     jne failure
 
-    mov dword ptr [0x404060], 0x12345678
-    mov dword ptr [0x404064], 0x12345678
-    mov dword ptr [0x404068], 0x12345678
-    mov edi, 0x404060
-    mov esi, 0x404064
-    mov edx, 0x404068
+    mov dword ptr [0x405060], 0x12345678
+    mov dword ptr [0x405064], 0x12345678
+    mov dword ptr [0x405068], 0x12345678
+    mov edi, 0x405060
+    mov esi, 0x405064
+    mov edx, 0x405068
     mov eax, 120
     call syscall_expect_zero
-    cmp dword ptr [0x404060], 0
+    cmp dword ptr [0x405060], 0
     jne failure
-    cmp dword ptr [0x404064], 0
+    cmp dword ptr [0x405064], 0
     jne failure
-    cmp dword ptr [0x404068], 0
+    cmp dword ptr [0x405068], 0
     jne failure
 
     mov eax, 186
@@ -2710,97 +2710,97 @@ linux_clone_repeat:
     cmp rax, -3
     jne failure
 
-    mov edi, 0x4041b0
+    mov edi, 0x4051b0
     mov esi, 23
     mov eax, 273
     call syscall_expect_einval
 
-    mov edi, 0x4051f0
+    mov edi, 0x4061f0
     mov esi, 24
     mov eax, 273
     call syscall_expect_efault
 
-    mov edi, 0x4041b0
+    mov edi, 0x4051b0
     mov esi, 24
     mov eax, 273
     call syscall_expect_zero
 
     mov edi, 2
-    mov esi, 0x4041c8
-    mov edx, 0x4041d0
+    mov esi, 0x4051c8
+    mov edx, 0x4051d0
     mov eax, 274
     syscall
     cmp rax, -3
     jne failure
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x4041c8], rax
+    mov qword ptr [0x4051c8], rax
     xor edi, edi
-    mov esi, 0x4041c8
-    mov edx, 0x4051fc
+    mov esi, 0x4051c8
+    mov edx, 0x4061fc
     mov eax, 274
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x4041c8], rax
+    cmp qword ptr [0x4051c8], rax
     jne failure
 
     xor edi, edi
-    mov esi, 0x4041c8
-    mov edx, 0x4041d0
+    mov esi, 0x4051c8
+    mov edx, 0x4051d0
     mov eax, 274
     call syscall_expect_zero
-    cmp qword ptr [0x4041c8], 0x4041b0
+    cmp qword ptr [0x4051c8], 0x4051b0
     jne failure
-    cmp qword ptr [0x4041d0], 24
+    cmp qword ptr [0x4051d0], 24
     jne failure
 
-    mov edi, 0x405001
+    mov edi, 0x406001
     mov esi, 4096
     mov edx, 1
     mov eax, 10
     call syscall_expect_einval
 
-    mov edi, 0x405000
+    mov edi, 0x406000
     mov esi, 4096
     mov edx, 4
     mov eax, 10
     call syscall_expect_einval
 
     movabs rax, 0x0a212145424f5250
-    mov qword ptr [0x405000], rax
-    mov edi, 0x405000
+    mov qword ptr [0x406000], rax
+    mov edi, 0x406000
     mov esi, 4096
     mov edx, 1
     mov eax, 10
     call syscall_expect_zero
 
-    mov edi, 0x405000
+    mov edi, 0x406000
     mov esi, 4096
     mov edx, 1
     mov eax, 10
     call syscall_expect_einval
 
-    mov edi, 0x405000
+    mov edi, 0x406000
     mov eax, 63
     call syscall_expect_efault
 
     mov edi, 1
-    mov esi, 0x405000
+    mov esi, 0x406000
     mov edx, 8
     mov eax, 1
     call syscall_expect_eight
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x404280], rax
-    mov qword ptr [0x404298], rax
+    mov qword ptr [0x405280], rax
+    mov qword ptr [0x405298], rax
     mov edi, 1
     mov esi, 0x5401
-    mov edx, 0x404280
+    mov edx, 0x405280
     mov eax, 16
     call syscall_expect_zero
-    cmp qword ptr [0x404280], 0
+    cmp qword ptr [0x405280], 0
     jne failure
-    cmp qword ptr [0x404298], 0
+    cmp qword ptr [0x405298], 0
     jne failure
 
     mov edi, 2
@@ -2934,62 +2934,62 @@ linux_clone_repeat:
     call syscall_expect_zero
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x404ff8], rax
+    mov qword ptr [0x405ff8], rax
     mov edi, 1
-    mov esi, 0x404ff8
+    mov esi, 0x405ff8
     mov eax, 228
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x404ff8], rax
+    cmp qword ptr [0x405ff8], rax
     jne failure
 
     xor edi, edi
-    mov esi, 0x404900
+    mov esi, 0x405900
     mov eax, 228
     call syscall_expect_einval
 
     mov edi, 1
-    mov esi, 0x404900
+    mov esi, 0x405900
     mov eax, 228
     call syscall_expect_zero
-    cmp qword ptr [0x404900], 0
+    cmp qword ptr [0x405900], 0
     jl failure
-    cmp qword ptr [0x404908], 1000000000
+    cmp qword ptr [0x405908], 1000000000
     jae failure
 
     mov edi, 1
-    mov esi, 0x404910
+    mov esi, 0x405910
     mov eax, 228
     call syscall_expect_zero
-    mov rax, qword ptr [0x404910]
-    cmp rax, qword ptr [0x404900]
+    mov rax, qword ptr [0x405910]
+    cmp rax, qword ptr [0x405900]
     jb failure
     ja clock_advanced
-    mov rax, qword ptr [0x404918]
-    cmp rax, qword ptr [0x404908]
+    mov rax, qword ptr [0x405918]
+    cmp rax, qword ptr [0x405908]
     jb failure
 clock_advanced:
-    cmp qword ptr [0x404918], 1000000000
+    cmp qword ptr [0x405918], 1000000000
     jae failure
 
     mov edi, 4
-    mov esi, 0x404920
+    mov esi, 0x405920
     mov eax, 228
     call syscall_expect_zero
-    cmp qword ptr [0x404928], 1000000000
+    cmp qword ptr [0x405928], 1000000000
     jae failure
 
     mov edi, 2
-    mov esi, 0x404950
+    mov esi, 0x405950
     mov eax, 228
     call syscall_expect_zero
-    cmp qword ptr [0x404958], 1000000000
+    cmp qword ptr [0x405958], 1000000000
     jae failure
     mov edi, 3
-    mov esi, 0x404960
+    mov esi, 0x405960
     mov eax, 228
     call syscall_expect_zero
-    cmp qword ptr [0x404968], 1000000000
+    cmp qword ptr [0x405968], 1000000000
     jae failure
 
     xor edi, edi
@@ -3003,132 +3003,132 @@ clock_advanced:
     call syscall_expect_zero
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x404ff8], rax
+    mov qword ptr [0x405ff8], rax
     mov edi, 4
-    mov esi, 0x404ff8
+    mov esi, 0x405ff8
     mov eax, 229
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x404ff8], rax
+    cmp qword ptr [0x405ff8], rax
     jne failure
 
     mov edi, 1
-    mov esi, 0x404930
+    mov esi, 0x405930
     mov eax, 229
     call syscall_expect_zero
-    cmp qword ptr [0x404930], 0
+    cmp qword ptr [0x405930], 0
     je resolution_subsecond
-    cmp qword ptr [0x404930], 1
+    cmp qword ptr [0x405930], 1
     jne failure
-    cmp qword ptr [0x404938], 0
+    cmp qword ptr [0x405938], 0
     jne failure
     jmp resolution_valid
 resolution_subsecond:
-    cmp qword ptr [0x404938], 0
+    cmp qword ptr [0x405938], 0
     jbe failure
-    cmp qword ptr [0x404938], 1000000000
+    cmp qword ptr [0x405938], 1000000000
     jae failure
 resolution_valid:
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x404ff0], rax
-    mov edi, 0x404ff0
+    mov qword ptr [0x405ff0], rax
+    mov edi, 0x405ff0
     mov eax, 100
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x404ff0], rax
+    cmp qword ptr [0x405ff0], rax
     jne failure
     xor edi, edi
     mov eax, 100
     syscall
     test rax, rax
     js failure
-    mov edi, 0x404970
+    mov edi, 0x405970
     mov eax, 100
     syscall
     test rax, rax
     js failure
-    cmp qword ptr [0x404970], rax
+    cmp qword ptr [0x405970], rax
     jne failure
-    cmp qword ptr [0x404978], 0
+    cmp qword ptr [0x405978], 0
     jne failure
-    cmp qword ptr [0x404980], 0
+    cmp qword ptr [0x405980], 0
     jne failure
-    cmp qword ptr [0x404988], 0
+    cmp qword ptr [0x405988], 0
     jne failure
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x404ff0], rax
+    mov qword ptr [0x405ff0], rax
     xor edi, edi
-    mov esi, 0x404ff0
+    mov esi, 0x405ff0
     mov eax, 36
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x404ff0], rax
+    cmp qword ptr [0x405ff0], rax
     jne failure
 
     mov edi, 3
-    mov esi, 0x404bc0
+    mov esi, 0x405bc0
     mov eax, 36
     call syscall_expect_einval
 
     xor edi, edi
-    mov esi, 0x404bc0
+    mov esi, 0x405bc0
     mov eax, 36
     call syscall_expect_zero
-    cmp qword ptr [0x404bc0], 0
+    cmp qword ptr [0x405bc0], 0
     jne failure
-    cmp qword ptr [0x404bd8], 0
+    cmp qword ptr [0x405bd8], 0
     jne failure
 
-    mov qword ptr [0x404be0], 1
-    mov qword ptr [0x404be8], 0
-    mov qword ptr [0x404bf0], 0
-    mov qword ptr [0x404bf8], 0
+    mov qword ptr [0x405be0], 1
+    mov qword ptr [0x405be8], 0
+    mov qword ptr [0x405bf0], 0
+    mov qword ptr [0x405bf8], 0
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x404c00], rax
+    mov qword ptr [0x405c00], rax
     xor edi, edi
-    mov esi, 0x404be0
-    mov edx, 0x404c00
+    mov esi, 0x405be0
+    mov edx, 0x405c00
     mov eax, 38
     call syscall_expect_enosys
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x404c00], rax
+    cmp qword ptr [0x405c00], rax
     jne failure
 
-    mov qword ptr [0x404be0], 0
+    mov qword ptr [0x405be0], 0
     xor edi, edi
-    mov esi, 0x404be0
-    mov edx, 0x404c00
+    mov esi, 0x405be0
+    mov edx, 0x405c00
     mov eax, 38
     call syscall_expect_zero
-    cmp qword ptr [0x404c00], 0
+    cmp qword ptr [0x405c00], 0
     jne failure
-    cmp qword ptr [0x404c18], 0
+    cmp qword ptr [0x405c18], 0
     jne failure
 
     xor edi, edi
-    mov esi, 0x405200
+    mov esi, 0x406200
     xor edx, edx
     mov eax, 38
     call syscall_expect_efault
 
-    mov dword ptr [0x404c40], 42
-    mov edi, 0x404c40
+    mov dword ptr [0x405c40], 42
+    mov edi, 0x405c40
     mov esi, 2
     mov edx, 42
     mov eax, 202
     call syscall_expect_einval
 
-    mov edi, 0x404c41
+    mov edi, 0x405c41
     xor esi, esi
     mov eax, 202
     call syscall_expect_einval
-    mov edi, 0x405200
+    mov edi, 0x406200
     mov eax, 202
     call syscall_expect_efault
 
-    mov edi, 0x404c40
+    mov edi, 0x405c40
     mov edx, 41
     mov eax, 202
     call syscall_expect_eagain
@@ -3142,54 +3142,54 @@ resolution_valid:
     call syscall_expect_enosys
 
     movabs rax, 0x1122334455667788
-    mov qword ptr [0x404ff0], rax
-    mov qword ptr [0x404ff8], rax
+    mov qword ptr [0x405ff0], rax
+    mov qword ptr [0x405ff8], rax
     xor edi, edi
-    mov esi, 0x404ff0
+    mov esi, 0x405ff0
     mov eax, 98
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
-    cmp qword ptr [0x404ff0], rax
+    cmp qword ptr [0x405ff0], rax
     jne failure
-    cmp qword ptr [0x404ff8], rax
+    cmp qword ptr [0x405ff8], rax
     jne failure
 
     mov edi, 2
-    mov esi, 0x404a00
+    mov esi, 0x405a00
     mov eax, 98
     call syscall_expect_einval
     xor edi, edi
     mov eax, 98
     call syscall_expect_zero
-    cmp qword ptr [0x404a08], 1000000
+    cmp qword ptr [0x405a08], 1000000
     jae failure
-    cmp qword ptr [0x404a10], 0
+    cmp qword ptr [0x405a10], 0
     jne failure
-    cmp qword ptr [0x404a18], 0
+    cmp qword ptr [0x405a18], 0
     jne failure
 
     mov edi, 1
-    mov esi, 0x404a90
+    mov esi, 0x405a90
     mov eax, 98
     call syscall_expect_zero
-    cmp qword ptr [0x404a98], 1000000
+    cmp qword ptr [0x405a98], 1000000
     jae failure
 
     mov edi, -1
-    mov esi, 0x404b20
+    mov esi, 0x405b20
     mov eax, 98
     call syscall_expect_zero
-    cmp qword ptr [0x404b20], 0
+    cmp qword ptr [0x405b20], 0
     jne failure
-    cmp qword ptr [0x404ba8], 0
+    cmp qword ptr [0x405ba8], 0
     jne failure
 
-    mov edi, 0x405200
+    mov edi, 0x406200
     mov eax, 218
     call syscall_expect_efault
 
-    mov dword ptr [0x404190], 0x12345678
-    mov edi, 0x404190
+    mov dword ptr [0x405190], 0x12345678
+    mov edi, 0x405190
     mov eax, 218
     call syscall_expect_one
 
@@ -3325,23 +3325,23 @@ linked_file_mmap_test:
     xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, 0x40a000
+    cmp rax, 0x40b000
     jne failure
-    cmp dword ptr [0x40a000], 0x464c457f
+    cmp dword ptr [0x40b000], 0x464c457f
     jne failure
-    cmp byte ptr [0x40a200], 0x48
+    cmp byte ptr [0x40b200], 0x48
     jne failure
-    cmp byte ptr [0x40bfff], 0
+    cmp byte ptr [0x40cfff], 0
     jne failure
 
     mov edi, 2
-    mov esi, 0x40a000
+    mov esi, 0x40b000
     mov edx, 1
     xor r10d, r10d
     mov eax, 17
     call syscall_expect_efault
 
-    mov edi, 0x40a000
+    mov edi, 0x40b000
     mov esi, 8192
     mov eax, 11
     call syscall_expect_zero

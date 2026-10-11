@@ -148,11 +148,11 @@ pub(crate) fn verify_linux_elf_mapping(
     {
         return false;
     }
-    let Some(frames) = memory::allocate_frames::<17>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<18>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, first_fourth_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page, mmap_tail_page] =
+    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, first_fourth_page, first_fifth_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page, mmap_tail_page] =
         addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
@@ -234,6 +234,8 @@ pub(crate) fn verify_linux_elf_mapping(
                 &mut *(mapped_frame::<u8>(first_third_page)? as *mut [u8; PAGE_SIZE]);
             let first_fourth_bytes =
                 &mut *(mapped_frame::<u8>(first_fourth_page)? as *mut [u8; PAGE_SIZE]);
+            let first_fifth_bytes =
+                &mut *(mapped_frame::<u8>(first_fifth_page)? as *mut [u8; PAGE_SIZE]);
             let second_bytes = &mut *(mapped_frame::<u8>(second_page)? as *mut [u8; PAGE_SIZE]);
             let second_tail_bytes =
                 &mut *(mapped_frame::<u8>(second_tail_page)? as *mut [u8; PAGE_SIZE]);
@@ -249,6 +251,10 @@ pub(crate) fn verify_linux_elf_mapping(
                 || first.page_count == 4
                     && (!crate::linux_elf::materialize_page(first, 2, first_third_bytes)
                         || !crate::linux_elf::materialize_page(first, 3, first_fourth_bytes))
+                || first.page_count == 5
+                    && (!crate::linux_elf::materialize_page(first, 2, first_third_bytes)
+                        || !crate::linux_elf::materialize_page(first, 3, first_fourth_bytes)
+                        || !crate::linux_elf::materialize_page(first, 4, first_fifth_bytes))
                 || second.page_count == 2
                     && !crate::linux_elf::materialize_page(second, 1, second_tail_bytes)
                 || header.is_some_and(|segment| {
@@ -289,6 +295,17 @@ pub(crate) fn verify_linux_elf_mapping(
                 table_entries
                     .add(first_indexes[3] + 3)
                     .write(first_fourth_page | flags(first));
+            }
+            if first.page_count == 5 {
+                table_entries
+                    .add(first_indexes[3] + 2)
+                    .write(first_third_page | flags(first));
+                table_entries
+                    .add(first_indexes[3] + 3)
+                    .write(first_fourth_page | flags(first));
+                table_entries
+                    .add(first_indexes[3] + 4)
+                    .write(first_fifth_page | flags(first));
             }
             if let Some(segment) = header {
                 header_table_entries
@@ -366,8 +383,13 @@ pub(crate) fn verify_linux_elf_mapping(
             } else {
                 0
             };
-            let first_fourth_entry = if first.page_count == 4 {
+            let first_fourth_entry = if first.page_count >= 4 {
                 table_entries.add(first_indexes[3] + 3).read()
+            } else {
+                0
+            };
+            let first_fifth_entry = if first.page_count == 5 {
+                table_entries.add(first_indexes[3] + 4).read()
             } else {
                 0
             };
@@ -416,6 +438,9 @@ pub(crate) fn verify_linux_elf_mapping(
                 && (first.page_count < 4
                     || first_fourth_entry & (PRESENT | USER) == PRESENT | USER
                         && first_fourth_entry & (WRITABLE | NO_EXECUTE) == 0)
+                && (first.page_count < 5
+                    || first_fifth_entry & (PRESENT | USER) == PRESENT | USER
+                        && first_fifth_entry & (WRITABLE | NO_EXECUTE) == 0)
                 && second_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
                 && (second.page_count == 1
@@ -437,6 +462,8 @@ pub(crate) fn verify_linux_elf_mapping(
                     || crate::linux_elf::materialized_page_matches(first, 2, first_third_bytes))
                 && (first.page_count < 4
                     || crate::linux_elf::materialized_page_matches(first, 3, first_fourth_bytes))
+                && (first.page_count < 5
+                    || crate::linux_elf::materialized_page_matches(first, 4, first_fifth_bytes))
                 && crate::linux_elf::materialized_page_matches(second, 0, second_bytes)
                 && (second.page_count == 1
                     || crate::linux_elf::materialized_page_matches(second, 1, second_tail_bytes))
@@ -529,7 +556,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     heap_size: PAGE_SIZE,
                     mmap: mmap_virtual_page as usize,
                     mmap_frames: [mmap_page, mmap_tail_page],
-                    main_mappings: [cpu::LinuxFileMapping::EMPTY; 7],
+                    main_mappings: [cpu::LinuxFileMapping::EMPTY; 8],
                     dependency_base_min: [0; 2],
                     dependency_base_end: [0; 2],
                     dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
@@ -903,7 +930,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     if protected_size == 0
         || plan.interpreter.read_only.is_some()
         || main_ro.page_count != 1
-        || main_rx.page_count != 4
+        || main_rx.page_count != 5
         || main_rw.page_count != 2
         || interpreter_rx.page_count != 2
         || interpreter_rw.page_count != 1
@@ -1024,7 +1051,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, interpreter_page, interpreter_tail_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page, tls_page, sibling_tls_page, sibling_stack_page] =
         addresses;
     let kernel_root_physical = current_root();
-    let mut main_frames = [None; 7];
+    let mut main_frames = [None; 8];
     let mut dependency_frames = [[None; 8]; 2];
     let valid = (|| -> Option<bool> {
         unsafe {
@@ -1349,6 +1376,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 file_mapping(main_rx, 1)?,
                 file_mapping(main_rx, 2)?,
                 file_mapping(main_rx, 3)?,
+                file_mapping(main_rx, 4)?,
                 file_mapping(main_rw, 0)?,
                 file_mapping(main_rw, 1)?,
             ];
@@ -1474,7 +1502,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             let main_permissions_valid = main_ro_entries.add(main_ro_indexes[3]).read()
                 & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
                 == main_frame_addresses[0] | PRESENT | USER | NO_EXECUTE
-                && main_frame_addresses[1..5]
+                && main_frame_addresses[1..6]
                     .iter()
                     .enumerate()
                     .all(|(offset, frame)| {
@@ -1484,10 +1512,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     })
                 && main_entries.add(main_rw_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == main_frame_addresses[5] | PRESENT | USER | WRITABLE | NO_EXECUTE
+                    == main_frame_addresses[6] | PRESENT | USER | WRITABLE | NO_EXECUTE
                 && main_entries.add(main_rw_indexes[3] + 1).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == main_frame_addresses[6] | PRESENT | USER | NO_EXECUTE;
+                    == main_frame_addresses[7] | PRESENT | USER | NO_EXECUTE;
             let selected_dependency_bases = execution_result.dependency_bases;
             let dependency_permissions_valid = executed
                 && (0..2).all(|dependency| {

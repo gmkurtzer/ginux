@@ -69,7 +69,7 @@ are accepted when their declarations are valid. The boot verifier reuses one
 mutation buffer across metadata cases and runs the metadata and RELRO mutation
 suites sequentially. At most two 16 KiB-class fixture images are therefore
 live on the 64 KiB bootstrap kernel stack. This keeps verification bounded
-while reserving the complete four-page executable profile for proof
+while reserving the complete five-page executable profile for proof
 instructions.
 
 The build also feeds the same assembly through the Rust toolchain's LLD to
@@ -81,10 +81,10 @@ header-table address/count, exact code and initialized data, 4608-byte data/BSS
 extent, and maps all three loads with role-derived permissions. The checked-in
 linker script fixes the read-only header load at
 `0x3ff000`, the non-page-base text entry at `0x400100`, and the data/BSS load at
-`0x404000`, with the final 512 bytes declared RELRO at `0x405000`; this is the
+`0x405000`, with the final 512 bytes declared RELRO at `0x406000`; this is the
 stable input contract for linked-image execution work. Both the assembly build
-and linker reject text larger than 16128 bytes, the exact space from the
-non-page-base entry through the end of its four-page executable mapping. Probe
+and linker reject text that exceeds the fixed space from the non-page-base
+entry through the end of its five-page executable mapping. Probe
 growth therefore fails at build time instead of overlapping the writable load
 or silently exceeding the runtime loader profile.
 
@@ -255,13 +255,13 @@ slot. The compact fixture then applies the dependency's relative
 relocation at `0x6131c0` and self-resolves its eager `GLOB_DAT` and split-table
 `JUMP_SLOT` targets at `0x6131c8` and `0x6131d0`; all three receive the
 dependency entry value `0x610100`. It writes the admitted main-image relative
-relocation value `0x400100` to the RELRO target `0x405100`, reads the main and
+relocation value `0x400100` to the RELRO target `0x406100`, reads the main and
 dependency symbol and hash-table addresses, requires symbol index one to be the
 selected SysV main-image bucket and GNU dependency bucket, follows both symbol-name offsets
 through their validated `DT_STRTAB` ranges, and compares the complete
 NUL-terminated names before resolving the undefined main symbol to the
 dependency entry. It writes that value through
-`R_X86_64_GLOB_DAT` at `0x405108` and eager `R_X86_64_JUMP_SLOT` at `0x405110`
+`R_X86_64_GLOB_DAT` at `0x406108` and eager `R_X86_64_JUMP_SLOT` at `0x406110`
 before jumping to the main entry at `0x400100`. The linker-produced graph main
 instead uses two leading relative relocations for one eight-byte preinit array
 and one eight-byte init array. Their relocated callback addresses are validated independently by
@@ -286,7 +286,7 @@ linker metadata used here: an in-range 32-byte `DT_PLTGOT`, zero `DT_DEBUG`,
 `DT_RELACOUNT = 2` for the preinitialized main, and optional
 `DT_FLAGS_1 = DF_1_PIE`; duplicates or other values are rejected. The main's linker metadata tail remains mapped for the
 interpreter but is intentionally outside the workload's bounded syscall-copy
-extent, preserving the existing `0x404000..0x405200` data contract.
+extent, preserving the existing `0x405000..0x406200` data contract.
 The executable LLD-produced main carries ordered `DT_NEEDED` entries for
 `libginux.so` and `libginux-aux.so`. The parser validates both names and the
 auxiliary DSO's matching `DT_SONAME`, bounded GNU hash, symbol, and relocation
@@ -338,13 +338,13 @@ temporary read-only window, then reopens the file and walks its ELF program
 headers in userspace. The walker requires a 56-byte `e_phentsize`, one through
 nine headers wholly inside the two-page inspection window, readable
 `PT_LOAD` entries, congruent file/virtual page offsets, `p_filesz <= p_memsz`,
-one through four pages per load, no unknown permission bits, W^X, and no more
-than seven installed pages per image. Checked arithmetic rejects wraparound.
+one through five pages per load, no unknown permission bits, W^X, and no more
+than eight installed pages per image. Checked arithmetic rejects wraparound.
 It translates ELF `PF_R/PF_W/PF_X` into mmap protections and derives each
 page address and file offset from the selected load bias. The resulting main
-requests install offset `0` at `0x3ff000` read-only/NX, offsets `0x1000..0x4000` at
-`0x400000..0x403000` RX, and offsets `0x5000..0x6000` at
-`0x404000..0x405000` RW/NX through exact one-page `MAP_PRIVATE |
+requests install offset `0` at `0x3ff000` read-only/NX, offsets `0x1000..0x5000` at
+`0x400000..0x404000` RX, and offsets `0x6000..0x7000` at
+`0x405000..0x406000` RW/NX through exact one-page `MAP_PRIVATE |
 MAP_FIXED_NOREPLACE` requests. The last writable page is later sealed
 read-only/NX by the admitted GNU RELRO transition. A repeated header request
 returns `-EEXIST`, and a W+X text request returns `-EINVAL`.
@@ -612,17 +612,17 @@ byte. Runtime address-space installation owns and tears down every planned
 page, including a second BSS-only RW/NX page.
 
 QEMU maps the toolchain-linked read-only header at `0x3ff000` through a
-separately cloned 2 MiB leaf table, validates it beside the four-page RX and
+separately cloned 2 MiB leaf table, validates it beside the five-page RX and
 RW/NX loads, and runs the linked entry. The synthetic proof also installs one
-four-page RX load at `0x400000` and two RW/NX pages at
-`0x404000` and `0x405000` into a newly allocated x86-64 root. It privately clones
+five-page RX load at `0x400000` and two RW/NX pages at
+`0x405000` and `0x406000` into a newly allocated x86-64 root. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
 segment ranges; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
-map. An owned page at `0x406000` supplies one zero-filled RW/NX heap page. The
-page at `0x407000` remains an unmapped lower stack guard, and an owned page at
-`0x408000` supplies a RW/NX stack; `0x409000` remains an upper guard. Two final
-owned frames are initially absent at `0x40a000` and `0x40b000` and are
+map. An owned page at `0x407000` supplies one zero-filled RW/NX heap page. The
+page at `0x408000` remains an unmapped lower stack guard, and an owned page at
+`0x409000` supplies a RW/NX stack; `0x40a000` remains an upper guard. Two final
+owned frames are initially absent at `0x40b000` and `0x40c000` and are
 installed only for the bounded one- or two-page anonymous or
 immutable-runtime-file `mmap` lifecycle. File-backed windows are private,
 read-only/NX copies of authenticated bytes and are scrubbed during unmap.
@@ -641,15 +641,15 @@ owned stack page, preserving every individual call-site assertion while
 avoiding duplicated branch sequences. Helpers cover common errno results and
 the repeated positive return values 1, 2, 3, 5, 8, 152, and 256. Together they
 recover more than 3.2 KiB of the
-fixed four-page executable budget without removing compatibility cases. The
+fixed five-page executable budget without removing compatibility cases. The
 instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
-Linux `write(1, 0x404000, 8)` whose kernel copy-in verifies the RW payload. A
-bounded `arch_prctl(ARCH_SET_FS, 0x404000)` then makes the payload available
+Linux `write(1, 0x405000, 8)` whose kernel copy-in verifies the RW payload. A
+bounded `arch_prctl(ARCH_SET_FS, 0x405000)` then makes the payload available
 through an FS-relative TLS read. `ARCH_GET_FS` copies the active base back to
 the declared data segment; invalid operation and destination tests require
 `-EINVAL` and `-EFAULT` without terminating the task. A bounded
-`uname(0x404000)` subsequently
+`uname(0x405000)` subsequently
 copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 4608-byte `p_memsz`, rather
