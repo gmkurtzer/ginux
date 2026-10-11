@@ -45,18 +45,20 @@ produce a genuine static ELF with separate read-only header, RX text, and RW
 data/BSS loads, populated section-header metadata, `PT_PHDR`, and
 `PT_GNU_STACK`. The boot verifier parses that linked artifact, checks its entry,
 header-table address/count, exact code and initialized data, 4608-byte data/BSS
-extent, and confirms that the current runtime mapper still rejects the third
-load. The checked-in linker script fixes the read-only header load at
+extent, and maps all three loads with role-derived permissions. The checked-in
+linker script fixes the read-only header load at
 `0x3ff000`, the non-page-base text entry at `0x400100`, and the data/BSS load at
-`0x401000`; this is the input contract for the next multi-table mapping step.
+`0x401000`; this is the stable input contract for linked-image execution work.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory
 start, accounts for the in-page prefix when bounding page count, and copies file
 bytes at the correct page offset while zeroing the prefix, BSS, and page tails.
-The current runtime mapper still rejects a third read-only load until a later
-milestone owns, maps, verifies, and tears down its frames. Planner acceptance
-therefore cannot silently omit the load.
+The runtime mapper owns a separate leaf table and payload frame for the third
+read-only load, installs it read-only/NX, activates the root, observes all three
+segments under SMAP, restores the kernel root, and scrubs every owned frame.
+Execution remains limited to the two-load proof until syscall copy bounds use
+the linked image's exact non-page-base RX extent.
 
 The strict profile prevents unsupported features from being silently
 interpreted with weaker semantics. It does not accept position-independent
@@ -79,7 +81,9 @@ exact RX instructions, RW data bytes, W^X metadata, and every zero-filled tail
 byte. Runtime address-space installation owns and tears down every planned
 page, including a second BSS-only RW/NX page.
 
-The QEMU proof installs an RX page at `0x400000` and two RW/NX pages at
+Before the executable proof, QEMU maps the toolchain-linked read-only header at
+`0x3ff000` through a separately cloned 2 MiB leaf table and validates it beside
+the RX and RW/NX loads. The executable proof installs an RX page at `0x400000` and two RW/NX pages at
 `0x401000` and `0x402000` into a newly allocated x86-64 root. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
 segment ranges; retains the supervisor-only higher-half direct map; and verifies
@@ -123,8 +127,8 @@ registered word before completing exit and verifies it after returning from
 ring 3. Those calls are
 accepted only while an atomic probe flag is armed; exit returns directly to the
 saved kernel stack. The kernel verifies a ring-3 heap write after exit. The
-proof restores and reads back the kernel root, then clears and releases all ten
-root/table/reserved-segment/heap/stack frames.
+proof restores and reads back the kernel root, then clears and releases all
+thirteen root/table/reserved-segment/heap/stack frames.
 
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the

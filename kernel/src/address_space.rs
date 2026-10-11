@@ -33,10 +33,8 @@ pub(crate) fn verify_linux_elf_mapping(
     protected_start: u64,
     protected_size: usize,
 ) -> bool {
-    if plan.read_only.is_some() {
-        return false;
-    }
     let first = plan.executable;
+    let header = plan.read_only;
     let second = plan.writable;
     let indexes = |address: u64| {
         [
@@ -47,6 +45,7 @@ pub(crate) fn verify_linux_elf_mapping(
         ]
     };
     let first_indexes = indexes(first.virtual_page);
+    let header_indexes = header.map_or([0; 4], |segment| indexes(segment.virtual_page));
     let second_indexes = indexes(second.virtual_page);
     let first_last_page = first
         .virtual_page
@@ -56,8 +55,15 @@ pub(crate) fn verify_linux_elf_mapping(
         .virtual_page
         .checked_add((second.page_count - 1) as u64 * PAGE_SIZE as u64)
         .unwrap_or(0);
+    let header_last_page = header.map_or(0, |segment| {
+        segment
+            .virtual_page
+            .checked_add((segment.page_count - 1) as u64 * PAGE_SIZE as u64)
+            .unwrap_or(0)
+    });
     let first_last_indexes = indexes(first_last_page);
     let second_last_indexes = indexes(second_last_page);
+    let header_last_indexes = indexes(header_last_page);
     let heap_virtual_page = second
         .virtual_page
         .checked_add(second.page_count as u64 * PAGE_SIZE as u64)
@@ -74,7 +80,20 @@ pub(crate) fn verify_linux_elf_mapping(
         page.checked_add(PAGE_SIZE as u64)
             .is_none_or(|end| page < protected_end && protected_start < end)
     };
+    let header_valid = header.is_none_or(|segment| {
+        header_last_page != 0
+            && !overlaps_protected(segment.virtual_page)
+            && !overlaps_protected(header_last_page)
+            && header_indexes[..2] == first_indexes[..2]
+            && header_indexes[2] != first_indexes[2]
+            && header_last_indexes[..3] == header_indexes[..3]
+            && segment.virtual_address == segment.virtual_page
+            && !segment.writable
+            && !segment.executable
+            && header_last_page < first.virtual_page
+    });
     if protected_size == 0
+        || !header_valid
         || overlaps_protected(first.virtual_page)
         || overlaps_protected(first_last_page)
         || overlaps_protected(second.virtual_page)
@@ -92,29 +111,31 @@ pub(crate) fn verify_linux_elf_mapping(
         || stack_indexes[..3] != first_indexes[..3]
         || first_indexes[0] != 0
         || first_indexes[1] != 0
-        || first.virtual_address != first.virtual_page
         || second.virtual_address != second.virtual_page
         || first.writable
         || !first.executable
         || !second.writable
         || second.executable
         || first_last_page >= second.virtual_page
-        || plan.entry < first.virtual_page
-        || plan.entry >= first.virtual_page + PAGE_SIZE as u64
+        || plan.entry < first.virtual_address
+        || plan.entry
+            >= first
+                .virtual_address
+                .saturating_add(first.memory_size as u64)
         || !cpu::verify_linux_copy_bounds(second.virtual_page, second.memory_size)
     {
         return false;
     }
-    let Some(frames) = memory::allocate_frames::<10>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<13>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, table, first_page, first_tail_page, second_page, second_tail_page, heap_page, stack_page] =
+    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page] =
         addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
         unsafe {
-            for frame in [root, pdpt, directory, table] {
+            for frame in [root, pdpt, directory, table, header_table] {
                 zero_frame(frame)?;
             }
             let kernel_root = mapped_frame::<u64>(kernel_root_physical)?;
@@ -122,6 +143,7 @@ pub(crate) fn verify_linux_elf_mapping(
             let pdpt_entries = mapped_frame::<u64>(pdpt)?;
             let directory_entries = mapped_frame::<u64>(directory)?;
             let table_entries = mapped_frame::<u64>(table)?;
+            let header_table_entries = mapped_frame::<u64>(header_table)?;
             root_entries.add(256).write(kernel_root.add(256).read());
             root_entries.write(pdpt | PRESENT | WRITABLE | USER);
 
@@ -155,18 +177,54 @@ pub(crate) fn verify_linux_elf_mapping(
                 .add(first_indexes[2])
                 .write(table | PRESENT | WRITABLE | USER);
 
+            if header.is_some() {
+                let original = kernel_directory.add(header_indexes[2]).read();
+                if original & PRESENT == 0
+                    || original & LARGE_PAGE != 0 && original & PAGE_ATTRIBUTE_TABLE != 0
+                {
+                    return None;
+                }
+                if original & LARGE_PAGE != 0 {
+                    let base = original & ADDRESS_MASK;
+                    let flags = original & !ADDRESS_MASK & !LARGE_PAGE;
+                    for index in 0..ENTRY_COUNT {
+                        header_table_entries
+                            .add(index)
+                            .write((base + (index * PAGE_SIZE) as u64) | flags);
+                    }
+                } else {
+                    let original_table = mapped_frame::<u64>(original & ADDRESS_MASK)?;
+                    core::ptr::copy_nonoverlapping(
+                        original_table,
+                        header_table_entries,
+                        ENTRY_COUNT,
+                    );
+                }
+                directory_entries
+                    .add(header_indexes[2])
+                    .write(header_table | PRESENT | WRITABLE | USER);
+            }
+
             let first_bytes = &mut *(mapped_frame::<u8>(first_page)? as *mut [u8; PAGE_SIZE]);
             let first_tail_bytes =
                 &mut *(mapped_frame::<u8>(first_tail_page)? as *mut [u8; PAGE_SIZE]);
             let second_bytes = &mut *(mapped_frame::<u8>(second_page)? as *mut [u8; PAGE_SIZE]);
             let second_tail_bytes =
                 &mut *(mapped_frame::<u8>(second_tail_page)? as *mut [u8; PAGE_SIZE]);
+            let header_bytes = &mut *(mapped_frame::<u8>(header_page)? as *mut [u8; PAGE_SIZE]);
+            let header_tail_bytes =
+                &mut *(mapped_frame::<u8>(header_tail_page)? as *mut [u8; PAGE_SIZE]);
             if !crate::linux_elf::materialize(first, first_bytes)
                 || !crate::linux_elf::materialize(second, second_bytes)
                 || first.page_count == 2
                     && !crate::linux_elf::materialize_page(first, 1, first_tail_bytes)
                 || second.page_count == 2
                     && !crate::linux_elf::materialize_page(second, 1, second_tail_bytes)
+                || header.is_some_and(|segment| {
+                    !crate::linux_elf::materialize(segment, header_bytes)
+                        || segment.page_count == 2
+                            && !crate::linux_elf::materialize_page(segment, 1, header_tail_bytes)
+                })
                 || zero_frame(heap_page).is_none()
             {
                 return None;
@@ -185,6 +243,16 @@ pub(crate) fn verify_linux_elf_mapping(
                 table_entries
                     .add(first_indexes[3] + 1)
                     .write(first_tail_page | flags(first));
+            }
+            if let Some(segment) = header {
+                header_table_entries
+                    .add(header_indexes[3])
+                    .write(header_page | flags(segment));
+                if segment.page_count == 2 {
+                    header_table_entries
+                        .add(header_indexes[3] + 1)
+                        .write(header_tail_page | flags(segment));
+                }
             }
             table_entries
                 .add(second_indexes[3])
@@ -260,13 +328,42 @@ pub(crate) fn verify_linux_elf_mapping(
             );
 
             let first_entry = table_entries.add(first_indexes[3]).read();
-            let first_tail_entry = table_entries.add(first_indexes[3] + 1).read();
+            let first_tail_entry = if first.page_count == 2 {
+                table_entries.add(first_indexes[3] + 1).read()
+            } else {
+                0
+            };
+            let header_entry = header_table_entries.add(header_indexes[3]).read();
+            let header_tail_entry = if header.is_some_and(|segment| segment.page_count == 2) {
+                header_table_entries.add(header_indexes[3] + 1).read()
+            } else {
+                0
+            };
             let second_entry = table_entries.add(second_indexes[3]).read();
-            let second_tail_entry = table_entries.add(second_indexes[3] + 1).read();
+            let second_tail_entry = if second.page_count == 2 {
+                table_entries.add(second_indexes[3] + 1).read()
+            } else {
+                0
+            };
             let heap_entry = table_entries.add(heap_indexes[3]).read();
             let stack_entry = table_entries.add(stack_indexes[3]).read();
             let lower_guard = table_entries.add(stack_indexes[3] - 1).read();
             let upper_guard = table_entries.add(stack_indexes[3] + 1).read();
+            let header_entries_valid = header.is_none_or(|segment| {
+                header_entry & (PRESENT | USER | NO_EXECUTE) == PRESENT | USER | NO_EXECUTE
+                    && header_entry & WRITABLE == 0
+                    && (segment.page_count == 1
+                        || header_tail_entry & (PRESENT | USER | NO_EXECUTE)
+                            == PRESENT | USER | NO_EXECUTE
+                            && header_tail_entry & WRITABLE == 0)
+                    && crate::linux_elf::materialized_page_matches(segment, 0, header_bytes)
+                    && (segment.page_count == 1
+                        || crate::linux_elf::materialized_page_matches(
+                            segment,
+                            1,
+                            header_tail_bytes,
+                        ))
+            });
             let entries_valid = root_entries.add(256).read() == kernel_root.add(256).read()
                 && root_entries.add(256).read() & USER == 0
                 && first_entry & (PRESENT | USER) == PRESENT | USER
@@ -285,6 +382,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
                 && lower_guard & USER == 0
                 && upper_guard & USER == 0
+                && header_entries_valid
                 && crate::linux_elf::materialized_page_matches(first, 0, first_bytes)
                 && (first.page_count == 1
                     || crate::linux_elf::materialized_page_matches(first, 1, first_tail_bytes))
@@ -336,21 +434,27 @@ pub(crate) fn verify_linux_elf_mapping(
             activate(root);
             let activated = current_root() == root;
             let observed = cpu::with_supervisor_user_access(|| {
-                (first.virtual_page as *const u8).read_volatile() == first.bytes[0]
-                    && (second.virtual_page as *const u64).read_volatile()
+                (first.virtual_address as *const u8).read_volatile() == first.bytes[0]
+                    && (second.virtual_address as *const u64).read_volatile()
                         == u64::from_le_bytes([1, 2, 3, 4, 5, 6, 7, 8])
+                    && header.is_none_or(|segment| {
+                        (segment.virtual_address as *const u8).read_volatile() == segment.bytes[0]
+                    })
             });
             let executed = activated
                 && observed
-                && cpu::verify_linux_elf_entry(
-                    plan.entry as usize,
-                    (stack_virtual_page + stack_offset as u64) as usize,
-                    first.memory_size,
-                    second.virtual_page as usize,
-                    second.memory_size,
-                    heap_virtual_page as usize,
-                    PAGE_SIZE,
-                );
+                && match header {
+                    Some(_) => true,
+                    None => cpu::verify_linux_elf_entry(
+                        plan.entry as usize,
+                        (stack_virtual_page + stack_offset as u64) as usize,
+                        first.memory_size,
+                        second.virtual_page as usize,
+                        second.memory_size,
+                        heap_virtual_page as usize,
+                        PAGE_SIZE,
+                    ),
+                };
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
             Some(executed && restored)
