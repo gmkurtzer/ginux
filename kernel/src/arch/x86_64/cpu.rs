@@ -173,7 +173,7 @@ const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_IOV_LIMIT: usize = 4;
 const LINUX_POLLFD_LIMIT: usize = 4;
 const LINUX_AUX_DESCRIPTOR_FIRST: u64 = 2;
-const LINUX_AUX_DESCRIPTOR_LIMIT: u64 = 4;
+const LINUX_AUX_DESCRIPTOR_LIMIT: u64 = 6;
 const LINUX_POLLIN: u16 = 1;
 const LINUX_POLLOUT: u16 = 4;
 const LINUX_POLLHUP: u16 = 0x10;
@@ -322,7 +322,7 @@ static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU8; 2] = [const { AtomicU8::new(0) }; 2];
+static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU8; 4] = [const { AtomicU8::new(0) }; 4];
 static ELF_PROBE_EPOLL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
 static ELF_PROBE_EPOLL_EVENTS: AtomicU32 = AtomicU32::new(0);
@@ -334,7 +334,7 @@ static ELF_PROBE_TIMERFD_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_TIMERFD_FLAGS: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_TIMERFD_INTERVAL: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_TIMERFD_DEADLINE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_DIRECTORY_CURSORS: [AtomicU8; 2] = [const { AtomicU8::new(0) }; 2];
+static ELF_PROBE_DIRECTORY_CURSORS: [AtomicU8; 4] = [const { AtomicU8::new(0) }; 4];
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
@@ -990,12 +990,16 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         u64::from(ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_DEVICE_DESCRIPTORS[0].load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_DEVICE_DESCRIPTORS[1].load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_DEVICE_DESCRIPTORS[2].load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_DEVICE_DESCRIPTORS[3].load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_EPOLL_DESCRIPTOR.load(Ordering::SeqCst)),
         ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst),
         u64::from(ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst)),
         ELF_PROBE_EPOLL_DATA.load(Ordering::SeqCst),
         u64::from(ELF_PROBE_DIRECTORY_CURSORS[0].load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_DIRECTORY_CURSORS[1].load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_DIRECTORY_CURSORS[2].load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_DIRECTORY_CURSORS[3].load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_EVENTFD_DESCRIPTOR.load(Ordering::SeqCst)),
         ELF_PROBE_EVENTFD_COUNTER.load(Ordering::SeqCst),
         u64::from(ELF_PROBE_EVENTFD_FLAGS.load(Ordering::SeqCst)),

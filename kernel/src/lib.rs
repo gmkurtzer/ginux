@@ -596,7 +596,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux bounded epoll lifecycle validated\r\n");
     serial_write("ginux: Linux bounded epoll_pwait inputs validated\r\n");
     serial_write("ginux: Linux bounded epoll_pwait2 timeout validated\r\n");
-    serial_write("ginux: Linux two-slot auxiliary descriptor table validated\r\n");
+    serial_write("ginux: Linux four-slot auxiliary descriptor table validated\r\n");
     serial_write("ginux: Linux bounded eventfd notification validated\r\n");
     serial_write("ginux: Linux bounded timerfd expiration validated\r\n");
     serial_write("ginux: Linux bounded syscall stack movement validated\r\n");

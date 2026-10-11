@@ -50,7 +50,7 @@ never blocks. Zero timeouts and immediately ready descriptors behave like
 sizes return `-EINVAL`, invalid input ranges return `-EFAULT`, and the timeout
 is not rewritten.
 `rax = 291` (`__NR_epoll_create1`) allocates one process-local epoll instance
-in the lowest free auxiliary descriptor, 2 or 3. It accepts only zero or
+in the lowest free auxiliary descriptor, 2 through 5. It accepts only zero or
 `EPOLL_CLOEXEC`; a second epoll instance or exhausted auxiliary table returns
 `-EMFILE`.
 `rax = 233` (`__NR_epoll_ctl`) retains one registration for an open console or
@@ -178,10 +178,10 @@ descriptor, `F_GETFD`, `F_SETFD`, and `F_GETFL` expose its close-on-exec bit and
 selected access mode; duplication remains outside this bounded node profile.
 `rax = 257` (`__NR_openat`) recognizes only the absolute paths `/dev/null`,
 `/dev/zero`, `/dev/console`, and `/dev/tty`, and
-allocates the lowest free auxiliary descriptor, 2 or 3. It accepts `O_RDONLY`, `O_WRONLY`, or
+allocates the lowest free auxiliary descriptor, 2 through 5. It accepts `O_RDONLY`, `O_WRONLY`, or
 `O_RDWR`, optionally with `O_CLOEXEC`; other paths return `-ENOENT`, unsupported
-flags return `-EINVAL`, bad path memory returns `-EFAULT`, and an open with both
-auxiliary slots occupied returns `-EMFILE`. `/dev/null` reads return EOF and writes discard their requested byte
+flags return `-EINVAL`, bad path memory returns `-EFAULT`, and an open with all
+four auxiliary slots occupied returns `-EMFILE`. `/dev/null` reads return EOF and writes discard their requested byte
 count without touching the caller buffer. This is a fixed device namespace,
 not directory traversal or a general VFS. `/dev/zero` reads up to 256 validated
 bytes as zeros and discards writes when its selected access mode permits them.

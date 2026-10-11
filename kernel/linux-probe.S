@@ -1067,9 +1067,9 @@ ginux_linux_probe:
     mov r10d, 0x404090
     mov eax, 302
     call syscall_expect_zero
-    cmp qword ptr [0x404090], 4
+    cmp qword ptr [0x404090], 6
     jne failure
-    cmp qword ptr [0x404098], 4
+    cmp qword ptr [0x404098], 6
     jne failure
 
     mov edi, 2
@@ -1245,9 +1245,23 @@ ginux_linux_probe:
     jne failure
     mov eax, 257
     syscall
+    cmp rax, 4
+    jne failure
+    mov eax, 257
+    syscall
+    cmp rax, 5
+    jne failure
+    mov eax, 257
+    syscall
     cmp rax, -24
     jne failure
     mov edi, 3
+    mov eax, 3
+    call syscall_expect_zero
+    mov edi, 4
+    mov eax, 3
+    call syscall_expect_zero
+    mov edi, 5
     mov eax, 3
     call syscall_expect_zero
 
