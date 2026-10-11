@@ -80,6 +80,14 @@ pub(crate) struct LoadPlan<'a> {
     pub(crate) relro: Option<Relro>,
 }
 
+pub(crate) struct InterpretedLoadPlan<'main, 'interpreter> {
+    pub(crate) initial_entry: u64,
+    pub(crate) main_entry: u64,
+    pub(crate) interpreter_base: u64,
+    pub(crate) main: LoadPlan<'main>,
+    pub(crate) interpreter: LoadPlan<'interpreter>,
+}
+
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * MIN_LOAD_SEGMENT_COUNT
         || bytes.get(0..4)? != b"\x7fELF"
@@ -234,7 +242,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
 }
 
 pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
-    if image.kind != ImageKind::Executable || image.interpreter.is_some() {
+    if image.interpreter.is_some() {
+        return None;
+    }
+    plan_executable(image)
+}
+
+fn plan_executable<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
+    if image.kind != ImageKind::Executable {
         return None;
     }
     Some(LoadPlan {
@@ -249,6 +264,56 @@ pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
         writable: plan_segment(image.writable)?,
         relro: image.relro,
     })
+}
+
+pub(crate) fn plan_interpreted<'main, 'interpreter>(
+    main: &Image<'main>,
+    resolved_path: &[u8],
+    interpreter: &Image<'interpreter>,
+    interpreter_base: u64,
+) -> Option<InterpretedLoadPlan<'main, 'interpreter>> {
+    if main.kind != ImageKind::Executable || main.interpreter != Some(resolved_path) {
+        return None;
+    }
+    let main = plan_executable(main)?;
+    let interpreter = plan_position_independent(interpreter, interpreter_base)?;
+    if plans_overlap(&main, &interpreter) {
+        return None;
+    }
+    Some(InterpretedLoadPlan {
+        initial_entry: interpreter.entry,
+        main_entry: main.entry,
+        interpreter_base,
+        main,
+        interpreter,
+    })
+}
+
+fn plans_overlap(first: &LoadPlan<'_>, second: &LoadPlan<'_>) -> bool {
+    planned_segments(first).into_iter().flatten().any(|first| {
+        planned_segments(second)
+            .into_iter()
+            .flatten()
+            .any(|second| planned_segments_overlap(first, second))
+    })
+}
+
+fn planned_segments<'a>(plan: &LoadPlan<'a>) -> [Option<PlannedSegment<'a>>; 3] {
+    [Some(plan.executable), plan.read_only, Some(plan.writable)]
+}
+
+fn planned_segments_overlap(first: PlannedSegment<'_>, second: PlannedSegment<'_>) -> bool {
+    let first_end = first
+        .virtual_page
+        .checked_add(first.page_count as u64 * PAGE_SIZE as u64);
+    let second_end = second
+        .virtual_page
+        .checked_add(second.page_count as u64 * PAGE_SIZE as u64);
+    first_end
+        .zip(second_end)
+        .is_none_or(|(first_end, second_end)| {
+            first.virtual_page < second_end && second.virtual_page < first_end
+        })
 }
 
 pub(crate) fn plan_position_independent<'a>(
@@ -783,7 +848,9 @@ pub(crate) fn verify_load_plan() -> bool {
     {
         return false;
     }
-    verify_oversized_writable_plan_rejected() && verify_position_independent_plan()
+    verify_oversized_writable_plan_rejected()
+        && verify_position_independent_plan()
+        && verify_interpreted_plan()
 }
 
 #[inline(never)]
@@ -819,6 +886,37 @@ fn verify_position_independent_plan() -> bool {
         && plan_position_independent(&parsed, 0).is_none()
         && plan_position_independent(&parsed, 0x60_0001).is_none()
         && plan_position_independent(&parsed, MAX_USER_ADDRESS).is_none()
+}
+
+#[inline(never)]
+fn verify_interpreted_plan() -> bool {
+    const PATH: &[u8] = b"/lib64/ld-ginux.so";
+    const PATH_WITH_NUL: &[u8] = b"/lib64/ld-ginux.so\0";
+    const PATH_OFFSET: usize = 0x3f80;
+    let mut main_bytes = fixture();
+    write_u16(&mut main_bytes, 56, 4);
+    write_interpreter(
+        &mut main_bytes,
+        ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE,
+        PATH_OFFSET,
+        PATH_WITH_NUL,
+    );
+    let interpreter_bytes = compact_position_independent_fixture();
+    let (Some(main), Some(interpreter)) = (parse(&main_bytes), parse(&interpreter_bytes)) else {
+        return false;
+    };
+    let Some(combined) = plan_interpreted(&main, PATH, &interpreter, 0x60_0000) else {
+        return false;
+    };
+    combined.initial_entry == 0x60_00f0
+        && combined.main_entry == 0x40_0100
+        && combined.interpreter_base == 0x60_0000
+        && combined.main.program_headers == 0x40_0040
+        && combined.interpreter.program_headers == 0x60_0040
+        && combined.interpreter.executable.virtual_page == 0x60_0000
+        && combined.interpreter.writable.virtual_page == 0x60_3000
+        && plan_interpreted(&main, b"/lib64/other.so", &interpreter, 0x60_0000).is_none()
+        && plan_interpreted(&main, PATH, &interpreter, 0x40_0000).is_none()
 }
 
 #[inline(never)]
@@ -967,6 +1065,43 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
     write_relro(&mut bytes, stack_header, 0x40_5000, 512);
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
     bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(b"PROBE!!\n");
+    bytes
+}
+
+fn compact_position_independent_fixture() -> [u8; 512] {
+    let mut bytes = [0_u8; 512];
+    bytes[0..4].copy_from_slice(b"\x7fELF");
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+    write_u16(&mut bytes, 16, ET_DYN);
+    write_u16(&mut bytes, 18, EM_X86_64);
+    write_u32(&mut bytes, 20, 1);
+    write_u64(&mut bytes, 24, 0xf0);
+    write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
+    write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
+    write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
+    write_u16(&mut bytes, 56, MIN_LOAD_SEGMENT_COUNT as u16);
+    write_segment(
+        &mut bytes,
+        ELF_HEADER_SIZE,
+        0,
+        0,
+        0x100,
+        0x100,
+        PF_READ | PF_EXECUTE,
+    );
+    write_segment(
+        &mut bytes,
+        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
+        0x100,
+        0x3000,
+        8,
+        0x100,
+        PF_READ | PF_WRITE,
+    );
+    bytes[0xf0] = 0xc3;
+    bytes[0x100..0x108].copy_from_slice(b"DYNAMIC!");
     bytes
 }
 

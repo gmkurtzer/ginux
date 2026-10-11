@@ -95,9 +95,14 @@ point. Position-independent `ET_DYN` images use a separate planner that requires
 a nonzero, page-aligned load bias, relocates every segment, entry, program-header,
 and RELRO address with checked arithmetic, and rejects mappings outside the user
 range. The static planner rejects `ET_DYN`, and the position-independent planner
-rejects interpreter-bearing images. The profile does not yet load or authenticate
-the named interpreter, apply dynamic relocations, map `ET_DYN` images, or support
-glibc.
+rejects interpreter-bearing images. A separate interpreted-image planner binds an
+`ET_EXEC` main image to an exactly matching resolved interpreter path and a
+non-interpreted `ET_DYN` image. It preserves the main entry for `AT_ENTRY`, uses
+the relocated interpreter entry as the initial instruction pointer, records the
+interpreter bias for `AT_BASE`, and rejects page-granular overlap between every
+main and interpreter load before mapping. The resolver still must authenticate
+the selected interpreter bytes. The profile does not yet apply dynamic
+relocations, map the combined plan, execute the interpreter, or support glibc.
 
 ## Page-image plan
 

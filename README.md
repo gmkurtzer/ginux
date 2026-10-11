@@ -106,7 +106,10 @@ classes can be queried and idempotently disarmed; arming remains unsupported
 until asynchronous signal delivery exists.
 The bounded ELF parser and page-image planner also validate checked,
 page-aligned load-bias plans for position-independent `ET_DYN` images. Dynamic
-relocation and interpreter mapping remain outside the executable profile.
+execution planning binds an exact `PT_INTERP` path to a non-overlapping relocated
+interpreter image while preserving distinct initial-entry, `AT_ENTRY`, and
+`AT_BASE` values. Relocation and combined-image mapping remain outside the
+executable profile.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and
