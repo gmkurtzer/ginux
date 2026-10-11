@@ -20,6 +20,35 @@ pub(crate) struct LocalApic {
     pub(crate) physical_base: u64,
 }
 
+impl LocalApic {
+    /// Reads a local-APIC register.
+    ///
+    /// # Safety
+    ///
+    /// In xAPIC mode, the APIC MMIO page must be mapped uncached at the
+    /// discovered physical base. The register must be aligned and below
+    /// offset `0x400`.
+    pub(crate) unsafe fn read(&self, register: u32) -> u32 {
+        debug_assert!(register < 0x400 && register.is_multiple_of(16));
+        match self.mode {
+            Mode::XApic => {
+                ((self.physical_base as usize + register as usize) as *const u32).read_volatile()
+            }
+            Mode::X2Apic => read_msr(0x800 + register / 16) as u32,
+        }
+    }
+
+    /// Writes a local-APIC register under the mapping requirements of `read`.
+    pub(crate) unsafe fn write(&self, register: u32, value: u32) {
+        debug_assert!(register < 0x400 && register.is_multiple_of(16));
+        match self.mode {
+            Mode::XApic => ((self.physical_base as usize + register as usize) as *mut u32)
+                .write_volatile(value),
+            Mode::X2Apic => write_msr(0x800 + register / 16, u64::from(value)),
+        }
+    }
+}
+
 /// Discovers the bootstrap processor's already-enabled local APIC.
 ///
 /// This is deliberately read-only. Interrupt delivery, MMIO access, timer
@@ -66,4 +95,14 @@ unsafe fn read_msr(msr: u32) -> u64 {
         options(nomem, nostack, preserves_flags)
     );
     (u64::from(high) << 32) | u64::from(low)
+}
+
+unsafe fn write_msr(msr: u32, value: u64) {
+    asm!(
+        "wrmsr",
+        in("ecx") msr,
+        in("eax") value as u32,
+        in("edx") (value >> 32) as u32,
+        options(nomem, nostack, preserves_flags)
+    );
 }

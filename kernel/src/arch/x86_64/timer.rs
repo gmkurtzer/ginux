@@ -1,4 +1,6 @@
-use core::arch::x86_64::__cpuid;
+use core::arch::{asm, x86_64::__cpuid};
+
+use super::apic::{LocalApic, Mode};
 
 const CPUID_BASIC_MAX: u32 = 0;
 const CPUID_FEATURES: u32 = 1;
@@ -9,6 +11,27 @@ const CPUID_ADVANCED_POWER: u32 = 0x8000_0007;
 const TSC_DEADLINE: u32 = 1 << 24;
 const INVARIANT_TSC: u32 = 1 << 8;
 const HERTZ_PER_MHZ: u64 = 1_000_000;
+const APIC_LVT_TIMER: u32 = 0x320;
+const APIC_INITIAL_COUNT: u32 = 0x380;
+const APIC_CURRENT_COUNT: u32 = 0x390;
+const APIC_DIVIDE_CONFIGURATION: u32 = 0x3e0;
+const APIC_TIMER_MASKED: u32 = 1 << 16;
+const APIC_DIVIDE_BY_16: u32 = 0x3;
+const PIT_FREQUENCY_HZ: u64 = 1_193_182;
+const PIT_CALIBRATION_TICKS: u16 = 11_932;
+const PIT_COMMAND: u16 = 0x43;
+const PIT_CHANNEL_2: u16 = 0x42;
+const PIT_SPEAKER_CONTROL: u16 = 0x61;
+const PIT_CHANNEL_2_MODE_0: u8 = 0xb0;
+const PIT_GATE_2: u8 = 1 << 0;
+const PIT_SPEAKER_ENABLE: u8 = 1 << 1;
+const PIT_OUTPUT_2: u8 = 1 << 5;
+const PIT_POLL_LIMIT: usize = 100_000_000;
+
+pub(crate) struct LocalApicCalibration {
+    pub(crate) counter_hz: u64,
+    pub(crate) divider: u32,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FrequencySource {
@@ -69,4 +92,78 @@ pub(crate) fn discover() -> Capabilities {
         frequency_hz,
         frequency_source,
     }
+}
+
+/// Calibrates the masked local-APIC timer against a one-shot PIT interval.
+///
+/// # Safety
+///
+/// The caller must own the legacy PIT and local APIC, keep interrupts
+/// disabled, and provide the exclusive mapped limit for xAPIC MMIO.
+pub(crate) unsafe fn calibrate_local_apic(
+    apic: &LocalApic,
+    mapped_limit: usize,
+) -> Option<LocalApicCalibration> {
+    if apic.mode == Mode::XApic && apic.physical_base.checked_add(0x400)? > mapped_limit as u64 {
+        return None;
+    }
+
+    apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED);
+    apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
+    apic.write(APIC_INITIAL_COUNT, u32::MAX);
+
+    let original_control = in_u8(PIT_SPEAKER_CONTROL);
+    out_u8(PIT_SPEAKER_CONTROL, original_control & !PIT_GATE_2);
+    out_u8(PIT_COMMAND, PIT_CHANNEL_2_MODE_0);
+    out_u8(PIT_CHANNEL_2, PIT_CALIBRATION_TICKS as u8);
+    out_u8(PIT_CHANNEL_2, (PIT_CALIBRATION_TICKS >> 8) as u8);
+    out_u8(
+        PIT_SPEAKER_CONTROL,
+        (original_control & !PIT_SPEAKER_ENABLE) | PIT_GATE_2,
+    );
+
+    let mut completed = false;
+    for _ in 0..PIT_POLL_LIMIT {
+        if in_u8(PIT_SPEAKER_CONTROL) & PIT_OUTPUT_2 != 0 {
+            completed = true;
+            break;
+        }
+        core::hint::spin_loop();
+    }
+
+    let current = apic.read(APIC_CURRENT_COUNT);
+    apic.write(APIC_INITIAL_COUNT, 0);
+    out_u8(PIT_SPEAKER_CONTROL, original_control);
+    if !completed {
+        return None;
+    }
+
+    let elapsed = u64::from(u32::MAX - current);
+    let counter_hz = elapsed
+        .checked_mul(PIT_FREQUENCY_HZ)?
+        .checked_div(u64::from(PIT_CALIBRATION_TICKS))?;
+    (counter_hz != 0).then_some(LocalApicCalibration {
+        counter_hz,
+        divider: 16,
+    })
+}
+
+unsafe fn in_u8(port: u16) -> u8 {
+    let value: u8;
+    asm!(
+        "in al, dx",
+        in("dx") port,
+        out("al") value,
+        options(nomem, nostack, preserves_flags)
+    );
+    value
+}
+
+unsafe fn out_u8(port: u16, value: u8) {
+    asm!(
+        "out dx, al",
+        in("dx") port,
+        in("al") value,
+        options(nomem, nostack, preserves_flags)
+    );
 }
