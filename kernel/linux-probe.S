@@ -1200,6 +1200,32 @@ ginux_linux_probe:
     test rax, rax
     jne failure
 
+    mov edi, -100
+    mov esi, 0x403340
+    xor edx, edx
+    mov r10d, 0x7ff
+    mov r8d, 0x404200
+    mov eax, 332
+    syscall
+    cmp rax, -14
+    jne failure
+    mov r8d, 0x403400
+    mov eax, 332
+    syscall
+    test rax, rax
+    jne failure
+    cmp dword ptr [0x403400], 0x7ff
+    jne failure
+    cmp word ptr [0x40341c], 0x2180
+    jne failure
+    cmp qword ptr [0x403420], 3
+    jne failure
+    mov r10d, 0x80000000
+    mov eax, 332
+    syscall
+    cmp rax, -22
+    jne failure
+
     mov edi, 0x404200
     mov eax, 80
     syscall

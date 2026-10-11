@@ -104,6 +104,11 @@ bytes as zeros and discards writes when its selected access mode permits them.
 EOF input, terminal ioctls, and non-seekable behavior as the inherited console.
 `/dev/tty` is a strict alias of that endpoint; controlling-terminal ownership,
 session attachment, and terminal reassignment remain unsupported.
+`rax = 332` (`__NR_statx`) returns a zero-initialized 256-byte result for these
+four paths, including `STATX_BASIC_STATS`, character-device mode `0600`, stable
+inode numbers, block size 4096, and conventional device minors. The reserved
+mask bit or nonzero flags return `-EINVAL`; unknown paths and invalid memory use
+the same `-ENOENT` and `-EFAULT` boundaries as the older metadata call.
 `rax = 262` (`__NR_newfstatat`)
 returns the same fixed character-device metadata for either device without
 opening it. Only zero flags are accepted; bad path or output memory returns

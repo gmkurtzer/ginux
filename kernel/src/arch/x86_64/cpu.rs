@@ -106,6 +106,7 @@ const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
+const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
@@ -132,6 +133,8 @@ const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_PROT_READ: u64 = 1;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
+const LINUX_STATX_BASIC_STATS: u32 = 0x7ff;
+const LINUX_STATX_RESERVED: u32 = 0x8000_0000;
 const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_IOV_LIMIT: usize = 4;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
@@ -1545,6 +1548,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_STATX_SYSCALL => linux_statx(buffer, count, register(0), register(2)),
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {
@@ -1664,6 +1668,36 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
     } else {
         0
     }
+}
+
+fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u64 {
+    if flags != 0 || mask & u64::from(LINUX_STATX_RESERVED) != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; 16];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let (inode, minor) = match &path[..path_length] {
+        b"/dev/null" => (1_u64, 3_u32),
+        b"/dev/zero" => (2, 5),
+        b"/dev/console" => (3, 1),
+        b"/dev/tty" => (3, 0),
+        _ => return LINUX_ENOENT,
+    };
+    let mut stat = [0_u8; 256];
+    stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
+    stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
+    stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
+    stat[28..30].copy_from_slice(&(LINUX_STAT_CHARACTER_DEVICE_MODE as u16).to_ne_bytes());
+    stat[32..40].copy_from_slice(&inode.to_ne_bytes());
+    stat[128..132].copy_from_slice(&1_u32.to_ne_bytes());
+    stat[132..136].copy_from_slice(&minor.to_ne_bytes());
+    if !copy_to_linux_user(stat_address, &stat) {
+        return LINUX_EFAULT;
+    }
+    0
 }
 
 fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
