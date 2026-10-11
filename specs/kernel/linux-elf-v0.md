@@ -20,8 +20,10 @@ The segments must not overlap.
 
 The profile requires exactly one executable segment and one writable segment.
 Writable-executable mappings are rejected. The entry point must lie inside the
-executable segment. The boot verifier accepts a synthetic image with a bounded
-RX segment and an eight-byte file/512-byte memory RW segment, then rejects
+executable segment. The boot verifier accepts a synthetic image whose bounded
+RX segment starts at file offset zero, includes its ELF/program headers and
+code, and uses a non-page-base entry. Its RW segment has eight file bytes and a
+512-byte memory extent. The verifier then rejects
 bad magic, wrong class, non-executable file type, wrong machine, an out-of-range
 entry point, W+X flags, overflowing file size, overlapping virtual ranges, an
 executable GNU stack, a non-load segment header, and truncation. The same image
@@ -38,10 +40,13 @@ The next bounded loader step accepts only segments whose virtual address is
 page-aligned and whose complete memory image fits in one 4096-byte page. It
 preserves the ELF virtual addresses and derives separate executable/read-only
 and writable/non-executable page metadata. Materialization first zeroes the
-whole destination page and then copies the file bytes, so the writable
-segment's file tail through `p_memsz` and all remaining page bytes are zero.
-The QEMU verifier checks the exact RX instruction byte, RW data bytes, W^X
-metadata, and every zero-filled byte in both pages.
+whole destination page and then copies the file bytes. A load segment may begin
+at file offset zero, as real ELF images commonly do, so the first mapped page
+preserves the ELF and program-header tables and places instructions at their
+file-relative offset. The writable segment's file tail through `p_memsz` and
+all remaining page bytes are zero. The QEMU verifier checks the ELF magic,
+exact RX instructions, RW data bytes, W^X metadata, and every zero-filled tail
+byte.
 
 The QEMU proof installs the two pages into a newly allocated x86-64
 root at their declared `0x400000` and `0x401000` addresses. It privately clones
@@ -53,7 +58,9 @@ pages remain supervisor-only. Before changing CR3, the proof rejects either
 segment target page if it overlaps the
 loaded kernel PE image. It then activates the root, observes both pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
-entry. The synthetic instruction stream first verifies that unsupported call
+entry at `0x400100`, while syscall return validation remains bounded to its
+`0x400000` executable page. The synthetic instruction stream first verifies
+that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
 Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. A
 bounded `uname(0x401000)` then copies a complete zero-initialized `utsname` into

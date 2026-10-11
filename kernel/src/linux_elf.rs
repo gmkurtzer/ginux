@@ -112,12 +112,8 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         return None;
     }
     let entry = read_u64(bytes, 24)?;
-    let first = parse_segment(bytes, ELF_HEADER_SIZE, program_table_end)?;
-    let second = parse_segment(
-        bytes,
-        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
-        program_table_end,
-    )?;
+    let first = parse_segment(bytes, ELF_HEADER_SIZE)?;
+    let second = parse_segment(bytes, ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE)?;
     if program_header_count == MAX_PROGRAM_HEADER_COUNT
         && !valid_gnu_stack(bytes, ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE)
     {
@@ -179,7 +175,7 @@ pub(crate) fn materialize(segment: PlannedSegment<'_>, page: &mut [u8; PAGE_SIZE
     true
 }
 
-fn parse_segment(bytes: &[u8], header: usize, program_table_end: usize) -> Option<Segment<'_>> {
+fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
     if read_u32(bytes, header)? != PT_LOAD {
         return None;
     }
@@ -201,7 +197,6 @@ fn parse_segment(bytes: &[u8], header: usize, program_table_end: usize) -> Optio
         || virtual_address < MIN_USER_ADDRESS
         || end > MAX_USER_ADDRESS
         || end <= virtual_address
-        || offset < program_table_end
         || file_end > bytes.len()
         || alignment == 0
         || !alignment.is_power_of_two()
@@ -233,10 +228,10 @@ pub(crate) fn verify_parser() -> bool {
     let Some(parsed) = parse(&image) else {
         return false;
     };
-    if parsed.entry != 0x40_0000
-        || parsed.segments[0].bytes != PROBE_CODE
+    if parsed.entry != 0x40_0100
+        || parsed.segments[0].bytes.get(0x100..) != Some(PROBE_CODE.as_slice())
         || parsed.segments[0].virtual_address != 0x40_0000
-        || parsed.segments[0].memory_size != PROBE_CODE.len() as u64
+        || parsed.segments[0].memory_size != (0x100 + PROBE_CODE.len()) as u64
         || parsed.segments[0].flags != PF_READ | PF_EXECUTE
         || parsed.segments[1].bytes != [1, 2, 3, 4, 5, 6, 7, 8]
         || parsed.segments[1].virtual_address != 0x40_1000
@@ -280,12 +275,13 @@ pub(crate) fn verify_load_plan() -> bool {
     let mut writable_page = [0xa5_u8; PAGE_SIZE];
     materialize(plan.segments[0], &mut executable_page)
         && materialize(plan.segments[1], &mut writable_page)
-        && plan.entry == 0x40_0000
+        && plan.entry == 0x40_0100
         && plan.segments[0].virtual_page == 0x40_0000
         && plan.segments[0].executable
         && !plan.segments[0].writable
-        && executable_page[..PROBE_CODE.len()] == PROBE_CODE
-        && executable_page[PROBE_CODE.len()..]
+        && executable_page[..4] == *b"\x7fELF"
+        && executable_page[0x100..0x100 + PROBE_CODE.len()] == PROBE_CODE
+        && executable_page[0x100 + PROBE_CODE.len()..]
             .iter()
             .all(|byte| *byte == 0)
         && plan.segments[1].virtual_page == 0x40_1000
@@ -315,7 +311,7 @@ fn fixture() -> [u8; 424] {
     write_u16(&mut bytes, 16, ET_EXEC);
     write_u16(&mut bytes, 18, EM_X86_64);
     write_u32(&mut bytes, 20, 1);
-    write_u64(&mut bytes, 24, 0x40_0000);
+    write_u64(&mut bytes, 24, 0x40_0100);
     write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
     write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
     write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
@@ -323,10 +319,10 @@ fn fixture() -> [u8; 424] {
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE,
-        0x100,
+        0,
         0x40_0000,
-        PROBE_CODE.len() as u64,
-        PROBE_CODE.len() as u64,
+        (0x100 + PROBE_CODE.len()) as u64,
+        (0x100 + PROBE_CODE.len()) as u64,
         PF_READ | PF_EXECUTE,
     );
     write_segment(

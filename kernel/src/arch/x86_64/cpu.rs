@@ -677,7 +677,7 @@ pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize, data: usize) ->
     };
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     ELF_PROBE_STACK.store(stack as u64, Ordering::SeqCst);
-    ELF_PROBE_ENTRY.store(entry as u64, Ordering::SeqCst);
+    ELF_PROBE_ENTRY.store((entry & !(PAGE_SIZE - 1)) as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(data as u64, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
     restore_linux_syscall(saved_msrs);

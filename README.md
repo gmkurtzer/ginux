@@ -6,9 +6,10 @@ The initial executable milestone is an x86-64 unified EFI image tested under QEM
 
 M4 begins with a strict static x86-64 ELF64 parser profile. It accepts an
 optional non-executable `PT_GNU_STACK` declaration, is validated during boot,
-materializes bounded RX/RW page images with zero-filled BSS, and
-installs them at their declared addresses in a collision-checked page-table
-root, activates it, and executes a one-shot verification entry at ring 3. This
+materializes bounded RX/RW page images with zero-filled BSS, including ELF and
+program headers in the first load page, and installs them at their declared
+addresses in a collision-checked page-table root. It activates the root and
+executes a non-page-base verification entry at ring 3. This
 entry receives a distinct RW/NX stack containing `argc`, `argv[0]`, and bounded
 Linux `AT_PAGESZ`/`AT_ENTRY` metadata, and validates its argument from ring 3
 before terminating through the architectural x86-64 `SYSCALL` instruction

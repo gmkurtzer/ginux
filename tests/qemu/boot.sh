@@ -513,8 +513,8 @@ if ! grep -q '^ginux: non-executable Linux GNU stack enforced' "$output_file"; t
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux ELF64 page images materialized' "$output_file"; then
-    echo "Boot test failed: Linux ELF64 page images were not materialized." >&2
+if ! grep -q '^ginux: Linux ELF headers mapped in executable segment' "$output_file"; then
+    echo "Boot test failed: Linux ELF headers were not mapped." >&2
     exit 1
 fi
 
