@@ -18,10 +18,11 @@ ring 3 before terminating through the architectural x86-64 `SYSCALL` instruction
 after checking that an unsupported call returns `-ENOSYS`, performing bounded
 `write` copy-in and `uname` copy-out operations, and validating a `getpid()`
 result returned through `SYSRETQ`. It also configures and queries an FS-relative
-TLS base through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's prior
-FS base afterward. Pointer-bearing calls are constrained to the RW segment's
-declared ELF memory extent even though the containing page is larger; invalid
-ranges and write arguments return Linux `-EFAULT`, `-EBADF`, or `-EINVAL`.
+TLS base through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's
+prior FS base afterward. Pointer-bearing calls are constrained to the RW
+segment's declared ELF memory extent or allocated heap bytes below the current
+break, even though the containing pages are larger; invalid ranges and write
+arguments return Linux `-EFAULT`, `-EBADF`, or `-EINVAL`.
 The ring-3 workload verifies each error and continues into valid calls.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.

@@ -1108,7 +1108,14 @@ extern "sysv64" fn linux_syscall_handler(
 fn linux_user_range_contains(address: u64, length: usize) -> bool {
     let base = ELF_PROBE_DATA.load(Ordering::SeqCst);
     let size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
-    linux_range_contains(base, size, address, length)
+    if linux_range_contains(base, size, address, length) {
+        return true;
+    }
+    let brk = ELF_PROBE_BRK.load(Ordering::SeqCst);
+    let heap_base = ELF_PROBE_BRK_LIMIT
+        .load(Ordering::SeqCst)
+        .saturating_sub(PAGE_SIZE as u64);
+    linux_range_contains(heap_base, brk.saturating_sub(heap_base), address, length)
 }
 
 fn linux_range_contains(base: u64, size: u64, address: u64, length: usize) -> bool {

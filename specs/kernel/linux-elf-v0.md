@@ -74,7 +74,8 @@ the declared data segment; invalid operation and destination tests require
 copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 512-byte `p_memsz`, rather
-than the rest of its mapped 4096-byte page. It next
+than the rest of its mapped 4096-byte page. Copy helpers also accept heap bytes
+strictly below the current break, not the entire mapped heap page. It next
 issues process identity queries, verifies PID, TID, process-group, and session
 ID 1 plus parent PID 0 after the kernel resumes it through `SYSRETQ`,
 registers a bounded clear-child-TID word, verifies preserved first and fourth

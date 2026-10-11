@@ -20,7 +20,9 @@ grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x403000` follows Linux syscall
 semantics by returning the unchanged current break rather than a negative
 error. The page remains mapped for the lifetime of this bounded process and is
-scrubbed during teardown.
+scrubbed during teardown. A valid `write` copies from the grown heap. A second
+eight-byte write crossing the current break returns `-EFAULT`, proving syscall
+copy ranges do not expand to the whole mapped page.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active
@@ -75,8 +77,9 @@ and `exit_group` calls. There is no thread
 creation, TID allocation, or clear-child-TID futex wake yet. Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
-remains disarmed outside the proof. The current copy helpers cover only the one declared RW
-segment; general VM-area lookup and cross-segment copies remain future work.
+remains disarmed outside the proof. The current copy helpers cover only the one
+declared RW segment and the bounded heap below its current break; general
+VM-area lookup and cross-area copies remain future work.
 Invalid `write` descriptors return `-EBADF`, unsupported bounded lengths return
 `-EINVAL`, and a `write` or `uname` range outside that segment returns
 `-EFAULT`. Boot verification covers the exact lower and upper boundaries, the

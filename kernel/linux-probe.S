@@ -32,6 +32,22 @@ ginux_linux_probe:
     syscall
     cmp rax, 0x402080
     jne failure
+    movabs rax, 0x0807060504030201
+    mov qword ptr [0x402000], rax
+    mov edi, 1
+    mov esi, 0x402000
+    mov edx, 8
+    mov eax, 1
+    syscall
+    cmp rax, 8
+    jne failure
+    mov edi, 1
+    mov esi, 0x402079
+    mov edx, 8
+    mov eax, 1
+    syscall
+    cmp rax, -14
+    jne failure
     movabs rax, 0x4845415042524b21
     mov qword ptr [0x402000], rax
     mov edi, 0x403001
