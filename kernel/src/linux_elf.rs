@@ -424,7 +424,7 @@ pub(crate) fn verify_parser() -> bool {
     write_u64(
         &mut conventional_addresses,
         ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 24,
-        0x40_1000,
+        0x40_2000,
     );
     write_u64(
         &mut conventional_addresses,
@@ -446,12 +446,12 @@ pub(crate) fn verify_parser() -> bool {
         || parsed.executable.flags != PF_READ | PF_EXECUTE
         || parsed.read_only.is_some()
         || parsed.writable.bytes != *b"PROBE!!\n"
-        || parsed.writable.virtual_address != 0x40_1000
+        || parsed.writable.virtual_address != 0x40_2000
         || parsed.writable.memory_size != (PAGE_SIZE + 512) as u64
         || parsed.writable.flags != PF_READ | PF_WRITE
         || parsed
             .relro
-            .is_none_or(|range| range.virtual_address != 0x40_2000 || range.memory_size != 512)
+            .is_none_or(|range| range.virtual_address != 0x40_3000 || range.memory_size != 512)
     {
         return false;
     }
@@ -502,34 +502,34 @@ fn verify_relro_parser() -> bool {
     let phdr_header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
     let mut candidate = fixture();
     write_u16(&mut candidate, 56, 3);
-    write_relro(&mut candidate, stack_header, 0x40_2000, 512);
+    write_relro(&mut candidate, stack_header, 0x40_3000, 512);
     let valid = parse(&candidate).is_some_and(|image| {
         image
             .relro
-            .is_some_and(|range| range.virtual_address == 0x40_2000 && range.memory_size == 512)
+            .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
     });
     candidate = fixture();
     write_u16(&mut candidate, 56, 3);
-    write_relro(&mut candidate, stack_header, 0x40_2000, 512);
+    write_relro(&mut candidate, stack_header, 0x40_3000, 512);
     write_u16(&mut candidate, 56, 4);
-    write_relro(&mut candidate, phdr_header, 0x40_2000, 512);
+    write_relro(&mut candidate, phdr_header, 0x40_3000, 512);
     let duplicate_rejected = parse(&candidate).is_none();
     candidate = fixture();
     write_u16(&mut candidate, 56, 3);
-    write_relro(&mut candidate, stack_header, 0x40_2001, 512);
+    write_relro(&mut candidate, stack_header, 0x40_3001, 512);
     let unaligned_rejected = parse(&candidate).is_none();
     candidate = fixture();
     write_u16(&mut candidate, 56, 3);
     write_relro(
         &mut candidate,
         stack_header,
-        0x40_2000,
+        0x40_3000,
         PAGE_SIZE as u64 + 1,
     );
     let oversized_rejected = parse(&candidate).is_none();
     candidate = fixture();
     write_u16(&mut candidate, 56, 3);
-    write_relro(&mut candidate, stack_header, 0x40_1000, 512);
+    write_relro(&mut candidate, stack_header, 0x40_2000, 512);
     valid
         && duplicate_rejected
         && unaligned_rejected
@@ -566,14 +566,14 @@ pub(crate) fn verify_load_plan() -> bool {
         && current_plan.read_only.is_none()
         && current_plan
             .relro
-            .is_some_and(|range| range.virtual_address == 0x40_2000 && range.memory_size == 512)
+            .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
         && executable_page[..4] == *b"\x7fELF"
         && &executable_page[0x100..0x100 + PROBE_CODE.len()] == PROBE_CODE
         && executable_page[0x100 + PROBE_CODE.len()..]
             .iter()
             .all(|byte| *byte == 0)
-        && current_plan.writable.virtual_page == 0x40_1000
-        && current_plan.writable.virtual_address == 0x40_1000
+        && current_plan.writable.virtual_page == 0x40_2000
+        && current_plan.writable.virtual_address == 0x40_2000
         && current_plan.writable.page_count == 2
         && current_plan.writable.writable
         && !current_plan.writable.executable
@@ -604,13 +604,20 @@ pub(crate) fn verify_linked_probe() -> bool {
         return false;
     };
     let mut page = [0xa5_u8; PAGE_SIZE];
+    let mut executable_tail_page = [0xa5_u8; PAGE_SIZE];
     let read_only_valid = materialize(read_only, &mut page)
         && page[..4] == *b"\x7fELF"
         && materialized_page_matches(read_only, 0, &page);
     let executable_valid = materialize(plan.executable, &mut page)
         && page[..0x100].iter().all(|byte| *byte == 0)
         && &page[0x100..0x100 + PROBE_CODE.len()] == PROBE_CODE
-        && materialized_page_matches(plan.executable, 0, &page);
+        && page[0x100 + PROBE_CODE.len()..]
+            .iter()
+            .all(|byte| *byte == 0)
+        && materialized_page_matches(plan.executable, 0, &page)
+        && materialize_page(plan.executable, 1, &mut executable_tail_page)
+        && executable_tail_page.iter().all(|byte| *byte == 0)
+        && materialized_page_matches(plan.executable, 1, &executable_tail_page);
     let writable_valid = materialize(plan.writable, &mut page)
         && page[..8] == *b"PROBE!!\n"
         && page[8..].iter().all(|byte| *byte == 0)
@@ -620,24 +627,27 @@ pub(crate) fn verify_linked_probe() -> bool {
         && image.program_headers == 0x3f_f040
         && image.program_header_count == 6
         && image.executable.virtual_address == 0x40_0100
-        && image.executable.bytes == PROBE_CODE
+        && image.executable.bytes.starts_with(PROBE_CODE)
+        && image.executable.bytes[PROBE_CODE.len()..]
+            .iter()
+            .all(|byte| *byte == 0)
         && image
             .read_only
             .is_some_and(|segment| segment.virtual_address == 0x3f_f000)
-        && image.writable.virtual_address == 0x40_1000
+        && image.writable.virtual_address == 0x40_2000
         && image.writable.bytes.len() == 4608
         && image.writable.bytes[..8] == *b"PROBE!!\n"
         && image.writable.bytes[8..].iter().all(|byte| *byte == 0)
         && image.writable.memory_size == 4608
         && image
             .relro
-            .is_some_and(|range| range.virtual_address == 0x40_2000 && range.memory_size == 512)
+            .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
         && plan
             .relro
-            .is_some_and(|range| range.virtual_address == 0x40_2000 && range.memory_size == 512)
+            .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
         && plan.executable.virtual_page == 0x40_0000
         && plan.executable.virtual_address == 0x40_0100
-        && plan.executable.page_count == 1
+        && plan.executable.page_count == 2
         && read_only.virtual_page == 0x3f_f000
         && plan.writable.page_count == 2
         && read_only_valid
@@ -684,13 +694,13 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
         &mut bytes,
         ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
         FIXTURE_DATA_OFFSET as u64,
-        0x40_1000,
+        0x40_2000,
         8,
         (PAGE_SIZE + 512) as u64,
         PF_READ | PF_WRITE,
     );
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
-    write_relro(&mut bytes, stack_header, 0x40_2000, 512);
+    write_relro(&mut bytes, stack_header, 0x40_3000, 512);
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
     bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(b"PROBE!!\n");
     bytes

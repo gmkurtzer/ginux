@@ -180,7 +180,6 @@ static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_ENTRY: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
@@ -760,10 +759,6 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     };
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     ELF_PROBE_STACK.store(execution.stack as u64, Ordering::SeqCst);
-    ELF_PROBE_ENTRY.store(
-        (execution.entry & !(PAGE_SIZE - 1)) as u64,
-        Ordering::SeqCst,
-    );
     ELF_PROBE_CODE_BASE.store(execution.code as u64, Ordering::SeqCst);
     ELF_PROBE_CODE_SIZE.store(execution.code_size as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(execution.data as u64, Ordering::SeqCst);
@@ -798,7 +793,6 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         })
     };
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
-    ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
     ELF_PROBE_CODE_BASE.store(0, Ordering::SeqCst);
     ELF_PROBE_CODE_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
@@ -1073,10 +1067,11 @@ extern "sysv64" fn linux_syscall_handler(
     let count = register(3);
     let buffer = register(4);
     let first_argument = register(5);
-    let entry = ELF_PROBE_ENTRY.load(Ordering::SeqCst);
+    let code_start = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
+    let code_end = code_start.saturating_add(ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst));
     if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
         || user_stack != ELF_PROBE_STACK.load(Ordering::SeqCst)
-        || !(entry..entry + PAGE_SIZE as u64).contains(&user_rip)
+        || !(code_start..code_end).contains(&user_rip)
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);

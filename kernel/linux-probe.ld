@@ -16,13 +16,19 @@ SECTIONS
     .headers : { BYTE(0) } :headers
 
     . = 0x400100;
-    .text : { *(.text) } :text
+    .text :
+    {
+        *(.text)
+        FILL(0)
+        . = ALIGN(4096);
+        BYTE(0)
+    } :text
 
-    . = 0x401000;
+    . = 0x402000;
     .data : { *(.data) } :data
     .bss : { *(.bss) } :data
 
-    . = 0x402000;
+    . = 0x403000;
     .data.rel.ro : { *(.data.rel.ro) } :data :relro
 
     /DISCARD/ : { *(.comment) *(.note*) }

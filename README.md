@@ -106,8 +106,9 @@ working on those inputs. The kernel build assembles `kernel/linux-probe.S` as
 an x86-64 ELF object, extracts its `.text` section for the executable runtime
 proof, and also links a complete static ELF with the Rust toolchain's LLD for
 parser compatibility verification. The checked-in linker script fixes its
-read-only headers at `0x3ff000`, entry at `0x400100`, and RW data/BSS at
-`0x401000`, matching the ring-3 workload's bounded layout. This tests ordinary
+read-only headers at `0x3ff000`, a two-page RX load with entry at `0x400100`,
+and RW data/BSS at `0x402000`, matching the ring-3 workload's bounded layout.
+This tests ordinary
 linker metadata on both macOS and Linux hosts. `make linux-probe` builds that
 artifact directly at `build/linux-probe.elf` for inspection without assembling
 the EFI filesystem. Override the tools with `CLANG=/path/to/clang` or

@@ -55,7 +55,7 @@ header-table address/count, exact code and initialized data, 4608-byte data/BSS
 extent, and maps all three loads with role-derived permissions. The checked-in
 linker script fixes the read-only header load at
 `0x3ff000`, the non-page-base text entry at `0x400100`, and the data/BSS load at
-`0x401000`, with the final 512 bytes declared RELRO at `0x402000`; this is the
+`0x402000`, with the final 512 bytes declared RELRO at `0x403000`; this is the
 stable input contract for linked-image execution work.
 
 The page-image planner represents executable, optional read-only, and writable
@@ -67,7 +67,7 @@ read-only load, installs it read-only/NX, activates the root, and executes the
 toolchain-linked image. It passes the normalized RELRO range into the execution
 contract, so the bounded `mprotect` path can seal only the declared page.
 Syscall return validation remains bounded to its mapped
-RX page while readable-code copy bounds begin at the exact non-page-base
+RX extent while readable-code copy bounds begin at the exact non-page-base
 `0x400100` memory extent. The proof restores the kernel root and scrubs every
 owned frame after exit.
 
@@ -93,32 +93,32 @@ byte. Runtime address-space installation owns and tears down every planned
 page, including a second BSS-only RW/NX page.
 
 QEMU maps the toolchain-linked read-only header at `0x3ff000` through a
-separately cloned 2 MiB leaf table, validates it beside the RX and RW/NX loads,
-and runs the linked entry. The synthetic proof also installs an RX page at
-`0x400000` and two RW/NX pages at
-`0x401000` and `0x402000` into a newly allocated x86-64 root. It privately clones
+separately cloned 2 MiB leaf table, validates it beside the two-page RX and
+RW/NX loads, and runs the linked entry. The synthetic proof also installs one
+RX page at `0x400000` and two RW/NX pages at
+`0x402000` and `0x403000` into a newly allocated x86-64 root. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
 segment ranges; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
-map. An owned page at `0x403000` supplies one zero-filled RW/NX heap page. The
-page at `0x404000` remains an unmapped lower stack guard, and an owned page at
-`0x405000` supplies a RW/NX stack; `0x406000` remains an upper guard. Before
+map. An owned page at `0x404000` supplies one zero-filled RW/NX heap page. The
+page at `0x405000` remains an unmapped lower stack guard, and an owned page at
+`0x406000` supplies a RW/NX stack; `0x407000` remains an upper guard. Before
 changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.
-It then activates the root, observes all three ELF pages through
-their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
+It then activates the root, observes the declared ELF mappings through their
+user virtual addresses under SMAP, and enters CPL3 at the ELF
 entry at `0x400100`, while syscall return validation remains bounded to its
-`0x400000` executable page. The proof instructions live in checked-in x86-64
+declared executable extent. The proof instructions live in checked-in x86-64
 assembly; the build uses Clang to produce an ELF relocatable and extracts its
 `.text` section, so branch layout is assembler-validated instead of
 hand-encoded. The instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
-Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. A
-bounded `arch_prctl(ARCH_SET_FS, 0x401000)` then makes the payload available
+Linux `write(1, 0x402000, 8)` whose kernel copy-in verifies the RW payload. A
+bounded `arch_prctl(ARCH_SET_FS, 0x402000)` then makes the payload available
 through an FS-relative TLS read. `ARCH_GET_FS` copies the active base back to
 the declared data segment; invalid operation and destination tests require
 `-EINVAL` and `-EFAULT` without terminating the task. A bounded
-`uname(0x401000)` subsequently
+`uname(0x402000)` subsequently
 copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 4608-byte `p_memsz`, rather
