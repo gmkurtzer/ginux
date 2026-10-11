@@ -33,4 +33,6 @@ service with an incremented domain generation. Even when its local capability
 reuses the prior handle encoding, pairing it with the retired domain ID cannot
 resolve authority. The boot proof runs the replacement through ABI negotiation
 and clean exit, then retires it again. General restart policy and
-outstanding-operation cleanup remain undefined.
+outstanding-operation cleanup remain undefined. The fault path also publishes a
+single capability-gated service-fault event to the control plane before reusing
+the service slot.

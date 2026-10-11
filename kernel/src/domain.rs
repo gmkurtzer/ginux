@@ -54,6 +54,8 @@ pub(crate) struct Manager {
     control_plane_id: Option<DomainId>,
     service_id: Option<DomainId>,
     last_retired_service_id: Option<DomainId>,
+    pending_service_fault: Option<DomainId>,
+    last_delivered_service_fault: Option<DomainId>,
 }
 
 impl Manager {
@@ -65,6 +67,8 @@ impl Manager {
             control_plane_id: None,
             service_id: None,
             last_retired_service_id: None,
+            pending_service_fault: None,
+            last_delivered_service_fault: None,
         }
     }
 
@@ -275,6 +279,41 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
     manager.service_id = None;
     manager.last_retired_service_id = Some(id);
     true
+}
+
+pub(crate) fn record_service_fault(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    if manager.service_id != Some(id)
+        || manager.pending_service_fault.is_some()
+        || manager
+            .domain(id)
+            .is_none_or(|domain| domain.role != Role::Service)
+    {
+        return false;
+    }
+    manager.pending_service_fault = Some(id);
+    true
+}
+
+pub(crate) fn take_service_fault() -> Option<u64> {
+    let manager = global_manager_mut()?;
+    let id = manager.pending_service_fault.take()?;
+    manager.last_delivered_service_fault = Some(id);
+    Some(1)
+}
+
+pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager().is_some_and(|manager| {
+        manager.pending_service_fault.is_none() && manager.last_delivered_service_fault == Some(id)
+    })
 }
 
 pub(crate) fn domain_is_retired(domain_raw: u64) -> bool {

@@ -303,6 +303,11 @@ if ! grep -q '^ginux: faulted service domain authority retired' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: service fault event delivered to control plane' "$output_file"; then
+    echo "Boot test failed: the service fault event did not reach the control plane." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: service domain generation reuse verified' "$output_file"; then
     echo "Boot test failed: service-domain slot reuse accepted stale identity." >&2
     exit 1

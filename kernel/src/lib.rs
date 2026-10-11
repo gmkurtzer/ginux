@@ -418,6 +418,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
     if !domain::domain_is_retired(service_domain)
+        || !domain::service_fault_was_delivered(service_domain)
         || domain::handle_permits(
             service_domain,
             service_ipc_handle,
@@ -447,6 +448,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated service request-reply completed");
     serial_write("\r\nginux: service domain authority restricted to IPC");
     serial_write("\r\nginux: faulted service domain authority retired");
+    serial_write("\r\nginux: service fault event delivered to control plane");
     serial_write("\r\nginux: service domain generation reuse verified");
     serial_write("\r\nginux: replacement service context executed");
     serial_write("\r\nginux: per-thread syscall budgets enforced");

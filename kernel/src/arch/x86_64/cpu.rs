@@ -15,7 +15,7 @@ const TSS_SELECTOR: u16 = 0x18;
 const USER_DATA_SELECTOR: u16 = 0x2b;
 const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
-const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_003f;
+const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_007f;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
@@ -579,6 +579,13 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
             }
         }
         6 => console_write(caller_domain, capability, frame),
+        7 => {
+            if domain::handle_permits(caller_domain, capability, 1, Rights::MANAGE) {
+                domain::take_service_fault().unwrap_or(u64::MAX - 2)
+            } else {
+                u64::MAX - 2
+            }
+        }
         _ => u64::MAX,
     }
 }
@@ -638,8 +645,13 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     let fault_domain = scheduler::current_domain();
     let service_fault = fault_domain.is_some_and(domain::is_service_domain);
     let action = scheduler::fault_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
-    if service_fault && !fault_domain.is_some_and(domain::retire_service) {
-        return u64::MAX;
+    if service_fault {
+        let Some(fault_domain) = fault_domain else {
+            return u64::MAX;
+        };
+        if !domain::record_service_fault(fault_domain) || !domain::retire_service(fault_domain) {
+            return u64::MAX;
+        }
     }
     if service_fault {
         if !matches!(action, RuntimeAction::Resume { .. }) {

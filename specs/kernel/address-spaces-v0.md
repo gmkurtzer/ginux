@@ -28,7 +28,7 @@ TLB shootdown protocol, and the kernel mapping remains transitional.
 The kernel copies only the manifest-measured control-plane bundle into the
 read-only executable page. Its GDT includes user code/data descriptors and TSS
 RSP0 names a dedicated guarded privilege stack. A DPL3 interrupt gate at vector
-`0x80` accepts five bring-up call numbers. The QEMU program enters CPL3 through
+`0x80` accepts eight bring-up call numbers. The QEMU program enters CPL3 through
 `IRETQ`, issues a ping call, and verifies the returned value after `IRETQ`
 resumes the same user context. Context 1 yields to context 2, whose deliberate
 invalid-opcode fault is contained by the scheduler. Context 1 then resumes and
@@ -51,4 +51,5 @@ preemption, signal model, IPC page, or complete fault-containment policy. The `I
 mechanism is a bring-up gate; the eventual ABI may use `SYSCALL/SYSRET` with a
 safe fallback.
 The current executable remains position-fixed and has no relocation policy,
-but its authenticated container supplies checked lengths and an entry offset.
+but its authenticated container supplies checked lengths and distinct control,
+service, and restart entry offsets.

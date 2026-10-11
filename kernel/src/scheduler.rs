@@ -2,7 +2,7 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_THREADS: usize = 8;
-const INITIAL_SYSCALL_BUDGET: u16 = 10;
+const INITIAL_SYSCALL_BUDGET: u16 = 12;
 
 static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut RUNTIME: MaybeUninit<Runtime> = MaybeUninit::uninit();
@@ -599,7 +599,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.faults == 1
         && runtime.restarts == 1
         && runtime.expected_fault_observed
-        && runtime.syscalls == 15
+        && runtime.syscalls == 17
         && runtime.address_space_switches == 3
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)

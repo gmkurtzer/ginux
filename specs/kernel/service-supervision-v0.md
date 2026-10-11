@@ -16,6 +16,13 @@ exit normally. Completion additionally requires an empty IPC queue, rejection
 of the stale service domain/handle pair, one contained service fault, and no
 `GINUX_KERNEL_PANIC` marker.
 
+Before retiring the faulted service, the kernel records one pending lifecycle
+event naming that service generation. The control plane can consume event kind
+1 only with manage authority on host-control object 1; presenting its console
+capability is rejected without consuming the event. The QEMU payload requires
+delivery before it exits, and the kernel verifies that the delivered event
+belonged to the original faulted generation.
+
 After the fault, the kernel creates one replacement domain generation with the
 same IPC-only delegation and queues a fresh context on the retained service
 address space. Once the client exits, the replacement negotiates ABI v1, exits
@@ -23,5 +30,5 @@ cleanly, and has its capability table retired. The single restart is a fixed
 proof action, not a production policy. There is no backoff, configurable
 restart budget, state recovery, service identity separate from thread identity,
 request ID, replay protection, cancellation, outstanding-call cleanup, or
-health protocol. Those semantics must be defined before more than one request
-can be in flight.
+health protocol. The single pending-event slot is not a general event queue.
+Those semantics must be defined before more than one request can be in flight.
