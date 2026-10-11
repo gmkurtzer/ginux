@@ -498,6 +498,16 @@ if ! grep -q '^ginux: monotonic queued IPC sequences verified' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: structured IPC delivery provenance verified' "$output_file"; then
+    echo "Boot test failed: structured IPC provenance was not verified." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: IPC diagnostic authority enforced' "$output_file"; then
+    echo "Boot test failed: IPC diagnostic authority was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: blocking IPC direct wake completed' "$output_file"; then
     echo "Boot test failed: blocking IPC did not wake the waiting service." >&2
     exit 1

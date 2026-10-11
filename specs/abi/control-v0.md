@@ -27,6 +27,7 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 | 10 | structured ABI descriptor and bounded userspace writes |
 | 11 | structured service-fault details |
 | 12 | structured lifecycle-event details |
+| 13 | structured IPC delivery details |
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
@@ -126,6 +127,16 @@ equal 24, and the same bounded writable-range validation applies. It returns 24
 or `UINT64_MAX - 2`. The ring-3 proof rejects the console capability, then
 validates the descriptor header, original service generation, and sequence one
 using host-management authority.
+Operation 13 requires read authority on IPC object 3 and writes a 32-byte
+little-endian descriptor for the calling endpoint's most recent accepted
+delivery. It contains `u32` size, `u16` ABI version, `u8` kind, one reserved
+zero byte, and `u64` values for source domain generation, monotonic sequence,
+and delivered value. Kind 1 identifies a message; kind 2 identifies a sticky
+peer closure, whose source and value both name the retired generation. `RDX`
+must equal 32, and bounded writable-range validation applies. It returns 32 or
+`UINT64_MAX - 2`. The descriptor is observational and does not dequeue data.
+The ring-3 proof rejects console authority, then validates the original
+service generation, reply sequence one, and value 2 using IPC read authority.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

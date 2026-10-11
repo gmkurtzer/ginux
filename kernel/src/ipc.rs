@@ -21,6 +21,8 @@ struct Duplex {
     next_closure_sequence: u64,
     last_control_closure_domain: Option<u64>,
     last_control_closure_sequence: u64,
+    last_control_delivery: Option<DeliveryAudit>,
+    last_service_delivery: Option<DeliveryAudit>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,6 +31,17 @@ struct MessageEnvelope {
     sequence: u64,
     value: u64,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeliveryAudit {
+    kind: u8,
+    source: u64,
+    sequence: u64,
+    value: u64,
+}
+
+const MESSAGE_DELIVERY: u8 = 1;
+const PEER_CLOSURE_DELIVERY: u8 = 2;
 
 enum SendPath {
     Failed,
@@ -69,6 +82,8 @@ impl Duplex {
             next_closure_sequence: 1,
             last_control_closure_domain: None,
             last_control_closure_sequence: 0,
+            last_control_delivery: None,
+            last_service_delivery: None,
         })
     }
 
@@ -93,6 +108,12 @@ impl Duplex {
             if let SendPath::Direct(sequence) = outcome {
                 self.last_control_message_source = Some(domain);
                 self.last_control_message_sequence = sequence;
+                self.last_control_delivery = Some(DeliveryAudit {
+                    kind: MESSAGE_DELIVERY,
+                    source: domain,
+                    sequence,
+                    value: message,
+                });
             }
             !matches!(outcome, SendPath::Failed)
         } else if self.service_side(domain) == Some(false) && self.service_domain.is_some() {
@@ -106,6 +127,12 @@ impl Duplex {
             if let SendPath::Direct(sequence) = outcome {
                 self.last_service_message_source = Some(domain);
                 self.last_service_message_sequence = sequence;
+                self.last_service_delivery = Some(DeliveryAudit {
+                    kind: MESSAGE_DELIVERY,
+                    source: domain,
+                    sequence,
+                    value: message,
+                });
             }
             !matches!(outcome, SendPath::Failed)
         } else {
@@ -152,6 +179,12 @@ impl Duplex {
             }
             self.last_service_message_source = Some(message.source);
             self.last_service_message_sequence = message.sequence;
+            self.last_service_delivery = Some(DeliveryAudit {
+                kind: MESSAGE_DELIVERY,
+                source: message.source,
+                sequence: message.sequence,
+                value: message.value,
+            });
             Receive::Message(message.value)
         } else if self.service_side(domain) == Some(false) {
             if let Some(message) = self.replies.receive() {
@@ -164,6 +197,12 @@ impl Duplex {
                 }
                 self.last_control_message_source = Some(message.source);
                 self.last_control_message_sequence = message.sequence;
+                self.last_control_delivery = Some(DeliveryAudit {
+                    kind: MESSAGE_DELIVERY,
+                    source: message.source,
+                    sequence: message.sequence,
+                    value: message.value,
+                });
                 Receive::Message(message.value)
             } else if let Some(closure) = self.service_closures.receive() {
                 if closure.source != closure.value
@@ -174,6 +213,12 @@ impl Duplex {
                 }
                 self.last_control_closure_domain = Some(closure.source);
                 self.last_control_closure_sequence = closure.sequence;
+                self.last_control_delivery = Some(DeliveryAudit {
+                    kind: PEER_CLOSURE_DELIVERY,
+                    source: closure.source,
+                    sequence: closure.sequence,
+                    value: closure.value,
+                });
                 Receive::PeerClosed(closure.value)
             } else {
                 Receive::Empty
@@ -241,6 +286,16 @@ impl Duplex {
 
     const fn is_empty(&self) -> bool {
         self.requests.len == 0 && self.replies.len == 0
+    }
+
+    fn delivery_audit(&self, domain: u64) -> Option<DeliveryAudit> {
+        if self.service_domain == Some(domain) {
+            self.last_service_delivery
+        } else if self.control_domain == domain {
+            self.last_control_delivery
+        } else {
+            None
+        }
     }
 }
 
@@ -359,6 +414,18 @@ pub(crate) fn last_closure_audit() -> Option<(u64, u64)> {
     ))
 }
 
+pub(crate) fn delivery_descriptor(
+    domain: u64,
+) -> Option<[u8; crate::control_abi::IPC_DELIVERY_DESCRIPTOR_SIZE]> {
+    let audit = channel_mut()?.delivery_audit(domain)?;
+    Some(crate::control_abi::ipc_delivery_descriptor(
+        audit.kind,
+        audit.source,
+        audit.sequence,
+        audit.value,
+    ))
+}
+
 pub(crate) fn verify_channel_invariants() -> bool {
     let (control, service, replacement) = (1, 2, 3);
     let Some(mut out_of_order) = Duplex::new(control, service) else {
@@ -412,7 +479,8 @@ pub(crate) fn verify_channel_invariants() -> bool {
     exhausted_request.next_request_sequence = u64::MAX;
     let exhausted_request_rejected = !exhausted_request.send_with_direct(control, 10, |_, _| true)
         && exhausted_request.requests.len == 0
-        && exhausted_request.last_service_message_source.is_none();
+        && exhausted_request.last_service_message_source.is_none()
+        && exhausted_request.last_service_delivery.is_none();
     let Some(mut exhausted_reply) = Duplex::new(control, service) else {
         return false;
     };
@@ -442,7 +510,14 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && direct.requests.len == 2
         && direct.receive(service) == Receive::Message(20)
         && direct.receive(service) == Receive::Message(30)
-        && direct.last_service_message_sequence == 3;
+        && direct.last_service_message_sequence == 3
+        && direct.last_service_delivery
+            == Some(DeliveryAudit {
+                kind: MESSAGE_DELIVERY,
+                source: control,
+                sequence: 3,
+                value: 30,
+            });
     let Some(mut channel) = Duplex::new(control, service) else {
         return false;
     };
@@ -509,6 +584,13 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.last_service_message_sequence == 7
         && channel.last_control_closure_domain == Some(replacement)
         && channel.last_control_closure_sequence == 2
+        && channel.last_control_delivery
+            == Some(DeliveryAudit {
+                kind: PEER_CLOSURE_DELIVERY,
+                source: replacement,
+                sequence: 2,
+                value: replacement,
+            })
 }
 
 fn channel_mut() -> Option<&'static mut Duplex> {

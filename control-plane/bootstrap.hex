@@ -96,7 +96,7 @@ cd80
 83f808
 0f859f000000
 
-# negotiate call-gate ABI v1 and its thirteen bootstrap features
+# negotiate call-gate ABI v1 and its fourteen bootstrap features
 @entry service
 b800000000
 cd80
@@ -261,7 +261,44 @@ cd80
 7402
 0f0b
 
-# the diagnostic consumed the final budgeted call
+# reject IPC delivery diagnostics through the console capability
+4889cf
+48bea020000080000000
+ba20000000
+b80d000000
+cd80
+83f8fd
+7402
+0f0b
+
+# fetch and validate the last control-side IPC delivery through read authority
+4c89c7
+48bea020000080000000
+ba20000000
+b80d000000
+cd80
+83f820
+7402
+0f0b
+488b06
+48bd2000000001000100
+4839e8
+7402
+0f0b
+488b4608
+4c39d0
+7402
+0f0b
+488b4610
+4883f801
+7402
+0f0b
+488b4618
+4883f802
+7402
+0f0b
+
+# the diagnostics consumed the final budgeted call
 b800000000
 cd80
 4883f8fc

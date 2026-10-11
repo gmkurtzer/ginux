@@ -101,9 +101,13 @@ a replacement that was bound but never scheduled. It requires an empty request
 direction, removes only that binding, and deliberately emits no peer-closure
 record for a service that never became observable.
 
-The scalar v1 receive result exposes only the immediate word; its source and
-sequence tags are currently kernel-auditable rather than returned to
-userspace. This revision has no capability transfer,
+The scalar v1 receive result exposes only the immediate word. A separate
+IPC-read-authorized operation copies a versioned descriptor for the calling
+endpoint's most recent accepted delivery without consuming another record. It
+distinguishes messages from closures and exposes the source generation,
+sequence, and value. The bootstrap proof validates the original service's
+queued reply; descriptor state is endpoint-local but remains a single latest
+record rather than a history. This revision has no capability transfer,
 cancellation request, timeout, or cleanup of queued replies after domain
 failure. It has one fixed control/service endpoint pair rather
 than allocatable endpoint objects. The global queue is safe only
