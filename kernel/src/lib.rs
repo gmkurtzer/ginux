@@ -1,5 +1,6 @@
 #![no_std]
 
+mod address_space;
 mod arch;
 mod capability;
 mod domain;
@@ -294,6 +295,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: physical frame allocation test failed\r\n");
     }
     serial_write("\r\nginux: physical frame allocator active");
+    if !address_space::verify_isolated_user_mapping() {
+        kernel_fail("\r\nginux: isolated address-space test failed\r\n");
+    }
+    serial_write("\r\nginux: isolated address space active");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());

@@ -183,6 +183,11 @@ if ! grep -q '^ginux: physical frame allocator active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated address space active' "$output_file"; then
+    echo "Boot test failed: isolated address-space activation failed." >&2
+    exit 1
+fi
+
 if grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
     echo "Boot test failed: a panic marker was emitted." >&2
     exit 1
