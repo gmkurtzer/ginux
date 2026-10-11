@@ -162,7 +162,7 @@ peer closure, whose source and value both name the retired generation. `RDX`
 must equal 32, and bounded writable-range validation applies. It returns 32 or
 `UINT64_MAX - 2`. The descriptor is observational and does not dequeue data.
 The ring-3 proof rejects console authority, then validates the replacement's
-reply sequence two and value 4 using IPC read authority. It also requires the
+final reply sequence three and retained value 3 using IPC read authority. It also requires the
 source generation to differ from the original faulted service; the kernel gate
 matches it to the exact replacement generation.
 Service-side descriptor state is cleared at retirement and must be empty when

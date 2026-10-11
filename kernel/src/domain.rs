@@ -5,8 +5,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 62;
-const SERVICE_CALL_BUDGET: u16 = 3;
+const CONTROL_CALL_BUDGET: u16 = 65;
+const SERVICE_CALL_BUDGET: u16 = 5;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
 const SERVICE_RESTART_BUDGET: u16 = 1;
@@ -1703,7 +1703,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 70
+    control.remaining_calls == 0 && manager.total_calls == 75
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
@@ -2011,27 +2011,31 @@ pub(crate) fn record_service_ready(domain_raw: u64) -> bool {
     let Some(manager) = global_manager_mut() else {
         return false;
     };
-    let Some(service) = manager
+    let Some((service, readiness_published)) = manager
         .domain(id)
-        .filter(|domain| {
-            domain.role == Role::SupervisedService
-                && domain.state == State::Ready
-                && !domain.readiness_published
+        .filter(|domain| domain.role == Role::SupervisedService && domain.state == State::Ready)
+        .and_then(|domain| {
+            domain
+                .service
+                .map(|service| (service, domain.readiness_published))
         })
-        .and_then(|domain| domain.service)
     else {
         return false;
     };
-    if manager.service_id != Some(id)
-        || !manager.lifecycle_events.push(LifecycleEvent {
-            kind: crate::control_abi::LIFECYCLE_SERVICE_READY,
-            domain: id,
-            service: Some(service),
-            detail: 0,
-            fault: None,
-            sequence: 0,
-        })
-    {
+    if manager.service_id != Some(id) {
+        return false;
+    }
+    if readiness_published {
+        return true;
+    }
+    if !manager.lifecycle_events.push(LifecycleEvent {
+        kind: crate::control_abi::LIFECYCLE_SERVICE_READY,
+        domain: id,
+        service: Some(service),
+        detail: 0,
+        fault: None,
+        sequence: 0,
+    }) {
         return false;
     }
     let Some(domain) = manager

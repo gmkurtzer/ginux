@@ -160,7 +160,7 @@ cd80
 85c0
 
 # jump to the appended structured-fault diagnostic before exhausting the budget
-e977000000
+e999000000
 cd80
 4883f8fc
 7507
@@ -197,24 +197,63 @@ cd80
 4883f803
 0f85b1ffffff
 
-# replacement transforms request 3 into reply 4
+# retain request 3 as volatile state and acknowledge it with reply 4
+4989c4
 48ffc0
 4889c6
 4c89c7
 b804000000
 cd80
 
-# replacement exits after replying
+# block for fixed GET command 5, then return the retained value 3
+4c89c7
+b808000000
+cd80
+4883f805
+7402
+0f0b
+4c89e6
+4c89c7
+b804000000
+cd80
+
+# replacement exits after serving both operations
 b802000000
 cd80
 0f0b
 
-# dispatch the awakened replacement and consume its reply
+# dispatch the awakened replacement and consume its acknowledgement
 b803000000
 cd80
 4c89c7
 b805000000
 cd80
+4883f804
+7402
+0f0b
+
+# request the retained value with command 5 and dispatch the service again
+4c89c7
+6a05
+5e
+b804000000
+cd80
+85c0
+7402
+0f0b
+b803000000
+cd80
+85c0
+7402
+0f0b
+
+# consume and require the volatile value stored by the replacement
+4c89c7
+b805000000
+cd80
+4883f803
+7402
+0f0b
 
 # control diagnostic trampoline: fetch retained service-fault details
 4889cf
@@ -304,11 +343,11 @@ cd80
 7502
 0f0b
 488b4610
-4883f802
+4883f803
 7402
 0f0b
 488b4618
-4883f804
+4883f803
 7402
 0f0b
 

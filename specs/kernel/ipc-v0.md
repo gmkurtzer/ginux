@@ -42,9 +42,9 @@ Exhausting either message sequence rejects both direct and queued sends without
 waking a waiter, changing audit state, or inserting a record.
 The local invariant injects zero and out-of-order envelopes, verifies that a
 full-queue send does not advance the counter, and proves that sequencing
-continues across service replacement. After one exchange with each service
-generation, the QEMU proof audits sequence two in both directions and binds the
-second reply to the replacement generation.
+continues across service replacement. After one exchange with the original
+generation and two with its replacement, the QEMU proof audits sequence three
+in both directions and binds the final reply to the replacement generation.
 
 The channel is object 3 in the signed boot authority manifest. Sending requires
 `WRITE`; receiving requires `READ`. The call gate resolves the supplied opaque
@@ -56,8 +56,9 @@ transformed reply 2 in the control-inbound direction, and deliberately faults.
 The resumed client requires reply 2. After replacement, it sends request 3 and
 requires reply 4 from the new exact service generation. Direction is selected from the current
 generation-checked domain role after capability validation; callers cannot
-choose it as an argument. The boot gate also requires both queues to be empty
-at completion.
+choose it as an argument. The replacement then accepts fixed command 5 and
+returns the retained value 3, proving a second exchange with the same live
+generation. The boot gate also requires both queues to be empty at completion.
 
 Operation 8 adds one blocking receive path. If its inbound queue is empty, the
 current context becomes blocked only when another context can run. A peer send
@@ -67,8 +68,9 @@ match the typed scheduler wait key. The wait key also names the exact expected
 peer generation obtained from the bound endpoint; object and direction matches
 from a stale or unrelated generation cannot wake it. The QEMU proof preempts into the replacement
 service, blocks it, resumes control, wakes the service with value 3, and later
-observes 3 as the receive result. The scheduler retains the exact waking domain
-generation and message sequence in its audit state. The channel commits that
+repeats that direct-wake path with command 5. The service observes both values
+as receive results. The scheduler retains the exact waking domain generation
+and latest message sequence in its audit state. The channel commits that
 sequence only after a matching waiter is woken; when no waiter matches, the
 same number is used by the queued fallback. Direct delivery is attempted only
 when that direction's queue is empty, preserving FIFO order even if scheduler

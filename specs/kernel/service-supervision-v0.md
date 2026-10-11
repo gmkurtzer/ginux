@@ -31,8 +31,9 @@ The CPL3 exception path removes only the service context, switches back to the
 client's CR3, releases the service's domain thread reservation, retires the
 faulted service domain and capability table, and
 restores the client's saved register frame. The client must receive reply 2.
-After restart it sends request 3 to the replacement and must receive reply 4
-before exiting normally. Completion additionally requires an empty IPC queue, rejection
+After restart it sends value 3 to the replacement, must receive acknowledgement
+4, sends GET command 5, and must receive the retained value 3 before exiting
+normally. Completion additionally requires an empty IPC queue, rejection
 of the stale service domain/handle pair, one contained service fault, and no
 `GINUX_KERNEL_PANIC` marker.
 
@@ -79,13 +80,16 @@ its already-produced reply remains available to the control client. The kernel
 rearms the APIC one-shot, returns to the client, and then
 preempts that client to run the replacement. The replacement negotiates ABI
 v1 and blocks on an empty request direction. The client wakes it directly with
-request 3, yields, and requires the replacement's transformed reply 4. The
-replacement then exits cleanly and has its capability table retired. This
-proves that restart restores request/reply service, rather than merely creating
+request 3, yields, and requires acknowledgement 4. The replacement retains 3
+as volatile state, blocks again, accepts fixed GET command 5, and returns 3
+before exiting cleanly and retiring its capability table. This proves that
+restart restores a stateful multi-request service, rather than merely creating
 a context that can exit. When the replacement first blocks on its empty request
 endpoint, the kernel publishes lifecycle kind 6 exactly once. The control plane
 consumes that record, rejects the original generation, and retains the exact
-replacement generation for validating reply provenance. The single
+replacement generation for validating reply provenance. Later blocking
+receives by that same generation do not republish readiness and are not an
+error. The single
 restart consumes the persistent control plane's fixed one-attempt bootstrap
 budget. The initial service creation does not consume that budget, and failed
 replacement setup does not refund it. A later service generation therefore
@@ -98,8 +102,8 @@ a kernel panic. The local manager invariant exercises rejection after the
 budget is consumed; the current hardware workload exercises the successful
 one-restart path. This is not yet a configurable
 production policy. There is no backoff, durable state recovery,
-request ID, replay protection, cancellation, outstanding-call cleanup, or
-health protocol. The four-record FIFO never overwrites queued events. Additional
+request ID, replay protection, cancellation, outstanding-call cleanup, durable
+storage, or health protocol. The four-record FIFO never overwrites queued events. Additional
 records set a sticky overflow notification containing the first dropped domain
 and sequence plus a saturating count, allowing teardown to continue. The control plane sees
 that notification after the concrete FIFO records. There is no blocking wait,
