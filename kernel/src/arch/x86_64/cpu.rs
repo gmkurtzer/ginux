@@ -121,6 +121,7 @@ const LINUX_FACCESSAT_SYSCALL: u64 = 269;
 const LINUX_PPOLL_SYSCALL: u64 = 271;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
+const LINUX_EPOLL_PWAIT_SYSCALL: u64 = 281;
 const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
@@ -1616,6 +1617,14 @@ extern "sysv64" fn linux_syscall_handler(
             linux_readlink_self(buffer, count, register(0))
         }
         LINUX_EPOLL_CREATE1_SYSCALL => linux_epoll_create1(first_argument),
+        LINUX_EPOLL_PWAIT_SYSCALL => linux_epoll_pwait(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+        ),
         LINUX_PPOLL_SYSCALL => linux_ppoll(first_argument, buffer, count, register(0), register(2)),
         LINUX_FACCESSAT_SYSCALL => linux_faccessat(buffer, count, 0),
         LINUX_FACCESSAT2_SYSCALL => linux_faccessat(buffer, count, register(0)),
@@ -2289,6 +2298,26 @@ fn linux_epoll_wait(epoll: u64, address: u64, maximum: u64, timeout: u64) -> u64
         return LINUX_EFAULT;
     }
     1
+}
+
+fn linux_epoll_pwait(
+    epoll: u64,
+    address: u64,
+    maximum: u64,
+    timeout: u64,
+    signal_mask_address: u64,
+    signal_set_size: u64,
+) -> u64 {
+    if signal_mask_address != 0 {
+        if signal_set_size != LINUX_SIGNAL_SET_SIZE {
+            return LINUX_EINVAL;
+        }
+        let mut signal_mask = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+        if !copy_from_linux_user(signal_mask_address, &mut signal_mask) {
+            return LINUX_EFAULT;
+        }
+    }
+    linux_epoll_wait(epoll, address, maximum, timeout)
 }
 
 fn linux_descriptor_open(descriptor: u64) -> bool {

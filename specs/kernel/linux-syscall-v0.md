@@ -65,6 +65,11 @@ wait returns `-ENOSYS` until scheduler-backed wait queues exist. Invalid output
 memory returns `-EFAULT` without consuming the level-triggered event. The epoll
 descriptor participates in `F_GETFD`, `F_SETFD`, `F_GETFL`, `poll`, and
 `close`; closing it clears the registration and releases fixed descriptor 2.
+`rax = 281` (`__NR_epoll_pwait`) uses the same bounded wait operation after
+validating an optional eight-byte signal mask and its exact signal-set size.
+The temporary mask is not installed because this implementation never blocks;
+invalid sizes return `-EINVAL` and invalid mask ranges return `-EFAULT` before
+examining readiness.
 This is a bounded event-notification proof, not a general epoll interest tree.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
