@@ -65,6 +65,10 @@ impl Table {
         self.boot_authority_sealed = true;
     }
 
+    pub(crate) const fn boot_authority_is_sealed(&self) -> bool {
+        self.boot_authority_sealed
+    }
+
     /// Produces strictly less authority over the same object.
     pub(crate) fn derive(&mut self, parent: Handle, rights: Rights) -> Option<Handle> {
         let parent_entry = self.entry(parent)?;

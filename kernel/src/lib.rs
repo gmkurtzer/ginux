@@ -2,6 +2,7 @@
 
 mod arch;
 mod capability;
+mod domain;
 mod memory;
 
 use core::arch::{asm, global_asm};
@@ -272,6 +273,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: capability authority invariant failed\r\n");
     }
     serial_write("ginux: capability derivation and revocation verified\r\n");
+
+    let Some(control_plane) = domain::create_and_verify_control_plane() else {
+        kernel_fail("ginux: control-plane domain construction failed\r\n");
+    };
+    serial_write("ginux: control-plane domain metadata sealed\r\nginux: control-plane domain ID: ");
+    serial_write_u64(control_plane);
+    serial_write("\r\n");
 
     let summary = summarize_memory(boot_info);
     serial_write("ginux: memory descriptors: ");

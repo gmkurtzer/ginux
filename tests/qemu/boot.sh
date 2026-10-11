@@ -163,6 +163,16 @@ if ! grep -q '^ginux: capability derivation and revocation verified' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: control-plane domain metadata sealed' "$output_file"; then
+    echo "Boot test failed: control-plane domain metadata was not sealed." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: control-plane domain ID: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: control-plane domain identity is invalid." >&2
+    exit 1
+fi
+
 if ! grep -Eq '^ginux: usable memory MiB: [1-9][0-9]*' "$output_file"; then
     echo "Boot test failed: the kernel did not inventory usable physical memory." >&2
     exit 1
