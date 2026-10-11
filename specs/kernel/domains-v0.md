@@ -87,14 +87,14 @@ creating an unsequenced teardown. A full event FIFO still permits retirement
 because its sticky overflow record preserves the first dropped auxiliary
 generation, sequence, and count; this matches the existing mandatory-teardown
 policy for service faults.
-Auxiliary registration is not yet exposed to userspace, assigned address
-spaces for execution, or integrated with an auxiliary restart policy. The boot
-proof does stage and fully roll back an unstarted auxiliary domain with a real
+Auxiliary registration is exposed to userspace, while address-space loading
+and scheduler admission remain kernel-only and auxiliaries deliberately have
+no restart policy. The boot proof stages and fully rolls back an unstarted auxiliary domain with a real
 allocator-owned W^X address space. A validated exact-generation resource bind
 temporarily permits one accounted thread reservation, but no scheduler context
 is queued during this transaction.
-Stop-only execution remains disabled until auxiliary scheduler removal,
-address-space release, authority revocation, and lifecycle publication form a
+Stop-only execution is admitted only after auxiliary scheduler removal,
+address-space release, authority revocation, and lifecycle publication have a
 single fail-closed teardown transaction.
 The domain manager already models the final policy step: after threads,
 operations, and address-space ownership are gone, a faulted auxiliary identity
@@ -118,12 +118,19 @@ active or unrelated hierarchy. The QEMU hardware gate now queues one minimal
 exit-only auxiliary context after the primary workload. It requires ring-3
 execution, clean stop-only retirement, exact lifecycle domain/service identity,
 stale capability rejection, an empty address-space registry, and zero remaining
-owned frames. General userspace creation and arbitrary auxiliary programs are
-not yet exposed. A second hardware-gated auxiliary context deliberately raises
+owned frames. General userspace loading and scheduler admission are not yet
+exposed. A second hardware-gated auxiliary context deliberately raises
 `#UD`; the proof requires lifecycle kind 4, exact domain and stable service
 identity, vector/error/instruction metadata, zero remaining authority and
 frames, and no restart. Only page faults report `CR2`; other exception kinds
 record a zero fault-address field instead of leaking stale page-fault state.
+Control ABI operation 15 exposes bounded auxiliary registration. Creation
+requires the persistent control-plane generation, host-management authority,
+and a valid delegated source capability for the exact requested object and
+rights. It creates only an unstarted domain: address-space construction and
+scheduler admission remain separate kernel transactions. The ring-3 proof
+denies creation through a non-managing capability, then delegates attenuated
+host-read authority into the clean-exit workload through the authorized path.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

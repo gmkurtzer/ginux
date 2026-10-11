@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 24;
+const CONTROL_CALL_BUDGET: u16 = 26;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
@@ -970,6 +970,51 @@ pub(crate) fn domain_service_identity(domain_raw: u64) -> Option<u64> {
     Some(encode_service_id(global_manager()?.domain(id)?.service?))
 }
 
+pub(crate) fn first_ready_auxiliary_service() -> Option<u64> {
+    let manager = global_manager()?;
+    manager
+        .auxiliary_service_ids
+        .iter()
+        .flatten()
+        .find_map(|id| {
+            manager
+                .domain(*id)
+                .filter(|domain| {
+                    domain.role == Role::AuxiliaryService
+                        && domain.state == State::Ready
+                        && domain.address_space_root.is_none()
+                        && domain.active_threads == 0
+                        && domain.active_operations == 0
+                })
+                .map(|domain| encode_id(domain.id))
+        })
+}
+
+pub(crate) fn create_auxiliary_service(
+    supervisor_raw: u64,
+    host_capability_raw: u64,
+    source_raw: u64,
+    object: u64,
+    rights_raw: u64,
+) -> Option<u64> {
+    let supervisor = decode_id(supervisor_raw)?;
+    let host_capability = Handle::from_raw(host_capability_raw)?;
+    let source = Handle::from_raw(source_raw)?;
+    let rights = Rights::from_bits(rights_raw)?;
+    let manager = global_manager_mut()?;
+    if manager.control_plane_id != Some(supervisor)
+        || !manager.permits(supervisor, host_capability, 1, Rights::MANAGE)
+    {
+        return None;
+    }
+    let id = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
+        source,
+        object,
+        rights,
+    }])?;
+    Some(encode_id(id))
+}
+
 pub(crate) fn handle_permits(domain_raw: u64, raw: u64, object: u64, rights: Rights) -> bool {
     let Some(domain_id) = decode_id(domain_raw) else {
         return false;
@@ -1628,7 +1673,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 29
+    control.remaining_calls == 0 && manager.total_calls == 31
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {

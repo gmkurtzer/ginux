@@ -559,9 +559,7 @@ pub(crate) fn verify_ring3_control_plane(
 
 pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
     const EXIT_PROGRAM: [u8; 7] = [0xb8, 2, 0, 0, 0, 0xcd, 0x80];
-    let Some(auxiliary) =
-        domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)
-    else {
+    let Some(auxiliary) = domain::first_ready_auxiliary_service() else {
         return false;
     };
     let (Some(handle), Some(identity), Some(owner)) = (
@@ -599,7 +597,7 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
         && registered_auxiliary_address_space_count() == 0
         && memory::owner_live_frame_count(owner) == Some(0)
         && domain::domain_is_retired(auxiliary)
-        && !domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+        && !domain::handle_permits(auxiliary, handle, 1, crate::capability::Rights::READ)
         && event
             == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
         && domain::last_lifecycle_event_audit()

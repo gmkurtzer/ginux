@@ -853,8 +853,27 @@ fn dispatch_charged_call(
         12 => write_lifecycle_descriptor(caller_domain, capability, frame),
         13 => write_ipc_delivery_descriptor(caller_domain, capability, frame),
         14 => write_lifecycle_identity_descriptor(caller_domain, capability, frame),
+        15 => create_auxiliary_service(caller_domain, capability, frame),
         _ => u64::MAX,
     }
+}
+
+fn create_auxiliary_service(
+    caller_domain: u64,
+    capability: u64,
+    frame: *const UserTrapFrame,
+) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    domain::create_auxiliary_service(
+        caller_domain,
+        capability,
+        frame.first_argument(),
+        frame.second_argument(),
+        frame.third_argument(),
+    )
+    .unwrap_or(u64::MAX - 2)
 }
 
 fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {

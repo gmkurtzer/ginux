@@ -246,6 +246,10 @@ impl UserTrapFrame {
         self.rdx
     }
 
+    pub(crate) fn third_argument(&self) -> u64 {
+        self.r8
+    }
+
     fn selectors_match(&self, code_selector: u16, data_selector: u16) -> bool {
         self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
     }

@@ -79,7 +79,7 @@ The shared ABI constants define lifecycle kind 1 as a supervised-service fault,
 kind 2 as an overflow summary, and kind 3 as a clean auxiliary-service
 retirement. Kind 3 carries the exact retired generation, zero detail, and no
 fault descriptor. It is currently exercised by the bounded registry proof;
-runtime auxiliary creation is not yet exposed to userspace.
+the ring-3 proof also creates and cleanly retires an auxiliary generation.
 Kind 4 is a stop-only auxiliary-service fault. It carries the exact domain and
 stable service identities plus architectural fault metadata, and never
 consumes the primary service restart budget.
@@ -158,6 +158,17 @@ registration receives a new service generation. `RDX` must equal 32, bounded
 writable-range validation applies, and denial returns `UINT64_MAX - 2` without
 altering the retained event. The proof rejects console authority and validates
 the original faulted domain, sequence one, and logical service ID.
+Operation 15 creates an unstarted stop-only auxiliary domain. `RDI` must carry
+host-control `MANAGE` authority, `RSI` names a control-plane capability to
+delegate, `RDX` names its nonzero object, and `R8` contains a nonempty subset
+of the four defined rights bits. The kernel revalidates the delegated source
+against that exact object and rights request, seals the child capability table,
+and returns its generation-tagged domain ID. Denial or registry exhaustion
+returns `UINT64_MAX - 2` without creating a partial record. The ring-3 proof
+requires denial through a non-managing authority, creates one attenuated
+host-read
+auxiliary through host-management authority, and the hardware scheduler proof
+then executes and retires that exact generation.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

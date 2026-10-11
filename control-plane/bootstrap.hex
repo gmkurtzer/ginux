@@ -96,7 +96,7 @@ cd80
 83f808
 0f859f000000
 
-# negotiate call-gate ABI v1 and its fifteen bootstrap features
+# negotiate call-gate ABI v1 and its sixteen bootstrap features
 @entry service
 b800000000
 cd80
@@ -332,6 +332,32 @@ cd80
 0f0b
 488b4618
 4c39d8
+7402
+0f0b
+
+# reject auxiliary creation through console-only authority
+4150
+4889cf
+4889de
+ba01000000
+41b801000000
+b80f000000
+cd80
+83f8fd
+7402
+0f0b
+
+# create one console-write auxiliary domain through host-management authority
+4889df
+4889de
+ba01000000
+41b801000000
+b80f000000
+cd80
+4158
+4989c4
+48c1e830
+4885c0
 7402
 0f0b
 
