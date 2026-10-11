@@ -5,6 +5,7 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-probe.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
+    println!("cargo:rerun-if-env-changed=GINUX_LINUX_PROBE_EXPORT");
 
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set"));
     let object = output.join("linux-probe.o");
@@ -48,6 +49,9 @@ fn main() {
     }
     let status = link.status().expect("failed to run LLD for Linux probe");
     assert!(status.success(), "LLD failed to link Linux probe");
+    if let Some(destination) = env::var_os("GINUX_LINUX_PROBE_EXPORT") {
+        fs::copy(&linked, destination).expect("failed to export linked Linux probe");
+    }
 }
 
 fn linker() -> (OsString, Option<PathBuf>) {
