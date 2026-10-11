@@ -35,7 +35,7 @@ RSP0 names a dedicated guarded privilege stack. A DPL3 interrupt gate at vector
 `0x80` accepts eight bring-up call numbers. The QEMU program enters CPL3 through
 `IRETQ`, issues a ping call, and verifies the returned value after `IRETQ`
 resumes the same user context. A calibrated APIC one-shot preempts context 1
-and switches to context 2, whose deliberate UMIP-protected `SLDT` fault is contained
+and switches to context 2, whose deliberate null-page write fault is contained
 by the scheduler. Context 1 then resumes at its interrupted instruction. A
 rearmed one-shot later dispatches the replacement service generation and
 returns to context 1 after that service exits. The final control exit

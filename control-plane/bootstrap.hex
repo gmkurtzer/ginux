@@ -111,7 +111,7 @@ b802000000
 cd80
 0f0b
 
-# service: receive request 1, reply 2, then execute SLDT for the UMIP proof
+# service: receive request 1, reply 2, then write through null for containment
 4c89c7
 b805000000
 cd80
@@ -124,7 +124,7 @@ b804000000
 cd80
 85c0
 75da
-0f00c0
+488900
 
 # replacement service: negotiate ABI and block for a direct wakeup
 b800000000

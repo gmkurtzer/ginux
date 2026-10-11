@@ -47,7 +47,7 @@ context, activates its recorded CR3, and restores its registers through
 frame, without cooperation from the running context. Exit destroys the current
 slot and either resumes the remaining context or returns to the kernel. In the
 current proof, a timer preempts context 1 to context 2, which receives an IPC request, sends its reply, and raises an
-expected UMIP general-protection fault. The scheduler removes it, queues one replacement
+expected null-page write fault. The scheduler removes it, queues one replacement
 service generation on the retained service address space, rearms the timer, and
 switches back to context 1. The survivor consumes the reply and fault event,
 then the second preemption dispatches the replacement. It negotiates the ABI

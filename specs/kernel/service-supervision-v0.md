@@ -8,8 +8,10 @@ value 1 through the bounded IPC channel and waits until a timer interrupt
 preempts it. Context 2 is a minimal
 isolated service in a different address space and a domain whose sole delegated
 capability is IPC read/write. It receives the request, sends reply value 2, and
-then executes a measured `SLDT` instruction. With UMIP active at CPL3, the
-instruction raises the expected general-protection fault.
+then attempts a measured write through address zero. The absent null page
+raises a user-mode write page fault. Containment validates vector 14, error bits
+for a user write to a non-present page, the authenticated faulting instruction,
+and `CR2 == 0` before restarting the service.
 
 The CPL3 exception path removes only the service context, switches back to the
 client's CR3, releases the service's domain thread reservation, retires the

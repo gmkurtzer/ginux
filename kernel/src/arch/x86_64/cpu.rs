@@ -847,8 +847,13 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     };
     let fault_domain = scheduler::current_domain();
     let service_fault = fault_domain.is_some_and(domain::is_service_domain);
+    let fault_address: u64;
+    unsafe {
+        asm!("mov {}, cr2", out(reg) fault_address, options(nomem, nostack, preserves_flags));
+    }
     let action = scheduler::fault_runtime(
         frame,
+        fault_address,
         USER_CODE_SELECTOR,
         USER_DATA_SELECTOR,
         fault_domain.map(|_| scheduler::WaitReason::IpcReceive {

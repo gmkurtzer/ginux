@@ -629,6 +629,7 @@ pub(crate) fn current_domain() -> Option<u64> {
 
 pub(crate) fn fault_runtime(
     frame: &mut UserFaultFrame,
+    fault_address: u64,
     code_selector: u16,
     data_selector: u16,
     peer_close: Option<WaitReason>,
@@ -661,8 +662,9 @@ pub(crate) fn fault_runtime(
             .scheduler
             .cancel_blocked_peers(dead_domain, reason, IPC_PEER_CLOSED);
     }
-    let expected = frame.vector == 13
-        && frame.error == 0
+    let expected = frame.vector == 14
+        && frame.error == 6
+        && fault_address == 0
         && frame.rip == runtime.expected_fault_instruction
         && frame.r9 == 2;
     let next = runtime.scheduler.exit_current(current);

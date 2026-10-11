@@ -570,7 +570,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: control call ABI v1 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
     serial_write("\r\nginux: ring-3 fault survivor resumed and exited");
-    serial_write("\r\nginux: user UMIP fault contained");
+    serial_write("\r\nginux: user page fault contained");
     serial_write("\r\nginux: isolated scheduler address spaces switched");
     serial_write("\r\nginux: one-shot user preemption completed");
     serial_write("\r\nginux: restarted service preemption completed");

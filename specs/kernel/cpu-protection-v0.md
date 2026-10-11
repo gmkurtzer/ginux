@@ -44,8 +44,9 @@ CPL0 enter a common fatal path with a normalized vector and error code. The
 fatal path reports both values and the instruction address, reports CR2 for
 page faults, emits `GINUX_KERNEL_PANIC`, and halts. Exceptions from CPL3 instead
 enter the scheduler containment path. Its hardware proof deliberately executes
-`SLDT` under UMIP in one context, validates vector 13 and the measured faulting
-instruction address, destroys only that context, and resumes its peer
+an unmapped null-page write in one context, validates vector 14, the user-write
+error bits, `CR2`, and the measured faulting instruction address, destroys only
+that context, and resumes its peer
 without a kernel panic. The double-fault gate uses IST1 so it does not depend
 on the interrupted stack.
 
