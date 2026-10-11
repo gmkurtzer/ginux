@@ -201,6 +201,12 @@ duplicated-output endpoints. Closed or unknown descriptors return `-EBADF`;
 other mutation and duplication commands return `-EINVAL`. On the null
 descriptor, `F_GETFD`, `F_SETFD`, and `F_GETFL` expose its close-on-exec bit and
 selected access mode; duplication remains outside this bounded node profile.
+`F_SETFL` can toggle only `O_NONBLOCK` on eventfd, timerfd, and each pipe
+endpoint; it ignores the supplied access-mode bits and rejects other status
+flags with `-EINVAL`. Pipe read and write endpoints retain independent status
+flags. The proof clears nonblocking mode on each descriptor class, observes
+the explicit `-ENOSYS` would-block boundary, restores it, and verifies
+`-EAGAIN`; changing the pipe reader leaves its writer nonblocking.
 `rax = 257` (`__NR_openat`) recognizes only the absolute paths `/dev/null`,
 `/dev/zero`, `/dev/console`, and `/dev/tty`, and
 allocates the lowest free auxiliary descriptor, 2 through 5. It accepts `O_RDONLY`, `O_WRONLY`, or

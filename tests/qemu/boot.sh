@@ -633,6 +633,11 @@ if ! grep -q '^ginux: Linux atomic vectored pipe I/O validated' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux mutable descriptor status flags validated' "$output_file"; then
+    echo "Boot test failed: Linux mutable descriptor status flags were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux bounded syscall stack movement validated' "$output_file"; then
     echo "Boot test failed: Linux bounded syscall stack movement was not validated." >&2
     exit 1

@@ -1309,6 +1309,18 @@ ginux_linux_probe:
     syscall
     cmp rax, 0x802
     jne failure
+    mov esi, 4
+    mov edx, 2
+    mov eax, 72
+    call syscall_expect_zero
+    mov esi, 0x404d90
+    mov edx, 8
+    xor eax, eax
+    call syscall_expect_enosys
+    mov esi, 4
+    mov edx, 0x802
+    mov eax, 72
+    call syscall_expect_zero
     mov eax, 8
     syscall
     cmp rax, -29
@@ -1601,6 +1613,18 @@ ginux_linux_probe:
     syscall
     cmp rax, 0x802
     jne failure
+    mov esi, 4
+    mov edx, 2
+    mov eax, 72
+    call syscall_expect_zero
+    mov esi, 0x404e00
+    mov edx, 8
+    xor eax, eax
+    call syscall_expect_enosys
+    mov esi, 4
+    mov edx, 0x802
+    mov eax, 72
+    call syscall_expect_zero
     mov eax, 8
     syscall
     cmp rax, -29
@@ -1771,6 +1795,32 @@ ginux_linux_probe:
     syscall
     cmp rax, 0x801
     jne failure
+    mov edi, 3
+    mov esi, 4
+    xor edx, edx
+    mov eax, 72
+    call syscall_expect_zero
+    mov esi, 3
+    mov eax, 72
+    call syscall_expect_zero
+    mov edi, 4
+    mov eax, 72
+    syscall
+    cmp rax, 0x801
+    jne failure
+    mov edi, 3
+    mov esi, 4
+    mov edx, 0x4000
+    mov eax, 72
+    call syscall_expect_einval
+    mov esi, 0x404eb0
+    mov edx, 1
+    xor eax, eax
+    call syscall_expect_enosys
+    mov esi, 4
+    mov edx, 0x800
+    mov eax, 72
+    call syscall_expect_zero
     mov eax, 8
     syscall
     cmp rax, -29

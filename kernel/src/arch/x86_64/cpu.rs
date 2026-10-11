@@ -203,6 +203,7 @@ const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_SETFD: u64 = 2;
 const LINUX_F_GETFL: u64 = 3;
+const LINUX_F_SETFL: u64 = 4;
 const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
 const LINUX_O_CLOEXEC: u64 = 0x80000;
@@ -342,7 +343,8 @@ static ELF_PROBE_TIMERFD_INTERVAL: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_TIMERFD_DEADLINE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PIPE_READ_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_PIPE_WRITE_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_PIPE_FLAGS: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_PIPE_READ_FLAGS: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_PIPE_WRITE_FLAGS: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_LENGTH: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_BUFFER: [AtomicU8; LINUX_PIPE_CAPACITY] =
     [const { AtomicU8::new(0) }; LINUX_PIPE_CAPACITY];
@@ -976,7 +978,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_READ_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_WRITE_DESCRIPTOR.store(0, Ordering::SeqCst);
-    ELF_PROBE_PIPE_FLAGS.store(0, Ordering::SeqCst);
+    ELF_PROBE_PIPE_READ_FLAGS.store(0, Ordering::SeqCst);
+    ELF_PROBE_PIPE_WRITE_FLAGS.store(0, Ordering::SeqCst);
     ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
     for byte in &ELF_PROBE_PIPE_BUFFER {
         byte.store(0, Ordering::SeqCst);
@@ -1028,7 +1031,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst),
         u64::from(ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst)),
-        u64::from(ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_PIPE_READ_FLAGS.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_PIPE_WRITE_FLAGS.load(Ordering::SeqCst)),
         u64::from(ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst)),
     ];
     let mut devices_closed = true;
@@ -1055,7 +1059,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && ELF_PROBE_TIMERFD_DEADLINE.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_PIPE_READ_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_PIPE_WRITE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_PIPE_FLAGS.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_PIPE_READ_FLAGS.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_PIPE_WRITE_FLAGS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_PIPE_LENGTH.swap(0, Ordering::SeqCst) == 0
         && cursors_reset;
     if !descriptor_state_valid {
@@ -2654,7 +2659,8 @@ fn linux_pipe(address: u64, flags: u64) -> u64 {
         byte.store(0, Ordering::SeqCst);
     }
     ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
-    ELF_PROBE_PIPE_FLAGS.store(flags as u32, Ordering::SeqCst);
+    ELF_PROBE_PIPE_READ_FLAGS.store(flags as u32, Ordering::SeqCst);
+    ELF_PROBE_PIPE_WRITE_FLAGS.store(flags as u32, Ordering::SeqCst);
     ELF_PROBE_PIPE_READ_DESCRIPTOR.store(descriptors[0] as u8, Ordering::SeqCst);
     ELF_PROBE_PIPE_WRITE_DESCRIPTOR.store(descriptors[1] as u8, Ordering::SeqCst);
     for descriptor in descriptors {
@@ -2680,7 +2686,7 @@ fn linux_pipe_read(descriptor: u64, address: u64, count: u64) -> Option<u64> {
             return Some(0);
         }
         return Some(
-            if ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+            if ELF_PROBE_PIPE_READ_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
                 LINUX_EAGAIN
             } else {
                 LINUX_ENOSYS
@@ -2729,7 +2735,7 @@ fn linux_pipe_write(descriptor: u64, address: u64, count: u64) -> Option<u64> {
     let length = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) as usize;
     if requested > LINUX_PIPE_CAPACITY - length {
         return Some(
-            if ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+            if ELF_PROBE_PIPE_WRITE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
                 LINUX_EAGAIN
             } else {
                 LINUX_ENOSYS
@@ -2789,7 +2795,7 @@ fn linux_pipe_writev(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
     let current = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) as usize;
     if total > LINUX_PIPE_CAPACITY - current {
         return Some(
-            if ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+            if ELF_PROBE_PIPE_WRITE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
                 LINUX_EAGAIN
             } else {
                 LINUX_ENOSYS
@@ -2851,7 +2857,7 @@ fn linux_pipe_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
             return Some(0);
         }
         return Some(
-            if ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+            if ELF_PROBE_PIPE_READ_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
                 LINUX_EAGAIN
             } else {
                 LINUX_ENOSYS
@@ -3360,20 +3366,18 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
     }
     if linux_pipe_read_descriptor(descriptor) {
         ELF_PROBE_PIPE_READ_DESCRIPTOR.store(0, Ordering::SeqCst);
+        ELF_PROBE_PIPE_READ_FLAGS.store(0, Ordering::SeqCst);
         ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
         for byte in &ELF_PROBE_PIPE_BUFFER {
             byte.store(0, Ordering::SeqCst);
-        }
-        if ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
-            ELF_PROBE_PIPE_FLAGS.store(0, Ordering::SeqCst);
         }
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
         return 0;
     }
     if linux_pipe_write_descriptor(descriptor) {
         ELF_PROBE_PIPE_WRITE_DESCRIPTOR.store(0, Ordering::SeqCst);
+        ELF_PROBE_PIPE_WRITE_FLAGS.store(0, Ordering::SeqCst);
         if ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
-            ELF_PROBE_PIPE_FLAGS.store(0, Ordering::SeqCst);
             ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
         }
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
@@ -3526,6 +3530,9 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
                         ELF_PROBE_EVENTFD_FLAGS.load(Ordering::SeqCst) & LINUX_EFD_NONBLOCK as u32,
                     )
                 }
+                LINUX_F_SETFL => {
+                    linux_descriptor_set_nonblocking(&ELF_PROBE_EVENTFD_FLAGS, argument)
+                }
                 _ => LINUX_EINVAL,
             };
         }
@@ -3547,6 +3554,9 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
                         ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst) & LINUX_TFD_NONBLOCK as u32,
                     )
                 }
+                LINUX_F_SETFL => {
+                    linux_descriptor_set_nonblocking(&ELF_PROBE_TIMERFD_FLAGS, argument)
+                }
                 _ => LINUX_EINVAL,
             };
         }
@@ -3565,10 +3575,20 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
                 }
                 LINUX_F_GETFL => {
                     let access = u64::from(linux_pipe_write_descriptor(descriptor));
-                    access
-                        | u64::from(
-                            ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32,
-                        )
+                    let flags = if access == 0 {
+                        &ELF_PROBE_PIPE_READ_FLAGS
+                    } else {
+                        &ELF_PROBE_PIPE_WRITE_FLAGS
+                    };
+                    access | u64::from(flags.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32)
+                }
+                LINUX_F_SETFL => {
+                    let flags = if linux_pipe_read_descriptor(descriptor) {
+                        &ELF_PROBE_PIPE_READ_FLAGS
+                    } else {
+                        &ELF_PROBE_PIPE_WRITE_FLAGS
+                    };
+                    linux_descriptor_set_nonblocking(flags, argument)
                 }
                 _ => LINUX_EINVAL,
             };
@@ -3591,6 +3611,18 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
         LINUX_F_GETFL => u64::from((state & 3) - 1),
         _ => LINUX_EINVAL,
     }
+}
+
+fn linux_descriptor_set_nonblocking(flags: &AtomicU32, argument: u64) -> u64 {
+    if argument & !(3 | LINUX_O_NONBLOCK) != 0 {
+        return LINUX_EINVAL;
+    }
+    let current = flags.load(Ordering::SeqCst);
+    flags.store(
+        (current & !(LINUX_O_NONBLOCK as u32)) | (argument as u32 & LINUX_O_NONBLOCK as u32),
+        Ordering::SeqCst,
+    );
+    0
 }
 
 fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
