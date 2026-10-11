@@ -63,6 +63,11 @@ if ! grep -q '^ginux: kernel page tables active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: null and stack guard pages active' "$output_file"; then
+    echo "Boot test failed: hardened null/stack mappings are not active." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: GDT/TSS/IDT active' "$output_file"; then
     echo "Boot test failed: kernel CPU protection tables are not active." >&2
     exit 1

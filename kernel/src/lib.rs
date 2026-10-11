@@ -16,12 +16,14 @@ const EFI_BOOT_SERVICES_CODE: u32 = 3;
 const EFI_BOOT_SERVICES_DATA: u32 = 4;
 const EFI_CONVENTIONAL_MEMORY: u32 = 7;
 const UEFI_PAGES_PER_MIB: u64 = 256;
+const PAGE_SIZE: usize = 4096;
 const KERNEL_STACK_SIZE: usize = 64 * 1024;
+const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 
-#[repr(C, align(16))]
-struct KernelStack([u8; KERNEL_STACK_SIZE]);
+#[repr(C, align(4096))]
+struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
 
-static mut KERNEL_STACK: KernelStack = KernelStack([0; KERNEL_STACK_SIZE]);
+static mut KERNEL_STACK: KernelStack = KernelStack([0; KERNEL_STACK_STORAGE_SIZE]);
 
 global_asm!(
     r#"
@@ -36,7 +38,7 @@ ginux_kernel_stack_entry:
     ud2
 "#,
     stack = sym KERNEL_STACK,
-    stack_size = const KERNEL_STACK_SIZE,
+    stack_size = const KERNEL_STACK_STORAGE_SIZE,
     kernel_main = sym kernel_main,
 );
 
@@ -119,23 +121,32 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
 
     let stack_start = core::ptr::addr_of!(KERNEL_STACK) as usize;
+    let kernel_stack_guard = stack_start;
+    let kernel_stack_start = stack_start + PAGE_SIZE;
+    let double_fault_guard = arch::x86_64::cpu::double_fault_guard_page();
     let required_addresses = [
         kernel_main as *const () as usize,
         boot_info as *const BootInfo as usize,
         boot_info.memory_map as usize,
         memory_map_end,
-        stack_start,
-        stack_start + KERNEL_STACK_SIZE - 1,
+        kernel_stack_start,
+        stack_start + KERNEL_STACK_STORAGE_SIZE - 1,
         boot_info.reset_system as usize,
     ];
+    let guard_pages = [0, kernel_stack_guard, double_fault_guard];
 
     // SAFETY: The entry trampoline disabled interrupts. The required live
     // addresses and the page-table objects are checked against the complete
     // transitional identity-map range before CR3 is changed.
-    if unsafe { arch::x86_64::paging::install_initial_identity_map(&required_addresses) }.is_err() {
+    if unsafe {
+        arch::x86_64::paging::install_initial_identity_map(&required_addresses, &guard_pages)
+    }
+    .is_err()
+    {
         kernel_fail("ginux: page-table transition failed\r\n");
     }
     serial_write("ginux: kernel page tables active\r\n");
+    serial_write("ginux: null and stack guard pages active\r\n");
 
     arch::x86_64::cpu::install();
     serial_write("ginux: GDT/TSS/IDT active\r\n");
@@ -204,6 +215,7 @@ fn kernel_stack_is_active() -> bool {
     }
 
     let stack_start = core::ptr::addr_of!(KERNEL_STACK) as usize;
+    let stack_start = stack_start + PAGE_SIZE;
     let stack_end = stack_start + KERNEL_STACK_SIZE;
     (stack_start..stack_end).contains(&stack_pointer)
 }

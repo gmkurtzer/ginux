@@ -8,7 +8,9 @@ const KERNEL_CODE_SELECTOR: u16 = 0x08;
 const KERNEL_DATA_SELECTOR: u16 = 0x10;
 const TSS_SELECTOR: u16 = 0x18;
 const DOUBLE_FAULT_IST: u8 = 1;
+const PAGE_SIZE: usize = 4096;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
+const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -63,8 +65,8 @@ struct DescriptorTablePointer {
     base: u64,
 }
 
-#[repr(C, align(16))]
-struct ExceptionStack([u8; EXCEPTION_STACK_SIZE]);
+#[repr(C, align(4096))]
+struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static mut GDT: [u64; 5] = [0; 5];
@@ -78,7 +80,7 @@ static mut TSS: TaskStateSegment = TaskStateSegment {
     io_map_base: size_of::<TaskStateSegment>() as u16,
 };
 static mut IDT: [IdtEntry; 256] = [IdtEntry::MISSING; 256];
-static mut DOUBLE_FAULT_STACK: ExceptionStack = ExceptionStack([0; EXCEPTION_STACK_SIZE]);
+static mut DOUBLE_FAULT_STACK: ExceptionStack = ExceptionStack([0; EXCEPTION_STACK_STORAGE_SIZE]);
 
 global_asm!(
     r#"
@@ -156,10 +158,14 @@ pub(crate) fn verify_breakpoint() -> bool {
     BREAKPOINT_HANDLED.load(Ordering::SeqCst)
 }
 
+pub(crate) fn double_fault_guard_page() -> usize {
+    core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize
+}
+
 unsafe fn install_gdt_and_tss() {
     let tss_address = core::ptr::addr_of!(TSS) as u64;
     let exception_stack_end =
-        core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64 + EXCEPTION_STACK_SIZE as u64;
+        core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64 + EXCEPTION_STACK_STORAGE_SIZE as u64;
     TSS.interrupt_stacks[0] = exception_stack_end;
 
     GDT[0] = 0;
