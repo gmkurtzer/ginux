@@ -453,8 +453,21 @@ rejects the complete sibling stack extent. Teardown zeroes the page, verifies
 the physical frame contains only zeroes, and releases it with the other
 execution frames. The mapping is still directly accessible to code sharing the
 same process address space; this proves bounded ownership, guarded layout, and
-cleanup rather than intra-process memory isolation. The table does not yet
-create a child register context or make a second Linux thread runnable.
+cleanup rather than intra-process memory isolation.
+
+The internal clone constructor accepts only
+`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID`.
+It requires the exact reserved sibling stack top, the sibling thread pointer,
+four-byte-aligned parent/child TID addresses wholly inside one declared parent
+writable extent, a lower-canonical nonzero return RIP, and RFLAGS with the
+reserved and interrupt-enable bits set and IOPL, nested-task, and virtual-8086
+bits clear. Successful construction stores RIP, RSP, RFLAGS, child `rax = 0`,
+and the child-clear-TID address in the generation-tagged slot, and returns the
+child TID as the future parent result. Invalid flags and stack bounds are
+rejected before slot mutation. Retirement clears every saved field, and the
+same slot's next generation must begin with an empty context. This is context
+construction only: no TID word is published, no userspace `clone` syscall is
+enabled, and the child is not runnable.
 
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns

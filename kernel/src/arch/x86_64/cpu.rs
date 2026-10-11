@@ -69,6 +69,24 @@ const LINUX_DUP2_SYSCALL: u64 = 33;
 const LINUX_GETITIMER_SYSCALL: u64 = 36;
 const LINUX_SETITIMER_SYSCALL: u64 = 38;
 const LINUX_GETPID_SYSCALL: u64 = 39;
+const LINUX_CLONE_VM: u64 = 0x0000_0100;
+const LINUX_CLONE_FS: u64 = 0x0000_0200;
+const LINUX_CLONE_FILES: u64 = 0x0000_0400;
+const LINUX_CLONE_SIGHAND: u64 = 0x0000_0800;
+const LINUX_CLONE_THREAD: u64 = 0x0001_0000;
+const LINUX_CLONE_SYSVSEM: u64 = 0x0004_0000;
+const LINUX_CLONE_SETTLS: u64 = 0x0008_0000;
+const LINUX_CLONE_PARENT_SETTID: u64 = 0x0010_0000;
+const LINUX_CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
+const LINUX_BOUNDED_THREAD_CLONE_FLAGS: u64 = LINUX_CLONE_VM
+    | LINUX_CLONE_FS
+    | LINUX_CLONE_FILES
+    | LINUX_CLONE_SIGHAND
+    | LINUX_CLONE_THREAD
+    | LINUX_CLONE_SYSVSEM
+    | LINUX_CLONE_SETTLS
+    | LINUX_CLONE_PARENT_SETTID
+    | LINUX_CLONE_CHILD_CLEARTID;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_FCNTL_SYSCALL: u64 = 72;
@@ -356,6 +374,14 @@ static LINUX_THREAD_TLS_SIZES: [AtomicU64; LINUX_THREAD_LIMIT] =
 static LINUX_THREAD_STACK_BASES: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_STACK_SIZES: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RIPS: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RSPS: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RFLAGS: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RAXS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_CLEAR_CHILD_TIDS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
@@ -1075,6 +1101,30 @@ struct LinuxThreadHandle {
     tid: u32,
 }
 
+#[derive(Clone, Copy)]
+struct LinuxCloneRequest {
+    flags: u64,
+    child_stack: u64,
+    parent_tid: u64,
+    child_tid: u64,
+    tls: u64,
+}
+
+#[derive(Clone, Copy)]
+struct LinuxUserContext {
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    rax: u64,
+    fs_base: u64,
+}
+
+#[derive(Clone, Copy)]
+struct LinuxCloneResult {
+    parent_rax: u64,
+    child: LinuxUserContext,
+}
+
 impl LinuxTlsContext {
     fn is_valid(self) -> bool {
         if self.extent_size == 0 {
@@ -1204,6 +1254,67 @@ fn linux_thread_context(handle: LinuxThreadHandle) -> Option<LinuxTlsContext> {
     })
 }
 
+fn construct_linux_clone_context(
+    handle: LinuxThreadHandle,
+    request: LinuxCloneRequest,
+    return_rip: u64,
+    return_rflags: u64,
+    parent_writable_base: u64,
+    parent_writable_size: usize,
+) -> Option<LinuxCloneResult> {
+    const REQUIRED_RFLAGS: u64 = (1 << 1) | (1 << 9);
+    const FORBIDDEN_RFLAGS: u64 = (3 << 12) | (1 << 14) | (1 << 17);
+    let slot = usize::from(handle.slot);
+    let context = linux_thread_context(handle)?;
+    if request.flags != LINUX_BOUNDED_THREAD_CLONE_FLAGS
+        || slot >= LINUX_THREAD_LIMIT
+        || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_READY
+        || current_linux_thread_slot() == Some(slot)
+        || return_rip == 0
+        || return_rip >= 1 << 47
+        || return_rflags & REQUIRED_RFLAGS != REQUIRED_RFLAGS
+        || return_rflags & FORBIDDEN_RFLAGS != 0
+        || request.tls != context.thread_pointer as u64
+        || request.child_stack & 15 != 0
+        || LINUX_THREAD_STACK_BASES[slot]
+            .load(Ordering::SeqCst)
+            .checked_add(LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst))
+            != Some(request.child_stack)
+        || request.parent_tid & 3 != 0
+        || request.child_tid & 3 != 0
+        || !linux_range_contains(
+            parent_writable_base,
+            parent_writable_size as u64,
+            request.parent_tid,
+            size_of::<u32>(),
+        )
+        || !linux_range_contains(
+            parent_writable_base,
+            parent_writable_size as u64,
+            request.child_tid,
+            size_of::<u32>(),
+        )
+    {
+        return None;
+    }
+    let child = LinuxUserContext {
+        rip: return_rip,
+        rsp: request.child_stack,
+        rflags: return_rflags,
+        rax: 0,
+        fs_base: request.tls,
+    };
+    LINUX_THREAD_RIPS[slot].store(child.rip, Ordering::SeqCst);
+    LINUX_THREAD_RSPS[slot].store(child.rsp, Ordering::SeqCst);
+    LINUX_THREAD_RFLAGS[slot].store(child.rflags, Ordering::SeqCst);
+    LINUX_THREAD_RAXS[slot].store(child.rax, Ordering::SeqCst);
+    LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(request.child_tid, Ordering::SeqCst);
+    Some(LinuxCloneResult {
+        parent_rax: u64::from(handle.tid),
+        child,
+    })
+}
+
 fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
     let slot = usize::from(handle.slot);
     let Some(context) = linux_thread_context(handle) else {
@@ -1260,6 +1371,10 @@ fn clear_linux_thread_slot(slot: usize) {
     LINUX_THREAD_TLS_SIZES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_STACK_BASES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_STACK_SIZES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RIPS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RSPS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RFLAGS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RAXS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_FREE, Ordering::SeqCst);
@@ -1322,6 +1437,18 @@ fn finish_linux_thread_table() -> bool {
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_STACK_SIZES
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_RIPS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_RSPS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_RFLAGS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_RAXS
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_CLEAR_CHILD_TIDS
@@ -1443,6 +1570,63 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                     != 0x2220
                 || !set_current_linux_clear_child_tid(0)
                 || !set_current_linux_robust_list(0)
+            {
+                return Some(false);
+            }
+            let clone_request = LinuxCloneRequest {
+                flags: LINUX_BOUNDED_THREAD_CLONE_FLAGS,
+                child_stack: execution.sibling_stack.checked_add(PAGE_SIZE)? as u64,
+                parent_tid: initial_stack.checked_add(64)? as u64,
+                child_tid: initial_stack.checked_add(68)? as u64,
+                tls: execution.sibling_fs_base as u64,
+            };
+            let invalid_flags_rejected = construct_linux_clone_context(
+                sibling_thread,
+                LinuxCloneRequest {
+                    flags: clone_request.flags | (1 << 63),
+                    ..clone_request
+                },
+                execution.entry as u64,
+                0x202,
+                initial_stack as u64,
+                PAGE_SIZE,
+            )
+            .is_none();
+            let invalid_stack_rejected = construct_linux_clone_context(
+                sibling_thread,
+                LinuxCloneRequest {
+                    child_stack: clone_request.child_stack - 16,
+                    ..clone_request
+                },
+                execution.entry as u64,
+                0x202,
+                initial_stack as u64,
+                PAGE_SIZE,
+            )
+            .is_none();
+            let clone = construct_linux_clone_context(
+                sibling_thread,
+                clone_request,
+                execution.entry as u64,
+                0x202,
+                initial_stack as u64,
+                PAGE_SIZE,
+            )?;
+            let sibling_slot = usize::from(sibling_thread.slot);
+            if !invalid_flags_rejected
+                || !invalid_stack_rejected
+                || clone.parent_rax != u64::from(sibling_thread.tid)
+                || clone.child.rip != execution.entry as u64
+                || clone.child.rsp != clone_request.child_stack
+                || clone.child.rflags != 0x202
+                || clone.child.rax != 0
+                || clone.child.fs_base != execution.sibling_fs_base as u64
+                || LINUX_THREAD_RIPS[sibling_slot].load(Ordering::SeqCst) != clone.child.rip
+                || LINUX_THREAD_RSPS[sibling_slot].load(Ordering::SeqCst) != clone.child.rsp
+                || LINUX_THREAD_RFLAGS[sibling_slot].load(Ordering::SeqCst) != clone.child.rflags
+                || LINUX_THREAD_RAXS[sibling_slot].load(Ordering::SeqCst) != 0
+                || LINUX_THREAD_CLEAR_CHILD_TIDS[sibling_slot].load(Ordering::SeqCst)
+                    != clone_request.child_tid
                 || !retire_linux_thread(sibling_thread)
             {
                 return Some(false);
@@ -1462,6 +1646,11 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                     && LINUX_THREAD_STACK_BASES[usize::from(replacement.slot)]
                         .load(Ordering::SeqCst)
                         == execution.sibling_stack as u64
+                    && LINUX_THREAD_RIPS[usize::from(replacement.slot)].load(Ordering::SeqCst) == 0
+                    && LINUX_THREAD_RSPS[usize::from(replacement.slot)].load(Ordering::SeqCst) == 0
+                    && LINUX_THREAD_RFLAGS[usize::from(replacement.slot)].load(Ordering::SeqCst)
+                        == 0
+                    && LINUX_THREAD_RAXS[usize::from(replacement.slot)].load(Ordering::SeqCst) == 0
                     && !switch_linux_thread(sibling_thread)
                     && retire_linux_thread(replacement),
             )

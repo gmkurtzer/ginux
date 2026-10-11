@@ -512,8 +512,14 @@ state before entering userspace. The sibling thread-table entry also retains an
 exact guarded stack page, while the active initial-thread syscall-copy state
 rejects that entire page. This is resource ownership and copy-boundary state,
 not protection from direct access within the shared process address space.
-This does not yet make syscall state generally per-thread or connect Linux TLS
-switching to scheduler preemption.
+An internal constructor additionally validates the exact bounded pthread-style
+clone flag set and prepares the sibling's post-syscall RIP, guarded RSP,
+RFLAGS, zero child return, FS base, and child-clear-TID registration. Invalid
+flags or stack pointers are rejected before mutation, and slot retirement
+clears the context. The constructor is not reachable as `clone(2)`, does not
+publish either TID word, and does not make the child runnable. This does not yet
+make syscall state generally per-thread or connect Linux TLS switching to
+scheduler preemption.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
@@ -644,8 +650,9 @@ credential, supplementary-group, and capability queries, fixed `personality`, bo
 identity queries above,
 `set_tid_address`, bounded robust-list registration/query, `exit`, and
 `exit_group` calls. There is no userspace thread creation, general TID
-allocation, child register construction, clear-child-TID futex wake, or robust
-futex recovery yet; the two-slot table and guarded sibling stack are exercised
+allocation, clone syscall dispatch, TID publication, clear-child-TID futex wake,
+or robust futex recovery yet; the two-slot table, guarded sibling stack, and
+internal child-context constructor are exercised
 only by the bounded kernel lifecycle proof. Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path

@@ -654,6 +654,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux TLS execution context switched and restored\r\n");
     serial_write("ginux: guarded Linux sibling stack materialized\r\n");
     serial_write("ginux: non-current Linux stack syscall access denied\r\n");
+    serial_write("ginux: bounded Linux clone contract validated\r\n");
+    serial_write("ginux: Linux child return context constructed\r\n");
+    serial_write("ginux: Linux child context cleared on slot reuse\r\n");
     serial_write("ginux: bounded Linux TID lifecycle validated\r\n");
     serial_write("ginux: stale Linux thread handles rejected\r\n");
     serial_write("ginux: Linux per-thread exit state isolated\r\n");

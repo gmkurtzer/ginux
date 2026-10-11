@@ -693,6 +693,21 @@ if ! grep -q '^ginux: non-current Linux stack syscall access denied' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux clone contract validated' "$output_file"; then
+    echo "Boot test failed: the bounded Linux clone contract was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux child return context constructed' "$output_file"; then
+    echo "Boot test failed: the Linux child return context was not constructed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux child context cleared on slot reuse' "$output_file"; then
+    echo "Boot test failed: the Linux child context survived slot reuse." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
     exit 1

@@ -104,8 +104,16 @@ guard pages. Its exact bounds follow the slot across TID 2 retirement and TID 3
 reuse. The current-thread syscall-copy contract rejects that whole page, and
 teardown verifies it is scrubbed before releasing its frame. This establishes
 bounded stack ownership and cleanup, not memory isolation within the shared
-process address space. There is still no userspace `clone`, child register
-context, or concurrently schedulable Linux thread.
+process address space.
+An internal clone constructor now accepts exactly the bounded shared-VM,
+shared-files, shared-signal-handler, thread-group, SysV-semaphore, TLS,
+parent-TID, and child-clear-TID flag set. It requires the reserved stack top,
+the sibling TLS pointer, aligned TID words inside the parent's writable stack,
+and a safe return RIP/RFLAGS pair. It records a child context that resumes after
+the eventual syscall with `rax = 0`, while the parent result is the child's TID.
+Malformed flags and stack bounds fail without changing the slot, and retirement
+clears the saved context before generation reuse. There is still no userspace
+`clone` entry, TID publication, or concurrently schedulable Linux thread.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.
