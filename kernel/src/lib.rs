@@ -668,6 +668,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux return ownership restored to parent\r\n");
     serial_write("ginux: stale Linux return installation left state unchanged\r\n");
     serial_write("ginux: live Linux syscall return frame round-trip validated\r\n");
+    serial_write("ginux: guarded Linux child executed in ring 3\r\n");
+    serial_write("ginux: Linux child exit restored suspended parent\r\n");
+    serial_write("ginux: per-thread Linux syscall stacks validated\r\n");
     serial_write("ginux: bounded Linux TID lifecycle validated\r\n");
     serial_write("ginux: stale Linux thread handles rejected\r\n");
     serial_write("ginux: Linux per-thread exit state isolated\r\n");

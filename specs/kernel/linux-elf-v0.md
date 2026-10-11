@@ -496,6 +496,17 @@ install the retired handle changes neither the caller-provided frame nor the
 current TID. The output is currently a local proof frame; the live assembly
 `SYSRETQ` state is not redirected yet.
 
+The interpreted runtime additionally creates one kernel-orchestrated proof
+child at the first bounded `sched_yield`. The yield target must lie in the
+authenticated main executable mapping. The parent frame is persisted, the
+child receives the separately owned TLS and guarded stack top, and the live
+assembly return state selects it through `SYSRETQ`. Its authenticated trampoline
+calls thread `exit`; the kernel retires that slot and restores the parent's
+saved registers, RIP/RSP/RFLAGS, FS base, and copy extent. Stack validation is
+resolved from the current generation-tagged slot and accepts the exact fresh
+child stack top. This proves one complete parent-child-parent ring-3 sequence,
+but creation is not yet exposed through `clone(2)`.
+
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns
 different nonzero sentinel values to TIDs 1 and 2, switches between them, and

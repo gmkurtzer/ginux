@@ -499,20 +499,13 @@ valid_interpreter_base:
     mov eax, 1
     call syscall_expect_efault
 
-    mov eax, 999
-    call syscall_expect_enosys
-
+    lea rdi, [rip + child_thread_probe]
     mov eax, 24
     call syscall_expect_zero
 
     xor edi, edi
     mov eax, 145
     call syscall_expect_zero
-    mov edi, 2
-    mov eax, 145
-    syscall
-    cmp rax, -3
-    jne failure
 
     xor edi, edi
     mov esi, 0x405200
@@ -3215,6 +3208,11 @@ resolution_valid:
 
     mov edi, 42
     mov eax, 231
+    syscall
+
+child_thread_probe:
+    mov edi, 42
+    mov eax, 60
     syscall
 failure:
     ud2

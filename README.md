@@ -140,8 +140,16 @@ The real ring-3 `sched_yield` path now round-trips through that typed live
 frame. With interrupts disabled, the handler validates and reinstalls the
 current TLS context, writes all twelve registers plus RIP/RSP/RFLAGS into the
 assembly-owned return state, reads the result back, and resumes successfully
-through `SYSRETQ`. It deliberately selects the calling thread only; cross-thread
-selection is the next boundary.
+through `SYSRETQ`.
+The interpreted proof now takes the next step: its first yield names a bounded
+authenticated child trampoline. The kernel saves the complete parent frame,
+reserves the sibling TID/TLS/stack resources, installs the child through the
+live `SYSRETQ` state, and executes it in ring 3 on the guarded stack. The child
+uses `exit` to retire only itself; the kernel restores the parent's saved frame,
+FS base, and copy ownership, after which the parent continues. Syscall stack
+validation now resolves the running thread's exact stack extent instead of the
+initial stack. This is one kernel-orchestrated proof child, not userspace
+`clone(2)` or a general scheduler.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.

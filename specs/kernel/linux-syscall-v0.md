@@ -547,7 +547,14 @@ revalidates and reinstalls the current thread's TLS context, rewrites all twelve
 registers and the RIP/RSP/RFLAGS return globals while interrupts remain
 disabled, verifies the written state, and returns through `SYSRETQ`. The ring-3
 workload continuing afterward proves the live round trip. This milestone still
-selects only the caller; it does not schedule the saved child.
+selects only the caller on profiles without sibling resources.
+For the interpreted profile, the first `sched_yield` supplies an authenticated
+main-code child target. The kernel saves the caller, reserves the fixed sibling
+TLS and guarded stack, and redirects the live frame to that child. A child
+`exit(42)` clears its per-thread state, retires only that slot, selects the ready
+parent, and returns the parent through the same live-frame path. `exit_group(42)`
+remains the final process teardown. This is a single kernel-orchestrated proof
+child; `clone(2)`, repeated creation, and general scheduling remain undefined.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control

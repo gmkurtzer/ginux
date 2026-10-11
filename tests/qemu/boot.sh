@@ -763,6 +763,21 @@ if ! grep -q '^ginux: live Linux syscall return frame round-trip validated' "$ou
     exit 1
 fi
 
+if ! grep -q '^ginux: guarded Linux child executed in ring 3' "$output_file"; then
+    echo "Boot test failed: the guarded Linux child did not execute in ring 3." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux child exit restored suspended parent' "$output_file"; then
+    echo "Boot test failed: Linux child exit did not restore the suspended parent." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: per-thread Linux syscall stacks validated' "$output_file"; then
+    echo "Boot test failed: per-thread Linux syscall stacks were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
     exit 1
