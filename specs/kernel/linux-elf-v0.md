@@ -175,9 +175,10 @@ static runtime stack is now populated by a single bounded auxiliary-vector
 encoder using that common contract, and the interpreted proof checks the exact
 word positions of its dynamic values. A bounded execution proof installs only
 the interpreter's separate RX and RW/NX pages in the initial user root. It
-reserves zeroed frames behind absent leaves for the main image's read-only/NX
-header page, four RX pages, two RW/NX pages, and the dependency's RX and RW
-pages. It also owns bounded heap, stack, and two `mmap` payload frames. The
+keeps absent leaves for the main image's read-only/NX header page, four RX
+pages, two RW/NX pages, and the dependency's RX and RW pages. It allocates each
+of those nine payload frames only when the matching authenticated mmap request
+arrives. It also owns bounded heap, stack, and two `mmap` payload frames. The
 proof verifies that the main and dependency leaves begin absent, validates
 their userspace-installed contents and permissions after execution, and
 constructs the dynamic-process stack with the common auxiliary-vector encoder.
@@ -288,10 +289,9 @@ using another in-window bias return `-EINVAL`. Only then does
 it apply dependency and main relocations. The namespace still admits only
 `libginux.so`, so an altered or unterminated name fails closed. Syscall return
 validation accepts only the declared main and interpreter RX extents. The
-kernel authenticates and plans all images and reserves the main frames.
-Dependency frames are allocated from the tracked kernel pool only when the
-admitted mmap requests arrive; their content and both images' leaf installation
-are userspace-driven.
+kernel authenticates and plans all images. Main and dependency payload frames
+are allocated from the tracked kernel pool only when their admitted mmap
+requests arrive; their content and leaf installation are userspace-driven.
 The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
 those bytes. The executable dynamic interpreter, main, and dependency instead
@@ -300,9 +300,9 @@ The complete ring-3 probe therefore runs with dynamic `AT_BASE`, main-image
 `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. Dependency dynamic
 metadata, entry, and relocation targets are translated from the authenticated
 canonical plan by the selected bias before validation. The kernel
-restores its own root, scrubs every payload, releases the two demand-allocated
-dependency leases, and requires the kernel-owned live-frame count to return to
-its pre-execution value. This profile performs one exact cross-object name match; it
+restores its own root, scrubs every payload, releases all nine demand-allocated
+main and dependency leases, and requires the kernel-owned live-frame count to
+return to its pre-execution value. This profile performs one exact cross-object name match; it
 does not support multiple dependencies, transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
 lazy binding, a general-purpose dynamic linker, or glibc. The main bias and

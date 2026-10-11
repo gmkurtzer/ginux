@@ -66,10 +66,11 @@ dependency and main relocations. Both dynamic-table addresses and entry counts
 come from bounded `PT_DYNAMIC` headers, and final transfer uses `AT_ENTRY`
 rather than an embedded main entry address. The kernel installs only the interpreter for
 this stage; it authenticates and plans the main and dependency and reserves
-zeroed main-image frames. Dependency frames are allocated only when its
-authenticated mmap requests arrive. Both images' content and leaves are
-installed by userspace, and every dependency lease is scrubbed and released
-after the process root is deactivated.
+only the address-space infrastructure and interpreter frames initially. Main
+and dependency payload frames are allocated only when their authenticated mmap
+requests arrive. Both images' content and leaves are installed by userspace,
+and every executable-page lease is scrubbed and released after the process
+root is deactivated.
 Linker-private metadata remains mapped but outside the probe's bounded
 syscall-copy data extent.
 Interpreter and dependency selection bind the exact `PT_INTERP` path or

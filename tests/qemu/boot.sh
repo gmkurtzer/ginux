@@ -708,6 +708,11 @@ if ! grep -q '^ginux: Linux dependency frames allocated on demand' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux executable frames allocated on demand' "$output_file"; then
+    echo "Boot test failed: executable mapping frames were not demand-allocated and reclaimed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: toolchain-linked Linux PIE and shared object executed' "$output_file"; then
     echo "Boot test failed: the toolchain-linked Linux PIE/shared-object pair was not executed." >&2
     exit 1
