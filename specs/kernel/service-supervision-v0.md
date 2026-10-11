@@ -8,7 +8,8 @@ value 1 through the bounded IPC channel and waits until a timer interrupt
 preempts it. Context 2 is a minimal
 isolated service in a different address space and a domain whose sole delegated
 capability is IPC read/write. It receives the request, sends reply value 2, and
-then executes the measured expected invalid opcode.
+then executes a measured `SLDT` instruction. With UMIP active at CPL3, the
+instruction raises the expected general-protection fault.
 
 The CPL3 exception path removes only the service context, switches back to the
 client's CR3, releases the service's domain thread reservation, retires the

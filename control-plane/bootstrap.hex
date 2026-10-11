@@ -111,7 +111,7 @@ b802000000
 cd80
 0f0b
 
-# service: receive request 1, reply 2, then fault for supervision proof
+# service: receive request 1, reply 2, then execute SLDT for the UMIP proof
 4c89c7
 b805000000
 cd80
@@ -124,18 +124,18 @@ b804000000
 cd80
 85c0
 75da
-0f0b
+0f00c0
 
 # replacement service: negotiate ABI and block for a direct wakeup
 b800000000
 cd80
 3dff000100
-0f85c6ffffff
+0f85c5ffffff
 4c89c7
 b808000000
 cd80
 4883f803
-0f85b2ffffff
+0f85b1ffffff
 
 # replacement exits after receiving the control message
 b802000000

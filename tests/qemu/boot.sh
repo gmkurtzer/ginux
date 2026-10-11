@@ -338,7 +338,7 @@ if ! grep -q '^ginux: ring-3 fault survivor resumed and exited' "$output_file"; 
     exit 1
 fi
 
-if ! grep -q '^ginux: user invalid-opcode fault contained' "$output_file"; then
+if ! grep -q '^ginux: user UMIP fault contained' "$output_file"; then
     echo "Boot test failed: a ring-3 fault was not contained." >&2
     exit 1
 fi

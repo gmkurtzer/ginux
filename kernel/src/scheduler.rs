@@ -661,7 +661,7 @@ pub(crate) fn fault_runtime(
             .scheduler
             .cancel_blocked_peers(dead_domain, reason, IPC_PEER_CLOSED);
     }
-    let expected = frame.vector == 6
+    let expected = frame.vector == 13
         && frame.error == 0
         && frame.rip == runtime.expected_fault_instruction
         && frame.r9 == 2;
