@@ -5,7 +5,7 @@ profile verified in QEMU.
 
 The first Linux-compatibility boundary accepts a deliberately bounded ELF64
 profile. Files must be little-endian ELF class 64, current ELF version,
-System-V or Linux ABI, `ET_EXEC`, and machine `EM_X86_64`. The ELF header and
+System-V or Linux ABI, `ET_EXEC` or `ET_DYN`, and machine `EM_X86_64`. The ELF header and
 program-header sizes must match the published 64-bit layout. Section-header
 metadata is not consulted by the runtime loader; processor flags and extended
 program-header counts are rejected.
@@ -28,7 +28,9 @@ Unknown and duplicate metadata headers are rejected. Each load
 segment must be readable, nonempty in the
 file, contained within the supplied image, aligned to a nonzero power of two
 with congruent file and virtual addresses, and mapped wholly inside the lower
-canonical user range beginning at `0x10000`. File size may be smaller than
+canonical user range. Static `ET_EXEC` virtual addresses begin at `0x10000`;
+`ET_DYN` addresses may be relative to zero but are subject to that lower bound
+after applying a load bias. File size may be smaller than
 memory size to represent zero-filled data. Physical addresses may be zero or
 equal to the corresponding virtual address, matching conventional linkers;
 they are otherwise rejected and never used for mapping.
@@ -89,8 +91,13 @@ NUL bytes. Duplicate, relative, unterminated, writable, oversized, and
 out-of-file records are rejected. An image carrying valid interpreter metadata
 is represented by the parser but deliberately rejected by the page-image
 planner, so the kernel cannot enter its main executable at the wrong entry
-point. The profile does not yet accept position-independent `ET_DYN`, load or
-authenticate the named interpreter, perform relocations, or support glibc.
+point. Position-independent `ET_DYN` images use a separate planner that requires
+a nonzero, page-aligned load bias, relocates every segment, entry, program-header,
+and RELRO address with checked arithmetic, and rejects mappings outside the user
+range. The static planner rejects `ET_DYN`, and the position-independent planner
+rejects interpreter-bearing images. The profile does not yet load or authenticate
+the named interpreter, apply dynamic relocations, map `ET_DYN` images, or support
+glibc.
 
 ## Page-image plan
 

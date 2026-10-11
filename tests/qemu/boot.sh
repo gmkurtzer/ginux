@@ -548,6 +548,11 @@ if ! grep -q '^ginux: toolchain-linked static Linux ELF executed' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux ET_DYN load bias validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux ET_DYN load bias was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: four-page Linux executable mapping validated' "$output_file"; then
     echo "Boot test failed: four-page Linux executable mapping was not validated." >&2
     exit 1

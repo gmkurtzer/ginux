@@ -9,6 +9,7 @@ const PT_PHDR: u32 = 6;
 const PT_GNU_STACK: u32 = 0x6474_e551;
 const PT_GNU_RELRO: u32 = 0x6474_e552;
 const ET_EXEC: u16 = 2;
+const ET_DYN: u16 = 3;
 const EM_X86_64: u16 = 62;
 const PF_EXECUTE: u32 = 1;
 const PF_WRITE: u32 = 2;
@@ -35,6 +36,7 @@ pub(crate) struct Segment<'a> {
 }
 
 pub(crate) struct Image<'a> {
+    pub(crate) kind: ImageKind,
     pub(crate) entry: u64,
     pub(crate) program_headers: u64,
     pub(crate) program_header_count: u16,
@@ -43,6 +45,12 @@ pub(crate) struct Image<'a> {
     pub(crate) writable: Segment<'a>,
     pub(crate) relro: Option<Relro>,
     pub(crate) interpreter: Option<&'a [u8]>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImageKind {
+    Executable,
+    PositionIndependent,
 }
 
 #[derive(Clone, Copy)]
@@ -81,7 +89,6 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         || !matches!(bytes[7], 0 | 3)
         || bytes[8] != 0
         || bytes[9..16].iter().any(|byte| *byte != 0)
-        || read_u16(bytes, 16)? != ET_EXEC
         || read_u16(bytes, 18)? != EM_X86_64
         || read_u32(bytes, 20)? != 1
         || read_u64(bytes, 32)? != ELF_HEADER_SIZE as u64
@@ -91,6 +98,11 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     {
         return None;
     }
+    let kind = match read_u16(bytes, 16)? {
+        ET_EXEC => ImageKind::Executable,
+        ET_DYN => ImageKind::PositionIndependent,
+        _ => return None,
+    };
     let program_header_count = usize::from(read_u16(bytes, 56)?);
     if !(MIN_LOAD_SEGMENT_COUNT..=MAX_PROGRAM_HEADER_COUNT).contains(&program_header_count) {
         return None;
@@ -111,7 +123,11 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         let header = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
         match read_u32(bytes, header)? {
             PT_LOAD if load_count < MAX_LOAD_SEGMENT_COUNT => {
-                loads[load_count] = Some(parse_segment(bytes, header)?);
+                loads[load_count] = Some(parse_segment(
+                    bytes,
+                    header,
+                    kind == ImageKind::PositionIndependent,
+                )?);
                 load_count += 1;
             }
             PT_GNU_STACK if !gnu_stack_seen && valid_gnu_stack(bytes, header) => {
@@ -205,6 +221,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         return None;
     }
     Some(Image {
+        kind,
         entry,
         program_headers,
         program_header_count: program_header_count as u16,
@@ -217,7 +234,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
 }
 
 pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
-    if image.interpreter.is_some() {
+    if image.kind != ImageKind::Executable || image.interpreter.is_some() {
         return None;
     }
     Some(LoadPlan {
@@ -231,6 +248,53 @@ pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
         },
         writable: plan_segment(image.writable)?,
         relro: image.relro,
+    })
+}
+
+pub(crate) fn plan_position_independent<'a>(
+    image: &Image<'a>,
+    load_bias: u64,
+) -> Option<LoadPlan<'a>> {
+    if image.kind != ImageKind::PositionIndependent
+        || image.interpreter.is_some()
+        || load_bias < MIN_USER_ADDRESS
+        || !load_bias.is_multiple_of(PAGE_SIZE as u64)
+    {
+        return None;
+    }
+    let executable = relocate_segment(image.executable, load_bias)?;
+    let writable = relocate_segment(image.writable, load_bias)?;
+    let read_only = match image.read_only {
+        Some(segment) => Some(relocate_segment(segment, load_bias)?),
+        None => None,
+    };
+    let relro = match image.relro {
+        Some(range) => Some(Relro {
+            virtual_address: range.virtual_address.checked_add(load_bias)?,
+            memory_size: range.memory_size,
+        }),
+        None => None,
+    };
+    Some(LoadPlan {
+        entry: image.entry.checked_add(load_bias)?,
+        program_headers: image.program_headers.checked_add(load_bias)?,
+        program_header_count: image.program_header_count,
+        executable: plan_segment(executable)?,
+        read_only: match read_only {
+            Some(segment) => Some(plan_segment(segment)?),
+            None => None,
+        },
+        writable: plan_segment(writable)?,
+        relro,
+    })
+}
+
+fn relocate_segment(segment: Segment<'_>, load_bias: u64) -> Option<Segment<'_>> {
+    let virtual_address = segment.virtual_address.checked_add(load_bias)?;
+    let end = virtual_address.checked_add(segment.memory_size)?;
+    (virtual_address >= MIN_USER_ADDRESS && end <= MAX_USER_ADDRESS).then_some(Segment {
+        virtual_address,
+        ..segment
     })
 }
 
@@ -334,7 +398,7 @@ pub(crate) fn materialized_page_matches(
     })
 }
 
-fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
+fn parse_segment(bytes: &[u8], header: usize, position_independent: bool) -> Option<Segment<'_>> {
     if read_u32(bytes, header)? != PT_LOAD {
         return None;
     }
@@ -353,7 +417,7 @@ fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
         || physical_address != 0 && physical_address != virtual_address
         || file_size == 0
         || memory_size < file_size as u64
-        || virtual_address < MIN_USER_ADDRESS
+        || !position_independent && virtual_address < MIN_USER_ADDRESS
         || end > MAX_USER_ADDRESS
         || end <= virtual_address
         || file_end > bytes.len()
@@ -440,7 +504,8 @@ pub(crate) fn verify_parser() -> bool {
     let Some(parsed) = parse(&image) else {
         return false;
     };
-    if parsed.entry != 0x40_0100
+    if parsed.kind != ImageKind::Executable
+        || parsed.entry != 0x40_0100
         || parsed.program_headers != 0x40_0040
         || parsed.program_header_count != 3
         || parsed.executable.bytes.get(0x100..) != Some(PROBE_CODE)
@@ -467,7 +532,7 @@ pub(crate) fn verify_parser() -> bool {
     }
     let rejections = rejects(&image, 0, b'X')
         && rejects(&image, 4, 1)
-        && rejects_u16(&image, 16, 3)
+        && rejects_u16(&image, 16, 1)
         && rejects_u16(&image, 18, 3)
         && rejects_u64(&image, 24, 0x50_0000)
         && rejects_u32(&image, ELF_HEADER_SIZE + 4, PF_READ | PF_WRITE | PF_EXECUTE)
@@ -718,7 +783,42 @@ pub(crate) fn verify_load_plan() -> bool {
     {
         return false;
     }
-    verify_oversized_writable_plan_rejected()
+    verify_oversized_writable_plan_rejected() && verify_position_independent_plan()
+}
+
+#[inline(never)]
+fn verify_position_independent_plan() -> bool {
+    let mut image = fixture();
+    write_u16(&mut image, 16, ET_DYN);
+    write_u64(&mut image, 24, 0x100);
+    write_u64(&mut image, ELF_HEADER_SIZE + 16, 0);
+    write_u64(
+        &mut image,
+        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 16,
+        0x4000,
+    );
+    let relro_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
+    write_u64(&mut image, relro_header + 16, 0x5000);
+    write_u64(&mut image, relro_header + 24, 0x5000);
+    let Some(parsed) = parse(&image) else {
+        return false;
+    };
+    let Some(relocated) = plan_position_independent(&parsed, 0x60_0000) else {
+        return false;
+    };
+    parsed.kind == ImageKind::PositionIndependent
+        && parsed.program_headers == 0x40
+        && plan(&parsed).is_none()
+        && relocated.entry == 0x60_0100
+        && relocated.program_headers == 0x60_0040
+        && relocated.executable.virtual_address == 0x60_0000
+        && relocated.writable.virtual_address == 0x60_4000
+        && relocated
+            .relro
+            .is_some_and(|range| range.virtual_address == 0x60_5000)
+        && plan_position_independent(&parsed, 0).is_none()
+        && plan_position_independent(&parsed, 0x60_0001).is_none()
+        && plan_position_independent(&parsed, MAX_USER_ADDRESS).is_none()
 }
 
 #[inline(never)]
