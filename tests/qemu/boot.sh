@@ -783,6 +783,11 @@ if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux supplementary root group validated' "$output_file"; then
+    echo "Boot test failed: Linux supplementary root group was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux immutable resource limits validated' "$output_file"; then
     echo "Boot test failed: Linux immutable resource limits were not validated." >&2
     exit 1

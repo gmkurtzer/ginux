@@ -156,7 +156,12 @@ Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 do not select a native domain, add a capability, or authorize a kernel control
 operation. `getresuid` and `getresgid` copy real/effective/saved triples of
 zero. All three destinations are validated before any write, so an invalid
-third pointer cannot leave a partial result. The initial process namespace has
+third pointer cannot leave a partial result. `rax = 115` (`__NR_getgroups`)
+reports one immutable supplementary group, container-local GID 0. A zero-sized
+query returns the required count without accessing its pointer, a negative size
+returns `-EINVAL`, and a full four-byte destination is required before copying.
+`rax = 116` (`__NR_setgroups`) always returns `-EPERM`, including for an empty
+list, because this profile's container credentials are immutable. The initial process namespace has
 one process and one thread:
 `getpid` and `gettid` return 1, `getppid` returns 0, and `getpgrp`,
 `getpgid(0)`, and `getsid(0)` return 1. `getpgid` and `getsid` return `-ESRCH`
@@ -233,7 +238,7 @@ bounded read-only `mprotect`,
 `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
-credential queries, bounded `prctl` process names, the bounded process/session
+credential and supplementary-group queries, bounded `prctl` process names, the bounded process/session
 identity queries above,
 `set_tid_address`, bounded robust-list registration/query, `exit`, and
 `exit_group` calls. There is no thread creation, TID allocation,

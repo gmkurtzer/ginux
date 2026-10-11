@@ -72,6 +72,8 @@ const LINUX_GETEUID_SYSCALL: u64 = 107;
 const LINUX_GETEGID_SYSCALL: u64 = 108;
 const LINUX_GETPPID_SYSCALL: u64 = 110;
 const LINUX_GETPGRP_SYSCALL: u64 = 111;
+const LINUX_GETGROUPS_SYSCALL: u64 = 115;
+const LINUX_SETGROUPS_SYSCALL: u64 = 116;
 const LINUX_GETRESUID_SYSCALL: u64 = 118;
 const LINUX_GETRESGID_SYSCALL: u64 = 120;
 const LINUX_GETPGID_SYSCALL: u64 = 121;
@@ -1302,6 +1304,19 @@ extern "sysv64" fn linux_syscall_handler(
         | LINUX_GETGID_SYSCALL
         | LINUX_GETEUID_SYSCALL
         | LINUX_GETEGID_SYSCALL => 0,
+        LINUX_GETGROUPS_SYSCALL => {
+            if (first_argument as i32) < 0 {
+                return LINUX_EINVAL;
+            }
+            if first_argument == 0 {
+                return 1;
+            }
+            if !copy_to_linux_user(buffer, &0_u32.to_ne_bytes()) {
+                return LINUX_EFAULT;
+            }
+            1
+        }
+        LINUX_SETGROUPS_SYSCALL => LINUX_EPERM,
         LINUX_GETRESUID_SYSCALL | LINUX_GETRESGID_SYSCALL => {
             if !copy_linux_root_id_triple(first_argument, buffer, count) {
                 return LINUX_EFAULT;
