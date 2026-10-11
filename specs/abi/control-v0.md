@@ -272,9 +272,11 @@ can exit after exhaustion.
 Operation 16 is the v2 network-device call. It requires `READ` authority on
 network-device object 4. `RSI` is the command and `RDX` its argument. Command 0
 requires argument zero and returns the fixed discovery word
-`0x0000000105dc0001`: descriptor version 1 in bits 0-15, MTU 1500 in bits
-16-31, and one queue in bits 32-63. Unknown commands, nonzero reserved
-arguments, and denial return `UINT64_MAX - 2`. This is a
+`0x0000000105dc0002`: descriptor version 2 in bits 0-15, MTU 1500 in bits
+16-31, and one queue in bits 32-63. Read-authorized command 1 requires argument
+zero and returns the current link-state bit. Write-authorized command 2 accepts
+only zero or one and updates that bit. Unknown commands, invalid arguments, and
+denial return `UINT64_MAX - 2`. This is a
 device-authorization skeleton only; it exposes no packets, addresses, routes,
 DMA, interrupts, or mutable network configuration.
 Each charged entry first acquires a bounded in-flight operation reference on

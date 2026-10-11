@@ -578,6 +578,11 @@ if ! grep -q '^ginux: network device command validation enforced' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: network link state configured' "$output_file"; then
+    echo "Boot test failed: network link state was not configured and observed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: network device capability revoked on exit' "$output_file"; then
     echo "Boot test failed: network device authority survived service exit." >&2
     exit 1

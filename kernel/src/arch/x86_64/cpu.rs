@@ -114,6 +114,7 @@ static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
+static NETWORK_LINK_UP: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
@@ -863,17 +864,49 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         return u64::MAX - 2;
     };
-    if !domain::handle_permits(
-        caller_domain,
-        capability,
-        control_abi::NETWORK_DEVICE_OBJECT,
-        Rights::READ,
-    ) || frame.first_argument() != 0
-        || frame.second_argument() != 0
-    {
-        return u64::MAX - 2;
+    let command = frame.first_argument();
+    let argument = frame.second_argument();
+    match command {
+        control_abi::NETWORK_DEVICE_PROBE
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            control_abi::NETWORK_DEVICE_DESCRIPTOR_WORD
+        }
+        control_abi::NETWORK_DEVICE_QUERY_LINK
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            u64::from(NETWORK_LINK_UP.load(Ordering::Acquire))
+        }
+        control_abi::NETWORK_DEVICE_SET_LINK
+            if argument <= 1
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::WRITE,
+                ) =>
+        {
+            NETWORK_LINK_UP.store(argument != 0, Ordering::Release);
+            0
+        }
+        _ => u64::MAX - 2,
     }
-    control_abi::NETWORK_DEVICE_DESCRIPTOR_WORD
+}
+
+pub(crate) fn network_link_is_up() -> bool {
+    NETWORK_LINK_UP.load(Ordering::Acquire)
 }
 
 fn create_auxiliary_service(

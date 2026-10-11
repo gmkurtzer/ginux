@@ -67,6 +67,6 @@ without creating a partial domain, then gives one test service independent IPC r
 host-object read roots, revokes and reuses only the IPC parent, and requires the
 host-object root to remain valid without lending its provenance to IPC. The
 booted supervised storage service remains deliberately IPC-only. A separate
-stop-only network skeleton receives only read authority on boot object 4,
-executes one device probe from ring 3, and proves its handle no longer resolves
+stop-only network skeleton receives only read/write authority on boot object 4,
+probes and configures link state from ring 3, and proves neither right resolves
 after normal retirement.

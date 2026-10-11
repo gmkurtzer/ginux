@@ -25,7 +25,7 @@ manifest authorizes host-control object 1 with read/write/manage and console
 object 2 with write. Object 3 grants read/write access to the bounded bootstrap
 IPC channel. These parsed grants—not parallel hard-coded roots—seed the
 control-plane capability table before its authority insertion path is sealed.
-Object 4 grants read-only discovery of the bounded bootstrap network-device
+Object 4 grants read/write access to the bounded bootstrap network-device
 skeleton and can be delegated to an isolated native service.
 The bundle range in handoff v3 must exactly match the recorded size and digest;
 only those verified bytes are copied into the ring-3 executable mapping.
