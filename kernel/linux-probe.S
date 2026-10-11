@@ -924,6 +924,22 @@ ginux_linux_probe:
     cmp qword ptr [0x4020a0], 1
     jne failure
 
+    mov eax, 203
+    syscall
+    test rax, rax
+    jne failure
+    mov qword ptr [0x4020a0], 0
+    mov eax, 203
+    syscall
+    cmp rax, -22
+    jne failure
+    mov edx, 0x403200
+    mov eax, 203
+    syscall
+    cmp rax, -14
+    jne failure
+    mov qword ptr [0x4020a0], 1
+
     mov dword ptr [0x4020a8], 0x12345678
     mov edi, 0x4020a8
     mov esi, 0x403200

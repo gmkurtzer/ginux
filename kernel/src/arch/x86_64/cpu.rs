@@ -94,6 +94,7 @@ const LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL: u64 = 147;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
+const LINUX_SCHED_SETAFFINITY_SYSCALL: u64 = 203;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
@@ -1490,6 +1491,23 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_EFAULT;
             }
             0
+        }
+        LINUX_SCHED_SETAFFINITY_SYSCALL => {
+            if !matches!(first_argument, 0 | 1) {
+                return LINUX_ESRCH;
+            }
+            if buffer < size_of::<u64>() as u64 {
+                return LINUX_EINVAL;
+            }
+            let mut mask = [0_u8; size_of::<u64>()];
+            if !copy_from_linux_user(count, &mut mask) {
+                return LINUX_EFAULT;
+            }
+            if u64::from_ne_bytes(mask) == 1 {
+                0
+            } else {
+                LINUX_EINVAL
+            }
         }
         LINUX_SCHED_GETAFFINITY_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {

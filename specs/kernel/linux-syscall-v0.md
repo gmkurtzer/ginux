@@ -103,7 +103,10 @@ to the kernel, keeping Linux `-EPERM` observable in ring 3.
 `rax = 204` (`__NR_sched_getaffinity`) accepts PID 0 or 1, requires an
 eight-byte-or-larger caller mask, writes the one-bit CPU 0 mask, and returns 8.
 An unknown PID returns `-ESRCH`, an undersized mask returns `-EINVAL`, and an
-invalid output range returns `-EFAULT` without a partial write. `rax = 309`
+invalid output range returns `-EFAULT` without a partial write.
+`sched_setaffinity` accepts only an idempotent CPU-0 mask with the same PID and
+size rules; a different mask returns `-EINVAL`, and an invalid input returns
+`-EFAULT`. `rax = 309`
 (`__NR_getcpu`) reports CPU 0 and NUMA node 0 through independently optional
 four-byte pointers. Both destinations are validated before either is written;
 the obsolete cache pointer is ignored as on Linux. These results describe the
