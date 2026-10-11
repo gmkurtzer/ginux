@@ -502,8 +502,11 @@ flags, authenticated sibling TLS pointer, guarded stack top, and distinct
 aligned parent- and child-TID words in the main writable segment. Publication
 makes the complete child context ready before writing the allocated TID to both
 words. The parent observes the same TID as its return value, while the child
-later resumes after the syscall with `rax = 0`. The parent yields once; the
-child performs a matching `FUTEX_WAIT` on the parent-TID word, persists its
+later resumes after the syscall with `rax = 0`. On each of the two slot
+generations, the child calls `gettid()` and requires the result to equal its
+published child-TID word, then requires `FS:[0]` to equal its authenticated
+sibling TLS/TCB pointer. The parent yields once; the child performs a matching
+`FUTEX_WAIT` on the parent-TID word, persists its
 context, records that exact address, and restores the parent. Explicit
 `FUTEX_WAKE` makes the child ready. The parent then waits on the child-TID word,
 which selects the child and resumes its first wait with zero. Its authenticated

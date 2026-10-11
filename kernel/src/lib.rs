@@ -674,6 +674,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: sequential Linux clone slot reuse validated\r\n");
     serial_write("ginux: reused Linux child stack began scrubbed\r\n");
     serial_write("ginux: monotonic Linux clone TIDs validated\r\n");
+    serial_write("ginux: live Linux child TIDs matched published words\r\n");
+    serial_write("ginux: live Linux child FS self pointers validated\r\n");
     serial_write("ginux: Linux clone return values validated\r\n");
     serial_write("ginux: Linux clone child TID cleared on exit\r\n");
     serial_write("ginux: Linux clone parent TID preserved on child exit\r\n");

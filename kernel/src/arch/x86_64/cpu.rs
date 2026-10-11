@@ -354,6 +354,7 @@ static LINUX_PARENT_RESUMED: AtomicBool = AtomicBool::new(false);
 static LINUX_CLONE_DISPATCH_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FIRST_CHILD_TID: AtomicU32 = AtomicU32::new(0);
 static LINUX_CLONE_REUSE_VALIDATED: AtomicBool = AtomicBool::new(false);
+static LINUX_CHILD_GETTID_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_EXPLICIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_EXIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -2052,6 +2053,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     LINUX_CLONE_DISPATCH_COUNT.store(0, Ordering::SeqCst);
     LINUX_FIRST_CHILD_TID.store(0, Ordering::SeqCst);
     LINUX_CLONE_REUSE_VALIDATED.store(false, Ordering::SeqCst);
+    LINUX_CHILD_GETTID_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_EXPLICIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_EXIT_WAKE_COUNT.store(0, Ordering::SeqCst);
@@ -2310,6 +2312,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let clone_dispatch_count = LINUX_CLONE_DISPATCH_COUNT.swap(0, Ordering::SeqCst);
     let first_child_tid = LINUX_FIRST_CHILD_TID.swap(0, Ordering::SeqCst);
     let clone_reuse_validated = LINUX_CLONE_REUSE_VALIDATED.swap(false, Ordering::SeqCst);
+    let child_gettid_count = LINUX_CHILD_GETTID_COUNT.swap(0, Ordering::SeqCst);
     let futex_wait_block_count = LINUX_FUTEX_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let futex_explicit_wake_count = LINUX_FUTEX_EXPLICIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let futex_exit_wake_count = LINUX_FUTEX_EXIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
@@ -2319,6 +2322,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             && clone_dispatch_count == 2
             && first_child_tid != 0
             && clone_reuse_validated
+            && child_gettid_count == 2
             && futex_wait_block_count == 4
             && futex_explicit_wake_count == 2
             && futex_exit_wake_count == 2)
@@ -2330,6 +2334,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             clone_dispatch_count == 2,
             first_child_tid != 0,
             clone_reuse_validated,
+            child_gettid_count == 2,
             futex_wait_block_count == 4,
             futex_explicit_wake_count == 2,
             futex_exit_wake_count == 2,
@@ -2587,6 +2592,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 && clone_dispatch_count == 2
                 && first_child_tid != 0
                 && clone_reuse_validated
+                && child_gettid_count == 2
                 && futex_wait_block_count == 4
                 && futex_explicit_wake_count == 2
                 && futex_exit_wake_count == 2)
@@ -3082,7 +3088,15 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_CLONE_SYSCALL => linux_clone_thread(saved_registers, user_rip, user_rflags),
         LINUX_GETPID_SYSCALL => 1,
-        LINUX_GETTID_SYSCALL => current_linux_tid().map_or(LINUX_ESRCH, u64::from),
+        LINUX_GETTID_SYSCALL => {
+            let Some(tid) = current_linux_tid() else {
+                return LINUX_ESRCH;
+            };
+            if tid != 1 {
+                LINUX_CHILD_GETTID_COUNT.fetch_add(1, Ordering::SeqCst);
+            }
+            u64::from(tid)
+        }
         LINUX_GETPPID_SYSCALL => 0,
         LINUX_GETPGRP_SYSCALL => 1,
         LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => {

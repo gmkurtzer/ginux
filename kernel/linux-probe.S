@@ -3212,6 +3212,13 @@ resolution_valid:
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
 child_thread_probe:
+    mov eax, 186
+    syscall
+    cmp eax, dword ptr [r8]
+    jne failure
+    mov rax, qword ptr fs:[0]
+    cmp rax, r9
+    jne failure
     mov rdi, rdx
     xor esi, esi
     mov edx, dword ptr [rdi]

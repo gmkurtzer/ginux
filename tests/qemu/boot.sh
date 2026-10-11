@@ -793,6 +793,16 @@ if ! grep -q '^ginux: monotonic Linux clone TIDs validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: live Linux child TIDs matched published words' "$output_file"; then
+    echo "Boot test failed: live Linux child TIDs did not match their published words." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: live Linux child FS self pointers validated' "$output_file"; then
+    echo "Boot test failed: live Linux children did not observe their own FS self pointers." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux clone return values validated' "$output_file"; then
     echo "Boot test failed: Linux clone return values were not validated." >&2
     exit 1

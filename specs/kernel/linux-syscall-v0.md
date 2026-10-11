@@ -553,8 +553,10 @@ For the interpreted profile, syscall 56 accepts only the exact bounded pthread
 flag set, fixed sibling TLS pointer, guarded stack top, and distinct aligned
 parent- and child-TID words in the authenticated writable mapping. It publishes
 the next monotonic TID to both words and returns that same value to the parent;
-the child context retains a zero return. Yield selects the child, whose matching
-`FUTEX_WAIT` saves it and restores the parent. An explicit wake readies the
+the child context retains a zero return. Each selected child verifies that a
+live `gettid()` returns its published child-TID value and that `FS:[0]` names
+its own sibling TLS/TCB before continuing. Yield selects the child, whose
+matching `FUTEX_WAIT` saves it and restores the parent. An explicit wake readies the
 child; the parent's matching wait then selects it and resumes the child wait
 with zero. Child `exit(42)` clears only the child-TID word, wakes the matching
 parent, preserves the parent-TID word, retires and scrubs only the child slot,

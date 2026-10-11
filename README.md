@@ -149,8 +149,10 @@ The call accepts only the authenticated sibling TLS pointer, guarded stack top,
 and distinct aligned parent- and child-TID words in the main writable mapping.
 Both words receive the monotonically allocated child TID before either thread
 returns to ring 3; the parent receives that same value, while the child resumes
-after the syscall with `rax = 0`. The parent first yields to the child, which
-blocks in `FUTEX_WAIT` on the parent-TID word and restores the parent. An
+after the syscall with `rax = 0`. Each child immediately requires its live
+`gettid()` result to match the published child-TID word and requires `FS:[0]`
+to contain its own sibling TLS/TCB pointer. The parent first yields to the
+child, which blocks in `FUTEX_WAIT` on the parent-TID word and restores the parent. An
 explicit `FUTEX_WAKE` makes the child ready. The parent then waits on the
 child-TID word, selecting the child again; its first wait resumes with zero.
 The child calls `exit(42)`, clears only its child-TID word, wakes the matching
