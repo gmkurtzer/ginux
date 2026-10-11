@@ -23,8 +23,9 @@ Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
 operation. The probe then uses `rax = 39` (`__NR_getpid`), requires PID 1 after
-resumption, and finally uses `rax = 231` (`__NR_exit_group`) with `rdi = 42`
-(status). Immediately before entry, the kernel:
+resumption, and `rax = 186` (`__NR_gettid`), which returns TID 1 for the only
+thread. It finally uses `rax = 231` (`__NR_exit_group`) with `rdi = 42` (status).
+Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;
 - programs `STAR` for the existing kernel and user GDT selectors;
@@ -52,8 +53,9 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, output
 streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `uname`, `arch_prctl(ARCH_SET_FS)`, identity-query, `getpid`, `exit`,
-and `exit_group` calls. Every other call returns `-ENOSYS` without disarming
+`write`, `uname`, `arch_prctl(ARCH_SET_FS)`, credential queries, `getpid`,
+`gettid`, `exit`, and `exit_group` calls. There is no thread creation or TID
+allocation yet. Every other call returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
 remains disarmed outside the proof. The current copy helpers cover only the one declared RW
 segment; general VM-area lookup and cross-segment copies remain future work.

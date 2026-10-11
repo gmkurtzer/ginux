@@ -538,6 +538,11 @@ if ! grep -q '^ginux: Linux errno recovery verified in ring 3' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux single-thread process identity verified' "$output_file"; then
+    echo "Boot test failed: Linux single-thread process identity was not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1
