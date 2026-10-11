@@ -583,6 +583,11 @@ if ! grep -q '^ginux: network link state configured' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: network IPv4 configuration retained' "$output_file"; then
+    echo "Boot test failed: network IPv4 configuration was not retained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: network device capability revoked on exit' "$output_file"; then
     echo "Boot test failed: network device authority survived service exit." >&2
     exit 1
