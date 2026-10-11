@@ -69,6 +69,15 @@ The same reusable materializer revalidates the plan before mutation, clears the
 whole owned page, copies every `.tdata` template, preserves zero-filled tails
 and padding, and writes the self-referential TCB. A substituted plan is rejected
 without changing the destination page.
+The interpreted address space also allocates a second independently owned
+RW/NX TLS page from that same authenticated plan. Its identical static blocks
+have a distinct self-referential TCB and thread pointer. The active syscall-copy
+contract admits only the initial thread's live TLS extent and rejects the
+sibling extent even while both mappings exist. Teardown verifies the sibling
+page is scrubbed before releasing both frame leases and restoring the allocator
+count. This proves reusable per-thread allocation and cleanup prerequisites; it
+does not yet create or schedule a second Linux thread, and code in one process
+continues to share that process's address space.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

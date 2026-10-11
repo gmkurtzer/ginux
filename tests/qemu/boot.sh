@@ -663,6 +663,21 @@ if ! grep -q '^ginux: bounded Linux TLS syscall copies validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: independent Linux sibling TLS materialized' "$output_file"; then
+    echo "Boot test failed: an independent sibling Linux TLS instance was not materialized." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: non-current Linux TLS syscall access denied' "$output_file"; then
+    echo "Boot test failed: non-current Linux TLS was admitted to syscall copies." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: sibling Linux TLS frame scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the sibling Linux TLS frame was not scrubbed and released." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux TLS frame scrubbed and released' "$output_file"; then
     echo "Boot test failed: the Linux TLS frame was not scrubbed and released." >&2
     exit 1

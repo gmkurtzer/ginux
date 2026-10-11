@@ -406,6 +406,20 @@ template, and writes the TCB self pointer; on a mismatched plan it leaves the
 destination unchanged. Initial execution uses this helper rather than raw
 module-specific copies.
 
+The interpreted mapping proof allocates a second frame and consumes the same
+plan and materializer at the next nonoverlapping virtual page. Both mappings
+are user-readable, user-writable, and non-executable; their static blocks are
+identical, while each TCB self pointer names its own thread pointer. Only the
+initial instance's live extent is installed in the active syscall-copy state.
+The kernel therefore admits the complete current extent, rejects its adjacent
+boundaries, and rejects the complete sibling extent while both pages remain
+mapped. After returning to the kernel address space it clears every owned
+frame, explicitly verifies the sibling TLS frame contains only zeroes, releases
+the leases, and requires the kernel live-frame count to return to its starting
+value. This is a bounded allocation, access-state, and reclamation proof for a
+future thread. It does not provide a second scheduled Linux context, a TID,
+`clone`, or direct memory isolation between threads of the same process.
+
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
 it may describe at most 23 entries. The interpreter derives the runtime

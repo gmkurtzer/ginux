@@ -1005,6 +1005,7 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) initial_fs_base: usize,
     pub(crate) tls: usize,
     pub(crate) tls_size: usize,
+    pub(crate) sibling_tls: usize,
     pub(crate) code: usize,
     pub(crate) code_size: usize,
     pub(crate) loader_code: usize,
@@ -1046,9 +1047,11 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         return LinuxElfResult::FAILED;
     };
     let tls_contract_valid = if execution.tls_size == 0 {
-        execution.tls == 0 && execution.initial_fs_base == 0
+        execution.tls == 0 && execution.sibling_tls == 0 && execution.initial_fs_base == 0
     } else {
         execution.tls != 0
+            && execution.sibling_tls != 0
+            && execution.sibling_tls != execution.tls
             && execution.initial_fs_base >= execution.tls
             && execution
                 .tls
@@ -1060,6 +1063,16 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                             .checked_add(16)
                             .is_some_and(|tcb_end| tcb_end <= end)
                 })
+            && execution
+                .sibling_tls
+                .checked_add(execution.tls_size)
+                .is_some_and(|end| end <= 1 << 47)
+            && !linux_ranges_overlap(
+                execution.tls as u64,
+                execution.tls_size,
+                execution.sibling_tls as u64,
+                execution.tls_size,
+            )
     };
     if !tls_contract_valid {
         return LinuxElfResult::FAILED;
@@ -1213,6 +1226,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
     let tls_copy_bounds_valid = execution.tls_size == 0
         || linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
+            && !linux_writable_user_range_contains(
+                execution.sibling_tls as u64,
+                execution.tls_size,
+            )
             && execution
                 .tls
                 .checked_sub(1)

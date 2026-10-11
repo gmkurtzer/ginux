@@ -645,6 +645,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: toolchain-driven Linux auxiliary TLS relocation applied\r\n");
     serial_write("ginux: linker-resolved Linux TLS symbols executed\r\n");
     serial_write("ginux: bounded Linux TLS syscall copies validated\r\n");
+    serial_write("ginux: independent Linux sibling TLS materialized\r\n");
+    serial_write("ginux: non-current Linux TLS syscall access denied\r\n");
+    serial_write("ginux: sibling Linux TLS frame scrubbed and released\r\n");
     serial_write("ginux: Linux TLS frame scrubbed and released\r\n");
     serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
     serial_write("ginux: toolchain-linked Linux interpreter executed\r\n");

@@ -514,6 +514,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     initial_fs_base: 0,
                     tls: 0,
                     tls_size: 0,
+                    sibling_tls: 0,
                     code: first.virtual_address as usize,
                     code_size: first.memory_size,
                     loader_code: 0,
@@ -780,7 +781,11 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let tls_virtual_page = mmap_tail_virtual_page
         .checked_add(PAGE_SIZE as u64)
         .unwrap_or(0);
+    let sibling_tls_virtual_page = tls_virtual_page.checked_add(PAGE_SIZE as u64).unwrap_or(0);
     let tls_base = tls_virtual_page
+        .checked_add(LINUX_TLS_THREAD_POINTER_OFFSET as u64)
+        .unwrap_or(0);
+    let sibling_tls_base = sibling_tls_virtual_page
         .checked_add(LINUX_TLS_THREAD_POINTER_OFFSET as u64)
         .unwrap_or(0);
     let indexes = |address: u64| {
@@ -819,6 +824,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let mmap_indexes = indexes(mmap_virtual_page);
     let mmap_tail_indexes = indexes(mmap_tail_virtual_page);
     let tls_indexes = indexes(tls_virtual_page);
+    let sibling_tls_indexes = indexes(sibling_tls_virtual_page);
     let Some(protected_end) = protected_start.checked_add(protected_size as u64) else {
         return false;
     };
@@ -850,6 +856,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     mmap_virtual_page,
                     mmap_tail_virtual_page,
                     tls_virtual_page,
+                    sibling_tls_virtual_page,
                 ]
                 .contains(&page)
                 || (0..dependency).any(|prior| {
@@ -917,12 +924,16 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || mmap_virtual_page == 0
         || mmap_tail_virtual_page == 0
         || tls_virtual_page == 0
+        || sibling_tls_virtual_page == 0
         || tls_base == 0
+        || sibling_tls_base == 0
         || heap_indexes[..3] != main_indexes[..3]
         || stack_indexes[..3] != main_indexes[..3]
         || mmap_indexes[..3] != main_indexes[..3]
         || mmap_tail_indexes[..3] != main_indexes[..3]
         || tls_indexes[..3] != main_indexes[..3]
+        || sibling_tls_indexes[..3] != main_indexes[..3]
+        || sibling_tls_indexes[3] == tls_indexes[3]
         || overlaps_protected(main_ro)
         || overlaps_protected(main_rx)
         || overlaps_protected(main_rw)
@@ -934,6 +945,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             mmap_virtual_page,
             mmap_tail_virtual_page,
             tls_virtual_page,
+            sibling_tls_virtual_page,
         ]
         .into_iter()
         .any(|page| page < protected_end && protected_start < page.saturating_add(PAGE_SIZE as u64))
@@ -968,16 +980,22 @@ pub(crate) fn verify_interpreted_elf_mapping(
             .is_multiple_of(dependency_tls_alignment)
         || !(tls_virtual_page as usize + auxiliary_tls_start_offset)
             .is_multiple_of(auxiliary_tls_alignment)
+        || !(sibling_tls_virtual_page as usize + main_tls_start_offset)
+            .is_multiple_of(main_tls_alignment)
+        || !(sibling_tls_virtual_page as usize + dependency_tls_start_offset)
+            .is_multiple_of(dependency_tls_alignment)
+        || !(sibling_tls_virtual_page as usize + auxiliary_tls_start_offset)
+            .is_multiple_of(auxiliary_tls_alignment)
         || LINUX_TLS_THREAD_POINTER_OFFSET + LINUX_TLS_TCB_SIZE > PAGE_SIZE
     {
         return false;
     }
 
-    let Some(frames) = memory::allocate_frames::<14>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<15>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, interpreter_page, interpreter_tail_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page, tls_page] =
+    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, interpreter_page, interpreter_tail_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page, tls_page, sibling_tls_page] =
         addresses;
     let kernel_root_physical = current_root();
     let mut main_frames = [None; 7];
@@ -1070,6 +1088,17 @@ pub(crate) fn verify_interpreted_elf_mapping(
             ) {
                 return None;
             }
+            let sibling_tls_bytes =
+                &mut *(mapped_frame::<u8>(sibling_tls_page)? as *mut [u8; PAGE_SIZE]);
+            if !crate::linux_elf::materialize_static_tls_page(
+                tls_layout,
+                main_tls,
+                [dependency_tls, auxiliary_tls],
+                sibling_tls_base,
+                sibling_tls_bytes,
+            ) {
+                return None;
+            }
             let flags = |segment: crate::linux_elf::PlannedSegment<'_>| {
                 PRESENT
                     | USER
@@ -1109,6 +1138,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             main_entries
                 .add(tls_indexes[3])
                 .write(tls_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
+            main_entries
+                .add(sibling_tls_indexes[3])
+                .write(sibling_tls_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
             let stack_offset = PAGE_SIZE - 48 * size_of::<u64>();
@@ -1181,6 +1213,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 && main_entries.add(tls_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
+                && main_entries.add(sibling_tls_indexes[3]).read()
+                    & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == sibling_tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
                 && stack_words.add(6).read() == startup.program_headers
                 && stack_words.add(10).read() == u64::from(startup.program_header_count)
                 && stack_words.add(14).read() == startup.interpreter_base
@@ -1235,6 +1270,17 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         .all(|byte| *byte == 0)
                         && (tls_base as *const u64).read_volatile() == tls_base
                         && ((tls_base + size_of::<u64>() as u64) as *const u64).read_volatile() == 0
+                        && core::slice::from_raw_parts(
+                            (sibling_tls_virtual_page as usize + tls_start_offset) as *const u8,
+                            tls_extent_size - LINUX_TLS_TCB_SIZE,
+                        ) == core::slice::from_raw_parts(
+                            (tls_virtual_page as usize + tls_start_offset) as *const u8,
+                            tls_extent_size - LINUX_TLS_TCB_SIZE,
+                        )
+                        && (sibling_tls_base as *const u64).read_volatile() == sibling_tls_base
+                        && ((sibling_tls_base + size_of::<u64>() as u64) as *const u64)
+                            .read_volatile()
+                            == 0
                 });
             let file_mapping = |segment: crate::linux_elf::PlannedSegment<'_>, page| {
                 Some(cpu::LinuxFileMapping {
@@ -1266,6 +1312,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     initial_fs_base: tls_base as usize,
                     tls: tls_virtual_page as usize + tls_start_offset,
                     tls_size: tls_extent_size,
+                    sibling_tls: sibling_tls_virtual_page as usize + tls_start_offset,
                     code: main_rx.virtual_address as usize,
                     code_size: main_rx.memory_size,
                     loader_code: interpreter_rx.virtual_address as usize,
@@ -1342,6 +1389,20 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         .iter()
                         .all(|byte| *byte == 0)
                         && (tls_base as *const u64).read_volatile() == tls_base
+                });
+            let sibling_tls_runtime_valid = executed
+                && main_entries.add(sibling_tls_indexes[3]).read()
+                    & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == sibling_tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
+                && cpu::with_supervisor_user_access(|| {
+                    core::slice::from_raw_parts(
+                        (sibling_tls_virtual_page as usize + tls_start_offset) as *const u8,
+                        tls_extent_size - LINUX_TLS_TCB_SIZE,
+                    ) == core::slice::from_raw_parts(
+                        (tls_virtual_page as usize + tls_start_offset) as *const u8,
+                        tls_extent_size - LINUX_TLS_TCB_SIZE,
+                    ) && (sibling_tls_base as *const u64).read_volatile() == sibling_tls_base
+                        && sibling_tls_base != tls_base
                 });
             let main_frame_addresses = execution_result
                 .main_frames
@@ -1529,6 +1590,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             if !tls_runtime_valid {
                 crate::serial_write_bytes(b"\r\nginux: initial Linux TLS runtime invalid");
             }
+            if !sibling_tls_runtime_valid {
+                crate::serial_write_bytes(b"\r\nginux: sibling Linux TLS runtime invalid");
+            }
             if !main_permissions_valid {
                 crate::serial_write_bytes(b"\r\nginux: userspace main mapping invalid");
             }
@@ -1567,6 +1631,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     && executed
                     && mapping_removed
                     && tls_runtime_valid
+                    && sibling_tls_runtime_valid
                     && main_permissions_valid
                     && main_image_valid
                     && dependency_permissions_valid
@@ -1582,6 +1647,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let cleared = frames
         .iter()
         .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
+    let sibling_tls_scrubbed = cleared && unsafe { frame_is_zero(sibling_tls_page) };
     let dependency_cleared = dependency_frames
         .iter()
         .flatten()
@@ -1591,7 +1657,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
         .iter()
         .flatten()
         .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
-    let frames_released = cleared && memory::release_frames(memory::FrameOwner::KERNEL, frames);
+    let frames_released =
+        sibling_tls_scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, frames);
     let mut dependency_frames_released = dependency_cleared;
     if dependency_cleared {
         for frame in dependency_frames.into_iter().flatten().flatten() {
@@ -3252,4 +3319,9 @@ unsafe fn zero_frame(frame: u64) -> Option<()> {
         entries.add(index).write(0);
     }
     Some(())
+}
+
+unsafe fn frame_is_zero(frame: u64) -> bool {
+    mapped_frame::<u64>(frame)
+        .is_some_and(|entries| (0..ENTRY_COUNT).all(|index| entries.add(index).read() == 0))
 }
