@@ -7,6 +7,7 @@ const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
 const CONTROL_CALL_BUDGET: u16 = 11;
 const SERVICE_CALL_BUDGET: u16 = 3;
+const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_MANAGER: MaybeUninit<Manager> = MaybeUninit::uninit();
@@ -48,6 +49,8 @@ struct Domain {
     boot_roots: [Option<Handle>; MAX_BOOT_GRANTS],
     boot_root_count: usize,
     remaining_calls: u16,
+    active_threads: u16,
+    thread_limit: u16,
 }
 
 pub(crate) struct Manager {
@@ -60,6 +63,7 @@ pub(crate) struct Manager {
     pending_service_fault: Option<DomainId>,
     last_delivered_service_fault: Option<DomainId>,
     total_calls: u16,
+    total_thread_attaches: u16,
 }
 
 impl Manager {
@@ -74,6 +78,7 @@ impl Manager {
             pending_service_fault: None,
             last_delivered_service_fault: None,
             total_calls: 0,
+            total_thread_attaches: 0,
         }
     }
 
@@ -103,6 +108,8 @@ impl Manager {
             boot_roots,
             boot_root_count: grants.len(),
             remaining_calls: CONTROL_CALL_BUDGET,
+            active_threads: 0,
+            thread_limit: BOOTSTRAP_THREAD_LIMIT,
         });
         self.control_plane_created = true;
         self.control_plane_id = Some(id);
@@ -146,6 +153,8 @@ impl Manager {
             boot_roots,
             boot_root_count: 1,
             remaining_calls: SERVICE_CALL_BUDGET,
+            active_threads: 0,
+            thread_limit: BOOTSTRAP_THREAD_LIMIT,
         });
         self.service_id = Some(id);
         Some(id)
@@ -295,6 +304,66 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     control.remaining_calls == 0 && manager.total_calls == 15
 }
 
+pub(crate) fn attach_thread(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    let Some(total) = manager.total_thread_attaches.checked_add(1) else {
+        return false;
+    };
+    let Some(domain) = manager
+        .domains
+        .get_mut(usize::from(id.slot))
+        .and_then(Option::as_mut)
+        .filter(|domain| domain.id == id)
+    else {
+        return false;
+    };
+    if domain.active_threads >= domain.thread_limit {
+        return false;
+    }
+    domain.active_threads += 1;
+    manager.total_thread_attaches = total;
+    true
+}
+
+pub(crate) fn detach_thread(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    let Some(domain) = manager
+        .domains
+        .get_mut(usize::from(id.slot))
+        .and_then(Option::as_mut)
+        .filter(|domain| domain.id == id)
+    else {
+        return false;
+    };
+    let Some(active) = domain.active_threads.checked_sub(1) else {
+        return false;
+    };
+    domain.active_threads = active;
+    true
+}
+
+pub(crate) fn thread_budget_proof_complete() -> bool {
+    let Some(manager) = global_manager() else {
+        return false;
+    };
+    let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
+        return false;
+    };
+    control.active_threads == 0
+        && control.thread_limit == BOOTSTRAP_THREAD_LIMIT
+        && manager.total_thread_attaches == 3
+}
+
 pub(crate) fn is_service_domain(domain_raw: u64) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
@@ -314,7 +383,7 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
     if manager.service_id != Some(id)
         || manager
             .domain(id)
-            .is_none_or(|domain| domain.role != Role::Service)
+            .is_none_or(|domain| domain.role != Role::Service || domain.active_threads != 0)
     {
         return false;
     }

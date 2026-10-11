@@ -42,3 +42,10 @@ current generation-tagged domain before dispatch, so threads cannot gain calls
 by yielding or creating another thread. A restarted service receives the new
 domain generation's independent budget. Exit is deliberately uncharged and
 remains available after exhaustion.
+
+The bootstrap domain metadata also enforces a one-thread limit. Scheduler
+creation must first reserve a thread against the exact domain generation, and
+normal exit or contained fault releases it. Service retirement is rejected
+while any thread remains attached. The QEMU proof rejects a second control
+thread and accounts for the control, original service, and replacement service
+attachments independently.

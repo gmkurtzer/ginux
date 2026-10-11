@@ -25,6 +25,11 @@ single-running-thread state, exit selection, idle behavior, slot reuse, domain
 ownership, stale-ID rejection, invalid-context rejection, and preservation of a
 modified register context across another thread's run and exit.
 
+Scheduler capacity does not grant permission to create a thread. Runtime
+creation first reserves a slot from the generation-checked owning domain; exit
+and fault paths release that reservation before a service domain may be
+retired. The current bootstrap policy permits one attached thread per domain.
+
 The measured ring-3 proof creates one control-plane context and one initial
 IPC-only service-domain context. Each owns a distinct page-table root, executable code frame, and writable,
 non-executable stack preceded by an absent guard page. `INT 0x80` saves the

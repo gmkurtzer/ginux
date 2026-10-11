@@ -1,6 +1,8 @@
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::domain;
+
 const MAX_THREADS: usize = 8;
 
 static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -379,10 +381,23 @@ pub(crate) fn initialize_runtime(
         r9: 3,
         ..second
     };
-    if scheduler.create(first_domain, first).is_none()
-        || scheduler.create(second_domain, second).is_none()
+    if !domain::attach_thread(first_domain) {
+        return false;
+    }
+    if scheduler.create(first_domain, first).is_none() {
+        let _ = domain::detach_thread(first_domain);
+        return false;
+    }
+    if !domain::attach_thread(second_domain) {
+        let _ = domain::detach_thread(first_domain);
+        return false;
+    }
+    if scheduler.create(second_domain, second).is_none()
+        || domain::attach_thread(first_domain)
         || scheduler.schedule_next().map(|next| next.context) != Some(first)
     {
+        let _ = domain::detach_thread(second_domain);
+        let _ = domain::detach_thread(first_domain);
         return false;
     }
 
@@ -416,7 +431,11 @@ pub(crate) fn queue_service_restart(domain: u64, ipc_handle: u64) -> bool {
         r8: ipc_handle,
         ..runtime.service_restart_context
     };
+    if !domain::attach_thread(domain) {
+        return false;
+    }
     if runtime.scheduler.create(domain, context).is_none() {
+        let _ = domain::detach_thread(domain);
         return false;
     }
     runtime.restarts = 1;

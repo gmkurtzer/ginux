@@ -10,7 +10,8 @@ capability is IPC read/write. It receives the request, sends reply value 2, and
 then executes the measured expected invalid opcode.
 
 The CPL3 exception path removes only the service context, switches back to the
-client's CR3, retires the faulted service domain and capability table, and
+client's CR3, releases the service's domain thread reservation, retires the
+faulted service domain and capability table, and
 restores the client's saved register frame. The client must receive reply 2 and
 exit normally. Completion additionally requires an empty IPC queue, rejection
 of the stale service domain/handle pair, one contained service fault, and no
