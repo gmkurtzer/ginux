@@ -46,6 +46,15 @@ cd80
 7402
 0f0b
 
+# reject a buffered read spanning the code page into its absent guard page
+48befc0f000080000000
+ba08000000
+b809000000
+cd80
+83f8fd
+7402
+0f0b
+
 # mov rdi, rcx; denied host read with console handle
 4889cf
 b801000000

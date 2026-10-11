@@ -29,7 +29,9 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
 be silently changed within version 1; incompatible changes require a new
-version and an overlap period when practical.
+version and an overlap period when practical. The scalar discovery word and
+structured descriptor are encoded from the same kernel constants so their
+version, feature bitmap, and bounded-console limit cannot drift independently.
 
 Operation 1 is a ping requiring read authority on host-control object 1. It
 returns `0x4758` when authorized and `UINT64_MAX - 1` when denied. Operation 2
@@ -73,7 +75,9 @@ present/user bits at every page-table level for every covered byte. Large-page
 aliases are rejected. With SMAP temporarily opened around only the copy, the
 kernel stages the complete input in a fixed kernel buffer, validates printable
 UTF-8, and emits it only after every check succeeds. It returns the byte count
-or `UINT64_MAX - 2`; invalid ranges produce no partial console output.
+or `UINT64_MAX - 2`; invalid ranges produce no partial console output. The
+ring-3 proof rejects both an unmapped null range and a range beginning in the
+code page but crossing into its absent guard page.
 Operation 10 writes a 16-byte little-endian ABI descriptor to the user virtual
 address in `RSI`; `RDX` must equal 16. The descriptor contains a `u32` byte
 size, `u16` ABI version, `u16` feature bitmap, `u32` maximum buffered-console

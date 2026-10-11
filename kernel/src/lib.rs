@@ -3,6 +3,7 @@
 mod address_space;
 mod arch;
 mod capability;
+mod control_abi;
 mod crypto;
 mod domain;
 mod executable;

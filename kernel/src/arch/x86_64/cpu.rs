@@ -10,7 +10,7 @@ use super::timer;
 use crate::{
     address_space,
     capability::Rights,
-    domain, ipc, memory, scheduler,
+    control_abi, domain, ipc, memory, scheduler,
     scheduler::{RuntimeAction, UserFaultFrame, UserTrapFrame},
     serial_write, serial_write_u64,
 };
@@ -21,7 +21,6 @@ const TSS_SELECTOR: u16 = 0x18;
 pub(crate) const USER_DATA_SELECTOR: u16 = 0x2b;
 pub(crate) const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
-const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_07ff;
 const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
@@ -694,7 +693,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         return CALL_BUDGET_EXHAUSTED;
     }
     match number {
-        0 => CONTROL_ABI_V1_FEATURES,
+        0 => control_abi::DISCOVERY_WORD,
         1 => {
             if domain::handle_permits(caller_domain, capability, 1, Rights::READ) {
                 SYSCALL_STATE.fetch_or(2, Ordering::SeqCst);
@@ -821,10 +820,10 @@ fn console_write_buffer(domain_id: u64, capability: u64, frame: *const UserTrapF
     let Ok(length) = usize::try_from(frame.second_argument()) else {
         return u64::MAX - 2;
     };
-    if !(1..=64).contains(&length) {
+    if !(1..=control_abi::MAX_BUFFERED_CONSOLE_BYTES as usize).contains(&length) {
         return u64::MAX - 2;
     }
-    let mut bytes = [0_u8; 64];
+    let mut bytes = [0_u8; control_abi::MAX_BUFFERED_CONSOLE_BYTES as usize];
     if !address_space::copy_from_current_user(frame.first_argument(), &mut bytes[..length])
         || !bytes[..length]
             .iter()
@@ -841,17 +840,17 @@ fn console_write_buffer(domain_id: u64, capability: u64, frame: *const UserTrapF
 }
 
 fn write_abi_descriptor(frame: *const UserTrapFrame) -> u64 {
-    const DESCRIPTOR: [u8; 16] = [16, 0, 0, 0, 1, 0, 0xff, 0x07, 64, 0, 0, 0, 0, 0, 0, 0];
+    let descriptor = control_abi::descriptor();
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         return u64::MAX - 2;
     };
-    if frame.second_argument() != DESCRIPTOR.len() as u64
-        || !address_space::copy_to_current_user(frame.first_argument(), &DESCRIPTOR)
+    if frame.second_argument() != descriptor.len() as u64
+        || !address_space::copy_to_current_user(frame.first_argument(), &descriptor)
     {
         return u64::MAX - 2;
     }
     SYSCALL_STATE.fetch_or(16, Ordering::SeqCst);
-    DESCRIPTOR.len() as u64
+    descriptor.len() as u64
 }
 
 fn runtime_result(frame: *mut UserTrapFrame) -> u64 {

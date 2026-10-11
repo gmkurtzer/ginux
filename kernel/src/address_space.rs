@@ -17,7 +17,7 @@ const USER: u64 = 1 << 2;
 const LARGE_PAGE: u64 = 1 << 7;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const USER_TEST_ADDRESS: usize = 1usize << 39;
-const EXPECTED_FAULT_OFFSET: usize = 486;
+const EXPECTED_FAULT_OFFSET: usize = 515;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 
