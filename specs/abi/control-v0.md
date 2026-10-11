@@ -23,8 +23,8 @@ console handle, `R8` contains the IPC handle, and `R9` identifies the proof
 context. The QEMU payload first presents the console write-only handle
 and requires denial. It then presents the manifest-derived host-control handle
 and requires success. The kernel accepts the boot only after observing denial,
-authorization, rejection of an IPC call using the wrong object, two FIFO
-messages, two resumed yields, and two explicit exits.
+authorization, rejection of an IPC call using the wrong object, a FIFO message,
+resumption after its peer's contained fault, and explicit survivor exit.
 
 Handles encode a private table slot and generation and are meaningful only in
 the calling domain. Stale generations, out-of-range slots, and nonzero reserved

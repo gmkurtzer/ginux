@@ -76,6 +76,62 @@ pub(crate) struct UserTrapFrame {
     ss: u64,
 }
 
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct UserFaultFrame {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    r11: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rbp: u64,
+    rdi: u64,
+    rsi: u64,
+    rdx: u64,
+    rcx: u64,
+    rbx: u64,
+    rax: u64,
+    vector: u64,
+    error: u64,
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+    rsp: u64,
+    ss: u64,
+}
+
+impl UserFaultFrame {
+    fn selectors_match(&self, code_selector: u16, data_selector: u16) -> bool {
+        self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
+    }
+
+    fn restore(&mut self, context: UserContext, code_selector: u16, data_selector: u16) {
+        self.r15 = context.r15;
+        self.r14 = context.r14;
+        self.r13 = context.r13;
+        self.r12 = context.r12;
+        self.r11 = context.r11;
+        self.r10 = context.r10;
+        self.r9 = context.r9;
+        self.r8 = context.r8;
+        self.rbp = context.rbp;
+        self.rdi = context.rdi;
+        self.rsi = context.rsi;
+        self.rdx = context.rdx;
+        self.rcx = context.rcx;
+        self.rbx = context.rbx;
+        self.rax = context.rax;
+        self.rip = context.rip;
+        self.cs = u64::from(code_selector);
+        self.rflags = context.rflags;
+        self.rsp = context.rsp;
+        self.ss = u64::from(data_selector);
+    }
+}
+
 impl UserTrapFrame {
     pub(crate) fn first_argument(&self) -> u64 {
         self.rsi
@@ -164,6 +220,9 @@ struct Runtime {
     exits: u8,
     syscalls: u16,
     address_space_switches: u8,
+    faults: u8,
+    expected_fault_instruction: u64,
+    expected_fault_observed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -280,6 +339,7 @@ pub(crate) fn initialize_runtime(
     entry: usize,
     stacks: [usize; 2],
     handles: [u64; 3],
+    expected_fault_instruction: usize,
 ) -> bool {
     let [first_address_space_root, second_address_space_root] = address_space_roots;
     let [first_stack, second_stack] = stacks;
@@ -324,10 +384,61 @@ pub(crate) fn initialize_runtime(
             exits: 0,
             syscalls: 0,
             address_space_switches: 0,
+            faults: 0,
+            expected_fault_instruction: expected_fault_instruction as u64,
+            expected_fault_observed: false,
         }));
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
     true
+}
+
+pub(crate) fn fault_runtime(
+    frame: &mut UserFaultFrame,
+    code_selector: u16,
+    data_selector: u16,
+) -> RuntimeAction {
+    if !frame.selectors_match(code_selector, data_selector) {
+        return RuntimeAction::Invalid;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(current) = runtime.scheduler.current else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(current_root) = runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.address_space_root)
+    else {
+        return RuntimeAction::Invalid;
+    };
+    let expected = frame.vector == 6
+        && frame.error == 0
+        && frame.rip == runtime.expected_fault_instruction
+        && frame.r9 == 2;
+    let next = runtime.scheduler.exit_current(current);
+    let Some(faults) = runtime.faults.checked_add(1) else {
+        return RuntimeAction::Invalid;
+    };
+    runtime.faults = faults;
+    runtime.expected_fault_observed |= expected;
+    if let Some(next) = next {
+        if next.context.address_space_root != current_root {
+            let Some(switches) = runtime.address_space_switches.checked_add(1) else {
+                return RuntimeAction::Invalid;
+            };
+            runtime.address_space_switches = switches;
+        }
+        frame.restore(next.context, code_selector, data_selector);
+        RuntimeAction::Resume {
+            result: next.context.rax,
+            address_space_root: next.context.address_space_root,
+        }
+    } else {
+        RuntimeAction::Complete
+    }
 }
 
 pub(crate) fn charge_runtime_call() -> bool {
@@ -442,10 +553,12 @@ pub(crate) fn verify_runtime_complete() -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;
     };
-    runtime.yields == 2
-        && runtime.exits == 2
-        && runtime.syscalls == 14
-        && runtime.address_space_switches == 3
+    runtime.yields == 1
+        && runtime.exits == 1
+        && runtime.faults == 1
+        && runtime.expected_fault_observed
+        && runtime.syscalls == 10
+        && runtime.address_space_switches == 2
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)
 }

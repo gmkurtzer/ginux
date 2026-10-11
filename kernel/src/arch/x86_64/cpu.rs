@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use crate::{
     capability::Rights,
     domain, ipc, scheduler,
-    scheduler::{RuntimeAction, UserTrapFrame},
+    scheduler::{RuntimeAction, UserFaultFrame, UserTrapFrame},
     serial_write, serial_write_u64,
 };
 
@@ -203,6 +203,8 @@ ginux_fatal_exception_common:
     push r13
     push r14
     push r15
+    test qword ptr [rsp + 144], 3
+    jnz ginux_user_fault_common
     mov rdi, [rsp + 120]
     mov rsi, [rsp + 128]
     mov rdx, cr2
@@ -210,6 +212,32 @@ ginux_fatal_exception_common:
     and rsp, -16
     call {fatal_exception_handler}
     ud2
+
+ginux_user_fault_common:
+    mov r12, rsp
+    mov rdi, rsp
+    and rsp, -16
+    call {user_fault_handler}
+    cmp rax, -1
+    je ginux_user_return_kernel
+    mov rsp, r12
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    add rsp, 16
+    iretq
 
     .section .rodata
     .align 8
@@ -291,7 +319,7 @@ ginux_syscall_entry:
     and rsp, -16
     call {syscall_handler}
     cmp rax, -1
-    je 3f
+    je ginux_user_return_kernel
     mov rsp, r12
     pop r15
     pop r14
@@ -308,7 +336,7 @@ ginux_syscall_entry:
     pop rcx
     pop rbx
     iretq
-3:
+ginux_user_return_kernel:
     mov rsp, [rip + {user_return_stack}]
     pop r15
     pop r14
@@ -320,6 +348,7 @@ ginux_syscall_entry:
 "#,
     breakpoint_handler = sym breakpoint_handler,
     fatal_exception_handler = sym fatal_exception_handler,
+    user_fault_handler = sym user_fault_handler,
     syscall_handler = sym syscall_handler,
     user_return_stack = sym USER_RETURN_STACK,
     user_data = const USER_DATA_SELECTOR as u64,
@@ -557,6 +586,21 @@ fn runtime_result(frame: *mut UserTrapFrame, yielding: bool) -> u64 {
     } else {
         scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR)
     };
+    resume_action(action)
+}
+
+extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return u64::MAX;
+    };
+    resume_action(scheduler::fault_runtime(
+        frame,
+        USER_CODE_SELECTOR,
+        USER_DATA_SELECTOR,
+    ))
+}
+
+fn resume_action(action: RuntimeAction) -> u64 {
     match action {
         RuntimeAction::Resume {
             result,

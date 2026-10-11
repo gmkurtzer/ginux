@@ -12,9 +12,9 @@ The channel is object 3 in the signed boot authority manifest. Sending requires
 `WRITE`; receiving requires `READ`. The call gate resolves the supplied opaque
 handle through the sealed control-plane capability table before touching the
 queue. The ring-3 proof requires a send with the console capability to fail,
-then has both scheduled contexts enqueue their identities, yield, resume, and
-receive the same values in FIFO order. The boot gate also requires the channel
-to be empty when both contexts exit.
+then has context 1 enqueue its identity and yield. Context 2 deliberately
+faults before enqueueing; the resumed survivor receives its FIFO value. The
+boot gate also requires the channel to be empty at completion.
 
 This revision transfers only an immediate word and has no blocking wait,
 endpoint ownership, capability transfer, cancellation, timeout, peer-close

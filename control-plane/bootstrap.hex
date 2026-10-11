@@ -3,14 +3,14 @@
 b801000000
 cd80
 3dfeffffff
-7557
+755d
 
 # mov rdi, rbx; allowed host read with host-control handle
 4889df
 b801000000
 cd80
 3d58470000
-7546
+754c
 
 # reject IPC send through a capability for the wrong object
 4889cf
@@ -18,7 +18,11 @@ cd80
 b804000000
 cd80
 3dfdffffff
-7532
+7538
+
+# context 2 deliberately raises invalid-opcode for containment proof
+4983f902
+7434
 
 # enqueue this context's identity through the IPC capability
 4c89c7
@@ -41,7 +45,8 @@ cd80
 4c39c8
 7507
 
-# exit; ud2 if exit unexpectedly returns or a check fails
+# exit; first ud2 is failure, second is the expected context-2 fault
 b802000000
 cd80
+0f0b
 0f0b

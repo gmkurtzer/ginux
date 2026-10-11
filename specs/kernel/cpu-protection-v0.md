@@ -13,11 +13,14 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
 
 Interrupts remain disabled. The kernel triggers `INT3` during every QEMU boot test; the assembly entry stub preserves general-purpose registers, invokes a Rust handler on the kernel stack, and returns with `IRETQ`. Successful continuation proves that the GDT, IDT, code selector, stack discipline, and basic exception return path work together.
 
-The breakpoint exception is the sole recoverable exception in this revision.
-Every other architectural exception enters a common fatal path with a
-normalized vector and error code. The fatal path reports both values, reports
-CR2 for page faults, emits `GINUX_KERNEL_PANIC`, and halts. The double-fault
-gate uses IST1 so it does not depend on the interrupted stack.
+The kernel breakpoint exception remains recoverable. Other exceptions from
+CPL0 enter a common fatal path with a normalized vector and error code. The
+fatal path reports both values and the instruction address, reports CR2 for
+page faults, emits `GINUX_KERNEL_PANIC`, and halts. Exceptions from CPL3 instead
+enter the scheduler containment path. Its hardware proof deliberately raises
+invalid opcode in one context, destroys only that context, and resumes its peer
+without a kernel panic. The double-fault gate uses IST1 so it does not depend
+on the interrupted stack.
 
 TSS RSP0 names a dedicated privilege stack rather than the suspended kernel
 call stack. This prevents repeated user calls from overwriting the kernel

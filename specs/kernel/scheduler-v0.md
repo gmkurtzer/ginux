@@ -31,18 +31,21 @@ non-executable stack preceded by an absent guard page. `INT 0x80` saves the
 hardware trap frame into the current scheduler record. Yield selects the other
 context, activates its recorded CR3, and restores its registers through
 `IRETQ`; exit destroys the current slot and either resumes the remaining
-context or returns to the kernel. The boot succeeds only after exactly two
-yields, two exits, and three cross-root dispatches.
+context or returns to the kernel. In the current proof, context 1 yields to
+context 2, context 2 raises an expected invalid-opcode fault, and the scheduler
+removes it before switching back to context 1. The survivor then completes its
+IPC exchange and exits. The boot succeeds only after exactly one yield, one
+contained fault, one normal exit, and two cross-root dispatches.
 
 Each created thread also receives a fixed eight-call bootstrap budget. Every
 call-gate entry is charged before dispatch, including denied operations, yield,
 and exit. Exhaustion rejects further dispatch. The ring-3 proof accounts for
-exactly fourteen calls across its two threads, demonstrating that scheduling
+exactly ten calls across its two threads, demonstrating that scheduling
 does not merge their budgets.
 
 This revision uses one guarded TSS privilege stack because execution is
-single-CPU and syscalls cannot nest. It stores no priority, budget, affinity,
-priority, CPU-time budget, affinity, wait reason, or timer deadline and provides
+single-CPU and syscalls cannot nest. It stores no priority, CPU-time budget,
+affinity, wait reason, or timer deadline and provides
 no preemption. The syscall counter is a bring-up resource bound, not a complete
 resource-accounting policy. Address-space switching currently flushes the local
 TLB through CR3 reload; PCID, TLB shootdown, and multi-CPU ownership are not
