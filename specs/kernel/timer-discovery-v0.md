@@ -29,3 +29,15 @@ The resulting frequency describes the APIC counter at the recorded divider. It
 is sufficient for bring-up tests but is not yet a production clocksource:
 future hardware support must prefer ACPI-described timers, quantify calibration
 error, and define behavior where the PIT is absent.
+
+## One-shot interrupt verification
+
+After calibration, the kernel installs owned IDT gates for vector 32 and the
+local-APIC spurious vector 255. It enables the local APIC in software, programs
+a masked-by-default one-shot for approximately 10 ms, briefly enables CPU
+interrupt delivery, acknowledges the timer with an APIC EOI, then disables
+interrupts and masks/stops the timer again. A bounded poll turns a missing
+interrupt into a boot failure instead of an indefinite wait.
+
+No periodic tick or scheduler is implied. External interrupt routing remains
+disabled and no other interrupt source is intentionally unmasked.

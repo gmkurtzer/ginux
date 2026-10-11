@@ -266,6 +266,22 @@ pub(crate) fn double_fault_guard_page() -> usize {
     core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize
 }
 
+/// Installs a non-exception interrupt gate while interrupts are disabled.
+pub(crate) fn install_interrupt_gate(vector: u8, handler: usize) -> bool {
+    if vector < 32 || handler == 0 {
+        return false;
+    }
+    let idt = core::ptr::addr_of_mut!(IDT).cast::<IdtEntry>();
+    // SAFETY: Bootstrap remains single-threaded with interrupts disabled. The
+    // loaded IDT is writable and the vector is outside the exception range.
+    unsafe {
+        idt.add(usize::from(vector))
+            .write(IdtEntry::interrupt(handler, 0));
+        let entry = idt.add(usize::from(vector)).read();
+        entry.selector == KERNEL_CODE_SELECTOR && entry.attributes == 0x8e && entry.ist == 0
+    }
+}
+
 unsafe fn install_gdt_and_tss() {
     let tss_address = core::ptr::addr_of!(TSS) as u64;
     let exception_stack_end =

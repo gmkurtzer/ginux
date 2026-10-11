@@ -1,6 +1,10 @@
-use core::arch::{asm, x86_64::__cpuid};
+use core::arch::{asm, global_asm, x86_64::__cpuid};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
-use super::apic::{LocalApic, Mode};
+use super::{
+    apic::{LocalApic, Mode},
+    cpu,
+};
 
 const CPUID_BASIC_MAX: u32 = 0;
 const CPUID_FEATURES: u32 = 1;
@@ -27,6 +31,70 @@ const PIT_GATE_2: u8 = 1 << 0;
 const PIT_SPEAKER_ENABLE: u8 = 1 << 1;
 const PIT_OUTPUT_2: u8 = 1 << 5;
 const PIT_POLL_LIMIT: usize = 100_000_000;
+const APIC_EOI: u32 = 0xb0;
+const APIC_SPURIOUS_VECTOR: u32 = 0xf0;
+const APIC_SOFTWARE_ENABLE: u32 = 1 << 8;
+const TIMER_VECTOR: u8 = 32;
+const SPURIOUS_VECTOR: u8 = 255;
+const INTERRUPT_POLL_LIMIT: usize = 100_000_000;
+
+static TIMER_FIRED: AtomicBool = AtomicBool::new(false);
+static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
+static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
+
+global_asm!(
+    r#"
+    .text
+    .global ginux_apic_timer_entry
+ginux_apic_timer_entry:
+    cld
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r12, rsp
+    and rsp, -16
+    call {timer_handler}
+    mov rsp, r12
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    iretq
+
+    .global ginux_apic_spurious_entry
+ginux_apic_spurious_entry:
+    iretq
+"#,
+    timer_handler = sym timer_interrupt_handler,
+);
+
+extern "C" {
+    fn ginux_apic_timer_entry();
+    fn ginux_apic_spurious_entry();
+}
 
 pub(crate) struct LocalApicCalibration {
     pub(crate) counter_hz: u64,
@@ -146,6 +214,69 @@ pub(crate) unsafe fn calibrate_local_apic(
         counter_hz,
         divider: 16,
     })
+}
+
+/// Delivers and acknowledges one local-APIC timer interrupt.
+///
+/// Interrupts are enabled only while waiting for the owned one-shot source and
+/// are disabled before this function returns.
+pub(crate) unsafe fn verify_local_apic_interrupt(
+    apic: &LocalApic,
+    calibration: &LocalApicCalibration,
+) -> bool {
+    if !cpu::install_interrupt_gate(TIMER_VECTOR, ginux_apic_timer_entry as *const () as usize)
+        || !cpu::install_interrupt_gate(
+            SPURIOUS_VECTOR,
+            ginux_apic_spurious_entry as *const () as usize,
+        )
+    {
+        return false;
+    }
+
+    INTERRUPT_APIC_BASE.store(apic.physical_base, Ordering::SeqCst);
+    INTERRUPT_APIC_MODE.store(
+        if apic.mode == Mode::X2Apic { 1 } else { 0 },
+        Ordering::SeqCst,
+    );
+    TIMER_FIRED.store(false, Ordering::SeqCst);
+
+    let spurious = apic.read(APIC_SPURIOUS_VECTOR);
+    apic.write(
+        APIC_SPURIOUS_VECTOR,
+        (spurious & !0xff) | u32::from(SPURIOUS_VECTOR) | APIC_SOFTWARE_ENABLE,
+    );
+    apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
+    apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
+    let initial_count = (calibration.counter_hz / 100).clamp(1, u64::from(u32::MAX)) as u32;
+    apic.write(APIC_INITIAL_COUNT, initial_count);
+
+    asm!("sti", options(nomem, nostack));
+    for _ in 0..INTERRUPT_POLL_LIMIT {
+        if TIMER_FIRED.load(Ordering::SeqCst) {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    asm!("cli", options(nomem, nostack));
+    apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
+    apic.write(APIC_INITIAL_COUNT, 0);
+    TIMER_FIRED.load(Ordering::SeqCst)
+}
+
+extern "C" fn timer_interrupt_handler() {
+    TIMER_FIRED.store(true, Ordering::SeqCst);
+    let apic = LocalApic {
+        id: 0,
+        mode: if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+            Mode::X2Apic
+        } else {
+            Mode::XApic
+        },
+        physical_base: INTERRUPT_APIC_BASE.load(Ordering::SeqCst),
+    };
+    // SAFETY: The verifier initializes these values before unmasking the timer,
+    // and the handler runs with exclusive bootstrap-processor APIC ownership.
+    unsafe { apic.write(APIC_EOI, 0) };
 }
 
 unsafe fn in_u8(port: u16) -> u8 {

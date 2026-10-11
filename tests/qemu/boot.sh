@@ -128,6 +128,11 @@ if ! grep -Eq '^ginux: APIC timer counter Hz: [1-9][0-9]*' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: local APIC timer interrupt handled' "$output_file"; then
+    echo "Boot test failed: the local APIC timer interrupt was not handled." >&2
+    exit 1
+fi
+
 if ! grep -Eq '^ginux: usable memory MiB: [1-9][0-9]*' "$output_file"; then
     echo "Boot test failed: the kernel did not inventory usable physical memory." >&2
     exit 1
