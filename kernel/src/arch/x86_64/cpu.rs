@@ -127,6 +127,7 @@ const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
+const LINUX_EPOLL_PWAIT2_SYSCALL: u64 = 441;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
@@ -1625,6 +1626,14 @@ extern "sysv64" fn linux_syscall_handler(
             register(2),
             register(1),
         ),
+        LINUX_EPOLL_PWAIT2_SYSCALL => linux_epoll_pwait2(
+            first_argument,
+            buffer,
+            count,
+            register(0),
+            register(2),
+            register(1),
+        ),
         LINUX_PPOLL_SYSCALL => linux_ppoll(first_argument, buffer, count, register(0), register(2)),
         LINUX_FACCESSAT_SYSCALL => linux_faccessat(buffer, count, 0),
         LINUX_FACCESSAT2_SYSCALL => linux_faccessat(buffer, count, register(0)),
@@ -2318,6 +2327,38 @@ fn linux_epoll_pwait(
         }
     }
     linux_epoll_wait(epoll, address, maximum, timeout)
+}
+
+fn linux_epoll_pwait2(
+    epoll: u64,
+    address: u64,
+    maximum: u64,
+    timeout_address: u64,
+    signal_mask_address: u64,
+    signal_set_size: u64,
+) -> u64 {
+    let waits = if timeout_address == 0 {
+        true
+    } else {
+        let mut timeout = [0_u8; 16];
+        if !copy_from_linux_user(timeout_address, &mut timeout) {
+            return LINUX_EFAULT;
+        }
+        let seconds = i64::from_ne_bytes(timeout[..8].try_into().unwrap());
+        let nanoseconds = i64::from_ne_bytes(timeout[8..].try_into().unwrap());
+        if seconds < 0 || !(0..NANOSECONDS_PER_SECOND as i64).contains(&nanoseconds) {
+            return LINUX_EINVAL;
+        }
+        seconds != 0 || nanoseconds != 0
+    };
+    linux_epoll_pwait(
+        epoll,
+        address,
+        maximum,
+        u64::from(waits),
+        signal_mask_address,
+        signal_set_size,
+    )
 }
 
 fn linux_descriptor_open(descriptor: u64) -> bool {

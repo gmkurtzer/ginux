@@ -70,6 +70,11 @@ validating an optional eight-byte signal mask and its exact signal-set size.
 The temporary mask is not installed because this implementation never blocks;
 invalid sizes return `-EINVAL` and invalid mask ranges return `-EFAULT` before
 examining readiness.
+`rax = 441` (`__NR_epoll_pwait2`) replaces the integer timeout with a null or
+complete 16-byte x86-64 `timespec`. Negative seconds and non-normalized
+nanoseconds return `-EINVAL`; invalid memory returns `-EFAULT`. A zero timespec
+queries immediately, while a nonzero or null timeout that finds no ready event
+retains the explicit `-ENOSYS` blocking boundary.
 This is a bounded event-notification proof, not a general epoll interest tree.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
