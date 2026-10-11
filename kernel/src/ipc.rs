@@ -18,6 +18,9 @@ struct Duplex {
     next_reply_sequence: u64,
     last_control_message_sequence: u64,
     last_service_message_sequence: u64,
+    next_closure_sequence: u64,
+    last_control_closure_domain: Option<u64>,
+    last_control_closure_sequence: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,6 +66,9 @@ impl Duplex {
             next_reply_sequence: 1,
             last_control_message_sequence: 0,
             last_service_message_sequence: 0,
+            next_closure_sequence: 1,
+            last_control_closure_domain: None,
+            last_control_closure_sequence: 0,
         })
     }
 
@@ -160,9 +166,14 @@ impl Duplex {
                 self.last_control_message_sequence = message.sequence;
                 Receive::Message(message.value)
             } else if let Some(closure) = self.service_closures.receive() {
-                if closure.source != closure.value {
+                if closure.source != closure.value
+                    || closure.sequence == 0
+                    || closure.sequence <= self.last_control_closure_sequence
+                {
                     return Receive::Empty;
                 }
+                self.last_control_closure_domain = Some(closure.source);
+                self.last_control_closure_sequence = closure.sequence;
                 Receive::PeerClosed(closure.value)
             } else {
                 Receive::Empty
@@ -176,13 +187,20 @@ impl Duplex {
         if self.service_domain != Some(domain) || self.service_closures.len == CAPACITY {
             return false;
         }
+        let Some(next) = self.next_closure_sequence.checked_add(1) else {
+            return false;
+        };
+        if !self.service_closures.send(MessageEnvelope {
+            source: domain,
+            sequence: self.next_closure_sequence,
+            value: domain,
+        }) {
+            return false;
+        }
         self.requests.clear();
         self.service_domain = None;
-        self.service_closures.send(MessageEnvelope {
-            source: domain,
-            sequence: 0,
-            value: domain,
-        })
+        self.next_closure_sequence = next;
+        true
     }
 
     fn bind_service(&mut self, domain: u64) -> bool {
@@ -333,6 +351,14 @@ pub(crate) fn last_message_audit() -> Option<((u64, u64), (u64, u64))> {
     ))
 }
 
+pub(crate) fn last_closure_audit() -> Option<(u64, u64)> {
+    let channel = channel_mut()?;
+    Some((
+        channel.last_control_closure_domain?,
+        channel.last_control_closure_sequence,
+    ))
+}
+
 pub(crate) fn verify_channel_invariants() -> bool {
     let (control, service, replacement) = (1, 2, 3);
     let Some(mut out_of_order) = Duplex::new(control, service) else {
@@ -357,6 +383,29 @@ pub(crate) fn verify_channel_invariants() -> bool {
         sequence: 0,
         value: 10,
     }) && zero_sequence.receive(service) == Receive::Empty;
+    let Some(mut stale_closure) = Duplex::new(control, service) else {
+        return false;
+    };
+    let stale_closure_rejected = stale_closure.service_closures.send(MessageEnvelope {
+        source: service,
+        sequence: 2,
+        value: service,
+    }) && stale_closure.receive(control)
+        == Receive::PeerClosed(service)
+        && stale_closure.service_closures.send(MessageEnvelope {
+            source: service,
+            sequence: 1,
+            value: service,
+        })
+        && stale_closure.receive(control) == Receive::Empty;
+    let Some(mut zero_closure) = Duplex::new(control, service) else {
+        return false;
+    };
+    let zero_closure_rejected = zero_closure.service_closures.send(MessageEnvelope {
+        source: service,
+        sequence: 0,
+        value: service,
+    }) && zero_closure.receive(control) == Receive::Empty;
     let Some(mut direct) = Duplex::new(control, service) else {
         return false;
     };
@@ -376,6 +425,8 @@ pub(crate) fn verify_channel_invariants() -> bool {
     };
     out_of_order_rejected
         && zero_sequence_rejected
+        && stale_closure_rejected
+        && zero_closure_rejected
         && direct_sequence_shared
         && channel.receive(control) == Receive::Empty
         && channel.receive(service) == Receive::Empty
@@ -430,6 +481,8 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.last_control_message_sequence == 2
         && channel.last_service_message_source == Some(control)
         && channel.last_service_message_sequence == 7
+        && channel.last_control_closure_domain == Some(replacement)
+        && channel.last_control_closure_sequence == 2
 }
 
 fn channel_mut() -> Option<&'static mut Duplex> {

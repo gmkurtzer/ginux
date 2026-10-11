@@ -47,7 +47,9 @@ validated at dequeue, but operation 5 returns only the scalar value in ABI v1.
 Failed enqueues do not consume sequence numbers, while intentional retirement
 cleanup can create valid gaps. IPC failure returns `UINT64_MAX - 2`.
 After queued replies are drained, operation 5 returns `UINT64_MAX - 4` once
-for each generation-tagged service closure retained by the endpoint.
+for each generation-tagged service closure retained by the endpoint. Closure
+records have a separate internal monotonic sequence that operation 5 does not
+expose in ABI v1.
 Operation 6 writes one through eight packed bytes from `RSI`, with the byte
 count in `RDX`, and requires write authority on console object 2. It returns
 the byte count or `UINT64_MAX - 2` on denial or invalid input.

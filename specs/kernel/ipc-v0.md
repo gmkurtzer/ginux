@@ -81,14 +81,18 @@ selected immediately even when it was the last surviving context. The
 scheduler invariant proves that object/direction mismatches stay blocked and
 that an unrelated ready context remains unchanged.
 
-Service retirement also appends the exact retired domain generation to a
-bounded four-record closure FIFO. Control-side receive drains already-produced
+Service retirement also appends the exact retired domain generation and a
+nonzero, monotonically increasing closure sequence to a bounded four-record
+closure FIFO. Control-side receive rejects zero or non-monotonic closure
+sequences and drains already-produced
 replies first, then returns the peer-closed outcome once per queued generation.
 Binding a replacement does not erase an older closure record, so a late
 receiver cannot confuse restart with an empty live channel. The QEMU gate
 observes the original and replacement generations in order after both have
-retired, then requires the closure FIFO to be empty. Retirement fails closed if
-the FIFO is full rather than discarding an unobserved closure.
+retired, audits closure sequence two for the replacement, then requires the
+closure FIFO to be empty. Retirement fails closed if the FIFO is full or the
+sequence space is exhausted rather than discarding an unobserved closure or
+reusing a number.
 The restart transaction has a separate exact-generation rollback operation for
 a replacement that was bound but never scheduled. It requires an empty request
 direction, removes only that binding, and deliberately emits no peer-closure

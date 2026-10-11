@@ -594,6 +594,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if ipc::receive(control_plane) != ipc::Receive::PeerClosed(service_domain)
         || ipc::receive(control_plane) != ipc::Receive::PeerClosed(replacement_domain)
         || ipc::receive(control_plane) != ipc::Receive::Empty
+        || ipc::last_closure_audit() != Some((replacement_domain, 2))
     {
         kernel_fail("\r\nginux: sticky IPC peer closure invariant failed\r\n");
     }
@@ -628,6 +629,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: IPC wait-key matching enforced");
     serial_write("\r\nginux: blocked IPC peer-close cleanup verified");
     serial_write("\r\nginux: sticky IPC peer closure delivered");
+    serial_write("\r\nginux: monotonic IPC peer closures verified");
     serial_write("\r\nginux: isolated service request-reply completed");
     serial_write("\r\nginux: service domain authority restricted to IPC");
     serial_write("\r\nginux: faulted service domain authority retired");

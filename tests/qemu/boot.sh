@@ -523,6 +523,11 @@ if ! grep -q '^ginux: sticky IPC peer closure delivered' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: monotonic IPC peer closures verified' "$output_file"; then
+    echo "Boot test failed: IPC peer closures were not sequenced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated service request-reply completed' "$output_file"; then
     echo "Boot test failed: isolated service request/reply did not complete." >&2
     exit 1
