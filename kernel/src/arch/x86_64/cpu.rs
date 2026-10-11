@@ -1,4 +1,7 @@
-use core::arch::{asm, global_asm};
+use core::arch::{
+    asm, global_asm,
+    x86_64::{__cpuid, __cpuid_count},
+};
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
@@ -24,6 +27,9 @@ const PAGE_SIZE: usize = 4096;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
 const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE + PAGE_SIZE;
 const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
+const CPUID_STRUCTURED_FEATURES: u32 = 7;
+const CPUID_SMEP: u32 = 1 << 7;
+const CR4_SMEP: u64 = 1 << 20;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -388,6 +394,29 @@ pub(crate) fn install() -> bool {
         install_idt();
     }
     exception_gates_are_valid()
+}
+
+pub(crate) fn enable_supervisor_execution_prevention() -> bool {
+    if __cpuid(0).eax < CPUID_STRUCTURED_FEATURES
+        || __cpuid_count(CPUID_STRUCTURED_FEATURES, 0).ebx & CPUID_SMEP == 0
+    {
+        return false;
+    }
+    let mut cr4: u64;
+    unsafe {
+        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+        cr4 |= CR4_SMEP;
+        asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack, preserves_flags));
+    }
+    supervisor_execution_prevention_enabled()
+}
+
+pub(crate) fn supervisor_execution_prevention_enabled() -> bool {
+    let cr4: u64;
+    unsafe {
+        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+    }
+    cr4 & CR4_SMEP != 0
 }
 
 pub(crate) fn verify_user_syscall(

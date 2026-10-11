@@ -8,6 +8,7 @@ qemu="$(find_qemu)"
 ovmf_code="$(find_ovmf_code)"
 ovmf_vars_template="$(find_ovmf_vars)"
 accelerator="${QEMU_ACCEL:-$(default_accelerator)}"
+cpu_model="${QEMU_CPU:-qemu64,+smep}"
 esp_dir="${GINUX_ESP_DIR:-$repo_root/build/esp}"
 runtime_dir="$repo_root/build/qemu"
 ovmf_vars="$runtime_dir/ovmf-vars.fd"
@@ -20,11 +21,11 @@ fi
 mkdir -p "$runtime_dir"
 cp "$ovmf_vars_template" "$ovmf_vars"
 
-echo "Booting x86-64 Ginux with QEMU/$accelerator"
+echo "Booting x86-64 Ginux with QEMU/$accelerator using CPU $cpu_model"
 
 exec "$qemu" \
     -machine "q35,accel=$accelerator" \
-    -cpu qemu64 \
+    -cpu "$cpu_model" \
     -smp 1 \
     -m 256M \
     -display none \
