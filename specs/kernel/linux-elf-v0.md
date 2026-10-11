@@ -137,8 +137,9 @@ page-granular overlap among all main, interpreter, and dependency loads. Wrong
 names, wrong internal SONAMEs, wrong digests, truncation, and an overlapping
 dependency bias are rejected. An authenticated dependency exporting a
 different symbol name is also rejected. The parser also accepts one bounded
-`PT_DYNAMIC` table describing one, two, three, five, or six relocation records, the exact
-primary `DT_RELA` size and 24-byte entry size, and a terminating `DT_NULL`.
+`PT_DYNAMIC` table describing one, two, three, four, five, or six relocation
+records, the exact primary `DT_RELA` size and 24-byte entry size, and a
+terminating `DT_NULL`.
 One- and two-record profiles keep every record in the primary table. A
 three-record profile may do the same, or may keep its first two records in the
 primary table and describe one non-overlapping `R_X86_64_JUMP_SLOT` record with
@@ -147,11 +148,16 @@ table must be exactly one 24-byte `DT_RELA` record. The five-record profile
 keeps one relative and two `GLOB_DAT` records in the primary table and exactly
 two `JUMP_SLOT` records in the split table. The six-record profile adds a
 leading preinit-array relative relocation before that five-record sequence.
+The four-record dependency profile keeps `RELATIVE`, `TPOFF64`, and `GLOB_DAT`
+records in the primary table and one `JUMP_SLOT` in the split table. It alone
+requires `DT_FLAGS = DF_STATIC_TLS`. Its `TPOFF64` record must use symbol zero,
+a zero addend, and a distinct aligned writable target.
 Partial triplets, another
 relocation encoding, wrong sizes, overlap with the primary table, and split
 tables attached to other primary-table sizes are rejected. The first record must
-be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must
-also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, and `DT_SYMENT`, plus exactly
+be an `R_X86_64_RELATIVE` relocation with no symbol. A two-, three-, or
+four-record table must also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, and
+`DT_SYMENT`, plus exactly
 one of `DT_HASH` or `DT_GNU_HASH`, with a 24-byte symbol-entry size. The
 file-backed single-symbol SysV form is bounded to one or two buckets and two
 chains. The five- and six-record main profiles use exactly three buckets and
@@ -161,8 +167,7 @@ bounded to one bucket, symbol offset one, one 64-bit bloom word, bloom shift
 five, and one terminating chain word. Its bloom bits, bucket, and chain must
 match the GNU hash of the admitted symbol name. The kernel computes either
 symbol-name hash rather than trusting a fixed table offset. In every symbol
-profile, the `GLOB_DAT` record immediately following the init-array relative
-relocation
+profile, the `GLOB_DAT` record following the optional static-TLS relocation
 must be `R_X86_64_GLOB_DAT`, use
 symbol index one, have a zero addend, and reference a global/default-visible
 function symbol. A self-contained image must define it with a value and size
@@ -375,12 +380,15 @@ The primary authenticated DSO carries a second bounded `PT_TLS` template with
 the eight-byte `DSOTLS!\n` value, sixteen total bytes, and eight-byte alignment.
 Parsing binds it to the DSO's digest and `DT_SONAME`, and planning relocates its
 metadata by the canonical dependency bias. Its direct initializer reads the
-assigned `TP-32` initialized value and `TP-24` zero tail before allowing its
-constructor to advance, so successful execution proves dependency TLS is live
-before constructors. That access still encodes the bounded module offset
-directly. Toolchain-generated dependency TLS relocations, additional TLS
-modules, dynamic TLS, and per-thread allocation remain outside the execution
-profile.
+assigned initialized value and zero tail before allowing its constructor to
+advance, so successful execution proves dependency TLS is live before
+constructors. The source names the hidden template through one
+`R_X86_64_GOTTPOFF` object relocation. LLD emits a `R_X86_64_TPOFF64` GOT
+relocation and `DT_FLAGS = DF_STATIC_TLS`; the userspace interpreter requires
+that exact symbol-zero, zero-addend shape and installs the assigned `-32`
+module offset. The initializer loads the offset from the relocated GOT rather
+than encoding it in its instruction stream. Additional TLS modules, dynamic
+TLS, and per-thread allocation remain outside the execution profile.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
@@ -389,7 +397,8 @@ dynamic-table address by adding the selected bias to `p_vaddr`; the linked main
 and dependency scans no longer embed their dynamic addresses or entry counts.
 The userspace scans require `DT_RELASZ = 96`, `DT_RELAENT = 24`,
 `DT_RELACOUNT = 2`, `DT_PLTRELSZ = 48`, and `DT_PLTREL = DT_RELA` for the
-main. Each dependency must instead declare `DT_RELASZ = 48`,
+main. The primary TLS-bearing dependency requires `DT_RELASZ = 72`, while the
+TLS-free auxiliary dependency requires `DT_RELASZ = 48`; both require
 `DT_RELAENT = 24`, `DT_RELACOUNT = 1`, `DT_PLTRELSZ = 24`, and
 `DT_PLTREL = DT_RELA`. A missing or different value fails before relocation.
 The interpreter keeps its bounded startup scratch in the zero-fill tail after

@@ -8,8 +8,8 @@ M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to nine
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
-`PT_GNU_STACK`, bounded `PT_INTERP`, `PT_TLS`, and one-, two-, three-, five-,
-or six-entry
+`PT_GNU_STACK`, bounded `PT_INTERP`, `PT_TLS`, and one-, two-, three-, four-,
+five-, or six-entry
 relocation `PT_DYNAMIC` declarations. Three-relocation images may place the eager
 `R_X86_64_JUMP_SLOT` record in a separate one-entry `DT_JMPREL` table described
 by `DT_PLTRELSZ` and `DT_PLTREL`; the six-relocation runtime main uses two
@@ -51,10 +51,14 @@ The kernel admits only the live static-block-plus-TCB extent to syscall copy
 validation; the interpreter writes the initialized `TLS_OK!` value directly
 from FS-relative storage before invoking the preinitializer, while one-byte
 underflow and overflow ranges are rejected internally.
-Dynamic TLS relocations, additional TLS modules, and per-thread allocation
-remain unimplemented. The primary DSO currently validates its assigned static
-offsets directly; toolchain-generated dependency TLS relocation is the next
-compatibility step.
+The primary DSO names its hidden TLS template through one toolchain-emitted
+`R_X86_64_GOTTPOFF` object reference. LLD converts that reference into a
+bounded `R_X86_64_TPOFF64` GOT relocation and marks the object `DF_STATIC_TLS`.
+The userspace interpreter validates the exact relocation shape and installs
+`-32`; the DSO initializer loads that value from its GOT before using it as an
+FS-relative offset. Malformed types, symbol indexes, addends, alignments, and
+targets are rejected. Additional TLS modules, dynamic TLS, and per-thread
+allocation remain unimplemented.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

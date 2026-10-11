@@ -598,6 +598,11 @@ if ! grep -q '^ginux: bounded Linux dependency TLS metadata validated' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux TPOFF64 relocation metadata validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux TPOFF64 relocation metadata was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TLS template metadata validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TLS template metadata was not validated." >&2
     exit 1
@@ -615,6 +620,11 @@ fi
 
 if ! grep -q '^ginux: Linux dependency TLS active before constructors' "$output_file"; then
     echo "Boot test failed: Linux dependency TLS was not active before constructors." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: toolchain-driven Linux dependency TLS relocation applied' "$output_file"; then
+    echo "Boot test failed: the toolchain-driven Linux dependency TLS relocation was not applied." >&2
     exit 1
 fi
 

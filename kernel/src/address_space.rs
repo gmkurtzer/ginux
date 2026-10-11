@@ -606,6 +606,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
         return false;
     };
     let dependency_tls_start_offset = tls_start_offset;
+    let Some(dependency_tls_distance) =
+        LINUX_TLS_THREAD_POINTER_OFFSET.checked_sub(dependency_tls_start_offset)
+    else {
+        return false;
+    };
+    let dependency_tls_offset = 0_u64.wrapping_sub(dependency_tls_distance as u64);
     let Some(tls_extent_size) = combined_tls_block_size.checked_add(LINUX_TLS_TCB_SIZE) else {
         return false;
     };
@@ -735,6 +741,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
     ) else {
         return false;
     };
+    let Some(dependency_tls_relocation_target) = dependency_dynamic
+        .tls_relocation_target
+        .map(core::num::NonZeroU64::get)
+    else {
+        return false;
+    };
     if dependency_dynamic.init_function.is_none()
         || dependency_dynamic.init_array != Some(dependency_dynamic.relocation_target)
     {
@@ -751,6 +763,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     };
     if auxiliary_dynamic.init_function.is_none()
         || auxiliary_dynamic.init_array != Some(auxiliary_dynamic.relocation_target)
+        || auxiliary_dynamic.tls_relocation_target.is_some()
     {
         return false;
     }
@@ -1432,20 +1445,28 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         relocate_dependency_address(dependency_dynamic.relocation_target)
                             .zip(relocate_dependency_address(dependency_symbol.target))
                             .zip(relocate_dependency_address(dependency_jump_slot.target))
-                            .is_some_and(|((relative_target, symbol_target), jump_target)| {
-                                cpu::with_supervisor_user_access(|| {
-                                    (actual_dependency_rx as *const u8).read_volatile()
-                                        == dependency_rx.bytes[0]
-                                        && (actual_dependency_entry as *const u8).read_volatile()
-                                            == dependency_entry_byte
-                                        && (relative_target as *const u64).read_volatile()
-                                            == actual_dependency_relative_value
-                                        && (symbol_target as *const u64).read_volatile()
-                                            == actual_dependency_entry
-                                        && (jump_target as *const u64).read_volatile()
-                                            == actual_dependency_entry
-                                })
-                            })
+                            .zip(relocate_dependency_address(
+                                dependency_tls_relocation_target,
+                            ))
+                            .is_some_and(
+                                |(((relative_target, symbol_target), jump_target), tls_target)| {
+                                    cpu::with_supervisor_user_access(|| {
+                                        (actual_dependency_rx as *const u8).read_volatile()
+                                            == dependency_rx.bytes[0]
+                                            && (actual_dependency_entry as *const u8)
+                                                .read_volatile()
+                                                == dependency_entry_byte
+                                            && (relative_target as *const u64).read_volatile()
+                                                == actual_dependency_relative_value
+                                            && (symbol_target as *const u64).read_volatile()
+                                                == actual_dependency_entry
+                                            && (jump_target as *const u64).read_volatile()
+                                                == actual_dependency_entry
+                                            && (tls_target as *const u64).read_volatile()
+                                                == dependency_tls_offset
+                                    })
+                                },
+                            )
                     },
                 );
             let selected_auxiliary_base = selected_dependency_bases[1];

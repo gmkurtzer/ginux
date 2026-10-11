@@ -1,3 +1,5 @@
+use core::num::NonZeroU64;
+
 const ELF_HEADER_SIZE: usize = 64;
 pub(crate) const PROGRAM_HEADER_SIZE: usize = 56;
 const MIN_LOAD_SEGMENT_COUNT: usize = 2;
@@ -53,13 +55,16 @@ const DT_FLAGS_1: u64 = 0x6fff_fffb;
 const DT_RELACOUNT: u64 = 0x6fff_fff9;
 const DT_INIT_ARRAY: u64 = 25;
 const DT_INIT_ARRAYSZ: u64 = 27;
+const DT_FLAGS: u64 = 30;
 const DT_PREINIT_ARRAY: u64 = 32;
 const DT_PREINIT_ARRAYSZ: u64 = 33;
 const DT_GNU_HASH: u64 = 0x6fff_fef5;
 const DF_1_PIE: u64 = 0x0800_0000;
+const DF_STATIC_TLS: u64 = 0x10;
 const R_X86_64_GLOB_DAT: u32 = 6;
 const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_RELATIVE: u64 = 8;
+const R_X86_64_TPOFF64: u32 = 18;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const INTERPRETER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-interpreter.bin"));
 const DEPENDENCY_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-dependency.bin"));
@@ -153,6 +158,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
                 && dynamic.preinit_array == dynamic.preinit_relocation_target
                 && dynamic.preinit_relocation_addend.is_some()
                 && dynamic.init_array == Some(dynamic.relocation_target)
+                && dynamic.tls_relocation_target.is_none()
                 && dynamic
                     .symbol_relocation
                     .is_some_and(|relocation| relocation.symbol_index == 1)
@@ -167,6 +173,9 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
                     .is_some_and(|relocation| relocation.symbol_index == 2)
         })
         && primary.program_header_count == 6
+        && primary.dynamic_relocations.is_some_and(|dynamic| {
+            dynamic.relocation_count == 4 && dynamic.tls_relocation_target.is_some()
+        })
         && primary_tls.is_some_and(|template| {
             template.bytes == b"DSOTLS!\n"
                 && template.memory_size == 16
@@ -194,6 +203,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
                 && dynamic.symbol_relocation.is_some()
                 && dynamic.jump_slot_relocation.is_some()
                 && dynamic.init_array == Some(dynamic.relocation_target)
+                && dynamic.tls_relocation_target.is_none()
         })
         && plan.dependency_bases == [0x61_0000, 0x63_0000]
         && plan.process.main_entry == 0x40_0100
@@ -317,6 +327,28 @@ pub(crate) fn verify_tls_template_metadata() -> bool {
         && bad_alignment_rejected
 }
 
+pub(crate) fn verify_tls_relocation_metadata() -> bool {
+    let mut record = [0_u8; RELA_ENTRY_SIZE];
+    write_u64(&mut record, 0, 0x4020);
+    write_u64(&mut record, 8, R_X86_64_TPOFF64 as u64);
+    let valid = parse_tls_relocation(&record, 0x4000, 0x4040, 0x4000)
+        .is_some_and(|target| target.get() == 0x4020);
+
+    let rejected = |offset: usize, value: u64| {
+        let mut malformed = record;
+        write_u64(&mut malformed, offset, value);
+        parse_tls_relocation(&malformed, 0x4000, 0x4040, 0x4000).is_none()
+    };
+    valid
+        && rejected(8, 17)
+        && rejected(8, (1_u64 << 32) | R_X86_64_TPOFF64 as u64)
+        && rejected(16, 1)
+        && rejected(0, 0x4000)
+        && rejected(0, 0x401f)
+        && rejected(0, 0x3ff8)
+        && rejected(0, 0x4040)
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
     pub(crate) bytes: &'a [u8],
@@ -369,7 +401,7 @@ pub(crate) struct Relro {
 pub(crate) struct DynamicRelocations {
     pub(crate) table_address: u64,
     pub(crate) relocation_address: u64,
-    pub(crate) jump_relocation_address: Option<u64>,
+    pub(crate) jump_relocation_address: Option<NonZeroU64>,
     pub(crate) relocation_count: usize,
     pub(crate) relocation_target: u64,
     pub(crate) relocation_addend: u64,
@@ -383,6 +415,7 @@ pub(crate) struct DynamicRelocations {
     pub(crate) preinit_relocation_target: Option<u64>,
     pub(crate) preinit_relocation_addend: Option<u64>,
     pub(crate) init_array: Option<u64>,
+    pub(crate) tls_relocation_target: Option<NonZeroU64>,
     pub(crate) symbol_relocation: Option<SymbolRelocation>,
     pub(crate) jump_slot_relocation: Option<SymbolRelocation>,
     pub(crate) secondary_symbol_relocation: Option<SymbolRelocation>,
@@ -700,6 +733,7 @@ pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
         preinit_relocation_target: None,
         preinit_relocation_addend: None,
         init_array: None,
+        tls_relocation_target: None,
         symbol_relocation: None,
         jump_slot_relocation: None,
         secondary_symbol_relocation: None,
@@ -802,6 +836,7 @@ pub(crate) fn plan_authenticated_pie_dependency_graph<'main, 'interpreter, 'depe
                 dynamic.symbol_defined
                     && dynamic.init_function.is_some()
                     && dynamic.preinit_array.is_none()
+                    && (image.tls.is_some() == dynamic.tls_relocation_target.is_some())
             })
         {
             return None;
@@ -1040,7 +1075,7 @@ fn plan_position_independent_at<'a>(
             table_address: dynamic.table_address.checked_add(load_bias)?,
             relocation_address: dynamic.relocation_address.checked_add(load_bias)?,
             jump_relocation_address: match dynamic.jump_relocation_address {
-                Some(address) => Some(address.checked_add(load_bias)?),
+                Some(address) => NonZeroU64::new(address.get().checked_add(load_bias)?),
                 None => None,
             },
             relocation_count: dynamic.relocation_count,
@@ -1075,6 +1110,10 @@ fn plan_position_independent_at<'a>(
             preinit_relocation_addend: dynamic.preinit_relocation_addend,
             init_array: match dynamic.init_array {
                 Some(address) => Some(address.checked_add(load_bias)?),
+                None => None,
+            },
+            tls_relocation_target: match dynamic.tls_relocation_target {
+                Some(address) => NonZeroU64::new(address.get().checked_add(load_bias)?),
                 None => None,
             },
             symbol_relocation: match dynamic.symbol_relocation {
@@ -1495,6 +1534,7 @@ fn parse_dynamic_relocations<'a>(
     let mut jump_relocation_kind = None;
     let mut plt_got = None;
     let mut debug = None;
+    let mut flags = None;
     let mut flags_1 = None;
     let mut relative_count = None;
     let mut init_function = None;
@@ -1535,6 +1575,7 @@ fn parse_dynamic_relocations<'a>(
             DT_PLTREL if jump_relocation_kind.replace(value).is_none() => {}
             DT_PLTGOT if plt_got.replace(value).is_none() => {}
             DT_DEBUG if debug.replace(value).is_none() => {}
+            DT_FLAGS if flags.replace(value).is_none() => {}
             DT_FLAGS_1 if flags_1.replace(value).is_none() => {}
             DT_RELACOUNT if relative_count.replace(value).is_none() => {}
             DT_INIT if init_function.replace(value).is_none() => {}
@@ -1579,6 +1620,18 @@ fn parse_dynamic_relocations<'a>(
         (None, None, None) => None,
         (Some(address), Some(size), Some(kind))
             if primary_relocation_count == 2
+                && size == RELA_ENTRY_SIZE as u64
+                && kind == DT_RELA =>
+        {
+            let primary_end = rela_address.checked_add(rela_size)?;
+            let jump_end = address.checked_add(size)?;
+            if rela_address < jump_end && address < primary_end {
+                return None;
+            }
+            Some(virtual_file_bytes(loads, address, RELA_ENTRY_SIZE)?)
+        }
+        (Some(address), Some(size), Some(kind))
+            if primary_relocation_count == 3
                 && size == RELA_ENTRY_SIZE as u64
                 && kind == DT_RELA =>
         {
@@ -1707,6 +1760,20 @@ fn parse_dynamic_relocations<'a>(
         hash_table_address,
         soname_offset,
     );
+    let tls_relocation_target =
+        if primary_relocation_count == 3 && jump_relocation_count == 1 && preinit_array.is_none() {
+            Some(parse_tls_relocation(
+                &rela[RELA_ENTRY_SIZE..2 * RELA_ENTRY_SIZE],
+                writable.virtual_address,
+                writable_end,
+                target,
+            )?)
+        } else {
+            None
+        };
+    if flags != tls_relocation_target.map(|_| DF_STATIC_TLS) {
+        return None;
+    }
     let (
         symbol_table_address,
         string_table_address,
@@ -1757,7 +1824,7 @@ fn parse_dynamic_relocations<'a>(
             )
         }
         (
-            count @ (2 | 3),
+            count @ 2..=4,
             (
                 Some(symbols),
                 Some(strings),
@@ -1767,6 +1834,7 @@ fn parse_dynamic_relocations<'a>(
                 soname_offset,
             ),
         ) if symbol_size == SYMBOL_ENTRY_SIZE as u64
+            && (count == 4) == tls_relocation_target.is_some()
             && (2..=MAX_INTERPRETER_PATH_SIZE as u64).contains(&string_size) =>
         {
             let string_size = usize::try_from(string_size).ok()?;
@@ -1774,7 +1842,13 @@ fn parse_dynamic_relocations<'a>(
             if string_table[0] != 0 {
                 return None;
             }
-            let second = &rela[RELA_ENTRY_SIZE..2 * RELA_ENTRY_SIZE];
+            let symbol_record = if tls_relocation_target.is_some() {
+                2
+            } else {
+                1
+            };
+            let second =
+                &rela[symbol_record * RELA_ENTRY_SIZE..(symbol_record + 1) * RELA_ENTRY_SIZE];
             let symbol_target = read_u64(second, 0)?;
             let symbol_info = read_u64(second, 8)?;
             let symbol_addend = read_u64(second, 16)?;
@@ -1785,6 +1859,7 @@ fn parse_dynamic_relocations<'a>(
                 || symbol_addend != 0
                 || !symbol_target.is_multiple_of(8)
                 || symbol_target == target
+                || tls_relocation_target.is_some_and(|target| target.get() == symbol_target)
                 || symbol_target < writable.virtual_address
                 || symbol_target.checked_add(8)? > writable_end
             {
@@ -1870,7 +1945,7 @@ fn parse_dynamic_relocations<'a>(
                 symbol_name_offset: name_offset,
                 addend: symbol_addend,
             };
-            let jump_slot_relocation = if count == 3 {
+            let jump_slot_relocation = if count >= 3 {
                 let third = match jump_rela {
                     Some(rela) => rela,
                     None => &rela[2 * RELA_ENTRY_SIZE..3 * RELA_ENTRY_SIZE],
@@ -1883,6 +1958,7 @@ fn parse_dynamic_relocations<'a>(
                     || jump_addend != 0
                     || !jump_target.is_multiple_of(8)
                     || jump_target == target
+                    || tls_relocation_target.is_some_and(|target| target.get() == jump_target)
                     || jump_target == symbol_target
                     || jump_target < writable.virtual_address
                     || jump_target.checked_add(8)? > writable_end
@@ -2055,7 +2131,10 @@ fn parse_dynamic_relocations<'a>(
         relocations: DynamicRelocations {
             table_address: table.virtual_address,
             relocation_address: rela_address,
-            jump_relocation_address,
+            jump_relocation_address: match jump_relocation_address {
+                Some(address) => NonZeroU64::new(address),
+                None => None,
+            },
             relocation_count,
             relocation_target: target,
             relocation_addend: addend,
@@ -2069,6 +2148,7 @@ fn parse_dynamic_relocations<'a>(
             preinit_relocation_target,
             preinit_relocation_addend,
             init_array,
+            tls_relocation_target,
             symbol_relocation,
             jump_slot_relocation,
             secondary_symbol_relocation,
@@ -2081,6 +2161,28 @@ fn parse_dynamic_relocations<'a>(
         needed_libraries,
         soname,
     })
+}
+
+fn parse_tls_relocation(
+    record: &[u8],
+    writable_start: u64,
+    writable_end: u64,
+    relative_target: u64,
+) -> Option<NonZeroU64> {
+    if record.len() != RELA_ENTRY_SIZE {
+        return None;
+    }
+    let target = read_u64(record, 0)?;
+    let info = read_u64(record, 8)?;
+    let addend = read_u64(record, 16)?;
+    (info as u32 == R_X86_64_TPOFF64
+        && info >> 32 == 0
+        && addend == 0
+        && target.is_multiple_of(8)
+        && target != relative_target
+        && target >= writable_start
+        && target.checked_add(8)? <= writable_end)
+        .then(|| NonZeroU64::new(target))?
 }
 
 fn virtual_file_bytes<'a>(
@@ -2636,7 +2738,7 @@ pub(crate) fn verify_interpreted_plan() -> bool {
             dynamic.table_address == 0x40_4008
                 && dynamic.relocation_address
                     == 0x3f_f000 + (ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE) as u64
-                && dynamic.jump_relocation_address
+                && dynamic.jump_relocation_address.map(NonZeroU64::get)
                     == Some(
                         0x3f_f000
                             + (ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE + 2 * RELA_ENTRY_SIZE)

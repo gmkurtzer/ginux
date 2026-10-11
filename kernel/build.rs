@@ -181,6 +181,14 @@ fn main() {
         status.success(),
         "clang failed to assemble linked Linux dependency"
     );
+    let linked_dependency_elf =
+        fs::read(&linked_dependency_object).expect("failed to read linked Linux dependency object");
+    assert_eq!(
+        elf_section_relocation_type_count(&linked_dependency_elf, b".text", 22)
+            .expect("failed to inspect linked Linux dependency TLS relocations"),
+        1,
+        "linked Linux dependency must contain exactly one R_X86_64_GOTTPOFF reference"
+    );
     let linked_auxiliary_object = output.join("linux-linked-auxiliary.o");
     let status = Command::new(&clang)
         .args([

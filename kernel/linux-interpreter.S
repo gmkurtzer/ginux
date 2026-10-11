@@ -361,6 +361,7 @@ ginux_linux_interpreter:
     mov qword ptr [rip + .Lprimary_relative_count], r9
     mov qword ptr [rip + .Lprimary_jump_relocation_size], r9
     mov qword ptr [rip + .Lprimary_jump_relocation_kind], r9
+    mov qword ptr [rip + .Lprimary_flags], r9
     mov qword ptr [rip + .Lprimary_init_array], r9
     mov qword ptr [rip + .Lprimary_init_array_size], r9
 #endif
@@ -397,9 +398,14 @@ ginux_linux_interpreter:
     mov qword ptr [rip + .Lprimary_jump_relocation_size], rdx
 .Lscan_primary_jump_relocation_kind:
     cmp qword ptr [rdi], 20
-    jne .Lscan_primary_init_function
+    jne .Lscan_primary_flags
     mov rdx, qword ptr [rdi + 8]
     mov qword ptr [rip + .Lprimary_jump_relocation_kind], rdx
+.Lscan_primary_flags:
+    cmp qword ptr [rdi], 30
+    jne .Lscan_primary_init_function
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lprimary_flags], rdx
 .Lscan_primary_init_function:
     cmp qword ptr [rdi], 12
     jne .Lscan_primary_init_array
@@ -433,7 +439,7 @@ ginux_linux_interpreter:
 #ifdef GINUX_LINKED
     cmp qword ptr [rip + .Lprimary_init_function], 0
     je .Linvalid_dynamic
-    cmp qword ptr [rip + .Lprimary_relocation_size], 48
+    cmp qword ptr [rip + .Lprimary_relocation_size], 72
     jne .Linvalid_dynamic
     cmp qword ptr [rip + .Lprimary_relocation_entry_size], 24
     jne .Linvalid_dynamic
@@ -442,6 +448,8 @@ ginux_linux_interpreter:
     cmp qword ptr [rip + .Lprimary_jump_relocation_size], 24
     jne .Linvalid_dynamic
     cmp qword ptr [rip + .Lprimary_jump_relocation_kind], 7
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lprimary_flags], 16
     jne .Linvalid_dynamic
     cmp qword ptr [rip + .Lprimary_init_array], 0
     je .Linvalid_dynamic
@@ -469,6 +477,20 @@ ginux_linux_interpreter:
     mov rcx, qword ptr [r11 + 24]
     add rcx, GINUX_DEPENDENCY_BASE
     mov rdx, qword ptr [r11 + 32]
+#ifdef GINUX_LINKED
+    cmp edx, 18
+    jne .Linvalid_dynamic
+    shr rdx, 32
+    test rdx, rdx
+    jne .Linvalid_dynamic
+    cmp qword ptr [r11 + 40], 0
+    jne .Linvalid_dynamic
+    mov qword ptr [rcx], -32
+
+    mov rcx, qword ptr [r11 + 48]
+    add rcx, GINUX_DEPENDENCY_BASE
+    mov rdx, qword ptr [r11 + 56]
+#endif
     shr rdx, 32
     cmp edx, dword ptr [r10 + 24]
     jne .Linvalid_dynamic
@@ -476,7 +498,11 @@ ginux_linux_interpreter:
     shl rdx, 3
     mov r12, qword ptr [r9 + rdx + 8]
     add r12, GINUX_DEPENDENCY_BASE
+#ifdef GINUX_LINKED
+    add r12, qword ptr [r11 + 64]
+#else
     add r12, qword ptr [r11 + 40]
+#endif
     mov qword ptr [rcx], r12
 
     mov rcx, qword ptr [rbp]
@@ -1174,6 +1200,8 @@ ginux_linux_interpreter:
 .Lprimary_jump_relocation_size:
     .zero 8
 .Lprimary_jump_relocation_kind:
+    .zero 8
+.Lprimary_flags:
     .zero 8
 .Lauxiliary_init_array:
     .zero 8
