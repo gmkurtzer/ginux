@@ -629,6 +629,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux minimum descriptor duplication validated\r\n");
     serial_write("ginux: Linux close-on-exec descriptor state validated\r\n");
     serial_write("ginux: Linux bounded null device validated\r\n");
+    serial_write("ginux: Linux bounded null device metadata validated\r\n");
     serial_write("ginux: Linux saved credential queries validated\r\n");
     serial_write("ginux: Linux supplementary root group validated\r\n");
     serial_write("ginux: Linux fixed execution personality validated\r\n");

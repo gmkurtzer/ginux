@@ -97,7 +97,10 @@ allocates fixed descriptor 2 once. It accepts `O_RDONLY`, `O_WRONLY`, or
 flags return `-EINVAL`, bad path memory returns `-EFAULT`, and a second open
 returns `-EMFILE`. Reads return EOF and writes discard their requested byte
 count without touching the caller buffer. This is one pathname-backed device,
-not directory traversal or a general VFS.
+not directory traversal or a general VFS. `rax = 262` (`__NR_newfstatat`)
+returns the same fixed character-device metadata for `/dev/null` without
+opening it. Only zero flags are accepted; bad path or output memory returns
+`-EFAULT`, unsupported flags return `-EINVAL`, and other paths return `-ENOENT`.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 3,

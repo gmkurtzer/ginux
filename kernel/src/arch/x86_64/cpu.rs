@@ -99,6 +99,7 @@ const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_OPENAT_SYSCALL: u64 = 257;
+const LINUX_NEWFSTATAT_SYSCALL: u64 = 262;
 const LINUX_READLINKAT_SYSCALL: u64 = 267;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
@@ -1465,6 +1466,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_READLINK_SYSCALL => linux_readlink_self(first_argument, buffer, count),
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count),
+        LINUX_NEWFSTATAT_SYSCALL => linux_newfstatat(first_argument, buffer, count, register(0)),
         LINUX_READLINKAT_SYSCALL => {
             if first_argument as u32 != LINUX_AT_FDCWD {
                 return LINUX_EBADF;
@@ -1605,6 +1607,24 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
     }
     2
+}
+
+fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; 16];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    if &path[..path_length] != b"/dev/null" {
+        return LINUX_ENOENT;
+    }
+    if !copy_to_linux_user(stat_address, &linux_console_stat()) {
+        return LINUX_EFAULT;
+    }
+    0
 }
 
 fn linux_descriptor_read(descriptor: u64) -> u64 {

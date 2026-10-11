@@ -1024,6 +1024,35 @@ ginux_linux_probe:
     syscall
     cmp rax, -24
     jne failure
+
+    mov edi, -100
+    mov esi, 0x404200
+    mov edx, 0x403350
+    xor r10d, r10d
+    mov eax, 262
+    syscall
+    cmp rax, -14
+    jne failure
+    mov esi, 0x403340
+    mov edx, 0x404200
+    mov eax, 262
+    syscall
+    cmp rax, -14
+    jne failure
+    mov edx, 0x403350
+    mov r10d, 1
+    mov eax, 262
+    syscall
+    cmp rax, -22
+    jne failure
+    xor r10d, r10d
+    mov eax, 262
+    syscall
+    test rax, rax
+    jne failure
+    cmp dword ptr [0x403368], 0x2180
+    jne failure
+
     mov edi, 2
     mov eax, 3
     syscall
