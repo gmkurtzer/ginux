@@ -39,17 +39,18 @@ CPL3 entry/return on a distinct RW/NX stack page with supervisor-only neighbors
 before restoring the kernel root. General Linux process execution and collision
 policy remain separate milestones.
 
-That Linux proof also reserves one physical frame behind an initially absent
-leaf at `0x40a000`. Its bounded anonymous mapping call validates an exact
-RW/NX request before installing the leaf; unmap clears the leaf, invalidates
-the local translation, and scrubs the frame before it can be installed again.
+That Linux proof also reserves two physical frames behind initially absent
+leaves at `0x40a000` and `0x40b000`. Its bounded anonymous mapping call
+validates an exact one- or two-page RW/NX request before installing any leaf;
+unmap requires the complete active extent, clears its leaves, invalidates the
+local translations, and scrubs both frames before they can be installed again.
 While active, its writable leaf can be irreversibly sealed read-only; copy
 permissions change with the hardware leaf, and unmap accepts either state.
 Bounded discard validates the same owned leaf and zeros its frame in place,
 preserving whichever writable state the mapping currently has.
-The matching residency query reports one present page only while this modeled
-leaf is active and does not walk or disclose any caller-selected address.
-The gate observes the leaf absent after ring-3 exit. This is a single-core,
+The matching residency query reports each present page only while this modeled
+extent is active and does not walk or disclose any caller-selected address.
+The gate observes both leaves absent after ring-3 exit. This is a single-core,
 single-slot lifecycle, not a general VMA allocator or TLB-shootdown protocol.
 
 Completed proof address-space page-table and data frames are cleared and

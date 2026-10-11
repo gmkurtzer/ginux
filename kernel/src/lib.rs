@@ -612,6 +612,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux static executable metadata validated\r\n");
     serial_write("ginux: Linux bounded brk heap validated\r\n");
     serial_write("ginux: Linux bounded anonymous mapping lifecycle validated\r\n");
+    serial_write("ginux: Linux two-page anonymous extent validated\r\n");
     serial_write("ginux: Linux anonymous mapping write seal validated\r\n");
     serial_write("ginux: Linux anonymous mapping discard validated\r\n");
     serial_write("ginux: Linux anonymous mapping residency validated\r\n");

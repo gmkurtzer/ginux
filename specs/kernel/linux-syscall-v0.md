@@ -206,24 +206,26 @@ one of those timers and optionally returns its previous disabled value. Arming
 a timer returns `-ENOSYS` until asynchronous signal delivery exists. Invalid
 selectors return `-EINVAL`; invalid complete input or output ranges return
 `-EFAULT`, and rejected requests do not partially change the old-value output.
-`rax = 9` (`__NR_mmap`) admits one anonymous private 4096-byte RW/NX mapping at
-fixed kernel-selected address `0x40a000`. It requires a null hint, exact page
-length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and
-offset zero. Unsupported arguments return `-EINVAL`; a request while the sole
-slot is occupied returns `-ENOMEM`. The kernel installs an allocator-owned,
-zero-filled frame only after validating the whole request. `rax = 11`
-(`__NR_munmap`) accepts only that exact address and length, clears the hardware
-leaf, invalidates its TLB entry, and scrubs the physical frame before reuse.
-Repeating that exact unmap succeeds. The probe writes through the mapping,
-uses it for syscall copy-out, proves copy-in rejects it after unmap, remaps it
-to observe zeroes, and exits with the leaf absent. This is not a general VMA
-allocator: hints, fixed mappings, files, sharing, partial ranges, multiple
-mappings, executable memory, and mapping growth are unsupported.
-`rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for that exact active
-page. It validates that the leaf still maps the allocator-owned frame, then
-zeros the complete frame through the supervisor direct map without changing
-its present, user, NX, or writable state. The proof discards a sealed
-read-only mapping, observes zeroes from ring 3, and still unmaps it normally.
+`rax = 9` (`__NR_mmap`) admits one anonymous private one- or two-page RW/NX
+extent at fixed kernel-selected address `0x40a000`. It requires a null hint,
+an exact 4096- or 8192-byte length, `PROT_READ | PROT_WRITE`,
+`MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and offset zero. Unsupported arguments
+return `-EINVAL`; a request while the sole extent is occupied returns
+`-ENOMEM`. The kernel installs zero-filled, allocator-owned frames only after
+validating the whole request and rolls back the first leaf if installing the
+second fails. `rax = 11` (`__NR_munmap`) accepts only the complete active
+extent, clears its hardware leaves, invalidates their TLB entries, and scrubs
+the physical frames before reuse. Repeating a supported exact unmap succeeds.
+The probe crosses the two-page boundary with syscall copy-out, proves both
+pages are resident and independently zeroed, rejects partial unmap, and exits
+with both leaves absent. This is not a general VMA allocator: hints, fixed
+mappings, files, sharing, partial ranges, multiple extents, executable memory,
+and mapping growth are unsupported.
+`rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for the exact active
+extent. It validates that every leaf still maps its allocator-owned frame, then
+zeros the frames through the supervisor direct map without changing their
+present, user, NX, or writable state. The proof also discards a sealed
+one-page read-only mapping, observes zeroes from ring 3, and unmaps it normally.
 Other advice, ranges, or inactive mappings return `-EINVAL` without changing
 the contents. There is no paging policy, reclamation queue, or lazy refill.
 `rax = 27` (`__NR_mincore`) accepts that exact page and length while active,

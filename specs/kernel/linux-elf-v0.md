@@ -109,9 +109,9 @@ segment ranges; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
 map. An owned page at `0x406000` supplies one zero-filled RW/NX heap page. The
 page at `0x407000` remains an unmapped lower stack guard, and an owned page at
-`0x408000` supplies a RW/NX stack; `0x409000` remains an upper guard. A final
-owned frame is initially absent at `0x40a000` and is installed only for the
-bounded anonymous `mmap` lifecycle. Before
+`0x408000` supplies a RW/NX stack; `0x409000` remains an upper guard. Two final
+owned frames are initially absent at `0x40a000` and `0x40b000` and are
+installed only for the bounded one- or two-page anonymous `mmap` lifecycle. Before
 changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.
 It then activates the root, observes the declared ELF mappings through their

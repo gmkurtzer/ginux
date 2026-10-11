@@ -38,7 +38,7 @@ configures and queries an FS-relative
 TLS base through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's
 prior FS base afterward. Pointer-bearing calls are constrained to the RW
 segment's declared ELF memory extent, allocated heap bytes below the current
-break, the mapped user stack, or the active anonymous page. They cannot cross
+break, the mapped user stack, or the active one- or two-page anonymous extent. They cannot cross
 the stack's guard-page boundaries. Invalid ranges and write arguments return Linux `-EFAULT`,
 `-EBADF`, or `-EINVAL`.
 Copy-in may also read the declared RX ELF extent, while copy-out rejects it.

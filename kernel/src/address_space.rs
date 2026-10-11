@@ -78,9 +78,11 @@ pub(crate) fn verify_linux_elf_mapping(
     let mmap_virtual_page = stack_virtual_page
         .checked_add(2 * PAGE_SIZE as u64)
         .unwrap_or(0);
+    let mmap_tail_virtual_page = mmap_virtual_page.checked_add(PAGE_SIZE as u64).unwrap_or(0);
     let heap_indexes = indexes(heap_virtual_page);
     let stack_indexes = indexes(stack_virtual_page);
     let mmap_indexes = indexes(mmap_virtual_page);
+    let mmap_tail_indexes = indexes(mmap_tail_virtual_page);
     let Some(protected_end) = protected_start.checked_add(protected_size as u64) else {
         return false;
     };
@@ -111,15 +113,18 @@ pub(crate) fn verify_linux_elf_mapping(
         || heap_virtual_page == 0
         || stack_virtual_page == 0
         || mmap_virtual_page == 0
+        || mmap_tail_virtual_page == 0
         || overlaps_protected(heap_virtual_page)
         || overlaps_protected(stack_virtual_page)
         || overlaps_protected(mmap_virtual_page)
+        || overlaps_protected(mmap_tail_virtual_page)
         || first_indexes[..3] != second_indexes[..3]
         || first_last_indexes[..3] != first_indexes[..3]
         || second_last_indexes[..3] != first_indexes[..3]
         || heap_indexes[..3] != first_indexes[..3]
         || stack_indexes[..3] != first_indexes[..3]
         || mmap_indexes[..3] != first_indexes[..3]
+        || mmap_tail_indexes[..3] != first_indexes[..3]
         || first_indexes[0] != 0
         || first_indexes[1] != 0
         || second.virtual_address != second.virtual_page
@@ -140,11 +145,11 @@ pub(crate) fn verify_linux_elf_mapping(
     {
         return false;
     }
-    let Some(frames) = memory::allocate_frames::<16>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<17>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, first_fourth_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page] =
+    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, first_fourth_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page, mmap_tail_page] =
         addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
@@ -250,6 +255,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 })
                 || zero_frame(heap_page).is_none()
                 || zero_frame(mmap_page).is_none()
+                || zero_frame(mmap_tail_page).is_none()
             {
                 return None;
             }
@@ -306,6 +312,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 .add(stack_indexes[3])
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
             table_entries.add(mmap_indexes[3]).write(0);
+            table_entries.add(mmap_tail_indexes[3]).write(0);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
             let stack_offset = PAGE_SIZE - 48 * size_of::<u64>();
@@ -453,6 +460,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 && lower_guard & USER == 0
                 && upper_guard & USER == 0
                 && mmap_entry == 0
+                && table_entries.add(mmap_tail_indexes[3]).read() == 0
                 && header_entries_valid
                 && crate::linux_elf::materialized_page_matches(first, 0, first_bytes)
                 && (first.page_count == 1
@@ -544,9 +552,10 @@ pub(crate) fn verify_linux_elf_mapping(
                     heap: heap_virtual_page as usize,
                     heap_size: PAGE_SIZE,
                     mmap: mmap_virtual_page as usize,
-                    mmap_frame: mmap_page,
+                    mmap_frames: [mmap_page, mmap_tail_page],
                 });
-            let mapping_removed = table_entries.add(mmap_indexes[3]).read() == 0;
+            let mapping_removed = table_entries.add(mmap_indexes[3]).read() == 0
+                && table_entries.add(mmap_tail_indexes[3]).read() == 0;
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
             Some(executed && mapping_removed && restored)
