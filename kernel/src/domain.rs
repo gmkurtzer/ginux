@@ -1,8 +1,13 @@
 use crate::capability::{Handle, Rights, Table as CapabilityTable};
 use crate::manifest::Manifest;
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
+
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+static mut GLOBAL_MANAGER: MaybeUninit<Manager> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DomainId {
@@ -45,6 +50,7 @@ pub(crate) struct Manager {
     domains: [Option<Domain>; MAX_DOMAINS],
     generations: [u32; MAX_DOMAINS],
     control_plane_created: bool,
+    control_plane_id: Option<DomainId>,
 }
 
 impl Manager {
@@ -53,6 +59,7 @@ impl Manager {
             domains: [const { None }; MAX_DOMAINS],
             generations: [0; MAX_DOMAINS],
             control_plane_created: false,
+            control_plane_id: None,
         }
     }
 
@@ -83,6 +90,7 @@ impl Manager {
             boot_root_count: grants.len(),
         });
         self.control_plane_created = true;
+        self.control_plane_id = Some(id);
         Some(id)
     }
 
@@ -94,7 +102,10 @@ impl Manager {
     }
 }
 
-pub(crate) fn create_and_verify_control_plane(manifest: &Manifest) -> Option<u64> {
+pub(crate) fn initialize_control_plane(manifest: &Manifest) -> Option<u64> {
+    if INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
     const HOST_CONTROL: u64 = 1;
     const CONSOLE: u64 = 2;
     let mut grants = [BootGrant::new(0, Rights::READ); MAX_BOOT_GRANTS];
@@ -121,5 +132,33 @@ pub(crate) fn create_and_verify_control_plane(manifest: &Manifest) -> Option<u64
     {
         return None;
     }
-    Some((u64::from(id.generation) << 16) | u64::from(id.slot))
+    let encoded = encode_id(id);
+    unsafe {
+        core::ptr::addr_of_mut!(GLOBAL_MANAGER).write(MaybeUninit::new(manager));
+    }
+    INITIALIZED.store(true, Ordering::Release);
+    control_plane_permits(0, HOST_CONTROL, Rights::MANAGE).then_some(encoded)
+}
+
+pub(crate) fn control_plane_permits(root_index: usize, object: u64, rights: Rights) -> bool {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return false;
+    }
+    unsafe {
+        let manager = &*core::ptr::addr_of!(GLOBAL_MANAGER).cast::<Manager>();
+        let Some(id) = manager.control_plane_id else {
+            return false;
+        };
+        let Some(domain) = manager.domain(id) else {
+            return false;
+        };
+        let Some(handle) = domain.boot_roots.get(root_index).copied().flatten() else {
+            return false;
+        };
+        domain.capabilities.permits(handle, object, rights)
+    }
+}
+
+const fn encode_id(id: DomainId) -> u64 {
+    (id.generation as u64) << 16 | id.slot as u64
 }

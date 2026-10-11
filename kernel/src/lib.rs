@@ -322,10 +322,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: capability derivation and revocation verified\r\n");
 
-    let Some(control_plane) = domain::create_and_verify_control_plane(&boot_manifest) else {
+    let Some(control_plane) = domain::initialize_control_plane(&boot_manifest) else {
         kernel_fail("ginux: control-plane domain construction failed\r\n");
     };
-    serial_write("ginux: control-plane domain metadata sealed\r\nginux: control-plane domain ID: ");
+    serial_write(
+        "ginux: persistent control-plane domain sealed\r\nginux: control-plane domain ID: ",
+    );
     serial_write_u64(control_plane);
     serial_write("\r\n");
 
