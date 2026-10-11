@@ -114,6 +114,25 @@ the monotonic deadline has elapsed. The descriptor also participates in
 and epoll together, observes one-shot readiness, verifies failed-read
 non-consumption, consumes periodic and already-expired absolute timers, and
 releases both descriptors.
+`rax = 22` (`__NR_pipe`) and `rax = 293` (`__NR_pipe2`) allocate one
+process-local unidirectional pipe using the two lowest free auxiliary
+descriptors and atomically copy the read and write descriptor numbers to an
+eight-byte user array. The pipe has a fixed 256-byte FIFO. `pipe2` accepts
+`O_CLOEXEC` and `O_NONBLOCK`; unsupported flags return `-EINVAL`, invalid
+output memory returns `-EFAULT` without allocating, and an existing pipe or
+fewer than two free slots returns `-EMFILE`. Writes of one through 256 bytes
+are all-or-nothing: invalid input leaves the FIFO unchanged, insufficient
+capacity returns `-EAGAIN` in nonblocking mode or `-ENOSYS` without wait
+queues, and larger writes return `-EINVAL`. Reads return up to the requested
+count and consume only after successful copy-out. An empty live pipe follows
+the same nonblocking or would-block errors; closing the writer makes an empty
+read return EOF and reports `POLLHUP`, while buffered bytes remain readable.
+Closing the reader makes writes return `-EPIPE` and reports `POLLERR`; SIGPIPE
+delivery is not yet implemented. The endpoints participate in `F_GETFD`,
+`F_SETFD`, `F_GETFL`, `lseek`, `poll`, epoll, and `close`. The ring-3 proof
+checks FIFO ordering across partial reads, failed-read non-consumption, full
+buffer backpressure, epoll readiness, EOF, broken-peer handling, and legacy
+`pipe` creation.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded

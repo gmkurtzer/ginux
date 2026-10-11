@@ -59,6 +59,7 @@ const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_READV_SYSCALL: u64 = 19;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
+const LINUX_PIPE_SYSCALL: u64 = 22;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_MINCORE_SYSCALL: u64 = 27;
 const LINUX_MADVISE_SYSCALL: u64 = 28;
@@ -128,6 +129,7 @@ const LINUX_TIMERFD_SETTIME_SYSCALL: u64 = 286;
 const LINUX_TIMERFD_GETTIME_SYSCALL: u64 = 287;
 const LINUX_EVENTFD2_SYSCALL: u64 = 290;
 const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
+const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_STATX_SYSCALL: u64 = 332;
@@ -145,6 +147,7 @@ const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EAGAIN: u64 = u64::MAX - 10;
+const LINUX_EPIPE: u64 = u64::MAX - 31;
 const LINUX_EACCES: u64 = u64::MAX - 12;
 const LINUX_EEXIST: u64 = u64::MAX - 16;
 const LINUX_ENOTDIR: u64 = u64::MAX - 19;
@@ -176,6 +179,7 @@ const LINUX_AUX_DESCRIPTOR_FIRST: u64 = 2;
 const LINUX_AUX_DESCRIPTOR_LIMIT: u64 = 6;
 const LINUX_POLLIN: u16 = 1;
 const LINUX_POLLOUT: u16 = 4;
+const LINUX_POLLERR: u16 = 8;
 const LINUX_POLLHUP: u16 = 0x10;
 const LINUX_POLLNVAL: u16 = 0x20;
 const LINUX_EPOLL_CTL_ADD: u64 = 1;
@@ -186,6 +190,7 @@ const LINUX_EFD_SEMAPHORE: u64 = 1;
 const LINUX_EFD_NONBLOCK: u64 = 0x800;
 const LINUX_TFD_TIMER_ABSTIME: u64 = 1;
 const LINUX_TFD_NONBLOCK: u64 = 0x800;
+const LINUX_PIPE_CAPACITY: usize = 256;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
@@ -202,6 +207,7 @@ const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
 const LINUX_O_CLOEXEC: u64 = 0x80000;
 const LINUX_O_DIRECTORY: u64 = 0x10000;
+const LINUX_O_NONBLOCK: u64 = 0x800;
 const LINUX_PR_SET_NAME: u64 = 15;
 const LINUX_PR_GET_NAME: u64 = 16;
 const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
@@ -334,6 +340,12 @@ static ELF_PROBE_TIMERFD_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_TIMERFD_FLAGS: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_TIMERFD_INTERVAL: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_TIMERFD_DEADLINE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_PIPE_READ_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_PIPE_WRITE_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_PIPE_FLAGS: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_PIPE_LENGTH: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_PIPE_BUFFER: [AtomicU8; LINUX_PIPE_CAPACITY] =
+    [const { AtomicU8::new(0) }; LINUX_PIPE_CAPACITY];
 static ELF_PROBE_DIRECTORY_CURSORS: [AtomicU8; 4] = [const { AtomicU8::new(0) }; 4];
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
@@ -962,6 +974,13 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_TIMERFD_FLAGS.store(0, Ordering::SeqCst);
     ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
     ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
+    ELF_PROBE_PIPE_READ_DESCRIPTOR.store(0, Ordering::SeqCst);
+    ELF_PROBE_PIPE_WRITE_DESCRIPTOR.store(0, Ordering::SeqCst);
+    ELF_PROBE_PIPE_FLAGS.store(0, Ordering::SeqCst);
+    ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
+    for byte in &ELF_PROBE_PIPE_BUFFER {
+        byte.store(0, Ordering::SeqCst);
+    }
     for cursor in &ELF_PROBE_DIRECTORY_CURSORS {
         cursor.store(0, Ordering::SeqCst);
     }
@@ -1007,6 +1026,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         u64::from(ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst)),
         ELF_PROBE_TIMERFD_INTERVAL.load(Ordering::SeqCst),
         ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst),
+        u64::from(ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst)),
     ];
     let mut devices_closed = true;
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
@@ -1030,6 +1053,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && ELF_PROBE_TIMERFD_FLAGS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_TIMERFD_INTERVAL.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_TIMERFD_DEADLINE.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_PIPE_READ_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_PIPE_WRITE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_PIPE_FLAGS.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_PIPE_LENGTH.swap(0, Ordering::SeqCst) == 0
         && cursors_reset;
     if !descriptor_state_valid {
         serial_write("ginux: Linux descriptor state leak:");
@@ -1385,7 +1412,9 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_LSEEK_SYSCALL => {
-            if linux_eventfd_descriptor(first_argument) || linux_timerfd_descriptor(first_argument)
+            if linux_eventfd_descriptor(first_argument)
+                || linux_timerfd_descriptor(first_argument)
+                || linux_pipe_descriptor(first_argument)
             {
                 return LINUX_ESPIPE;
             }
@@ -1480,6 +1509,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_READV_SYSCALL => linux_descriptor_readv(first_argument, buffer, count),
         LINUX_WRITEV_SYSCALL => linux_descriptor_writev(first_argument, buffer, count),
+        LINUX_PIPE_SYSCALL => linux_pipe(first_argument, 0),
         LINUX_MINCORE_SYSCALL => linux_mincore(first_argument, buffer, count),
         LINUX_MADVISE_SYSCALL => linux_madvise(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
@@ -1697,6 +1727,7 @@ extern "sysv64" fn linux_syscall_handler(
             linux_readlink_self(buffer, count, register(0))
         }
         LINUX_EPOLL_CREATE1_SYSCALL => linux_epoll_create1(first_argument),
+        LINUX_PIPE2_SYSCALL => linux_pipe(first_argument, buffer),
         LINUX_TIMERFD_CREATE_SYSCALL => linux_timerfd_create(first_argument, buffer),
         LINUX_EVENTFD_SYSCALL => linux_eventfd(first_argument, 0),
         LINUX_EVENTFD2_SYSCALL => linux_eventfd(first_argument, buffer),
@@ -2233,6 +2264,9 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     if let Some(result) = linux_timerfd_read(descriptor, address, count) {
         return result;
     }
+    if let Some(result) = linux_pipe_read(descriptor, address, count) {
+        return result;
+    }
     let device = linux_device_descriptor(descriptor);
     if device & LINUX_DEVICE_DIRECTORY != 0 {
         return LINUX_EISDIR;
@@ -2587,6 +2621,135 @@ fn linux_store_timespec(timespec: &mut [u8], nanoseconds: u64) {
     timespec[8..16].copy_from_slice(&(nanoseconds % NANOSECONDS_PER_SECOND).to_ne_bytes());
 }
 
+fn linux_pipe(address: u64, flags: u64) -> u64 {
+    if flags & !(LINUX_O_NONBLOCK | LINUX_O_CLOEXEC) != 0 {
+        return LINUX_EINVAL;
+    }
+    if ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst) != 0
+        || ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst) != 0
+    {
+        return LINUX_EMFILE;
+    }
+    let mut descriptors = [0_u64; 2];
+    let mut found = 0;
+    for descriptor in LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT {
+        if linux_aux_descriptor_free(descriptor) {
+            descriptors[found] = descriptor;
+            found += 1;
+            if found == descriptors.len() {
+                break;
+            }
+        }
+    }
+    if found != descriptors.len() {
+        return LINUX_EMFILE;
+    }
+    let mut output = [0_u8; 8];
+    output[..4].copy_from_slice(&(descriptors[0] as u32).to_ne_bytes());
+    output[4..].copy_from_slice(&(descriptors[1] as u32).to_ne_bytes());
+    if !copy_to_linux_user(address, &output) {
+        return LINUX_EFAULT;
+    }
+    for byte in &ELF_PROBE_PIPE_BUFFER {
+        byte.store(0, Ordering::SeqCst);
+    }
+    ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
+    ELF_PROBE_PIPE_FLAGS.store(flags as u32, Ordering::SeqCst);
+    ELF_PROBE_PIPE_READ_DESCRIPTOR.store(descriptors[0] as u8, Ordering::SeqCst);
+    ELF_PROBE_PIPE_WRITE_DESCRIPTOR.store(descriptors[1] as u8, Ordering::SeqCst);
+    for descriptor in descriptors {
+        if flags & LINUX_O_CLOEXEC != 0 {
+            ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
+        } else {
+            ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+        }
+    }
+    0
+}
+
+fn linux_pipe_read(descriptor: u64, address: u64, count: u64) -> Option<u64> {
+    if !linux_pipe_read_descriptor(descriptor) {
+        return None;
+    }
+    if count == 0 {
+        return Some(0);
+    }
+    let length = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) as usize;
+    if length == 0 {
+        if ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+            return Some(0);
+        }
+        return Some(
+            if ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+                LINUX_EAGAIN
+            } else {
+                LINUX_ENOSYS
+            },
+        );
+    }
+    let requested = usize::try_from(count).unwrap_or(usize::MAX);
+    let returned = length.min(requested);
+    let mut output = [0_u8; LINUX_PIPE_CAPACITY];
+    for (target, source) in output[..returned]
+        .iter_mut()
+        .zip(&ELF_PROBE_PIPE_BUFFER[..returned])
+    {
+        *target = source.load(Ordering::SeqCst);
+    }
+    if !copy_to_linux_user(address, &output[..returned]) {
+        return Some(LINUX_EFAULT);
+    }
+    for index in 0..length - returned {
+        let value = ELF_PROBE_PIPE_BUFFER[index + returned].load(Ordering::SeqCst);
+        ELF_PROBE_PIPE_BUFFER[index].store(value, Ordering::SeqCst);
+    }
+    for byte in &ELF_PROBE_PIPE_BUFFER[length - returned..length] {
+        byte.store(0, Ordering::SeqCst);
+    }
+    ELF_PROBE_PIPE_LENGTH.store((length - returned) as u32, Ordering::SeqCst);
+    Some(returned as u64)
+}
+
+fn linux_pipe_write(descriptor: u64, address: u64, count: u64) -> Option<u64> {
+    if !linux_pipe_write_descriptor(descriptor) {
+        return None;
+    }
+    if count == 0 {
+        return Some(0);
+    }
+    if ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+        return Some(LINUX_EPIPE);
+    }
+    let Ok(requested) = usize::try_from(count) else {
+        return Some(LINUX_EINVAL);
+    };
+    if requested > LINUX_PIPE_CAPACITY {
+        return Some(LINUX_EINVAL);
+    }
+    let length = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) as usize;
+    if requested > LINUX_PIPE_CAPACITY - length {
+        return Some(
+            if ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+                LINUX_EAGAIN
+            } else {
+                LINUX_ENOSYS
+            },
+        );
+    }
+    let mut input = [0_u8; LINUX_PIPE_CAPACITY];
+    if !copy_from_linux_user(address, &mut input[..requested]) {
+        return Some(LINUX_EFAULT);
+    }
+    for (target, source) in ELF_PROBE_PIPE_BUFFER[length..length + requested]
+        .iter()
+        .zip(&input[..requested])
+    {
+        target.store(*source, Ordering::SeqCst);
+    }
+    ELF_PROBE_PIPE_LENGTH.store((length + requested) as u32, Ordering::SeqCst);
+    Some(count)
+}
+
 fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u64) -> u64 {
     if !linux_epoll_descriptor(epoll) {
         return LINUX_EBADF;
@@ -2644,7 +2807,7 @@ fn linux_epoll_wait(epoll: u64, address: u64, maximum: u64, timeout: u64) -> u64
         0
     } else {
         linux_descriptor_poll_events(target as i32, requested)
-            & (LINUX_POLLIN | LINUX_POLLOUT | LINUX_POLLHUP)
+            & (LINUX_POLLIN | LINUX_POLLOUT | LINUX_POLLERR | LINUX_POLLHUP)
     };
     if ready == 0 {
         return if timeout as u32 == 0 { 0 } else { LINUX_ENOSYS };
@@ -2716,6 +2879,7 @@ fn linux_descriptor_open(descriptor: u64) -> bool {
         || linux_epoll_descriptor(descriptor)
         || linux_eventfd_descriptor(descriptor)
         || linux_timerfd_descriptor(descriptor)
+        || linux_pipe_descriptor(descriptor)
 }
 
 fn linux_epoll_descriptor(descriptor: u64) -> bool {
@@ -2733,12 +2897,27 @@ fn linux_timerfd_descriptor(descriptor: u64) -> bool {
         && u64::from(ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
 }
 
+fn linux_pipe_read_descriptor(descriptor: u64) -> bool {
+    descriptor >= LINUX_AUX_DESCRIPTOR_FIRST
+        && u64::from(ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
+}
+
+fn linux_pipe_write_descriptor(descriptor: u64) -> bool {
+    descriptor >= LINUX_AUX_DESCRIPTOR_FIRST
+        && u64::from(ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
+}
+
+fn linux_pipe_descriptor(descriptor: u64) -> bool {
+    linux_pipe_read_descriptor(descriptor) || linux_pipe_write_descriptor(descriptor)
+}
+
 fn linux_aux_descriptor_free(descriptor: u64) -> bool {
     (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor)
         && linux_device_descriptor(descriptor) == 0
         && !linux_epoll_descriptor(descriptor)
         && !linux_eventfd_descriptor(descriptor)
         && !linux_timerfd_descriptor(descriptor)
+        && !linux_pipe_descriptor(descriptor)
 }
 
 fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
@@ -2775,6 +2954,26 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
         let ready = deadline != 0 && linux_elapsed_nanoseconds().is_some_and(|now| now >= deadline);
         return if ready { requested & LINUX_POLLIN } else { 0 };
     }
+    if linux_pipe_read_descriptor(descriptor) {
+        let mut returned = 0;
+        if ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) != 0 {
+            returned |= requested & LINUX_POLLIN;
+        }
+        if ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+            returned |= LINUX_POLLHUP;
+        }
+        return returned;
+    }
+    if linux_pipe_write_descriptor(descriptor) {
+        if ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+            return LINUX_POLLERR;
+        }
+        return if ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) < LINUX_PIPE_CAPACITY as u32 {
+            requested & LINUX_POLLOUT
+        } else {
+            0
+        };
+    }
     let device = linux_device_descriptor(descriptor);
     if device == 0 {
         return LINUX_POLLNVAL;
@@ -2796,6 +2995,9 @@ fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
     }
     if linux_timerfd_descriptor(descriptor) {
         return LINUX_EINVAL;
+    }
+    if let Some(result) = linux_pipe_write(descriptor, address, count) {
+        return result;
     }
     let device = linux_device_descriptor(descriptor);
     let access = device & 3;
@@ -3012,6 +3214,27 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
         return 0;
     }
+    if linux_pipe_read_descriptor(descriptor) {
+        ELF_PROBE_PIPE_READ_DESCRIPTOR.store(0, Ordering::SeqCst);
+        ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
+        for byte in &ELF_PROBE_PIPE_BUFFER {
+            byte.store(0, Ordering::SeqCst);
+        }
+        if ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+            ELF_PROBE_PIPE_FLAGS.store(0, Ordering::SeqCst);
+        }
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+        return 0;
+    }
+    if linux_pipe_write_descriptor(descriptor) {
+        ELF_PROBE_PIPE_WRITE_DESCRIPTOR.store(0, Ordering::SeqCst);
+        if ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+            ELF_PROBE_PIPE_FLAGS.store(0, Ordering::SeqCst);
+            ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
+        }
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+        return 0;
+    }
     if ELF_PROBE_DEVICE_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
         .swap(0, Ordering::SeqCst)
         == 0
@@ -3179,6 +3402,29 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
                     2 | u64::from(
                         ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst) & LINUX_TFD_NONBLOCK as u32,
                     )
+                }
+                _ => LINUX_EINVAL,
+            };
+        }
+        if linux_pipe_descriptor(descriptor) {
+            return match command {
+                LINUX_F_GETFD => {
+                    u64::from((ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst) >> descriptor) & 1)
+                }
+                LINUX_F_SETFD => {
+                    if argument & u64::from(LINUX_FD_CLOEXEC) != 0 {
+                        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
+                    } else {
+                        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+                    }
+                    0
+                }
+                LINUX_F_GETFL => {
+                    let access = u64::from(linux_pipe_write_descriptor(descriptor));
+                    access
+                        | u64::from(
+                            ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32,
+                        )
                 }
                 _ => LINUX_EINVAL,
             };

@@ -623,6 +623,11 @@ if ! grep -q '^ginux: Linux bounded timerfd expiration validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded pipe notification validated' "$output_file"; then
+    echo "Boot test failed: Linux bounded pipe notification was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux bounded syscall stack movement validated' "$output_file"; then
     echo "Boot test failed: Linux bounded syscall stack movement was not validated." >&2
     exit 1
