@@ -434,6 +434,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: generation exhaustion invariant failed\r\n");
     }
     serial_write("ginux: exhausted generational slots skipped\r\n");
+    if !domain::verify_frame_quarantine_registry_invariants() {
+        kernel_fail("ginux: frame quarantine registry invariant failed\r\n");
+    }
+    serial_write("ginux: per-service frame quarantines isolated\r\n");
     if !domain::verify_auxiliary_service_registry_invariants() {
         kernel_fail("ginux: auxiliary service registry invariant failed\r\n");
     }

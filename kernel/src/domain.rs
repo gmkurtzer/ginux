@@ -120,6 +120,12 @@ struct EventQueue {
     last_delivered_sequence: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FrameQuarantine {
+    domain: DomainId,
+    service: ServiceId,
+}
+
 impl EventQueue {
     const fn new() -> Self {
         Self {
@@ -205,7 +211,7 @@ pub(crate) struct Manager {
     service_started: bool,
     remaining_service_restarts: u16,
     total_service_restarts: u16,
-    quarantined_frame_owner: Option<DomainId>,
+    quarantined_frame_owners: [Option<FrameQuarantine>; MAX_SERVICE_IDENTITIES],
 }
 
 impl Manager {
@@ -227,7 +233,7 @@ impl Manager {
             service_started: false,
             remaining_service_restarts: SERVICE_RESTART_BUDGET,
             total_service_restarts: 0,
-            quarantined_frame_owner: None,
+            quarantined_frame_owners: [None; MAX_SERVICE_IDENTITIES],
         }
     }
 
@@ -293,6 +299,34 @@ impl Manager {
             slot: u16::try_from(slot).ok()?,
             generation,
         })
+    }
+
+    fn service_identity_slot(&self, id: ServiceId) -> Option<usize> {
+        let slot = usize::from(id.slot);
+        (slot < MAX_SERVICE_IDENTITIES && self.service_generations[slot] == id.generation)
+            .then_some(slot)
+    }
+
+    fn record_frame_quarantine(&mut self, domain: DomainId, service: ServiceId) -> bool {
+        let Some(slot) = self.service_identity_slot(service) else {
+            return false;
+        };
+        if self.quarantined_frame_owners[slot].is_some() {
+            return false;
+        }
+        self.quarantined_frame_owners[slot] = Some(FrameQuarantine { domain, service });
+        true
+    }
+
+    fn clear_frame_quarantine(&mut self, domain: DomainId, service: ServiceId) -> bool {
+        let Some(slot) = self.service_identity_slot(service) else {
+            return false;
+        };
+        if self.quarantined_frame_owners[slot] != Some(FrameQuarantine { domain, service }) {
+            return false;
+        }
+        self.quarantined_frame_owners[slot] = None;
+        true
     }
 
     fn create_service(&mut self) -> Option<DomainId> {
@@ -739,8 +773,13 @@ pub(crate) fn initialize_boot_service() -> Option<u64> {
 
 pub(crate) fn initialize_boot_service_restart() -> Option<u64> {
     let manager = global_manager_mut()?;
-    let quarantined = manager.quarantined_frame_owner?;
-    let owner = crate::memory::FrameOwner::domain(encode_id(quarantined))?;
+    let service = manager.primary_service_identity?;
+    let slot = manager.service_identity_slot(service)?;
+    let quarantine = manager.quarantined_frame_owners[slot]?;
+    if quarantine.service != service {
+        return None;
+    }
+    let owner = crate::memory::FrameOwner::domain(encode_id(quarantine.domain))?;
     if crate::memory::owner_live_frame_count(owner) != Some(7) {
         return None;
     }
@@ -916,6 +955,52 @@ pub(crate) fn verify_auxiliary_stop_revocation_invariants() -> bool {
 
 pub(crate) fn verify_generation_exhaustion_invariants() -> bool {
     verify_generation_exhaustion_invariants_inner().unwrap_or(false)
+}
+
+pub(crate) fn verify_frame_quarantine_registry_invariants() -> bool {
+    verify_frame_quarantine_registry_invariants_inner().unwrap_or(false)
+}
+
+fn verify_frame_quarantine_registry_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    let control = manager.create_control_plane(&grants)?;
+    let primary = manager.create_service()?;
+    let console_source = manager.domain(control)?.boot_roots[1]?;
+    let auxiliary = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
+        source: console_source,
+        object: 2,
+        rights: Rights::WRITE,
+    }])?;
+    let primary_service = manager.domain(primary)?.service?;
+    let auxiliary_service = manager.domain(auxiliary)?.service?;
+    let stale_auxiliary = ServiceId {
+        slot: auxiliary_service.slot,
+        generation: auxiliary_service.generation.checked_add(1)?,
+    };
+    if !manager.record_frame_quarantine(primary, primary_service)
+        || manager.record_frame_quarantine(primary, primary_service)
+        || !manager.record_frame_quarantine(auxiliary, auxiliary_service)
+        || manager.record_frame_quarantine(auxiliary, stale_auxiliary)
+        || manager.clear_frame_quarantine(primary, auxiliary_service)
+        || !manager.clear_frame_quarantine(primary, primary_service)
+    {
+        return Some(false);
+    }
+    let auxiliary_slot = usize::from(auxiliary_service.slot);
+    Some(
+        manager.quarantined_frame_owners[auxiliary_slot]
+            == Some(FrameQuarantine {
+                domain: auxiliary,
+                service: auxiliary_service,
+            })
+            && manager.clear_frame_quarantine(auxiliary, auxiliary_service)
+            && manager.quarantined_frame_owners.iter().all(Option::is_none),
+    )
 }
 
 fn verify_generation_exhaustion_invariants_inner() -> Option<bool> {
@@ -1373,10 +1458,19 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
     let Some(manager) = global_manager_mut() else {
         return false;
     };
-    if manager.quarantined_frame_owner.is_some() || !manager.retire_service(id) {
+    let Some(service) = manager.domain(id).and_then(|domain| domain.service) else {
+        return false;
+    };
+    let Some(slot) = manager.service_identity_slot(service) else {
+        return false;
+    };
+    if manager.quarantined_frame_owners[slot].is_some() || !manager.retire_service(id) {
         return false;
     }
-    manager.quarantined_frame_owner = Some(id);
+    manager.quarantined_frame_owners[slot] = Some(FrameQuarantine {
+        domain: id,
+        service,
+    });
     true
 }
 
@@ -1392,14 +1486,27 @@ pub(crate) fn adopt_quarantined_service_frames(retired_raw: u64, replacement_raw
     let Some(manager) = global_manager_mut() else {
         return false;
     };
-    if manager.quarantined_frame_owner != Some(retired)
+    let Some(service) = manager
+        .domain(replacement)
+        .and_then(|domain| domain.service)
+    else {
+        return false;
+    };
+    let Some(slot) = manager.service_identity_slot(service) else {
+        return false;
+    };
+    if manager.quarantined_frame_owners[slot]
+        != Some(FrameQuarantine {
+            domain: retired,
+            service,
+        })
         || manager.service_id != Some(replacement)
         || crate::memory::owner_live_frame_count(retired_owner) != Some(0)
         || crate::memory::owner_live_frame_count(replacement_owner) != Some(7)
     {
         return false;
     }
-    manager.quarantined_frame_owner = None;
+    manager.quarantined_frame_owners[slot] = None;
     true
 }
 
@@ -1415,14 +1522,26 @@ pub(crate) fn restore_quarantined_service_frames(retired_raw: u64, replacement_r
     let Some(manager) = global_manager_mut() else {
         return false;
     };
-    if manager.quarantined_frame_owner.is_some()
+    let Some(service) = manager
+        .domain(replacement)
+        .and_then(|domain| domain.service)
+    else {
+        return false;
+    };
+    let Some(slot) = manager.service_identity_slot(service) else {
+        return false;
+    };
+    if manager.quarantined_frame_owners[slot].is_some()
         || manager.service_id != Some(replacement)
         || crate::memory::owner_live_frame_count(retired_owner) != Some(7)
         || crate::memory::owner_live_frame_count(replacement_owner) != Some(0)
     {
         return false;
     }
-    manager.quarantined_frame_owner = Some(retired);
+    manager.quarantined_frame_owners[slot] = Some(FrameQuarantine {
+        domain: retired,
+        service,
+    });
     true
 }
 
@@ -1436,17 +1555,31 @@ pub(crate) fn complete_service_frame_quarantine(retired_raw: u64) -> bool {
     let Some(manager) = global_manager_mut() else {
         return false;
     };
-    if manager.quarantined_frame_owner != Some(retired)
+    let Some((slot, quarantine)) = manager
+        .quarantined_frame_owners
+        .iter()
+        .copied()
+        .enumerate()
+        .find_map(|(slot, quarantine)| {
+            quarantine
+                .filter(|quarantine| quarantine.domain == retired)
+                .map(|quarantine| (slot, quarantine))
+        })
+    else {
+        return false;
+    };
+    if manager.service_identity_slot(quarantine.service) != Some(slot)
         || crate::memory::owner_live_frame_count(owner) != Some(0)
     {
         return false;
     }
-    manager.quarantined_frame_owner = None;
+    manager.quarantined_frame_owners[slot] = None;
     true
 }
 
 pub(crate) fn service_frame_quarantine_is_clear() -> bool {
-    global_manager().is_some_and(|manager| manager.quarantined_frame_owner.is_none())
+    global_manager()
+        .is_some_and(|manager| manager.quarantined_frame_owners.iter().all(Option::is_none))
 }
 
 pub(crate) fn discard_unstarted_service(domain_raw: u64) -> bool {
