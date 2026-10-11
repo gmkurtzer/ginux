@@ -581,6 +581,20 @@ impl Manager {
         if domain.role != Role::AuxiliaryService || domain.state != State::Ready {
             return false;
         }
+        if domain.boot_root_count == 0
+            || domain.boot_roots[..domain.boot_root_count]
+                .iter()
+                .any(|root| {
+                    root.is_none_or(|root| domain.capabilities.authority_root(root) != Some(root))
+                })
+        {
+            return false;
+        }
+        for root in domain.boot_roots[..domain.boot_root_count].iter().flatten() {
+            if !domain.capabilities.revoke(*root) {
+                return false;
+            }
+        }
         domain.state = State::Stopping;
         true
     }
@@ -821,6 +835,49 @@ pub(crate) fn verify_auxiliary_service_registry_invariants() -> bool {
 
 pub(crate) fn verify_auxiliary_retirement_overflow_invariants() -> bool {
     verify_auxiliary_retirement_overflow_invariants_inner().unwrap_or(false)
+}
+
+pub(crate) fn verify_auxiliary_stop_revocation_invariants() -> bool {
+    verify_auxiliary_stop_revocation_invariants_inner().unwrap_or(false)
+}
+
+fn verify_auxiliary_stop_revocation_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    let control = manager.create_control_plane(&grants)?;
+    let host_source = manager.domain(control)?.boot_roots[0]?;
+    let console_source = manager.domain(control)?.boot_roots[1]?;
+    let auxiliary = manager.create_auxiliary_service_with_delegations(&[
+        DelegationGrant {
+            source: console_source,
+            object: 2,
+            rights: Rights::WRITE,
+        },
+        DelegationGrant {
+            source: host_source,
+            object: 1,
+            rights: Rights::READ,
+        },
+    ])?;
+    let console = manager.domain(auxiliary)?.boot_roots[0]?;
+    let host = manager.domain(auxiliary)?.boot_roots[1]?;
+    if !manager.permits(auxiliary, console, 2, Rights::WRITE)
+        || !manager.permits(auxiliary, host, 1, Rights::READ)
+        || !manager.request_auxiliary_stop(control, host_source, auxiliary)
+    {
+        return Some(false);
+    }
+    Some(
+        !manager.permits(auxiliary, console, 2, Rights::WRITE)
+            && !manager.permits(auxiliary, host, 1, Rights::READ)
+            && !manager.begin_operation(auxiliary)
+            && manager.domain(auxiliary)?.state == State::Stopping
+            && manager.retire_auxiliary_service(auxiliary),
+    )
 }
 
 fn verify_auxiliary_retirement_overflow_invariants_inner() -> Option<bool> {

@@ -54,6 +54,10 @@ operations, and retirement remains blocked until existing operations drain.
 The stop transition requires the persistent control-plane generation and its
 host-control capability with `MANAGE`; an auxiliary service cannot supervise a
 peer, and a control-plane capability for another object is insufficient.
+An accepted stop atomically revokes every delegated capability root and all of
+its derived children before publishing the stopping state. This removes both
+single- and multi-root authority immediately even while an already-accounted
+operation is still draining.
 Repeated or stale stop requests fail closed, and a newly reused slot starts in
 the ready state. Successful retirement publishes lifecycle event kind 3 with
 the exact retired generation and no synthetic fault metadata. Reusing a domain

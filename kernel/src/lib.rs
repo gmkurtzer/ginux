@@ -439,6 +439,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: auxiliary supervision authority enforced\r\n");
     serial_write("ginux: auxiliary retirement events sequenced\r\n");
     serial_write("ginux: auxiliary retirement publication atomic\r\n");
+    if !domain::verify_auxiliary_stop_revocation_invariants() {
+        kernel_fail("ginux: auxiliary stop revocation invariant failed\r\n");
+    }
+    serial_write("ginux: auxiliary stop authority revoked\r\n");
     if !domain::verify_auxiliary_retirement_overflow_invariants() {
         kernel_fail("ginux: auxiliary retirement overflow invariant failed\r\n");
     }

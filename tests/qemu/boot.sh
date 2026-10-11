@@ -313,6 +313,11 @@ if ! grep -q '^ginux: auxiliary retirement publication atomic' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary stop authority revoked' "$output_file"; then
+    echo "Boot test failed: auxiliary stop authority was not revoked." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: auxiliary retirement overflow summarized' "$output_file"; then
     echo "Boot test failed: auxiliary retirement overflow was not summarized." >&2
     exit 1
