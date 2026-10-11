@@ -53,9 +53,13 @@ Every scheduler-triggered CR3 load first requires the target to equal the
 current scheduler record, fall below the 4 GiB bootstrap ceiling, and have a
 bounded PML4 shape: entry zero must exactly share the kernel's supervisor-only
 identity entry, entry one must be a present writable user hierarchy, and all
-other entries must be absent. The hardware readback still has to match after
-the load. This prevents an internally corrupted or stale scheduler root from
-silently widening a domain's top-level mappings.
+other entries must be absent. Validation follows the user hierarchy and
+requires exactly one non-large PDPT entry, one non-large directory entry, and
+the fixed code/guard/stack/guard/stack leaf layout with W^X permissions. All
+seven page-table and payload frames must be distinct, nonzero, and below 4 GiB;
+every unmodeled entry must remain absent. The hardware readback still has to
+match after the load. This prevents an internally corrupted or stale scheduler
+root from silently widening a domain's mappings.
 
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3

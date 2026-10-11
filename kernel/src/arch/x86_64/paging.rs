@@ -26,11 +26,75 @@ pub(crate) fn user_root_has_safe_shape(root: u64) -> bool {
     let kernel_entry = unsafe { core::ptr::addr_of!(PML4.0).cast::<u64>().read() };
     let shared = unsafe { entries.read() };
     let user = unsafe { entries.add(1).read() };
-    shared == kernel_entry
-        && shared & PRESENT != 0
-        && shared & USER == 0
-        && user & (PRESENT | WRITABLE | USER) == (PRESENT | WRITABLE | USER)
-        && (2..ENTRY_COUNT).all(|index| unsafe { entries.add(index).read() == 0 })
+    if shared != kernel_entry
+        || shared & PRESENT == 0
+        || shared & USER != 0
+        || user & (PRESENT | WRITABLE | USER) != (PRESENT | WRITABLE | USER)
+        || user & (LARGE_PAGE | NO_EXECUTE) != 0
+        || !(2..ENTRY_COUNT).all(|index| unsafe { entries.add(index).read() == 0 })
+    {
+        return false;
+    }
+    let pdpt_address = user & ADDRESS_MASK as u64;
+    let Some(pdpt_entry) = single_user_table_entry(pdpt_address) else {
+        return false;
+    };
+    let directory_address = pdpt_entry & ADDRESS_MASK as u64;
+    let Some(directory_entry) = single_user_table_entry(directory_address) else {
+        return false;
+    };
+    let table_address = directory_entry & ADDRESS_MASK as u64;
+    if table_address == 0 || table_address >= INITIAL_IDENTITY_LIMIT as u64 {
+        return false;
+    }
+    let table = table_address as *const u64;
+    let code = unsafe { table.read() };
+    let first_guard = unsafe { table.add(1).read() };
+    let first_stack = unsafe { table.add(2).read() };
+    let second_guard = unsafe { table.add(3).read() };
+    let second_stack = unsafe { table.add(4).read() };
+    let code_address = code & ADDRESS_MASK as u64;
+    let first_stack_address = first_stack & ADDRESS_MASK as u64;
+    let second_stack_address = second_stack & ADDRESS_MASK as u64;
+    let frames = [
+        root,
+        pdpt_address,
+        directory_address,
+        table_address,
+        code_address,
+        first_stack_address,
+        second_stack_address,
+    ];
+    code & (PRESENT | USER) == (PRESENT | USER)
+        && code & (WRITABLE | NO_EXECUTE | LARGE_PAGE) == 0
+        && first_guard == 0
+        && first_stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+            == (PRESENT | WRITABLE | USER | NO_EXECUTE)
+        && first_stack & LARGE_PAGE == 0
+        && second_guard == 0
+        && second_stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+            == (PRESENT | WRITABLE | USER | NO_EXECUTE)
+        && second_stack & LARGE_PAGE == 0
+        && (5..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
+        && frames
+            .iter()
+            .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)
+        && frames
+            .iter()
+            .enumerate()
+            .all(|(index, frame)| !frames[index + 1..].contains(frame))
+}
+
+fn single_user_table_entry(table_address: u64) -> Option<u64> {
+    if table_address == 0 || table_address >= INITIAL_IDENTITY_LIMIT as u64 {
+        return None;
+    }
+    let table = table_address as *const u64;
+    let entry = unsafe { table.read() };
+    (entry & (PRESENT | WRITABLE | USER) == (PRESENT | WRITABLE | USER)
+        && entry & (LARGE_PAGE | NO_EXECUTE) == 0
+        && (1..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 }))
+    .then_some(entry)
 }
 
 #[derive(Clone, Copy)]
