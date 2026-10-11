@@ -231,6 +231,12 @@ for ready, 4 for running, or 5 for blocked. Non-auxiliary, stopping, retired,
 wrong-generation, ambiguous-context, and malformed requests fail closed. The
 ring-3 proof observes created, staged, and ready in order and rejects a query
 for a retired generation.
+Action 7 has the same exact-generation, authority, and zero object/rights
+requirements as action 6. It returns a flags word whose bit 0 is set only after
+action 4 has installed the private payload; all other bits are zero in version
+1. A created or merely loaded auxiliary returns zero. The ring-3 proof observes
+the bit clear after loading and set after initialization, before action 5 is
+allowed to succeed.
 The ring-3 control plane consumes both kind 3 stop records as they are
 published. After action 5 it voluntarily yields, resumes only after the
 workload has exited, consumes the kind 5 record, and validates the exact

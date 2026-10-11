@@ -518,6 +518,11 @@ if ! grep -q '^ginux: private auxiliary payload initialization enforced' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary initialization state observable' "$output_file"; then
+    echo "Boot test failed: auxiliary initialization state was not observable." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: uninitialized auxiliary admission denied' "$output_file"; then
     echo "Boot test failed: uninitialized auxiliary admission was not denied." >&2
     exit 1

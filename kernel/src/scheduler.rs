@@ -808,6 +808,25 @@ pub(crate) fn auxiliary_runtime_state(domain_id: u64) -> Option<u64> {
     })
 }
 
+pub(crate) fn auxiliary_runtime_flags(domain_id: u64) -> Option<u64> {
+    let runtime = runtime_mut()?;
+    let mut matches = runtime
+        .scheduler
+        .threads
+        .iter()
+        .flatten()
+        .filter(|thread| thread.domain == domain_id);
+    let initialized = matches.next().map(|thread| thread.initialized);
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(if initialized.unwrap_or(false) {
+        crate::control_abi::AUXILIARY_FLAG_INITIALIZED
+    } else {
+        0
+    })
+}
+
 pub(crate) fn start_staged_auxiliary(domain_id: u64) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;

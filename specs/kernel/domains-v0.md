@@ -172,6 +172,9 @@ must name a nonzero logical service distinct from the primary managed service.
 Before yielding, the control plane queries the exact auxiliary generation and
 observes its created, staged, and ready states. A query after retirement is
 rejected rather than aliasing a reused slot.
+The management flags query separately exposes the initialization latch without
+changing the lifecycle state enumeration, allowing the control plane to prove
+that private initialization completed before requesting admission.
 It also starts a separate initialized generation, observes it as ready, and
 stops it before dispatch. Teardown removes its scheduler context and address
 space without executing its first instruction.

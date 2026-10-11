@@ -624,6 +624,18 @@ cd80
 0f0b
 
 
+# observe that the loaded context is not initialized
+66c746060700
+48c7461000000000
+48c7461800000000
+4889df
+ba20000000
+b80f000000
+cd80
+85c0
+7402
+0f0b
+
 # reject admission before private initialization is complete
 66c746060500
 48c7461000000000
@@ -646,6 +658,18 @@ ba20000000
 b80f000000
 cd80
 85c0
+7402
+0f0b
+
+# observe the initialization latch after the payload is installed
+66c746060700
+48c7461000000000
+48c7461800000000
+4889df
+ba20000000
+b80f000000
+cd80
+4883f801
 7402
 0f0b
 

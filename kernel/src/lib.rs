@@ -663,6 +663,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: ready auxiliary cancellation and teardown enforced");
     serial_write("\r\nginux: userspace auxiliary load and admission enforced");
     serial_write("\r\nginux: private auxiliary payload initialization enforced");
+    serial_write("\r\nginux: auxiliary initialization state observable");
     serial_write("\r\nginux: uninitialized auxiliary admission denied");
     serial_write("\r\nginux: explicit auxiliary start authority enforced");
     serial_write("\r\nginux: auxiliary runtime state query enforced");
