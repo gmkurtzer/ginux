@@ -5,8 +5,59 @@ ginux_linux_interpreter:
     lea rbx, [rip]
     and rbx, -4096
 
+#ifdef GINUX_LINKED
+    cmp dword ptr [rbx], 0x464c457f
+    jne .Linvalid_dynamic
+    cmp word ptr [rbx + 54], 56
+    jne .Linvalid_dynamic
+    mov r12, qword ptr [rbx + 32]
+    movzx r13d, word ptr [rbx + 56]
+    test r13d, r13d
+    jz .Linvalid_dynamic
+    cmp r13d, 8
+    ja .Linvalid_dynamic
+    mov rax, r13
+    imul rax, rax, 56
+    add rax, r12
+    jc .Linvalid_dynamic
+    cmp rax, 4096
+    ja .Linvalid_dynamic
+    add r12, rbx
+    xor r14d, r14d
+    xor r15d, r15d
+.Lscan_interpreter_headers:
+    cmp dword ptr [r12], 2
+    jne .Lnext_interpreter_header
+    test r14, r14
+    jnz .Linvalid_dynamic
+    mov rax, qword ptr [r12 + 32]
+    test rax, rax
+    jz .Linvalid_dynamic
+    cmp rax, qword ptr [r12 + 40]
+    jne .Linvalid_dynamic
+    test al, 15
+    jnz .Linvalid_dynamic
+    shr rax, 4
+    cmp rax, 17
+    ja .Linvalid_dynamic
+    mov r14, qword ptr [r12 + 16]
+    add r14, rbx
+    jc .Linvalid_dynamic
+    mov r15, rax
+.Lnext_interpreter_header:
+    add r12, 56
+    dec r13d
+    jnz .Lscan_interpreter_headers
+    test r14, r14
+    jz .Linvalid_dynamic
+    test r15, r15
+    jz .Linvalid_dynamic
+    mov rdi, r14
+    mov rcx, r15
+#else
     lea rdi, [rbx + 0x3008]
     mov ecx, 17
+#endif
     xor eax, eax
 .Lscan_interpreter_dynamic:
     test qword ptr [rdi], -1

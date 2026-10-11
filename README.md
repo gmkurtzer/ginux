@@ -42,7 +42,10 @@ program headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and
 `DT_SONAME`. The kernel authenticates all three linker outputs, applies fixed
 load biases, accepts the dependency's intentionally unmapped ELF headers, and
 executes the complete probe through the linker-generated jump slot.
-After relocating itself, the interpreter bounds and scans its initial stack,
+Before relocating itself, the linked interpreter validates its mapped ELF
+header and bounded program-header table and derives its sole `PT_DYNAMIC`
+address and entry count; it no longer embeds its linker layout. After applying
+that relocation, the interpreter bounds and scans its initial stack,
 requires `AT_PHDR`, `AT_PHNUM`, `AT_BASE`, and `AT_ENTRY`, and verifies that
 `AT_BASE` identifies its actual load page. It derives the main load bias from
 `AT_PHDR`, the authenticated file's `e_phoff`, and matching `e_phnum`. It then

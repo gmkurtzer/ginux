@@ -663,6 +663,11 @@ if ! grep -q '^ginux: toolchain-linked Linux interpreter executed' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux interpreter metadata discovered' "$output_file"; then
+    echo "Boot test failed: the userspace Linux interpreter did not discover its metadata." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace Linux runtime files discovered' "$output_file"; then
     echo "Boot test failed: the userspace Linux interpreter did not discover runtime files." >&2
     exit 1

@@ -191,7 +191,13 @@ null-only dynamic symbol/string/GNU-hash tables; those tables are validated but
 never used for resolution because its sole relocation is relative. The compact
 fixture bounds raw interpreter text to its non-overlapping `0x100..0x400`
 executable window. At runtime
-it derives its page-aligned load bias and scans each bounded dynamic table for
+the linked interpreter first validates its mapped ELF magic, requires a
+56-byte program-header entry size, and bounds one through eight headers to its
+first 4096-byte RX page. It accepts exactly one nonempty `PT_DYNAMIC` whose
+equal file/memory size is a multiple of 16 bytes and contains at most 17
+entries, then derives that table's runtime address with checked addition. The
+compact fixture retains its fixed synthetic table offset to remain within its
+768-byte raw-text bound. Both forms derive their page-aligned load bias and scan each bounded dynamic table for
 the admitted primary relocation, split PLT relocation, symbol-table, and
 hash-table tags rather than depending on tag order or embedding their values in
 its instructions. The compact fixture first writes the load-biased value
