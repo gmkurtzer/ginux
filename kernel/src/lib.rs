@@ -528,6 +528,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: auxiliary scheduler admission resource-gated");
     serial_write("\r\nginux: auxiliary address-space ownership retained");
     serial_write("\r\nginux: auxiliary runtime teardown path connected");
+    serial_write("\r\nginux: auxiliary teardown restores kernel page tables");
     let control_plane_bundle = core::slice::from_raw_parts(
         boot_info.control_plane_bundle,
         boot_info.control_plane_bundle_size,

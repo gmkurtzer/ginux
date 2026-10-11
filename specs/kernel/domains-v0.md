@@ -110,9 +110,12 @@ to service or disappearing without an audit event.
 The common ring-3 exit and fault handlers now dispatch on the stored policy.
 A stop-only context closes no primary IPC endpoint and receives no restart.
 After scheduler removal and thread detachment, the handler revokes authority,
+switches from the auxiliary page-table root back to the retained kernel root,
 releases the exact registered address space, verifies that no owned frames
-remain, and only then publishes retirement. Auxiliary contexts are still not
-queued, so this path is connected but not yet exercised as a live workload.
+remain, and only then publishes retirement. The switch requires the active
+root to match the exact-generation registry entry; this prevents clearing an
+active or unrelated hierarchy. Auxiliary contexts are still not queued, so
+this path is connected but not yet exercised as a live workload.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

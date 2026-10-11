@@ -403,6 +403,22 @@ pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
     true
 }
 
+pub(crate) fn activate_kernel_root_for_auxiliary(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) =
+        (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if current_root() != registered.space.root {
+        return false;
+    }
+    unsafe {
+        activate(registered.space.kernel_root);
+    }
+    current_root() == registered.space.kernel_root
+}
+
 pub(crate) fn verify_ring3_control_plane(
     program: &[u8],
     entry_offsets: [usize; 3],
@@ -542,6 +558,7 @@ pub(crate) fn verify_ring3_control_plane(
 }
 
 struct WxAddressSpace {
+    kernel_root: u64,
     root: u64,
     code_frame: *mut u8,
     first_stack_frame: *mut u8,
@@ -583,6 +600,7 @@ impl WxAddressSpace {
                 .write(second_stack | PRESENT | WRITABLE | USER | NO_EXECUTE);
         }
         Some(Self {
+            kernel_root,
             root,
             code_frame: code as *mut u8,
             first_stack_frame: first_stack as *mut u8,

@@ -453,6 +453,11 @@ if ! grep -q '^ginux: auxiliary runtime teardown path connected' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary teardown restores kernel page tables' "$output_file"; then
+    echo "Boot test failed: auxiliary teardown did not restore kernel page tables." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded executable container accepted' "$output_file"; then
     echo "Boot test failed: the executable container was not accepted." >&2
     exit 1

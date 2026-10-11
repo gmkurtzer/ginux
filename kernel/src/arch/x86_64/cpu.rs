@@ -1056,6 +1056,7 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
     }
     if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly)
         && (!domain::begin_auxiliary_runtime_exit(caller_domain)
+            || !address_space::activate_kernel_root_for_auxiliary(caller_domain)
             || !address_space::release_auxiliary_address_space(caller_domain)
             || !domain::retire_stopped_auxiliary_service(caller_domain))
     {
@@ -1116,6 +1117,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     }
     if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly)
         && (!domain::begin_auxiliary_runtime_fault(fault_domain, fault_metadata)
+            || !address_space::activate_kernel_root_for_auxiliary(fault_domain)
             || !address_space::release_auxiliary_address_space(fault_domain)
             || !domain::retire_stopped_auxiliary_service(fault_domain))
     {
