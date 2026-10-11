@@ -603,6 +603,11 @@ if ! grep -q '^ginux: bounded Linux relative relocation metadata validated' "$ou
     exit 1
 fi
 
+if ! grep -q '^ginux: unresolved dynamic Linux static entry denied' "$output_file"; then
+    echo "Boot test failed: unresolved dynamic Linux static entry was not denied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux ELF headers mapped in executable segment' "$output_file"; then
     echo "Boot test failed: Linux ELF headers were not mapped." >&2
     exit 1

@@ -590,6 +590,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: malformed Linux dynamic relocation metadata accepted\r\n");
     }
     serial_write("ginux: bounded Linux relative relocation metadata validated\r\n");
+    if !linux_elf::verify_unresolved_dynamic_image_rejected() {
+        kernel_fail("ginux: unresolved dynamic Linux image admitted as static\r\n");
+    }
+    serial_write("ginux: unresolved dynamic Linux static entry denied\r\n");
     serial_write("ginux: separate-header Linux interpreter plan validated\r\n");
     serial_write("ginux: Linux dynamic startup metadata validated\r\n");
     serial_write("ginux: Linux auxiliary vector encoding validated\r\n");

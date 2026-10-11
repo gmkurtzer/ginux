@@ -299,10 +299,25 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
 }
 
 pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
-    if image.interpreter.is_some() {
+    if image.interpreter.is_some() || image.dynamic_relocations.is_some() {
         return None;
     }
     plan_executable(image)
+}
+
+pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
+    let bytes = fixture();
+    let Some(mut image) = parse(&bytes) else {
+        return false;
+    };
+    image.dynamic_relocations = Some(DynamicRelocations {
+        table_address: 0x40_4008,
+        relocation_address: 0x40_4100,
+        relocation_count: 1,
+        relocation_target: 0x40_4200,
+        relocation_addend: 0x40_0100,
+    });
+    plan(&image).is_none()
 }
 
 fn plan_executable<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {

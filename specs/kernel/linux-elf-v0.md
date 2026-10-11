@@ -125,6 +125,9 @@ stored from file offset `0x200` with entry `0x400100`, RW/RELRO data, and
 without occupying entry bytes. Static and interpreted plans produce the same
 startup-metadata type, so initial RIP and the `AT_PHDR`, `AT_PHNUM`, `AT_BASE`,
 and `AT_ENTRY` values cannot silently fall back to static defaults. The existing
+static planner rejects images carrying dynamic relocation metadata even when
+they have no interpreter declaration, preventing unresolved code from entering
+through the static path. The existing
 static runtime stack is now populated by a single bounded auxiliary-vector
 encoder using that common contract, and the interpreted proof checks the exact
 word positions of its dynamic values. A bounded execution proof installs the

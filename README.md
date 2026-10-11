@@ -21,6 +21,8 @@ digest before parsing or mapping. A production authority source, relocation,
 and dynamic linking remain unimplemented. Malformed dynamic tables, duplicate
 tags, unsupported relocations, and relocation targets outside writable memory
 are rejected before mapping.
+The static planner also rejects any image carrying dynamic relocation metadata,
+so unresolved code cannot bypass interpreter-first startup.
 The execution-oriented main plan keeps its five-header table in a distinct
 read-only load so its `0x400100` entry remains intact.
 The profile is validated during boot,
