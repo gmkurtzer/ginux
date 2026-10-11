@@ -14,8 +14,9 @@ a resolved `ET_EXEC` main image and relocated `ET_DYN` interpreter into separate
 W^X regions, builds the dynamic startup stack, and enters the interpreter first.
 A compact interpreter trampoline transfers control to the main entry; the full
 ring-3 probe then completes before the kernel restores its root and scrubs every
-owned frame. Real interpreter authentication, relocation, and dynamic linking
-remain unimplemented.
+owned frame. Interpreter selection binds the exact `PT_INTERP` path and SHA-256
+digest before parsing or mapping. A production authority source, relocation,
+and dynamic linking remain unimplemented.
 The execution-oriented main plan keeps its five-header table in a distinct
 read-only load so its `0x400100` entry remains intact.
 The profile is validated during boot,
@@ -117,7 +118,8 @@ page-aligned load-bias plans for position-independent `ET_DYN` images. Dynamic
 execution planning binds an exact `PT_INTERP` path to a non-overlapping relocated
 interpreter image while preserving distinct initial-entry, `AT_ENTRY`, and
 `AT_BASE` values. The bounded synthetic interpreter-first execution path is
-verified, but dynamic relocation and a real userspace linker remain outside the
+verified, including rejection of substituted, mutated, and truncated interpreter
+bytes, but dynamic relocation and a real userspace linker remain outside the
 executable profile.
 This is not yet a general Linux
 process or syscall environment; see

@@ -108,8 +108,12 @@ rejects interpreter-bearing images. A separate interpreted-image planner binds a
 non-interpreted `ET_DYN` image. It preserves the main entry for `AT_ENTRY`, uses
 the relocated interpreter entry as the initial instruction pointer, records the
 interpreter bias for `AT_BASE`, and rejects page-granular overlap between every
-main and interpreter load before mapping. The resolver still must authenticate
-the selected interpreter bytes. The execution-oriented planning fixture uses a
+main and interpreter load before mapping. An interpreter authority record binds
+the exact `PT_INTERP` path to a SHA-256 digest. The kernel requires both to match
+the resolved bytes before it parses, plans, maps, or executes the interpreter;
+wrong-path, wrong-digest, mutated, and truncated candidates are rejected. The
+authority record is currently a synthetic proof input rather than a
+production-signed package manifest. The execution-oriented planning fixture uses a
 five-header main image: a dedicated read-only header load at `0x3ff000`, RX text
 stored from file offset `0x200` with entry `0x400100`, RW/RELRO data, and
 `PT_INTERP`. Its program-header table therefore remains readable at `0x3ff040`

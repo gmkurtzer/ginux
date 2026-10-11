@@ -593,6 +593,11 @@ if ! grep -q '^ginux: bounded multi-page Linux ELF plan verified' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: measured Linux interpreter bytes enforced' "$output_file"; then
+    echo "Boot test failed: measured Linux interpreter bytes were not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux ELF headers mapped in executable segment' "$output_file"; then
     echo "Boot test failed: Linux ELF headers were not mapped." >&2
     exit 1

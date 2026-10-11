@@ -88,6 +88,11 @@ pub(crate) struct InterpretedLoadPlan<'main, 'interpreter> {
     pub(crate) interpreter: LoadPlan<'interpreter>,
 }
 
+pub(crate) struct InterpreterAuthority<'a> {
+    pub(crate) path: &'a [u8],
+    pub(crate) sha256: [u8; 32],
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct ProcessStartup {
     pub(crate) initial_entry: u64,
@@ -283,7 +288,7 @@ fn plan_executable<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
     (!plan_has_internal_overlap(&plan)).then_some(plan)
 }
 
-pub(crate) fn plan_interpreted<'main, 'interpreter>(
+fn plan_interpreted<'main, 'interpreter>(
     main: &Image<'main>,
     resolved_path: &[u8],
     interpreter: &Image<'interpreter>,
@@ -304,6 +309,21 @@ pub(crate) fn plan_interpreted<'main, 'interpreter>(
         main,
         interpreter,
     })
+}
+
+pub(crate) fn plan_authenticated_interpreted<'main, 'interpreter>(
+    main: &Image<'main>,
+    authority: &InterpreterAuthority<'_>,
+    interpreter_bytes: &'interpreter [u8],
+    interpreter_base: u64,
+) -> Option<InterpretedLoadPlan<'main, 'interpreter>> {
+    if main.interpreter != Some(authority.path)
+        || crate::crypto::sha256(interpreter_bytes) != authority.sha256
+    {
+        return None;
+    }
+    let interpreter = parse(interpreter_bytes)?;
+    plan_interpreted(main, authority.path, &interpreter, interpreter_base)
 }
 
 pub(crate) fn static_startup(plan: &LoadPlan<'_>) -> ProcessStartup {
@@ -1001,10 +1021,16 @@ fn verify_interpreted_plan() -> bool {
     const PATH: &[u8] = b"/lib64/ld-ginux.so";
     let main_bytes = interpreted_main_fixture();
     let interpreter_bytes = compact_position_independent_fixture();
-    let (Some(main), Some(interpreter)) = (parse(&main_bytes), parse(&interpreter_bytes)) else {
+    let Some(main) = parse(&main_bytes) else {
         return false;
     };
-    let Some(combined) = plan_interpreted(&main, PATH, &interpreter, 0x60_0000) else {
+    let authority = InterpreterAuthority {
+        path: PATH,
+        sha256: crate::crypto::sha256(&interpreter_bytes),
+    };
+    let Some(combined) =
+        plan_authenticated_interpreted(&main, &authority, &interpreter_bytes, 0x60_0000)
+    else {
         return false;
     };
     let startup = interpreted_startup(&combined);
@@ -1032,8 +1058,40 @@ fn verify_interpreted_plan() -> bool {
         && combined.interpreter.program_headers == 0x60_0040
         && combined.interpreter.executable.virtual_page == 0x60_0000
         && combined.interpreter.writable.virtual_page == 0x60_3000
-        && plan_interpreted(&main, b"/lib64/other.so", &interpreter, 0x60_0000).is_none()
-        && plan_interpreted(&main, PATH, &interpreter, 0x40_0000).is_none()
+        && verify_interpreter_authentication_rejections(&main, &interpreter_bytes, &authority)
+        && plan_authenticated_interpreted(&main, &authority, &interpreter_bytes, 0x40_0000)
+            .is_none()
+}
+
+fn verify_interpreter_authentication_rejections(
+    main: &Image<'_>,
+    interpreter_bytes: &[u8],
+    authority: &InterpreterAuthority<'_>,
+) -> bool {
+    let wrong_path = InterpreterAuthority {
+        path: b"/lib64/other.so",
+        sha256: authority.sha256,
+    };
+    let mut wrong_digest = authority.sha256;
+    wrong_digest[0] ^= 1;
+    let wrong_digest = InterpreterAuthority {
+        path: authority.path,
+        sha256: wrong_digest,
+    };
+    let mut mutated = compact_position_independent_fixture();
+    let last = mutated.len() - 1;
+    mutated[last] ^= 1;
+    plan_authenticated_interpreted(main, &wrong_path, interpreter_bytes, 0x60_0000).is_none()
+        && plan_authenticated_interpreted(main, &wrong_digest, interpreter_bytes, 0x60_0000)
+            .is_none()
+        && plan_authenticated_interpreted(main, authority, &mutated, 0x60_0000).is_none()
+        && plan_authenticated_interpreted(
+            main,
+            authority,
+            &interpreter_bytes[..interpreter_bytes.len() - 1],
+            0x60_0000,
+        )
+        .is_none()
 }
 
 #[inline(never)]
@@ -1179,10 +1237,16 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
     const PATH: &[u8] = b"/lib64/ld-ginux.so";
     let main_bytes = interpreted_main_fixture();
     let interpreter_bytes = compact_position_independent_fixture();
-    let (Some(main), Some(interpreter)) = (parse(&main_bytes), parse(&interpreter_bytes)) else {
+    let Some(main) = parse(&main_bytes) else {
         return false;
     };
-    let Some(plan) = plan_interpreted(&main, PATH, &interpreter, 0x60_0000) else {
+    let authority = InterpreterAuthority {
+        path: PATH,
+        sha256: crate::crypto::sha256(&interpreter_bytes),
+    };
+    let Some(plan) =
+        plan_authenticated_interpreted(&main, &authority, &interpreter_bytes, 0x60_0000)
+    else {
         return false;
     };
     crate::address_space::verify_interpreted_elf_mapping(&plan, protected_start, protected_size)

@@ -585,6 +585,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded multi-page Linux ELF plan verified\r\n");
     serial_write("ginux: bounded Linux ET_DYN load bias validated\r\n");
     serial_write("ginux: bounded Linux interpreter resolution plan validated\r\n");
+    serial_write("ginux: measured Linux interpreter bytes enforced\r\n");
     serial_write("ginux: separate-header Linux interpreter plan validated\r\n");
     serial_write("ginux: Linux dynamic startup metadata validated\r\n");
     serial_write("ginux: Linux auxiliary vector encoding validated\r\n");
