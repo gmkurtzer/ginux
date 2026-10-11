@@ -48,6 +48,8 @@ const DT_DEBUG: u64 = 21;
 const DT_JMPREL: u64 = 23;
 const DT_FLAGS_1: u64 = 0x6fff_fffb;
 const DT_RELACOUNT: u64 = 0x6fff_fff9;
+const DT_INIT_ARRAY: u64 = 25;
+const DT_INIT_ARRAYSZ: u64 = 27;
 const DT_GNU_HASH: u64 = 0x6fff_fef5;
 const DF_1_PIE: u64 = 0x0800_0000;
 const R_X86_64_GLOB_DAT: u32 = 6;
@@ -140,6 +142,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
             dynamic.symbol_defined
                 && dynamic.symbol_relocation.is_some()
                 && dynamic.jump_slot_relocation.is_some()
+                && dynamic.init_array == Some(dynamic.relocation_target)
         })
         && plan.dependency_bases == [0x61_0000, 0x63_0000]
         && plan.process.main_entry == 0x40_0100
@@ -244,6 +247,7 @@ pub(crate) struct DynamicRelocations {
     pub(crate) string_table_size: usize,
     pub(crate) hash_table_address: Option<u64>,
     pub(crate) hash_is_gnu: bool,
+    pub(crate) init_array: Option<u64>,
     pub(crate) symbol_relocation: Option<SymbolRelocation>,
     pub(crate) jump_slot_relocation: Option<SymbolRelocation>,
     pub(crate) secondary_symbol_relocation: Option<SymbolRelocation>,
@@ -547,6 +551,7 @@ pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
         string_table_size: 0,
         hash_table_address: None,
         hash_is_gnu: false,
+        init_array: None,
         symbol_relocation: None,
         jump_slot_relocation: None,
         secondary_symbol_relocation: None,
@@ -900,6 +905,10 @@ fn plan_position_independent_at<'a>(
                 None => None,
             },
             hash_is_gnu: dynamic.hash_is_gnu,
+            init_array: match dynamic.init_array {
+                Some(address) => Some(address.checked_add(load_bias)?),
+                None => None,
+            },
             symbol_relocation: match dynamic.symbol_relocation {
                 Some(relocation) => Some(SymbolRelocation {
                     target: relocation.target.checked_add(load_bias)?,
@@ -1250,6 +1259,8 @@ fn parse_dynamic_relocations<'a>(
     let mut debug = None;
     let mut flags_1 = None;
     let mut relative_count = None;
+    let mut init_array = None;
+    let mut init_array_size = None;
     let mut terminated = false;
     let entries = table.bytes.as_chunks::<DYNAMIC_ENTRY_SIZE>().0;
     for (index, entry) in entries.iter().enumerate() {
@@ -1285,6 +1296,8 @@ fn parse_dynamic_relocations<'a>(
             DT_DEBUG if debug.replace(value).is_none() => {}
             DT_FLAGS_1 if flags_1.replace(value).is_none() => {}
             DT_RELACOUNT if relative_count.replace(value).is_none() => {}
+            DT_INIT_ARRAY if init_array.replace(value).is_none() => {}
+            DT_INIT_ARRAYSZ if init_array_size.replace(value).is_none() => {}
             _ => return None,
         }
     }
@@ -1362,6 +1375,29 @@ fn parse_dynamic_relocations<'a>(
     {
         return None;
     }
+    let init_array = match (init_array, init_array_size) {
+        (None, None) => None,
+        (Some(address), Some(size))
+            if size == 8
+                && address.is_multiple_of(8)
+                && address == target
+                && address >= writable.virtual_address
+                && address.checked_add(size)? <= writable_end =>
+        {
+            let executable = loads
+                .iter()
+                .flatten()
+                .find(|segment| segment.flags & PF_EXECUTE != 0)?;
+            let executable_end = executable
+                .virtual_address
+                .checked_add(executable.memory_size)?;
+            if addend < executable.virtual_address || addend >= executable_end {
+                return None;
+            }
+            Some(address)
+        }
+        _ => return None,
+    };
     let symbol_metadata = (
         symbol_table_address,
         string_table_address,
@@ -1724,6 +1760,7 @@ fn parse_dynamic_relocations<'a>(
             string_table_size,
             hash_table_address,
             hash_is_gnu,
+            init_array,
             symbol_relocation,
             jump_slot_relocation,
             secondary_symbol_relocation,
@@ -2901,6 +2938,11 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
             .is_some_and(|segment| segment.page_count == 1)
         || plan.dependencies[1].executable.page_count != 1
         || plan.dependencies[1].writable.page_count != 1
+        || plan.dependencies.iter().any(|dependency| {
+            dependency
+                .dynamic_relocations
+                .is_none_or(|dynamic| dynamic.init_array != Some(dynamic.relocation_target))
+        })
     {
         crate::serial_write_bytes(b"\r\nginux: linked DSO page-contract fixture mismatch");
         return false;

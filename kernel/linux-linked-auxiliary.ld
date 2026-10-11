@@ -22,7 +22,8 @@ SECTIONS
     .rela.plt : { *(.rela.plt) } :data
     .got : { *(.got) } :data
     .got.plt : { *(.got.plt) } :data
-    .data.rel.ro : { *(.data.rel.ro) } :data
+    .init_array : { *(.init_array) } :data
+    .data : { *(.data) } :data
 
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 }

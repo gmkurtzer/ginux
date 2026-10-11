@@ -172,7 +172,12 @@ indexes one and two in order and four distinct writable targets.
 Duplicate tags, mixed hash styles, missing or mixed symbol metadata, malformed
 bucket, bloom, or chain metadata, unsupported relocation types or sizes, invalid symbol indexes/attributes/ranges/names, nonzero
 symbol-relocation addends, and executable relocation targets are rejected. The
-execution-oriented planning fixture uses a
+all-or-none `DT_INIT_ARRAY` and `DT_INIT_ARRAYSZ` pair is admitted only for an
+exact one-entry, eight-byte array wholly inside writable memory. Its address
+must equal the image's sole relative-relocation target, and the authenticated
+addend must point inside that image's executable segment. Duplicate, partial,
+empty, multi-entry, unaligned, non-writable, or non-executable-target forms are
+rejected. The execution-oriented planning fixture uses a
 six-header main image: a dedicated read-only header load at `0x3ff000`, RX text
 stored from file offset `0x200` with entry `0x400100`, RW/RELRO data, and
 `PT_INTERP`. Its program-header table therefore remains readable at `0x3ff040`
@@ -256,9 +261,11 @@ files before parsing, requires both SONAMEs, and rejects digest substitution or
 any pairwise overlap among the main, interpreter, and two dependency plans.
 The userspace interpreter preserves that order, derives both runtime paths,
 maps each DSO in its independent authenticated slot, applies each DSO's
-`RELATIVE`, `GLOB_DAT`, and eager `JUMP_SLOT` relocations, and calls the
-auxiliary entry before transferring to the main workload. The auxiliary return
-value is checked in ring 3. The main then calls both providers through its
+`RELATIVE`, `GLOB_DAT`, and eager `JUMP_SLOT` relocations, then calls each
+relocated one-entry `DT_INIT_ARRAY` before transferring to the main workload.
+Each provider records initialization in private writable data and its exported
+function fails until that state is present, making constructor-before-use order
+observable in ring 3. The main then calls both providers through its
 linker-produced PLT, after the interpreter matches both complete names through
 the three-bucket main SysV table and each provider's GNU table. The kernel
 independently checks the main's two `GLOB_DAT` and two `JUMP_SLOT` values, both DSO mapping
@@ -340,7 +347,8 @@ main and dependency leases, and requires the kernel-owned live-frame count to
 return to its pre-execution value. This profile performs two exact cross-object
 name matches and calls both direct dependencies. It does not support transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
-lazy binding, a general-purpose dynamic linker, or glibc. The main bias and
+lazy binding, main-image constructors, multi-entry init arrays, fini arrays,
+a general-purpose dynamic linker, or glibc. The main bias and
 entry are startup-metadata-driven. Each dependency selects among 16
 page-aligned candidate biases in its own fixed window and receives frames on
 demand, but each relative page layout remains a kernel-authenticated contract;

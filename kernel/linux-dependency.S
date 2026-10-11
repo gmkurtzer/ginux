@@ -4,6 +4,10 @@
 .type ginux_dependency_symbol,@function
 .Lginux_dependency_local:
 ginux_dependency_symbol:
+#ifdef GINUX_LINKED
+    cmp qword ptr [rip + .Ldependency_initialized], 0x4758
+    jne .Ldependency_invalid
+#endif
 #ifndef GINUX_LINKED
     mov edx, 0x610100
     cmp qword ptr [0x6131c0], rdx
@@ -26,6 +30,10 @@ ginux_dependency_symbol:
     call ginux_dependency_symbol@PLT
     ret
 
+.Ldependency_initialize:
+    mov qword ptr [rip + .Ldependency_initialized], 0x4758
+    ret
+
 .section .text.secondary,"ax",@progbits
 .Ldependency_secondary:
     mov eax, 0x47584e32
@@ -35,6 +43,10 @@ ginux_dependency_symbol:
 .Ldependency_read_only:
     .quad 0x594c4e4f44414552
 
-.section .data.rel.ro,"aw",@progbits
-    .quad .Lginux_dependency_local
+.section .init_array,"aw",@init_array
+    .quad .Ldependency_initialize
+
+.section .data,"aw",@progbits
+.Ldependency_initialized:
+    .quad 0
 #endif

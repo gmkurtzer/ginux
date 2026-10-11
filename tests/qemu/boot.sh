@@ -828,6 +828,16 @@ if ! grep -q '^ginux: userspace Linux auxiliary dependency self-relocations appl
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux dependency init arrays validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux dependency init arrays were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: userspace Linux dependency constructors executed' "$output_file"; then
+    echo "Boot test failed: userspace Linux dependency constructors were not executed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux auxiliary dependency entry executed' "$output_file"; then
     echo "Boot test failed: the auxiliary Linux dependency entry was not executed." >&2
     exit 1

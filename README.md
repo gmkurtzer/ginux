@@ -32,8 +32,10 @@ A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The
 symbol relocations resolve to the authenticated dependencies, and the interpreter
-also applies both dependencies' own relative and self-symbol relocations before
-transferring control to the main entry. The main workload calls through the
+also applies both dependencies' own relative and self-symbol relocations. Each
+DSO exposes one authenticated eight-byte `DT_INIT_ARRAY`; the interpreter calls
+both relocated constructors before transferring control to the main entry, and
+each exported function refuses to succeed before its constructor runs. The main workload calls through the
 resolved jump slots; the loader validates all six dependency relocations and
 both dependency calls return checked values before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
@@ -74,7 +76,7 @@ Kernel execution state now provides two isolated dependency slots, each with
 its own base window, selected bias, eight-entry contract table, mapping mask,
 generation leases, and cleanup validation. The running interpreter populates
 both slots, applies all three admitted relocations in each DSO, and directly
-executes a checked auxiliary entry before transferring to the main workload.
+executes both one-entry dependency init arrays before transferring to the main workload.
 Wrong offsets, duplicate
 placement, a mixed bias, and W+X are rejected before it applies
 dependency and main relocations. Both dynamic-table addresses and entry counts

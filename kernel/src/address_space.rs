@@ -670,6 +670,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
     ) else {
         return false;
     };
+    if dependency_dynamic.init_array != Some(dependency_dynamic.relocation_target) {
+        return false;
+    }
     let Some(auxiliary_dynamic) = dependency_plan.dependencies[1].dynamic_relocations else {
         return false;
     };
@@ -679,6 +682,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
     ) else {
         return false;
     };
+    if auxiliary_dynamic.init_array != Some(auxiliary_dynamic.relocation_target) {
+        return false;
+    }
     let Some(interpreter_relocation_value) = plan
         .interpreter_base
         .checked_add(interpreter_dynamic.relocation_addend)
