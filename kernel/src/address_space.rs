@@ -281,10 +281,22 @@ pub(crate) fn verify_ring3_control_plane(
             && ipc::is_empty()
             && current_root() == kernel_root
             && preemption_complete;
-        let owner_adopted = scheduler::service_address_space_owner()
-            .and_then(memory::FrameOwner::domain)
-            .is_some_and(|owner| second_space.adopt_transferred_owner(owner));
-        valid && owner_adopted && first_space.release() && second_space.release()
+        let Some(replacement_owner) =
+            scheduler::service_address_space_owner().and_then(memory::FrameOwner::domain)
+        else {
+            return false;
+        };
+        if !valid
+            || !second_space.adopt_transferred_owner(replacement_owner)
+            || memory::owner_live_frame_count(service_owner) != Some(0)
+            || !first_space.release()
+            || !second_space.release()
+        {
+            return false;
+        }
+        memory::owner_live_frame_count(control_owner) == Some(0)
+            && memory::owner_live_frame_count(service_owner) == Some(0)
+            && memory::owner_live_frame_count(replacement_owner) == Some(0)
     }
 }
 

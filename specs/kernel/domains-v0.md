@@ -70,3 +70,9 @@ normal exit or contained fault releases it. Service retirement is rejected
 while any thread remains attached. The QEMU proof rejects a second control
 thread and accounts for the control, original service, and replacement service
 attachments independently.
+
+Domain retirement is also reconciled with the physical-frame ledger at the end
+of the bounded boot workload. The failed service must own zero frames after its
+address-space leases transfer to the replacement, and the control, failed, and
+replacement generations must all own zero frames after final address-space
+release. Retirement does not yet invoke a general object graph destructor.

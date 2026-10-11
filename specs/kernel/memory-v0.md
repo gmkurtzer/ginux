@@ -68,4 +68,12 @@ the same transfer into an empty owner. The fixed number is a bring-up policy,
 not yet a configurable quota hierarchy; partial resource transfer is also
 undefined.
 
+The allocator exposes an internal exact-owner live-frame count for lifecycle
+auditing. After the ring-3 proof transfers the failed service's seven frames to
+its replacement and releases both address spaces, the boot gate requires zero
+live frames for the control domain, the failed service generation, and the
+replacement generation. A retired generation therefore cannot pass the proof
+while silently retaining an allocator lease. This is a bounded bootstrap audit,
+not yet a general resource destructor for every future kernel object.
+
 Loader regions containing the unified image, handoff map, page tables, and kernel stacks are never admitted because only `EfiConventionalMemory` ranges enter the allocator.

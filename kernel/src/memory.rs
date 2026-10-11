@@ -360,6 +360,16 @@ pub(crate) fn frames_owned_by<const N: usize>(owner: FrameOwner, frames: &[Frame
     }
 }
 
+pub(crate) fn owner_live_frame_count(owner: FrameOwner) -> Option<usize> {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        Some((*allocator).owner_live_count(owner))
+    }
+}
+
 pub(crate) fn verify_reservation_invariants() -> bool {
     let mut allocator = FrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
@@ -412,7 +422,9 @@ pub(crate) fn verify_reservation_invariants() -> bool {
     let stale_release_rejected = !allocator.release(other_owner, first);
     let ownership_transferred = allocator.transfer_owner(owner, other_owner) == Some(1)
         && !allocator.owns(owner, &last)
-        && allocator.owns(other_owner, &last);
+        && allocator.owns(other_owner, &last)
+        && allocator.owner_live_count(owner) == 0
+        && allocator.owner_live_count(other_owner) == 3;
     let mut budgeted = FrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
         range_count: 1,

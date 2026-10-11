@@ -488,6 +488,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: one-shot user preemption completed");
     serial_write("\r\nginux: restarted service preemption completed");
     serial_write("\r\nginux: completed address-space frames reclaimed");
+    serial_write("\r\nginux: retired domain frame ownership cleared");
     serial_write("\r\nginux: capability-gated bounded IPC verified");
     serial_write("\r\nginux: directional IPC endpoints isolated");
     serial_write("\r\nginux: generation-bound IPC endpoints verified");
