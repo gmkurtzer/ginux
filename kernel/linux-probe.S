@@ -630,4 +630,8 @@ ginux_linux_probe_data:
 
 .section .bss
 .balign 8
-    .space 4600
+    .space 4088
+
+.section .data.rel.ro,"aw",@progbits
+.balign 8
+    .space 512

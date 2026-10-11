@@ -6,6 +6,7 @@ PHDRS
     headers PT_LOAD FILEHDR PHDRS FLAGS(4);
     text PT_LOAD FLAGS(5);
     data PT_LOAD FLAGS(6);
+    relro PT_GNU_RELRO FLAGS(4);
     stack PT_GNU_STACK FLAGS(6);
 }
 
@@ -20,6 +21,9 @@ SECTIONS
     . = 0x401000;
     .data : { *(.data) } :data
     .bss : { *(.bss) } :data
+
+    . = 0x402000;
+    .data.rel.ro : { *(.data.rel.ro) } :data :relro
 
     /DISCARD/ : { *(.comment) *(.note*) }
 }

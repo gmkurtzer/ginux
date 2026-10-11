@@ -2,10 +2,11 @@ const ELF_HEADER_SIZE: usize = 64;
 pub(crate) const PROGRAM_HEADER_SIZE: usize = 56;
 const MIN_LOAD_SEGMENT_COUNT: usize = 2;
 const MAX_LOAD_SEGMENT_COUNT: usize = 3;
-const MAX_PROGRAM_HEADER_COUNT: usize = 5;
+const MAX_PROGRAM_HEADER_COUNT: usize = 6;
 const PT_LOAD: u32 = 1;
 const PT_PHDR: u32 = 6;
 const PT_GNU_STACK: u32 = 0x6474_e551;
+const PT_GNU_RELRO: u32 = 0x6474_e552;
 const ET_EXEC: u16 = 2;
 const EM_X86_64: u16 = 62;
 const PF_EXECUTE: u32 = 1;
@@ -36,6 +37,13 @@ pub(crate) struct Image<'a> {
     pub(crate) executable: Segment<'a>,
     pub(crate) read_only: Option<Segment<'a>>,
     pub(crate) writable: Segment<'a>,
+    pub(crate) relro: Option<Relro>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Relro {
+    pub(crate) virtual_address: u64,
+    pub(crate) memory_size: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -56,6 +64,7 @@ pub(crate) struct LoadPlan<'a> {
     pub(crate) executable: PlannedSegment<'a>,
     pub(crate) read_only: Option<PlannedSegment<'a>>,
     pub(crate) writable: PlannedSegment<'a>,
+    pub(crate) relro: Option<Relro>,
 }
 
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
@@ -91,6 +100,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     let mut load_count = 0;
     let mut gnu_stack_seen = false;
     let mut phdr_address = None;
+    let mut relro = None;
     for index in 0..program_header_count {
         let header = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
         match read_u32(bytes, header)? {
@@ -103,6 +113,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
             }
             PT_PHDR if phdr_address.is_none() => {
                 phdr_address = Some(parse_phdr(bytes, header, program_header_count)?);
+            }
+            PT_GNU_RELRO if relro.is_none() => {
+                relro = Some(parse_relro(bytes, header)?);
             }
             _ => return None,
         }
@@ -147,6 +160,15 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     {
         return None;
     }
+    if relro.is_some_and(|range| {
+        range.virtual_address < writable.virtual_address
+            || range.virtual_address % PAGE_SIZE as u64 != 0
+            || range.memory_size > PAGE_SIZE as u64
+            || range.virtual_address.checked_add(range.memory_size)
+                != writable.virtual_address.checked_add(writable.memory_size)
+    }) {
+        return None;
+    }
     for (index, first) in loads.iter().flatten().enumerate() {
         let first_end = first.virtual_address.checked_add(first.memory_size)?;
         for second in loads[index + 1..].iter().flatten() {
@@ -180,6 +202,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         executable,
         read_only,
         writable,
+        relro,
     })
 }
 
@@ -194,6 +217,7 @@ pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
             None => None,
         },
         writable: plan_segment(image.writable)?,
+        relro: image.relro,
     })
 }
 
@@ -352,6 +376,26 @@ fn parse_phdr(bytes: &[u8], header: usize, program_header_count: usize) -> Optio
         .then_some(virtual_address)
 }
 
+fn parse_relro(bytes: &[u8], header: usize) -> Option<Relro> {
+    let file_offset = read_u64(bytes, header + 8)?;
+    let virtual_address = read_u64(bytes, header + 16)?;
+    let physical_address = read_u64(bytes, header + 24)?;
+    let file_size = read_u64(bytes, header + 32)?;
+    let memory_size = read_u64(bytes, header + 40)?;
+    let alignment = read_u64(bytes, header + 48)?;
+    (read_u32(bytes, header + 4)? == PF_READ
+        && (physical_address == 0 || physical_address == virtual_address)
+        && memory_size != 0
+        && file_size <= memory_size
+        && alignment != 0
+        && alignment.is_power_of_two()
+        && file_offset % alignment == virtual_address % alignment)
+        .then_some(Relro {
+            virtual_address,
+            memory_size,
+        })
+}
+
 pub(crate) fn verify_parser() -> bool {
     let image = fixture();
     let mut without_stack = image;
@@ -430,6 +474,7 @@ pub(crate) fn verify_parser() -> bool {
         && parse(&bad_phdr_size).is_none()
         && parse(&conventional_addresses).is_some()
         && parse(&zero_aligned_stack).is_some()
+        && verify_relro_parser()
         && parse(&three_loads).is_some_and(|image| {
             image.read_only.is_some_and(|segment| {
                 segment.flags == PF_READ && segment.virtual_address == 0x40_3000
@@ -459,6 +504,42 @@ pub(crate) fn verify_parser() -> bool {
         )
         && rejects_u16(&image, 56, (MAX_PROGRAM_HEADER_COUNT + 1) as u16)
         && parse(&image[..image.len() - 1]).is_none()
+}
+
+#[inline(never)]
+fn verify_relro_parser() -> bool {
+    let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
+    let phdr_header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
+    let mut candidate = fixture();
+    write_relro(&mut candidate, stack_header, 0x40_2000, 512);
+    let valid = parse(&candidate).is_some_and(|image| {
+        image
+            .relro
+            .is_some_and(|range| range.virtual_address == 0x40_2000 && range.memory_size == 512)
+    });
+    candidate = fixture();
+    write_relro(&mut candidate, stack_header, 0x40_2000, 512);
+    write_u16(&mut candidate, 56, 4);
+    write_relro(&mut candidate, phdr_header, 0x40_2000, 512);
+    let duplicate_rejected = parse(&candidate).is_none();
+    candidate = fixture();
+    write_relro(&mut candidate, stack_header, 0x40_2001, 512);
+    let unaligned_rejected = parse(&candidate).is_none();
+    candidate = fixture();
+    write_relro(
+        &mut candidate,
+        stack_header,
+        0x40_2000,
+        PAGE_SIZE as u64 + 1,
+    );
+    let oversized_rejected = parse(&candidate).is_none();
+    candidate = fixture();
+    write_relro(&mut candidate, stack_header, 0x40_1000, 512);
+    valid
+        && duplicate_rejected
+        && unaligned_rejected
+        && oversized_rejected
+        && parse(&candidate).is_none()
 }
 
 pub(crate) fn verify_load_plan() -> bool {
@@ -538,15 +619,23 @@ pub(crate) fn verify_linked_probe() -> bool {
         && page.iter().all(|byte| *byte == 0);
     image.entry == 0x40_0100
         && image.program_headers == 0x3f_f040
-        && image.program_header_count == 5
+        && image.program_header_count == 6
         && image.executable.virtual_address == 0x40_0100
         && image.executable.bytes == PROBE_CODE
         && image
             .read_only
             .is_some_and(|segment| segment.virtual_address == 0x3f_f000)
         && image.writable.virtual_address == 0x40_1000
-        && image.writable.bytes == [1, 2, 3, 4, 5, 6, 7, 8]
+        && image.writable.bytes.len() == 4608
+        && image.writable.bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
+        && image.writable.bytes[8..].iter().all(|byte| *byte == 0)
         && image.writable.memory_size == 4608
+        && image
+            .relro
+            .is_some_and(|range| range.virtual_address == 0x40_2000 && range.memory_size == 512)
+        && plan
+            .relro
+            .is_some_and(|range| range.virtual_address == 0x40_2000 && range.memory_size == 512)
         && plan.executable.virtual_page == 0x40_0000
         && plan.executable.virtual_address == 0x40_0100
         && plan.executable.page_count == 1
@@ -624,6 +713,16 @@ fn write_phdr(bytes: &mut [u8], header: usize, program_header_count: usize) {
     let table_size = (program_header_count * PROGRAM_HEADER_SIZE) as u64;
     write_u64(bytes, header + 32, table_size);
     write_u64(bytes, header + 40, table_size);
+    write_u64(bytes, header + 48, 8);
+}
+
+fn write_relro(bytes: &mut [u8], header: usize, virtual_address: u64, memory_size: u64) {
+    bytes[header..header + PROGRAM_HEADER_SIZE].fill(0);
+    write_u32(bytes, header, PT_GNU_RELRO);
+    write_u32(bytes, header + 4, PF_READ);
+    write_u64(bytes, header + 16, virtual_address);
+    write_u64(bytes, header + 24, virtual_address);
+    write_u64(bytes, header + 40, memory_size);
     write_u64(bytes, header + 48, 8);
 }
 

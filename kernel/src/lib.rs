@@ -568,6 +568,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: non-executable Linux GNU stack enforced\r\n");
     serial_write("ginux: bounded Linux ELF metadata headers validated\r\n");
+    serial_write("ginux: bounded Linux GNU RELRO metadata validated\r\n");
     serial_write("ginux: three-load Linux ELF runtime mapping verified\r\n");
     if !linux_elf::verify_linked_probe() {
         kernel_fail("ginux: linked Linux ELF64 probe invariant failed\r\n");

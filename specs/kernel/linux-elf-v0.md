@@ -16,7 +16,11 @@ One `PT_GNU_STACK` header
 is optional and must request read/write, non-executable memory with no file or
 virtual range. One `PT_PHDR` header is also optional; it must be read-only and
 must exactly describe the in-image program-header table at its derived mapped
-address. Up to five recognized headers may appear in any order. The parser
+address. One `PT_GNU_RELRO` header is optional. It must be read-only, start on
+the final page of the writable load, end exactly with that load, and cover no
+more than one page. This profile rounds the declaration out to its containing
+page when userspace seals it with `mprotect`. Up to six recognized headers may
+appear in any order. The parser
 normalizes load segments by executable, read-only, and writable role before
 planning. Unknown and duplicate metadata headers are rejected. Each load
 segment must be readable, nonempty in the
@@ -43,12 +47,14 @@ are accepted when their declarations are valid.
 The build also feeds the same assembly through the Rust toolchain's LLD to
 produce a genuine static ELF with separate read-only header, RX text, and RW
 data/BSS loads, populated section-header metadata, `PT_PHDR`, and
-`PT_GNU_STACK`. The boot verifier parses that linked artifact, checks its entry,
+`PT_GNU_RELRO` plus `PT_GNU_STACK`. The boot verifier parses that linked
+artifact, checks its entry,
 header-table address/count, exact code and initialized data, 4608-byte data/BSS
 extent, and maps all three loads with role-derived permissions. The checked-in
 linker script fixes the read-only header load at
 `0x3ff000`, the non-page-base text entry at `0x400100`, and the data/BSS load at
-`0x401000`; this is the stable input contract for linked-image execution work.
+`0x401000`, with the final 512 bytes declared RELRO at `0x402000`; this is the
+stable input contract for linked-image execution work.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory
