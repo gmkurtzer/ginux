@@ -81,6 +81,11 @@ Repeated or stale stop requests fail closed, and a newly reused slot starts in
 the ready state. Successful retirement publishes lifecycle event kind 3 with
 the exact retired generation and no synthetic fault metadata. Reusing a domain
 slot therefore produces a distinct, monotonically sequenced audit record.
+Normal workload exit instead publishes lifecycle kind 5 with its bounded
+eight-bit status in the detail field. Management stop remains kind 3 with zero
+detail, and auxiliary fault remains kind 4 with zero detail and fault metadata.
+The ring-3 workload proves an out-of-range status cannot remove or retire its
+thread before publishing status 42 from the same context.
 Event publication precedes registry and capability-table removal; sequence
 exhaustion rejects retirement without losing the stopped domain record or
 creating an unsequenced teardown. A full event FIFO still permits retirement

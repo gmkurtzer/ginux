@@ -65,6 +65,7 @@ struct Domain {
     service: Option<ServiceId>,
     failure_policy: Option<ServiceFailurePolicy>,
     terminal_fault: Option<FaultMetadata>,
+    terminal_exit_status: Option<u8>,
     role: Role,
     state: State,
     capabilities: CapabilityTable,
@@ -264,6 +265,7 @@ impl Manager {
             service: None,
             failure_policy: None,
             terminal_fault: None,
+            terminal_exit_status: None,
             role: Role::ControlPlane,
             state: State::Ready,
             capabilities,
@@ -440,6 +442,7 @@ impl Manager {
                 ServiceFailurePolicy::StopOnly
             }),
             terminal_fault: None,
+            terminal_exit_status: None,
             role,
             state: State::Ready,
             capabilities,
@@ -710,7 +713,7 @@ impl Manager {
         else {
             return false;
         };
-        let Some((service, fault)) = self
+        let Some((service, fault, exit_status)) = self
             .domain(id)
             .filter(|domain| {
                 domain.role == Role::AuxiliaryService
@@ -722,7 +725,7 @@ impl Manager {
             .and_then(|domain| {
                 domain
                     .service
-                    .map(|service| (service, domain.terminal_fault))
+                    .map(|service| (service, domain.terminal_fault, domain.terminal_exit_status))
             })
         else {
             return false;
@@ -730,12 +733,14 @@ impl Manager {
         if !self.lifecycle_events.push(LifecycleEvent {
             kind: if fault.is_some() {
                 crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+            } else if exit_status.is_some() {
+                crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
             } else {
                 crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
             },
             domain: id,
             service: Some(service),
-            detail: 0,
+            detail: exit_status.unwrap_or(0),
             fault,
             sequence: 0,
         }) {
@@ -747,7 +752,7 @@ impl Manager {
     }
 
     fn retire_faulted_auxiliary_service(&mut self, id: DomainId, fault: FaultMetadata) -> bool {
-        self.begin_auxiliary_runtime_stop(id, Some(fault), true)
+        self.begin_auxiliary_runtime_stop(id, Some(fault), None, true)
             && self.retire_auxiliary_service(id)
     }
 
@@ -755,6 +760,7 @@ impl Manager {
         &mut self,
         id: DomainId,
         fault: Option<FaultMetadata>,
+        exit_status: Option<u8>,
         require_quiescent: bool,
     ) -> bool {
         if !self.auxiliary_service_ids.contains(&Some(id)) {
@@ -787,6 +793,7 @@ impl Manager {
             }
         }
         domain.terminal_fault = fault;
+        domain.terminal_exit_status = exit_status;
         domain.state = State::Stopping;
         true
     }
@@ -803,7 +810,7 @@ impl Manager {
         {
             return false;
         }
-        self.begin_auxiliary_runtime_stop(id, None, false)
+        self.begin_auxiliary_runtime_stop(id, None, None, false)
     }
 }
 
@@ -1921,11 +1928,12 @@ pub(crate) fn discard_unstarted_auxiliary_service(domain_raw: u64) -> bool {
     global_manager_mut().is_some_and(|manager| manager.discard_unstarted_auxiliary_service(id))
 }
 
-pub(crate) fn begin_auxiliary_runtime_exit(domain_raw: u64) -> bool {
+pub(crate) fn begin_auxiliary_runtime_exit(domain_raw: u64, status: u8) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
-    global_manager_mut().is_some_and(|manager| manager.begin_auxiliary_runtime_stop(id, None, true))
+    global_manager_mut()
+        .is_some_and(|manager| manager.begin_auxiliary_runtime_stop(id, None, Some(status), true))
 }
 
 pub(crate) fn begin_auxiliary_runtime_fault(domain_raw: u64, fault: FaultMetadata) -> bool {
@@ -1933,7 +1941,7 @@ pub(crate) fn begin_auxiliary_runtime_fault(domain_raw: u64, fault: FaultMetadat
         return false;
     };
     global_manager_mut()
-        .is_some_and(|manager| manager.begin_auxiliary_runtime_stop(id, Some(fault), true))
+        .is_some_and(|manager| manager.begin_auxiliary_runtime_stop(id, Some(fault), None, true))
 }
 
 pub(crate) fn retire_stopped_auxiliary_service(domain_raw: u64) -> bool {
@@ -2037,6 +2045,10 @@ pub(crate) fn delivered_fault_descriptor() -> Option<[u8; crate::control_abi::FA
 pub(crate) fn last_lifecycle_event_audit() -> Option<(u8, u64, u64)> {
     let event = global_manager()?.last_delivered_lifecycle_event?;
     Some((event.kind, encode_id(event.domain), event.sequence))
+}
+
+pub(crate) fn last_lifecycle_event_detail() -> Option<u8> {
+    Some(global_manager()?.last_delivered_lifecycle_event?.detail)
 }
 
 pub(crate) fn last_lifecycle_service_identity() -> Option<u64> {

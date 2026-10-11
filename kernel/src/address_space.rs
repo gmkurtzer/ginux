@@ -661,6 +661,7 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
     };
     if stopped_kind != crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
         || stopped_sequence != 2
+        || domain::last_lifecycle_event_detail() != Some(0)
         || stopped_event
             != ((stopped_domain << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
         || domain::last_lifecycle_service_identity().is_none()
@@ -681,6 +682,7 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
     };
     if queued_stop_kind != crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
         || queued_stop_sequence != 3
+        || domain::last_lifecycle_event_detail() != Some(0)
         || queued_stop_domain == stopped_domain
         || queued_stop_event
             != ((queued_stop_domain << 8)
@@ -701,12 +703,15 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
     let Some(owner) = memory::FrameOwner::domain(executed_domain) else {
         return false;
     };
-    executed_kind == crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
+    executed_kind == crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
         && executed_sequence == 4
+        && domain::last_lifecycle_event_detail() == Some(42)
         && executed_domain != stopped_domain
         && executed_domain != queued_stop_domain
         && executed_event
-            == ((executed_domain << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
+            == ((42_u64 << 56)
+                | (executed_domain << 8)
+                | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED))
         && domain::last_lifecycle_service_identity().is_some()
         && scheduler::current_domain().is_none()
         && registered_auxiliary_address_space_count() == 0
@@ -761,6 +766,7 @@ pub(crate) fn verify_ring3_auxiliary_fault() -> bool {
             == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
         && domain::last_lifecycle_event_audit()
             == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 5))
+        && domain::last_lifecycle_event_detail() == Some(0)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::delivered_fault_matches(
             auxiliary,

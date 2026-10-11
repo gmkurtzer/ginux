@@ -655,7 +655,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !address_space::verify_ring3_auxiliary_exit() {
         kernel_fail("\r\nginux: ring-3 auxiliary exit invariant failed\r\n");
     }
-    serial_write("\r\nginux: stop-only auxiliary context executed and retired");
+    serial_write("\r\nginux: auxiliary exit status sequenced and retired");
     serial_write("\r\nginux: userspace auxiliary creation authority enforced");
     serial_write("\r\nginux: userspace auxiliary stop sequenced and retired");
     serial_write("\r\nginux: failed auxiliary load rollback enforced");

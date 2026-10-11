@@ -73,7 +73,8 @@ and blocks on an empty inbound IPC direction, resuming the control context.
 The control context directly wakes it with a message, stages and cancels one
 auxiliary, stages, initializes, and explicitly starts a distinct auxiliary,
 verifies budget exhaustion, and exits.
-The awakened replacement and admitted auxiliary both exit cleanly. The boot
+The awakened replacement exits cleanly; the admitted auxiliary validates its
+private payload and exits with status 42. The boot
 succeeds only after exactly two preemptions, no cooperative yields, one
 contained primary-service fault, three normal exits, one restart, one
 block/wake pair, and five or six cross-root dispatches depending on the valid

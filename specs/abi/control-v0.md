@@ -42,7 +42,12 @@ from the kernel.
 
 Operation 1 is a ping requiring read authority on host-control object 1. It
 returns `0x4758` when authorized and `UINT64_MAX - 1` when denied. Operation 2
-exits the calling thread and does not return to that context. Operation 3
+exits the calling thread and does not return to that context. A stop-only
+auxiliary supplies an exit status from 0 through 255 in `RSI`; larger values
+are rejected without removing the thread. Other domain roles ignore `RSI`.
+The hardware proof first attempts status 256, requires `UINT64_MAX - 2`, then
+exits the same still-running context with status 42.
+Operation 3
 cooperatively yields and returns zero when the context is scheduled again.
 Operation 4 sends the `RSI` word to IPC object 3 and requires write authority;
 operation 5 receives one word and requires read authority. The kernel selects
@@ -83,6 +88,11 @@ the ring-3 proof also creates and cleanly retires an auxiliary generation.
 Kind 4 is a stop-only auxiliary-service fault. It carries the exact domain and
 stable service identities plus architectural fault metadata, and never
 consumes the primary service restart budget.
+Kind 5 is a normal stop-only auxiliary exit. It carries the exact retired
+domain in bits 8-55 and the workload's eight-bit exit status in bits 56-63 of
+operation 7's packed result; the structured lifecycle descriptor exposes the
+same value in its detail byte. It carries no fault metadata and is distinct
+from a management-requested kind 3 stop.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes

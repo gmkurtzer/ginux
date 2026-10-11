@@ -1126,6 +1126,14 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         return u64::MAX;
     };
     let failure_policy = domain::service_failure_policy(caller_domain);
+    let auxiliary_exit_status = if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly) {
+        let Ok(status) = u8::try_from(frame.first_argument()) else {
+            return u64::MAX - 2;
+        };
+        Some(status)
+    } else {
+        None
+    };
     let service_exit = failure_policy == Some(domain::ServiceFailurePolicy::RestartManaged);
     let close_wait = if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly) {
         None
@@ -1146,8 +1154,10 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         return u64::MAX;
     }
     if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly)
-        && (!domain::begin_auxiliary_runtime_exit(caller_domain)
-            || !address_space::activate_kernel_root_for_auxiliary(caller_domain)
+        && (!domain::begin_auxiliary_runtime_exit(
+            caller_domain,
+            auxiliary_exit_status.unwrap_or(0),
+        ) || !address_space::activate_kernel_root_for_auxiliary(caller_domain)
             || !address_space::release_auxiliary_address_space(caller_domain)
             || !domain::retire_stopped_auxiliary_service(caller_domain))
     {

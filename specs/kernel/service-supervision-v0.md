@@ -56,6 +56,10 @@ new event without modifying the FIFO or overflow state. Event kind 3 records a
 cleanly retired auxiliary service generation and carries no fault metadata.
 Event kind occupies the low eight bits and the generation-tagged domain ID
 occupies the next 48 bits.
+Event kind 5 records a normal auxiliary exit. Its detail byte is the workload's
+bounded exit status, while kind 3 management stops and kind 4 faults retain
+zero detail. This lets supervision distinguish requested stop, normal exit,
+and contained fault without consulting mutable domain state.
 
 After the fault, the kernel creates one replacement domain generation with the
 same logical service identity and IPC-only delegation, explicitly rebinds the service side of the IPC
