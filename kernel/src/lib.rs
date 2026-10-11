@@ -590,6 +590,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: malformed Linux dynamic relocation metadata accepted\r\n");
     }
     serial_write("ginux: bounded Linux relative relocation metadata validated\r\n");
+    serial_write("ginux: bounded Linux symbol relocation metadata validated\r\n");
     if !linux_elf::verify_unresolved_dynamic_image_rejected() {
         kernel_fail("ginux: unresolved dynamic Linux image admitted as static\r\n");
     }
@@ -613,6 +614,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: interpreter-first Linux ring-3 entry verified\r\n");
     serial_write("ginux: userspace Linux interpreter self-relocation applied\r\n");
     serial_write("ginux: userspace Linux relative relocation applied\r\n");
+    serial_write("ginux: userspace Linux GLOB_DAT relocation applied\r\n");
     serial_write("ginux: metadata-driven Linux relative relocations applied\r\n");
     serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
     serial_write("ginux: Linux proof workload assembled from source\r\n");

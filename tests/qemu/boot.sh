@@ -603,6 +603,11 @@ if ! grep -q '^ginux: bounded Linux relative relocation metadata validated' "$ou
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux symbol relocation metadata validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux symbol relocation metadata was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: unresolved dynamic Linux static entry denied' "$output_file"; then
     echo "Boot test failed: unresolved dynamic Linux static entry was not denied." >&2
     exit 1
@@ -640,6 +645,11 @@ fi
 
 if ! grep -q '^ginux: userspace Linux relative relocation applied' "$output_file"; then
     echo "Boot test failed: userspace Linux relative relocation was not applied." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: userspace Linux GLOB_DAT relocation applied' "$output_file"; then
+    echo "Boot test failed: userspace Linux GLOB_DAT relocation was not applied." >&2
     exit 1
 fi
 
