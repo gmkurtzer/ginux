@@ -199,6 +199,13 @@ all resource counters remain zero. The no-child proof returns an all-zero
 structure for `RUSAGE_CHILDREN`. Other selectors return `-EINVAL`, and an
 invalid complete output returns `-EFAULT` without a partial write. This is
 single-task compatibility accounting, not scheduler-derived usage accounting.
+`rax = 36` (`__NR_getitimer`) reports each of `ITIMER_REAL`, `ITIMER_VIRTUAL`,
+and `ITIMER_PROF` as a zero-initialized, disabled 32-byte x86-64 `itimerval`.
+`rax = 38` (`__NR_setitimer`) accepts an all-zero value to idempotently disarm
+one of those timers and optionally returns its previous disabled value. Arming
+a timer returns `-ENOSYS` until asynchronous signal delivery exists. Invalid
+selectors return `-EINVAL`; invalid complete input or output ranges return
+`-EFAULT`, and rejected requests do not partially change the old-value output.
 `rax = 9` (`__NR_mmap`) admits one anonymous private 4096-byte RW/NX mapping at
 fixed kernel-selected address `0x40a000`. It requires a null hint, exact page
 length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and
@@ -367,7 +374,8 @@ bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprote
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
-bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`,
+bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
+`getitimer`/`setitimer`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,

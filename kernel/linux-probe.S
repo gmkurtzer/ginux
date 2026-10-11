@@ -2421,6 +2421,74 @@ resolution_valid:
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x404ff0], rax
+    xor edi, edi
+    mov esi, 0x404ff0
+    mov eax, 36
+    syscall
+    cmp rax, -14
+    jne failure
+    movabs rax, 0x1122334455667788
+    cmp qword ptr [0x404ff0], rax
+    jne failure
+
+    mov edi, 3
+    mov esi, 0x404bc0
+    mov eax, 36
+    syscall
+    cmp rax, -22
+    jne failure
+
+    xor edi, edi
+    mov esi, 0x404bc0
+    mov eax, 36
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x404bc0], 0
+    jne failure
+    cmp qword ptr [0x404bd8], 0
+    jne failure
+
+    mov qword ptr [0x404be0], 1
+    mov qword ptr [0x404be8], 0
+    mov qword ptr [0x404bf0], 0
+    mov qword ptr [0x404bf8], 0
+    movabs rax, 0x1122334455667788
+    mov qword ptr [0x404c00], rax
+    xor edi, edi
+    mov esi, 0x404be0
+    mov edx, 0x404c00
+    mov eax, 38
+    syscall
+    cmp rax, -38
+    jne failure
+    movabs rax, 0x1122334455667788
+    cmp qword ptr [0x404c00], rax
+    jne failure
+
+    mov qword ptr [0x404be0], 0
+    xor edi, edi
+    mov esi, 0x404be0
+    mov edx, 0x404c00
+    mov eax, 38
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x404c00], 0
+    jne failure
+    cmp qword ptr [0x404c18], 0
+    jne failure
+
+    xor edi, edi
+    mov esi, 0x405200
+    xor edx, edx
+    mov eax, 38
+    syscall
+    cmp rax, -14
+    jne failure
+
+    movabs rax, 0x1122334455667788
+    mov qword ptr [0x404ff0], rax
     mov qword ptr [0x404ff8], rax
     xor edi, edi
     mov esi, 0x404ff0

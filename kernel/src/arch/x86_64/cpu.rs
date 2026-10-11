@@ -63,6 +63,8 @@ const LINUX_MINCORE_SYSCALL: u64 = 27;
 const LINUX_MADVISE_SYSCALL: u64 = 28;
 const LINUX_DUP_SYSCALL: u64 = 32;
 const LINUX_DUP2_SYSCALL: u64 = 33;
+const LINUX_GETITIMER_SYSCALL: u64 = 36;
+const LINUX_SETITIMER_SYSCALL: u64 = 38;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
@@ -1361,6 +1363,8 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_MADVISE_SYSCALL => linux_madvise(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
+        LINUX_GETITIMER_SYSCALL => linux_getitimer(first_argument, buffer),
+        LINUX_SETITIMER_SYSCALL => linux_setitimer(first_argument, buffer, count),
         LINUX_FCNTL_SYSCALL => linux_descriptor_fcntl(first_argument, buffer, count),
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
@@ -1726,6 +1730,38 @@ fn linux_getrusage(who: u64, output_address: u64) -> u64 {
         usage[8..16].copy_from_slice(&(nanoseconds / 1_000).to_ne_bytes());
     }
     if !copy_to_linux_user(output_address, &usage) {
+        return LINUX_EFAULT;
+    }
+    0
+}
+
+fn linux_getitimer(which: u64, output_address: u64) -> u64 {
+    if which > 2 {
+        return LINUX_EINVAL;
+    }
+    if !copy_to_linux_user(output_address, &[0_u8; 32]) {
+        return LINUX_EFAULT;
+    }
+    0
+}
+
+fn linux_setitimer(which: u64, input_address: u64, old_output_address: u64) -> u64 {
+    if which > 2 {
+        return LINUX_EINVAL;
+    }
+    if !linux_readable_user_range_contains(input_address, 32)
+        || (old_output_address != 0 && !linux_writable_user_range_contains(old_output_address, 32))
+    {
+        return LINUX_EFAULT;
+    }
+    let mut requested = [0_u8; 32];
+    if !copy_from_linux_user(input_address, &mut requested) {
+        return LINUX_EFAULT;
+    }
+    if requested != [0_u8; 32] {
+        return LINUX_ENOSYS;
+    }
+    if old_output_address != 0 && !copy_to_linux_user(old_output_address, &[0_u8; 32]) {
         return LINUX_EFAULT;
     }
     0

@@ -84,7 +84,9 @@ private TSC epoch, using PIT calibration when CPUID has no frequency data;
 `clock_getres` reports its rounded single-tick resolution. The sole process and
 thread expose that same non-descheduled interval through CPU clocks and
 100-Hz `times` accounting; bounded `getrusage` returns it as user time in a
-fully initialized x86-64 resource-usage structure.
+fully initialized x86-64 resource-usage structure. The three interval-timer
+classes can be queried and idempotently disarmed; arming remains unsupported
+until asynchronous signal delivery exists.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and
