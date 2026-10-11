@@ -677,7 +677,10 @@ for marker in \
     'bounded Linux exec rejection preserved live image' \
     'Linux exec argv and environment delivered' \
     'old Linux image pages removed after exec' \
-    'replaced Linux image retired cleanly'; do
+    'replaced Linux image retired cleanly' \
+    'Linux close-on-exec descriptors transitioned' \
+    'Linux exec signal state transitioned' \
+    'Linux exec process identity installed'; do
     if ! grep -q "^ginux: $marker" "$output_file"; then
         echo "Boot test failed: missing exec proof: $marker." >&2
         exit 1

@@ -264,6 +264,8 @@ const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
 const LINUX_PR_GET_NO_NEW_PRIVS: u64 = 39;
 const LINUX_PROCESS_NAME_SIZE: usize = 16;
 const LINUX_INITIAL_PROCESS_NAME: u64 = 0x7469_6e69;
+const LINUX_EXEC_PROCESS_NAME_LOW: u64 = 0x7261_742d_6365_7865;
+const LINUX_EXEC_PROCESS_NAME_HIGH: u64 = 0x0074_6567;
 const LINUX_SIG_BLOCK: u64 = 0;
 const LINUX_SIG_UNBLOCK: u64 = 1;
 const LINUX_SIG_SETMASK: u64 = 2;
@@ -2697,13 +2699,19 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             serial_write("\r\n");
         }
     }
+    let expected_process_name = if exec_replaced {
+        [LINUX_EXEC_PROCESS_NAME_LOW, LINUX_EXEC_PROCESS_NAME_HIGH]
+    } else {
+        [LINUX_INITIAL_PROCESS_NAME, 0]
+    };
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
-        == LINUX_INITIAL_PROCESS_NAME
-        && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
+        == expected_process_name[0]
+        && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == expected_process_name[1];
     let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
     let signal_mask_restored = ELF_PROBE_SIGNAL_MASK.swap(0, Ordering::SeqCst) == 0;
     let signal_actions_restored = (0..LINUX_SIGNAL_COUNT).all(|signal| {
-        ELF_PROBE_SIGNAL_HANDLERS[signal].swap(0, Ordering::SeqCst) == 0
+        let expected_handler = u64::from(exec_replaced && signal == 11);
+        ELF_PROBE_SIGNAL_HANDLERS[signal].swap(0, Ordering::SeqCst) == expected_handler
             && ELF_PROBE_SIGNAL_FLAGS[signal].swap(0, Ordering::SeqCst) == 0
             && ELF_PROBE_SIGNAL_RESTORERS[signal].swap(0, Ordering::SeqCst) == 0
             && ELF_PROBE_SIGNAL_ACTION_MASKS[signal].swap(0, Ordering::SeqCst) == 0
@@ -4664,6 +4672,14 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
     {
         return LINUX_E2BIG;
     }
+    let close_on_exec = ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst);
+    if close_on_exec >> LINUX_AUX_DESCRIPTOR_LIMIT != 0
+        || (0..LINUX_AUX_DESCRIPTOR_LIMIT).any(|descriptor| {
+            close_on_exec & (1 << descriptor) != 0 && !linux_descriptor_open(descriptor)
+        })
+    {
+        return LINUX_ESRCH;
+    }
     let entry = ELF_PROBE_EXEC_ENTRY.load(Ordering::SeqCst);
     let mappings = core::array::from_fn(|index| {
         let flags = ELF_PROBE_EXEC_MAPPING_FLAGS[index].load(Ordering::SeqCst);
@@ -4738,6 +4754,24 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
         let _ = copy_to_linux_user(new_stack, &previous_stack);
         return LINUX_ENOMEM;
     }
+    for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
+        if close_on_exec & (1 << descriptor) != 0 {
+            let _ = linux_descriptor_close(descriptor);
+        }
+    }
+    for signal in 0..LINUX_SIGNAL_COUNT {
+        if ELF_PROBE_SIGNAL_HANDLERS[signal].load(Ordering::SeqCst) != 1 {
+            ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
+            ELF_PROBE_SIGNAL_FLAGS[signal].store(0, Ordering::SeqCst);
+            ELF_PROBE_SIGNAL_RESTORERS[signal].store(0, Ordering::SeqCst);
+            ELF_PROBE_SIGNAL_ACTION_MASKS[signal].store(0, Ordering::SeqCst);
+        }
+    }
+    ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+    ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_EXEC_PROCESS_NAME_LOW, Ordering::SeqCst);
+    ELF_PROBE_PROCESS_NAME_HIGH.store(LINUX_EXEC_PROCESS_NAME_HIGH, Ordering::SeqCst);
     ELF_PROBE_EXITED_CLEAR_CHILD_TID.store(clear_child_tid, Ordering::SeqCst);
     ELF_PROBE_EXITED_ROBUST_LIST.store(robust_list, Ordering::SeqCst);
     ELF_PROBE_CODE_BASE.store(mappings[1].address as u64, Ordering::SeqCst);

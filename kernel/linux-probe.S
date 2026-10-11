@@ -721,6 +721,7 @@ linux_clone_repeat:
     mov r10d, 8
     mov eax, 13
     call syscall_expect_zero
+
     cmp qword ptr [0x405120], 0
     jne failure
     cmp qword ptr [0x405138], 0
@@ -3292,7 +3293,7 @@ resolution_valid:
 #endif
 
 #ifndef GINUX_LINKED
-    sub rsp, 128
+    sub rsp, 192
     lea rax, [rip + exec_path]
     mov qword ptr [rsp], rax
     lea rax, [rip + exec_mode]
@@ -3301,6 +3302,50 @@ resolution_valid:
     lea rax, [rip + exec_environment]
     mov qword ptr [rsp + 24], rax
     mov qword ptr [rsp + 32], 0
+
+    mov edi, -100
+    lea rsi, [rip + exec_zero_path]
+    mov edx, 0x80000
+    mov eax, 257
+    call syscall_expect_two
+
+    mov edi, -100
+    lea rsi, [rip + exec_null_path]
+    mov edx, 1
+    mov eax, 257
+    call syscall_expect_three
+
+    mov qword ptr [rsp + 80], 0x400100
+    mov qword ptr [rsp + 88], 0
+    mov qword ptr [rsp + 96], 0
+    mov qword ptr [rsp + 104], 0
+    mov edi, 10
+    lea rsi, [rsp + 80]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    call syscall_expect_zero
+
+    mov qword ptr [rsp + 80], 1
+    mov edi, 12
+    lea rsi, [rsp + 80]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    call syscall_expect_zero
+
+    mov qword ptr [rsp + 112], 0x405800
+    mov qword ptr [rsp + 120], 0
+    mov qword ptr [rsp + 128], 2048
+    lea rdi, [rsp + 112]
+    xor esi, esi
+    mov eax, 131
+    call syscall_expect_zero
+
+    mov edi, 15
+    lea rsi, [rip + pre_exec_name]
+    mov eax, 157
+    call syscall_expect_zero
 
     lea rdi, [rip + missing_exec_path]
     mov rsi, rsp
@@ -3321,6 +3366,12 @@ resolution_valid:
     lea rdx, [rsp + 24]
     mov eax, 59
     call syscall_expect_e2big
+
+    mov edi, 2
+    mov esi, 1
+    xor edx, edx
+    mov eax, 72
+    call syscall_expect_one
 
     lea rdi, [rip + exec_path]
     mov rsi, rsp
@@ -3463,6 +3514,12 @@ exec_environment:
     .asciz "GINUX_EXEC=1"
 missing_exec_path:
     .asciz "/bin/missing"
+exec_zero_path:
+    .asciz "/dev/zero"
+exec_null_path:
+    .asciz "/dev/null"
+pre_exec_name:
+    .asciz "pre-exec"
 #endif
 
 #ifdef GINUX_LINKED

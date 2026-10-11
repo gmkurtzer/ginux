@@ -356,11 +356,16 @@ returns `-EFAULT`, and any other vector shape or contents return `-E2BIG`
 without changing the running image. A multithreaded caller returns `-EAGAIN`.
 On success the kernel clears the clear-child-TID and robust-list registrations,
 constructs a fresh bounded initial stack, atomically replaces the authenticated
-image mappings, and never returns to the old program. The replacement reopens
+image mappings, and never returns to the old program. Descriptors marked
+`FD_CLOEXEC` close only after the mapping commit, while ordinary descriptors
+survive. Caught signal dispositions reset to default, ignored dispositions
+remain ignored, the alternate signal stack becomes disabled, the signal mask
+and `no_new_privs` remain unchanged, and the process name becomes
+`exec-target`. The replacement validates each of these transitions, reopens
 `/dev/console`, validates its complete initial stack, emits `EXEC_OK`, closes
-the descriptor, and exits with status 42. General pathname loading, dynamic
-targets, shebangs, and arbitrary argument or environment vectors are outside
-this version.
+all surviving proof descriptors, and exits with status 42. General pathname
+loading, dynamic targets, shebangs, and arbitrary argument or environment
+vectors are outside this version.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 4,

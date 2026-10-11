@@ -37,6 +37,86 @@ ginux_linux_exec_target:
     jne .Lfailure
     cmp qword ptr [rsp + 56], 0
     jne .Lfailure
+
+    mov edi, 2
+    mov esi, 1
+    xor edx, edx
+    mov eax, 72
+    syscall
+    cmp rax, -9
+    jne .Lfailure
+    mov edi, 3
+    mov esi, 1
+    xor edx, edx
+    mov eax, 72
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, 10
+    xor esi, esi
+    lea rdx, [rip + .Lsignal_action]
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_action], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_action + 8], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_action + 16], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_action + 24], 0
+    jne .Lfailure
+    mov edi, 12
+    xor esi, esi
+    lea rdx, [rip + .Lsignal_action]
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_action], 1
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_action + 8], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_action + 16], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_action + 24], 0
+    jne .Lfailure
+
+    xor edi, edi
+    lea rsi, [rip + .Lalt_stack]
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lalt_stack], 0
+    jne .Lfailure
+    cmp dword ptr [rip + .Lalt_stack + 8], 2
+    jne .Lfailure
+    cmp qword ptr [rip + .Lalt_stack + 16], 0
+    jne .Lfailure
+
+    mov edi, 16
+    lea rsi, [rip + .Lprocess_name]
+    mov eax, 157
+    syscall
+    test rax, rax
+    jne .Lfailure
+    movabs rcx, 0x7261742d63657865
+    cmp qword ptr [rip + .Lprocess_name], rcx
+    jne .Lfailure
+    cmp dword ptr [rip + .Lprocess_name + 8], 0x00746567
+    jne .Lfailure
+
+    mov edi, 3
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov edi, -100
     lea rsi, [rip + .Lconsole]
     mov edx, 1
@@ -75,5 +155,14 @@ ginux_linux_exec_target:
 
 .section .data
 .quad 0x4558454354415247
+
+.section .bss
+.balign 8
+.Lprocess_name:
+    .zero 16
+.Lsignal_action:
+    .zero 32
+.Lalt_stack:
+    .zero 24
 
 .section .note.GNU-stack,"",@progbits
