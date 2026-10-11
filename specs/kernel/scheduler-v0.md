@@ -25,8 +25,12 @@ grant authority or attach a new thread.
 Each thread owns a C-layout saved context containing all general-purpose
 registers, user RIP/RSP/RFLAGS, and its page-table root. Creation and yield
 reject null or non-lower-canonical instruction/stack pointers, a missing
-mandatory RFLAGS bit, and null or unaligned roots. Yield atomically replaces
-the current thread's saved context before choosing another thread.
+mandatory RFLAGS bit, a cleared interrupt-enable flag, user I/O privilege,
+nested-task or virtual-8086 state, and null or unaligned roots. Requiring IF at
+creation and every saved-context transition prevents the kernel from admitting
+a user context that cannot be preempted by maskable interrupts. Yield
+atomically replaces the current thread's saved context before choosing another
+thread.
 
 The QEMU boot gate covers two-thread ordering, rejected non-current yield,
 single-running-thread state, exit selection, idle behavior, slot reuse, domain

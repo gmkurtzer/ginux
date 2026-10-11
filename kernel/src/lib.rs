@@ -633,6 +633,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }
     serial_write("\r\nginux: scheduler context lifecycle verified");
+    serial_write("\r\nginux: preemptible user context flags enforced");
     if !crypto::verify_sha256_known_answers() {
         kernel_fail("\r\nginux: bootstrap SHA-256 self-test failed\r\n");
     }

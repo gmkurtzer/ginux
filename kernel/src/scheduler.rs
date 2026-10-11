@@ -292,6 +292,7 @@ impl UserTrapFrame {
 impl UserContext {
     fn is_valid(&self) -> bool {
         const LOWER_CANONICAL_END: u64 = (1_u64 << 47) - 1;
+        const INTERRUPT_ENABLE: u64 = 1 << 9;
         const IOPL: u64 = 3 << 12;
         const NESTED_TASK: u64 = 1 << 14;
         const VIRTUAL_8086: u64 = 1 << 17;
@@ -300,6 +301,7 @@ impl UserContext {
             && self.rip != 0
             && self.rsp != 0
             && self.rflags & 2 != 0
+            && self.rflags & INTERRUPT_ENABLE != 0
             && self.rflags & (IOPL | NESTED_TASK | VIRTUAL_8086) == 0
             && self.address_space_root != 0
             && self.address_space_root.is_multiple_of(4096)
@@ -1005,6 +1007,15 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             .create(
                 1,
                 UserContext {
+                    rflags: first_context.rflags & !(1 << 9),
+                    ..first_context
+                },
+            )
+            .is_some()
+        || scheduler
+            .create(
+                1,
+                UserContext {
                     rflags: first_context.rflags | (3 << 12),
                     ..first_context
                 },
@@ -1132,7 +1143,7 @@ const fn test_context(rax: u64, rip: u64, rsp: u64, root: u64) -> UserContext {
         r15: 0,
         rip,
         rsp,
-        rflags: 2,
+        rflags: 2 | (1 << 9),
         address_space_root: root,
     }
 }
