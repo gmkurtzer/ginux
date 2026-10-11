@@ -104,7 +104,9 @@ main and interpreter load before mapping. The resolver still must authenticate
 the selected interpreter bytes. Static and interpreted plans produce the same
 startup-metadata type, so initial RIP and the `AT_PHDR`, `AT_PHNUM`, `AT_BASE`,
 and `AT_ENTRY` values cannot silently fall back to static defaults. The existing
-static runtime stack is now populated from that common contract. The profile
+static runtime stack is now populated by a single bounded auxiliary-vector
+encoder using that common contract, and the interpreted proof checks the exact
+word positions of its dynamic values. The profile
 does not yet apply dynamic
 relocations, map the combined plan, execute the interpreter, or support glibc.
 

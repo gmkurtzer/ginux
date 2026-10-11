@@ -324,53 +324,18 @@ pub(crate) fn verify_linux_elf_mapping(
             let environment_address = stack_virtual_page + environment_offset as u64;
             let argument_address = stack_virtual_page + argument_offset as u64;
             let stack_words = stack_bytes.add(stack_offset).cast::<u64>();
-            for (index, value) in [
-                1_u64,
-                argument_address,
-                0,
-                environment_address,
-                0,
-                3,
-                startup.program_headers,
-                4,
-                crate::linux_elf::PROGRAM_HEADER_SIZE as u64,
-                5,
-                u64::from(startup.program_header_count),
-                6,
-                PAGE_SIZE as u64,
-                7,
-                startup.interpreter_base,
-                8,
-                0,
-                11,
-                0,
-                12,
-                0,
-                13,
-                0,
-                14,
-                0,
-                23,
-                0,
-                31,
-                argument_address,
-                9,
-                startup.main_entry,
-                17,
-                100,
-                15,
-                platform_address,
-                16,
-                0,
-                26,
-                0,
-                0,
-                0,
-            ]
-            .into_iter()
-            .enumerate()
+            for (index, value) in [1_u64, argument_address, 0, environment_address, 0]
+                .into_iter()
+                .enumerate()
             {
                 stack_words.add(index).write(value);
+            }
+            for (index, value) in
+                crate::linux_elf::auxiliary_vector(startup, argument_address, platform_address)
+                    .into_iter()
+                    .enumerate()
+            {
+                stack_words.add(5 + index).write(value);
             }
             core::ptr::copy_nonoverlapping(
                 LINUX_PLATFORM.as_ptr(),

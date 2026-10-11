@@ -97,6 +97,8 @@ pub(crate) struct ProcessStartup {
     pub(crate) main_entry: u64,
 }
 
+pub(crate) const AUXILIARY_VECTOR_WORDS: usize = 36;
+
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * MIN_LOAD_SEGMENT_COUNT
         || bytes.get(0..4)? != b"\x7fELF"
@@ -316,6 +318,51 @@ pub(crate) fn interpreted_startup(plan: &InterpretedLoadPlan<'_, '_>) -> Process
         interpreter_base: plan.interpreter_base,
         main_entry: plan.main_entry,
     }
+}
+
+pub(crate) fn auxiliary_vector(
+    startup: ProcessStartup,
+    executable_name: u64,
+    platform: u64,
+) -> [u64; AUXILIARY_VECTOR_WORDS] {
+    [
+        3,
+        startup.program_headers,
+        4,
+        PROGRAM_HEADER_SIZE as u64,
+        5,
+        u64::from(startup.program_header_count),
+        6,
+        PAGE_SIZE as u64,
+        7,
+        startup.interpreter_base,
+        8,
+        0,
+        11,
+        0,
+        12,
+        0,
+        13,
+        0,
+        14,
+        0,
+        23,
+        0,
+        31,
+        executable_name,
+        9,
+        startup.main_entry,
+        17,
+        100,
+        15,
+        platform,
+        16,
+        0,
+        26,
+        0,
+        0,
+        0,
+    ]
 }
 
 fn plans_overlap(first: &LoadPlan<'_>, second: &LoadPlan<'_>) -> bool {
@@ -938,11 +985,19 @@ fn verify_interpreted_plan() -> bool {
         return false;
     };
     let startup = interpreted_startup(&combined);
+    let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000);
     startup.initial_entry == 0x60_00f0
         && startup.program_headers == 0x40_0040
         && startup.program_header_count == 4
         && startup.interpreter_base == 0x60_0000
         && startup.main_entry == 0x40_0100
+        && auxiliary[1] == 0x40_0040
+        && auxiliary[5] == 4
+        && auxiliary[9] == 0x60_0000
+        && auxiliary[23] == 0x70_1000
+        && auxiliary[25] == 0x40_0100
+        && auxiliary[29] == 0x70_2000
+        && auxiliary[34..] == [0, 0]
         && combined.initial_entry == 0x60_00f0
         && combined.main_entry == 0x40_0100
         && combined.interpreter_base == 0x60_0000
