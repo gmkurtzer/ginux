@@ -40,7 +40,11 @@ event naming that service generation. The control plane can consume event kind
 1 only with manage authority on host-control object 1; presenting its console
 capability is rejected without consuming the event. The QEMU payload requires
 delivery before it exits, and the kernel verifies that the delivered event
-belonged to the original faulted generation. Event kind occupies the low eight
+belonged to the original faulted generation and carried lifecycle sequence one.
+Every accepted event receives a nonzero monotonic internal sequence; dequeue
+rejects zero or non-monotonic records. A full FIFO still consumes sequence
+numbers for dropped records, while its later summary identifies the first
+dropped sequence and the saturating drop count. Event kind occupies the low eight
 bits and the generation-tagged domain ID occupies the next 48 bits.
 
 After the fault, the kernel creates one replacement domain generation with the
@@ -76,7 +80,7 @@ production policy. There is no backoff, state recovery, service identity separat
 request ID, replay protection, cancellation, outstanding-call cleanup, or
 health protocol. The four-record FIFO never overwrites queued events. Additional
 records set a sticky overflow notification containing the first dropped domain
-and a saturating count, allowing teardown to continue. The control plane sees
+and sequence plus a saturating count, allowing teardown to continue. The control plane sees
 that notification after the concrete FIFO records. There is no blocking wait,
 subscription, recovery of the dropped record contents, or persistence.
 Those semantics must be defined before more than one request can be in flight.

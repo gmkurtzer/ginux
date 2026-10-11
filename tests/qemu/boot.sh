@@ -553,6 +553,11 @@ if ! grep -q '^ginux: service fault event generation matched' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: monotonic lifecycle events verified' "$output_file"; then
+    echo "Boot test failed: lifecycle events were not sequenced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: service fault metadata matched' "$output_file"; then
     echo "Boot test failed: service fault metadata did not match." >&2
     exit 1

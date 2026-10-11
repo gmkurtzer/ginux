@@ -72,6 +72,7 @@ struct LifecycleEvent {
     domain: DomainId,
     detail: u8,
     fault: Option<FaultMetadata>,
+    sequence: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,6 +86,7 @@ pub(crate) struct FaultMetadata {
 #[derive(Clone, Copy)]
 struct EventOverflow {
     first_domain: DomainId,
+    first_sequence: u64,
     dropped: u8,
 }
 
@@ -93,6 +95,8 @@ struct EventQueue {
     head: usize,
     len: usize,
     overflow: Option<EventOverflow>,
+    next_sequence: u64,
+    last_delivered_sequence: u64,
 }
 
 impl EventQueue {
@@ -102,40 +106,57 @@ impl EventQueue {
             head: 0,
             len: 0,
             overflow: None,
+            next_sequence: 1,
+            last_delivered_sequence: 0,
         }
     }
 
-    fn push(&mut self, event: LifecycleEvent) -> bool {
+    fn push(&mut self, mut event: LifecycleEvent) -> bool {
+        let Some(next) = self.next_sequence.checked_add(1) else {
+            return false;
+        };
+        event.sequence = self.next_sequence;
         if let Some(overflow) = &mut self.overflow {
             overflow.dropped = overflow.dropped.saturating_add(1);
+            self.next_sequence = next;
             return true;
         }
         if self.len == EVENT_CAPACITY {
             self.overflow = Some(EventOverflow {
                 first_domain: event.domain,
+                first_sequence: event.sequence,
                 dropped: 1,
             });
+            self.next_sequence = next;
             return true;
         }
         let tail = (self.head + self.len) % EVENT_CAPACITY;
         self.events[tail] = Some(event);
         self.len += 1;
+        self.next_sequence = next;
         true
     }
 
     fn pop(&mut self) -> Option<LifecycleEvent> {
-        if self.len == 0 {
+        let event = if self.len == 0 {
             let overflow = self.overflow.take()?;
-            return Some(LifecycleEvent {
+            LifecycleEvent {
                 kind: 2,
                 domain: overflow.first_domain,
                 detail: overflow.dropped,
                 fault: None,
-            });
+                sequence: overflow.first_sequence,
+            }
+        } else {
+            let event = self.events[self.head].take()?;
+            self.head = (self.head + 1) % EVENT_CAPACITY;
+            self.len -= 1;
+            event
+        };
+        if event.sequence == 0 || event.sequence <= self.last_delivered_sequence {
+            return None;
         }
-        let event = self.events[self.head].take()?;
-        self.head = (self.head + 1) % EVENT_CAPACITY;
-        self.len -= 1;
+        self.last_delivered_sequence = event.sequence;
         Some(event)
     }
 
@@ -904,6 +925,7 @@ pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> boo
         domain: id,
         detail: 0,
         fault: Some(fault),
+        sequence: 0,
     })
 }
 
@@ -956,6 +978,11 @@ pub(crate) fn delivered_service_fault_descriptor(
     )
 }
 
+pub(crate) fn last_lifecycle_event_audit() -> Option<(u8, u64, u64)> {
+    let event = global_manager()?.last_delivered_service_fault?;
+    Some((event.kind, encode_id(event.domain), event.sequence))
+}
+
 pub(crate) fn verify_lifecycle_event_invariants() -> bool {
     let first = LifecycleEvent {
         kind: 1,
@@ -970,33 +997,58 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
             address: 0,
             instruction: 0x1000,
         }),
+        sequence: 0,
     };
+    let mut zero_sequence = EventQueue::new();
+    if !zero_sequence.push(first) {
+        return false;
+    }
+    let Some(zero_event) = zero_sequence.events[0].as_mut() else {
+        return false;
+    };
+    zero_event.sequence = 0;
+    let zero_sequence_rejected = zero_sequence.pop().is_none();
+    let mut stale_sequence = EventQueue::new();
+    let stale_sequence_rejected = stale_sequence.push(first) && {
+        stale_sequence.last_delivered_sequence = 1;
+        stale_sequence.pop().is_none()
+    };
+    let mut exhausted = EventQueue::new();
+    exhausted.next_sequence = u64::MAX;
+    let exhausted_sequence_rejected = !exhausted.push(first) && exhausted.is_empty();
     let mut queue = EventQueue::new();
-    queue.pop().is_none()
+    zero_sequence_rejected
+        && stale_sequence_rejected
+        && exhausted_sequence_rejected
+        && queue.pop().is_none()
         && queue.push(first)
         && queue.push(LifecycleEvent {
             kind: 2,
             domain: first.domain,
             detail: 0,
             fault: None,
+            sequence: 0,
         })
         && queue.push(LifecycleEvent {
             kind: 3,
             domain: first.domain,
             detail: 0,
             fault: None,
+            sequence: 0,
         })
         && queue.push(LifecycleEvent {
             kind: 4,
             domain: first.domain,
             detail: 0,
             fault: None,
+            sequence: 0,
         })
         && queue.push(LifecycleEvent {
             kind: 5,
             domain: first.domain,
             detail: 0,
             fault: None,
+            sequence: 0,
         })
         && queue.push(LifecycleEvent {
             kind: 6,
@@ -1006,23 +1058,42 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
             },
             detail: 0,
             fault: None,
+            sequence: 0,
         })
-        && queue.pop() == Some(first)
+        && queue.pop().is_some_and(|event| {
+            event
+                == LifecycleEvent {
+                    sequence: 1,
+                    ..first
+                }
+        })
         && queue.push(LifecycleEvent {
             kind: 7,
             domain: first.domain,
             detail: 0,
             fault: None,
+            sequence: 0,
         })
-        && queue.pop().is_some_and(|event| event.kind == 2)
-        && queue.pop().is_some_and(|event| event.kind == 3)
-        && queue.pop().is_some_and(|event| event.kind == 4)
+        && queue
+            .pop()
+            .is_some_and(|event| event.kind == 2 && event.sequence == 2)
+        && queue
+            .pop()
+            .is_some_and(|event| event.kind == 3 && event.sequence == 3)
+        && queue
+            .pop()
+            .is_some_and(|event| event.kind == 4 && event.sequence == 4)
         && queue.pop().is_some_and(|event| {
-            event.kind == 2 && event.domain == first.domain && event.detail == 3
+            event.kind == 2
+                && event.domain == first.domain
+                && event.detail == 3
+                && event.sequence == 5
         })
         && queue.pop().is_none()
         && queue.is_empty()
         && queue.events.iter().all(Option::is_none)
+        && queue.next_sequence == 8
+        && queue.last_delivered_sequence == 5
 }
 
 pub(crate) fn domain_is_retired(domain_raw: u64) -> bool {

@@ -63,7 +63,9 @@ when full. If additional records arrive while full, teardown continues and the
 queue retains one sticky overflow notification. After the four concrete events
 are consumed, operation 7 returns event kind 2, the first dropped domain in
 bits 8-55, and a saturating dropped-record count in bits 56-63. Consuming that
-notification clears the overflow state.
+notification clears the overflow state. Concrete and summarized events carry
+an internal monotonic sequence for replay detection, but the packed ABI v1
+result does not expose it.
 For a concrete service fault, the kernel retains vector, error code, fault
 address, and instruction address with the consumed record for supervision
 auditing.

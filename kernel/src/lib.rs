@@ -538,6 +538,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
+        || domain::last_lifecycle_event_audit() != Some((1, service_domain, 1))
         || !domain::delivered_service_fault_matches(
             service_domain,
             domain::FaultMetadata {
@@ -635,6 +636,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: faulted service domain authority retired");
     serial_write("\r\nginux: service fault event delivered to control plane");
     serial_write("\r\nginux: service fault event generation matched");
+    serial_write("\r\nginux: monotonic lifecycle events verified");
     serial_write("\r\nginux: service fault metadata matched");
     serial_write("\r\nginux: structured service fault delivered");
     serial_write("\r\nginux: service fault diagnostic authority enforced");
