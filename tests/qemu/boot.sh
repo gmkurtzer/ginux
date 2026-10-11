@@ -778,6 +778,11 @@ if ! grep -q '^ginux: userspace Linux interpreter self-relocation applied' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux relocation table shapes validated' "$output_file"; then
+    echo "Boot test failed: userspace Linux relocation table shapes were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace Linux relative relocation applied' "$output_file"; then
     echo "Boot test failed: userspace Linux relative relocation was not applied." >&2
     exit 1

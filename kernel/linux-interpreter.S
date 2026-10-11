@@ -161,6 +161,8 @@ ginux_linux_interpreter:
     mov qword ptr [rip + .Lmain_relocation_size], rax
     mov qword ptr [rip + .Lmain_relocation_entry_size], rax
     mov qword ptr [rip + .Lmain_relative_count], rax
+    mov qword ptr [rip + .Lmain_jump_relocation_size], rax
+    mov qword ptr [rip + .Lmain_jump_relocation_kind], rax
     mov qword ptr [rip + .Lmain_preinit_array], rax
     mov qword ptr [rip + .Lmain_preinit_array_size], rax
     mov qword ptr [rip + .Lmain_init_function], rax
@@ -190,9 +192,19 @@ ginux_linux_interpreter:
     mov qword ptr [rip + .Lmain_relocation_entry_size], rdx
 .Lscan_main_relative_count:
     cmp qword ptr [rdi], 0x6ffffff9
-    jne .Lscan_main_preinit_array
+    jne .Lscan_main_jump_relocation_size
     mov rdx, qword ptr [rdi + 8]
     mov qword ptr [rip + .Lmain_relative_count], rdx
+.Lscan_main_jump_relocation_size:
+    cmp qword ptr [rdi], 2
+    jne .Lscan_main_jump_relocation_kind
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_jump_relocation_size], rdx
+.Lscan_main_jump_relocation_kind:
+    cmp qword ptr [rdi], 20
+    jne .Lscan_main_preinit_array
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_jump_relocation_kind], rdx
 .Lscan_main_preinit_array:
     cmp qword ptr [rdi], 32
     jne .Lscan_main_preinit_array_size
@@ -259,6 +271,10 @@ ginux_linux_interpreter:
     cmp qword ptr [rip + .Lmain_relocation_entry_size], 24
     jne .Linvalid_dynamic
     cmp qword ptr [rip + .Lmain_relative_count], 2
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_jump_relocation_size], 48
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_jump_relocation_kind], 7
     jne .Linvalid_dynamic
     cmp qword ptr [rip + .Lmain_preinit_array], 0
     je .Linvalid_dynamic
@@ -331,6 +347,11 @@ ginux_linux_interpreter:
     xor ebp, ebp
 #ifdef GINUX_LINKED
     mov qword ptr [rip + .Lprimary_init_function], r9
+    mov qword ptr [rip + .Lprimary_relocation_size], r9
+    mov qword ptr [rip + .Lprimary_relocation_entry_size], r9
+    mov qword ptr [rip + .Lprimary_relative_count], r9
+    mov qword ptr [rip + .Lprimary_jump_relocation_size], r9
+    mov qword ptr [rip + .Lprimary_jump_relocation_kind], r9
     mov qword ptr [rip + .Lprimary_init_array], r9
     mov qword ptr [rip + .Lprimary_init_array_size], r9
 #endif
@@ -346,6 +367,31 @@ ginux_linux_interpreter:
     cmp qword ptr [rdi], 23
     cmove rbp, qword ptr [rdi + 8]
 #ifdef GINUX_LINKED
+    cmp qword ptr [rdi], 8
+    jne .Lscan_primary_relocation_entry_size
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lprimary_relocation_size], rdx
+.Lscan_primary_relocation_entry_size:
+    cmp qword ptr [rdi], 9
+    jne .Lscan_primary_relative_count
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lprimary_relocation_entry_size], rdx
+.Lscan_primary_relative_count:
+    cmp qword ptr [rdi], 0x6ffffff9
+    jne .Lscan_primary_jump_relocation_size
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lprimary_relative_count], rdx
+.Lscan_primary_jump_relocation_size:
+    cmp qword ptr [rdi], 2
+    jne .Lscan_primary_jump_relocation_kind
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lprimary_jump_relocation_size], rdx
+.Lscan_primary_jump_relocation_kind:
+    cmp qword ptr [rdi], 20
+    jne .Lscan_primary_init_function
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lprimary_jump_relocation_kind], rdx
+.Lscan_primary_init_function:
     cmp qword ptr [rdi], 12
     jne .Lscan_primary_init_array
     mov rdx, qword ptr [rdi + 8]
@@ -363,7 +409,8 @@ ginux_linux_interpreter:
 .Ladvance_dependency_dynamic:
 #endif
     add rdi, 16
-    loop .Lscan_dependency_dynamic
+    dec rcx
+    jnz .Lscan_dependency_dynamic
     test r9, r9
     jz .Linvalid_dynamic
     test r10, r10
@@ -377,6 +424,16 @@ ginux_linux_interpreter:
 #ifdef GINUX_LINKED
     cmp qword ptr [rip + .Lprimary_init_function], 0
     je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lprimary_relocation_size], 48
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lprimary_relocation_entry_size], 24
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lprimary_relative_count], 1
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lprimary_jump_relocation_size], 24
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lprimary_jump_relocation_kind], 7
+    jne .Linvalid_dynamic
     cmp qword ptr [rip + .Lprimary_init_array], 0
     je .Linvalid_dynamic
     cmp qword ptr [rip + .Lprimary_init_array_size], 8
@@ -663,6 +720,11 @@ ginux_linux_interpreter:
     mov qword ptr [rip + .Lauxiliary_init_array], r9
     mov qword ptr [rip + .Lauxiliary_init_array_size], r9
     mov qword ptr [rip + .Lauxiliary_init_function], r9
+    mov qword ptr [rip + .Lauxiliary_relocation_size], r9
+    mov qword ptr [rip + .Lauxiliary_relocation_entry_size], r9
+    mov qword ptr [rip + .Lauxiliary_relative_count], r9
+    mov qword ptr [rip + .Lauxiliary_jump_relocation_size], r9
+    mov qword ptr [rip + .Lauxiliary_jump_relocation_kind], r9
 .Lscan_auxiliary_dynamic:
     cmp qword ptr [rdi], 6
     cmove r9, qword ptr [rdi + 8]
@@ -674,6 +736,31 @@ ginux_linux_interpreter:
     cmove r14, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 23
     cmove rbp, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 8
+    jne .Lscan_auxiliary_relocation_entry_size
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lauxiliary_relocation_size], rdx
+.Lscan_auxiliary_relocation_entry_size:
+    cmp qword ptr [rdi], 9
+    jne .Lscan_auxiliary_relative_count
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lauxiliary_relocation_entry_size], rdx
+.Lscan_auxiliary_relative_count:
+    cmp qword ptr [rdi], 0x6ffffff9
+    jne .Lscan_auxiliary_jump_relocation_size
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lauxiliary_relative_count], rdx
+.Lscan_auxiliary_jump_relocation_size:
+    cmp qword ptr [rdi], 2
+    jne .Lscan_auxiliary_jump_relocation_kind
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lauxiliary_jump_relocation_size], rdx
+.Lscan_auxiliary_jump_relocation_kind:
+    cmp qword ptr [rdi], 20
+    jne .Lscan_auxiliary_init_function
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lauxiliary_jump_relocation_kind], rdx
+.Lscan_auxiliary_init_function:
     cmp qword ptr [rdi], 12
     jne .Lscan_auxiliary_init_array
     mov rdx, qword ptr [rdi + 8]
@@ -690,7 +777,8 @@ ginux_linux_interpreter:
     mov qword ptr [rip + .Lauxiliary_init_array_size], rdx
 .Ladvance_auxiliary_dynamic:
     add rdi, 16
-    loop .Lscan_auxiliary_dynamic
+    dec rcx
+    jnz .Lscan_auxiliary_dynamic
     test r9, r9
     jz .Linvalid_dynamic
     test r10, r10
@@ -703,6 +791,16 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     cmp qword ptr [rip + .Lauxiliary_init_function], 0
     je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lauxiliary_relocation_size], 48
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lauxiliary_relocation_entry_size], 24
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lauxiliary_relative_count], 1
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lauxiliary_jump_relocation_size], 24
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lauxiliary_jump_relocation_kind], 7
+    jne .Linvalid_dynamic
     cmp qword ptr [rip + .Lauxiliary_init_array], 0
     je .Linvalid_dynamic
     cmp qword ptr [rip + .Lauxiliary_init_array_size], 8
@@ -1026,6 +1124,10 @@ ginux_linux_interpreter:
     .zero 8
 .Lmain_relative_count:
     .zero 8
+.Lmain_jump_relocation_size:
+    .zero 8
+.Lmain_jump_relocation_kind:
+    .zero 8
 .Lmain_preinit_array:
     .zero 8
 .Lmain_preinit_array_size:
@@ -1054,11 +1156,31 @@ ginux_linux_interpreter:
     .zero 8
 .Lprimary_init_array_size:
     .zero 8
+.Lprimary_relocation_size:
+    .zero 8
+.Lprimary_relocation_entry_size:
+    .zero 8
+.Lprimary_relative_count:
+    .zero 8
+.Lprimary_jump_relocation_size:
+    .zero 8
+.Lprimary_jump_relocation_kind:
+    .zero 8
 .Lauxiliary_init_array:
     .zero 8
 .Lauxiliary_init_function:
     .zero 8
 .Lauxiliary_init_array_size:
+    .zero 8
+.Lauxiliary_relocation_size:
+    .zero 8
+.Lauxiliary_relocation_entry_size:
+    .zero 8
+.Lauxiliary_relative_count:
+    .zero 8
+.Lauxiliary_jump_relocation_size:
+    .zero 8
+.Lauxiliary_jump_relocation_kind:
     .zero 8
 .Lexpected_phnum:
     .zero 8

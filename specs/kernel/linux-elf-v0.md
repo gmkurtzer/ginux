@@ -346,6 +346,11 @@ file and memory sizes must match, its size must be a multiple of 16 bytes, and
 it may describe at most 23 entries. The interpreter derives the runtime
 dynamic-table address by adding the selected bias to `p_vaddr`; the linked main
 and dependency scans no longer embed their dynamic addresses or entry counts.
+The userspace scans require `DT_RELASZ = 96`, `DT_RELAENT = 24`,
+`DT_RELACOUNT = 2`, `DT_PLTRELSZ = 48`, and `DT_PLTREL = DT_RELA` for the
+main. Each dependency must instead declare `DT_RELASZ = 48`,
+`DT_RELAENT = 24`, `DT_RELACOUNT = 1`, `DT_PLTRELSZ = 24`, and
+`DT_PLTREL = DT_RELA`. A missing or different value fails before relocation.
 The interpreter keeps its bounded startup scratch in the zero-fill tail after
 its linker-emitted `.dynamic` and relocation target so that the bootstrap
 dynamic-table offset remains invariant.

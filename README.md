@@ -31,6 +31,9 @@ stack, and enters the interpreter first.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The
+interpreter independently requires the exact primary and split relocation
+sizes, 24-byte `RELA` entries, counted-relative totals, and `DT_RELA` PLT kind
+for the main and both dependencies before applying those records. The
 symbol relocations resolve to the authenticated dependencies, and the interpreter
 also applies both dependencies' own relative and self-symbol relocations. Each
 DSO and the main expose one authenticated `DT_INIT` function and one eight-byte

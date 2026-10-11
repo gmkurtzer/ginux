@@ -646,6 +646,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux dependency W^X mapping verified\r\n");
     serial_write("ginux: interpreter-first Linux ring-3 entry verified\r\n");
     serial_write("ginux: userspace Linux interpreter self-relocation applied\r\n");
+    serial_write("ginux: userspace Linux relocation table shapes validated\r\n");
     serial_write("ginux: userspace Linux relative relocation applied\r\n");
     serial_write("ginux: userspace Linux GLOB_DAT relocation applied\r\n");
     serial_write("ginux: userspace Linux JUMP_SLOT relocation applied\r\n");
