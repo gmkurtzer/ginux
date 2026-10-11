@@ -713,6 +713,11 @@ if ! grep -q '^ginux: Linux executable frames allocated on demand' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux dependency page contracts applied' "$output_file"; then
+    echo "Boot test failed: the bounded dependency page-contract table was not applied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: toolchain-linked Linux PIE and shared object executed' "$output_file"; then
     echo "Boot test failed: the toolchain-linked Linux PIE/shared-object pair was not executed." >&2
     exit 1

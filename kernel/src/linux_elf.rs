@@ -2464,6 +2464,13 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         crate::serial_write_bytes(b"\r\nginux: linked dynamic dependency plan failed");
         return false;
     };
+    if plan.dependency.executable.page_count != 2
+        || plan.dependency.writable.page_count != 1
+        || plan.dependency.read_only.is_some()
+    {
+        crate::serial_write_bytes(b"\r\nginux: linked DSO page-contract fixture mismatch");
+        return false;
+    }
     let main_symbols_unresolved = plan
         .process
         .main

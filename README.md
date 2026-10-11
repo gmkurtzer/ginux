@@ -57,10 +57,12 @@ four RX, and two RW/NX pages through exact `MAP_FIXED_NOREPLACE` contracts. It
 then captures the main image's sole `DT_NEEDED` string,
 constructs `/lib64/<needed-name>` on its bounded stack, inspects that derived
 dependency path, walks that file's `PT_LOAD` entries the same way, and installs
-its RX page at `0x618000` and RW/NX page at `0x61b000`. The kernel admits a
+RX pages at `0x618000..0x61a000` and an RW/NX page at `0x61b000`. The kernel admits a
 page-aligned dependency bias only within `0x610000..0x620000`, binds the first
 valid request, and requires every later dependency page to preserve the
-authenticated relative layout at that bias. Wrong offsets, duplicate
+authenticated relative layout at that bias. A bounded eight-entry contract
+table is derived from the dependency's authenticated page plan; the current
+fixture consumes three entries. Wrong offsets, duplicate
 placement, a mixed bias, and W+X are rejected before it applies
 dependency and main relocations. Both dynamic-table addresses and entry counts
 come from bounded `PT_DYNAMIC` headers, and final transfer uses `AT_ENTRY`

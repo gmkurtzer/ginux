@@ -11,7 +11,9 @@ PHDRS
 SECTIONS
 {
     . = 0x100;
-    .text : { *(.text) *(.text.*) } :text
+    .text : { *(.text) } :text
+    . = 0x1000;
+    .text.secondary : { *(.text.secondary) } :text
 
     . = 0x3000;
     .dynamic : { *(.dynamic) } :data :dynamic

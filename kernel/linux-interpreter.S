@@ -377,7 +377,7 @@ ginux_linux_interpreter:
     mov edx, 3
     mov r10d, 0x100002
     mov r8d, 2
-    mov r9d, 0x2000
+    mov r9d, 0x3000
     mov eax, 9
     syscall
     cmp rax, -22
@@ -515,19 +515,19 @@ ginux_linux_interpreter:
     or edx, 4
 
 .Lmap_load_page:
-    cmp ebp, 7
+    cmp ebp, 8
     jae .Linvalid_dynamic
     mov esi, 4096
     mov r10d, 0x100002
     mov r8d, 2
     test ebp, ebp
     jnz .Ltest_load_wx
-    add r9, 4096
+    add r9, 32768
     mov eax, 9
     syscall
     cmp rax, -22
     jne .Linvalid_dynamic
-    sub r9, 4096
+    sub r9, 32768
 .Ltest_load_wx:
     test edx, 4
     jz .Linstall_load_page

@@ -26,6 +26,11 @@ ginux_dependency_symbol:
     call ginux_dependency_symbol@PLT
     ret
 
+.section .text.secondary,"ax",@progbits
+.Ldependency_secondary:
+    mov eax, 0x47584e32
+    ret
+
 .section .data.rel.ro,"aw",@progbits
     .quad .Lginux_dependency_local
 #endif

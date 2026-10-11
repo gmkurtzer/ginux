@@ -383,14 +383,18 @@ MAP_FIXED_NOREPLACE` requests already authenticated by the kernel plan. For
 offsets `0x5000..0x6000` at `0x404000..0x405000` with `PROT_READ |
 PROT_WRITE`. For `libginux.so`, the kernel admits a page-aligned base in the
 half-open range `0x610000..0x620000`. Offset `0x1000` must be RX at relative
-address zero and offset `0x2000` must be RW/NX at relative address `0x3000`.
-The current interpreter selects base `0x618000`, producing mappings at
-`0x618000` and `0x61b000`.
+address zero, offset `0x2000` must be RX at relative address `0x1000`, and
+offset `0x3000` must be RW/NX at relative address `0x3000`. The current
+interpreter selects base `0x618000`, producing mappings at `0x618000`,
+`0x619000`, and `0x61b000`.
 
 The interpreter derives these requests from each authenticated file's bounded
 `PT_LOAD` table rather than embedding the valid page sequence. It supplies the
 main load bias and selects the dependency bias, translates ELF permissions,
-and issues one request per derived page. The first valid dependency request
+and issues one request per derived page. The kernel represents up to eight
+dependency pages as authenticated relative-address, file-offset, file-size,
+and protection contracts rather than special-casing RX and RW segments. The
+first valid dependency request
 atomically binds its candidate bias; later requests must produce that same
 bias from their authenticated relative addresses. The kernel contract remains
 authoritative: a derived address, offset, relative layout, or protection that
