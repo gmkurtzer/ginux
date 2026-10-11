@@ -651,7 +651,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: userspace Linux hash bucket resolution applied\r\n");
     serial_write("ginux: userspace Linux symbol names matched\r\n");
     serial_write("ginux: userspace Linux cross-object symbol resolved\r\n");
+    serial_write("ginux: userspace Linux two-provider symbols resolved\r\n");
     serial_write("ginux: Linux JUMP_SLOT dependency call executed\r\n");
+    serial_write("ginux: Linux auxiliary JUMP_SLOT dependency call executed\r\n");
     serial_write("ginux: userspace Linux dependency self-relocations applied\r\n");
     serial_write("ginux: userspace Linux auxiliary dependency self-relocations applied\r\n");
     serial_write("ginux: Linux auxiliary dependency entry executed\r\n");

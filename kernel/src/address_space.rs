@@ -655,6 +655,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
     ) else {
         return false;
     };
+    let (Some(main_auxiliary_symbol), Some(main_auxiliary_jump_slot)) = (
+        main_dynamic.secondary_symbol_relocation,
+        main_dynamic.secondary_jump_slot_relocation,
+    ) else {
+        return false;
+    };
     let Some(dependency_dynamic) = dependency_plan.dependencies[0].dynamic_relocations else {
         return false;
     };
@@ -1181,16 +1187,24 @@ pub(crate) fn verify_interpreted_elf_mapping(
                             == main_rx.bytes[0]
                         && (plan.main.entry as *const u8).read_volatile() == 0x48
                 });
-            let (main_relative_value, main_symbol_value, main_jump_value) = if main_image_valid {
+            let (
+                main_relative_value,
+                main_symbol_value,
+                main_jump_value,
+                main_auxiliary_symbol_value,
+                main_auxiliary_jump_value,
+            ) = if main_image_valid {
                 cpu::with_supervisor_user_access(|| {
                     (
                         (main_dynamic.relocation_target as *const u64).read_volatile(),
                         (main_symbol.target as *const u64).read_volatile(),
                         (main_jump_slot.target as *const u64).read_volatile(),
+                        (main_auxiliary_symbol.target as *const u64).read_volatile(),
+                        (main_auxiliary_jump_slot.target as *const u64).read_volatile(),
                     )
                 })
             } else {
-                (0, 0, 0)
+                (0, 0, 0, 0, 0)
             };
             let main_relative_relocated = main_relative_value == plan.main.entry;
             let relocate_dependency_address = |address: u64| {
@@ -1205,8 +1219,6 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 .unwrap_or(0);
             let main_symbol_relocated = main_symbol_value == actual_dependency_entry;
             let main_jump_relocated = main_jump_value == actual_dependency_entry;
-            let main_relocated =
-                main_relative_relocated && main_symbol_relocated && main_jump_relocated;
             let dependency_relocated = executed
                 && dependency_permissions_valid
                 && relocate_dependency_address(dependency_rx.virtual_address).is_some_and(
@@ -1238,6 +1250,14 @@ pub(crate) fn verify_interpreted_elf_mapping(
             };
             let actual_auxiliary_entry =
                 relocate_auxiliary_address(dependency_plan.dependencies[1].entry).unwrap_or(0);
+            let main_auxiliary_symbol_relocated =
+                main_auxiliary_symbol_value == actual_auxiliary_entry;
+            let main_auxiliary_jump_relocated = main_auxiliary_jump_value == actual_auxiliary_entry;
+            let main_relocated = main_relative_relocated
+                && main_symbol_relocated
+                && main_jump_relocated
+                && main_auxiliary_symbol_relocated
+                && main_auxiliary_jump_relocated;
             let actual_auxiliary_relative_value = selected_auxiliary_base
                 .checked_add(auxiliary_dynamic.relocation_addend)
                 .unwrap_or(0);
@@ -1293,6 +1313,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 }
                 if !main_jump_relocated {
                     crate::serial_write_bytes(b" JUMP_SLOT");
+                }
+                if !main_auxiliary_symbol_relocated {
+                    crate::serial_write_bytes(b" AUX_GLOB_DAT");
+                }
+                if !main_auxiliary_jump_relocated {
+                    crate::serial_write_bytes(b" AUX_JUMP_SLOT");
                 }
             }
             if !dependency_relocated {

@@ -114,6 +114,25 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
     overlapping_authorities[1].load_bias = dependency_authorities[0].load_bias;
     let reversed_authorities = [dependency_authorities[1], dependency_authorities[0]];
     let valid = main.needed_libraries == [Some(PRIMARY), Some(AUXILIARY)]
+        && main.dynamic_symbol == Some(b"ginux_dependency_symbol")
+        && main.secondary_dynamic_symbol == Some(b"ginux_auxiliary_symbol")
+        && main.dynamic_relocations.is_some_and(|dynamic| {
+            dynamic.relocation_count == 5
+                && !dynamic.symbol_defined
+                && !dynamic.secondary_symbol_defined
+                && dynamic
+                    .symbol_relocation
+                    .is_some_and(|relocation| relocation.symbol_index == 1)
+                && dynamic
+                    .jump_slot_relocation
+                    .is_some_and(|relocation| relocation.symbol_index == 1)
+                && dynamic
+                    .secondary_symbol_relocation
+                    .is_some_and(|relocation| relocation.symbol_index == 2)
+                && dynamic
+                    .secondary_jump_slot_relocation
+                    .is_some_and(|relocation| relocation.symbol_index == 2)
+        })
         && auxiliary.soname == Some(AUXILIARY)
         && auxiliary.needed_libraries == [None; 2]
         && auxiliary.dynamic_symbol == Some(b"ginux_auxiliary_symbol")
@@ -195,6 +214,7 @@ pub(crate) struct Image<'a> {
     pub(crate) interpreter: Option<&'a [u8]>,
     pub(crate) dynamic_relocations: Option<DynamicRelocations>,
     pub(crate) dynamic_symbol: Option<&'a [u8]>,
+    pub(crate) secondary_dynamic_symbol: Option<&'a [u8]>,
     pub(crate) needed_libraries: [Option<&'a [u8]>; 2],
     pub(crate) soname: Option<&'a [u8]>,
 }
@@ -226,13 +246,17 @@ pub(crate) struct DynamicRelocations {
     pub(crate) hash_is_gnu: bool,
     pub(crate) symbol_relocation: Option<SymbolRelocation>,
     pub(crate) jump_slot_relocation: Option<SymbolRelocation>,
+    pub(crate) secondary_symbol_relocation: Option<SymbolRelocation>,
+    pub(crate) secondary_jump_slot_relocation: Option<SymbolRelocation>,
     pub(crate) symbol_defined: bool,
+    pub(crate) secondary_symbol_defined: bool,
 }
 
 #[derive(Clone, Copy)]
 struct DynamicMetadata<'a> {
     relocations: DynamicRelocations,
     symbol_name: Option<&'a [u8]>,
+    secondary_symbol_name: Option<&'a [u8]>,
     needed_libraries: [Option<&'a [u8]>; 2],
     soname: Option<&'a [u8]>,
 }
@@ -490,6 +514,8 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         interpreter,
         dynamic_relocations,
         dynamic_symbol: dynamic_metadata.and_then(|metadata| metadata.symbol_name),
+        secondary_dynamic_symbol: dynamic_metadata
+            .and_then(|metadata| metadata.secondary_symbol_name),
         needed_libraries: dynamic_metadata
             .map(|metadata| metadata.needed_libraries)
             .unwrap_or([None; 2]),
@@ -523,7 +549,10 @@ pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
         hash_is_gnu: false,
         symbol_relocation: None,
         jump_slot_relocation: None,
+        secondary_symbol_relocation: None,
+        secondary_jump_slot_relocation: None,
         symbol_defined: false,
+        secondary_symbol_defined: false,
     });
     plan(&image).is_none()
 }
@@ -598,14 +627,18 @@ pub(crate) fn plan_authenticated_pie_dependency_graph<'main, 'interpreter, 'depe
         || interpreter.program_headers == 0
         || interpreter.needed_libraries != [None; 2]
         || main.dynamic_symbol.is_none()
+        || main.secondary_dynamic_symbol.is_none()
         || main_dynamic.symbol_defined
+        || main_dynamic.secondary_symbol_defined
         || main.dynamic_symbol != dependency_images[0].dynamic_symbol
-        || dependency_images[0].dynamic_symbol == dependency_images[1].dynamic_symbol
+        || main.secondary_dynamic_symbol != dependency_images[1].dynamic_symbol
+        || main.dynamic_symbol == main.secondary_dynamic_symbol
     {
         return None;
     }
     for (image, authority) in dependency_images.iter().zip(dependency_authorities) {
         if image.needed_libraries != [None; 2]
+            || image.secondary_dynamic_symbol.is_some()
             || image.soname != Some(authority.name)
             || !image
                 .dynamic_relocations
@@ -669,6 +702,7 @@ fn plan_authenticated_dependency_at<'main, 'interpreter, 'dependency>(
     if main.program_headers == 0
         || interpreter.program_headers == 0
         || main.dynamic_symbol.is_none()
+        || main.secondary_dynamic_symbol.is_some()
         || main.dynamic_symbol != dependency_image.dynamic_symbol
         || main_dynamic.symbol_defined
         || !dependency_dynamic.symbol_defined
@@ -890,7 +924,32 @@ fn plan_position_independent_at<'a>(
                 }),
                 None => None,
             },
+            secondary_symbol_relocation: match dynamic.secondary_symbol_relocation {
+                Some(relocation) => Some(SymbolRelocation {
+                    target: relocation.target.checked_add(load_bias)?,
+                    symbol_value: if dynamic.secondary_symbol_defined {
+                        relocation.symbol_value.checked_add(load_bias)?
+                    } else {
+                        relocation.symbol_value
+                    },
+                    ..relocation
+                }),
+                None => None,
+            },
+            secondary_jump_slot_relocation: match dynamic.secondary_jump_slot_relocation {
+                Some(relocation) => Some(SymbolRelocation {
+                    target: relocation.target.checked_add(load_bias)?,
+                    symbol_value: if dynamic.secondary_symbol_defined {
+                        relocation.symbol_value.checked_add(load_bias)?
+                    } else {
+                        relocation.symbol_value
+                    },
+                    ..relocation
+                }),
+                None => None,
+            },
             symbol_defined: dynamic.symbol_defined,
+            secondary_symbol_defined: dynamic.secondary_symbol_defined,
         }),
         None => None,
     };
@@ -1272,9 +1331,22 @@ fn parse_dynamic_relocations<'a>(
             }
             Some(virtual_file_bytes(loads, address, RELA_ENTRY_SIZE)?)
         }
+        (Some(address), Some(size), Some(kind))
+            if primary_relocation_count == 3
+                && size == (2 * RELA_ENTRY_SIZE) as u64
+                && kind == DT_RELA =>
+        {
+            let primary_end = rela_address.checked_add(rela_size)?;
+            let jump_end = address.checked_add(size)?;
+            if rela_address < jump_end && address < primary_end {
+                return None;
+            }
+            Some(virtual_file_bytes(loads, address, 2 * RELA_ENTRY_SIZE)?)
+        }
         _ => return None,
     };
-    let relocation_count = primary_relocation_count + usize::from(jump_rela.is_some());
+    let jump_relocation_count = jump_rela.map_or(0, |records| records.len() / RELA_ENTRY_SIZE);
+    let relocation_count = primary_relocation_count + jump_relocation_count;
     let rela = virtual_file_bytes(
         loads,
         rela_address,
@@ -1305,13 +1377,17 @@ fn parse_dynamic_relocations<'a>(
         hash_table_address,
         symbol_relocation,
         jump_slot_relocation,
+        secondary_symbol_relocation,
+        secondary_jump_slot_relocation,
         symbol_name,
+        secondary_symbol_name,
         needed_libraries,
         soname,
         symbol_defined,
+        secondary_symbol_defined,
     ) = match (relocation_count, symbol_metadata) {
         (1, (None, None, None, None, None, None)) if needed_name_offsets == [None; 2] => (
-            None, None, 0, None, None, None, None, [None; 2], None, false,
+            None, None, 0, None, None, None, None, None, None, None, [None; 2], None, false, false,
         ),
         (1, (Some(symbols), Some(strings), Some(1), Some(symbol_size), Some(hash), None))
             if symbol_size == SYMBOL_ENTRY_SIZE as u64
@@ -1334,8 +1410,12 @@ fn parse_dynamic_relocations<'a>(
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
                 [None; 2],
                 None,
+                false,
                 false,
             )
         }
@@ -1489,10 +1569,144 @@ fn parse_dynamic_relocations<'a>(
                 Some(hash),
                 Some(symbol_relocation),
                 jump_slot_relocation,
+                None,
+                None,
                 Some(name),
+                None,
                 needed_libraries,
                 soname,
                 symbol_defined,
+                false,
+            )
+        }
+        (
+            5,
+            (Some(symbols), Some(strings), Some(string_size), Some(symbol_size), Some(hash), None),
+        ) if symbol_size == SYMBOL_ENTRY_SIZE as u64
+            && !hash_is_gnu
+            && (2..=MAX_INTERPRETER_PATH_SIZE as u64).contains(&string_size) =>
+        {
+            let string_size = usize::try_from(string_size).ok()?;
+            let string_table = virtual_file_bytes(loads, strings, string_size)?;
+            let symbol_bytes = virtual_file_bytes(loads, symbols, 3 * SYMBOL_ENTRY_SIZE)?;
+            let jump_records = jump_rela?;
+            if string_table[0] != 0
+                || symbol_bytes[..SYMBOL_ENTRY_SIZE]
+                    .iter()
+                    .any(|byte| *byte != 0)
+            {
+                return None;
+            }
+            let parse_string = |offset: u32| -> Option<&[u8]> {
+                let offset = usize::try_from(offset).ok()?;
+                let candidate = string_table.get(offset..)?;
+                let length = candidate.iter().position(|byte| *byte == 0)?;
+                (length != 0).then_some(&candidate[..length])
+            };
+            let parse_needed = |offset: Option<u64>| -> Option<Option<&[u8]>> {
+                match offset {
+                    Some(offset) => Some(Some(parse_string(u32::try_from(offset).ok()?)?)),
+                    None => Some(None),
+                }
+            };
+            let needed_libraries = [
+                parse_needed(needed_name_offsets[0])?,
+                parse_needed(needed_name_offsets[1])?,
+            ];
+            if needed_libraries[0].is_none()
+                || needed_libraries[1].is_none()
+                || needed_libraries[0] == needed_libraries[1]
+            {
+                return None;
+            }
+
+            let first_symbol = &symbol_bytes[SYMBOL_ENTRY_SIZE..2 * SYMBOL_ENTRY_SIZE];
+            let second_symbol = &symbol_bytes[2 * SYMBOL_ENTRY_SIZE..3 * SYMBOL_ENTRY_SIZE];
+            let first_name_offset = read_u32(first_symbol, 0)?;
+            let second_name_offset = read_u32(second_symbol, 0)?;
+            let first_name = parse_string(first_name_offset)?;
+            let second_name = parse_string(second_name_offset)?;
+            if first_name == second_name
+                || first_symbol[4] != 0x12
+                || second_symbol[4] != 0x12
+                || first_symbol[5] != 0
+                || second_symbol[5] != 0
+                || read_u16(first_symbol, 6)? != 0
+                || read_u16(second_symbol, 6)? != 0
+                || read_u64(first_symbol, 8)? != 0
+                || read_u64(second_symbol, 8)? != 0
+                || read_u64(first_symbol, 16)? != 0
+                || read_u64(second_symbol, 16)? != 0
+                || !validate_sysv_hash_pair(loads, hash, [first_name, second_name])?
+            {
+                return None;
+            }
+
+            let parse_relocation = |record: &[u8], kind: u32, index: u32| {
+                let relocation_target = read_u64(record, 0)?;
+                let relocation_info = read_u64(record, 8)?;
+                let relocation_addend = read_u64(record, 16)?;
+                (relocation_info as u32 == kind
+                    && u32::try_from(relocation_info >> 32).ok()? == index
+                    && relocation_addend == 0
+                    && relocation_target.is_multiple_of(8)
+                    && relocation_target >= writable.virtual_address
+                    && relocation_target.checked_add(8)? <= writable_end)
+                    .then_some(relocation_target)
+            };
+            let first_symbol_target = parse_relocation(
+                &rela[RELA_ENTRY_SIZE..2 * RELA_ENTRY_SIZE],
+                R_X86_64_GLOB_DAT,
+                1,
+            )?;
+            let second_symbol_target = parse_relocation(
+                &rela[2 * RELA_ENTRY_SIZE..3 * RELA_ENTRY_SIZE],
+                R_X86_64_GLOB_DAT,
+                2,
+            )?;
+            let first_jump_target =
+                parse_relocation(&jump_records[..RELA_ENTRY_SIZE], R_X86_64_JUMP_SLOT, 1)?;
+            let second_jump_target = parse_relocation(
+                &jump_records[RELA_ENTRY_SIZE..2 * RELA_ENTRY_SIZE],
+                R_X86_64_JUMP_SLOT,
+                2,
+            )?;
+            let targets = [
+                target,
+                first_symbol_target,
+                second_symbol_target,
+                first_jump_target,
+                second_jump_target,
+            ];
+            if targets
+                .iter()
+                .enumerate()
+                .any(|(index, target)| targets[..index].contains(target))
+            {
+                return None;
+            }
+            let relocation = |target, symbol_index, symbol_name_offset| SymbolRelocation {
+                target,
+                symbol_index,
+                symbol_value: 0,
+                symbol_name_offset,
+                addend: 0,
+            };
+            (
+                Some(symbols),
+                Some(strings),
+                string_size,
+                Some(hash),
+                Some(relocation(first_symbol_target, 1, first_name_offset)),
+                Some(relocation(first_jump_target, 1, first_name_offset)),
+                Some(relocation(second_symbol_target, 2, second_name_offset)),
+                Some(relocation(second_jump_target, 2, second_name_offset)),
+                Some(first_name),
+                Some(second_name),
+                needed_libraries,
+                None,
+                false,
+                false,
             )
         }
         _ => return None,
@@ -1512,9 +1726,13 @@ fn parse_dynamic_relocations<'a>(
             hash_is_gnu,
             symbol_relocation,
             jump_slot_relocation,
+            secondary_symbol_relocation,
+            secondary_jump_slot_relocation,
             symbol_defined,
+            secondary_symbol_defined,
         },
         symbol_name,
+        secondary_symbol_name,
         needed_libraries,
         soname,
     })
@@ -1586,6 +1804,29 @@ fn validate_sysv_hash(
         buckets_valid
             && read_u32(table, chains_offset)? == 0
             && read_u32(table, chains_offset + 4)? == 0,
+    )
+}
+
+fn validate_sysv_hash_pair(
+    loads: &[Option<Segment<'_>>],
+    address: u64,
+    names: [&[u8]; 2],
+) -> Option<bool> {
+    let table = virtual_file_bytes(loads, address, 32)?;
+    if read_u32(table, 0)? != 3 || read_u32(table, 4)? != 3 {
+        return Some(false);
+    }
+    let mut expected_buckets = [0_u32; 3];
+    for (offset, name) in names.into_iter().enumerate() {
+        let bucket = usize::try_from(elf_hash(name)).ok()? % expected_buckets.len();
+        if expected_buckets[bucket] != 0 {
+            return Some(false);
+        }
+        expected_buckets[bucket] = u32::try_from(offset + 1).ok()?;
+    }
+    Some(
+        (0..3).all(|index| read_u32(table, 8 + index * 4) == Some(expected_buckets[index]))
+            && (0..3).all(|index| read_u32(table, 20 + index * 4) == Some(0)),
     )
 }
 
@@ -2675,6 +2916,13 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
                     .is_some_and(|relocation| relocation.symbol_value == 0)
                 && dynamic
                     .jump_slot_relocation
+                    .is_some_and(|relocation| relocation.symbol_value == 0)
+                && !dynamic.secondary_symbol_defined
+                && dynamic
+                    .secondary_symbol_relocation
+                    .is_some_and(|relocation| relocation.symbol_value == 0)
+                && dynamic
+                    .secondary_jump_slot_relocation
                     .is_some_and(|relocation| relocation.symbol_value == 0)
         });
     if !main_symbols_unresolved {

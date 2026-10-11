@@ -138,6 +138,24 @@ fn main() {
         status.success(),
         "clang failed to assemble linked Linux main probe"
     );
+    let linked_graph_main_object = output.join("linux-linked-graph-main.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-DGINUX_LINKED",
+            "-DGINUX_GRAPH",
+            "-c",
+            "linux-probe.S",
+            "-o",
+        ])
+        .arg(&linked_graph_main_object)
+        .status()
+        .expect("failed to assemble linked Linux dependency-graph main probe");
+    assert!(
+        status.success(),
+        "clang failed to assemble linked Linux dependency-graph main probe"
+    );
     let linked_dependency_object = output.join("linux-linked-dependency.o");
     let status = Command::new(&clang)
         .args([
@@ -318,7 +336,7 @@ fn main() {
             "-T",
         ])
         .arg(&linked_main_script)
-        .arg(&linked_main_object)
+        .arg(&linked_graph_main_object)
         .arg("--no-as-needed")
         .arg(&linked_dependency)
         .arg(&linked_auxiliary)

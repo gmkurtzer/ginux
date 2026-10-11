@@ -317,7 +317,11 @@ ginux_linux_interpreter:
     add rcx, r15
     mov rdx, qword ptr [rax + 32]
     shr rdx, 32
+#ifdef GINUX_LINKED
+    cmp edx, dword ptr [r8 + 12]
+#else
     cmp edx, dword ptr [r8 + 8]
+#endif
     jne .Linvalid_dynamic
     cmp edx, dword ptr [r10 + 24]
     jne .Linvalid_dynamic
@@ -350,6 +354,52 @@ ginux_linux_interpreter:
     add rdx, GINUX_DEPENDENCY_BASE
     add rdx, qword ptr [rbx + 16]
     mov qword ptr [rcx], rdx
+
+#ifdef GINUX_LINKED
+    mov rcx, qword ptr [rax + 48]
+    add rcx, r15
+    mov rdx, qword ptr [rax + 56]
+    shr rdx, 32
+    cmp edx, dword ptr [r8 + 8]
+    jne .Linvalid_dynamic
+    cmp edx, 2
+    jne .Linvalid_dynamic
+    lea rdx, [rdx + rdx * 2]
+    shl rdx, 3
+    mov edi, dword ptr [rsi + rdx]
+    add rdi, r13
+    mov r9, qword ptr [rip + .Lauxiliary_symbol_table]
+    mov r10, qword ptr [rip + .Lauxiliary_hash_table]
+    mov r14, qword ptr [rip + .Lauxiliary_string_table]
+    mov edx, dword ptr [r10 + 24]
+    cmp edx, 1
+    jne .Linvalid_dynamic
+    lea rdx, [rdx + rdx * 2]
+    shl rdx, 3
+    mov ebp, dword ptr [r9 + rdx]
+    add rbp, r14
+.Lcompare_auxiliary_symbol_name:
+    mov r12b, byte ptr [rdi]
+    cmp r12b, byte ptr [rbp]
+    jne .Linvalid_dynamic
+    inc rdi
+    inc rbp
+    test r12b, r12b
+    jne .Lcompare_auxiliary_symbol_name
+    mov rdx, qword ptr [r9 + rdx + 8]
+    add rdx, GINUX_AUXILIARY_BASE
+    add rdx, qword ptr [rax + 64]
+    mov qword ptr [rcx], rdx
+
+    mov rcx, qword ptr [rbx + 24]
+    add rcx, r15
+    mov rdi, qword ptr [rbx + 32]
+    shr rdi, 32
+    cmp edi, 2
+    jne .Linvalid_dynamic
+    add rdx, qword ptr [rbx + 40]
+    mov qword ptr [rcx], rdx
+#endif
 
 #ifdef GINUX_LINKED
     mov rax, qword ptr [rip + .Lmain_entry]
@@ -484,6 +534,9 @@ ginux_linux_interpreter:
     add r11, GINUX_AUXILIARY_BASE
     add r14, GINUX_AUXILIARY_BASE
     add rbp, GINUX_AUXILIARY_BASE
+    mov qword ptr [rip + .Lauxiliary_symbol_table], r9
+    mov qword ptr [rip + .Lauxiliary_hash_table], r10
+    mov qword ptr [rip + .Lauxiliary_string_table], r14
 
     mov rcx, qword ptr [r11]
     add rcx, GINUX_AUXILIARY_BASE
@@ -778,6 +831,12 @@ ginux_linux_interpreter:
 .Lprimary_dynamic_address:
     .zero 8
 .Lprimary_dynamic_count:
+    .zero 8
+.Lauxiliary_symbol_table:
+    .zero 8
+.Lauxiliary_hash_table:
+    .zero 8
+.Lauxiliary_string_table:
     .zero 8
 .Lexpected_phnum:
     .zero 8

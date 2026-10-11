@@ -129,20 +129,24 @@ page-granular overlap among all main, interpreter, and dependency loads. Wrong
 names, wrong internal SONAMEs, wrong digests, truncation, and an overlapping
 dependency bias are rejected. An authenticated dependency exporting a
 different symbol name is also rejected. The parser also accepts one bounded
-`PT_DYNAMIC` table describing one, two, or three relocation records, the exact
+`PT_DYNAMIC` table describing one, two, three, or five relocation records, the exact
 primary `DT_RELA` size and 24-byte entry size, and a terminating `DT_NULL`.
 One- and two-record profiles keep every record in the primary table. A
 three-record profile may do the same, or may keep its first two records in the
 primary table and describe one non-overlapping `R_X86_64_JUMP_SLOT` record with
 the all-or-none `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL` triplet. The split
-table must be exactly one 24-byte `DT_RELA` record. Partial triplets, another
+table must be exactly one 24-byte `DT_RELA` record. The five-record profile
+keeps one relative and two `GLOB_DAT` records in the primary table and exactly
+two `JUMP_SLOT` records in the split table. Partial triplets, another
 relocation encoding, wrong sizes, overlap with the primary table, and split
 tables attached to other primary-table sizes are rejected. The first record must
 be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must
 also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, and `DT_SYMENT`, plus exactly
 one of `DT_HASH` or `DT_GNU_HASH`, with a 24-byte symbol-entry size. The
-file-backed SysV form is bounded to one bucket and two chains. Its sole bucket
-must select symbol one, and both chain terminators must be zero. The GNU form is
+file-backed single-symbol SysV form is bounded to one or two buckets and two
+chains. The five-record main uses exactly three buckets and three chains,
+requires each of symbols one and two in its computed bucket without collision,
+and requires all chain terminators to be zero. The GNU form is
 bounded to one bucket, symbol offset one, one 64-bit bloom word, bloom shift
 five, and one terminating chain word. Its bloom bits, bucket, and chain must
 match the GNU hash of the admitted symbol name. The kernel computes either
@@ -153,14 +157,18 @@ function symbol. A self-contained image must define it with a value and size
 inside the executable load. An interpreted main image with `DT_NEEDED` must
 instead leave it undefined with zero value and size; the authenticated
 dependency must define the same name and may not name another dependency. A
-third record must be `R_X86_64_JUMP_SLOT`, reference the same symbol,
+third record in the three-record profile must be `R_X86_64_JUMP_SLOT`, reference the same symbol,
 carry a zero addend, and use a third distinct writable target. This profile
 performs eager binding; it does not install or invoke a lazy resolver. The
-validated symbol-table prefix is exactly two entries for this proof:
+validated symbol-table prefix is exactly two entries for the single-symbol profiles:
 an all-zero null entry followed by the referenced symbol. Its nonempty name must start within a
 2-to-256-byte file-backed string table and terminate within that table. Every
 relocation target must be distinct, eight-byte aligned, and wholly inside the
 writable load. A one-record table may not carry partial symbol metadata.
+The five-record main instead has an exact three-entry prefix: the null symbol
+followed by two distinct undefined global/default-visible functions with zero
+value and size. Its two `GLOB_DAT` and two `JUMP_SLOT` records must use symbol
+indexes one and two in order and four distinct writable targets.
 Duplicate tags, mixed hash styles, missing or mixed symbol metadata, malformed
 bucket, bloom, or chain metadata, unsupported relocation types or sizes, invalid symbol indexes/attributes/ranges/names, nonzero
 symbol-relocation addends, and executable relocation targets are rejected. The
@@ -227,10 +235,11 @@ untouched zero targets for each static startup; after it exits, the kernel also
 validates the interpreter's relocated target through the still-active user root.
 The runtime execution proof replaces the synthetic interpreter, main, and
 dependency containers with LLD outputs. LLD links a five-header interpreter,
-an eight-header `ET_DYN` PIE main with SysV hashing, and a header-unmapped
-`libginux.so` with GNU hashing. The main is loaded with bias `0x3ff000`; the
-dependency is authenticated against canonical bias `0x610000` and loaded at
-userspace-selected bias `0x618000`. Their
+an eight-header `ET_DYN` PIE main with SysV hashing, and header-unmapped
+`libginux.so` and `libginux-aux.so` providers with GNU hashing. The main is
+loaded with bias `0x3ff000`; the providers are authenticated against canonical
+biases `0x610000` and `0x630000` and loaded at userspace-selected biases
+`0x618000` and `0x638000`. Their
 linker-owned GOT/PLT slots and split relocation tables drive the same userspace
 interpreter and the complete syscall workload. The parser admits the exact
 linker metadata used here: an in-range 32-byte `DT_PLTGOT`, zero `DT_DEBUG`,
@@ -249,7 +258,10 @@ The userspace interpreter preserves that order, derives both runtime paths,
 maps each DSO in its independent authenticated slot, applies each DSO's
 `RELATIVE`, `GLOB_DAT`, and eager `JUMP_SLOT` relocations, and calls the
 auxiliary entry before transferring to the main workload. The auxiliary return
-value is checked in ring 3; the kernel independently checks both DSO mapping
+value is checked in ring 3. The main then calls both providers through its
+linker-produced PLT, after the interpreter matches both complete names through
+the three-bucket main SysV table and each provider's GNU table. The kernel
+independently checks the main's two `GLOB_DAT` and two `JUMP_SLOT` values, both DSO mapping
 permissions, code and entry bytes, all six relocation targets, lease cleanup,
 frame scrubbing, and restoration of the pre-execution live-frame count.
 After applying its self-relocation, the linked interpreter enters the syscall
@@ -325,9 +337,8 @@ metadata, entry, and relocation targets are translated from the authenticated
 canonical plan by the selected bias before validation. The kernel
 restores its own root, scrubs every payload, releases all thirteen demand-allocated
 main and dependency leases, and requires the kernel-owned live-frame count to
-return to its pre-execution value. This profile performs one exact cross-object
-name match against the primary dependency and a direct checked call into the
-auxiliary dependency. It does not support transitive dependency graphs, search
+return to its pre-execution value. This profile performs two exact cross-object
+name matches and calls both direct dependencies. It does not support transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
 lazy binding, a general-purpose dynamic linker, or glibc. The main bias and
 entry are startup-metadata-driven. Each dependency selects among 16

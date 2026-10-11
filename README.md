@@ -8,21 +8,20 @@ M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to eight
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
-`PT_GNU_STACK`, bounded `PT_INTERP`, and one- to three-entry relocation
-`PT_DYNAMIC` declarations. Three-relocation images may place the eager
+`PT_GNU_STACK`, bounded `PT_INTERP`, and one-, two-, three-, or five-entry
+relocation `PT_DYNAMIC` declarations. Three-relocation images may place the eager
 `R_X86_64_JUMP_SLOT` record in a separate one-entry `DT_JMPREL` table described
-by `DT_PLTRELSZ` and `DT_PLTREL`; the current interpreted fixtures use that
-conventional split. The symbol profile validates a two-entry symbol-table
-prefix, bounded string table, either a one-bucket legacy SysV `DT_HASH` or a
-one-bucket/one-word-bloom `DT_GNU_HASH`, and one
-global function symbol used by `R_X86_64_GLOB_DAT` and
-`R_X86_64_JUMP_SLOT`. The parser admits an ordered list of at most two distinct
+by `DT_PLTRELSZ` and `DT_PLTREL`; the five-relocation runtime main uses two
+entries in that split table. The symbol profile validates a two- or three-entry
+symbol-table prefix, bounded string table, bounded SysV `DT_HASH` or
+one-bucket/one-word-bloom `DT_GNU_HASH`, and up to two global function symbols
+used by paired `R_X86_64_GLOB_DAT` and `R_X86_64_JUMP_SLOT` records. The parser admits an ordered list of at most two distinct
 `DT_NEEDED` names and rejects overflow or duplicates. A separate LLD-produced
 metadata fixture proves both names and the second DSO's `DT_SONAME`. Independent
 authority records bind both ordered names to their SHA-256 digests and canonical
 load biases, with pairwise overlap rejection. Both dependencies are mapped and
-self-relocated by the userspace interpreter. The main image's undefined
-main-image symbol is matched to the same defined symbol in one authenticated
+self-relocated by the userspace interpreter. The main image's two undefined
+symbols are matched by complete name against one provider in each authenticated
 `ET_DYN` dependency.
 Images whose expanded
 program-header table covers the entry point are rejected. A bounded proof maps
@@ -32,11 +31,11 @@ stack, and enters the interpreter first.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The
-symbol relocations resolve to the authenticated dependency, and the interpreter
-also applies the dependency's own relative and self-symbol relocations before
+symbol relocations resolve to the authenticated dependencies, and the interpreter
+also applies both dependencies' own relative and self-symbol relocations before
 transferring control to the main entry. The main workload calls through the
-resolved jump slot; the loader validates all three dependency relocations and
-dependency code returns a checked value before the full
+resolved jump slots; the loader validates all six dependency relocations and
+both dependency calls return checked values before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
 target. The kernel then restores its root and scrubs every owned frame.
 The build rejects unresolved ELF relocation records in all three raw embedded

@@ -3,6 +3,9 @@
 .global ginux_linux_probe
 #ifdef GINUX_LINKED
 .type ginux_dependency_symbol,@function
+#ifdef GINUX_GRAPH
+.type ginux_auxiliary_symbol,@function
+#endif
 #endif
 ginux_linux_probe:
 #ifdef GINUX_LINKED
@@ -14,6 +17,17 @@ ginux_linux_probe:
     cmp rax, rcx
     jne failure
 
+#ifdef GINUX_GRAPH
+    mov rax, qword ptr [rip + ginux_auxiliary_symbol@GOTPCREL]
+    test rax, rax
+    jz failure
+    call ginux_auxiliary_symbol@PLT
+    movabs rcx, 0x5952414958554147
+    cmp rax, rcx
+    jne failure
+#endif
+
+#ifndef GINUX_GRAPH
     mov edi, -100
     lea rsi, [rip + auxiliary_dependency_path]
     xor edx, edx
@@ -34,6 +48,7 @@ ginux_linux_probe:
     syscall
     test rax, rax
     jne failure
+#endif
 #endif
     cmp qword ptr [rsp], 1
     jne failure

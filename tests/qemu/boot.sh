@@ -803,8 +803,18 @@ if ! grep -q '^ginux: userspace Linux cross-object symbol resolved' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux two-provider symbols resolved' "$output_file"; then
+    echo "Boot test failed: two-provider Linux symbol resolution was not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux JUMP_SLOT dependency call executed' "$output_file"; then
     echo "Boot test failed: the resolved Linux dependency call was not executed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux auxiliary JUMP_SLOT dependency call executed' "$output_file"; then
+    echo "Boot test failed: the resolved auxiliary Linux dependency call was not executed." >&2
     exit 1
 fi
 
