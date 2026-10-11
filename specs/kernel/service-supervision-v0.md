@@ -54,6 +54,9 @@ restart is a fixed
 proof action, not a production policy. There is no backoff, configurable
 restart budget, state recovery, service identity separate from thread identity,
 request ID, replay protection, cancellation, outstanding-call cleanup, or
-health protocol. The four-record FIFO has no blocking wait, event classes beyond
-the contained-fault record, subscription, overflow recovery, or persistence.
+health protocol. The four-record FIFO never overwrites queued events. Additional
+records set a sticky overflow notification containing the first dropped domain
+and a saturating count, allowing teardown to continue. The control plane sees
+that notification after the concrete FIFO records. There is no blocking wait,
+subscription, recovery of the dropped record contents, or persistence.
 Those semantics must be defined before more than one request can be in flight.

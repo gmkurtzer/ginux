@@ -45,7 +45,11 @@ packed word with event kind 1 in bits 0-7 and the 48-bit generation-tagged
 faulted domain ID in bits 8-55; bits 56-63 are zero. It returns
 `UINT64_MAX - 2` on denial or when no event is pending. This bootstrap revision
 holds four events in FIFO order and refuses to overwrite an undelivered event
-when full.
+when full. If additional records arrive while full, teardown continues and the
+queue retains one sticky overflow notification. After the four concrete events
+are consumed, operation 7 returns event kind 2, the first dropped domain in
+bits 8-55, and a saturating dropped-record count in bits 56-63. Consuming that
+notification clears the overflow state.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes

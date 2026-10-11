@@ -208,6 +208,11 @@ if ! grep -q '^ginux: bounded lifecycle event queue verified' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: lifecycle event overflow notification verified' "$output_file"; then
+    echo "Boot test failed: lifecycle event overflow notification failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: persistent control-plane domain sealed' "$output_file"; then
     echo "Boot test failed: persistent control-plane domain state was not sealed." >&2
     exit 1

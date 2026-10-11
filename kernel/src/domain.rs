@@ -67,12 +67,20 @@ struct DelegatedRoot {
 struct LifecycleEvent {
     kind: u8,
     domain: DomainId,
+    detail: u8,
+}
+
+#[derive(Clone, Copy)]
+struct EventOverflow {
+    first_domain: DomainId,
+    dropped: u8,
 }
 
 struct EventQueue {
     events: [Option<LifecycleEvent>; EVENT_CAPACITY],
     head: usize,
     len: usize,
+    overflow: Option<EventOverflow>,
 }
 
 impl EventQueue {
@@ -81,12 +89,21 @@ impl EventQueue {
             events: [None; EVENT_CAPACITY],
             head: 0,
             len: 0,
+            overflow: None,
         }
     }
 
     fn push(&mut self, event: LifecycleEvent) -> bool {
+        if let Some(overflow) = &mut self.overflow {
+            overflow.dropped = overflow.dropped.saturating_add(1);
+            return true;
+        }
         if self.len == EVENT_CAPACITY {
-            return false;
+            self.overflow = Some(EventOverflow {
+                first_domain: event.domain,
+                dropped: 1,
+            });
+            return true;
         }
         let tail = (self.head + self.len) % EVENT_CAPACITY;
         self.events[tail] = Some(event);
@@ -96,7 +113,12 @@ impl EventQueue {
 
     fn pop(&mut self) -> Option<LifecycleEvent> {
         if self.len == 0 {
-            return None;
+            let overflow = self.overflow.take()?;
+            return Some(LifecycleEvent {
+                kind: 2,
+                domain: overflow.first_domain,
+                detail: overflow.dropped,
+            });
         }
         let event = self.events[self.head].take()?;
         self.head = (self.head + 1) % EVENT_CAPACITY;
@@ -105,7 +127,7 @@ impl EventQueue {
     }
 
     const fn is_empty(&self) -> bool {
-        self.len == 0
+        self.len == 0 && self.overflow.is_none()
     }
 }
 
@@ -608,6 +630,7 @@ pub(crate) fn record_service_fault(domain_raw: u64) -> bool {
     manager.lifecycle_events.push(LifecycleEvent {
         kind: 1,
         domain: id,
+        detail: 0,
     })
 }
 
@@ -615,7 +638,7 @@ pub(crate) fn take_service_fault() -> Option<u64> {
     let manager = global_manager_mut()?;
     let event = manager.lifecycle_events.pop()?;
     manager.last_delivered_service_fault = Some(event.domain);
-    Some((encode_id(event.domain) << 8) | u64::from(event.kind))
+    Some((u64::from(event.detail) << 56) | (encode_id(event.domain) << 8) | u64::from(event.kind))
 }
 
 pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
@@ -634,6 +657,7 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
             slot: 1,
             generation: 7,
         },
+        detail: 0,
     };
     let mut queue = EventQueue::new();
     queue.pop().is_none()
@@ -641,28 +665,43 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
         && queue.push(LifecycleEvent {
             kind: 2,
             domain: first.domain,
+            detail: 0,
         })
         && queue.push(LifecycleEvent {
             kind: 3,
             domain: first.domain,
+            detail: 0,
         })
         && queue.push(LifecycleEvent {
             kind: 4,
             domain: first.domain,
+            detail: 0,
         })
-        && !queue.push(LifecycleEvent {
-            kind: 5,
-            domain: first.domain,
-        })
-        && queue.pop() == Some(first)
         && queue.push(LifecycleEvent {
             kind: 5,
             domain: first.domain,
+            detail: 0,
+        })
+        && queue.push(LifecycleEvent {
+            kind: 6,
+            domain: DomainId {
+                slot: 2,
+                generation: 9,
+            },
+            detail: 0,
+        })
+        && queue.pop() == Some(first)
+        && queue.push(LifecycleEvent {
+            kind: 7,
+            domain: first.domain,
+            detail: 0,
         })
         && queue.pop().is_some_and(|event| event.kind == 2)
         && queue.pop().is_some_and(|event| event.kind == 3)
         && queue.pop().is_some_and(|event| event.kind == 4)
-        && queue.pop().is_some_and(|event| event.kind == 5)
+        && queue.pop().is_some_and(|event| {
+            event.kind == 2 && event.domain == first.domain && event.detail == 3
+        })
         && queue.pop().is_none()
         && queue.is_empty()
         && queue.events.iter().all(Option::is_none)
