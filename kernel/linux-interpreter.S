@@ -21,7 +21,7 @@ ginux_linux_interpreter:
     movzx r13d, word ptr [rbx + 56]
     test r13d, r13d
     jz .Linvalid_dynamic
-    cmp r13d, 8
+    cmp r13d, 9
     ja .Linvalid_dynamic
     mov rax, r13
     imul rax, rax, 56
@@ -894,7 +894,7 @@ ginux_linux_interpreter:
     jne .Linvalid_dynamic
     test r13d, r13d
     jz .Linvalid_dynamic
-    cmp r13d, 8
+    cmp r13d, 9
     ja .Linvalid_dynamic
     mov rax, qword ptr [rip + .Lexpected_phnum]
     test rax, rax

@@ -3427,10 +3427,24 @@ ginux_main_init_state:
     .quad 0
 #endif
 
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+.section .tdata,"awT",@progbits
+.balign 8
+.global ginux_main_tls_template
+ginux_main_tls_template:
+    .ascii "GINUXTLS"
+
+.section .tbss,"awT",@nobits
+.balign 8
+.global ginux_main_tls_zero
+ginux_main_tls_zero:
+    .space 8
+#endif
+
 .section .bss
 .balign 8
 #ifdef GINUX_GRAPH
-    .space 4080
+    .space 4064
 #else
     .space 4088
 #endif

@@ -23,7 +23,14 @@ must exactly describe the in-image program-header table at its derived mapped
 address. One `PT_GNU_RELRO` header is optional. It must be read-only, start on
 the final page of the writable load, end exactly with that load, and cover no
 more than one page. This profile rounds the declaration out to its containing
-page when userspace seals it with `mprotect`. Up to eight recognized headers may
+page when userspace seals it with `mprotect`. One `PT_TLS` header is optional.
+It must be read-only, contain one through 64 initialized bytes, declare total
+memory no smaller than the initialized data, cap total memory and alignment at 64 bytes, and
+use a nonzero power-of-two alignment. Its file and virtual offsets must be
+congruent, its physical address must be zero or equal its virtual address, and
+both its initialized and total extents must preserve the same displacement
+inside the writable load. This makes TLS metadata an authenticated overlapping
+view rather than an additional mapping. Up to nine recognized headers may
 appear in any order. The parser
 normalizes load segments by executable, read-only, and writable role before
 planning. The parser accepts images without RELRO, while the current executable
@@ -103,8 +110,9 @@ out-of-file records are rejected. An image carrying valid interpreter metadata
 is represented by the parser but deliberately rejected by the page-image
 planner, so the kernel cannot enter its main executable at the wrong entry
 point. Position-independent `ET_DYN` images use a separate planner that requires
-a nonzero, page-aligned load bias, relocates every segment, entry, program-header,
-and RELRO address with checked arithmetic, and rejects mappings outside the user
+a nonzero, page-aligned load bias, relocates every segment, entry,
+program-header, RELRO, and TLS virtual address with checked arithmetic, and
+rejects mappings outside the user
 range. The static planner rejects `ET_DYN`, and the position-independent planner
 rejects interpreter-bearing images. A separate interpreted-image planner binds an
 `ET_EXEC` main image to an exactly matching resolved interpreter path and a
@@ -227,7 +235,7 @@ never used for resolution because its sole relocation is relative. The compact
 fixture bounds raw interpreter text to its non-overlapping `0x100..0x400`
 executable window. At runtime
 the linked interpreter first validates its mapped ELF magic, requires a
-56-byte program-header entry size, and bounds one through eight headers to its
+56-byte program-header entry size, and bounds one through nine headers to its
 first 4096-byte RX page. It accepts exactly one nonempty `PT_DYNAMIC` whose
 equal file/memory size is a multiple of 16 bytes and contains at most 23
 entries, then derives that table's runtime address with checked addition. The
@@ -260,7 +268,8 @@ untouched zero targets for each static startup; after it exits, the kernel also
 validates the interpreter's relocated target through the still-active user root.
 The runtime execution proof replaces the synthetic interpreter, main, and
 dependency containers with LLD outputs. LLD links a five-header interpreter,
-an eight-header `ET_DYN` PIE main with SysV hashing, and header-unmapped
+a nine-header `ET_DYN` PIE main with SysV hashing and one `PT_TLS`, and
+header-unmapped
 `libginux.so` and `libginux-aux.so` providers with GNU hashing. The main is
 loaded with bias `0x3ff000`; the providers are authenticated against canonical
 biases `0x610000` and `0x630000` and loaded at userspace-selected biases
@@ -322,7 +331,7 @@ The interpreter then enters the syscall gate from its own admitted RX extent
 and opens `/init`. It first inspects a
 temporary read-only window, then reopens the file and walks its ELF program
 headers in userspace. The walker requires a 56-byte `e_phentsize`, one through
-eight headers wholly inside the two-page inspection window, readable
+nine headers wholly inside the two-page inspection window, readable
 `PT_LOAD` entries, congruent file/virtual page offsets, `p_filesz <= p_memsz`,
 one through four pages per load, no unknown permission bits, W^X, and no more
 than seven installed pages per image. Checked arithmetic rejects wraparound.
@@ -340,6 +349,12 @@ fully validated by the kernel plan; it is not yet an independent general ELF
 validator. In particular, file identity, ELF class/machine, segment overlap,
 entry validity, dynamic metadata, and the final admitted page set remain
 kernel-enforced contracts.
+
+The current TLS milestone authenticates and load-biases metadata only. It does
+not materialize `.tdata`/`.tbss`, choose an x86-64 TLS variant, establish the
+initial thread pointer, admit TLS relocations, or provide per-thread storage.
+The separate bounded `arch_prctl(ARCH_SET_FS)` syscall proof is not
+loader-managed TLS.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and

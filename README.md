@@ -4,11 +4,12 @@ Ginux is an immutable, capability-secure, container-native operating system for 
 
 The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. A separate isolated service probes and configures link, IPv4, default-gateway, and one static-route record through the first manifest-authorized network-device contract in control ABI v2; a monotonic generation makes effective configuration changes observable and rejects stale whole-state applies. Distinct read-only and write-only services prove that observation and mutation authority can be delegated independently, and a faulted network service is retired without losing mediated state or panicking the kernel. Packet I/O and a general route table remain deliberately unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
 
-M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to eight
+M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to nine
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
-`PT_GNU_STACK`, bounded `PT_INTERP`, and one-, two-, three-, five-, or six-entry
+`PT_GNU_STACK`, bounded `PT_INTERP`, `PT_TLS`, and one-, two-, three-, five-,
+or six-entry
 relocation `PT_DYNAMIC` declarations. Three-relocation images may place the eager
 `R_X86_64_JUMP_SLOT` record in a separate one-entry `DT_JMPREL` table described
 by `DT_PLTRELSZ` and `DT_PLTREL`; the six-relocation runtime main uses two
@@ -28,6 +29,13 @@ program-header table covers the entry point are rejected. A bounded proof maps
 a resolved `ET_EXEC` main image, relocated `ET_DYN` interpreter, and two
 relocated dependencies into separate W^X regions, builds the dynamic startup
 stack, and enters the interpreter first.
+The linker-produced main also carries an authenticated read-only `PT_TLS` view
+of its writable load: eight initialized bytes, sixteen total bytes, and
+eight-byte alignment. The parser caps both TLS size and alignment at 64 bytes,
+requires matching file and virtual displacement inside the writable load, and
+rejects malformed or duplicate declarations. Planning preserves the template
+and applies the PIE bias, but this milestone does not yet allocate a TLS block,
+establish a thread pointer, or execute a TLS access.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The
@@ -79,7 +87,7 @@ requires `AT_PHDR`, `AT_PHNUM`, `AT_BASE`, and `AT_ENTRY`, and verifies that
 `AT_PHDR`, the authenticated file's `e_phoff`, and matching `e_phnum`. It then
 invokes the Linux syscall gate from its own RX range and opens `/init`. After inspecting it through a temporary
 read-only window, the interpreter reopens it, bounds its 56-byte program-header
-table to eight entries in the two-page window, and derives page-aligned mmap
+table to nine entries in the two-page window, and derives page-aligned mmap
 requests from each readable `PT_LOAD`. It installs the authenticated header,
 four RX, and two RW/NX pages through exact `MAP_FIXED_NOREPLACE` contracts. It
 then captures the main image's two ordered `DT_NEEDED` strings, constructs each

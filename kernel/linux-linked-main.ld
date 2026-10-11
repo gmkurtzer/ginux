@@ -8,6 +8,7 @@ PHDRS
     data PT_LOAD FLAGS(6);
     dynamic PT_DYNAMIC FLAGS(6);
     interp PT_INTERP FLAGS(4);
+    tls PT_TLS FLAGS(4);
     relro PT_GNU_RELRO FLAGS(4);
     stack PT_GNU_STACK FLAGS(6);
 }
@@ -31,6 +32,8 @@ SECTIONS
 
     . = 0x5000;
     .data : { *(.data) } :data
+    .tdata : { *(.tdata) } :data :tls
+    .tbss (NOLOAD) : { *(.tbss) } :data :tls
     .bss : { *(.bss) } :data
 
     . = 0x6000;

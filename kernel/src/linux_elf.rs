@@ -2,11 +2,12 @@ const ELF_HEADER_SIZE: usize = 64;
 pub(crate) const PROGRAM_HEADER_SIZE: usize = 56;
 const MIN_LOAD_SEGMENT_COUNT: usize = 2;
 const MAX_LOAD_SEGMENT_COUNT: usize = 3;
-const MAX_PROGRAM_HEADER_COUNT: usize = 8;
+const MAX_PROGRAM_HEADER_COUNT: usize = 9;
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
 const PT_PHDR: u32 = 6;
+const PT_TLS: u32 = 7;
 const PT_GNU_STACK: u32 = 0x6474_e551;
 const PT_GNU_RELRO: u32 = 0x6474_e552;
 const ET_EXEC: u16 = 2;
@@ -21,6 +22,7 @@ const PAGE_SIZE: usize = 4096;
 const MAX_EXECUTABLE_SEGMENT_PAGES: usize = 4;
 const MAX_OTHER_SEGMENT_PAGES: usize = 2;
 const MAX_INTERPRETER_PATH_SIZE: usize = 256;
+const MAX_TLS_TEMPLATE_SIZE: u64 = 64;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (4 * PAGE_SIZE) as u64;
 const FIXTURE_DATA_OFFSET: usize = 0x4000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
@@ -223,6 +225,75 @@ pub(crate) fn runtime_auxiliary_dependency_bytes() -> &'static [u8] {
     LINKED_DYNAMIC_AUXILIARY
 }
 
+pub(crate) fn verify_tls_template_metadata() -> bool {
+    let Some(main) = parse(LINKED_DYNAMIC_GRAPH_MAIN) else {
+        return false;
+    };
+    let Some(template) = main.tls else {
+        return false;
+    };
+    let Some(plan) = plan_position_independent_at(&main, 0x3f_f000, true) else {
+        return false;
+    };
+    let linked_valid = main.program_header_count == 9
+        && template.bytes == b"GINUXTLS"
+        && template.memory_size == 16
+        && template.alignment == 8
+        && plan.tls.is_some_and(|relocated| {
+            relocated.bytes == template.bytes
+                && relocated.file_offset == template.file_offset
+                && relocated.virtual_address
+                    == template.virtual_address.checked_add(0x3f_f000).unwrap_or(0)
+                && relocated.memory_size == template.memory_size
+                && relocated.alignment == template.alignment
+        });
+
+    let mut header = [0_u8; 80];
+    header[64..72].copy_from_slice(b"GINUXTLS");
+    write_u32(&mut header, 0, PT_TLS);
+    write_u32(&mut header, 4, PF_READ);
+    write_u64(&mut header, 8, 64);
+    write_u64(&mut header, 16, 0x5040);
+    write_u64(&mut header, 24, 0x5040);
+    write_u64(&mut header, 32, 8);
+    write_u64(&mut header, 40, 16);
+    write_u64(&mut header, 48, 8);
+    let Some(valid_template) = parse_tls(&header, 0) else {
+        return false;
+    };
+    let writable = Segment {
+        bytes: &header,
+        file_offset: 0,
+        virtual_address: 0x5000,
+        memory_size: 0x100,
+        flags: PF_READ | PF_WRITE,
+    };
+    let mut malformed = header;
+    write_u32(&mut malformed, 4, PF_READ | PF_WRITE);
+    let bad_flags_rejected = parse_tls(&malformed, 0).is_none();
+    malformed = header;
+    write_u64(&mut malformed, 32, 0);
+    let empty_template_rejected = parse_tls(&malformed, 0).is_none();
+    malformed = header;
+    write_u64(&mut malformed, 40, MAX_TLS_TEMPLATE_SIZE + 1);
+    let oversized_template_rejected = parse_tls(&malformed, 0).is_none();
+    malformed = header;
+    write_u64(&mut malformed, 48, 3);
+    let bad_alignment_rejected = parse_tls(&malformed, 0).is_none();
+    let misplaced_template = TlsTemplate {
+        virtual_address: valid_template.virtual_address + 8,
+        ..valid_template
+    };
+
+    linked_valid
+        && tls_within_writable(valid_template, writable)
+        && !tls_within_writable(misplaced_template, writable)
+        && bad_flags_rejected
+        && empty_template_rejected
+        && oversized_template_rejected
+        && bad_alignment_rejected
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
     pub(crate) bytes: &'a [u8],
@@ -230,6 +301,15 @@ pub(crate) struct Segment<'a> {
     pub(crate) virtual_address: u64,
     pub(crate) memory_size: u64,
     pub(crate) flags: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct TlsTemplate<'a> {
+    pub(crate) bytes: &'a [u8],
+    pub(crate) file_offset: u64,
+    pub(crate) virtual_address: u64,
+    pub(crate) memory_size: u64,
+    pub(crate) alignment: u64,
 }
 
 pub(crate) struct Image<'a> {
@@ -241,6 +321,7 @@ pub(crate) struct Image<'a> {
     pub(crate) read_only: Option<Segment<'a>>,
     pub(crate) writable: Segment<'a>,
     pub(crate) relro: Option<Relro>,
+    pub(crate) tls: Option<TlsTemplate<'a>>,
     pub(crate) interpreter: Option<&'a [u8]>,
     pub(crate) dynamic_relocations: Option<DynamicRelocations>,
     pub(crate) dynamic_symbol: Option<&'a [u8]>,
@@ -332,6 +413,7 @@ pub(crate) struct LoadPlan<'a> {
     pub(crate) read_only: Option<PlannedSegment<'a>>,
     pub(crate) writable: PlannedSegment<'a>,
     pub(crate) relro: Option<Relro>,
+    pub(crate) tls: Option<TlsTemplate<'a>>,
     pub(crate) dynamic_relocations: Option<DynamicRelocations>,
 }
 
@@ -418,6 +500,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     let mut relro = None;
     let mut interpreter = None;
     let mut dynamic = None;
+    let mut tls = None;
     for index in 0..program_header_count {
         let header = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
         match read_u32(bytes, header)? {
@@ -443,6 +526,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
             }
             PT_DYNAMIC if dynamic.is_none() => {
                 dynamic = Some(parse_dynamic_table(bytes, header)?);
+            }
+            PT_TLS if tls.is_none() => {
+                tls = Some(parse_tls(bytes, header)?);
             }
             _ => return None,
         }
@@ -496,6 +582,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     }) {
         return None;
     }
+    if tls.is_some_and(|template| !tls_within_writable(template, writable)) {
+        return None;
+    }
     for (index, first) in loads.iter().flatten().enumerate() {
         let first_end = first.virtual_address.checked_add(first.memory_size)?;
         for second in loads[index + 1..].iter().flatten() {
@@ -546,6 +635,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         read_only,
         writable,
         relro,
+        tls,
         interpreter,
         dynamic_relocations,
         dynamic_symbol: dynamic_metadata.and_then(|metadata| metadata.symbol_name),
@@ -612,6 +702,7 @@ fn plan_executable<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
         },
         writable: plan_segment(image.writable)?,
         relro: image.relro,
+        tls: image.tls,
         dynamic_relocations: image.dynamic_relocations,
     };
     (!plan_has_internal_overlap(&plan)).then_some(plan)
@@ -1016,6 +1107,13 @@ fn plan_position_independent_at<'a>(
         }),
         None => None,
     };
+    let tls = match image.tls {
+        Some(template) => Some(TlsTemplate {
+            virtual_address: template.virtual_address.checked_add(load_bias)?,
+            ..template
+        }),
+        None => None,
+    };
     let plan = LoadPlan {
         entry: image.entry.checked_add(load_bias)?,
         program_headers: image.program_headers.checked_add(load_bias)?,
@@ -1027,6 +1125,7 @@ fn plan_position_independent_at<'a>(
         },
         writable: plan_segment(writable)?,
         relro,
+        tls,
         dynamic_relocations,
     };
     (!plan_has_internal_overlap(&plan)).then_some(plan)
@@ -1233,6 +1332,68 @@ fn parse_relro(bytes: &[u8], header: usize) -> Option<Relro> {
             virtual_address,
             memory_size,
         })
+}
+
+fn parse_tls(bytes: &[u8], header: usize) -> Option<TlsTemplate<'_>> {
+    let file_offset = read_u64(bytes, header + 8)?;
+    let virtual_address = read_u64(bytes, header + 16)?;
+    let physical_address = read_u64(bytes, header + 24)?;
+    let file_size = read_u64(bytes, header + 32)?;
+    let memory_size = read_u64(bytes, header + 40)?;
+    let alignment = read_u64(bytes, header + 48)?;
+    let file_start = usize::try_from(file_offset).ok()?;
+    let file_length = usize::try_from(file_size).ok()?;
+    let file_end = file_start.checked_add(file_length)?;
+    if read_u32(bytes, header)? != PT_TLS
+        || read_u32(bytes, header + 4)? != PF_READ
+        || physical_address != 0 && physical_address != virtual_address
+        || file_size == 0
+        || file_size > memory_size
+        || memory_size > MAX_TLS_TEMPLATE_SIZE
+        || alignment == 0
+        || alignment > MAX_TLS_TEMPLATE_SIZE
+        || !alignment.is_power_of_two()
+        || file_offset % alignment != virtual_address % alignment
+        || file_end > bytes.len()
+    {
+        return None;
+    }
+    Some(TlsTemplate {
+        bytes: bytes.get(file_start..file_end)?,
+        file_offset,
+        virtual_address,
+        memory_size,
+        alignment,
+    })
+}
+
+fn tls_within_writable(template: TlsTemplate<'_>, writable: Segment<'_>) -> bool {
+    let Some(template_memory_end) = template.virtual_address.checked_add(template.memory_size)
+    else {
+        return false;
+    };
+    let Some(writable_memory_end) = writable.virtual_address.checked_add(writable.memory_size)
+    else {
+        return false;
+    };
+    let Some(template_file_end) = template
+        .file_offset
+        .checked_add(template.bytes.len() as u64)
+    else {
+        return false;
+    };
+    let Some(writable_file_end) = writable
+        .file_offset
+        .checked_add(writable.bytes.len() as u64)
+    else {
+        return false;
+    };
+    template.virtual_address >= writable.virtual_address
+        && template_memory_end <= writable_memory_end
+        && template.file_offset >= writable.file_offset
+        && template_file_end <= writable_file_end
+        && template.virtual_address - writable.virtual_address
+            == template.file_offset - writable.file_offset
 }
 
 fn parse_interpreter(bytes: &[u8], header: usize) -> Option<&[u8]> {

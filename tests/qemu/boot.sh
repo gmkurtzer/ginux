@@ -593,6 +593,11 @@ if ! grep -q '^ginux: bounded Linux dependency authority graph validated' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux TLS template metadata validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux TLS template metadata was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: four-page Linux executable mapping validated' "$output_file"; then
     echo "Boot test failed: four-page Linux executable mapping was not validated." >&2
     exit 1
