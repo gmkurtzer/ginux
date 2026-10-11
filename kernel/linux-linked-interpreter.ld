@@ -19,7 +19,10 @@ SECTIONS
     .rela.dyn : { *(.rela.dyn) } :text
 
     . = 0x200;
-    .text : { *(.text) *(.text.*) } :text
+    .text : { *(.text) } :text
+    .text.discovery : { *(.text.discovery) } :text
+    .rodata.loader : { *(.rodata.loader) } :text
+    ASSERT(. <= 0x1000, "Linux interpreter discovery exceeds its RX page")
 
     . = 0x3000;
     .data : { *(.data) } :data

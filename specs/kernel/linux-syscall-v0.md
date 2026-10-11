@@ -16,6 +16,12 @@ console-input stream. It returns zero for EOF without reading or validating the
 caller buffer; output, closed, and unknown descriptors return `-EBADF`. This is
 an explicit bootstrap state until an authorized input service and wait path
 exist, not an interactive console implementation.
+The interpreted proof also admits syscall instruction pointers and copy-in
+buffers from the parsed interpreter's RX extent. Its linked interpreter uses
+RX-resident path strings to open and inspect `/init` and
+`/lib64/libginux.so`. Return RIP outside either the main or interpreter RX
+extent still terminates the bounded workload, and copy-out never accepts an RX
+page.
 `rax = 63`
 (`__NR_uname`) and the exact RW segment base request
 a fixed 390-byte Linux `utsname`. The kernel zero-initializes every byte, fills

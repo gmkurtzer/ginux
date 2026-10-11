@@ -223,6 +223,15 @@ linker metadata used here: an in-range 32-byte `DT_PLTGOT`, zero `DT_DEBUG`,
 values are rejected. The main's linker metadata tail remains mapped for the
 interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
+After applying its self-relocation, the linked interpreter enters the syscall
+gate from its own admitted RX extent. It opens `/init` and
+`/lib64/libginux.so`, maps the first two pages of each through the immutable
+runtime-file interface, validates ELF magic and the first code byte at file
+offset `0x1100`, then unmaps and closes each descriptor before continuing with
+relocations. Syscall return validation accepts only the declared main and
+interpreter RX extents. This proves userspace file discovery, not yet
+userspace-owned executable mapping: the kernel still installs the parsed main
+and dependency segments before interpreter entry.
 The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
 those bytes. The executable dynamic interpreter, main, and dependency instead
@@ -271,8 +280,9 @@ Before changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.
 It then activates the root, observes the declared ELF mappings through their
 user virtual addresses under SMAP, and enters CPL3 at the ELF
-entry at `0x400100`, while syscall return validation remains bounded to its
-declared executable extent. The proof instructions live in checked-in x86-64
+entry at `0x400100`, while syscall return validation remains bounded to the
+declared main and interpreter executable extents. The proof instructions live
+in checked-in x86-64
 assembly; the build uses Clang to produce an ELF relocatable and extracts its
 `.text` section, so branch layout is assembler-validated instead of
 hand-encoded. Repeated success and errno assertions use callable assembly
@@ -295,10 +305,11 @@ the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 4608-byte `p_memsz`, rather
 than the rest of its final mapped page. Copy helpers also accept heap bytes
 strictly below the current break, not the entire mapped heap page, ranges
-wholly inside the user stack page, and ranges inside the active anonymous
-mapping. Copy-in additionally permits the declared
-RX ELF memory extent; copy-out does not. The proof reads an embedded RX payload
-through `write` and requires `-EFAULT` when `uname` targets that read-only page.
+wholly inside the user stack page, and ranges inside the active mapping.
+Copy-in additionally permits the declared main and interpreter RX ELF memory
+extents; copy-out does not. The interpreter uses its RX-resident path strings
+for `openat`; the main proof reads an embedded RX payload through `write` and
+requires `-EFAULT` when `uname` targets that read-only page.
 Ranges crossing a stack guard page are rejected before SMAP access. Bounded
 `getcwd` exposes the initial container working directory as `/`, and bounded
 `readlink` identifies `/proc/self/exe` as `/init`. Per-process `umask` starts at

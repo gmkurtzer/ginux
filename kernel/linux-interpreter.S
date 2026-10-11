@@ -26,6 +26,10 @@ ginux_linux_interpreter:
     add rdx, rbx
     mov qword ptr [rcx], rdx
 
+#ifdef GINUX_LINKED
+    call .Ldiscover_runtime_files
+#endif
+
     mov edi, 0x405200
     cmp qword ptr [rdi], 1
     je .Llinked_main_dynamic
@@ -193,6 +197,56 @@ ginux_linux_interpreter:
     ud2
 
 #ifdef GINUX_LINKED
+.section .text.discovery,"ax",@progbits
+.Ldiscover_runtime_files:
+    lea rsi, [rip + .Lmain_path]
+    call .Linspect_runtime_file
+    lea rsi, [rip + .Ldependency_path]
+    call .Linspect_runtime_file
+    ret
+
+.Linspect_runtime_file:
+    mov edi, -100
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne .Linvalid_dynamic
+
+    xor edi, edi
+    mov esi, 8192
+    mov edx, 1
+    mov r10d, 2
+    mov r8d, 2
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40a000
+    jne .Linvalid_dynamic
+    cmp dword ptr [0x40a000], 0x464c457f
+    jne .Linvalid_dynamic
+    cmp byte ptr [0x40b100], 0x48
+    jne .Linvalid_dynamic
+
+    mov edi, 0x40a000
+    mov esi, 8192
+    mov eax, 11
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    ret
+
+.section .rodata.loader,"a",@progbits
+.Lmain_path:
+    .asciz "/init"
+.Ldependency_path:
+    .asciz "/lib64/libginux.so"
+
 .section .data,"aw",@progbits
     .ascii "DYNAMIC!"
 

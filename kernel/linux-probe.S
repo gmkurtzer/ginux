@@ -3286,7 +3286,7 @@ linked_file_mmap_test:
     jne failure
     cmp byte ptr [0x40a200], 0x48
     jne failure
-    cmp byte ptr [0x40b4a0], 0
+    cmp byte ptr [0x40bfff], 0
     jne failure
 
     mov edi, 2

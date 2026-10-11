@@ -511,6 +511,8 @@ pub(crate) fn verify_linux_elf_mapping(
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     code: first.virtual_address as usize,
                     code_size: first.memory_size,
+                    loader_code: 0,
+                    loader_code_size: 0,
                     data: second.virtual_page as usize,
                     data_size: second.memory_size,
                     relro: relro.virtual_address as usize,
@@ -943,6 +945,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     code: main_rx.virtual_address as usize,
                     code_size: main_rx.memory_size,
+                    loader_code: interpreter_rx.virtual_address as usize,
+                    loader_code_size: interpreter_rx.memory_size,
                     data: main_rw.virtual_page as usize,
                     data_size: usize::try_from(
                         relro

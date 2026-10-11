@@ -322,6 +322,8 @@ static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_LOADER_CODE_BASE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_LOADER_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_RELRO: AtomicU64 = AtomicU64::new(0);
@@ -922,6 +924,8 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) stack: usize,
     pub(crate) code: usize,
     pub(crate) code_size: usize,
+    pub(crate) loader_code: usize,
+    pub(crate) loader_code_size: usize,
     pub(crate) data: usize,
     pub(crate) data_size: usize,
     pub(crate) relro: usize,
@@ -953,6 +957,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_STACK.store(execution.stack as u64, Ordering::SeqCst);
     ELF_PROBE_CODE_BASE.store(execution.code as u64, Ordering::SeqCst);
     ELF_PROBE_CODE_SIZE.store(execution.code_size as u64, Ordering::SeqCst);
+    ELF_PROBE_LOADER_CODE_BASE.store(execution.loader_code as u64, Ordering::SeqCst);
+    ELF_PROBE_LOADER_CODE_SIZE.store(execution.loader_code_size as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(execution.data as u64, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(execution.data_size as u64, Ordering::SeqCst);
     ELF_PROBE_RELRO.store(execution.relro as u64, Ordering::SeqCst);
@@ -1128,6 +1134,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     ELF_PROBE_CODE_BASE.store(0, Ordering::SeqCst);
     ELF_PROBE_CODE_SIZE.store(0, Ordering::SeqCst);
+    ELF_PROBE_LOADER_CODE_BASE.store(0, Ordering::SeqCst);
+    ELF_PROBE_LOADER_CODE_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_RELRO.store(0, Ordering::SeqCst);
@@ -1409,9 +1417,12 @@ extern "sysv64" fn linux_syscall_handler(
     let first_argument = register(5);
     let code_start = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
     let code_end = code_start.saturating_add(ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst));
+    let loader_start = ELF_PROBE_LOADER_CODE_BASE.load(Ordering::SeqCst);
+    let loader_end = loader_start.saturating_add(ELF_PROBE_LOADER_CODE_SIZE.load(Ordering::SeqCst));
     if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
         || !linux_user_stack_pointer_valid(user_stack)
-        || !(code_start..code_end).contains(&user_rip)
+        || (!(code_start..code_end).contains(&user_rip)
+            && !(loader_start..loader_end).contains(&user_rip))
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
@@ -4075,9 +4086,12 @@ pub(crate) fn verify_linux_copy_bounds(base: u64, size: usize) -> bool {
 fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
     let code_base = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
     let code_size = ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst);
+    let loader_code_base = ELF_PROBE_LOADER_CODE_BASE.load(Ordering::SeqCst);
+    let loader_code_size = ELF_PROBE_LOADER_CODE_SIZE.load(Ordering::SeqCst);
     let data_base = ELF_PROBE_DATA.load(Ordering::SeqCst);
     let data_size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
     if !linux_range_contains(code_base, code_size, address, output.len())
+        && !linux_range_contains(loader_code_base, loader_code_size, address, output.len())
         && !linux_range_contains(data_base, data_size, address, output.len())
         && !linux_readable_user_range_contains(address, output.len())
     {
