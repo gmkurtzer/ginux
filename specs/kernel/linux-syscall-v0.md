@@ -113,6 +113,15 @@ buffers; a valid request returns the total zeroed length.
 fixed devices. Console vectors use the atomic serial-copy path; null and zero
 devices validate the vector table and lengths, then discard the total without
 touching payload memory, matching their scalar-write contract.
+`openat` also opens immutable `/dev` on fixed descriptor 2, optionally requiring
+`O_DIRECTORY`; writable access returns `-EISDIR`, while `O_DIRECTORY` on a
+device node returns `-ENOTDIR`. `rax = 217` (`__NR_getdents64`) atomically
+returns six aligned records for `.`, `..`, `null`, `zero`, `console`, and `tty`
+in a 152-byte-or-larger buffer. An undersized buffer returns `-EINVAL`, invalid
+memory returns `-EFAULT` without advancing, the next call returns EOF, and
+`lseek(fd, 0, SEEK_SET)` resets the bounded cursor. `fstat`, `newfstatat`,
+`statx`, and access checks report `/dev` as immutable mode `0555` directory
+metadata. No other directory or mutable namespace exists.
 `rax = 332` (`__NR_statx`) returns a zero-initialized 256-byte result for these
 four paths, including `STATX_BASIC_STATS`, character-device mode `0600`, stable
 inode numbers, block size 4096, and conventional device minors. The reserved

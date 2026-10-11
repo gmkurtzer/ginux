@@ -97,6 +97,7 @@ const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_SCHED_SETAFFINITY_SYSCALL: u64 = 203;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
+const LINUX_GETDENTS64_SYSCALL: u64 = 217;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_OPENAT_SYSCALL: u64 = 257;
@@ -121,6 +122,8 @@ const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EACCES: u64 = u64::MAX - 12;
+const LINUX_ENOTDIR: u64 = u64::MAX - 19;
+const LINUX_EISDIR: u64 = u64::MAX - 20;
 const LINUX_ENOMEM: u64 = u64::MAX - 11;
 const LINUX_ESPIPE: u64 = u64::MAX - 28;
 const LINUX_EMFILE: u64 = u64::MAX - 23;
@@ -134,6 +137,7 @@ const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_PROT_READ: u64 = 1;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
+const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
 const LINUX_STATX_BASIC_STATS: u32 = 0x7ff;
 const LINUX_STATX_RESERVED: u32 = 0x8000_0000;
 const LINUX_WRITE_LIMIT: usize = 256;
@@ -145,6 +149,7 @@ const LINUX_DESCRIPTOR_INPUT: u8 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
 const LINUX_DEVICE_ZERO: u8 = 1 << 2;
 const LINUX_DEVICE_CONSOLE: u8 = 1 << 3;
+const LINUX_DEVICE_DIRECTORY: u8 = 1 << 4;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_SETFD: u64 = 2;
@@ -152,6 +157,7 @@ const LINUX_F_GETFL: u64 = 3;
 const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
 const LINUX_O_CLOEXEC: u64 = 0x80000;
+const LINUX_O_DIRECTORY: u64 = 0x10000;
 const LINUX_PR_SET_NAME: u64 = 15;
 const LINUX_PR_GET_NAME: u64 = 16;
 const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
@@ -262,6 +268,7 @@ static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_DEVICE_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_DIRECTORY_CURSOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
@@ -861,6 +868,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     );
     ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
     ELF_PROBE_DEVICE_DESCRIPTOR.store(0, Ordering::SeqCst);
+    ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
@@ -881,7 +889,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0;
+        && ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_DIRECTORY_CURSOR.swap(0, Ordering::SeqCst) == 0;
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
         == LINUX_INITIAL_PROCESS_NAME
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
@@ -1206,10 +1215,9 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_SCHED_YIELD_SYSCALL => 0,
         LINUX_CLOSE_SYSCALL => linux_descriptor_close(first_argument),
         LINUX_FSTAT_SYSCALL => {
-            if !linux_descriptor_open(first_argument) {
+            let Some(stat) = linux_descriptor_stat(first_argument) else {
                 return LINUX_EBADF;
-            }
-            let stat = linux_console_stat();
+            };
             if !copy_to_linux_user(buffer, &stat) {
                 return LINUX_EFAULT;
             }
@@ -1219,6 +1227,13 @@ extern "sysv64" fn linux_syscall_handler(
             let device = linux_device_descriptor(first_argument);
             if device & LINUX_DEVICE_CONSOLE != 0 {
                 LINUX_ESPIPE
+            } else if device & LINUX_DEVICE_DIRECTORY != 0 {
+                if buffer == 0 && count == 0 {
+                    ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
+                    0
+                } else {
+                    LINUX_EINVAL
+                }
             } else if device != 0 {
                 0
             } else if linux_console_descriptor_open(first_argument) {
@@ -1550,6 +1565,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_GETDENTS64_SYSCALL => linux_getdents64(first_argument, buffer, count),
         LINUX_STATX_SYSCALL => linux_statx(buffer, count, register(0), register(2)),
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
@@ -1608,11 +1624,18 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
         b"/dev/null" => 0,
         b"/dev/zero" => LINUX_DEVICE_ZERO,
         b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
+        b"/dev" => LINUX_DEVICE_DIRECTORY,
         _ => return LINUX_ENOENT,
     };
     let access = flags & 3;
-    if access == 3 || flags & !(3 | LINUX_O_CLOEXEC) != 0 {
+    if access == 3 || flags & !(3 | LINUX_O_CLOEXEC | LINUX_O_DIRECTORY) != 0 {
         return LINUX_EINVAL;
+    }
+    if kind & LINUX_DEVICE_DIRECTORY != 0 && access != 0 {
+        return LINUX_EISDIR;
+    }
+    if kind & LINUX_DEVICE_DIRECTORY == 0 && flags & LINUX_O_DIRECTORY != 0 {
+        return LINUX_ENOTDIR;
     }
     let state = kind | (access + 1) as u8;
     if ELF_PROBE_DEVICE_DESCRIPTOR
@@ -1626,6 +1649,7 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
     } else {
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
     }
+    ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
     2
 }
 
@@ -1638,13 +1662,14 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
         Ok(length) => length,
         Err(error) => return error,
     };
-    if !matches!(
-        &path[..path_length],
-        b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty"
-    ) {
-        return LINUX_ENOENT;
-    }
-    if !copy_to_linux_user(stat_address, &linux_console_stat()) {
+    let stat = match &path[..path_length] {
+        b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => {
+            linux_stat(LINUX_STAT_CHARACTER_DEVICE_MODE, 1)
+        }
+        b"/dev" => linux_stat(LINUX_STAT_DIRECTORY_MODE, 2),
+        _ => return LINUX_ENOENT,
+    };
+    if !copy_to_linux_user(stat_address, &stat) {
         return LINUX_EFAULT;
     }
     0
@@ -1659,13 +1684,12 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
         Ok(length) => length,
         Err(error) => return error,
     };
-    if !matches!(
-        &path[..path_length],
-        b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty"
-    ) {
-        return LINUX_ENOENT;
-    }
-    if mode & 1 != 0 {
+    let directory = match &path[..path_length] {
+        b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => false,
+        b"/dev" => true,
+        _ => return LINUX_ENOENT,
+    };
+    if !directory && mode & 1 != 0 || directory && mode & 2 != 0 {
         LINUX_EACCES
     } else {
         0
@@ -1681,21 +1705,24 @@ fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u
         Ok(length) => length,
         Err(error) => return error,
     };
-    let (inode, minor) = match &path[..path_length] {
-        b"/dev/null" => (1_u64, 3_u32),
-        b"/dev/zero" => (2, 5),
-        b"/dev/console" => (3, 1),
-        b"/dev/tty" => (3, 0),
+    let (inode, minor, mode) = match &path[..path_length] {
+        b"/dev/null" => (1_u64, 3_u32, LINUX_STAT_CHARACTER_DEVICE_MODE),
+        b"/dev/zero" => (2, 5, LINUX_STAT_CHARACTER_DEVICE_MODE),
+        b"/dev/console" => (3, 1, LINUX_STAT_CHARACTER_DEVICE_MODE),
+        b"/dev/tty" => (3, 0, LINUX_STAT_CHARACTER_DEVICE_MODE),
+        b"/dev" => (4, 0, LINUX_STAT_DIRECTORY_MODE),
         _ => return LINUX_ENOENT,
     };
     let mut stat = [0_u8; 256];
     stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
     stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
     stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
-    stat[28..30].copy_from_slice(&(LINUX_STAT_CHARACTER_DEVICE_MODE as u16).to_ne_bytes());
+    stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
     stat[32..40].copy_from_slice(&inode.to_ne_bytes());
-    stat[128..132].copy_from_slice(&1_u32.to_ne_bytes());
-    stat[132..136].copy_from_slice(&minor.to_ne_bytes());
+    if mode == LINUX_STAT_CHARACTER_DEVICE_MODE {
+        stat[128..132].copy_from_slice(&1_u32.to_ne_bytes());
+        stat[132..136].copy_from_slice(&minor.to_ne_bytes());
+    }
     if !copy_to_linux_user(stat_address, &stat) {
         return LINUX_EFAULT;
     }
@@ -1704,6 +1731,9 @@ fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u
 
 fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     let device = linux_device_descriptor(descriptor);
+    if device & LINUX_DEVICE_DIRECTORY != 0 {
+        return LINUX_EISDIR;
+    }
     let access = device & 3;
     if access == LINUX_DESCRIPTOR_INPUT || access == 3 {
         if device & LINUX_DEVICE_ZERO == 0 || count == 0 {
@@ -1883,10 +1913,6 @@ fn linux_device_descriptor(descriptor: u64) -> u8 {
     }
 }
 
-fn linux_descriptor_open(descriptor: u64) -> bool {
-    linux_console_descriptor_open(descriptor) || linux_device_descriptor(descriptor) != 0
-}
-
 fn linux_console_descriptor(descriptor: u64) -> u8 {
     if descriptor >= 2 {
         return 0;
@@ -1922,6 +1948,7 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
     if ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0 {
         return LINUX_EBADF;
     }
+    ELF_PROBE_DIRECTORY_CURSOR.store(0, Ordering::SeqCst);
     ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
     0
 }
@@ -2047,6 +2074,64 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     }
 }
 
+fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
+    if linux_device_descriptor(descriptor) & LINUX_DEVICE_DIRECTORY == 0 {
+        return LINUX_ENOTDIR;
+    }
+    if ELF_PROBE_DIRECTORY_CURSOR.load(Ordering::SeqCst) != 0 {
+        return 0;
+    }
+    let Ok(capacity) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    let mut entries = [0_u8; 152];
+    let mut used = 0_usize;
+    for (inode, next, kind, name) in [
+        (4_u64, 1_i64, 4_u8, &b"."[..]),
+        (4, 2, 4, &b".."[..]),
+        (1, 3, 2, &b"null"[..]),
+        (2, 4, 2, &b"zero"[..]),
+        (3, 5, 2, &b"console"[..]),
+        (3, 6, 2, &b"tty"[..]),
+    ] {
+        if !append_linux_dirent(&mut entries, &mut used, inode, next, kind, name) {
+            return LINUX_EINVAL;
+        }
+    }
+    if capacity < used {
+        return LINUX_EINVAL;
+    }
+    if !copy_to_linux_user(address, &entries[..used]) {
+        return LINUX_EFAULT;
+    }
+    ELF_PROBE_DIRECTORY_CURSOR.store(1, Ordering::SeqCst);
+    used as u64
+}
+
+fn append_linux_dirent(
+    output: &mut [u8],
+    used: &mut usize,
+    inode: u64,
+    next: i64,
+    kind: u8,
+    name: &[u8],
+) -> bool {
+    let record_size = (19 + name.len() + 1 + 7) & !7;
+    let Some(end) = used.checked_add(record_size) else {
+        return false;
+    };
+    let Some(record) = output.get_mut(*used..end) else {
+        return false;
+    };
+    record[..8].copy_from_slice(&inode.to_ne_bytes());
+    record[8..16].copy_from_slice(&next.to_ne_bytes());
+    record[16..18].copy_from_slice(&(record_size as u16).to_ne_bytes());
+    record[18] = kind;
+    record[19..19 + name.len()].copy_from_slice(name);
+    *used = end;
+    true
+}
+
 fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
     let value = match resource {
         LINUX_RLIMIT_STACK => PAGE_SIZE as u64,
@@ -2060,9 +2145,28 @@ fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
 }
 
 fn linux_console_stat() -> [u8; LINUX_STAT_SIZE] {
+    linux_stat(LINUX_STAT_CHARACTER_DEVICE_MODE, 1)
+}
+
+fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
+    if linux_console_descriptor_open(descriptor) {
+        return Some(linux_console_stat());
+    }
+    let device = linux_device_descriptor(descriptor);
+    (device != 0).then(|| {
+        if device & LINUX_DEVICE_DIRECTORY != 0 {
+            linux_stat(LINUX_STAT_DIRECTORY_MODE, 2)
+        } else {
+            linux_console_stat()
+        }
+    })
+}
+
+fn linux_stat(mode: u32, inode: u64) -> [u8; LINUX_STAT_SIZE] {
     let mut stat = [0_u8; LINUX_STAT_SIZE];
+    stat[8..16].copy_from_slice(&inode.to_ne_bytes());
     stat[16..24].copy_from_slice(&1_u64.to_ne_bytes());
-    stat[24..28].copy_from_slice(&LINUX_STAT_CHARACTER_DEVICE_MODE.to_ne_bytes());
+    stat[24..28].copy_from_slice(&mode.to_ne_bytes());
     stat[56..64].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
     stat
 }
