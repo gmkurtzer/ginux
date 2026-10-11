@@ -13,8 +13,9 @@ and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
 program-header table covers the entry point are rejected. A bounded proof maps
 a resolved `ET_EXEC` main image and relocated `ET_DYN` interpreter into separate
 W^X regions, builds the dynamic startup stack, and enters the interpreter first.
-A compact userspace interpreter applies its own load-biased relative relocation,
-applies the admitted main-image relocation, and then transfers control to the
+A compact userspace interpreter assembled from its own source derives its load
+bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
+relocation and the main-image relocation, and then transfers control to the
 main entry. The main workload requires its relocated value before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
 target. The kernel then restores its root and scrubs every owned frame.

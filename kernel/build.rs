@@ -5,9 +5,11 @@ const LINUX_PROBE_ENTRY_OFFSET: usize = 0x100;
 const LINUX_PROBE_EXECUTABLE_PAGES: usize = 4;
 const LINUX_PROBE_MAX_TEXT_SIZE: usize =
     LINUX_PROBE_EXECUTABLE_PAGES * PAGE_SIZE - LINUX_PROBE_ENTRY_OFFSET;
+const LINUX_INTERPRETER_MAX_TEXT_SIZE: usize = 256;
 
 fn main() {
     println!("cargo:rerun-if-changed=linux-probe.S");
+    println!("cargo:rerun-if-changed=linux-interpreter.S");
     println!("cargo:rerun-if-changed=linux-probe.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
@@ -32,6 +34,36 @@ fn main() {
         LINUX_PROBE_MAX_TEXT_SIZE
     );
     fs::write(output.join("linux-probe.bin"), text).expect("failed to write Linux probe bytes");
+
+    let interpreter_object = output.join("linux-interpreter.o");
+    let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
+    let status = Command::new(clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-c",
+            "linux-interpreter.S",
+            "-o",
+        ])
+        .arg(&interpreter_object)
+        .status()
+        .expect("failed to run clang for Linux interpreter");
+    assert!(
+        status.success(),
+        "clang failed to assemble Linux interpreter"
+    );
+    let interpreter_elf =
+        fs::read(&interpreter_object).expect("failed to read Linux interpreter object");
+    let interpreter_text = elf_section(&interpreter_elf, b".text")
+        .expect("Linux interpreter object has no .text section");
+    assert!(
+        interpreter_text.len() <= LINUX_INTERPRETER_MAX_TEXT_SIZE,
+        "Linux interpreter .text is {} bytes; the bounded profile permits at most {} bytes",
+        interpreter_text.len(),
+        LINUX_INTERPRETER_MAX_TEXT_SIZE
+    );
+    fs::write(output.join("linux-interpreter.bin"), interpreter_text)
+        .expect("failed to write Linux interpreter bytes");
 
     let linked = output.join("linux-probe.elf");
     let link_script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))

@@ -643,6 +643,11 @@ if ! grep -q '^ginux: userspace Linux relative relocation applied' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: metadata-driven Linux relative relocations applied' "$output_file"; then
+    echo "Boot test failed: metadata-driven Linux relative relocations were not applied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux copy errors and overflow bounds verified' "$output_file"; then
     echo "Boot test failed: Linux copy errors or overflow bounds were not verified." >&2
     exit 1

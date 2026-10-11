@@ -33,6 +33,7 @@ const DT_RELASZ: u64 = 8;
 const DT_RELAENT: u64 = 9;
 const R_X86_64_RELATIVE: u64 = 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
+const INTERPRETER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-interpreter.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
 
 #[derive(Clone, Copy)]
@@ -1606,8 +1607,8 @@ fn compact_position_independent_fixture() -> [u8; 1024] {
         ELF_HEADER_SIZE,
         0,
         0,
-        0x120,
-        0x120,
+        (0x100 + INTERPRETER_CODE.len()) as u64,
+        (0x100 + INTERPRETER_CODE.len()) as u64,
         PF_READ | PF_EXECUTE,
     );
     write_segment(
@@ -1645,13 +1646,7 @@ fn compact_position_independent_fixture() -> [u8; 1024] {
     write_u64(&mut bytes, RELA_OFFSET, 0x3080);
     write_u64(&mut bytes, RELA_OFFSET + 8, R_X86_64_RELATIVE);
     write_u64(&mut bytes, RELA_OFFSET + 16, 0x1234);
-    bytes[0x100..0x10c].copy_from_slice(&[
-        0x48, 0xc7, 0x04, 0x25, 0x80, 0x30, 0x60, 0x00, 0x34, 0x12, 0x60, 0x00,
-    ]);
-    bytes[0x10c..0x118].copy_from_slice(&[
-        0x48, 0xc7, 0x04, 0x25, 0x00, 0x41, 0x40, 0x00, 0x00, 0x01, 0x40, 0x00,
-    ]);
-    bytes[0x118..0x11d].copy_from_slice(&[0xe9, 0xe3, 0xff, 0xdf, 0xff]);
+    bytes[0x100..0x100 + INTERPRETER_CODE.len()].copy_from_slice(INTERPRETER_CODE);
     bytes[DATA_OFFSET..DATA_OFFSET + 8].copy_from_slice(b"DYNAMIC!");
     bytes
 }

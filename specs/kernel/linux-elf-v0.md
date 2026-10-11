@@ -137,10 +137,13 @@ regions. It also owns bounded heap, stack, and two `mmap` payload frames. The
 proof validates permissions, the intact main entry, and image contents through
 the activated user root, constructs the dynamic-process stack with the common
 auxiliary-vector encoder, and enters the relocated interpreter at `0x600100`.
-The interpreter carries its own bounded dynamic table and first writes the
-load-biased value `0x601234` to its writable relocation target `0x603080`. It
-then writes the admitted main-image relative relocation value `0x400100` to the
-writable target `0x404100` and jumps to the main entry at `0x400100`. The main
+The interpreter is assembled from `linux-interpreter.S`; at runtime it derives
+its page-aligned load bias and reads the relocation address, target, and addend
+from the admitted dynamic metadata rather than embedding those values in its
+instructions. It first writes the load-biased value `0x601234` to its writable
+relocation target `0x603080`, then writes the admitted main-image relative
+relocation value `0x400100` to the writable target `0x404100` and jumps to the
+main entry at `0x400100`. The main
 workload requires its relocated value for a dynamic startup and requires an
 untouched zero target for each static startup; after it exits, the kernel also
 validates the interpreter's relocated target through the still-active user root.
