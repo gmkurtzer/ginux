@@ -374,6 +374,19 @@ cd80
 7402
 0f0b
 
+# query and require the exact generation's created state
+66c746060600
+4c896608
+48c7461000000000
+48c7461800000000
+4889df
+ba20000000
+b80f000000
+cd80
+4883f801
+7402
+0f0b
+
 # stop and retire that exact unstarted generation
 66c746060200
 4c896608
@@ -395,6 +408,16 @@ cd80
 48c1e208
 4883ca03
 4839d0
+7402
+0f0b
+
+# reject a state query for the retired generation
+66c746060600
+4889df
+ba20000000
+b80f000000
+cd80
+83f8fd
 7402
 0f0b
 
@@ -536,6 +559,18 @@ cd80
 7402
 0f0b
 
+# query and require staged state after loading and initialization
+66c746060600
+48c7461000000000
+48c7461800000000
+4889df
+ba20000000
+b80f000000
+cd80
+4883f802
+7402
+0f0b
+
 # explicitly admit the fully initialized generation for execution
 66c746060500
 48c7461000000000
@@ -545,6 +580,16 @@ ba20000000
 b80f000000
 cd80
 85c0
+7402
+0f0b
+
+# query and require ready state before yielding to the workload
+66c746060600
+4889df
+ba20000000
+b80f000000
+cd80
+4883f803
 7402
 0f0b
 

@@ -523,6 +523,11 @@ if ! grep -q '^ginux: explicit auxiliary start authority enforced' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary runtime state query enforced' "$output_file"; then
+    echo "Boot test failed: auxiliary runtime state queries were not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace auxiliary lifecycle observation enforced' "$output_file"; then
     echo "Boot test failed: userspace auxiliary lifecycle observation was not enforced." >&2
     exit 1

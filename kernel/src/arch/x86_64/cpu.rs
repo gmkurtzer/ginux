@@ -923,6 +923,13 @@ fn create_auxiliary_service(
         {
             0
         }
+        control_abi::MANAGEMENT_QUERY_AUXILIARY
+            if request.object == 0
+                && request.rights == 0
+                && domain::auxiliary_service_is_ready(request.source) =>
+        {
+            scheduler::auxiliary_runtime_state(request.source).unwrap_or(u64::MAX - 2)
+        }
         _ => u64::MAX - 2,
     }
 }

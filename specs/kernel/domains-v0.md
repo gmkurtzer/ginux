@@ -169,6 +169,9 @@ validates kind 5, the exact generation, and status 42 before exhausting its own
 budget. It also validates the structured descriptor for that event. The kernel
 requires no auxiliary events to remain queued. The identity-bearing descriptor
 must name a nonzero logical service distinct from the primary managed service.
+Before yielding, the control plane queries the exact auxiliary generation and
+observes its created, staged, and ready states. A query after retirement is
+rejected rather than aliasing a reused slot.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

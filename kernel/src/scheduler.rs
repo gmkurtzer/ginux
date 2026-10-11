@@ -780,6 +780,27 @@ pub(crate) fn auxiliary_is_staged(domain_id: u64) -> bool {
         && matches.next().is_none()
 }
 
+pub(crate) fn auxiliary_runtime_state(domain_id: u64) -> Option<u64> {
+    let runtime = runtime_mut()?;
+    let mut matches = runtime
+        .scheduler
+        .threads
+        .iter()
+        .flatten()
+        .filter(|thread| thread.domain == domain_id);
+    let state = matches.next().map(|thread| thread.state);
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(match state {
+        None => crate::control_abi::AUXILIARY_STATE_CREATED,
+        Some(State::Staged) => crate::control_abi::AUXILIARY_STATE_STAGED,
+        Some(State::Ready) => crate::control_abi::AUXILIARY_STATE_READY,
+        Some(State::Running) => crate::control_abi::AUXILIARY_STATE_RUNNING,
+        Some(State::Blocked) => crate::control_abi::AUXILIARY_STATE_BLOCKED,
+    })
+}
+
 pub(crate) fn start_staged_auxiliary(domain_id: u64) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;

@@ -222,6 +222,12 @@ generation and the object and rights fields must be zero. The scheduler changes
 that one unambiguous context from `Staged` to `Ready`; normal scheduling may
 dispatch it immediately after the management call returns. Repeated starts and
 absent, ready, running, blocked, or wrong-generation targets fail closed.
+Action 6 queries the exact live auxiliary named by source; object and rights
+must be zero. It returns 1 for created with no runtime context, 2 for staged, 3
+for ready, 4 for running, or 5 for blocked. Non-auxiliary, stopping, retired,
+wrong-generation, ambiguous-context, and malformed requests fail closed. The
+ring-3 proof observes created, staged, and ready in order and rejects a query
+for a retired generation.
 The ring-3 control plane consumes both kind 3 stop records as they are
 published. After action 5 it voluntarily yields, resumes only after the
 workload has exited, consumes the kind 5 record, and validates the exact
