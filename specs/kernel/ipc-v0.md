@@ -25,7 +25,8 @@ at completion.
 Operation 8 adds one blocking receive path. If its inbound queue is empty, the
 current context becomes blocked only when another context can run. A peer send
 then bypasses the queue, writes the word into the blocked context's result
-register, and makes it ready. The QEMU proof preempts into the replacement
+register, and makes it ready only if object 3 and the receiver-side direction
+match the typed scheduler wait key. The QEMU proof preempts into the replacement
 service, blocks it, resumes control, wakes the service with value 3, and later
 observes 3 as the receive result. There is at most one bootstrap waiter, and a
 failed block rolls back atomically.

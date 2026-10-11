@@ -46,8 +46,9 @@ bootstrap revision holds at most one such event.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes
-the sent word the operation's eventual return value. If blocking would leave no
-runnable thread, it returns `UINT64_MAX - 2` without changing scheduler state.
+the sent word the operation's eventual return value only when the object and
+inbound endpoint direction match the saved wait key. If blocking would leave
+no runnable thread, it returns `UINT64_MAX - 2` without changing scheduler state.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

@@ -17,8 +17,10 @@ so stale identifiers cannot observe or control a replacement.
 A blocking IPC receive atomically saves the current context, marks it
 `Blocked`, and selects another ready thread. If none exists, the transition is
 rolled back and the caller remains `Running`. A peer send writes its word into
-the sole blocked peer's saved result register and changes it to `Ready`; it
-does not grant authority or attach a new thread.
+the sole blocked peer's saved result register and changes it to `Ready` only
+when the IPC object and endpoint direction exactly match the saved wait key.
+Object or direction mismatches leave the waiter unchanged. Waking does not
+grant authority or attach a new thread.
 
 Each thread owns a C-layout saved context containing all general-purpose
 registers, user RIP/RSP/RFLAGS, and its page-table root. Creation and yield

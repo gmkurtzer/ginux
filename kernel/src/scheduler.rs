@@ -21,11 +21,17 @@ enum State {
     Blocked,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WaitReason {
+    IpcReceive { object: u64, service_side: bool },
+}
+
 #[derive(Clone, Copy)]
 struct Thread {
     id: ThreadId,
     domain: u64,
     state: State,
+    wait: Option<WaitReason>,
     context: UserContext,
 }
 
@@ -347,6 +353,7 @@ impl Scheduler {
             id,
             domain,
             state: State::Ready,
+            wait: None,
             context,
         });
         Some(id)
@@ -396,7 +403,12 @@ impl Scheduler {
         self.schedule_next()
     }
 
-    fn block_current(&mut self, id: ThreadId, saved: UserContext) -> Option<Scheduled> {
+    fn block_current(
+        &mut self,
+        id: ThreadId,
+        saved: UserContext,
+        reason: WaitReason,
+    ) -> Option<Scheduled> {
         if self.current != Some(id) || !saved.is_valid() {
             return None;
         }
@@ -407,6 +419,7 @@ impl Scheduler {
         let previous = thread.context;
         thread.context = saved;
         thread.state = State::Blocked;
+        thread.wait = Some(reason);
         self.current = None;
         if let Some(next) = self.schedule_next() {
             return Some(next);
@@ -414,17 +427,21 @@ impl Scheduler {
         let thread = self.thread_mut(id)?;
         thread.context = previous;
         thread.state = State::Running;
+        thread.wait = None;
         self.current = Some(id);
         None
     }
 
-    fn wake_blocked_peer(&mut self, sender_domain: u64, result: u64) -> bool {
+    fn wake_blocked_peer(&mut self, sender_domain: u64, reason: WaitReason, result: u64) -> bool {
         let mut blocked_slot = None;
         for (slot, thread) in self.threads.iter().enumerate() {
             let Some(thread) = thread else {
                 continue;
             };
-            if thread.state == State::Blocked && thread.domain != sender_domain {
+            if thread.state == State::Blocked
+                && thread.domain != sender_domain
+                && thread.wait == Some(reason)
+            {
                 if blocked_slot.is_some() {
                     return false;
                 }
@@ -439,6 +456,7 @@ impl Scheduler {
         };
         thread.context.rax = result;
         thread.state = State::Ready;
+        thread.wait = None;
         true
     }
 
@@ -715,6 +733,7 @@ pub(crate) fn block_runtime(
     frame: &mut UserTrapFrame,
     code_selector: u16,
     data_selector: u16,
+    reason: WaitReason,
 ) -> RuntimeAction {
     if !frame.selectors_match(code_selector, data_selector) {
         return RuntimeAction::Invalid;
@@ -733,7 +752,7 @@ pub(crate) fn block_runtime(
         return RuntimeAction::Invalid;
     };
     let saved = frame.saved_context(0, root);
-    let Some(next) = runtime.scheduler.block_current(current, saved) else {
+    let Some(next) = runtime.scheduler.block_current(current, saved, reason) else {
         return RuntimeAction::Invalid;
     };
     let Some(blocks) = runtime.blocks.checked_add(1) else {
@@ -753,14 +772,26 @@ pub(crate) fn block_runtime(
     }
 }
 
-pub(crate) fn wake_ipc_peer(sender_domain: u64, result: u64) -> bool {
+pub(crate) fn wake_ipc_peer(
+    sender_domain: u64,
+    object: u64,
+    service_side: bool,
+    result: u64,
+) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;
     };
     let Some(wakes) = runtime.wakes.checked_add(1) else {
         return false;
     };
-    if !runtime.scheduler.wake_blocked_peer(sender_domain, result) {
+    if !runtime.scheduler.wake_blocked_peer(
+        sender_domain,
+        WaitReason::IpcReceive {
+            object,
+            service_side,
+        },
+        result,
+    ) {
         return false;
     }
     runtime.wakes = wakes;
@@ -921,11 +952,32 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     let mut blocking = Scheduler::new();
     let blocked = blocking.create(1, first_context)?;
     let peer = blocking.create(2, second_context)?;
+    let wait = WaitReason::IpcReceive {
+        object: 3,
+        service_side: false,
+    };
     if blocking.schedule_next()?.id != blocked
-        || blocking.block_current(blocked, first_context)?.id != peer
+        || blocking.block_current(blocked, first_context, wait)?.id != peer
         || blocking.thread(blocked)?.state != State::Blocked
-        || !blocking.wake_blocked_peer(2, 77)
+        || blocking.wake_blocked_peer(
+            2,
+            WaitReason::IpcReceive {
+                object: 4,
+                service_side: false,
+            },
+            66,
+        )
+        || blocking.wake_blocked_peer(
+            2,
+            WaitReason::IpcReceive {
+                object: 3,
+                service_side: true,
+            },
+            66,
+        )
+        || !blocking.wake_blocked_peer(2, wait, 77)
         || blocking.thread(blocked)?.state != State::Ready
+        || blocking.thread(blocked)?.wait.is_some()
         || blocking.exit_current(peer)?.context.rax != 77
     {
         return Some(false);
@@ -934,9 +986,10 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     let mut lone = Scheduler::new();
     let lone_id = lone.create(1, first_context)?;
     let _ = lone.schedule_next()?;
-    let rollback = lone.block_current(lone_id, first_context).is_none()
+    let rollback = lone.block_current(lone_id, first_context, wait).is_none()
         && lone.current == Some(lone_id)
-        && lone.thread(lone_id)?.state == State::Running;
+        && lone.thread(lone_id)?.state == State::Running
+        && lone.thread(lone_id)?.wait.is_none();
     Some(generation_valid && rollback)
 }
 
