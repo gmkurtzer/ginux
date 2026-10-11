@@ -13,7 +13,7 @@ const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
 const MAX_SEGMENT_PAGES: usize = 2;
-const FIXTURE_DATA_OFFSET: usize = 0x800;
+const FIXTURE_DATA_OFFSET: usize = 0x1000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 

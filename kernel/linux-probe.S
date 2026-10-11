@@ -239,6 +239,90 @@ ginux_linux_probe:
     cmp dword ptr [rdi], 0x756e6947
     jne failure
 
+    mov edi, 99
+    mov esi, 0x401080
+    mov eax, 97
+    syscall
+    cmp rax, -22
+    jne failure
+
+    movabs rax, 0x1122334455667788
+    mov qword ptr [0x4021f8], rax
+    mov edi, 3
+    mov esi, 0x4021f8
+    mov eax, 97
+    syscall
+    cmp rax, -14
+    jne failure
+    movabs rax, 0x1122334455667788
+    cmp qword ptr [0x4021f8], rax
+    jne failure
+
+    mov edi, 3
+    mov esi, 0x401080
+    mov eax, 97
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x401080], 0x1000
+    jne failure
+    cmp qword ptr [0x401088], 0x1000
+    jne failure
+
+    mov edi, 2
+    mov esi, 7
+    xor edx, edx
+    mov r10d, 0x401090
+    mov eax, 302
+    syscall
+    cmp rax, -3
+    jne failure
+
+    xor edi, edi
+    mov esi, 99
+    xor edx, edx
+    mov r10d, 0x401090
+    mov eax, 302
+    syscall
+    cmp rax, -22
+    jne failure
+
+    xor edi, edi
+    mov esi, 7
+    mov edx, 0x401080
+    xor r10d, r10d
+    mov eax, 302
+    syscall
+    cmp rax, -1
+    jne failure
+
+    movabs rax, 0x1122334455667788
+    mov qword ptr [0x4021f8], rax
+    xor edi, edi
+    mov esi, 7
+    xor edx, edx
+    mov r10d, 0x4021f8
+    mov eax, 302
+    syscall
+    cmp rax, -14
+    jne failure
+    movabs rax, 0x1122334455667788
+    cmp qword ptr [0x4021f8], rax
+    jne failure
+
+    xor edi, edi
+    mov esi, 7
+    xor edx, edx
+    mov r10d, 0x401090
+    mov eax, 302
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x401090], 2
+    jne failure
+    cmp qword ptr [0x401098], 2
+    jne failure
+
     mov eax, 102
     syscall
     test rax, rax

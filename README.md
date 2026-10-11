@@ -44,6 +44,9 @@ Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 `readlink` result is `/init`.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
+Read-only `getrlimit` and `prlimit64` queries expose the bounded stack and file
+descriptor ceilings; unsupported resources, foreign PIDs, mutations, and
+invalid output ranges fail without changing user memory.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

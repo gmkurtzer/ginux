@@ -623,6 +623,11 @@ if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux immutable resource limits validated' "$output_file"; then
+    echo "Boot test failed: Linux immutable resource limits were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

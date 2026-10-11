@@ -52,6 +52,7 @@ const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_GETCWD_SYSCALL: u64 = 79;
 const LINUX_READLINK_SYSCALL: u64 = 89;
 const LINUX_UMASK_SYSCALL: u64 = 95;
+const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
@@ -66,9 +67,12 @@ const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
+const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
+const LINUX_RETURN_TO_KERNEL: u64 = (-4096_i64) as u64;
+const LINUX_EPERM: u64 = u64::MAX;
 const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
@@ -77,6 +81,8 @@ const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
 const LINUX_ENAMETOOLONG: u64 = u64::MAX - 35;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
+const LINUX_RLIMIT_STACK: u64 = 3;
+const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
 
@@ -457,7 +463,7 @@ ginux_linux_syscall_entry:
     mov r8, [rip + {linux_user_rflags}]
     and rsp, -16
     call {linux_syscall_handler}
-    cmp rax, -1
+    cmp rax, {linux_return_to_kernel}
     je ginux_user_return_kernel
     mov [rip + {linux_syscall_result}], rax
     mov rsp, [rip + {linux_kernel_frame}]
@@ -493,6 +499,7 @@ ginux_user_return_kernel:
     linux_user_rflags = sym LINUX_USER_RFLAGS,
     linux_kernel_frame = sym LINUX_KERNEL_FRAME,
     linux_syscall_result = sym LINUX_SYSCALL_RESULT,
+    linux_return_to_kernel = const LINUX_RETURN_TO_KERNEL as i64,
     user_data = const USER_DATA_SELECTOR as u64,
     user_code = const USER_CODE_SELECTOR as u64,
 );
@@ -1005,7 +1012,7 @@ extern "sysv64" fn linux_syscall_handler(
 ) -> u64 {
     if registers.is_null() {
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-        return u64::MAX;
+        return LINUX_RETURN_TO_KERNEL;
     }
     // SAFETY: the assembly entry stub passes the base of six saved registers.
     let registers = unsafe { core::slice::from_raw_parts(registers, 6) };
@@ -1020,7 +1027,7 @@ extern "sysv64" fn linux_syscall_handler(
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-        return u64::MAX;
+        return LINUX_RETURN_TO_KERNEL;
     }
     match number {
         LINUX_WRITE_SYSCALL => {
@@ -1139,6 +1146,31 @@ extern "sysv64" fn linux_syscall_handler(
             output_length as u64
         }
         LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
+        LINUX_GETRLIMIT_SYSCALL => {
+            let Some(limit) = linux_resource_limit(first_argument) else {
+                return LINUX_EINVAL;
+            };
+            if !copy_to_linux_user(buffer, &limit) {
+                return LINUX_EFAULT;
+            }
+            0
+        }
+        LINUX_PRLIMIT64_SYSCALL => {
+            if !matches!(first_argument, 0 | 1) {
+                return LINUX_ESRCH;
+            }
+            let Some(limit) = linux_resource_limit(buffer) else {
+                return LINUX_EINVAL;
+            };
+            if count != 0 {
+                return LINUX_EPERM;
+            }
+            let old_limit = register(0);
+            if old_limit != 0 && !copy_to_linux_user(old_limit, &limit) {
+                return LINUX_EFAULT;
+            }
+            0
+        }
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {
@@ -1148,10 +1180,22 @@ extern "sysv64" fn linux_syscall_handler(
             }
             ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-            u64::MAX
+            LINUX_RETURN_TO_KERNEL
         }
         _ => LINUX_ENOSYS,
     }
+}
+
+fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
+    let value = match resource {
+        LINUX_RLIMIT_STACK => PAGE_SIZE as u64,
+        LINUX_RLIMIT_NOFILE => 2,
+        _ => return None,
+    };
+    let mut limit = [0_u8; 16];
+    limit[..8].copy_from_slice(&value.to_ne_bytes());
+    limit[8..].copy_from_slice(&value.to_ne_bytes());
+    Some(limit)
 }
 
 fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {

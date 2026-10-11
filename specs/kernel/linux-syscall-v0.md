@@ -26,6 +26,17 @@ zero output size returns `-EINVAL`; invalid pathname or output ranges return
 `rax = 95` (`__NR_umask`) atomically replaces the single process's permission
 mask, returns the previous value, and ignores bits outside `0777`. The initial
 value is `022`; the proof changes it twice and restores it before exit.
+`rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
+limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
+are one page, matching the bounded mapped stack; the descriptor limits are 2,
+matching the highest descriptor number the profile can accept plus one.
+`prlimit64` accepts PID 0 or 1 and an optional old-limit destination. Other
+PIDs return `-ESRCH`, unsupported resources return `-EINVAL`, and any non-null
+new-limit pointer returns `-EPERM`. Output is copied only after the full
+16-byte `rlimit` range passes writable-VMA validation, so a range crossing the
+declared ELF extent returns `-EFAULT` without a partial write. The syscall
+entry uses an internal value outside Linux's `-1..-4095` errno range to return
+to the kernel, keeping Linux `-EPERM` observable in ring 3.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x403000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x404000` follows Linux syscall
@@ -91,7 +102,8 @@ or credential-based permissions, a general file-descriptor table, output
 streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
 `write`, `brk`, `uname`, `getcwd`, bounded `readlink`,
-`umask`, `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
+`umask`, read-only `getrlimit`/`prlimit64`,
+`arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential queries, the bounded process/session identity queries above,
 `set_tid_address`, `exit`, and `exit_group` calls. There is no thread
 creation, TID allocation, or clear-child-TID futex wake yet. Every other call
