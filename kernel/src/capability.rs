@@ -192,6 +192,9 @@ impl Table {
 }
 
 pub(crate) fn verify_authority_invariants() -> bool {
+    if !verify_rights_lattice() {
+        return false;
+    }
     const OBJECT: u64 = 7;
     let root_rights = Rights::READ.union(Rights::WRITE).union(Rights::MANAGE);
     let mut table = Table::new();
@@ -237,4 +240,42 @@ pub(crate) fn verify_authority_invariants() -> bool {
     replacement != root
         && table.permits(replacement, 8, Rights::READ)
         && !table.permits(root, OBJECT, Rights::READ)
+}
+
+fn verify_rights_lattice() -> bool {
+    const OBJECT: u64 = 0x55;
+    for parent_bits in 1..=0x0f {
+        let mut table = Table::new();
+        let Some(parent_rights) = Rights::from_bits(parent_bits) else {
+            return false;
+        };
+        let Some(parent) = table.authorize_boot(OBJECT, parent_rights) else {
+            return false;
+        };
+        table.seal_boot_authority();
+        for child_bits in 0..=0x0f {
+            let child_rights = Rights(child_bits);
+            let expected = child_bits != 0
+                && child_bits != parent_bits
+                && child_bits & parent_bits == child_bits;
+            let derived = table.derive(parent, child_rights);
+            if derived.is_some() != expected {
+                return false;
+            }
+            let Some(child) = derived else {
+                continue;
+            };
+            for request_bits in 1..=0x0f {
+                let requested = Rights(request_bits);
+                let permitted = request_bits & child_bits == request_bits;
+                if table.permits(child, OBJECT, requested) != permitted {
+                    return false;
+                }
+            }
+            if table.permits(child, OBJECT + 1, child_rights) {
+                return false;
+            }
+        }
+    }
+    Rights::from_bits(0).is_none() && Rights::from_bits(0x10).is_none()
 }

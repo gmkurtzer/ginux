@@ -45,7 +45,11 @@ define general userspace-requested transfer, object lifetime, concurrent table
 mutation, or cancellation of in-flight operations. Charged call-gate dispatch
 holds a bounded generation-specific operation reference, and retirement
 requires that count to reach zero before removing the complete table. The boot
-test covers rejected
+test exhaustively checks all parent, derived-child, and requested-rights
+combinations in the four-bit rights lattice. A derivation succeeds exactly for
+a nonempty strict subset, authorization succeeds exactly for a request subset
+of the derived rights, and the same handle never authorizes a different object.
+It also covers rejected
 equal/expanded derivation, least-rights access, recursive revocation, slot
 reuse, stale-generation rejection, one kernel-mediated IPC delegation, and
 cross-domain handle substitution. A separate manager invariant leaves a child
