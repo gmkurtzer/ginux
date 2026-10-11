@@ -134,8 +134,14 @@ generation-tagged running state and FS/copy context, and then fills an exact
 return frame. Because all fallible work precedes the frame writes, a stale
 handle leaves every output word and the running parent unchanged. The boot
 proof installs the child, observes that copy admission moved to its TLS, and
-restores the parent with the reverse admission decision. This still uses a
-local proof frame rather than redirecting the live `SYSRETQ`.
+restores the parent with the reverse admission decision. That cross-thread
+installer still targets a local proof frame rather than redirecting `SYSRETQ`.
+The real ring-3 `sched_yield` path now round-trips through that typed live
+frame. With interrupts disabled, the handler validates and reinstalls the
+current TLS context, writes all twelve registers plus RIP/RSP/RFLAGS into the
+assembly-owned return state, reads the result back, and resumes successfully
+through `SYSRETQ`. It deliberately selects the calling thread only; cross-thread
+selection is the next boundary.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.

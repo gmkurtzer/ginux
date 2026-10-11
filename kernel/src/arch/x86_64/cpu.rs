@@ -345,6 +345,7 @@ static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
+static LINUX_LIVE_RETURN_VALIDATED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
@@ -1900,6 +1901,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         return LinuxElfResult::FAILED;
     }
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
+    LINUX_LIVE_RETURN_VALIDATED.store(false, Ordering::SeqCst);
     ELF_PROBE_STACK.store(execution.stack as u64, Ordering::SeqCst);
     ELF_PROBE_CODE_BASE.store(execution.code as u64, Ordering::SeqCst);
     ELF_PROBE_CODE_SIZE.store(execution.code_size as u64, Ordering::SeqCst);
@@ -2143,6 +2145,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let linux_thread_table_released = finish_linux_thread_table();
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
+    let live_return_validated = LINUX_LIVE_RETURN_VALIDATED.swap(false, Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let descriptor_snapshot = [
         u64::from(ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst)),
@@ -2380,6 +2383,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_BRK_LIMIT.store(0, Ordering::SeqCst);
     let valid = inactive
         && completed
+        && live_return_validated
         && child_tid_cleared
         && robust_list_cleared
         && protected_page == execution.relro as u64
@@ -2671,7 +2675,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
 
 extern "sysv64" fn linux_syscall_handler(
     number: u64,
-    registers: *const LinuxSyscallFrame,
+    registers: *mut LinuxSyscallFrame,
     user_stack: u64,
     user_rip: u64,
     user_rflags: u64,
@@ -2682,8 +2686,8 @@ extern "sysv64" fn linux_syscall_handler(
     }
     // SAFETY: the assembly entry stub passes the aligned base of the exact
     // twelve-register frame represented by LinuxSyscallFrame.
-    let registers = unsafe { registers.read() };
-    let register = |index: usize| registers.argument(index).unwrap_or(0);
+    let saved_registers = unsafe { registers.read() };
+    let register = |index: usize| saved_registers.argument(index).unwrap_or(0);
     let count = register(3);
     let buffer = register(4);
     let first_argument = register(5);
@@ -2706,7 +2710,13 @@ extern "sysv64" fn linux_syscall_handler(
             linux_regular_file_read_at(first_argument, buffer, count, register(0))
         }
         LINUX_WRITE_SYSCALL => linux_descriptor_write(first_argument, buffer, count),
-        LINUX_SCHED_YIELD_SYSCALL => 0,
+        LINUX_SCHED_YIELD_SYSCALL => linux_sched_yield_live_return(
+            registers,
+            saved_registers,
+            user_stack,
+            user_rip,
+            user_rflags,
+        ),
         LINUX_CLOSE_SYSCALL => linux_descriptor_close(first_argument),
         LINUX_POLL_SYSCALL => linux_poll(first_argument, buffer, count),
         LINUX_FSTAT_SYSCALL => {
@@ -3175,6 +3185,57 @@ extern "sysv64" fn linux_syscall_handler(
             LINUX_RETURN_TO_KERNEL
         }
         _ => LINUX_ENOSYS,
+    }
+}
+
+fn linux_sched_yield_live_return(
+    output: *mut LinuxSyscallFrame,
+    registers: LinuxSyscallFrame,
+    user_stack: u64,
+    user_rip: u64,
+    user_rflags: u64,
+) -> u64 {
+    let Some(slot) = current_linux_thread_slot() else {
+        return LINUX_ESRCH;
+    };
+    let tls = LinuxTlsContext {
+        thread_pointer: LINUX_THREAD_POINTERS[slot].load(Ordering::SeqCst) as usize,
+        extent: LINUX_THREAD_TLS_EXTENTS[slot].load(Ordering::SeqCst) as usize,
+        extent_size: LINUX_THREAD_TLS_SIZES[slot].load(Ordering::SeqCst) as usize,
+    };
+    let context = LinuxUserContext {
+        registers,
+        rip: user_rip,
+        rsp: user_stack,
+        rflags: user_rflags,
+        rax: 0,
+        fs_base: tls.thread_pointer as u64,
+    };
+    if !context.is_valid() || !tls.is_valid() || !install_linux_tls_context(tls) {
+        return LINUX_EINVAL;
+    }
+    // SAFETY: the entry assembly passes the live, aligned syscall frame and
+    // reads these return globals only after this handler returns. Interrupts
+    // remain disabled for the serialized update.
+    unsafe {
+        output.write(context.registers);
+        LINUX_USER_RSP = context.rsp;
+        LINUX_USER_RIP = context.rip;
+        LINUX_USER_RFLAGS = context.rflags;
+    }
+    // SAFETY: the same serialized frame and globals remain exclusively owned
+    // by this syscall entry until the handler returns.
+    let installed = unsafe {
+        output.read() == context.registers
+            && LINUX_USER_RSP == context.rsp
+            && LINUX_USER_RIP == context.rip
+            && LINUX_USER_RFLAGS == context.rflags
+    };
+    if installed {
+        LINUX_LIVE_RETURN_VALIDATED.store(true, Ordering::SeqCst);
+        0
+    } else {
+        LINUX_EINVAL
     }
 }
 

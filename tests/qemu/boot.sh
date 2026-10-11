@@ -758,6 +758,11 @@ if ! grep -q '^ginux: stale Linux return installation left state unchanged' "$ou
     exit 1
 fi
 
+if ! grep -q '^ginux: live Linux syscall return frame round-trip validated' "$output_file"; then
+    echo "Boot test failed: the live Linux syscall return frame did not round-trip." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
     exit 1

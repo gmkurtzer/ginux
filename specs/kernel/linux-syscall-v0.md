@@ -541,6 +541,13 @@ frame. Child installation moves TLS copy admission to the child; restoring the
 parent reverses it. A stale handle leaves both output frame and running identity
 untouched. The tested output remains local rather than the live assembly return
 frame.
+The bounded `sched_yield` proof now exercises the live form of this operation.
+The handler receives a mutable pointer to the exact assembly-owned typed frame,
+revalidates and reinstalls the current thread's TLS context, rewrites all twelve
+registers and the RIP/RSP/RFLAGS return globals while interrupts remain
+disabled, verifies the written state, and returns through `SYSRETQ`. The ring-3
+workload continuing afterward proves the live round trip. This milestone still
+selects only the caller; it does not schedule the saved child.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
