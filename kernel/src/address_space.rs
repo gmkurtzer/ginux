@@ -36,6 +36,9 @@ pub(crate) fn verify_linux_elf_mapping(
     let first = plan.executable;
     let header = plan.read_only;
     let second = plan.writable;
+    let Some(relro) = plan.relro else {
+        return false;
+    };
     let indexes = |address: u64| {
         [
             ((address >> 39) & 0x1ff) as usize,
@@ -116,6 +119,9 @@ pub(crate) fn verify_linux_elf_mapping(
         || !first.executable
         || !second.writable
         || second.executable
+        || relro.virtual_address != second_last_page
+        || relro.memory_size == 0
+        || relro.memory_size > PAGE_SIZE as u64
         || first_last_page >= second.virtual_page
         || plan.entry < first.virtual_address
         || plan.entry
@@ -450,6 +456,8 @@ pub(crate) fn verify_linux_elf_mapping(
                     code_size: first.memory_size,
                     data: second.virtual_page as usize,
                     data_size: second.memory_size,
+                    relro: relro.virtual_address as usize,
+                    relro_size: relro.memory_size as usize,
                     heap: heap_virtual_page as usize,
                     heap_size: PAGE_SIZE,
                 });

@@ -173,6 +173,8 @@ static ELF_PROBE_CODE_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_RELRO: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_RELRO_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
@@ -726,6 +728,8 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) code_size: usize,
     pub(crate) data: usize,
     pub(crate) data_size: usize,
+    pub(crate) relro: usize,
+    pub(crate) relro_size: usize,
     pub(crate) heap: usize,
     pub(crate) heap_size: usize,
 }
@@ -751,6 +755,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_CODE_SIZE.store(execution.code_size as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(execution.data as u64, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(execution.data_size as u64, Ordering::SeqCst);
+    ELF_PROBE_RELRO.store(execution.relro as u64, Ordering::SeqCst);
+    ELF_PROBE_RELRO_SIZE.store(execution.relro_size as u64, Ordering::SeqCst);
     ELF_PROBE_BRK.store(execution.heap as u64, Ordering::SeqCst);
     ELF_PROBE_BRK_LIMIT.store(heap_limit as u64, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
@@ -782,13 +788,15 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_CODE_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
+    ELF_PROBE_RELRO.store(0, Ordering::SeqCst);
+    ELF_PROBE_RELRO_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_BRK.store(0, Ordering::SeqCst);
     ELF_PROBE_BRK_LIMIT.store(0, Ordering::SeqCst);
     inactive
         && completed
         && child_tid_cleared
         && robust_list_cleared
-        && protected_page == execution.data as u64 + PAGE_SIZE as u64
+        && protected_page == execution.relro as u64
         && heap_written
         && umask_restored
         && msrs_restored
@@ -1077,10 +1085,15 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_MPROTECT_SYSCALL => {
-            let data_tail = ELF_PROBE_DATA
-                .load(Ordering::SeqCst)
-                .saturating_add(PAGE_SIZE as u64);
-            if first_argument != data_tail || buffer != PAGE_SIZE as u64 || count != LINUX_PROT_READ
+            let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
+            let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
+            if relro == 0
+                || relro_size == 0
+                || relro_size > PAGE_SIZE as u64
+                || first_argument != relro
+                || !relro.is_multiple_of(PAGE_SIZE as u64)
+                || buffer != PAGE_SIZE as u64
+                || count != LINUX_PROT_READ
             {
                 return LINUX_EINVAL;
             }

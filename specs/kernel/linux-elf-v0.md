@@ -22,7 +22,9 @@ more than one page. This profile rounds the declaration out to its containing
 page when userspace seals it with `mprotect`. Up to six recognized headers may
 appear in any order. The parser
 normalizes load segments by executable, read-only, and writable role before
-planning. Unknown and duplicate metadata headers are rejected. Each load
+planning. The parser accepts images without RELRO, while the current executable
+mapping proof requires it so the memory transition has an authenticated target.
+Unknown and duplicate metadata headers are rejected. Each load
 segment must be readable, nonempty in the
 file, contained within the supplied image, aligned to a nonzero power of two
 with congruent file and virtual addresses, and mapped wholly inside the lower
@@ -62,7 +64,9 @@ start, accounts for the in-page prefix when bounding page count, and copies file
 bytes at the correct page offset while zeroing the prefix, BSS, and page tails.
 The runtime mapper owns a separate leaf table and payload frame for the third
 read-only load, installs it read-only/NX, activates the root, and executes the
-toolchain-linked image. Syscall return validation remains bounded to its mapped
+toolchain-linked image. It passes the normalized RELRO range into the execution
+contract, so the bounded `mprotect` path can seal only the declared page.
+Syscall return validation remains bounded to its mapped
 RX page while readable-code copy bounds begin at the exact non-page-base
 `0x400100` memory extent. The proof restores the kernel root and scrubs every
 owned frame after exit.
