@@ -10,6 +10,16 @@ clears the consumed slot. The local invariant test covers empty receive,
 per-direction capacity enforcement, FIFO order, wraparound, and rejection of
 receiving an endpoint's own outbound messages.
 
+The duplex endpoint stores the exact generation-tagged control and service
+domain IDs. Queue operations resolve the caller against those bindings rather
+than trusting a caller-selected direction. When a service generation retires,
+the kernel clears requests that were destined for it, rejects the stale domain,
+and leaves already-produced replies available to the control plane. A
+replacement generation receives nothing until the kernel explicitly binds its
+new ID. The local invariant covers stale access and empty replacement input;
+the ring-3 path preserves the original service's reply across retirement while
+requiring the replacement to block until a new control request arrives.
+
 The channel is object 3 in the signed boot authority manifest. Sending requires
 `WRITE`; receiving requires `READ`. The call gate resolves the supplied opaque
 handle through the sealed control-plane capability table before touching the
@@ -40,7 +50,7 @@ that an unrelated ready context remains unchanged.
 
 This revision transfers only an immediate word and has no capability transfer,
 cancellation request, timeout, persistent close state, or cleanup of queued
-words after domain failure. Peer-close currently wakes only receivers already
+replies after domain failure. Peer-close currently wakes only receivers already
 blocked at teardown; a later receive cannot yet observe the prior closure. It
 has one fixed control/service endpoint pair rather
 than allocatable endpoint objects. The global queue is safe only

@@ -236,7 +236,7 @@ pub(crate) fn verify_ring3_control_plane(
         if first_marker != TEST_PATTERN || second_marker != !TEST_PATTERN {
             return false;
         }
-        if !ipc::initialize_control_channel()
+        if !ipc::initialize_control_channel(domains[0], domains[1])
             || !scheduler::initialize_runtime(
                 domains,
                 [first_space.root, second_space.root],

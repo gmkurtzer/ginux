@@ -333,6 +333,11 @@ if ! grep -q '^ginux: directional IPC endpoints isolated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: generation-bound IPC endpoints verified' "$output_file"; then
+    echo "Boot test failed: IPC endpoint generations were not isolated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: blocking IPC direct wake completed' "$output_file"; then
     echo "Boot test failed: blocking IPC did not wake the waiting service." >&2
     exit 1

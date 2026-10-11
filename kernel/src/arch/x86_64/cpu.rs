@@ -584,7 +584,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
             let from_service = domain::is_service_domain(caller_domain);
             if domain::handle_permits(caller_domain, capability, 3, Rights::WRITE)
                 && (scheduler::wake_ipc_peer(caller_domain, 3, !from_service, message)
-                    || ipc::send(from_service, message))
+                    || ipc::send(caller_domain, message))
             {
                 0
             } else {
@@ -593,7 +593,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         }
         5 => {
             if domain::handle_permits(caller_domain, capability, 3, Rights::READ) {
-                ipc::receive(domain::is_service_domain(caller_domain)).unwrap_or(u64::MAX - 2)
+                ipc::receive(caller_domain).unwrap_or(u64::MAX - 2)
             } else {
                 u64::MAX - 2
             }
@@ -615,7 +615,7 @@ fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) 
     if !domain::handle_permits(domain_id, capability, 3, Rights::READ) {
         return u64::MAX - 2;
     }
-    if let Some(message) = ipc::receive(domain::is_service_domain(domain_id)) {
+    if let Some(message) = ipc::receive(domain_id) {
         return message;
     }
     let Some(frame) = (unsafe { frame.as_mut() }) else {
@@ -690,7 +690,9 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
     if matches!(action, RuntimeAction::Invalid) || !domain::detach_thread(caller_domain) {
         return u64::MAX;
     }
-    if service_exit && !domain::retire_service(caller_domain) {
+    if service_exit
+        && (!ipc::retire_service(caller_domain) || !domain::retire_service(caller_domain))
+    {
         return u64::MAX;
     }
     resume_action(action)
@@ -718,7 +720,9 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         return u64::MAX;
     }
     if service_fault
-        && (!domain::record_service_fault(fault_domain) || !domain::retire_service(fault_domain))
+        && (!domain::record_service_fault(fault_domain)
+            || !ipc::retire_service(fault_domain)
+            || !domain::retire_service(fault_domain))
     {
         return u64::MAX;
     }
@@ -732,7 +736,12 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         let Some(replacement_handle) = domain::service_boot_handle() else {
             return u64::MAX;
         };
+        if !ipc::bind_service(replacement_domain) {
+            let _ = domain::retire_service(replacement_domain);
+            return u64::MAX;
+        }
         if !scheduler::queue_service_restart(replacement_domain, replacement_handle) {
+            let _ = ipc::retire_service(replacement_domain);
             let _ = domain::retire_service(replacement_domain);
             return u64::MAX;
         }

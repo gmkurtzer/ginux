@@ -33,8 +33,11 @@ belonged to the original faulted generation. Event kind occupies the low eight
 bits and the generation-tagged domain ID occupies the next 48 bits.
 
 After the fault, the kernel creates one replacement domain generation with the
-same IPC-only delegation and queues a fresh context on the retained service
-address space. It rearms the APIC one-shot, returns to the client, and then
+same IPC-only delegation, explicitly rebinds the service side of the IPC
+endpoint to that generation, and queues a fresh context on the retained
+service address space. Requests left for the failed generation are cleared;
+its already-produced reply remains available to the control client. The kernel
+rearms the APIC one-shot, returns to the client, and then
 preempts that client to run the replacement. The replacement negotiates ABI
 v1 and blocks on an empty request direction. The client wakes it with a direct
 message, exhausts its call budget, and exits. The replacement then observes the
