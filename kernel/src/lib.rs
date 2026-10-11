@@ -620,6 +620,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux targeted descriptor duplication validated\r\n");
     serial_write("ginux: Linux console descriptor flags validated\r\n");
     serial_write("ginux: Linux minimum descriptor duplication validated\r\n");
+    serial_write("ginux: Linux close-on-exec descriptor state validated\r\n");
     serial_write("ginux: Linux saved credential queries validated\r\n");
     serial_write("ginux: Linux immutable resource limits validated\r\n");
     serial_write("ginux: Linux single-CPU topology queries validated\r\n");

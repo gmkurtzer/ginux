@@ -69,14 +69,17 @@ both slots. There is still no general allocation or inherited table.
 open source's endpoint type. Equal source and target descriptors return the
 target unchanged. A closed source or a descriptor outside the two-slot limit
 returns `-EBADF`.
-`rax = 72` (`__NR_fcntl`) supports `F_DUPFD` plus read-only `F_GETFD` and
-`F_GETFL` queries. `F_DUPFD` copies an open endpoint into the lowest available
-slot at or above its nonnegative minimum; a minimum outside the two-slot table
-returns `-EINVAL`, and exhaustion returns `-EMFILE`.
-No close-on-exec flag is currently set; `F_GETFL` reports `O_RDONLY` for the
-input endpoint and `O_WRONLY` for output or duplicated-output endpoints. Closed
-or unknown descriptors return `-EBADF`; other mutation and duplication
-commands return `-EINVAL`.
+`rax = 72` (`__NR_fcntl`) supports `F_DUPFD`, `F_DUPFD_CLOEXEC`, `F_GETFD`,
+`F_SETFD`, and `F_GETFL`. The duplication commands copy an open endpoint into
+the lowest available slot at or above their nonnegative minimum; a minimum
+outside the two-slot table returns `-EINVAL`, and exhaustion returns `-EMFILE`.
+`F_DUPFD_CLOEXEC` sets the new slot's `FD_CLOEXEC` bit, while `F_DUPFD`, `dup`,
+and a replacing `dup2` clear it. `F_SETFD` retains only `FD_CLOEXEC`; `F_GETFD`
+reports it. The current profile has no second `exec` operation yet, so the flag
+is process-local observable state rather than an exercised inheritance action.
+`F_GETFL` reports `O_RDONLY` for the input endpoint and `O_WRONLY` for output or
+duplicated-output endpoints. Closed or unknown descriptors return `-EBADF`;
+other mutation and duplication commands return `-EINVAL`.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 2,

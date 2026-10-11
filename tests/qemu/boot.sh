@@ -738,6 +738,11 @@ if ! grep -q '^ginux: Linux minimum descriptor duplication validated' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux close-on-exec descriptor state validated' "$output_file"; then
+    echo "Boot test failed: Linux close-on-exec descriptor state was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

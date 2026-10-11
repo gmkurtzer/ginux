@@ -854,6 +854,36 @@ ginux_linux_probe:
     test rax, rax
     jne failure
 
+    xor edi, edi
+    mov esi, 2
+    mov edx, 1
+    mov eax, 72
+    syscall
+    test rax, rax
+    jne failure
+
+    xor edi, edi
+    mov esi, 1
+    mov eax, 72
+    syscall
+    cmp rax, 1
+    jne failure
+
+    xor edi, edi
+    mov esi, 2
+    mov edx, 2
+    mov eax, 72
+    syscall
+    test rax, rax
+    jne failure
+
+    xor edi, edi
+    mov esi, 1
+    mov eax, 72
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 1
     xor esi, esi
     xor edx, edx
@@ -869,7 +899,35 @@ ginux_linux_probe:
     jne failure
 
     mov edi, 1
+    mov esi, 1030
+    xor edx, edx
+    mov eax, 72
+    syscall
+    test rax, rax
+    jne failure
+
+    xor edi, edi
+    mov esi, 1
+    mov eax, 72
+    syscall
+    cmp rax, 1
+    jne failure
+
+    xor edi, edi
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne failure
+
+    mov edi, 1
     mov eax, 32
+    syscall
+    test rax, rax
+    jne failure
+
+    xor edi, edi
+    mov esi, 1
+    mov eax, 72
     syscall
     test rax, rax
     jne failure

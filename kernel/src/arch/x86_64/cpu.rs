@@ -112,7 +112,10 @@ const LINUX_DESCRIPTOR_INPUT: u8 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
+const LINUX_F_SETFD: u64 = 2;
 const LINUX_F_GETFL: u64 = 3;
+const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
+const LINUX_FD_CLOEXEC: u8 = 1;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -205,6 +208,7 @@ static ELF_PROBE_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -787,12 +791,14 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         LINUX_DESCRIPTOR_INPUT | (LINUX_DESCRIPTOR_OUTPUT << 2),
         Ordering::SeqCst,
     );
+    ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
-    let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0;
+    let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0;
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
@@ -1442,16 +1448,17 @@ fn linux_console_close(descriptor: u64) -> u64 {
             .compare_exchange(current, current & !mask, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
+            ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
             return 0;
         }
     }
 }
 
 fn linux_console_dup(descriptor: u64) -> u64 {
-    linux_console_dup_at_least(descriptor, 0)
+    linux_console_dup_at_least(descriptor, 0, false)
 }
 
-fn linux_console_dup_at_least(descriptor: u64, minimum: u64) -> u64 {
+fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool) -> u64 {
     if minimum >= 2 {
         return LINUX_EINVAL;
     }
@@ -1478,6 +1485,12 @@ fn linux_console_dup_at_least(descriptor: u64, minimum: u64) -> u64 {
             )
             .is_ok()
         {
+            let flag = 1 << target;
+            if close_on_exec {
+                ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(flag, Ordering::SeqCst);
+            } else {
+                ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!flag, Ordering::SeqCst);
+            }
             return target;
         }
     }
@@ -1507,6 +1520,7 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             )
             .is_ok()
         {
+            ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << target), Ordering::SeqCst);
             return target;
         }
     }
@@ -1518,8 +1532,20 @@ fn linux_console_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
         return LINUX_EBADF;
     }
     match command {
-        LINUX_F_DUPFD => linux_console_dup_at_least(descriptor, argument),
-        LINUX_F_GETFD => 0,
+        LINUX_F_DUPFD => linux_console_dup_at_least(descriptor, argument, false),
+        LINUX_F_DUPFD_CLOEXEC => linux_console_dup_at_least(descriptor, argument, true),
+        LINUX_F_GETFD => {
+            u64::from((ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst) >> descriptor) & 1)
+        }
+        LINUX_F_SETFD => {
+            let flag = 1 << descriptor;
+            if argument & u64::from(LINUX_FD_CLOEXEC) != 0 {
+                ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(flag, Ordering::SeqCst);
+            } else {
+                ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!flag, Ordering::SeqCst);
+            }
+            0
+        }
         LINUX_F_GETFL if state == LINUX_DESCRIPTOR_INPUT => 0,
         LINUX_F_GETFL if state == LINUX_DESCRIPTOR_OUTPUT => 1,
         _ => LINUX_EINVAL,
