@@ -333,6 +333,11 @@ if ! grep -q '^ginux: service fault event delivered to control plane' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: service fault event generation matched' "$output_file"; then
+    echo "Boot test failed: service fault event generation did not match." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: service domain generation reuse verified' "$output_file"; then
     echo "Boot test failed: service-domain slot reuse accepted stale identity." >&2
     exit 1

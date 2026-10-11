@@ -23,7 +23,8 @@ event naming that service generation. The control plane can consume event kind
 1 only with manage authority on host-control object 1; presenting its console
 capability is rejected without consuming the event. The QEMU payload requires
 delivery before it exits, and the kernel verifies that the delivered event
-belonged to the original faulted generation.
+belonged to the original faulted generation. Event kind occupies the low eight
+bits and the generation-tagged domain ID occupies the next 48 bits.
 
 After the fault, the kernel creates one replacement domain generation with the
 same IPC-only delegation and queues a fresh context on the retained service

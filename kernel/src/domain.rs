@@ -416,7 +416,7 @@ pub(crate) fn take_service_fault() -> Option<u64> {
     let manager = global_manager_mut()?;
     let id = manager.pending_service_fault.take()?;
     manager.last_delivered_service_fault = Some(id);
-    Some(1)
+    Some((encode_id(id) << 8) | 1)
 }
 
 pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {

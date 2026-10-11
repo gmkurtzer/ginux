@@ -3,14 +3,14 @@
 b801000000
 cd80
 3dfeffffff
-0f8507010000
+0f8512010000
 
 # mov rdi, rbx; allowed host read with host-control handle
 4889df
 b801000000
 cd80
 3d58470000
-0f85f2000000
+0f85fd000000
 
 # reject IPC send through a capability for the wrong object
 4889cf
@@ -18,7 +18,7 @@ cd80
 b804000000
 cd80
 3dfdffffff
-0f85da000000
+0f85e5000000
 
 # reject console write through the host-control capability
 4889df
@@ -27,7 +27,7 @@ ba08000000
 b806000000
 cd80
 3dfdffffff
-0f85b6000000
+0f85c1000000
 
 # write "USER_OK\n" through the console capability
 4889cf
@@ -36,17 +36,17 @@ ba08000000
 b806000000
 cd80
 83f808
-0f8594000000
+0f859f000000
 
 # negotiate call-gate ABI v1 and its eight bootstrap features
 b800000000
 cd80
 3dff000100
-0f8582000000
+0f858d000000
 
 # branch context 2 into the isolated service role
 4983f902
-747e
+0f8485000000
 
 # enqueue this context's identity through the IPC capability
 4c89c7
@@ -54,7 +54,7 @@ cd80
 b804000000
 cd80
 85c0
-756b
+7572
 
 # wait for the kernel's calibrated one-shot to preempt this context
 b900000001
@@ -67,20 +67,23 @@ e2fc
 b805000000
 cd80
 4883f802
-7550
+7557
 
 # reject fault-event receipt through the console capability
 4889cf
 b807000000
 cd80
 3dfdffffff
-0f853b000000
+0f8542000000
 
 # consume the service-fault event through host-control manage authority
 4889df
 b807000000
 cd80
-4883f801
+# require event kind 1 and the original service-domain generation
+49c1e208
+4983ca01
+4c39d0
 752b
 
 # wait for the rearmed one-shot to dispatch the replacement service

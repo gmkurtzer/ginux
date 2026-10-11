@@ -40,9 +40,11 @@ Operation 6 writes one through eight packed bytes from `RSI`, with the byte
 count in `RDX`, and requires write authority on console object 2. It returns
 the byte count or `UINT64_MAX - 2` on denial or invalid input.
 Operation 7 consumes the pending service-fault event and requires manage
-authority on host-control object 1. It returns event kind 1 for a contained
-service fault, or `UINT64_MAX - 2` on denial or when no event is pending. This
-bootstrap revision holds at most one such event.
+authority on host-control object 1. On a contained service fault it returns a
+packed word with event kind 1 in bits 0-7 and the 48-bit generation-tagged
+faulted domain ID in bits 8-55; bits 56-63 are zero. It returns
+`UINT64_MAX - 2` on denial or when no event is pending. This bootstrap revision
+holds at most one such event.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes
@@ -56,12 +58,14 @@ Unknown operations terminate the proof program without granting an operation.
 
 At initial entry, `RBX` contains the host-control handle, `RCX` contains the
 console handle, `R8` contains the IPC handle, and `R9` identifies the proof
-context. The QEMU payload first presents the console write-only handle
+context. For the control context, `R10` contains the initial supervised service
+domain ID. The QEMU payload first presents the console write-only handle
 and requires denial. It then presents the manifest-derived host-control handle
 and requires success. The kernel accepts the boot only after observing denial,
 authorization, rejection of IPC, console, and event calls using the wrong
 object, one authorized console record, a FIFO message, receipt of its peer's
-contained-fault event, resumption, and explicit survivor exit.
+contained-fault event with the expected domain generation, resumption, and
+explicit survivor exit.
 Both contexts also query operation 0 and require the exact version-1 feature
 word before continuing.
 

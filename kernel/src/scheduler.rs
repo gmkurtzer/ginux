@@ -504,7 +504,7 @@ pub(crate) fn initialize_runtime(
         return false;
     }
     let mut scheduler = Scheduler::new();
-    let first = initial_context(
+    let mut first = initial_context(
         first_address_space_root,
         first_entry,
         first_stack,
@@ -513,6 +513,7 @@ pub(crate) fn initialize_runtime(
         first_handles[2],
         1,
     );
+    first.r10 = second_domain;
     let second = initial_context(
         second_address_space_root,
         second_entry,

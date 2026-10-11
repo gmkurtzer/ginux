@@ -283,6 +283,7 @@ ginux_exception_entries:
     .text
     .global ginux_user_enter
 ginux_user_enter:
+    mov r10, [rsp + 8]
     push rbx
     push rbp
     push r12
@@ -372,6 +373,7 @@ extern "sysv64" {
         console_handle: u64,
         ipc_handle: u64,
         identity: u64,
+        service_domain: u64,
     );
 }
 
@@ -391,6 +393,7 @@ pub(crate) fn verify_user_syscall(
     host_handle: u64,
     console_handle: u64,
     ipc_handle: u64,
+    service_domain: u64,
 ) -> bool {
     if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize) {
         return false;
@@ -399,7 +402,17 @@ pub(crate) fn verify_user_syscall(
     // SAFETY: The caller supplies mapped ring-3 code and stack addresses. The
     // syscall gate abandons the user frame and returns on the saved kernel
     // stack, with interrupts disabled throughout.
-    unsafe { ginux_user_enter(entry, stack, host_handle, console_handle, ipc_handle, 1) };
+    unsafe {
+        ginux_user_enter(
+            entry,
+            stack,
+            host_handle,
+            console_handle,
+            ipc_handle,
+            1,
+            service_domain,
+        )
+    };
     SYSCALL_STATE.load(Ordering::SeqCst) == 7
 }
 

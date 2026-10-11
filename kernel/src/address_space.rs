@@ -16,7 +16,7 @@ const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const USER_TEST_ADDRESS: usize = 1usize << 39;
-const EXPECTED_FAULT_OFFSET: usize = 322;
+const EXPECTED_FAULT_OFFSET: usize = 333;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 const EXTENDED_CPUID_MAX: u32 = 0x8000_0000;
@@ -265,6 +265,7 @@ pub(crate) fn verify_ring3_control_plane(
             handles[0][0],
             handles[0][1],
             handles[0][2],
+            domains[1],
         );
         activate(kernel_root);
         let preemption_complete = timer::finish_scheduler_preemption(local_apic);

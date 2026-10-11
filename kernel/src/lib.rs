@@ -458,6 +458,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: service domain authority restricted to IPC");
     serial_write("\r\nginux: faulted service domain authority retired");
     serial_write("\r\nginux: service fault event delivered to control plane");
+    serial_write("\r\nginux: service fault event generation matched");
     serial_write("\r\nginux: service domain generation reuse verified");
     serial_write("\r\nginux: replacement service context executed");
     serial_write("\r\nginux: per-domain syscall budgets enforced");

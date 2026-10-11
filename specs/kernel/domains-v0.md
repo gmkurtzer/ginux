@@ -35,7 +35,10 @@ resolve authority. The boot proof runs the replacement through ABI negotiation
 and clean exit, then retires it again. General restart policy and
 outstanding-operation cleanup remain undefined. The fault path also publishes a
 single capability-gated service-fault event to the control plane before reusing
-the service slot.
+the service slot. The event carries the retired generation-tagged domain ID,
+not merely the reusable slot. The control proof compares it with the child ID
+supplied at initial entry, so the replacement generation cannot be mistaken for
+the faulted service.
 
 Each domain also owns a fixed bootstrap call budget. Charging resolves the
 current generation-tagged domain before dispatch, so threads cannot gain calls
