@@ -613,6 +613,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: root lookups resolved only owned image bytes\r\n");
     serial_write("ginux: invalid root lookup paths denied\r\n");
     serial_write("ginux: indexed root frame scrubbed and released\r\n");
+    if !initramfs::publish_read_only_root(root_image) {
+        kernel_fail("ginux: persistent read-only root publication failed\r\n");
+    }
+    serial_write("ginux: measured root published in kernel-owned memory\r\n");
     if !linux_elf::verify_parser() {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
     }
@@ -892,12 +896,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: generation-scoped IPC diagnostics verified\r\n");
     serial_write("ginux: monotonic sequence exhaustion contained\r\n");
-    let (Some(host_handle), Some(console_handle), Some(ipc_handle), Some(service_ipc_handle)) = (
+    let (
+        Some(host_handle),
+        Some(console_handle),
+        Some(ipc_handle),
+        Some(root_handle),
+        Some(service_ipc_handle),
+    ) = (
         domain::control_plane_boot_handle(0),
         domain::control_plane_boot_handle(1),
         domain::control_plane_boot_handle(2),
+        domain::control_plane_boot_handle(4),
         domain::service_boot_handle(),
-    ) else {
+    )
+    else {
         kernel_fail("\r\nginux: control-plane bootstrap handles unavailable\r\n");
     };
     let ipc_rights = capability::Rights::READ.union(capability::Rights::WRITE);
@@ -911,6 +923,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             capability::Rights::READ,
         )
         || domain::handle_permits(service_domain, ipc_handle, 3, capability::Rights::READ)
+        || !domain::handle_permits(
+            control_plane,
+            root_handle,
+            control_abi::ROOT_OBJECT,
+            capability::Rights::READ,
+        )
+        || domain::handle_permits(
+            control_plane,
+            root_handle,
+            control_abi::ROOT_OBJECT,
+            capability::Rights::WRITE,
+        )
     {
         kernel_fail("\r\nginux: cross-domain capability isolation failed\r\n");
     }
@@ -919,16 +943,24 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         control_plane_image.entries,
         [control_plane, service_domain],
         [
-            [host_handle, console_handle, ipc_handle],
-            [0, 0, service_ipc_handle],
+            [host_handle, console_handle, ipc_handle, root_handle],
+            [0, 0, service_ipc_handle, 0],
         ],
         &local_apic,
         &apic_timer,
     ) {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
+    if !initramfs::published_root_is_live() {
+        kernel_fail("\r\nginux: published root ownership was lost\r\n");
+    }
+    serial_write("\r\nginux: read-only root capability enforced");
+    serial_write("\r\nginux: ring-3 root metadata lookup completed");
+    serial_write("\r\nginux: ring-3 root file read completed");
+    serial_write("\r\nginux: invalid root userspace requests denied");
+    serial_write("\r\nginux: published root remains kernel-owned");
     let Some(expected_fault_instruction) =
-        address_space::expected_service_fault_instruction(control_plane_image.entries[0])
+        address_space::expected_service_fault_instruction(control_plane_image.entries[1])
     else {
         kernel_fail("\r\nginux: service fault instruction overflowed\r\n");
     };
@@ -1067,7 +1099,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: stop-only auxiliary fault executed and contained");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
-    serial_write("\r\nginux: control call ABI v2 negotiated");
+    serial_write("\r\nginux: control call ABI v3 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
     serial_write("\r\nginux: minimal user interrupt surface enforced");
     serial_write("\r\nginux: bounded userspace read enforced");

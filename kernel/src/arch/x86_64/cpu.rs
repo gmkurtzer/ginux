@@ -10,7 +10,7 @@ use super::{paging, timer};
 use crate::{
     address_space,
     capability::Rights,
-    control_abi, domain, ipc, memory, network, scheduler,
+    control_abi, domain, initramfs, ipc, memory, network, scheduler,
     scheduler::{RuntimeAction, UserFaultFrame, UserTrapFrame},
     serial_write, serial_write_u64,
 };
@@ -720,6 +720,7 @@ ginux_user_enter:
     push r14
     push r15
     mov [rip + {user_return_stack}], rsp
+    mov r14, [rsp + 72]
     mov rbx, rdx
     push {user_data}
     push rsi
@@ -864,6 +865,7 @@ extern "sysv64" {
         identity: u64,
         service_domain: u64,
         service_identity: u64,
+        root_handle: u64,
     );
 }
 
@@ -1003,6 +1005,7 @@ pub(crate) fn verify_user_syscall(
     host_handle: u64,
     console_handle: u64,
     ipc_handle: u64,
+    root_handle: u64,
     service_domain: u64,
 ) -> bool {
     if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
@@ -1030,6 +1033,7 @@ pub(crate) fn verify_user_syscall(
             1,
             service_domain,
             service_identity,
+            root_handle,
         )
     };
     SYSCALL_STATE.load(Ordering::SeqCst) == 31
@@ -1055,6 +1059,7 @@ pub(crate) fn execute_auxiliary(
             4,
             domain_id,
             service_identity,
+            0,
         )
     };
 }
@@ -2309,7 +2314,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             && linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
             && !linux_writable_user_range_contains(execution.sibling_tls as u64, execution.tls_size)
     };
-    unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
+    unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let linux_thread_table_released = finish_linux_thread_table();
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -6529,8 +6534,129 @@ fn dispatch_charged_call(
         14 => write_lifecycle_identity_descriptor(caller_domain, capability, frame),
         15 => create_auxiliary_service(caller_domain, capability, frame),
         16 => network_device_call(caller_domain, capability, frame),
+        17 => root_device_call(caller_domain, capability, frame),
         _ => u64::MAX,
     }
+}
+
+fn root_device_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(
+        caller_domain,
+        capability,
+        control_abi::ROOT_OBJECT,
+        Rights::READ,
+    ) || !initramfs::published_root_is_live()
+    {
+        return u64::MAX - 2;
+    }
+    let command = frame.first_argument();
+    let argument = frame.second_argument();
+    match command {
+        control_abi::ROOT_PROBE if argument == 0 => control_abi::ROOT_DESCRIPTOR_WORD,
+        control_abi::ROOT_LOOKUP => root_lookup(argument),
+        control_abi::ROOT_READ => root_read(argument),
+        _ => u64::MAX - 2,
+    }
+}
+
+fn root_lookup(address: u64) -> u64 {
+    let mut request = [0_u8; control_abi::ROOT_LOOKUP_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(address, &mut request)
+        || !root_request_header(&request, control_abi::ROOT_LOOKUP_REQUEST_SIZE)
+    {
+        return u64::MAX - 2;
+    }
+    let path_address = root_request_word(&request, 8);
+    let path_size = root_request_word(&request, 16);
+    let output_address = root_request_word(&request, 24);
+    let output_size = root_request_word(&request, 32);
+    let Some(path) = copy_root_path(path_address, path_size) else {
+        return u64::MAX - 2;
+    };
+    if output_size != control_abi::ROOT_LOOKUP_DESCRIPTOR_SIZE as u64 {
+        return u64::MAX - 2;
+    }
+    let Some((mode, data_size)) = initramfs::published_lookup(path.as_slice()) else {
+        return u64::MAX - 2;
+    };
+    let Some(descriptor) = control_abi::root_lookup_descriptor(mode, data_size) else {
+        return u64::MAX - 2;
+    };
+    if address_space::copy_to_current_user(output_address, &descriptor) {
+        descriptor.len() as u64
+    } else {
+        u64::MAX - 2
+    }
+}
+
+fn root_read(address: u64) -> u64 {
+    let mut request = [0_u8; control_abi::ROOT_READ_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(address, &mut request)
+        || !root_request_header(&request, control_abi::ROOT_READ_REQUEST_SIZE)
+    {
+        return u64::MAX - 2;
+    }
+    let path_address = root_request_word(&request, 8);
+    let path_size = root_request_word(&request, 16);
+    let offset = root_request_word(&request, 24);
+    let output_address = root_request_word(&request, 32);
+    let output_size = root_request_word(&request, 40);
+    let (Some(path), Ok(offset), Ok(output_size)) = (
+        copy_root_path(path_address, path_size),
+        usize::try_from(offset),
+        usize::try_from(output_size),
+    ) else {
+        return u64::MAX - 2;
+    };
+    if !(1..=control_abi::ROOT_MAX_READ_SIZE).contains(&output_size) {
+        return u64::MAX - 2;
+    }
+    let mut output = [0_u8; control_abi::ROOT_MAX_READ_SIZE];
+    let Some(size) = initramfs::published_read(path.as_slice(), offset, &mut output[..output_size])
+    else {
+        return u64::MAX - 2;
+    };
+    if size == 0 || address_space::copy_to_current_user(output_address, &output[..size]) {
+        size as u64
+    } else {
+        u64::MAX - 2
+    }
+}
+
+struct RootPath {
+    bytes: [u8; control_abi::ROOT_MAX_PATH_SIZE],
+    size: usize,
+}
+
+impl RootPath {
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.size]
+    }
+}
+
+fn copy_root_path(address: u64, size: u64) -> Option<RootPath> {
+    let size = usize::try_from(size).ok()?;
+    if !(1..=control_abi::ROOT_MAX_PATH_SIZE).contains(&size) {
+        return None;
+    }
+    let mut path = RootPath {
+        bytes: [0; control_abi::ROOT_MAX_PATH_SIZE],
+        size,
+    };
+    address_space::copy_from_current_user(address, &mut path.bytes[..size]).then_some(path)
+}
+
+fn root_request_header(request: &[u8], expected_size: usize) -> bool {
+    u32::from_le_bytes(request[0..4].try_into().unwrap()) as usize == expected_size
+        && u16::from_le_bytes(request[4..6].try_into().unwrap()) == control_abi::VERSION
+        && request[6..8] == [0, 0]
+}
+
+fn root_request_word(request: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(request[offset..offset + 8].try_into().unwrap())
 }
 
 fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {

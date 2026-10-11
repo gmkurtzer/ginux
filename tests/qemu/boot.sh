@@ -578,6 +578,36 @@ if ! grep -q '^ginux: indexed root frame scrubbed and released' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: measured root published in kernel-owned memory' "$output_file"; then
+    echo "Boot test failed: the measured root was not published." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: read-only root capability enforced' "$output_file"; then
+    echo "Boot test failed: the root capability boundary was not enforced." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: ring-3 root metadata lookup completed' "$output_file"; then
+    echo "Boot test failed: ring-3 root lookup did not complete." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: ring-3 root file read completed' "$output_file"; then
+    echo "Boot test failed: ring-3 root read did not complete." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: invalid root userspace requests denied' "$output_file"; then
+    echo "Boot test failed: invalid root requests were accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: published root remains kernel-owned' "$output_file"; then
+    echo "Boot test failed: published root ownership was lost." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: non-executable Linux GNU stack enforced' "$output_file"; then
     echo "Boot test failed: Linux GNU stack policy was not enforced." >&2
     exit 1
@@ -1988,7 +2018,7 @@ if ! grep -q '^ginux: stop-only auxiliary fault executed and contained' "$output
     exit 1
 fi
 
-if ! grep -q '^ginux: control call ABI v2 negotiated' "$output_file"; then
+if ! grep -q '^ginux: control call ABI v3 negotiated' "$output_file"; then
     echo "Boot test failed: control call ABI negotiation failed." >&2
     exit 1
 fi

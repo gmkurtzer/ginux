@@ -1,4 +1,4 @@
-include!("../../specs/abi/control-v2.rs");
+include!("../../specs/abi/control-v3.rs");
 
 pub(crate) const DISCOVERY_WORD: u64 = ((VERSION as u64) << 16) | FEATURES as u64;
 
@@ -113,4 +113,16 @@ pub(crate) fn ipc_delivery_descriptor(
     bytes[16..24].copy_from_slice(&sequence.to_le_bytes());
     bytes[24..32].copy_from_slice(&value.to_le_bytes());
     bytes
+}
+
+pub(crate) fn root_lookup_descriptor(
+    mode: u32,
+    data_size: usize,
+) -> Option<[u8; ROOT_LOOKUP_DESCRIPTOR_SIZE]> {
+    let mut bytes = [0_u8; ROOT_LOOKUP_DESCRIPTOR_SIZE];
+    bytes[0..4].copy_from_slice(&(ROOT_LOOKUP_DESCRIPTOR_SIZE as u32).to_le_bytes());
+    bytes[4..6].copy_from_slice(&VERSION.to_le_bytes());
+    bytes[8..12].copy_from_slice(&mode.to_le_bytes());
+    bytes[16..24].copy_from_slice(&u64::try_from(data_size).ok()?.to_le_bytes());
+    Some(bytes)
 }

@@ -1,4 +1,6 @@
 use crate::memory;
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAGIC: &[u8; 6] = b"070701";
 const HEADER_SIZE: usize = 110;
@@ -14,6 +16,9 @@ const TYPE_MASK: u32 = 0o170000;
 const DIRECTORY: u32 = 0o040000;
 const REGULAR: u32 = 0o100000;
 const SYMLINK: u32 = 0o120000;
+
+static ROOT_PUBLISHED: AtomicBool = AtomicBool::new(false);
+static mut PUBLISHED_ROOT: MaybeUninit<ReadOnlyRoot> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy)]
 pub(crate) struct Entry<'a> {
@@ -498,6 +503,60 @@ impl ReadOnlyRoot {
     fn release(self) -> bool {
         self.image.release()
     }
+}
+
+fn published_root() -> Option<&'static ReadOnlyRoot> {
+    if !ROOT_PUBLISHED.load(Ordering::Acquire) {
+        return None;
+    }
+    // SAFETY: publication writes the root exactly once before the release
+    // store. Bootstrap is single-core and never mutates or releases it.
+    Some(unsafe { &*core::ptr::addr_of!(PUBLISHED_ROOT).cast::<ReadOnlyRoot>() })
+}
+
+pub(crate) fn publish_read_only_root(source: &[u8]) -> bool {
+    if ROOT_PUBLISHED.load(Ordering::Acquire) {
+        return false;
+    }
+    let Some(image) = OwnedRoot::materialize(source) else {
+        return false;
+    };
+    let Some(root) = ReadOnlyRoot::build(image) else {
+        return false;
+    };
+    if root.node_count == 0 || !root.image.tail_is_zero() {
+        let _ = root.release();
+        return false;
+    }
+    // SAFETY: the publication flag is still false and bootstrap is single-core.
+    unsafe {
+        core::ptr::addr_of_mut!(PUBLISHED_ROOT).write(MaybeUninit::new(root));
+    }
+    ROOT_PUBLISHED.store(true, Ordering::Release);
+    true
+}
+
+pub(crate) fn published_root_is_live() -> bool {
+    published_root().is_some_and(|root| {
+        root.node_count != 0
+            && root.image.tail_is_zero()
+            && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root.image.frame])
+    })
+}
+
+pub(crate) fn published_lookup(name: &[u8]) -> Option<(u32, usize)> {
+    let entry = published_root()?.lookup(name)?;
+    Some((entry.mode, entry.data.len()))
+}
+
+pub(crate) fn published_read(name: &[u8], offset: usize, output: &mut [u8]) -> Option<usize> {
+    let entry = published_root()?.lookup(name)?;
+    let available = entry.data.get(offset..)?;
+    let size = output.len().min(available.len());
+    output
+        .get_mut(..size)?
+        .copy_from_slice(available.get(..size)?);
+    Some(size)
 }
 
 pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {

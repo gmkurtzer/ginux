@@ -583,7 +583,7 @@ pub(crate) fn initialize_runtime(
     address_space_roots: [u64; 2],
     entries: [usize; 2],
     stacks: [usize; 2],
-    handles: [[u64; 3]; 2],
+    handles: [[u64; 4]; 2],
     expected_fault_instruction: usize,
     service_restart_entry: usize,
 ) -> bool {
@@ -612,6 +612,7 @@ pub(crate) fn initialize_runtime(
     );
     first.r10 = second_domain;
     first.r11 = service_identity;
+    first.r14 = first_handles[3];
     let second = initial_context(
         second_address_space_root,
         second_entry,
@@ -621,6 +622,10 @@ pub(crate) fn initialize_runtime(
         second_handles[2],
         2,
     );
+    let second = UserContext {
+        r14: second_handles[3],
+        ..second
+    };
     let service_restart_context = UserContext {
         rip: service_restart_entry as u64,
         r9: 3,

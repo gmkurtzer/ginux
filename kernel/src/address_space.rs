@@ -17,7 +17,8 @@ const USER: u64 = 1 << 2;
 const LARGE_PAGE: u64 = 1 << 7;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const USER_TEST_ADDRESS: usize = 1usize << 39;
-const EXPECTED_FAULT_OFFSET: usize = 515;
+const EXPECTED_SERVICE_FAULT_OFFSET: usize = 197;
+const ROOT_HANDLE_STACK_OFFSET: usize = PAGE_SIZE - 256;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
@@ -1784,10 +1785,10 @@ struct RegisteredAuxiliaryAddressSpace {
     space: WxAddressSpace,
 }
 
-pub(crate) fn expected_service_fault_instruction(control_entry_offset: usize) -> Option<u64> {
+pub(crate) fn expected_service_fault_instruction(service_entry_offset: usize) -> Option<u64> {
     USER_TEST_ADDRESS
-        .checked_add(control_entry_offset)?
-        .checked_add(EXPECTED_FAULT_OFFSET)
+        .checked_add(service_entry_offset)?
+        .checked_add(EXPECTED_SERVICE_FAULT_OFFSET)
         .and_then(|address| u64::try_from(address).ok())
 }
 
@@ -2567,7 +2568,7 @@ pub(crate) fn verify_ring3_control_plane(
     program: &[u8],
     entry_offsets: [usize; 3],
     domains: [u64; 2],
-    handles: [[u64; 3]; 2],
+    handles: [[u64; 4]; 2],
     local_apic: &LocalApic,
     apic_timer: &LocalApicCalibration,
 ) -> bool {
@@ -2595,7 +2596,7 @@ pub(crate) fn verify_ring3_control_plane(
         return false;
     }
     let [control_entry_offset, service_entry_offset, service_restart_offset] = entry_offsets;
-    let Some(expected_fault_instruction) = expected_service_fault_instruction(control_entry_offset)
+    let Some(expected_fault_instruction) = expected_service_fault_instruction(service_entry_offset)
     else {
         return false;
     };
@@ -2622,6 +2623,11 @@ pub(crate) fn verify_ring3_control_plane(
             .first_stack_frame
             .cast::<u64>()
             .write_volatile(!TEST_PATTERN);
+        first_space
+            .first_stack_frame
+            .add(ROOT_HANDLE_STACK_OFFSET)
+            .cast::<u64>()
+            .write_volatile(handles[0][3]);
         activate(first_space.root);
         let first_marker = cpu::with_supervisor_user_access(|| {
             ((USER_TEST_ADDRESS + 2 * PAGE_SIZE) as *const u64).read_volatile()
@@ -2639,7 +2645,13 @@ pub(crate) fn verify_ring3_control_plane(
             .first_stack_frame
             .cast::<u64>()
             .write_volatile(0);
-        if first_marker != TEST_PATTERN || second_marker != !TEST_PATTERN {
+        let root_handle_seeded = first_space
+            .first_stack_frame
+            .add(ROOT_HANDLE_STACK_OFFSET)
+            .cast::<u64>()
+            .read_volatile()
+            == handles[0][3];
+        if first_marker != TEST_PATTERN || second_marker != !TEST_PATTERN || !root_handle_seeded {
             return false;
         }
         if !ipc::initialize_control_channel(domains[0], domains[1])
@@ -2671,6 +2683,7 @@ pub(crate) fn verify_ring3_control_plane(
             handles[0][0],
             handles[0][1],
             handles[0][2],
+            handles[0][3],
             domains[1],
         );
         activate(kernel_root);

@@ -10,7 +10,7 @@ The measured ring-3 control-plane bundle invokes interrupt vector `0x80` with:
 - `RAX` on return: result value.
 
 Operation 0 requires no capability and returns a discovery word. Bits 16-31
-contain ABI version 2 and bits 0-15 contain its feature bitmap:
+contain ABI version 3 and bits 0-15 contain its feature bitmap:
 
 | Bit | Feature |
 |---:|---|
@@ -34,10 +34,10 @@ contain ABI version 2 and bits 0-15 contain its feature bitmap:
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
 be silently changed within a version; incompatible changes require a new
-version and an overlap period when practical. Version 2 preserves operations
-0 through 15 and adds the mandatory network-device probe at operation 16. The
-pre-release bootstrap switches atomically to v2 rather than carrying a v1
-adapter; `control-v1.rs` remains frozen as drift evidence. The scalar discovery word and
+version and an overlap period when practical. Version 3 preserves operations
+0 through 16 and adds the mandatory read-only root object at operation 17. The
+pre-release bootstrap switches atomically to v3 rather than carrying adapters;
+`control-v1.rs` and `control-v2.rs` remain frozen as drift evidence. The scalar discovery word and
 structured descriptor are encoded from the same kernel constants so their
 version, feature bitmap, and bounded-console limit cannot drift independently.
 Those constants also drive symbolic expansion in the signed ring-3 proof
@@ -58,13 +58,13 @@ operation 5 receives one word and requires read authority. The kernel selects
 the request or reply direction from the caller's domain role, so an endpoint
 cannot receive its own outbound words. Queued words retain an internal exact
 sender-generation tag and a per-direction monotonic sequence number that are
-validated at dequeue, but operation 5 returns only the scalar value in ABI v2.
+validated at dequeue, but operation 5 returns only the scalar value in ABI v2/v3.
 Failed enqueues do not consume sequence numbers, while intentional retirement
 cleanup can create valid gaps. IPC failure returns `UINT64_MAX - 2`.
 After queued replies are drained, operation 5 returns `UINT64_MAX - 4` once
 for each generation-tagged service closure retained by the endpoint. Closure
 records have a separate internal monotonic sequence that operation 5 does not
-expose in ABI v2.
+expose in ABI v2/v3.
 Operation 6 writes one through eight packed bytes from `RSI`, with the byte
 count in `RDX`, and requires write authority on console object 2. It returns
 the byte count or `UINT64_MAX - 2` on denial or invalid input.
@@ -79,7 +79,7 @@ queue retains one sticky overflow notification. After the four concrete events
 are consumed, operation 7 returns event kind 2, the first dropped domain in
 bits 8-55, and a saturating dropped-record count in bits 56-63. Consuming that
 notification clears the overflow state. Concrete and summarized events carry
-an internal monotonic sequence for replay detection, but the packed ABI v2
+an internal monotonic sequence for replay detection, but the packed ABI v2/v3
 result does not expose it.
 For a concrete service fault, the kernel retains vector, error code, fault
 address, and instruction address with the consumed record for supervision
@@ -269,7 +269,7 @@ Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
 
-Operation 16 is the v2 network-device call. It requires `READ` authority on
+Operation 16 is the network-device call introduced by v2 and retained by v3. It requires `READ` authority on
 network-device object 4. `RSI` is the command and `RDX` its argument. Command 0
 requires argument zero and returns the fixed discovery word
 `0x0000000105dc0009`: descriptor version 9 in bits 0-15, MTU 1500 in bits
@@ -322,6 +322,28 @@ Unknown commands, invalid arguments, and
 denial return `UINT64_MAX - 2`. This is a
 device-authorization skeleton only; it exposes no packets, general route table,
 DMA, interrupts, or hardware-backed configuration.
+
+Operation 17 is the v3 read-only root call and requires `READ` authority on
+root object 5. `RSI` selects the command and `RDX` supplies its argument.
+Command 0 requires argument zero and returns `0x0000004000100001`: profile
+version 1 in bits 0-15, the 16-node index limit in bits 16-31, and the 64-byte
+read limit in bits 32-47.
+
+Command 1 copies a 40-byte little-endian lookup request from `RDX`. It contains
+`u32` size, `u16` ABI version, reserved-zero `u16`, then `u64` values for path
+address, path length, output address, and output size. Paths contain 1 through
+255 bytes and use the normalized initramfs path rules. Output size must be 24.
+An exact match copies a descriptor containing `u32` size, `u16` ABI version,
+reserved-zero `u16`, `u32` mode, reserved-zero `u32`, and `u64` data size.
+
+Command 2 copies a 48-byte request with the same header, path address, and path
+length, followed by `u64` offset, output address, and requested size. Requested
+size must be 1 through 64. A valid request copies at most the requested bytes
+and stops at end of file; an offset exactly at end of file returns zero without
+touching the output. Kernel staging precedes every copy-out. Unknown commands,
+malformed requests, missing paths, invalid offsets or user ranges, and authority
+denial return `UINT64_MAX - 2`. No operation grants write, create, remove,
+rename, mount, or enumeration authority.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler
@@ -345,7 +367,10 @@ Unknown operations terminate the proof program without granting an operation.
 At initial entry, `RBX` contains the host-control handle, `RCX` contains the
 console handle, `R8` contains the IPC handle, and `R9` identifies the proof
 context. For the control context, `R10` contains the initial supervised service
-domain ID and `R11` contains its logical service ID. The QEMU payload first writes `BUFFER!\n` from its read-only
+domain ID, `R11` contains its logical service ID, and `R14` initially contains
+the root handle. The bootstrap stack also retains that same opaque handle at
+`0x80002f00`; changing it cannot create authority because every call resolves
+the supplied generation-tagged handle in the caller's sealed table. The QEMU payload first writes `BUFFER!\n` from its read-only
 executable mapping through operation 9, then requires the same call to reject
 an unmapped null range without output. It also fetches and validates the
 structured ABI descriptor. It then presents the console write-only
@@ -355,7 +380,7 @@ authorization, rejection of IPC, console, and event calls using the wrong
 object, one authorized console record, a FIFO message, receipt of its peer's
 contained-fault event with the expected domain generation, resumption, and
 explicit survivor exit.
-Both contexts also query operation 0 and require the exact version-1 feature
+Both contexts also query operation 0 and require the exact version-3 discovery
 word before continuing.
 
 Handles encode a private table slot and generation and are meaningful only in
