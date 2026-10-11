@@ -624,6 +624,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded Linux static TLS layout plan validated\r\n");
     serial_write("ginux: reusable Linux TLS page materialization validated\r\n");
+    if !arch::x86_64::cpu::verify_linux_tls_context_contract() {
+        kernel_fail("ginux: bounded Linux TLS execution context invalid\r\n");
+    }
+    serial_write("ginux: bounded Linux TLS execution context validated\r\n");
     if !linux_elf::verify_tls_template_metadata() {
         kernel_fail("ginux: bounded Linux TLS template metadata invalid\r\n");
     }
@@ -647,6 +651,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux TLS syscall copies validated\r\n");
     serial_write("ginux: independent Linux sibling TLS materialized\r\n");
     serial_write("ginux: non-current Linux TLS syscall access denied\r\n");
+    serial_write("ginux: Linux TLS execution context switched and restored\r\n");
     serial_write("ginux: sibling Linux TLS frame scrubbed and released\r\n");
     serial_write("ginux: Linux TLS frame scrubbed and released\r\n");
     serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");

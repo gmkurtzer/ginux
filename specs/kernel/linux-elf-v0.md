@@ -420,6 +420,18 @@ value. This is a bounded allocation, access-state, and reclamation proof for a
 future thread. It does not provide a second scheduled Linux context, a TID,
 `clone`, or direct memory isolation between threads of the same process.
 
+A checked Linux TLS execution context binds one canonical thread pointer to its
+nonempty live copy extent; the TCB must fit inside that extent. The no-TLS form
+requires all three values to be zero. Installing a context updates the bounded
+syscall-copy state, programs `IA32_FS_BASE`, and requires the MSR readback to
+match. During the interpreted proof, the kernel installs the sibling context,
+requires its entire extent and not the initial extent to be admitted, validates
+the sibling self pointer through SMAP-controlled access, then installs the
+initial context again and proves the admission decision reverses. Only then may
+the interpreter enter ring 3. This serialized bootstrap proof runs with one CPU
+and interrupts disabled; it does not yet connect the context to scheduler
+preemption or expose Linux thread creation.
+
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
 it may describe at most 23 entries. The interpreter derives the runtime

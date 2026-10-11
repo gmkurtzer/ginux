@@ -1005,6 +1005,7 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) initial_fs_base: usize,
     pub(crate) tls: usize,
     pub(crate) tls_size: usize,
+    pub(crate) sibling_fs_base: usize,
     pub(crate) sibling_tls: usize,
     pub(crate) code: usize,
     pub(crate) code_size: usize,
@@ -1023,6 +1024,85 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) dependency_base_end: [usize; LINUX_DEPENDENCY_COUNT],
     pub(crate) dependency_mappings:
         [[LinuxRelativeFileMapping; LINUX_DEPENDENCY_MAPPING_COUNT]; LINUX_DEPENDENCY_COUNT],
+}
+
+#[derive(Clone, Copy)]
+struct LinuxTlsContext {
+    thread_pointer: usize,
+    extent: usize,
+    extent_size: usize,
+}
+
+impl LinuxTlsContext {
+    fn is_valid(self) -> bool {
+        if self.extent_size == 0 {
+            return self.thread_pointer == 0 && self.extent == 0;
+        }
+        self.thread_pointer != 0
+            && self.extent != 0
+            && self.thread_pointer >= self.extent
+            && self
+                .extent
+                .checked_add(self.extent_size)
+                .is_some_and(|end| {
+                    end <= 1 << 47
+                        && self
+                            .thread_pointer
+                            .checked_add(16)
+                            .is_some_and(|tcb_end| tcb_end <= end)
+                })
+    }
+}
+
+pub(crate) fn verify_linux_tls_context_contract() -> bool {
+    LinuxTlsContext {
+        thread_pointer: 0,
+        extent: 0,
+        extent_size: 0,
+    }
+    .is_valid()
+        && LinuxTlsContext {
+            thread_pointer: 0x1030,
+            extent: 0x1000,
+            extent_size: 0x40,
+        }
+        .is_valid()
+        && !LinuxTlsContext {
+            thread_pointer: 0x1030,
+            extent: 0,
+            extent_size: 0,
+        }
+        .is_valid()
+        && !LinuxTlsContext {
+            thread_pointer: 0,
+            extent: 0x1000,
+            extent_size: 0x40,
+        }
+        .is_valid()
+        && !LinuxTlsContext {
+            thread_pointer: 0x0ff8,
+            extent: 0x1000,
+            extent_size: 0x40,
+        }
+        .is_valid()
+        && !LinuxTlsContext {
+            thread_pointer: 0x1038,
+            extent: 0x1000,
+            extent_size: 0x40,
+        }
+        .is_valid()
+        && !LinuxTlsContext {
+            thread_pointer: (1 << 47) - 8,
+            extent: (1 << 47) - 0x20,
+            extent_size: 0x40,
+        }
+        .is_valid()
+        && !LinuxTlsContext {
+            thread_pointer: usize::MAX - 8,
+            extent: usize::MAX - 0x20,
+            extent_size: 0x40,
+        }
+        .is_valid()
 }
 
 pub(crate) struct LinuxElfResult {
@@ -1046,34 +1126,25 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let Some(heap_limit) = execution.heap.checked_add(execution.heap_size) else {
         return LinuxElfResult::FAILED;
     };
-    let tls_contract_valid = if execution.tls_size == 0 {
-        execution.tls == 0 && execution.sibling_tls == 0 && execution.initial_fs_base == 0
-    } else {
-        execution.tls != 0
-            && execution.sibling_tls != 0
-            && execution.sibling_tls != execution.tls
-            && execution.initial_fs_base >= execution.tls
-            && execution
-                .tls
-                .checked_add(execution.tls_size)
-                .is_some_and(|end| {
-                    end <= 1 << 47
-                        && execution
-                            .initial_fs_base
-                            .checked_add(16)
-                            .is_some_and(|tcb_end| tcb_end <= end)
-                })
-            && execution
-                .sibling_tls
-                .checked_add(execution.tls_size)
-                .is_some_and(|end| end <= 1 << 47)
-            && !linux_ranges_overlap(
-                execution.tls as u64,
-                execution.tls_size,
-                execution.sibling_tls as u64,
-                execution.tls_size,
-            )
+    let initial_tls = LinuxTlsContext {
+        thread_pointer: execution.initial_fs_base,
+        extent: execution.tls,
+        extent_size: execution.tls_size,
     };
+    let sibling_tls = LinuxTlsContext {
+        thread_pointer: execution.sibling_fs_base,
+        extent: execution.sibling_tls,
+        extent_size: execution.tls_size,
+    };
+    let tls_contract_valid = initial_tls.is_valid()
+        && sibling_tls.is_valid()
+        && (execution.tls_size == 0
+            || !linux_ranges_overlap(
+                initial_tls.extent as u64,
+                initial_tls.extent_size,
+                sibling_tls.extent as u64,
+                sibling_tls.extent_size,
+            ));
     if !tls_contract_valid {
         return LinuxElfResult::FAILED;
     }
@@ -1090,13 +1161,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     };
-    if execution.initial_fs_base >= 1 << 47 {
-        let _ = restore_linux_syscall(saved_msrs);
-        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-        return LinuxElfResult::FAILED;
-    }
-    unsafe { write_msr(FS_BASE_MSR, execution.initial_fs_base as u64) };
-    if unsafe { read_msr(FS_BASE_MSR) } != execution.initial_fs_base as u64 {
+    if !install_linux_tls_context(initial_tls) {
         let _ = restore_linux_syscall(saved_msrs);
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
@@ -1109,8 +1174,6 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_LOADER_CODE_SIZE.store(execution.loader_code_size as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(execution.data as u64, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(execution.data_size as u64, Ordering::SeqCst);
-    ELF_PROBE_TLS.store(execution.tls as u64, Ordering::SeqCst);
-    ELF_PROBE_TLS_SIZE.store(execution.tls_size as u64, Ordering::SeqCst);
     ELF_PROBE_RELRO.store(execution.relro as u64, Ordering::SeqCst);
     ELF_PROBE_RELRO_SIZE.store(execution.relro_size as u64, Ordering::SeqCst);
     ELF_PROBE_BRK.store(execution.heap as u64, Ordering::SeqCst);
@@ -1238,6 +1301,25 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 .tls
                 .checked_add(execution.tls_size - 1)
                 .is_some_and(|last| !linux_writable_user_range_contains(last as u64, 2));
+    let tls_context_switch_valid = if execution.tls_size == 0 {
+        true
+    } else {
+        let sibling_installed = install_linux_tls_context(sibling_tls);
+        let sibling_valid = sibling_installed
+            && linux_writable_user_range_contains(execution.sibling_tls as u64, execution.tls_size)
+            && !linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
+            && unsafe {
+                with_supervisor_user_access(|| {
+                    (execution.sibling_fs_base as *const u64).read_volatile()
+                        == execution.sibling_fs_base as u64
+                })
+            };
+        let initial_restored = install_linux_tls_context(initial_tls);
+        sibling_valid
+            && initial_restored
+            && linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
+            && !linux_writable_user_range_contains(execution.sibling_tls as u64, execution.tls_size)
+    };
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -1490,6 +1572,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         && dependency_mappings_valid
         && tls_state_valid
         && tls_copy_bounds_valid
+        && tls_context_switch_valid
         && process_name_restored
         && no_new_privileges_enforced
         && signal_mask_restored
@@ -1502,6 +1585,28 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         main_frames,
         dependency_frames,
     }
+}
+
+fn install_linux_tls_context(context: LinuxTlsContext) -> bool {
+    if !context.is_valid() {
+        return false;
+    }
+    if context.extent_size == 0 {
+        unsafe { write_msr(FS_BASE_MSR, 0) };
+        if unsafe { read_msr(FS_BASE_MSR) } != 0 {
+            return false;
+        }
+        ELF_PROBE_TLS.store(0, Ordering::SeqCst);
+        ELF_PROBE_TLS_SIZE.store(0, Ordering::SeqCst);
+        return true;
+    }
+    unsafe { write_msr(FS_BASE_MSR, context.thread_pointer as u64) };
+    if unsafe { read_msr(FS_BASE_MSR) } != context.thread_pointer as u64 {
+        return false;
+    }
+    ELF_PROBE_TLS.store(context.extent as u64, Ordering::SeqCst);
+    ELF_PROBE_TLS_SIZE.store(context.extent_size as u64, Ordering::SeqCst);
+    true
 }
 
 fn configure_linux_syscall() -> Option<[u64; 5]> {

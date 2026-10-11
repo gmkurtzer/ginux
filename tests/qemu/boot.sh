@@ -613,6 +613,11 @@ if ! grep -q '^ginux: reusable Linux TLS page materialization validated' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux TLS execution context validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux TLS execution context was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TLS template metadata validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TLS template metadata was not validated." >&2
     exit 1
@@ -670,6 +675,11 @@ fi
 
 if ! grep -q '^ginux: non-current Linux TLS syscall access denied' "$output_file"; then
     echo "Boot test failed: non-current Linux TLS was admitted to syscall copies." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux TLS execution context switched and restored' "$output_file"; then
+    echo "Boot test failed: Linux TLS execution context was not switched and restored." >&2
     exit 1
 fi
 

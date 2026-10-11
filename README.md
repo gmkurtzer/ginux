@@ -78,6 +78,12 @@ page is scrubbed before releasing both frame leases and restoring the allocator
 count. This proves reusable per-thread allocation and cleanup prerequisites; it
 does not yet create or schedule a second Linux thread, and code in one process
 continues to share that process's address space.
+FS base and the syscall-copy TLS extent are represented together as a checked
+execution context. Before ring-3 entry, the kernel installs the sibling context,
+reads back its FS base, validates its self pointer, proves copy admission moved
+from the initial extent to the sibling extent, and then restores and revalidates
+the initial context. Bootstrap is single-core with interrupts disabled during
+this transition; scheduler-driven Linux TLS switching remains future work.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

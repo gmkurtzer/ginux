@@ -504,6 +504,12 @@ base to a bounded user pointer. An invalid destination returns `-EFAULT`, and
 an unsupported operation returns `-EINVAL`; both errors are recoverable. The
 kernel saves the prior supervisor FS-base MSR before entry, restores it after
 exit, and reads it back.
+Loader-provided static TLS uses a separate checked execution context that binds
+the initial FS base to the exact live static-TLS-plus-TCB copy extent. The boot
+proof switches that state to an independently materialized sibling instance,
+requires syscall-copy admission to follow the switch, and restores the initial
+state before entering userspace. This does not yet make syscall state generally
+per-thread or connect Linux TLS switching to scheduler preemption.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
