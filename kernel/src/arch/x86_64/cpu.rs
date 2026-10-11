@@ -47,6 +47,7 @@ const EFER_NXE: u64 = 1 << 11;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_FSTAT_SYSCALL: u64 = 5;
+const LINUX_LSEEK_SYSCALL: u64 = 8;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
@@ -90,6 +91,7 @@ const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
+const LINUX_ESPIPE: u64 = u64::MAX - 28;
 const LINUX_EMFILE: u64 = u64::MAX - 23;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOTTY: u64 = u64::MAX - 24;
@@ -1102,6 +1104,13 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_EFAULT;
             }
             0
+        }
+        LINUX_LSEEK_SYSCALL => {
+            if linux_console_descriptor_open(first_argument) {
+                LINUX_ESPIPE
+            } else {
+                LINUX_EBADF
+            }
         }
         LINUX_MPROTECT_SYSCALL => {
             let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);

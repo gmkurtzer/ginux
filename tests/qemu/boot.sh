@@ -708,6 +708,11 @@ if ! grep -q '^ginux: Linux fixed console termios validated' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux non-seekable console validated' "$output_file"; then
+    echo "Boot test failed: Linux non-seekable console behavior was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux console descriptor close validated' "$output_file"; then
     echo "Boot test failed: Linux console descriptor close was not validated." >&2
     exit 1

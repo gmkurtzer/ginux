@@ -53,6 +53,9 @@ pixel dimensions zero. Unknown descriptors return `-EBADF`, unsupported
 requests return `-ENOTTY`, and invalid destinations return `-EFAULT`. This is a
 fixed early-console contract, not mutable terminal state or a general ioctl
 mechanism.
+`rax = 8` (`__NR_lseek`) reports `-ESPIPE` for either open console endpoint,
+regardless of offset or origin, and `-EBADF` for a closed or unknown descriptor.
+The bounded console is a stream and never claims a mutable file position.
 `rax = 3` (`__NR_close`) irreversibly clears descriptor 0 or 1 from the bounded
 process-local console table. Closing an unknown or already closed descriptor
 returns `-EBADF`; subsequent `fstat` and `ioctl` calls observe the closure. No

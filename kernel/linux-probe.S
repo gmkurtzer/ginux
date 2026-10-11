@@ -374,6 +374,22 @@ ginux_linux_probe:
     cmp dword ptr [0x402284], 0
     jne failure
 
+    mov edi, 2
+    movabs rsi, 0x1122334455667788
+    mov edx, 2
+    mov eax, 8
+    syscall
+    cmp rax, -9
+    jne failure
+
+    mov edi, 1
+    movabs rsi, 0x1122334455667788
+    mov edx, 99
+    mov eax, 8
+    syscall
+    cmp rax, -29
+    jne failure
+
     lea rax, [rip + readable_payload]
     mov qword ptr [0x402300], rax
     mov qword ptr [0x402308], 4
