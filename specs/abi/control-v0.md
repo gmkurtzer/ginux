@@ -272,13 +272,16 @@ can exit after exhaustion.
 Operation 16 is the v2 network-device call. It requires `READ` authority on
 network-device object 4. `RSI` is the command and `RDX` its argument. Command 0
 requires argument zero and returns the fixed discovery word
-`0x0000000105dc0005`: descriptor version 5 in bits 0-15, MTU 1500 in bits
+`0x0000000105dc0006`: descriptor version 6 in bits 0-15, MTU 1500 in bits
 16-31, and one queue in bits 32-63. Read-authorized command 1 requires argument
 zero and returns the current link-state bit. Write-authorized command 2 accepts
 only zero or one and updates that bit. Write-authorized command 3 stores a
 packed IPv4 address in bits 0-31 and prefix in bits 32-39; prefix must be at
 most 32, higher bits must be zero, and address zero requires prefix zero.
 Read-authorized command 4 requires argument zero and returns the packed state.
+Changing or clearing the IPv4 configuration atomically clears a default gateway
+that is no longer usable within the new prefix; the whole update advances the
+configuration generation once.
 Write-authorized command 5 stores zero or one on-subnet, non-self, non-network,
 non-broadcast default gateway. Read-authorized command 6 requires argument zero
 and returns it. Read-authorized command 7 requires argument zero and returns a

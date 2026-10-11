@@ -598,6 +598,11 @@ if ! grep -q '^ginux: network configuration generation tracked' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: network gateway invalidated on address change' "$output_file"; then
+    echo "Boot test failed: stale network gateway survived an address change." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: network device capability revoked on exit' "$output_file"; then
     echo "Boot test failed: network device authority survived service exit." >&2
     exit 1

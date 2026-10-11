@@ -915,9 +915,7 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
                     Rights::WRITE,
                 ) =>
         {
-            if NETWORK_IPV4_CONFIGURATION.swap(argument, Ordering::AcqRel) != argument {
-                record_network_configuration_change();
-            }
+            apply_ipv4_configuration(argument);
             0
         }
         control_abi::NETWORK_DEVICE_QUERY_IPV4
@@ -993,7 +991,13 @@ fn valid_ipv4_gateway(gateway: u64) -> bool {
     if gateway == 0 {
         return true;
     }
-    let configuration = NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire);
+    valid_ipv4_gateway_for_configuration(
+        gateway,
+        NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire),
+    )
+}
+
+fn valid_ipv4_gateway_for_configuration(gateway: u32, configuration: u64) -> bool {
     let address = configuration as u32;
     let prefix = (configuration >> 32) as u8;
     if address == 0 || prefix == 0 {
@@ -1003,6 +1007,18 @@ fn valid_ipv4_gateway(gateway: u64) -> bool {
     let network = address & mask;
     let broadcast = network | !mask;
     gateway & mask == network && gateway != address && gateway != network && gateway != broadcast
+}
+
+fn apply_ipv4_configuration(configuration: u64) {
+    if NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire) == configuration {
+        return;
+    }
+    NETWORK_IPV4_CONFIGURATION.store(configuration, Ordering::Release);
+    let gateway = NETWORK_IPV4_GATEWAY.load(Ordering::Acquire) as u32;
+    if gateway != 0 && !valid_ipv4_gateway_for_configuration(gateway, configuration) {
+        NETWORK_IPV4_GATEWAY.store(0, Ordering::Release);
+    }
+    record_network_configuration_change();
 }
 
 pub(crate) fn network_link_is_up() -> bool {
