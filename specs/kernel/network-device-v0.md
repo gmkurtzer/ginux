@@ -88,6 +88,14 @@ stale generation 6 is rejected at generation 7, then applies link-down at 7 and
 link-up at 8, receiving generations 8 and 9. This is optimistic concurrency for
 the current single-CPU call gate, not yet an SMP synchronization primitive.
 
+A fourth isolated service receives only object-4 `READ` authority and executes
+an invalid opcode. The kernel retires the faulting domain, reclaims its W^X
+address-space frames, revokes the network handle, and publishes vector 6 with
+the exact service identity and lifecycle sequence. Link, IPv4, route, and
+generation state remain intact after the crash. This proves containment and
+state survival, not automatic driver restart or hardware recovery; those need
+a later supervised service wired to an actual device backend.
+
 Before exit the service also installs and reads back `10.0.2.15/24`. This is not
 yet a network stack or virtual NIC. Link and IPv4 state are kernel-owned scalar
 values and are not backed by hardware. There is no packet transport, MAC

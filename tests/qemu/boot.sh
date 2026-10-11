@@ -663,6 +663,21 @@ if ! grep -q '^ginux: configurator capability revoked on exit' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: faulted network service contained' "$output_file"; then
+    echo "Boot test failed: faulted network service was not contained." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: faulted network authority revoked' "$output_file"; then
+    echo "Boot test failed: faulted network service retained authority." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: network state survived service fault' "$output_file"; then
+    echo "Boot test failed: network state did not survive a service fault." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
     echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
     exit 1

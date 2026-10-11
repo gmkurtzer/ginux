@@ -708,6 +708,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: stale network configuration apply rejected");
     serial_write("\r\nginux: atomic network configuration apply completed");
     serial_write("\r\nginux: configurator capability revoked on exit");
+    if !address_space::verify_ring3_network_fault_containment() {
+        kernel_fail("\r\nginux: network service fault containment invariant failed\r\n");
+    }
+    serial_write("\r\nginux: faulted network service contained");
+    serial_write("\r\nginux: faulted network authority revoked");
+    serial_write("\r\nginux: network state survived service fault");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }
