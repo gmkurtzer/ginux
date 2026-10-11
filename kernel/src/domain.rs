@@ -735,6 +735,43 @@ impl Manager {
         true
     }
 
+    fn retire_faulted_auxiliary_service(&mut self, id: DomainId, fault: FaultMetadata) -> bool {
+        let Some(registry_slot) = self
+            .auxiliary_service_ids
+            .iter()
+            .position(|registered| *registered == Some(id))
+        else {
+            return false;
+        };
+        let Some(service) = self
+            .domain(id)
+            .filter(|domain| {
+                domain.role == Role::AuxiliaryService
+                    && domain.failure_policy == Some(ServiceFailurePolicy::StopOnly)
+                    && domain.state == State::Ready
+                    && domain.address_space_root.is_none()
+                    && domain.active_threads == 0
+                    && domain.active_operations == 0
+            })
+            .and_then(|domain| domain.service)
+        else {
+            return false;
+        };
+        if !self.lifecycle_events.push(LifecycleEvent {
+            kind: crate::control_abi::LIFECYCLE_AUXILIARY_FAULT,
+            domain: id,
+            service: Some(service),
+            detail: 0,
+            fault: Some(fault),
+            sequence: 0,
+        }) {
+            return false;
+        }
+        self.domains[usize::from(id.slot)] = None;
+        self.auxiliary_service_ids[registry_slot] = None;
+        true
+    }
+
     fn request_auxiliary_stop(
         &mut self,
         supervisor: DomainId,
@@ -1078,6 +1115,10 @@ pub(crate) fn verify_auxiliary_stop_revocation_invariants() -> bool {
     verify_auxiliary_stop_revocation_invariants_inner().unwrap_or(false)
 }
 
+pub(crate) fn verify_auxiliary_fault_policy_invariants() -> bool {
+    verify_auxiliary_fault_policy_invariants_inner().unwrap_or(false)
+}
+
 pub(crate) fn verify_generation_exhaustion_invariants() -> bool {
     verify_generation_exhaustion_invariants_inner().unwrap_or(false)
 }
@@ -1269,6 +1310,54 @@ fn verify_auxiliary_retirement_overflow_invariants_inner() -> Option<bool> {
             && overflow.detail == 1
             && overflow.fault.is_none()
             && overflow.sequence == 5
+            && manager.lifecycle_events.is_empty(),
+    )
+}
+
+fn verify_auxiliary_fault_policy_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    let control = manager.create_control_plane(&grants)?;
+    let primary = manager.create_service()?;
+    let console_source = manager.domain(control)?.boot_roots[1]?;
+    let auxiliary = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
+        source: console_source,
+        object: 2,
+        rights: Rights::WRITE,
+    }])?;
+    let identity = manager.domain(auxiliary)?.service?;
+    let handle = manager.domain(auxiliary)?.boot_roots[0]?;
+    let fault = FaultMetadata {
+        vector: 14,
+        error: 5,
+        address: 0x1000,
+        instruction: 0x2000,
+    };
+    if !manager.begin_operation(auxiliary)
+        || manager.retire_faulted_auxiliary_service(auxiliary, fault)
+        || !manager.end_operation(auxiliary)
+        || !manager.retire_faulted_auxiliary_service(auxiliary, fault)
+        || manager.domain(auxiliary).is_some()
+        || manager.permits(auxiliary, handle, 2, Rights::WRITE)
+        || manager.domain(primary).is_none()
+        || manager.remaining_service_restarts != SERVICE_RESTART_BUDGET
+        || manager.total_service_restarts != 0
+        || manager.retire_faulted_auxiliary_service(auxiliary, fault)
+    {
+        return Some(false);
+    }
+    let event = manager.lifecycle_events.pop()?;
+    Some(
+        event.kind == crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+            && event.domain == auxiliary
+            && event.service == Some(identity)
+            && event.detail == 0
+            && event.fault == Some(fault)
+            && event.sequence == 1
             && manager.lifecycle_events.is_empty(),
     )
 }
@@ -1841,10 +1930,14 @@ pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMe
     })
 }
 
-pub(crate) fn delivered_service_fault_descriptor(
-) -> Option<[u8; crate::control_abi::FAULT_DESCRIPTOR_SIZE]> {
+pub(crate) fn delivered_fault_descriptor() -> Option<[u8; crate::control_abi::FAULT_DESCRIPTOR_SIZE]>
+{
     let event = global_manager()?.last_delivered_lifecycle_event?;
-    if event.kind != crate::control_abi::LIFECYCLE_SERVICE_FAULT || event.detail != 0 {
+    if !matches!(
+        event.kind,
+        crate::control_abi::LIFECYCLE_SERVICE_FAULT | crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+    ) || event.detail != 0
+    {
         return None;
     }
     let fault = event.fault?;

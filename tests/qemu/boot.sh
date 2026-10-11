@@ -343,6 +343,11 @@ if ! grep -q '^ginux: auxiliary retirement overflow summarized' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: stop-only auxiliary faults contained' "$output_file"; then
+    echo "Boot test failed: stop-only auxiliary faults were not contained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded service restart policy verified' "$output_file"; then
     echo "Boot test failed: service restart policy validation failed." >&2
     exit 1

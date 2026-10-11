@@ -96,6 +96,13 @@ is queued during this transaction.
 Stop-only execution remains disabled until auxiliary scheduler removal,
 address-space release, authority revocation, and lifecycle publication form a
 single fail-closed teardown transaction.
+The domain manager already models the final policy step: after threads,
+operations, and address-space ownership are gone, a faulted auxiliary identity
+is retired without consuming the primary restart budget. Retirement removes
+all of that generation's capability authority and publishes lifecycle kind 4
+with exact domain identity, stable service identity, and architectural fault
+metadata. The proof rejects retirement while an operation is active and
+rejects a stale repeat.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

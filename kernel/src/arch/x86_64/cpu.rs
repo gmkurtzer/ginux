@@ -951,7 +951,7 @@ fn write_fault_descriptor(domain_id: u64, capability: u64, frame: *const UserTra
     {
         return u64::MAX - 2;
     }
-    let Some(descriptor) = domain::delivered_service_fault_descriptor() else {
+    let Some(descriptor) = domain::delivered_fault_descriptor() else {
         return u64::MAX - 2;
     };
     if !address_space::copy_to_current_user(frame.first_argument(), &descriptor) {

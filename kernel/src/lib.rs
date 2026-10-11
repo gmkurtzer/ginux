@@ -457,6 +457,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: auxiliary retirement overflow invariant failed\r\n");
     }
     serial_write("ginux: auxiliary retirement overflow summarized\r\n");
+    if !domain::verify_auxiliary_fault_policy_invariants() {
+        kernel_fail("ginux: auxiliary fault policy invariant failed\r\n");
+    }
+    serial_write("ginux: stop-only auxiliary faults contained\r\n");
     if !domain::verify_service_restart_budget_invariants() {
         kernel_fail("ginux: service restart budget invariant failed\r\n");
     }

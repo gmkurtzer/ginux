@@ -80,6 +80,9 @@ kind 2 as an overflow summary, and kind 3 as a clean auxiliary-service
 retirement. Kind 3 carries the exact retired generation, zero detail, and no
 fault descriptor. It is currently exercised by the bounded registry proof;
 runtime auxiliary creation is not yet exposed to userspace.
+Kind 4 is a stop-only auxiliary-service fault. It carries the exact domain and
+stable service identities plus architectural fault metadata, and never
+consumes the primary service restart budget.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes
@@ -116,7 +119,7 @@ and opens SMAP only for the bounded write. It returns 16 or
 every field, and requires the same operation to reject its read-only code page
 before continuing.
 Operation 11 requires manage authority on host-control object 1 and writes the
-most recently consumed concrete service-fault record to the user address in
+most recently consumed concrete kind 1 or kind 4 fault record to the user address in
 `RSI`; `RDX` must equal 48. The little-endian record contains `u32` size,
 `u16` ABI version, `u16` vector, and `u64` values for domain generation, error
 code, fault address, and instruction address, followed by a reserved zero
