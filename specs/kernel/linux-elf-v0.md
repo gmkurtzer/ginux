@@ -57,8 +57,9 @@ the rule applies equally before static mapping and after `ET_DYN` relocation.
 The profile requires exactly one executable segment and one writable segment.
 Writable-executable mappings are rejected. The entry point must lie inside the
 executable segment. The boot verifier accepts a synthetic image whose bounded
-RX segment starts at file offset zero, includes its ELF/program headers and
-code through file offset `0x4000`, and uses a non-page-base entry. Its RW
+RX segment starts at file offset zero, includes its ELF/program headers, and
+uses a non-page-base code entry at `0x100`. The fixture reserves the complete
+five-page RX file range through offset `0x5000` before its RW
 segment has eight file bytes and a
 4608-byte memory extent spanning two pages. The verifier then rejects
 bad magic, wrong class, non-executable file type, wrong machine, an out-of-range
@@ -67,10 +68,11 @@ executable GNU stack, malformed or duplicate metadata, unsupported header
 types, and truncation. Images with neither metadata header, either one, or both
 are accepted when their declarations are valid. The boot verifier reuses one
 mutation buffer across metadata cases and runs the metadata and RELRO mutation
-suites sequentially. At most two 16 KiB-class fixture images are therefore
-live on the 64 KiB bootstrap kernel stack. This keeps verification bounded
-while reserving the complete five-page executable profile for proof
-instructions.
+suites sequentially. Non-inlined verifier phases construct at most one 20
+KiB-class fixture image at a time on the 64 KiB bootstrap kernel stack; the
+load materializer's page buffer and the alias verifier's compact dynamic image
+also execute in separate frames. This keeps verification bounded while
+reserving the complete five-page executable profile for proof instructions.
 
 The build also feeds the same assembly through the Rust toolchain's LLD to
 produce a genuine static ELF with separate read-only header, RX text, and RW

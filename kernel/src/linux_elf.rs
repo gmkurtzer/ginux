@@ -26,7 +26,7 @@ const MAX_OTHER_SEGMENT_PAGES: usize = 2;
 const MAX_INTERPRETER_PATH_SIZE: usize = 256;
 const MAX_TLS_TEMPLATE_SIZE: u64 = 64;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (5 * PAGE_SIZE) as u64;
-const FIXTURE_DATA_OFFSET: usize = 0x4000;
+const FIXTURE_DATA_OFFSET: usize = 0x5000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const INTERPRETED_DATA_OFFSET: usize = 0x4100;
 const INTERPRETED_FIXTURE_SIZE: usize =
@@ -2530,6 +2530,15 @@ fn validate_empty_gnu_hash(loads: &[Option<Segment<'_>>], address: u64) -> Optio
 }
 
 pub(crate) fn verify_parser() -> bool {
+    verify_base_parser()
+        && verify_metadata_parser()
+        && verify_relro_parser()
+        && verify_interpreter_parser()
+        && verify_parser_rejections()
+}
+
+#[inline(never)]
+fn verify_base_parser() -> bool {
     let image = fixture();
     let Some(parsed) = parse(&image) else {
         return false;
@@ -2555,62 +2564,56 @@ pub(crate) fn verify_parser() -> bool {
     {
         return false;
     }
-    if !verify_metadata_parser(&image)
-        || !verify_relro_parser()
-        || !verify_interpreter_parser(&image)
-    {
-        return false;
-    }
-    let rejections = rejects(&image, 0, b'X')
-        && rejects(&image, 4, 1)
-        && rejects_u16(&image, 16, 1)
-        && rejects_u16(&image, 18, 3)
-        && rejects_u64(&image, 24, 0x50_0000)
-        && rejects_u32(&image, ELF_HEADER_SIZE + 4, PF_READ | PF_WRITE | PF_EXECUTE)
-        && rejects_u64(&image, ELF_HEADER_SIZE + 24, 1)
-        && rejects_u64(&image, ELF_HEADER_SIZE + 32, u64::MAX)
-        && rejects_u64(
-            &image,
-            ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 16,
-            0x40_0000,
-        )
-        && rejects_u32(&image, ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE, 3)
+    true
+}
+
+#[inline(never)]
+fn verify_parser_rejections() -> bool {
+    rejects(0, b'X')
+        && rejects(4, 1)
+        && rejects_u16(16, 1)
+        && rejects_u16(18, 3)
+        && rejects_u64(24, 0x50_0000)
+        && rejects_u32(ELF_HEADER_SIZE + 4, PF_READ | PF_WRITE | PF_EXECUTE)
+        && rejects_u64(ELF_HEADER_SIZE + 24, 1)
+        && rejects_u64(ELF_HEADER_SIZE + 32, u64::MAX)
+        && rejects_u64(ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 16, 0x40_0000)
+        && rejects_u32(ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE, 3)
         && rejects_u32(
-            &image,
             ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE + 4,
             PF_READ | PF_WRITE | PF_EXECUTE,
         )
-        && rejects_entry_in_program_headers(&image)
-        && rejects_u16(&image, 56, (MAX_PROGRAM_HEADER_COUNT + 1) as u16)
-        && parse(&image[..image.len() - 1]).is_none();
-    rejections
+        && rejects_entry_in_program_headers()
+        && rejects_u16(56, (MAX_PROGRAM_HEADER_COUNT + 1) as u16)
+        && rejects_truncated_fixture()
 }
 
-fn rejects_entry_in_program_headers(image: &[u8; FIXTURE_SIZE]) -> bool {
-    let mut candidate = *image;
+#[inline(never)]
+fn rejects_entry_in_program_headers() -> bool {
+    let mut candidate = fixture();
     write_u16(&mut candidate, 56, 4);
     write_gnu_stack(&mut candidate, ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE);
     parse(&candidate).is_none()
 }
 
 #[inline(never)]
-fn verify_metadata_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
+fn verify_metadata_parser() -> bool {
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
     let extended_phdr_header = ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE;
-    let mut candidate = *image;
+    let mut candidate = fixture();
 
     write_u16(&mut candidate, 56, MIN_LOAD_SEGMENT_COUNT as u16);
     if parse(&candidate).is_none() {
         return false;
     }
 
-    candidate = *image;
+    candidate = fixture();
     write_phdr(&mut candidate, stack_header, 3);
     if parse(&candidate).is_none_or(|image| image.program_headers != 0x40_0040) {
         return false;
     }
 
-    candidate = *image;
+    candidate = fixture();
     configure_extended_metadata(&mut candidate);
     if parse(&candidate).is_none() {
         return false;
@@ -2623,35 +2626,35 @@ fn verify_metadata_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
         return false;
     }
 
-    candidate = *image;
+    candidate = fixture();
     configure_extended_metadata(&mut candidate);
     write_gnu_stack(&mut candidate, extended_phdr_header);
     if parse(&candidate).is_some() {
         return false;
     }
 
-    candidate = *image;
+    candidate = fixture();
     configure_extended_metadata(&mut candidate);
     write_phdr(&mut candidate, stack_header, 5);
     if parse(&candidate).is_some() {
         return false;
     }
 
-    candidate = *image;
+    candidate = fixture();
     write_phdr(&mut candidate, stack_header, 3);
     write_u64(&mut candidate, stack_header + 16, 0x40_0048);
     if parse(&candidate).is_some() {
         return false;
     }
 
-    candidate = *image;
+    candidate = fixture();
     write_phdr(&mut candidate, stack_header, 3);
     write_u64(&mut candidate, stack_header + 32, 1);
     if parse(&candidate).is_some() {
         return false;
     }
 
-    candidate = *image;
+    candidate = fixture();
     configure_extended_metadata(&mut candidate);
     write_u64(&mut candidate, ELF_HEADER_SIZE + 24, 0x40_0000);
     write_u64(
@@ -2664,7 +2667,7 @@ fn verify_metadata_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
         return false;
     }
 
-    candidate = *image;
+    candidate = fixture();
     write_gnu_stack(&mut candidate, stack_header);
     write_u64(&mut candidate, stack_header + 48, 0);
     parse(&candidate).is_some()
@@ -2680,13 +2683,13 @@ fn configure_extended_metadata(bytes: &mut [u8]) {
 }
 
 #[inline(never)]
-fn verify_interpreter_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
+fn verify_interpreter_parser() -> bool {
     const PATH: &[u8] = b"/lib64/ld-linux-x86-64.so.2\0";
     const PATH_OFFSET: usize = 0x3f80;
     const SECOND_PATH_OFFSET: usize = 0x3fc0;
     let header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
     let duplicate_header = ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE;
-    let mut candidate = *image;
+    let mut candidate = fixture();
     write_u16(&mut candidate, 56, 4);
     write_u64(&mut candidate, 24, 0x40_0120);
     write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
@@ -2694,25 +2697,25 @@ fn verify_interpreter_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
         image.interpreter == Some(&PATH[..PATH.len() - 1]) && plan(&image).is_none()
     });
 
-    candidate = *image;
+    candidate = fixture();
     write_u16(&mut candidate, 56, 5);
     write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
     write_interpreter(&mut candidate, duplicate_header, SECOND_PATH_OFFSET, PATH);
     let duplicate_rejected = parse(&candidate).is_none();
 
-    candidate = *image;
+    candidate = fixture();
     write_u16(&mut candidate, 56, 4);
     write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
     candidate[PATH_OFFSET + PATH.len() - 1] = b'X';
     let unterminated_rejected = parse(&candidate).is_none();
 
-    candidate = *image;
+    candidate = fixture();
     write_u16(&mut candidate, 56, 4);
     write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
     candidate[PATH_OFFSET] = b'l';
     let relative_rejected = parse(&candidate).is_none();
 
-    candidate = *image;
+    candidate = fixture();
     write_u16(&mut candidate, 56, 4);
     write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
     write_u32(&mut candidate, header + 4, PF_READ | PF_WRITE);
@@ -4065,32 +4068,38 @@ fn write_segment(
     write_u64(bytes, header + 48, 8);
 }
 
-fn rejects(bytes: &[u8], offset: usize, value: u8) -> bool {
+#[inline(never)]
+fn rejects(offset: usize, value: u8) -> bool {
     let mut candidate = fixture();
-    candidate[..bytes.len()].copy_from_slice(bytes);
     candidate[offset] = value;
     parse(&candidate).is_none()
 }
 
-fn rejects_u16(bytes: &[u8], offset: usize, value: u16) -> bool {
+#[inline(never)]
+fn rejects_u16(offset: usize, value: u16) -> bool {
     let mut candidate = fixture();
-    candidate[..bytes.len()].copy_from_slice(bytes);
     write_u16(&mut candidate, offset, value);
     parse(&candidate).is_none()
 }
 
-fn rejects_u32(bytes: &[u8], offset: usize, value: u32) -> bool {
+#[inline(never)]
+fn rejects_u32(offset: usize, value: u32) -> bool {
     let mut candidate = fixture();
-    candidate[..bytes.len()].copy_from_slice(bytes);
     write_u32(&mut candidate, offset, value);
     parse(&candidate).is_none()
 }
 
-fn rejects_u64(bytes: &[u8], offset: usize, value: u64) -> bool {
+#[inline(never)]
+fn rejects_u64(offset: usize, value: u64) -> bool {
     let mut candidate = fixture();
-    candidate[..bytes.len()].copy_from_slice(bytes);
     write_u64(&mut candidate, offset, value);
     parse(&candidate).is_none()
+}
+
+#[inline(never)]
+fn rejects_truncated_fixture() -> bool {
+    let candidate = fixture();
+    parse(&candidate[..candidate.len() - 1]).is_none()
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
