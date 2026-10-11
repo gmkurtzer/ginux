@@ -21,6 +21,7 @@ const EXPECTED_FAULT_OFFSET: usize = 515;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
+const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
 const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 
@@ -147,14 +148,17 @@ pub(crate) fn verify_linux_elf_mapping(
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - 18 * size_of::<u64>();
+            let stack_offset = PAGE_SIZE - 20 * size_of::<u64>();
+            let environment_offset = PAGE_SIZE - 3 * size_of::<u64>();
             let argument_offset = PAGE_SIZE - size_of::<u64>();
+            let environment_address = stack_virtual_page + environment_offset as u64;
             let argument_address = stack_virtual_page + argument_offset as u64;
             let stack_words = stack_bytes.add(stack_offset).cast::<u64>();
             for (index, value) in [
                 1_u64,
                 argument_address,
                 0,
+                environment_address,
                 0,
                 3,
                 plan.program_headers,
@@ -174,6 +178,11 @@ pub(crate) fn verify_linux_elf_mapping(
             {
                 stack_words.add(index).write(value);
             }
+            core::ptr::copy_nonoverlapping(
+                LINUX_INIT_ENVIRONMENT.as_ptr(),
+                stack_bytes.add(environment_offset),
+                LINUX_INIT_ENVIRONMENT.len(),
+            );
             core::ptr::copy_nonoverlapping(
                 LINUX_INIT_ARGUMENT.as_ptr(),
                 stack_bytes.add(argument_offset),
@@ -203,16 +212,21 @@ pub(crate) fn verify_linux_elf_mapping(
                 && second_bytes[8..].iter().all(|byte| *byte == 0)
                 && stack_words.read() == 1
                 && stack_words.add(1).read() == argument_address
-                && stack_words.add(4).read() == 3
-                && stack_words.add(5).read() == plan.program_headers
-                && stack_words.add(6).read() == 4
-                && stack_words.add(7).read() == crate::linux_elf::PROGRAM_HEADER_SIZE as u64
-                && stack_words.add(8).read() == 5
-                && stack_words.add(9).read() == u64::from(plan.program_header_count)
-                && stack_words.add(10).read() == 6
-                && stack_words.add(11).read() == PAGE_SIZE as u64
-                && stack_words.add(12).read() == 9
-                && stack_words.add(13).read() == plan.entry
+                && stack_words.add(3).read() == environment_address
+                && stack_words.add(5).read() == 3
+                && stack_words.add(6).read() == plan.program_headers
+                && stack_words.add(7).read() == 4
+                && stack_words.add(8).read() == crate::linux_elf::PROGRAM_HEADER_SIZE as u64
+                && stack_words.add(9).read() == 5
+                && stack_words.add(10).read() == u64::from(plan.program_header_count)
+                && stack_words.add(11).read() == 6
+                && stack_words.add(12).read() == PAGE_SIZE as u64
+                && stack_words.add(13).read() == 9
+                && stack_words.add(14).read() == plan.entry
+                && core::slice::from_raw_parts(
+                    stack_bytes.add(environment_offset),
+                    LINUX_INIT_ENVIRONMENT.len(),
+                ) == LINUX_INIT_ENVIRONMENT
                 && core::slice::from_raw_parts(
                     stack_bytes.add(argument_offset),
                     LINUX_INIT_ARGUMENT.len(),

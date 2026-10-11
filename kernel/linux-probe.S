@@ -7,7 +7,10 @@ ginux_linux_probe:
     mov rax, qword ptr [rsp + 8]
     cmp byte ptr [rax], '/'
     jne failure
-    cmp qword ptr [rsp + 104], 0x400100
+    mov rax, qword ptr [rsp + 24]
+    cmp byte ptr [rax], 'G'
+    jne failure
+    cmp qword ptr [rsp + 112], 0x400100
     jne failure
 
     mov eax, 999

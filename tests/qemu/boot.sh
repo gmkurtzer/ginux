@@ -543,6 +543,11 @@ if ! grep -q '^ginux: Linux single-thread process identity verified' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux initial environment vector validated' "$output_file"; then
+    echo "Boot test failed: Linux initial environment vector was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1
