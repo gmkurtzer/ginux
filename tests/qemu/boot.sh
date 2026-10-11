@@ -608,6 +608,11 @@ if ! grep -q '^ginux: bounded Linux static TLS layout plan validated' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: reusable Linux TLS page materialization validated' "$output_file"; then
+    echo "Boot test failed: reusable Linux TLS page materialization was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TLS template metadata validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TLS template metadata was not validated." >&2
     exit 1

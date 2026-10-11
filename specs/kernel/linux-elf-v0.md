@@ -400,6 +400,11 @@ one owned page. Zero and non-power-of-two alignments, initialized data larger
 than memory size, a thread pointer misaligned for any module, subtraction
 underflow, and a TCB extending beyond the page are rejected. Both initial
 execution and future thread allocation are required to consume this plan.
+The page materializer recomputes and compares that plan before modifying its
+destination. On success it zeroes the complete owned page, copies each bounded
+template, and writes the TCB self pointer; on a mismatched plan it leaves the
+destination unchanged. Initial execution uses this helper rather than raw
+module-specific copies.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and

@@ -623,6 +623,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: bounded Linux static TLS layout invalid\r\n");
     }
     serial_write("ginux: bounded Linux static TLS layout plan validated\r\n");
+    serial_write("ginux: reusable Linux TLS page materialization validated\r\n");
     if !linux_elf::verify_tls_template_metadata() {
         kernel_fail("ginux: bounded Linux TLS template metadata invalid\r\n");
     }

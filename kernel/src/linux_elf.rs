@@ -388,6 +388,36 @@ pub(crate) fn verify_static_tls_layout() -> bool {
     else {
         return false;
     };
+    let Some(page_layout) = plan_static_tls_layout(main, [primary, auxiliary], 192, 16, 256) else {
+        return false;
+    };
+    let mut page = [0xaa_u8; 256];
+    let page_materialized = materialize_static_tls_page(
+        page_layout,
+        main,
+        [primary, auxiliary],
+        0x1234_5678,
+        &mut page,
+    ) && page[176..180] == *b"MAIN"
+        && page[160..167] == *b"PRIMARY"
+        && page[144..147] == *b"AUX"
+        && page[147..160].iter().all(|byte| *byte == 0)
+        && page[167..176].iter().all(|byte| *byte == 0)
+        && page[180..192].iter().all(|byte| *byte == 0)
+        && page[192..200] == 0x1234_5678_u64.to_le_bytes()
+        && page[200..208].iter().all(|byte| *byte == 0)
+        && page[..144].iter().all(|byte| *byte == 0)
+        && page[208..].iter().all(|byte| *byte == 0);
+    let mut invalid_layout = page_layout;
+    invalid_layout.main.start_offset += 8;
+    let mut unchanged = [0xaa_u8; 256];
+    let invalid_unchanged = !materialize_static_tls_page(
+        invalid_layout,
+        main,
+        [primary, auxiliary],
+        0x1234_5678,
+        &mut unchanged,
+    ) && unchanged.iter().all(|byte| *byte == 0xaa);
     layout.main.start_offset == 4016
         && layout.main.thread_offset == (-16_i64) as u64
         && layout.dependencies[0].start_offset == 4000
@@ -400,6 +430,8 @@ pub(crate) fn verify_static_tls_layout() -> bool {
         && mixed.dependencies[0].start_offset == 3968
         && mixed.dependencies[1].start_offset == 3960
         && mixed.extent_size == 88
+        && page_materialized
+        && invalid_unchanged
         && plan_static_tls_layout(template(b"XX", 1, 8), [primary, auxiliary], 4032, 16, 4096)
             .is_none()
         && plan_static_tls_layout(template(b"M", 16, 3), [primary, auxiliary], 4032, 16, 4096)
@@ -430,7 +462,7 @@ pub(crate) struct TlsTemplate<'a> {
     pub(crate) alignment: u64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StaticTlsBlock {
     pub(crate) start_offset: usize,
     pub(crate) memory_size: usize,
@@ -438,12 +470,14 @@ pub(crate) struct StaticTlsBlock {
     pub(crate) thread_offset: u64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StaticTlsLayout {
     pub(crate) main: StaticTlsBlock,
     pub(crate) dependencies: [StaticTlsBlock; 2],
     pub(crate) extent_start: usize,
     pub(crate) extent_size: usize,
+    pub(crate) thread_pointer_offset: usize,
+    pub(crate) tcb_size: usize,
 }
 
 pub(crate) fn plan_static_tls_layout(
@@ -474,6 +508,7 @@ pub(crate) fn plan_static_tls_layout(
         .iter()
         .fold(main_description.1, |maximum, block| maximum.max(block.1));
     if thread_pointer_offset > page_size
+        || tcb_size < 16
         || thread_pointer_offset.checked_add(tcb_size)? > page_size
         || !thread_pointer_offset.is_multiple_of(maximum_alignment)
     {
@@ -503,7 +538,48 @@ pub(crate) fn plan_static_tls_layout(
         extent_size: thread_pointer_offset
             .checked_sub(second_start)?
             .checked_add(tcb_size)?,
+        thread_pointer_offset,
+        tcb_size,
     })
+}
+
+pub(crate) fn materialize_static_tls_page(
+    layout: StaticTlsLayout,
+    main: TlsTemplate<'_>,
+    dependencies: [TlsTemplate<'_>; 2],
+    thread_pointer: u64,
+    page: &mut [u8],
+) -> bool {
+    if plan_static_tls_layout(
+        main,
+        dependencies,
+        layout.thread_pointer_offset,
+        layout.tcb_size,
+        page.len(),
+    ) != Some(layout)
+    {
+        return false;
+    }
+    page.fill(0);
+    let copy = |page: &mut [u8], block: StaticTlsBlock, template: TlsTemplate<'_>| -> Option<()> {
+        page.get_mut(block.start_offset..block.start_offset.checked_add(template.bytes.len())?)?
+            .copy_from_slice(template.bytes);
+        Some(())
+    };
+    if copy(page, layout.dependencies[1], dependencies[1]).is_none()
+        || copy(page, layout.dependencies[0], dependencies[0]).is_none()
+        || copy(page, layout.main, main).is_none()
+    {
+        return false;
+    }
+    let Some(tcb_end) = layout.thread_pointer_offset.checked_add(layout.tcb_size) else {
+        return false;
+    };
+    let Some(tcb) = page.get_mut(layout.thread_pointer_offset..tcb_end) else {
+        return false;
+    };
+    tcb[..8].copy_from_slice(&thread_pointer.to_le_bytes());
+    true
 }
 
 pub(crate) struct Image<'a> {

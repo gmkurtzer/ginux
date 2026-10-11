@@ -65,6 +65,10 @@ offset, live extent, and TCB fit from the authenticated templates. It rejects
 zero or non-power-of-two alignments, undersized declarations, misaligned thread
 pointers, arithmetic underflow, and page overflow; the execution path consumes
 that plan rather than maintaining separate layout arithmetic.
+The same reusable materializer revalidates the plan before mutation, clears the
+whole owned page, copies every `.tdata` template, preserves zero-filled tails
+and padding, and writes the self-referential TCB. A substituted plan is rejected
+without changing the destination page.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

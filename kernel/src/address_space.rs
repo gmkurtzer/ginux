@@ -1060,31 +1060,16 @@ pub(crate) fn verify_interpreted_elf_mapping(
             zero_frame(stack_page)?;
             zero_frame(mmap_page)?;
             zero_frame(mmap_tail_page)?;
-            zero_frame(tls_page)?;
-            let tls_bytes = mapped_frame::<u8>(tls_page)?;
-            core::ptr::copy_nonoverlapping(
-                auxiliary_tls.bytes.as_ptr(),
-                tls_bytes.add(auxiliary_tls_start_offset),
-                auxiliary_tls.bytes.len(),
-            );
-            core::ptr::copy_nonoverlapping(
-                dependency_tls.bytes.as_ptr(),
-                tls_bytes.add(dependency_tls_start_offset),
-                dependency_tls.bytes.len(),
-            );
-            core::ptr::copy_nonoverlapping(
-                main_tls.bytes.as_ptr(),
-                tls_bytes.add(main_tls_start_offset),
-                main_tls.bytes.len(),
-            );
-            tls_bytes
-                .add(LINUX_TLS_THREAD_POINTER_OFFSET)
-                .cast::<u64>()
-                .write(tls_base);
-            tls_bytes
-                .add(LINUX_TLS_THREAD_POINTER_OFFSET + size_of::<u64>())
-                .cast::<u64>()
-                .write(0);
+            let tls_bytes = &mut *(mapped_frame::<u8>(tls_page)? as *mut [u8; PAGE_SIZE]);
+            if !crate::linux_elf::materialize_static_tls_page(
+                tls_layout,
+                main_tls,
+                [dependency_tls, auxiliary_tls],
+                tls_base,
+                tls_bytes,
+            ) {
+                return None;
+            }
             let flags = |segment: crate::linux_elf::PlannedSegment<'_>| {
                 PRESENT
                     | USER
