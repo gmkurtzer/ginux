@@ -187,7 +187,9 @@ The interpreter is assembled from `linux-interpreter.S`; the runtime path links
 it as a five-header PIE with LLD, while the compact hand-built ELF remains a
 parser and planning fixture. The linked interpreter retains the linker-emitted
 null-only dynamic symbol/string/GNU-hash tables; those tables are validated but
-never used for resolution because its sole relocation is relative. At runtime
+never used for resolution because its sole relocation is relative. The compact
+fixture bounds raw interpreter text to its non-overlapping `0x100..0x400`
+executable window. At runtime
 it derives its page-aligned load bias and scans each bounded dynamic table for
 the admitted primary relocation, split PLT relocation, symbol-table, and
 hash-table tags rather than depending on tag order or embedding their values in
@@ -224,14 +226,18 @@ values are rejected. The main's linker metadata tail remains mapped for the
 interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
 After applying its self-relocation, the linked interpreter enters the syscall
-gate from its own admitted RX extent. It opens `/init` and
-`/lib64/libginux.so`, maps the first two pages of each through the immutable
-runtime-file interface, validates ELF magic and the first code byte at file
-offset `0x1100`, then unmaps and closes each descriptor before continuing with
-relocations. Syscall return validation accepts only the declared main and
-interpreter RX extents. This proves userspace file discovery, not yet
-userspace-owned executable mapping: the kernel still installs the parsed main
-and dependency segments before interpreter entry.
+gate from its own admitted RX extent and opens `/init`. Its main dynamic-table
+scan captures the sole `DT_NEEDED` string-table offset, requires a nonzero
+bounded name, and constructs `/lib64/<needed-name>` on the mapped user stack.
+It opens that derived path and maps the first two pages of both files through
+the immutable runtime-file interface, validates ELF magic and the first code
+byte at file offset `0x1100`, then unmaps and closes each descriptor before
+continuing with relocations. The namespace still admits only `libginux.so`, so
+an altered or unterminated name fails closed. Syscall return validation accepts
+only the declared main and interpreter RX extents. This proves metadata-driven
+userspace file discovery, not yet userspace-owned executable mapping: the
+kernel still installs the parsed main and dependency segments before
+interpreter entry.
 The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
 those bytes. The executable dynamic interpreter, main, and dependency instead

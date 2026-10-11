@@ -27,7 +27,7 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], rdx
 
 #ifdef GINUX_LINKED
-    call .Ldiscover_runtime_files
+    call .Ldiscover_main_file
 #endif
 
     mov edi, 0x405200
@@ -46,6 +46,7 @@ ginux_linux_interpreter:
     xor esi, esi
     xor r8d, r8d
     xor r13d, r13d
+    xor r12d, r12d
 .Lscan_main_dynamic:
     cmp qword ptr [rdi], 7
     cmove rax, qword ptr [rdi + 8]
@@ -57,6 +58,8 @@ ginux_linux_interpreter:
     cmove r13, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 23
     cmove rbx, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 1
+    cmove r12, qword ptr [rdi + 8]
     add rdi, 16
     loop .Lscan_main_dynamic
     test rax, rax
@@ -69,11 +72,28 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     test rbx, rbx
     jz .Linvalid_dynamic
+    test r12, r12
+    jz .Linvalid_dynamic
     add rax, r15
     add rsi, r15
     add r8, r15
     add r13, r15
     add rbx, r15
+    add r12, r13
+
+#ifdef GINUX_LINKED
+    push rax
+    push rsi
+    push r8
+    push r13
+    push rbx
+    call .Ldiscover_dependency_file
+    pop rbx
+    pop r13
+    pop r8
+    pop rsi
+    pop rax
+#endif
 
     mov edi, 0x613000
     cmp qword ptr [rdi], 14
@@ -198,11 +218,29 @@ ginux_linux_interpreter:
 
 #ifdef GINUX_LINKED
 .section .text.discovery,"ax",@progbits
-.Ldiscover_runtime_files:
+.Ldiscover_main_file:
     lea rsi, [rip + .Lmain_path]
     call .Linspect_runtime_file
-    lea rsi, [rip + .Ldependency_path]
+    ret
+
+.Ldiscover_dependency_file:
+    sub rsp, 32
+    movabs rax, 0x002f343662696c2f
+    mov qword ptr [rsp], rax
+    lea rdi, [rsp + 7]
+    mov rsi, r12
+    mov ecx, 13
+.Lcopy_needed_name:
+    lodsb
+    stosb
+    test al, al
+    jz .Lneeded_path_ready
+    loop .Lcopy_needed_name
+    jmp .Linvalid_dynamic
+.Lneeded_path_ready:
+    lea rsi, [rsp]
     call .Linspect_runtime_file
+    add rsp, 32
     ret
 
 .Linspect_runtime_file:
@@ -244,8 +282,6 @@ ginux_linux_interpreter:
 .section .rodata.loader,"a",@progbits
 .Lmain_path:
     .asciz "/init"
-.Ldependency_path:
-    .asciz "/lib64/libginux.so"
 
 .section .data,"aw",@progbits
     .ascii "DYNAMIC!"

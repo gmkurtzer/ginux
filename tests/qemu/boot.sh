@@ -668,6 +668,11 @@ if ! grep -q '^ginux: userspace Linux runtime files discovered' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux DT_NEEDED path resolved' "$output_file"; then
+    echo "Boot test failed: the userspace Linux interpreter did not resolve DT_NEEDED." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: toolchain-linked Linux PIE and shared object executed' "$output_file"; then
     echo "Boot test failed: the toolchain-linked Linux PIE/shared-object pair was not executed." >&2
     exit 1
