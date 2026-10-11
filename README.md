@@ -2,6 +2,12 @@
 
 Ginux is an immutable, capability-secure, container-native operating system for AI infrastructure. The native host is intentionally small: an immutable kernel boots one constrained control-plane domain, which creates isolated services and containers through stable interfaces.
 
+The first system-container storage prerequisite is a deterministic, bounded
+ASCII `newc` initramfs. The kernel validates normalized metadata, safe relative
+paths, uniqueness, alignment, an executable `init`, and an exact trailer while
+rejecting malformed variants during every QEMU boot. The current embedded
+`init` is a format marker, not PID 1; no archive is mounted or executed yet.
+
 The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. A separate isolated service probes and configures link, IPv4, default-gateway, and one static-route record through the first manifest-authorized network-device contract in control ABI v2; a monotonic generation makes effective configuration changes observable and rejects stale whole-state applies. Distinct read-only and write-only services prove that observation and mutation authority can be delegated independently, and a faulted network service is retired without losing mediated state or panicking the kernel. Packet I/O and a general route table remain deliberately unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
 
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
@@ -454,7 +460,7 @@ static artifact at `build/linux-probe.elf` and the dynamic fixtures at
 `build/linux-dynamic/linux-linked-main.elf`, and
 `build/linux-dynamic/libginux.so`. It also emits the bounded dependency-list
 fixtures `linux-linked-graph-main.elf` and `libginux-aux.so` for inspection
-without assembling the EFI
+and the deterministic proof root at `build/initramfs-v0.cpio` without assembling the EFI
 filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and
 proof-workload ABI constants share the machine-readable
@@ -514,4 +520,4 @@ fail-closed supervisor execution/access and user-mode instruction protection
 requirements. `QEMU_CPU` may select a different model only if it still
 advertises SMEP, SMAP, and UMIP.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v3](specs/boot/handoff-v3.md) for the firmware-to-kernel boundary, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v3](specs/boot/handoff-v3.md) for the firmware-to-kernel boundary, [Initramfs Archive Profile v0](specs/kernel/initramfs-v0.md) for the proof root format, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.

@@ -513,6 +513,26 @@ if ! grep -q '^ginux: malformed executable containers rejected' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: deterministic initramfs image accepted' "$output_file"; then
+    echo "Boot test failed: the deterministic initramfs image was not accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: bounded newc archive paths validated' "$output_file"; then
+    echo "Boot test failed: bounded initramfs paths were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: executable init entry discovered' "$output_file"; then
+    echo "Boot test failed: the initramfs executable init entry was not found." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: malformed initramfs archives rejected' "$output_file"; then
+    echo "Boot test failed: malformed initramfs archives were not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: non-executable Linux GNU stack enforced' "$output_file"; then
     echo "Boot test failed: Linux GNU stack policy was not enforced." >&2
     exit 1

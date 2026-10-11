@@ -7,6 +7,7 @@ mod control_abi;
 mod crypto;
 mod domain;
 mod executable;
+mod initramfs;
 mod ipc;
 mod linux_elf;
 mod manifest;
@@ -565,6 +566,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: bounded executable container accepted");
     serial_write("\r\nginux: authenticated executable entry points accepted");
     serial_write("\r\nginux: malformed executable containers rejected\r\n");
+    if !initramfs::verify_pinned_image() {
+        kernel_fail("ginux: bounded initramfs image invalid\r\n");
+    }
+    serial_write("ginux: deterministic initramfs image accepted\r\n");
+    serial_write("ginux: bounded newc archive paths validated\r\n");
+    serial_write("ginux: executable init entry discovered\r\n");
+    if !initramfs::verify_rejections() {
+        kernel_fail("ginux: malformed initramfs parser test failed\r\n");
+    }
+    serial_write("ginux: malformed initramfs archives rejected\r\n");
     if !linux_elf::verify_parser() {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
     }

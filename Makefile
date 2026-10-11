@@ -8,6 +8,7 @@ ESP_DIR := build/esp
 EFI_DESTINATION := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 LINUX_PROBE := build/linux-probe.elf
 LINUX_DYNAMIC_DIR := build/linux-dynamic
+INITRAMFS := build/initramfs-v0.cpio
 
 .DEFAULT_GOAL := help
 
@@ -35,18 +36,19 @@ manifest:
 
 linux-probe:
 	@mkdir -p "$(dir $(LINUX_PROBE))"
-	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-kernel --target $(TARGET) $(CARGO_PROFILE_FLAG)
+	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" GINUX_INITRAMFS_EXPORT="$(abspath $(INITRAMFS))" cargo build --package ginux-kernel --target $(TARGET) $(CARGO_PROFILE_FLAG)
 	@test -f "$(LINUX_PROBE)"
+	@test -f "$(INITRAMFS)"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-main.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-graph-main.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/libginux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/libginux-aux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/ld-ginux.so"
-	@echo "Built $(LINUX_PROBE) and $(LINUX_DYNAMIC_DIR)"
+	@echo "Built $(LINUX_PROBE), $(LINUX_DYNAMIC_DIR), and $(INITRAMFS)"
 
 build: manifest linux-probe
 	@echo "Building Ginux for $(TARGET) ($(PROFILE))"
-	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
+	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" GINUX_INITRAMFS_EXPORT="$(abspath $(INITRAMFS))" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
 	@mkdir -p "$(dir $(EFI_DESTINATION))"
 	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
 	@echo "Built $(EFI_DESTINATION)"
