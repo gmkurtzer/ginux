@@ -139,6 +139,7 @@ const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_DESCRIPTOR_INPUT: u8 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
+const LINUX_DEVICE_ZERO: u8 = 1 << 2;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_SETFD: u64 = 2;
@@ -255,7 +256,7 @@ static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_NULL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_DEVICE_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
@@ -854,7 +855,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         Ordering::SeqCst,
     );
     ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
-    ELF_PROBE_NULL_DESCRIPTOR.store(0, Ordering::SeqCst);
+    ELF_PROBE_DEVICE_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
@@ -875,7 +876,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_NULL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0;
+        && ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0;
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
         == LINUX_INITIAL_PROCESS_NAME
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
@@ -1195,7 +1196,7 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     match number {
-        LINUX_READ_SYSCALL => linux_descriptor_read(first_argument),
+        LINUX_READ_SYSCALL => linux_descriptor_read(first_argument, buffer, count),
         LINUX_WRITE_SYSCALL => linux_descriptor_write(first_argument, buffer, count),
         LINUX_SCHED_YIELD_SYSCALL => 0,
         LINUX_CLOSE_SYSCALL => linux_descriptor_close(first_argument),
@@ -1210,7 +1211,7 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_LSEEK_SYSCALL => {
-            if linux_null_descriptor(first_argument) != 0 {
+            if linux_device_descriptor(first_argument) != 0 {
                 0
             } else if linux_console_descriptor_open(first_argument) {
                 LINUX_ESPIPE
@@ -1240,7 +1241,7 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_IOCTL_SYSCALL => {
-            if linux_null_descriptor(first_argument) != 0 {
+            if linux_device_descriptor(first_argument) != 0 {
                 return LINUX_ENOTTY;
             }
             if !linux_console_descriptor_open(first_argument) {
@@ -1592,15 +1593,17 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
         Ok(length) => length,
         Err(error) => return error,
     };
-    if &path[..path_length] != b"/dev/null" {
-        return LINUX_ENOENT;
-    }
+    let kind = match &path[..path_length] {
+        b"/dev/null" => 0,
+        b"/dev/zero" => LINUX_DEVICE_ZERO,
+        _ => return LINUX_ENOENT,
+    };
     let access = flags & 3;
     if access == 3 || flags & !(3 | LINUX_O_CLOEXEC) != 0 {
         return LINUX_EINVAL;
     }
-    let state = (access + 1) as u8;
-    if ELF_PROBE_NULL_DESCRIPTOR
+    let state = kind | (access + 1) as u8;
+    if ELF_PROBE_DEVICE_DESCRIPTOR
         .compare_exchange(0, state, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
@@ -1623,7 +1626,7 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
         Ok(length) => length,
         Err(error) => return error,
     };
-    if &path[..path_length] != b"/dev/null" {
+    if !matches!(&path[..path_length], b"/dev/null" | b"/dev/zero") {
         return LINUX_ENOENT;
     }
     if !copy_to_linux_user(stat_address, &linux_console_stat()) {
@@ -1641,7 +1644,7 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
         Ok(length) => length,
         Err(error) => return error,
     };
-    if &path[..path_length] != b"/dev/null" {
+    if !matches!(&path[..path_length], b"/dev/null" | b"/dev/zero") {
         return LINUX_ENOENT;
     }
     if mode & 1 != 0 {
@@ -1651,11 +1654,24 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
     }
 }
 
-fn linux_descriptor_read(descriptor: u64) -> u64 {
-    let null = linux_null_descriptor(descriptor);
-    if matches!(null, LINUX_DESCRIPTOR_INPUT | 3)
-        || linux_console_descriptor(descriptor) == LINUX_DESCRIPTOR_INPUT
-    {
+fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
+    let device = linux_device_descriptor(descriptor);
+    let access = device & 3;
+    if access == LINUX_DESCRIPTOR_INPUT || access == 3 {
+        if device & LINUX_DEVICE_ZERO == 0 || count == 0 {
+            return 0;
+        }
+        let Ok(length) = usize::try_from(count) else {
+            return LINUX_EINVAL;
+        };
+        if length > LINUX_WRITE_LIMIT {
+            return LINUX_EINVAL;
+        }
+        if !copy_to_linux_user(address, &[0_u8; LINUX_WRITE_LIMIT][..length]) {
+            return LINUX_EFAULT;
+        }
+        count
+    } else if linux_console_descriptor(descriptor) == LINUX_DESCRIPTOR_INPUT {
         0
     } else {
         LINUX_EBADF
@@ -1663,8 +1679,8 @@ fn linux_descriptor_read(descriptor: u64) -> u64 {
 }
 
 fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
-    let null = linux_null_descriptor(descriptor);
-    if null == LINUX_DESCRIPTOR_OUTPUT || null == 3 {
+    let access = linux_device_descriptor(descriptor) & 3;
+    if access == LINUX_DESCRIPTOR_OUTPUT || access == 3 {
         count
     } else {
         linux_console_write(descriptor, address, count)
@@ -1734,16 +1750,16 @@ fn linux_console_descriptor_open(descriptor: u64) -> bool {
     linux_console_descriptor(descriptor) != 0
 }
 
-fn linux_null_descriptor(descriptor: u64) -> u8 {
+fn linux_device_descriptor(descriptor: u64) -> u8 {
     if descriptor == 2 {
-        ELF_PROBE_NULL_DESCRIPTOR.load(Ordering::SeqCst)
+        ELF_PROBE_DEVICE_DESCRIPTOR.load(Ordering::SeqCst)
     } else {
         0
     }
 }
 
 fn linux_descriptor_open(descriptor: u64) -> bool {
-    linux_console_descriptor_open(descriptor) || linux_null_descriptor(descriptor) != 0
+    linux_console_descriptor_open(descriptor) || linux_device_descriptor(descriptor) != 0
 }
 
 fn linux_console_descriptor(descriptor: u64) -> u8 {
@@ -1778,7 +1794,7 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
     if descriptor != 2 {
         return linux_console_close(descriptor);
     }
-    if ELF_PROBE_NULL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0 {
+    if ELF_PROBE_DEVICE_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0 {
         return LINUX_EBADF;
     }
     ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << 2), Ordering::SeqCst);
@@ -1884,7 +1900,7 @@ fn linux_console_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
 }
 
 fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
-    let state = linux_null_descriptor(descriptor);
+    let state = linux_device_descriptor(descriptor);
     if state == 0 {
         return linux_console_fcntl(descriptor, command, argument);
     }
@@ -1901,7 +1917,7 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
             }
             0
         }
-        LINUX_F_GETFL => u64::from(state - 1),
+        LINUX_F_GETFL => u64::from((state & 3) - 1),
         _ => LINUX_EINVAL,
     }
 }
