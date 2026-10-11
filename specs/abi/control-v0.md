@@ -220,9 +220,11 @@ and the executed workload; the latter validates the pointer, length, and bytes
 before exiting.
 Action 5 starts a staged auxiliary. The source field is its exact domain
 generation and the object and rights fields must be zero. The scheduler changes
-that one unambiguous context from `Staged` to `Ready`; normal scheduling may
-dispatch it immediately after the management call returns. Repeated starts and
-absent, ready, running, blocked, or wrong-generation targets fail closed.
+that one unambiguous, initialized context from `Staged` to `Ready`; normal
+scheduling may dispatch it immediately after the management call returns. A
+loaded context has an internal initialization latch that only action 4 can set.
+Premature starts, repeated initialization or starts, and absent, ready,
+running, blocked, or wrong-generation targets fail closed.
 Action 6 queries the exact live auxiliary named by source; object and rights
 must be zero. It returns 1 for created with no runtime context, 2 for staged, 3
 for ready, 4 for running, or 5 for blocked. Non-auxiliary, stopping, retired,

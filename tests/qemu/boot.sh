@@ -518,6 +518,11 @@ if ! grep -q '^ginux: private auxiliary payload initialization enforced' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: uninitialized auxiliary admission denied' "$output_file"; then
+    echo "Boot test failed: uninitialized auxiliary admission was not denied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: explicit auxiliary start authority enforced' "$output_file"; then
     echo "Boot test failed: explicit auxiliary start authority was not enforced." >&2
     exit 1

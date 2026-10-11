@@ -37,6 +37,7 @@ struct Thread {
     id: ThreadId,
     domain: u64,
     state: State,
+    initialized: bool,
     wait: Option<WaitReason>,
     context: UserContext,
 }
@@ -384,6 +385,7 @@ impl Scheduler {
             id,
             domain,
             state: State::Ready,
+            initialized: true,
             wait: None,
             context,
         });
@@ -540,7 +542,10 @@ impl Scheduler {
         let mut slot = None;
         for (index, thread) in self.threads.iter().enumerate() {
             if thread.is_some_and(|thread| thread.domain == domain) {
-                if slot.is_some() || thread.is_some_and(|thread| thread.state != State::Staged) {
+                if slot.is_some()
+                    || thread
+                        .is_some_and(|thread| thread.state != State::Staged || !thread.initialized)
+                {
                     return false;
                 }
                 slot = Some(index);
@@ -716,6 +721,7 @@ pub(crate) fn queue_auxiliary(
             return false;
         };
         queued.state = State::Staged;
+        queued.initialized = false;
         true
     } else {
         let Some(next) = runtime.scheduler.schedule_next() else {
@@ -750,7 +756,7 @@ pub(crate) fn initialize_staged_auxiliary(
     let mut matched = None;
     for thread in runtime.scheduler.threads.iter_mut().flatten() {
         if thread.domain == domain_id {
-            if matched.is_some() || thread.state != State::Staged {
+            if matched.is_some() || thread.state != State::Staged || thread.initialized {
                 return false;
             }
             matched = Some(thread);
@@ -761,6 +767,7 @@ pub(crate) fn initialize_staged_auxiliary(
     };
     thread.context.rsi = payload_address;
     thread.context.rdx = payload_length;
+    thread.initialized = true;
     true
 }
 
@@ -1357,11 +1364,17 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     let staging_control = staged.create(1, first_context)?;
     let staged_workload = staged.create(2, second_context)?;
     staged.thread_mut(staged_workload)?.state = State::Staged;
+    staged.thread_mut(staged_workload)?.initialized = false;
     let staging_run = staged.schedule_next()?;
     let staged_not_implicitly_admitted = staging_run.id == staging_control
         && staged.yield_current(staging_control, first_context)?.id == staging_control
         && staged.thread(staged_workload)?.state == State::Staged;
-    let staged_explicitly_started = staged.start_staged_domain(2)
+    let staged_explicitly_started = !staged.start_staged_domain(2)
+        && {
+            staged.thread_mut(staged_workload)?.initialized = true;
+            true
+        }
+        && staged.start_staged_domain(2)
         && !staged.start_staged_domain(2)
         && staged.yield_current(staging_control, first_context)?.id == staged_workload;
     Some(
