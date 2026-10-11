@@ -577,7 +577,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: linked Linux ELF64 probe invariant failed\r\n");
     }
     serial_write("ginux: toolchain-linked static Linux ELF executed\r\n");
-    serial_write("ginux: three-page Linux executable mapping validated\r\n");
+    serial_write("ginux: four-page Linux executable mapping validated\r\n");
     if !linux_elf::verify_load_plan() {
         kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
     }

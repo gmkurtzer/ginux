@@ -140,11 +140,11 @@ pub(crate) fn verify_linux_elf_mapping(
     {
         return false;
     }
-    let Some(frames) = memory::allocate_frames::<15>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<16>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page] =
+    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, first_fourth_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page] =
         addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
@@ -224,6 +224,8 @@ pub(crate) fn verify_linux_elf_mapping(
                 &mut *(mapped_frame::<u8>(first_tail_page)? as *mut [u8; PAGE_SIZE]);
             let first_third_bytes =
                 &mut *(mapped_frame::<u8>(first_third_page)? as *mut [u8; PAGE_SIZE]);
+            let first_fourth_bytes =
+                &mut *(mapped_frame::<u8>(first_fourth_page)? as *mut [u8; PAGE_SIZE]);
             let second_bytes = &mut *(mapped_frame::<u8>(second_page)? as *mut [u8; PAGE_SIZE]);
             let second_tail_bytes =
                 &mut *(mapped_frame::<u8>(second_tail_page)? as *mut [u8; PAGE_SIZE]);
@@ -236,6 +238,9 @@ pub(crate) fn verify_linux_elf_mapping(
                     && !crate::linux_elf::materialize_page(first, 1, first_tail_bytes)
                 || first.page_count == 3
                     && !crate::linux_elf::materialize_page(first, 2, first_third_bytes)
+                || first.page_count == 4
+                    && (!crate::linux_elf::materialize_page(first, 2, first_third_bytes)
+                        || !crate::linux_elf::materialize_page(first, 3, first_fourth_bytes))
                 || second.page_count == 2
                     && !crate::linux_elf::materialize_page(second, 1, second_tail_bytes)
                 || header.is_some_and(|segment| {
@@ -267,6 +272,14 @@ pub(crate) fn verify_linux_elf_mapping(
                 table_entries
                     .add(first_indexes[3] + 2)
                     .write(first_third_page | flags(first));
+            }
+            if first.page_count == 4 {
+                table_entries
+                    .add(first_indexes[3] + 2)
+                    .write(first_third_page | flags(first));
+                table_entries
+                    .add(first_indexes[3] + 3)
+                    .write(first_fourth_page | flags(first));
             }
             if let Some(segment) = header {
                 header_table_entries
@@ -373,8 +386,13 @@ pub(crate) fn verify_linux_elf_mapping(
             } else {
                 0
             };
-            let first_third_entry = if first.page_count == 3 {
+            let first_third_entry = if first.page_count >= 3 {
                 table_entries.add(first_indexes[3] + 2).read()
+            } else {
+                0
+            };
+            let first_fourth_entry = if first.page_count == 4 {
+                table_entries.add(first_indexes[3] + 3).read()
             } else {
                 0
             };
@@ -420,6 +438,9 @@ pub(crate) fn verify_linux_elf_mapping(
                 && (first.page_count < 3
                     || first_third_entry & (PRESENT | USER) == PRESENT | USER
                         && first_third_entry & (WRITABLE | NO_EXECUTE) == 0)
+                && (first.page_count < 4
+                    || first_fourth_entry & (PRESENT | USER) == PRESENT | USER
+                        && first_fourth_entry & (WRITABLE | NO_EXECUTE) == 0)
                 && second_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
                 && (second.page_count == 1
@@ -438,6 +459,8 @@ pub(crate) fn verify_linux_elf_mapping(
                     || crate::linux_elf::materialized_page_matches(first, 1, first_tail_bytes))
                 && (first.page_count < 3
                     || crate::linux_elf::materialized_page_matches(first, 2, first_third_bytes))
+                && (first.page_count < 4
+                    || crate::linux_elf::materialized_page_matches(first, 3, first_fourth_bytes))
                 && crate::linux_elf::materialized_page_matches(second, 0, second_bytes)
                 && (second.page_count == 1
                     || crate::linux_elf::materialized_page_matches(second, 1, second_tail_bytes))

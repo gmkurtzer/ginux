@@ -543,8 +543,8 @@ if ! grep -q '^ginux: toolchain-linked static Linux ELF executed' "$output_file"
     exit 1
 fi
 
-if ! grep -q '^ginux: three-page Linux executable mapping validated' "$output_file"; then
-    echo "Boot test failed: three-page Linux executable mapping was not validated." >&2
+if ! grep -q '^ginux: four-page Linux executable mapping validated' "$output_file"; then
+    echo "Boot test failed: four-page Linux executable mapping was not validated." >&2
     exit 1
 fi
 

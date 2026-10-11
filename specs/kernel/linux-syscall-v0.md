@@ -193,7 +193,7 @@ child fields remain zero. An invalid complete output returns `-EFAULT` without
 a partial write. This is bounded single-task accounting, not scheduler CPU
 charging or child aggregation.
 `rax = 9` (`__NR_mmap`) admits one anonymous private 4096-byte RW/NX mapping at
-fixed kernel-selected address `0x409000`. It requires a null hint, exact page
+fixed kernel-selected address `0x40a000`. It requires a null hint, exact page
 length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and
 offset zero. Unsupported arguments return `-EINVAL`; a request while the sole
 slot is occupied returns `-ENOMEM`. The kernel installs an allocator-owned,
@@ -217,9 +217,9 @@ atomically writes the single resident bit to a validated one-byte vector, and
 returns `-ENOMEM` after unmap. Misaligned or different ranges return `-EINVAL`;
 an invalid vector returns `-EFAULT`. It exposes only the fixed slot, not
 arbitrary page-table state or reclaim information.
-The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x405000`,
+The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x406000`,
 grow within one separately owned zero-filled RW/NX page, write through that
-mapping, and shrink the break. A request beyond `0x406000` follows Linux syscall
+mapping, and shrink the break. A request beyond `0x407000` follows Linux syscall
 semantics by returning the unchanged current break rather than a negative
 error. The page remains mapped for the lifetime of this bounded process and is
 scrubbed during teardown. A valid `write` copies from the grown heap. A second

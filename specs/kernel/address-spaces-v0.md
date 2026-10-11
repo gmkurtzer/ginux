@@ -40,7 +40,7 @@ before restoring the kernel root. General Linux process execution and collision
 policy remain separate milestones.
 
 That Linux proof also reserves one physical frame behind an initially absent
-leaf at `0x409000`. Its bounded anonymous mapping call validates an exact
+leaf at `0x40a000`. Its bounded anonymous mapping call validates an exact
 RW/NX request before installing the leaf; unmap clears the leaf, invalidates
 the local translation, and scrubs the frame before it can be installed again.
 While active, its writable leaf can be irreversibly sealed read-only; copy

@@ -57,10 +57,10 @@ header-table address/count, exact code and initialized data, 4608-byte data/BSS
 extent, and maps all three loads with role-derived permissions. The checked-in
 linker script fixes the read-only header load at
 `0x3ff000`, the non-page-base text entry at `0x400100`, and the data/BSS load at
-`0x403000`, with the final 512 bytes declared RELRO at `0x404000`; this is the
+`0x404000`, with the final 512 bytes declared RELRO at `0x405000`; this is the
 stable input contract for linked-image execution work. Both the assembly build
-and linker reject text larger than 12032 bytes, the exact space from the
-non-page-base entry through the end of its three-page executable mapping. Probe
+and linker reject text larger than 16128 bytes, the exact space from the
+non-page-base entry through the end of its four-page executable mapping. Probe
 growth therefore fails at build time instead of overlapping the writable load
 or silently exceeding the runtime loader profile.
 
@@ -100,17 +100,17 @@ byte. Runtime address-space installation owns and tears down every planned
 page, including a second BSS-only RW/NX page.
 
 QEMU maps the toolchain-linked read-only header at `0x3ff000` through a
-separately cloned 2 MiB leaf table, validates it beside the three-page RX and
+separately cloned 2 MiB leaf table, validates it beside the four-page RX and
 RW/NX loads, and runs the linked entry. The synthetic proof also installs one
-three-page RX load at `0x400000` and two RW/NX pages at
-`0x403000` and `0x404000` into a newly allocated x86-64 root. It privately clones
+four-page RX load at `0x400000` and two RW/NX pages at
+`0x404000` and `0x405000` into a newly allocated x86-64 root. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
 segment ranges; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
-map. An owned page at `0x405000` supplies one zero-filled RW/NX heap page. The
-page at `0x406000` remains an unmapped lower stack guard, and an owned page at
-`0x407000` supplies a RW/NX stack; `0x408000` remains an upper guard. A final
-owned frame is initially absent at `0x409000` and is installed only for the
+map. An owned page at `0x406000` supplies one zero-filled RW/NX heap page. The
+page at `0x407000` remains an unmapped lower stack guard, and an owned page at
+`0x408000` supplies a RW/NX stack; `0x409000` remains an upper guard. A final
+owned frame is initially absent at `0x40a000` and is installed only for the
 bounded anonymous `mmap` lifecycle. Before
 changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.
@@ -122,12 +122,12 @@ assembly; the build uses Clang to produce an ELF relocatable and extracts its
 `.text` section, so branch layout is assembler-validated instead of
 hand-encoded. The instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
-Linux `write(1, 0x403000, 8)` whose kernel copy-in verifies the RW payload. A
-bounded `arch_prctl(ARCH_SET_FS, 0x403000)` then makes the payload available
+Linux `write(1, 0x404000, 8)` whose kernel copy-in verifies the RW payload. A
+bounded `arch_prctl(ARCH_SET_FS, 0x404000)` then makes the payload available
 through an FS-relative TLS read. `ARCH_GET_FS` copies the active base back to
 the declared data segment; invalid operation and destination tests require
 `-EINVAL` and `-EFAULT` without terminating the task. A bounded
-`uname(0x403000)` subsequently
+`uname(0x404000)` subsequently
 copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 4608-byte `p_memsz`, rather
@@ -150,7 +150,7 @@ ring 3. Those calls are
 accepted only while an atomic probe flag is armed; exit returns directly to the
 saved kernel stack. The kernel verifies a ring-3 heap write after exit. The
 proof restores and reads back the kernel root, then clears and releases all
-fifteen root/table/reserved-segment/heap/stack/mapping frames.
+sixteen root/table/reserved-segment/heap/stack/mapping frames.
 
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the
