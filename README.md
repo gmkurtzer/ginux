@@ -14,6 +14,8 @@ images remain non-executable until the interpreter-first entry path is
 implemented. A bounded proof already maps a resolved `ET_EXEC` main image and
 relocated `ET_DYN` interpreter into separate W^X regions, validates both through
 the activated user root, restores the kernel root, and scrubs every owned frame.
+The execution-oriented main plan keeps its five-header table in a distinct
+read-only load so its `0x400100` entry remains intact.
 The profile is validated during boot,
 plans and installs up to two RX/RW pages per segment with independently
 zero-filled BSS, including ELF and program headers in the first load page. The

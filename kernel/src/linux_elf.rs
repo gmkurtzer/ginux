@@ -999,17 +999,7 @@ fn verify_position_independent_plan() -> bool {
 #[inline(never)]
 fn verify_interpreted_plan() -> bool {
     const PATH: &[u8] = b"/lib64/ld-ginux.so";
-    const PATH_WITH_NUL: &[u8] = b"/lib64/ld-ginux.so\0";
-    const PATH_OFFSET: usize = 0x3f80;
-    let mut main_bytes = fixture();
-    write_u16(&mut main_bytes, 56, 4);
-    write_u64(&mut main_bytes, 24, 0x40_0120);
-    write_interpreter(
-        &mut main_bytes,
-        ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE,
-        PATH_OFFSET,
-        PATH_WITH_NUL,
-    );
+    let main_bytes = interpreted_main_fixture();
     let interpreter_bytes = compact_position_independent_fixture();
     let (Some(main), Some(interpreter)) = (parse(&main_bytes), parse(&interpreter_bytes)) else {
         return false;
@@ -1020,21 +1010,25 @@ fn verify_interpreted_plan() -> bool {
     let startup = interpreted_startup(&combined);
     let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000);
     startup.initial_entry == 0x60_00f0
-        && startup.program_headers == 0x40_0040
-        && startup.program_header_count == 4
+        && startup.program_headers == 0x3f_f040
+        && startup.program_header_count == 5
         && startup.interpreter_base == 0x60_0000
-        && startup.main_entry == 0x40_0120
-        && auxiliary[1] == 0x40_0040
-        && auxiliary[5] == 4
+        && startup.main_entry == 0x40_0100
+        && auxiliary[1] == 0x3f_f040
+        && auxiliary[5] == 5
         && auxiliary[9] == 0x60_0000
         && auxiliary[23] == 0x70_1000
-        && auxiliary[25] == 0x40_0120
+        && auxiliary[25] == 0x40_0100
         && auxiliary[29] == 0x70_2000
         && auxiliary[34..] == [0, 0]
         && combined.initial_entry == 0x60_00f0
-        && combined.main_entry == 0x40_0120
+        && combined.main_entry == 0x40_0100
         && combined.interpreter_base == 0x60_0000
-        && combined.main.program_headers == 0x40_0040
+        && combined.main.program_headers == 0x3f_f040
+        && combined
+            .main
+            .read_only
+            .is_some_and(|segment| segment.virtual_address == 0x3f_f000)
         && combined.interpreter.program_headers == 0x60_0040
         && combined.interpreter.executable.virtual_page == 0x60_0000
         && combined.interpreter.writable.virtual_page == 0x60_3000
@@ -1201,6 +1195,68 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         return false;
     };
     crate::address_space::verify_interpreted_elf_mapping(&plan, protected_start, protected_size)
+}
+
+fn interpreted_main_fixture() -> [u8; FIXTURE_SIZE] {
+    const PATH: &[u8] = b"/lib64/ld-ginux.so\0";
+    const EXECUTABLE_OFFSET: usize = 0x200;
+    const PATH_OFFSET: usize = 0x3f80;
+    let mut bytes = [0_u8; FIXTURE_SIZE];
+    bytes[0..4].copy_from_slice(b"\x7fELF");
+    bytes[4] = 2;
+    bytes[5] = 1;
+    bytes[6] = 1;
+    write_u16(&mut bytes, 16, ET_EXEC);
+    write_u16(&mut bytes, 18, EM_X86_64);
+    write_u32(&mut bytes, 20, 1);
+    write_u64(&mut bytes, 24, 0x40_0100);
+    write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
+    write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
+    write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
+    write_u16(&mut bytes, 56, 5);
+    let program_table_size = (ELF_HEADER_SIZE + 5 * PROGRAM_HEADER_SIZE) as u64;
+    write_segment(
+        &mut bytes,
+        ELF_HEADER_SIZE,
+        0,
+        0x3f_f000,
+        program_table_size,
+        program_table_size,
+        PF_READ,
+    );
+    write_segment(
+        &mut bytes,
+        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
+        EXECUTABLE_OFFSET as u64,
+        0x40_0100,
+        PROBE_CODE.len() as u64,
+        (4 * PAGE_SIZE - 0x100) as u64,
+        PF_READ | PF_EXECUTE,
+    );
+    write_segment(
+        &mut bytes,
+        ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE,
+        FIXTURE_DATA_OFFSET as u64,
+        0x40_4000,
+        8,
+        (PAGE_SIZE + 512) as u64,
+        PF_READ | PF_WRITE,
+    );
+    write_relro(
+        &mut bytes,
+        ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE,
+        0x40_5000,
+        512,
+    );
+    write_interpreter(
+        &mut bytes,
+        ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE,
+        PATH_OFFSET,
+        PATH,
+    );
+    bytes[EXECUTABLE_OFFSET..EXECUTABLE_OFFSET + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
+    bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(b"PROBE!!\n");
+    bytes
 }
 
 fn fixture() -> [u8; FIXTURE_SIZE] {

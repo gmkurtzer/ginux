@@ -558,6 +558,11 @@ if ! grep -q '^ginux: bounded Linux interpreter resolution plan validated' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: separate-header Linux interpreter plan validated' "$output_file"; then
+    echo "Boot test failed: separate-header Linux interpreter planning was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux dynamic startup metadata validated' "$output_file"; then
     echo "Boot test failed: Linux dynamic startup metadata was not validated." >&2
     exit 1
