@@ -171,6 +171,14 @@ the raw Linux syscall value 20. It accepts only `PRIO_PROCESS` and PID 0 or 1;
 other selectors return `-EINVAL` and an unknown PID returns `-ESRCH`.
 `setpriority` accepts only an idempotent request for nice value zero; an actual
 priority change returns `-EPERM`.
+`rax = 228` (`__NR_clock_gettime`) exposes `CLOCK_MONOTONIC` and
+`CLOCK_MONOTONIC_RAW` from an ordered bootstrap-processor TSC. The conversion
+uses a CPUID-reported frequency when available and the PIT-calibrated fallback
+otherwise. Both clocks share a private process epoch, return a normalized
+16-byte x86-64 `timespec`, and cannot move backward during this single-CPU
+proof. Other clock IDs return `-EINVAL`; an invalid output range returns
+`-EFAULT` without changing its valid prefix. Realtime, CPU clocks, sleeping,
+adjustment, and a vDSO remain unsupported.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x405000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x406000` follows Linux syscall
@@ -311,6 +319,7 @@ bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
+bounded `clock_gettime`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,

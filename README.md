@@ -74,6 +74,8 @@ descriptor ceilings; unsupported resources, foreign PIDs, mutations, and
 invalid output ranges fail without changing user memory.
 Bounded `sched_getaffinity` and `getcpu` report the current bootstrap topology
 as CPU 0 in NUMA node 0, with atomic validation of their output ranges.
+Bounded `clock_gettime` reports monotonic and raw-monotonic elapsed time from a
+private TSC epoch, using PIT calibration when CPUID has no frequency data.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

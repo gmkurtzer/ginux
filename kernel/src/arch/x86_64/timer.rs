@@ -45,6 +45,7 @@ static PREEMPTION_COUNT: AtomicU8 = AtomicU8::new(0);
 static PREEMPTION_RELOAD: AtomicU32 = AtomicU32::new(0);
 static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
+static CALIBRATED_TSC_HZ: AtomicU64 = AtomicU64::new(0);
 
 global_asm!(
     r#"
@@ -106,6 +107,7 @@ extern "C" {
 pub(crate) struct LocalApicCalibration {
     pub(crate) counter_hz: u64,
     pub(crate) divider: u32,
+    pub(crate) tsc_hz: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -169,6 +171,36 @@ pub(crate) fn discover() -> Capabilities {
     }
 }
 
+/// Reads the processor timestamp counter after ordering earlier loads.
+///
+/// The bounded Linux clock profile uses this only on the bootstrap processor,
+/// with task migration and concurrent writers absent.
+pub(crate) fn timestamp_counter() -> u64 {
+    let low: u32;
+    let high: u32;
+    // SAFETY: LFENCE and RDTSC are unprivileged x86-64 instructions and do
+    // not access memory. LFENCE prevents an earlier read from passing RDTSC.
+    unsafe {
+        asm!(
+            "lfence",
+            "rdtsc",
+            out("eax") low,
+            out("edx") high,
+            options(nomem, nostack)
+        );
+    }
+    (u64::from(high) << 32) | u64::from(low)
+}
+
+pub(crate) fn monotonic_frequency() -> Option<u64> {
+    discover()
+        .frequency_hz
+        .or_else(|| match CALIBRATED_TSC_HZ.load(Ordering::SeqCst) {
+            0 => None,
+            frequency => Some(frequency),
+        })
+}
+
 /// Calibrates the masked local-APIC timer against a one-shot PIT interval.
 ///
 /// # Safety
@@ -192,6 +224,7 @@ pub(crate) unsafe fn calibrate_local_apic(
     out_u8(PIT_COMMAND, PIT_CHANNEL_2_MODE_0);
     out_u8(PIT_CHANNEL_2, PIT_CALIBRATION_TICKS as u8);
     out_u8(PIT_CHANNEL_2, (PIT_CALIBRATION_TICKS >> 8) as u8);
+    let tsc_start = timestamp_counter();
     out_u8(
         PIT_SPEAKER_CONTROL,
         (original_control & !PIT_SPEAKER_ENABLE) | PIT_GATE_2,
@@ -206,6 +239,7 @@ pub(crate) unsafe fn calibrate_local_apic(
         core::hint::spin_loop();
     }
 
+    let tsc_end = timestamp_counter();
     let current = apic.read(APIC_CURRENT_COUNT);
     apic.write(APIC_INITIAL_COUNT, 0);
     out_u8(PIT_SPEAKER_CONTROL, original_control);
@@ -217,9 +251,18 @@ pub(crate) unsafe fn calibrate_local_apic(
     let counter_hz = elapsed
         .checked_mul(PIT_FREQUENCY_HZ)?
         .checked_div(u64::from(PIT_CALIBRATION_TICKS))?;
-    (counter_hz != 0).then_some(LocalApicCalibration {
+    let tsc_hz = tsc_end
+        .checked_sub(tsc_start)?
+        .checked_mul(PIT_FREQUENCY_HZ)?
+        .checked_div(u64::from(PIT_CALIBRATION_TICKS))?;
+    if counter_hz == 0 || tsc_hz == 0 {
+        return None;
+    }
+    CALIBRATED_TSC_HZ.store(tsc_hz, Ordering::SeqCst);
+    Some(LocalApicCalibration {
         counter_hz,
         divider: 16,
+        tsc_hz,
     })
 }
 

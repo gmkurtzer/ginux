@@ -420,6 +420,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(u64::from(apic_timer.divider));
     serial_write("\r\nginux: APIC timer counter Hz: ");
     serial_write_u64(apic_timer.counter_hz);
+    serial_write("\r\nginux: calibrated TSC Hz: ");
+    serial_write_u64(apic_timer.tsc_hz);
     serial_write("\r\n");
 
     // SAFETY: The timer vector and APIC are exclusively owned during this
@@ -647,6 +649,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux single-thread scheduling yield validated\r\n");
     serial_write("ginux: Linux fixed scheduler policy validated\r\n");
     serial_write("ginux: Linux fixed process priority validated\r\n");
+    serial_write("ginux: Linux bounded monotonic clocks validated\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

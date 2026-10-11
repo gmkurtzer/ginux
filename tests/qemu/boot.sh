@@ -263,6 +263,11 @@ if ! grep -Eq '^ginux: APIC timer counter Hz: [1-9][0-9]*' "$output_file"; then
     exit 1
 fi
 
+if ! grep -Eq '^ginux: calibrated TSC Hz: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the calibrated TSC frequency is invalid." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: local APIC timer interrupt handled' "$output_file"; then
     echo "Boot test failed: the local APIC timer interrupt was not handled." >&2
     exit 1
@@ -870,6 +875,11 @@ fi
 
 if ! grep -q '^ginux: Linux fixed process priority validated' "$output_file"; then
     echo "Boot test failed: Linux fixed process priority was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux bounded monotonic clocks validated' "$output_file"; then
+    echo "Boot test failed: Linux monotonic clocks were not validated." >&2
     exit 1
 fi
 
