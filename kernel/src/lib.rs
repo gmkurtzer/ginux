@@ -674,6 +674,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux clone return values validated\r\n");
     serial_write("ginux: Linux clone child TID cleared on exit\r\n");
     serial_write("ginux: Linux clone parent TID preserved on child exit\r\n");
+    serial_write("ginux: bounded Linux futex waiter blocked\r\n");
+    serial_write("ginux: Linux clear-child-TID wake restored parent\r\n");
+    serial_write("ginux: Linux futex waiter state reclaimed\r\n");
     serial_write("ginux: per-thread Linux syscall stacks validated\r\n");
     serial_write("ginux: bounded Linux TID lifecycle validated\r\n");
     serial_write("ginux: stale Linux thread handles rejected\r\n");
@@ -767,7 +770,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux FS base query validated\r\n");
     serial_write("ginux: Linux clear-child-TID exit action validated\r\n");
     serial_write("ginux: Linux robust-list registration validated\r\n");
-    serial_write("ginux: Linux nonblocking futex boundary validated\r\n");
+    serial_write("ginux: bounded Linux futex boundary validated\r\n");
     serial_write("ginux: Linux read-only memory transition validated\r\n");
     serial_write("ginux: Linux initial process namespace identity validated\r\n");
     serial_write("ginux: Linux bounded process name state validated\r\n");

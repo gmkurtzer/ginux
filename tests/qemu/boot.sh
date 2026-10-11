@@ -793,6 +793,21 @@ if ! grep -q '^ginux: Linux clone parent TID preserved on child exit' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux futex waiter blocked' "$output_file"; then
+    echo "Boot test failed: the bounded Linux futex waiter did not block." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux clear-child-TID wake restored parent' "$output_file"; then
+    echo "Boot test failed: Linux clear-child-TID did not wake and restore the parent." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux futex waiter state reclaimed' "$output_file"; then
+    echo "Boot test failed: Linux futex waiter state was not reclaimed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: per-thread Linux syscall stacks validated' "$output_file"; then
     echo "Boot test failed: per-thread Linux syscall stacks were not validated." >&2
     exit 1
@@ -1333,8 +1348,8 @@ if ! grep -q '^ginux: Linux robust-list registration validated' "$output_file"; 
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux nonblocking futex boundary validated' "$output_file"; then
-    echo "Boot test failed: Linux futex boundary was not validated." >&2
+if ! grep -q '^ginux: bounded Linux futex boundary validated' "$output_file"; then
+    echo "Boot test failed: the bounded Linux futex boundary was not validated." >&2
     exit 1
 fi
 

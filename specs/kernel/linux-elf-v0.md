@@ -429,8 +429,8 @@ requires its entire extent and not the initial extent to be admitted, validates
 the sibling self pointer through SMAP-controlled access, then installs the
 initial context again and proves the admission decision reverses. Only then may
 the interpreter enter ring 3. This serialized bootstrap proof runs with one CPU
-and interrupts disabled. The cooperative clone/yield path switches this
-context, but timer-driven Linux-thread preemption remains undefined.
+and interrupts disabled. The clone/futex-wait/exit path switches this context,
+but timer-driven Linux-thread preemption remains undefined.
 
 The execution proof owns a fixed two-slot Linux thread table. Each live entry
 contains a monotonically assigned process-local TID, an internal slot
@@ -501,14 +501,17 @@ flags, authenticated sibling TLS pointer, guarded stack top, and distinct
 aligned parent- and child-TID words in the main writable segment. Publication
 makes the complete child context ready before writing the allocated TID to both
 words. The parent observes the same TID as its return value, while the child
-later resumes after the syscall with `rax = 0`.
-`sched_yield` persists the parent and selects that ready child through
+later resumes after the syscall with `rax = 0`. A matching `FUTEX_WAIT`
+persists the parent, records the exact child-TID address in its
+generation-tagged slot, marks it blocked, and selects the ready child through
 `SYSRETQ`. Its authenticated trampoline calls `exit(42)`; the kernel zeroes the
-registered child-TID word, leaves the parent-TID word unchanged, retires that
-slot, and restores the parent's saved
-registers, RIP/RSP/RFLAGS, FS base, and copy extent. The resumed parent verifies
-the zeroed word. This proves one complete userspace clone-parent-child-parent
-sequence, not repeated creation, simultaneous execution, or general scheduling.
+registered child-TID word, wakes the matching parent, leaves the parent-TID word
+unchanged, retires the child slot, and restores the parent's saved registers,
+RIP/RSP/RFLAGS, FS base, and copy extent. The resumed wait returns zero and the
+parent verifies both TID words. Teardown requires every waiter address to be
+zero. This proves one complete userspace clone-wait-child-wake-parent sequence,
+not repeated creation, simultaneous execution, timed waits, or general
+scheduling.
 
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns

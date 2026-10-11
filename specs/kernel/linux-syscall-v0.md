@@ -315,8 +315,8 @@ size rules; a different mask returns `-EINVAL`, and an invalid input returns
 four-byte pointers. Both destinations are validated before either is written;
 the obsolete cache pointer is ignored as on Linux. These results describe the
 single-bootstrap-processor profile and do not claim SMP scheduling support.
-`rax = 24` (`__NR_sched_yield`) succeeds as a no-op because this bounded
-process has exactly one runnable thread. `sched_getscheduler` reports
+`rax = 24` (`__NR_sched_yield`) selects the sole ready sibling when one exists
+and otherwise succeeds as a no-op. `sched_getscheduler` reports
 `SCHED_OTHER` for PID 0 or 1, and `sched_getparam` copies its priority of zero
 only after validating the complete output. `sched_get_priority_min` and
 `sched_get_priority_max` both report zero for `SCHED_OTHER`. Unknown PIDs
@@ -540,8 +540,8 @@ FS/copy-context transition. It performs every fallible lookup and MSR update
 before copying the target's registers, RIP, RSP, RFLAGS, and RAX into the output
 frame. Child installation moves TLS copy admission to the child; restoring the
 parent reverses it. A stale handle leaves both output frame and running identity
-untouched. The clone/yield runtime applies the same operation to the live
-assembly return frame.
+untouched. The clone, yield, futex-wait, and exit paths apply the same operation
+to the live assembly return frame.
 The bounded `sched_yield` proof now exercises the live form of this operation.
 The handler receives a mutable pointer to the exact assembly-owned typed frame,
 revalidates and reinstalls the current thread's TLS context, rewrites all twelve
@@ -553,11 +553,12 @@ For the interpreted profile, syscall 56 accepts only the exact bounded pthread
 flag set, fixed sibling TLS pointer, guarded stack top, and distinct aligned
 parent- and child-TID words in the authenticated writable mapping. It publishes
 the next monotonic TID to both words and returns that same value to the parent;
-the child context retains a zero return. A subsequent
-`sched_yield` saves the caller and redirects the live frame to the ready child.
-The child `exit(42)` clears only the child-TID word, preserves the parent-TID
-word, retires only that slot, selects
-the ready parent, and returns it through the same live-frame path.
+the child context retains a zero return. A subsequent matching `FUTEX_WAIT`
+saves the parent, records the exact wait address, marks its slot blocked, and
+redirects the live frame to the ready child. The child `exit(42)` clears only
+the child-TID word, wakes the matching parent, preserves the parent-TID word,
+retires only the child slot, and returns the parent through the same live-frame
+path. The resumed wait returns zero.
 `exit_group(42)` remains final process teardown. Repeated creation, parallel
 execution, timer preemption, and general Linux-thread scheduling are undefined.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
@@ -604,9 +605,9 @@ Next, `rax = 218` (`__NR_set_tid_address`) registers a
 four-byte word inside the declared RW segment and returns the current table
 entry's TID 1. The bounded
 proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
-registered word and clears the pointer from that thread's slot;
-the bounded clone child uses the same per-slot state, but blocking futex queues
-do not exist, so there is no waiter to wake. `rax = 273`
+registered word and clears the pointer from that thread's slot. The bounded
+clone child uses the same per-slot state; its exit also wakes the one parent
+blocked on that exact address. `rax = 273`
 (`__NR_set_robust_list`) registers one writable 24-byte
 robust-list head in the current generation-tagged thread slot. Other lengths return `-EINVAL`, and a head
 crossing the declared writable extent returns `-EFAULT`. `rax = 274`
@@ -618,13 +619,18 @@ or recovery is attempted. Internal TID lifecycle testing assigns distinct
 clear-child-TID and robust-list sentinels to two slots, proves they follow the
 current-thread selection, and proves retirement clears them before slot reuse.
 
-`rax = 202` (`__NR_futex`) provides the nonblocking portion of the single-thread
-futex contract. Aligned, readable `FUTEX_WAIT` and `FUTEX_WAIT_PRIVATE` compare
-one 32-bit word and return `-EAGAIN` when it differs from the expected value. A
-matching value returns `-ENOSYS` because honoring it would require a scheduler
-wait queue. `FUTEX_WAKE` and `FUTEX_WAKE_PRIVATE` return zero because this proof
-has no waiters. Invalid operations or alignment return `-EINVAL`, and an invalid
-word returns `-EFAULT`. No call silently pretends to block or wake a thread.
+`rax = 202` (`__NR_futex`) supports a bounded one-waiter lifecycle. Aligned,
+readable `FUTEX_WAIT` and `FUTEX_WAIT_PRIVATE` compare one 32-bit word and return
+`-EAGAIN` when it differs from the expected value. When the fixed clone child is
+ready, a match saves the current parent frame, records the wait address in that
+generation-tagged slot, marks it blocked, and selects the child. `FUTEX_WAKE`
+and `FUTEX_WAKE_PRIVATE` move up to the requested number of exact address
+matches back to ready state. Child clear-child-TID performs the same one-waiter
+wake after zeroing the word, then restores the parent; the resumed wait returns
+zero. A matching wait with no other ready thread returns `-ENOSYS` instead of
+deadlocking. Invalid operations or alignment return `-EINVAL`, and an invalid
+word returns `-EFAULT`. Timeouts, bitsets, requeueing, priority inheritance,
+multiple waiters, and cross-process keys remain undefined.
 
 `rax = 10` (`__NR_mprotect`) supports one irreversible transition on either the
 page named by the parsed `PT_GNU_RELRO` range or the complete active anonymous
@@ -682,7 +688,7 @@ bounded anonymous and immutable-file `mmap`/`munmap` plus bounded
 `madvise`/`mincore`, bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
-nonblocking single-thread `futex`,
+bounded one-waiter `futex`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
 bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
 `getitimer`/`setitimer`,
@@ -693,11 +699,11 @@ identity queries above,
 `clone`, `exit`, and `exit_group` calls. `clone` requires
 `CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID`,
 the fixed sibling stack and TLS resources, and distinct writable aligned parent-
-and child-TID words. It publishes the TID to both words, returns it to the parent and zero to the
-cooperatively scheduled child; child exit clears the word before restoring the
-parent. There is no general TID
-allocation, repeated or parallel thread creation, clear-child-TID futex wake,
-or robust futex recovery yet. Every other call
+and child-TID words. It publishes the TID to both words and returns it to the
+parent. A matching futex wait runs the zero-return child; child exit clears its
+word, wakes the blocked parent, and resumes the wait with zero. There is no
+general TID allocation, repeated or parallel thread creation, general futex
+queue, or robust futex recovery yet. Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
 remains disarmed outside the proof. The current copy helpers cover only the one

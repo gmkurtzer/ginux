@@ -121,22 +121,22 @@ the same transaction as syscall 56 for one fixed sibling context.
 The Linux `SYSCALL` entry now captures and restores `rbx`, `rbp`, and
 `r12`-`r15` alongside all six syscall argument registers. Existing argument
 indices remain unchanged for dispatch. This makes the complete preserved user
-register set available on the kernel stack when `sched_yield` switches between
-the bounded parent and child.
+register set available on the kernel stack when `sched_yield` or blocking
+`FUTEX_WAIT` switches between the bounded parent and child.
 The assembly layout is now represented by one `repr(C)` syscall-frame type
 rather than an untyped word slice. Clone construction copies all twelve saved
 registers into generation-bound per-thread storage alongside RIP, RSP, RFLAGS,
 RAX, and FS base. A checked selector reconstructs the complete return context
 only for the matching live handle; retired handles and newly reused slots have
-no selectable context. The live yield and child-exit paths use that selection
-to redirect `SYSRETQ`.
+no selectable context. The live yield, futex-wait, and child-exit paths use that
+selection to redirect `SYSRETQ`.
 A checked installer now validates the selected child first, switches the
 generation-tagged running state and FS/copy context, and then fills an exact
 return frame. Because all fallible work precedes the frame writes, a stale
 handle leaves every output word and the running parent unchanged. The boot
 proof installs the child, observes that copy admission moved to its TLS, and
-restores the parent with the reverse admission decision. The live clone path
-uses the same installer for the assembly-owned return frame.
+restores the parent with the reverse admission decision. The live thread paths
+use the same installer for the assembly-owned return frame.
 The real ring-3 `sched_yield` path now round-trips through that typed live
 frame. With interrupts disabled, the handler validates and reinstalls the
 current TLS context, writes all twelve registers plus RIP/RSP/RFLAGS into the
@@ -148,14 +148,17 @@ The call accepts only the authenticated sibling TLS pointer, guarded stack top,
 and distinct aligned parent- and child-TID words in the main writable mapping.
 Both words receive the monotonically allocated child TID before either thread
 returns to ring 3; the parent receives that same value, while the child resumes
-after the syscall with `rax = 0`. A cooperative
-`sched_yield` saves the complete parent frame and selects the child through the
-live `SYSRETQ` state. The child calls `exit(42)`, clears only its child-TID word,
-leaves the parent-TID word intact, retires itself, and restores the parent's
-registers, FS base, and copy ownership. Malformed requests return `EINVAL`, inaccessible TID writes
+after the syscall with `rax = 0`. The parent then performs a matching
+`FUTEX_WAIT` on the child-TID word. The kernel persists its complete frame,
+marks its generation-tagged slot blocked on that exact address, and selects the
+ready child through `SYSRETQ`. The child calls `exit(42)`, clears only its
+child-TID word, wakes the matching parent, leaves the parent-TID word intact,
+retires itself, and restores the parent's registers, FS base, and copy
+ownership. The resumed wait returns zero. Malformed requests return `EINVAL`, inaccessible TID writes
 return `EFAULT`, and occupied capacity returns `EAGAIN`. This remains a fixed
 two-slot, one-child profile without arbitrary allocation, simultaneous
-execution, preemption, blocking futex wakeups, or a general scheduler.
+execution, preemption, futex timeouts, multiple waiters, requeue operations, or
+a general scheduler.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.
@@ -318,10 +321,11 @@ PID 0, matching an initial process namespace. A bounded
 part of exit.
 Bounded `set_robust_list` and `get_robust_list` calls retain and report one
 24-byte thread robust-list head, reject foreign process IDs and invalid ranges,
-and discard the registration during exit. Nonblocking futex compare and wake
-semantics are exposed for the sole thread; a wait that would sleep returns
-`ENOSYS` until scheduler wait queues exist. Robust futex recovery is not
-implemented.
+and discard the registration during exit. A bounded matching futex wait may
+block the initial thread only when its one clone child is ready; child exit
+clears the registered word and wakes that exact waiter. Mismatches return
+`EAGAIN`, and a matching wait without another runnable thread returns `ENOSYS`.
+General futex queues, timeouts, and robust futex recovery are not implemented.
 Bounded `mprotect` can irreversibly seal the page named by the parsed
 `PT_GNU_RELRO` range or every page in the active anonymous extent as
 read-only/NX. The page-table permissions and syscall copy direction change

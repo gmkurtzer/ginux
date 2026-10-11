@@ -514,14 +514,19 @@ valid_interpreter_base:
     cmp eax, dword ptr [r8]
     jne failure
     mov ebx, eax
-#endif
-    mov eax, 24
+    mov ebp, edx
+    mov rdi, r8
+    xor esi, esi
+    mov edx, ebx
+    mov eax, 202
     call syscall_expect_zero
-#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     cmp dword ptr [r8], 0
     jne failure
-    cmp dword ptr [rdx], ebx
+    cmp dword ptr [rbp], ebx
     jne failure
+#else
+    mov eax, 24
+    call syscall_expect_zero
 #endif
 
     xor edi, edi
