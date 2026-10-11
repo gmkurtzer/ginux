@@ -29,7 +29,9 @@ const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE + P
 const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
 const CPUID_STRUCTURED_FEATURES: u32 = 7;
 const CPUID_SMEP: u32 = 1 << 7;
+const CPUID_SMAP: u32 = 1 << 20;
 const CR4_SMEP: u64 = 1 << 20;
+const CR4_SMAP: u64 = 1 << 21;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -111,6 +113,7 @@ global_asm!(
     .text
     .global ginux_breakpoint_entry
 ginux_breakpoint_entry:
+    clac
     cld
     push rax
     push rbx
@@ -200,6 +203,7 @@ ginux_double_fault_entry:
 
 ginux_fatal_exception_common:
     cli
+    clac
     cld
     push rax
     push rbx
@@ -311,6 +315,7 @@ ginux_user_enter:
     .global ginux_syscall_entry
 ginux_syscall_entry:
     cli
+    clac
     cld
     push rbx
     push rcx
@@ -417,6 +422,41 @@ pub(crate) fn supervisor_execution_prevention_enabled() -> bool {
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
     }
     cr4 & CR4_SMEP != 0
+}
+
+pub(crate) fn enable_supervisor_access_prevention() -> bool {
+    if __cpuid(0).eax < CPUID_STRUCTURED_FEATURES
+        || __cpuid_count(CPUID_STRUCTURED_FEATURES, 0).ebx & CPUID_SMAP == 0
+    {
+        return false;
+    }
+    let mut cr4: u64;
+    unsafe {
+        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+        cr4 |= CR4_SMAP;
+        asm!(
+            "mov cr4, {cr4}",
+            "clac",
+            cr4 = in(reg) cr4,
+            options(nomem, nostack)
+        );
+    }
+    supervisor_access_prevention_enabled()
+}
+
+pub(crate) fn supervisor_access_prevention_enabled() -> bool {
+    let cr4: u64;
+    unsafe {
+        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+    }
+    cr4 & CR4_SMAP != 0
+}
+
+pub(crate) unsafe fn with_supervisor_user_access<T>(operation: impl FnOnce() -> T) -> T {
+    asm!("stac", options(nostack));
+    let result = operation();
+    asm!("clac", options(nostack));
+    result
 }
 
 pub(crate) fn verify_user_syscall(
@@ -832,15 +872,21 @@ fn scrub_service_restart_stack() -> bool {
         return false;
     }
     let stack = stack_base as *mut u8;
-    unsafe {
-        for offset in 0..PAGE_SIZE {
-            stack.add(offset).write_volatile(0);
-        }
-        for offset in 0..PAGE_SIZE / size_of::<u64>() {
-            if stack.cast::<u64>().add(offset).read_volatile() != 0 {
-                return false;
+    let scrubbed = unsafe {
+        with_supervisor_user_access(|| {
+            for offset in 0..PAGE_SIZE {
+                stack.add(offset).write_volatile(0);
             }
-        }
+            for offset in 0..PAGE_SIZE / size_of::<u64>() {
+                if stack.cast::<u64>().add(offset).read_volatile() != 0 {
+                    return false;
+                }
+            }
+            true
+        })
+    };
+    if !scrubbed {
+        return false;
     }
     SERVICE_STACK_SCRUBBED.store(true, Ordering::Release);
     true

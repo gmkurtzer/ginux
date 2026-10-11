@@ -247,6 +247,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: SMEP unavailable or inactive\r\n");
     }
     serial_write("ginux: supervisor execution prevention active\r\n");
+    if !arch::x86_64::cpu::enable_supervisor_access_prevention() {
+        kernel_fail("ginux: SMAP unavailable or inactive\r\n");
+    }
+    serial_write("ginux: supervisor access prevention active\r\n");
     serial_write("ginux: null and bidirectional stack guard pages active\r\n");
 
     let Some(platform) = arch::x86_64::acpi::discover(
@@ -462,6 +466,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !domain::service_fault_was_delivered(service_domain)
         || !arch::x86_64::paging::static_page_tables_are_read_only()
         || !arch::x86_64::cpu::supervisor_execution_prevention_enabled()
+        || !arch::x86_64::cpu::supervisor_access_prevention_enabled()
         || !arch::x86_64::cpu::service_restart_stack_was_scrubbed()
         || !arch::x86_64::cpu::service_address_space_frames_were_transferred()
         || !domain::call_budget_proof_complete()

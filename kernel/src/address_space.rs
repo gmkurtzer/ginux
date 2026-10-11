@@ -123,7 +123,9 @@ pub(crate) fn verify_isolated_user_mapping() -> bool {
         (space.user_frame as *mut u64).write_volatile(0);
         activate(space.root);
         let activated = current_root() == space.root;
-        (USER_TEST_ADDRESS as *mut u64).write_volatile(TEST_PATTERN);
+        cpu::with_supervisor_user_access(|| {
+            (USER_TEST_ADDRESS as *mut u64).write_volatile(TEST_PATTERN);
+        });
         let aliased = (space.user_frame as *const u64).read_volatile() == TEST_PATTERN;
         activate(kernel_root);
         let restored = current_root() == kernel_root;
@@ -152,11 +154,14 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
         space.first_stack_frame.cast::<u64>().write_volatile(0);
         space.second_stack_frame.cast::<u64>().write_volatile(0);
         activate(space.root);
-        let code_visible = (USER_TEST_ADDRESS as *const u8).read_volatile() == 0x90;
         let first_stack_address = USER_TEST_ADDRESS + 2 * PAGE_SIZE;
         let second_stack_address = USER_TEST_ADDRESS + 4 * PAGE_SIZE;
-        (first_stack_address as *mut u64).write_volatile(TEST_PATTERN);
-        (second_stack_address as *mut u64).write_volatile(!TEST_PATTERN);
+        let code_visible = cpu::with_supervisor_user_access(|| {
+            let visible = (USER_TEST_ADDRESS as *const u8).read_volatile() == 0x90;
+            (first_stack_address as *mut u64).write_volatile(TEST_PATTERN);
+            (second_stack_address as *mut u64).write_volatile(!TEST_PATTERN);
+            visible
+        });
         let stacks_writable = space.first_stack_frame.cast::<u64>().read_volatile() == TEST_PATTERN
             && space.second_stack_frame.cast::<u64>().read_volatile() == !TEST_PATTERN;
         activate(kernel_root);
@@ -228,9 +233,13 @@ pub(crate) fn verify_ring3_control_plane(
             .cast::<u64>()
             .write_volatile(!TEST_PATTERN);
         activate(first_space.root);
-        let first_marker = ((USER_TEST_ADDRESS + 2 * PAGE_SIZE) as *const u64).read_volatile();
+        let first_marker = cpu::with_supervisor_user_access(|| {
+            ((USER_TEST_ADDRESS + 2 * PAGE_SIZE) as *const u64).read_volatile()
+        });
         activate(second_space.root);
-        let second_marker = ((USER_TEST_ADDRESS + 2 * PAGE_SIZE) as *const u64).read_volatile();
+        let second_marker = cpu::with_supervisor_user_access(|| {
+            ((USER_TEST_ADDRESS + 2 * PAGE_SIZE) as *const u64).read_volatile()
+        });
         activate(kernel_root);
         first_space
             .first_stack_frame

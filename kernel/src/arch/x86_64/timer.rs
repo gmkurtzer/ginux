@@ -51,6 +51,7 @@ global_asm!(
     .text
     .global ginux_apic_timer_entry
 ginux_apic_timer_entry:
+    clac
     cld
     push rax
     push rbx
@@ -91,6 +92,7 @@ ginux_apic_timer_entry:
 
     .global ginux_apic_spurious_entry
 ginux_apic_spurious_entry:
+    clac
     iretq
 "#,
     timer_handler = sym timer_interrupt_handler,

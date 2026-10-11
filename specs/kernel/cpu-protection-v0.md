@@ -19,6 +19,10 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
 - Supervisor-mode execution prevention (`CR4.SMEP`) required by the declared
   virtual CPU contract, enabled before ring-3 execution, and rechecked after
   the ring-3 workload.
+- Supervisor-mode access prevention (`CR4.SMAP`) required, enabled, and
+  rechecked on the same schedule. Assembly entries clear AC before entering
+  Rust; the few intentional bootstrap reads and writes of user mappings use a
+  bounded `STAC`/`CLAC` scope while interrupts remain disabled.
 
 Interrupts remain disabled while kernel bootstrap code runs. The kernel triggers
 `INT3` during every QEMU boot test; the assembly entry stub preserves
@@ -51,7 +55,8 @@ on a reset or timeout.
 All assembly-to-Rust callbacks use the explicit `sysv64` ABI. The UEFI target's
 default C ABI is Microsoft x64 and must not be assumed by handwritten stubs.
 
-The checked-in QEMU runner requests `qemu64,+smep`; a virtual CPU that does not
-advertise SMEP fails boot rather than silently weakening the boundary. SMAP is
-not enabled in this revision because supervisor accesses to user mappings still
-need to be routed through explicit, audited copy helpers first.
+The checked-in QEMU runner requests `qemu64,+smep,+smap`; a virtual CPU that
+does not advertise both features fails boot rather than silently weakening the
+boundary. The current access scope serves fixed bootstrap mappings only; a
+general user-copy API must additionally validate ranges and recover from copy
+faults before arbitrary userspace buffers are accepted.
