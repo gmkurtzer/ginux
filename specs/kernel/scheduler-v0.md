@@ -40,7 +40,7 @@ contained fault, one normal exit, and two cross-root dispatches.
 Each created thread also receives a fixed ten-call bootstrap budget. Every
 call-gate entry is charged before dispatch, including denied operations, yield,
 and exit. Exhaustion rejects further dispatch. The ring-3 proof accounts for
-exactly fourteen calls across its two threads, demonstrating that scheduling
+exactly sixteen calls across its two threads, demonstrating that scheduling
 does not merge their budgets.
 
 This revision uses one guarded TSS privilege stack because execution is

@@ -561,7 +561,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.exits == 1
         && runtime.faults == 1
         && runtime.expected_fault_observed
-        && runtime.syscalls == 14
+        && runtime.syscalls == 16
         && runtime.address_space_switches == 2
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)

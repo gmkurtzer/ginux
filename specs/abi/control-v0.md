@@ -1,13 +1,30 @@
 # Control-Plane Call Gate v0
 
-**Status:** Bring-up ABI; intentionally unstable.
+**Status:** Version-discoverable bring-up ABI; operations remain experimental.
 
 The measured ring-3 control-plane bundle invokes interrupt vector `0x80` with:
 
 - `RAX`: operation number;
-- `RDI`: opaque domain-local capability handle; and
+- `RDI`: opaque domain-local capability handle;
 - `RSI`: first immediate argument; and
 - `RAX` on return: result value.
+
+Operation 0 requires no capability and returns a discovery word. Bits 16-31
+contain ABI version 1 and bits 0-15 contain its feature bitmap:
+
+| Bit | Feature |
+|---:|---|
+| 0 | opaque capability handles |
+| 1 | cooperative context switching |
+| 2 | isolated address-space switching |
+| 3 | bounded IPC |
+| 4 | user-fault containment |
+| 5 | bounded console writes |
+
+Unknown feature bits must be ignored. A caller must reject an unsupported ABI
+version before invoking other operations. Existing operation semantics cannot
+be silently changed within version 1; incompatible changes require a new
+version and an overlap period when practical.
 
 Operation 1 is a ping requiring read authority on host-control object 1. It
 returns `0x4758` when authorized and `UINT64_MAX - 1` when denied. Operation 2
@@ -29,9 +46,11 @@ and requires success. The kernel accepts the boot only after observing denial,
 authorization, rejection of IPC and console calls using the wrong object, two
 authorized console records, a FIFO message, resumption after its peer's
 contained fault, and explicit survivor exit.
+Both contexts also query operation 0 and require the exact version-1 feature
+word before continuing.
 
 Handles encode a private table slot and generation and are meaningful only in
 the calling domain. Stale generations, out-of-range slots, and nonzero reserved
 high bits are rejected. A later version must define argument/result structures,
 cancellation and restart semantics, copy/validation rules, transfer semantics,
-and version negotiation.
+and a broader negotiation and deprecation policy.

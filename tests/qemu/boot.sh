@@ -238,6 +238,11 @@ if ! grep -q '^ginux: opaque capability handles enforced at call gate' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: control call ABI v1 negotiated' "$output_file"; then
+    echo "Boot test failed: control call ABI negotiation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace console capability enforced' "$output_file"; then
     echo "Boot test failed: userspace console authority failed." >&2
     exit 1

@@ -15,6 +15,7 @@ const TSS_SELECTOR: u16 = 0x18;
 const USER_DATA_SELECTOR: u16 = 0x2b;
 const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
+const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_003f;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
@@ -540,6 +541,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         return u64::MAX;
     }
     match number {
+        0 => CONTROL_ABI_V1_FEATURES,
         1 => {
             if domain::control_plane_handle_permits(capability, 1, Rights::READ) {
                 SYSCALL_STATE.fetch_or(2, Ordering::SeqCst);
