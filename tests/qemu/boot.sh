@@ -78,8 +78,8 @@ if ! grep -Eq '^ginux: usable memory MiB: [1-9][0-9]*' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: conventional frame probe passed' "$output_file"; then
-    echo "Boot test failed: conventional physical memory was not writable." >&2
+if ! grep -q '^ginux: physical frame allocator active' "$output_file"; then
+    echo "Boot test failed: physical frame allocation was not verified." >&2
     exit 1
 fi
 

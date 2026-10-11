@@ -1,6 +1,6 @@
 # Initial Physical-Memory Classification v0
 
-**Status:** Experimental; inventory only, with no allocator enabled.
+**Status:** Experimental monotonic allocator enabled below 4 GiB.
 
 After `ExitBootServices()`, the kernel walks the final UEFI memory map using the descriptor stride supplied by firmware. It does not assume that the stride equals the size of the descriptor prefix understood by the kernel.
 
@@ -20,4 +20,6 @@ The kernel validates that:
 - The total map length is an exact multiple of the supplied stride.
 - Page totals use saturating arithmetic while parsing untrusted firmware data.
 
-Before enabling allocation, the kernel must normalize overlapping or adjacent ranges, reject arithmetic overflow, reserve its image and handoff objects explicitly, and define when boot-service ranges become eligible for reuse.
+The initial allocator sorts and merges conventional ranges, rejects range arithmetic overflow, excludes the first MiB, and limits allocations to the currently mapped physical ceiling. Allocation is monotonic and returns distinct 4 KiB frames; deallocation and boot-service-memory reclamation are not yet supported. The QEMU gate allocates two frames, verifies independent volatile access, and clears both frames.
+
+Loader regions containing the unified image, handoff map, page tables, and kernel stacks are never admitted because only `EfiConventionalMemory` ranges enter the allocator.
