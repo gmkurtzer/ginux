@@ -42,8 +42,10 @@ Operation 4 sends the `RSI` word to IPC object 3 and requires write authority;
 operation 5 receives one word and requires read authority. The kernel selects
 the request or reply direction from the caller's domain role, so an endpoint
 cannot receive its own outbound words. Queued words retain an internal exact
-sender-generation tag that is validated at dequeue, but operation 5 returns
-only the scalar value in ABI v1. IPC failure returns `UINT64_MAX - 2`.
+sender-generation tag and a per-direction monotonic sequence number that are
+validated at dequeue, but operation 5 returns only the scalar value in ABI v1.
+Failed enqueues do not consume sequence numbers, while intentional retirement
+cleanup can create valid gaps. IPC failure returns `UINT64_MAX - 2`.
 After queued replies are drained, operation 5 returns `UINT64_MAX - 4` once
 for each generation-tagged service closure retained by the endpoint.
 Operation 6 writes one through eight packed bytes from `RSI`, with the byte
@@ -69,6 +71,8 @@ peer is runnable, it blocks the caller; a peer send wakes the caller and makes
 the sent word the operation's eventual return value only when the object and
 inbound endpoint direction match the saved wait key. If blocking would leave
 no runnable thread, it returns `UINT64_MAX - 2` without changing scheduler state.
+This direct-delivery path is bound to the exact peer generation but is not yet
+assigned a queued-message sequence number.
 If the opposite endpoint's domain exits or faults while the caller is blocked,
 the kernel makes the caller ready and operation 8 returns
 `UINT64_MAX - 4`. Cleanup matches both object and endpoint direction; unrelated

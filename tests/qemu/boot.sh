@@ -488,6 +488,11 @@ if ! grep -q '^ginux: generation-tagged IPC messages verified' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: monotonic queued IPC sequences verified' "$output_file"; then
+    echo "Boot test failed: queued IPC sequence validation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: blocking IPC direct wake completed' "$output_file"; then
     echo "Boot test failed: blocking IPC did not wake the waiting service." >&2
     exit 1

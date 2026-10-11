@@ -32,6 +32,17 @@ original failed service, not the replacement, and the consumed request to
 remain attributed to the control plane. Closure records use the same envelope
 and require their source and retired-generation value to agree.
 
+Queued request and reply envelopes also carry independent, monotonically
+increasing sequence numbers. Sequence zero is invalid, a failed enqueue does
+not consume a number, and service retirement or replacement rebinding does not
+reset either direction. Dequeue rejects a number that is not greater than the
+last accepted number for that direction. Retirement may deliberately discard
+requests for the old service, so gaps are valid and contiguity is not required.
+The local invariant injects zero and out-of-order envelopes, verifies that a
+full-queue send does not advance the counter, and proves that sequencing
+continues across service replacement. The QEMU proof audits sequence one in
+both directions for the first exchange.
+
 The channel is object 3 in the signed boot authority manifest. Sending requires
 `WRITE`; receiving requires `READ`. The call gate resolves the supplied opaque
 handle through the sealed control-plane capability table before touching the
@@ -77,8 +88,10 @@ a replacement that was bound but never scheduled. It requires an empty request
 direction, removes only that binding, and deliberately emits no peer-closure
 record for a service that never became observable.
 
-The scalar v1 receive result exposes only the immediate word; its source tag is
-currently kernel-auditable rather than returned to userspace. This revision has no capability transfer,
+The scalar v1 receive result exposes only the immediate word; its source and
+sequence tags are currently kernel-auditable rather than returned to
+userspace. Direct delivery to a blocked receiver is generation-bound but does
+not yet carry a sequence number. This revision has no capability transfer,
 cancellation request, timeout, or cleanup of queued replies after domain
 failure. It has one fixed control/service endpoint pair rather
 than allocatable endpoint objects. The global queue is safe only

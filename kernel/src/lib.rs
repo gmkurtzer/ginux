@@ -588,7 +588,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
     }
-    if ipc::last_message_sources() != Some((service_domain, control_plane)) {
+    if ipc::last_message_audit() != Some(((service_domain, 1), (control_plane, 1))) {
         kernel_fail("\r\nginux: IPC message provenance invariant failed\r\n");
     }
     if ipc::receive(control_plane) != ipc::Receive::PeerClosed(service_domain)
@@ -621,6 +621,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: directional IPC endpoints isolated");
     serial_write("\r\nginux: generation-bound IPC endpoints verified");
     serial_write("\r\nginux: generation-tagged IPC messages verified");
+    serial_write("\r\nginux: monotonic queued IPC sequences verified");
     serial_write("\r\nginux: blocking IPC direct wake completed");
     serial_write("\r\nginux: direct IPC wake provenance verified");
     serial_write("\r\nginux: IPC wait-key matching enforced");

@@ -14,16 +14,22 @@ struct Duplex {
     service_closures: Channel,
     last_control_message_source: Option<u64>,
     last_service_message_source: Option<u64>,
+    next_request_sequence: u64,
+    next_reply_sequence: u64,
+    last_control_message_sequence: u64,
+    last_service_message_sequence: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MessageEnvelope {
     source: u64,
+    sequence: u64,
     value: u64,
 }
 
 const EMPTY_MESSAGE: MessageEnvelope = MessageEnvelope {
     source: 0,
+    sequence: 0,
     value: 0,
 };
 
@@ -47,23 +53,51 @@ impl Duplex {
             service_closures: Channel::new(),
             last_control_message_source: None,
             last_service_message_source: None,
+            next_request_sequence: 1,
+            next_reply_sequence: 1,
+            last_control_message_sequence: 0,
+            last_service_message_sequence: 0,
         })
     }
 
     fn send(&mut self, domain: u64, message: u64) -> bool {
         if self.service_side(domain) == Some(true) {
-            self.replies.send(MessageEnvelope {
-                source: domain,
-                value: message,
-            })
+            Self::send_sequenced(
+                &mut self.replies,
+                &mut self.next_reply_sequence,
+                domain,
+                message,
+            )
         } else if self.service_side(domain) == Some(false) && self.service_domain.is_some() {
-            self.requests.send(MessageEnvelope {
-                source: domain,
-                value: message,
-            })
+            Self::send_sequenced(
+                &mut self.requests,
+                &mut self.next_request_sequence,
+                domain,
+                message,
+            )
         } else {
             false
         }
+    }
+
+    fn send_sequenced(
+        channel: &mut Channel,
+        next_sequence: &mut u64,
+        source: u64,
+        value: u64,
+    ) -> bool {
+        let Some(next) = next_sequence.checked_add(1) else {
+            return false;
+        };
+        if !channel.send(MessageEnvelope {
+            source,
+            sequence: *next_sequence,
+            value,
+        }) {
+            return false;
+        }
+        *next_sequence = next;
+        true
     }
 
     fn receive(&mut self, domain: u64) -> Receive {
@@ -71,17 +105,26 @@ impl Duplex {
             let Some(message) = self.requests.receive() else {
                 return Receive::Empty;
             };
-            if message.source != self.control_domain {
+            if message.source != self.control_domain
+                || message.sequence == 0
+                || message.sequence <= self.last_service_message_sequence
+            {
                 return Receive::Empty;
             }
             self.last_service_message_source = Some(message.source);
+            self.last_service_message_sequence = message.sequence;
             Receive::Message(message.value)
         } else if self.service_side(domain) == Some(false) {
             if let Some(message) = self.replies.receive() {
-                if message.source == 0 || message.source == self.control_domain {
+                if message.source == 0
+                    || message.source == self.control_domain
+                    || message.sequence == 0
+                    || message.sequence <= self.last_control_message_sequence
+                {
                     return Receive::Empty;
                 }
                 self.last_control_message_source = Some(message.source);
+                self.last_control_message_sequence = message.sequence;
                 Receive::Message(message.value)
             } else if let Some(closure) = self.service_closures.receive() {
                 if closure.source != closure.value {
@@ -104,6 +147,7 @@ impl Duplex {
         self.service_domain = None;
         self.service_closures.send(MessageEnvelope {
             source: domain,
+            sequence: 0,
             value: domain,
         })
     }
@@ -238,20 +282,50 @@ pub(crate) fn is_empty() -> bool {
     channel_mut().is_some_and(|channel| channel.is_empty())
 }
 
-pub(crate) fn last_message_sources() -> Option<(u64, u64)> {
+pub(crate) fn last_message_audit() -> Option<((u64, u64), (u64, u64))> {
     let channel = channel_mut()?;
     Some((
-        channel.last_control_message_source?,
-        channel.last_service_message_source?,
+        (
+            channel.last_control_message_source?,
+            channel.last_control_message_sequence,
+        ),
+        (
+            channel.last_service_message_source?,
+            channel.last_service_message_sequence,
+        ),
     ))
 }
 
 pub(crate) fn verify_channel_invariants() -> bool {
     let (control, service, replacement) = (1, 2, 3);
+    let Some(mut out_of_order) = Duplex::new(control, service) else {
+        return false;
+    };
+    let out_of_order_rejected = out_of_order.requests.send(MessageEnvelope {
+        source: control,
+        sequence: 2,
+        value: 10,
+    }) && out_of_order.receive(service) == Receive::Message(10)
+        && out_of_order.requests.send(MessageEnvelope {
+            source: control,
+            sequence: 1,
+            value: 20,
+        })
+        && out_of_order.receive(service) == Receive::Empty;
+    let Some(mut zero_sequence) = Duplex::new(control, service) else {
+        return false;
+    };
+    let zero_sequence_rejected = zero_sequence.requests.send(MessageEnvelope {
+        source: control,
+        sequence: 0,
+        value: 10,
+    }) && zero_sequence.receive(service) == Receive::Empty;
     let Some(mut channel) = Duplex::new(control, service) else {
         return false;
     };
-    channel.receive(control) == Receive::Empty
+    out_of_order_rejected
+        && zero_sequence_rejected
+        && channel.receive(control) == Receive::Empty
         && channel.receive(service) == Receive::Empty
         && channel.service_side(control) == Some(false)
         && channel.service_side(service) == Some(true)
@@ -301,7 +375,9 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.receive(control) == Receive::Empty
         && channel.is_empty()
         && channel.last_control_message_source == Some(service)
+        && channel.last_control_message_sequence == 2
         && channel.last_service_message_source == Some(control)
+        && channel.last_service_message_sequence == 7
 }
 
 fn channel_mut() -> Option<&'static mut Duplex> {
