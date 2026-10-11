@@ -58,7 +58,14 @@ all seven retained address-space leases from the failed generation to its
 replacement. Its local address-space record adopts the new owner only after
 verifying all seven ledger entries, and final release requires that owner. The
 live ledger is currently limited to 128 simultaneous allocations and fails
-closed at capacity. General per-domain quotas and partial resource transfer are
-not yet defined.
+closed at capacity. Each non-kernel owner is additionally limited to 16 live
+frames in this bootstrap revision. Multi-frame reservation stages the complete
+operation, so exceeding the owner budget consumes neither frames nor budget.
+Whole-owner transfer likewise checks the destination's existing count before
+changing any entry. The invariant test fills one owner, rejects its next frame,
+rejects transfer into an owner that would exceed the limit, and then completes
+the same transfer into an empty owner. The fixed number is a bring-up policy,
+not yet a configurable quota hierarchy; partial resource transfer is also
+undefined.
 
 Loader regions containing the unified image, handoff map, page tables, and kernel stacks are never admitted because only `EfiConventionalMemory` ranges enter the allocator.

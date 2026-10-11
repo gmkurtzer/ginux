@@ -248,6 +248,11 @@ if ! grep -q '^ginux: stale frame leases rejected' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: per-domain physical frame budgets enforced' "$output_file"; then
+    echo "Boot test failed: per-domain physical-frame budgets were not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated address space active' "$output_file"; then
     echo "Boot test failed: isolated address-space activation failed." >&2
     exit 1

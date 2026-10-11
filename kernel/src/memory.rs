@@ -7,6 +7,7 @@ const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 64;
 const MAX_RECYCLED_FRAMES: usize = 128;
 const MAX_LIVE_FRAMES: usize = 128;
+const DOMAIN_FRAME_LIMIT: usize = 16;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_ALLOCATOR: MaybeUninit<FrameAllocator> = MaybeUninit::uninit();
@@ -37,6 +38,10 @@ impl FrameOwner {
         } else {
             Some(Self(raw))
         }
+    }
+
+    const fn is_kernel(self) -> bool {
+        self.0 == 0
     }
 }
 
@@ -119,7 +124,9 @@ impl FrameAllocator {
     }
 
     fn allocate_one(&mut self, owner: FrameOwner) -> Option<FrameLease> {
-        if self.live_count == MAX_LIVE_FRAMES {
+        if self.live_count == MAX_LIVE_FRAMES
+            || (!owner.is_kernel() && self.owner_live_count(owner) >= DOMAIN_FRAME_LIMIT)
+        {
             return None;
         }
         if self.recycled_count != 0 {
@@ -231,12 +238,26 @@ impl FrameAllocator {
         if count == 0 {
             return None;
         }
+        if self
+            .owner_live_count(to)
+            .checked_add(count)
+            .is_none_or(|total| total > DOMAIN_FRAME_LIMIT)
+        {
+            return None;
+        }
         for owner in &mut self.live_owners[..self.live_count] {
             if *owner == from {
                 *owner = to;
             }
         }
         Some(count)
+    }
+
+    fn owner_live_count(&self, owner: FrameOwner) -> usize {
+        self.live_owners[..self.live_count]
+            .iter()
+            .filter(|live_owner| **live_owner == owner)
+            .count()
     }
 
     fn owns<const N: usize>(&self, owner: FrameOwner, frames: &[FrameLease; N]) -> bool {
@@ -392,6 +413,36 @@ pub(crate) fn verify_reservation_invariants() -> bool {
     let ownership_transferred = allocator.transfer_owner(owner, other_owner) == Some(1)
         && !allocator.owns(owner, &last)
         && allocator.owns(other_owner, &last);
+    let mut budgeted = FrameAllocator {
+        ranges: [EMPTY_RANGE; MAX_RANGES],
+        range_count: 1,
+        active_range: 0,
+        allocated_frames: 0,
+        live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
+        live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
+        live_count: 0,
+        recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
+        recycled_count: 0,
+    };
+    budgeted.ranges[0] = Range {
+        next: 0x40_0000,
+        end: 0x40_0000 + 33 * PAGE_SIZE,
+    };
+    let before_over_budget = budgeted;
+    let over_budget_atomic = budgeted.reserve::<17>(owner).is_none()
+        && budgeted.live_count == before_over_budget.live_count
+        && budgeted.ranges[0].next == before_over_budget.ranges[0].next;
+    let budget_filled = budgeted.reserve::<16>(owner).is_some()
+        && budgeted.reserve::<1>(owner).is_none()
+        && budgeted.reserve::<1>(other_owner).is_some();
+    let third_owner = FrameOwner(3);
+    let transfer_over_budget_rejected = budgeted.transfer_owner(owner, other_owner).is_none()
+        && budgeted.owner_live_count(owner) == 16
+        && budgeted.owner_live_count(other_owner) == 1;
+    let bounded_transfer_completed = budgeted.transfer_owner(owner, third_owner) == Some(16)
+        && budgeted.owner_live_count(owner) == 0
+        && budgeted.owner_live_count(third_owner) == 16;
+
     first.map(FrameLease::address) == [0x10_0000, 0x10_1000]
         && failed
         && failure_was_atomic
@@ -408,4 +459,8 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         && allocator.live_count == 3
         && allocator.available_frames() == 0
         && allocator.reserve::<0>(owner).is_none()
+        && over_budget_atomic
+        && budget_filled
+        && transfer_over_budget_rejected
+        && bounded_transfer_completed
 }
