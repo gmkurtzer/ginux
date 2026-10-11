@@ -416,9 +416,9 @@ boundaries, and rejects the complete sibling extent while both pages remain
 mapped. After returning to the kernel address space it clears every owned
 frame, explicitly verifies the sibling TLS frame contains only zeroes, releases
 the leases, and requires the kernel live-frame count to return to its starting
-value. This is a bounded allocation, access-state, and reclamation proof for a
-future thread. It does not provide a second scheduled Linux context, a TID,
-`clone`, or direct memory isolation between threads of the same process.
+value. The bounded `clone(2)` profile consumes this preallocated sibling TLS
+instance and assigns it a monotonic TID. It does not provide dynamic thread allocation or
+direct memory isolation between threads of the same process.
 
 A checked Linux TLS execution context binds one canonical thread pointer to its
 nonempty live copy extent; the TCB must fit inside that extent. The no-TLS form
@@ -429,8 +429,8 @@ requires its entire extent and not the initial extent to be admitted, validates
 the sibling self pointer through SMAP-controlled access, then installs the
 initial context again and proves the admission decision reverses. Only then may
 the interpreter enter ring 3. This serialized bootstrap proof runs with one CPU
-and interrupts disabled; it does not yet connect the context to scheduler
-preemption or expose Linux thread creation.
+and interrupts disabled. The cooperative clone/yield path switches this
+context, but timer-driven Linux-thread preemption remains undefined.
 
 The execution proof owns a fixed two-slot Linux thread table. Each live entry
 contains a monotonically assigned process-local TID, an internal slot
@@ -473,9 +473,9 @@ but denied by the active current-thread copy boundary forces all saved execution
 state and the child-clear-TID registration back to zero. A valid publication is
 read back through SMAP-controlled access while the child context remains ready;
 the proof then restores the original parent stack word and retires the child.
-`CLONE_CHILD_CLEARTID` registers but does not write the child-TID word. This is
-an atomicity proof only: no userspace `clone` syscall is enabled and the child
-is not runnable.
+`CLONE_CHILD_CLEARTID` registers but does not write the child-TID word. The
+ring-3 clone path uses the same transaction and later clears that registered
+word when the child exits.
 
 The child slot persists the complete typed x86-64 syscall frame: `r15`, `r14`,
 `r13`, `r12`, `rbp`, `rbx`, `r10`, `r9`, `r8`, `rdx`, `rsi`, and `rdi`, followed
@@ -484,8 +484,8 @@ matches the entry assembly and retains the existing six-argument syscall index
 contract. Return-context lookup first resolves the generation-tagged handle,
 then reconstructs and validates canonical instruction, stack, and FS values and
 safe flags. Retirement zeroes every register. A stale handle and an empty
-replacement generation cannot select a context. The selector is not yet wired
-to the hardware return path.
+replacement generation cannot select a context. Cooperative yield and child
+exit install the selected context into the hardware `SYSRETQ` path.
 
 The internal return installer resolves and validates the complete target
 context, then switches the generation-tagged running slot and installs its
@@ -493,19 +493,21 @@ FS/copy extent before writing the infallible output frame. The proof observes
 all child register values plus child-only TLS copy admission, switches back to
 the initial thread, and observes the admission decision reverse. Attempting to
 install the retired handle changes neither the caller-provided frame nor the
-current TID. The output is currently a local proof frame; the live assembly
-`SYSRETQ` state is not redirected yet.
+current TID. The runtime uses the same checked operation on the live assembly
+return frame.
 
-The interpreted runtime additionally creates one kernel-orchestrated proof
-child at the first bounded `sched_yield`. The yield target must lie in the
-authenticated main executable mapping. The parent frame is persisted, the
-child receives the separately owned TLS and guarded stack top, and the live
-assembly return state selects it through `SYSRETQ`. Its authenticated trampoline
-calls thread `exit`; the kernel retires that slot and restores the parent's
-saved registers, RIP/RSP/RFLAGS, FS base, and copy extent. Stack validation is
-resolved from the current generation-tagged slot and accepts the exact fresh
-child stack top. This proves one complete parent-child-parent ring-3 sequence,
-but creation is not yet exposed through `clone(2)`.
+The interpreted runtime invokes x86-64 syscall 56 with the exact bounded clone
+flags, authenticated sibling TLS pointer, guarded stack top, and one aligned
+TID word in the main writable segment. Publication makes the complete child
+context ready before writing the allocated TID to the parent-TID word. The
+parent observes the same TID as its return value, while the child later resumes
+after the syscall with `rax = 0`.
+`sched_yield` persists the parent and selects that ready child through
+`SYSRETQ`. Its authenticated trampoline calls `exit(42)`; the kernel zeroes the
+registered child-TID word, retires that slot, and restores the parent's saved
+registers, RIP/RSP/RFLAGS, FS base, and copy extent. The resumed parent verifies
+the zeroed word. This proves one complete userspace clone-parent-child-parent
+sequence, not repeated creation, simultaneous execution, or general scheduling.
 
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns

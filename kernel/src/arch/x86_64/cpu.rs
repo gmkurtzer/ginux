@@ -69,6 +69,7 @@ const LINUX_DUP2_SYSCALL: u64 = 33;
 const LINUX_GETITIMER_SYSCALL: u64 = 36;
 const LINUX_SETITIMER_SYSCALL: u64 = 38;
 const LINUX_GETPID_SYSCALL: u64 = 39;
+const LINUX_CLONE_SYSCALL: u64 = 56;
 const LINUX_CLONE_VM: u64 = 0x0000_0100;
 const LINUX_CLONE_FS: u64 = 0x0000_0200;
 const LINUX_CLONE_FILES: u64 = 0x0000_0400;
@@ -348,6 +349,7 @@ static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static LINUX_LIVE_RETURN_VALIDATED: AtomicBool = AtomicBool::new(false);
 static LINUX_CHILD_EXECUTED: AtomicBool = AtomicBool::new(false);
 static LINUX_PARENT_RESUMED: AtomicBool = AtomicBool::new(false);
+static LINUX_CLONE_DISPATCHED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
@@ -1196,6 +1198,12 @@ struct LinuxCloneResult {
     child: LinuxUserContext,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LinuxClonePublishError {
+    InvalidRequest,
+    ParentTidFault,
+}
+
 impl LinuxUserContext {
     fn is_valid(self) -> bool {
         const REQUIRED_RFLAGS: u64 = (1 << 1) | (1 << 9);
@@ -1413,7 +1421,7 @@ fn publish_linux_clone(
     return_rflags: u64,
     parent_writable_base: u64,
     parent_writable_size: usize,
-) -> Option<LinuxCloneResult> {
+) -> Result<LinuxCloneResult, LinuxClonePublishError> {
     let result = construct_linux_clone_context(
         handle,
         request,
@@ -1422,13 +1430,14 @@ fn publish_linux_clone(
         return_rflags,
         parent_writable_base,
         parent_writable_size,
-    )?;
+    )
+    .ok_or(LinuxClonePublishError::InvalidRequest)?;
     let tid = handle.tid;
     if !copy_to_linux_user(request.parent_tid, &tid.to_ne_bytes()) {
         clear_linux_thread_execution(usize::from(handle.slot));
-        return None;
+        return Err(LinuxClonePublishError::ParentTidFault);
     }
-    Some(result)
+    Ok(result)
 }
 
 fn linux_thread_return_context(handle: LinuxThreadHandle) -> Option<LinuxUserContext> {
@@ -1968,6 +1977,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     LINUX_LIVE_RETURN_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CHILD_EXECUTED.store(false, Ordering::SeqCst);
     LINUX_PARENT_RESUMED.store(false, Ordering::SeqCst);
+    LINUX_CLONE_DISPATCHED.store(false, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -2111,16 +2121,18 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 child_tid: execution.sibling_stack.checked_add(4)? as u64,
                 ..request
             };
-            let rollback_rejected = publish_linux_clone(
-                child,
-                rollback_request,
-                LinuxSyscallFrame::ZERO,
-                execution.entry as u64,
-                0x202,
-                execution.sibling_stack as u64,
-                PAGE_SIZE,
-            )
-            .is_none();
+            let rollback_rejected = matches!(
+                publish_linux_clone(
+                    child,
+                    rollback_request,
+                    LinuxSyscallFrame::ZERO,
+                    execution.entry as u64,
+                    0x202,
+                    execution.sibling_stack as u64,
+                    PAGE_SIZE,
+                ),
+                Err(LinuxClonePublishError::ParentTidFault)
+            );
             let slot = usize::from(child.slot);
             let rollback_clean = LINUX_THREAD_RIPS[slot].load(Ordering::SeqCst) == 0
                 && LINUX_THREAD_RSPS[slot].load(Ordering::SeqCst) == 0
@@ -2148,7 +2160,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 0x202,
                 initial_stack as u64,
                 PAGE_SIZE,
-            )?;
+            )
+            .ok()?;
             let selected = linux_thread_return_context(child)?;
             // SAFETY: the same two live, bounded stack words are inspected and
             // restored before userspace receives its initial stack.
@@ -2217,6 +2230,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let live_return_validated = LINUX_LIVE_RETURN_VALIDATED.swap(false, Ordering::SeqCst);
     let child_executed = LINUX_CHILD_EXECUTED.swap(false, Ordering::SeqCst);
     let parent_resumed = LINUX_PARENT_RESUMED.swap(false, Ordering::SeqCst);
+    let clone_dispatched = LINUX_CLONE_DISPATCHED.swap(false, Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let descriptor_snapshot = [
         u64::from(ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst)),
@@ -2459,7 +2473,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let valid = inactive
         && completed
         && live_return_validated
-        && (execution.tls_size == 0 || child_executed && parent_resumed)
+        && (execution.tls_size == 0 || child_executed && parent_resumed && clone_dispatched)
         && child_tid_cleared
         && robust_list_cleared
         && protected_page == execution.relro as u64
@@ -2950,6 +2964,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_RT_SIGPROCMASK_SYSCALL => {
             linux_rt_sigprocmask(first_argument, buffer, count, register(0))
         }
+        LINUX_CLONE_SYSCALL => linux_clone_thread(saved_registers, user_rip, user_rflags),
         LINUX_GETPID_SYSCALL => 1,
         LINUX_GETTID_SYSCALL => current_linux_tid().map_or(LINUX_ESRCH, u64::from),
         LINUX_GETPPID_SYSCALL => 0,
@@ -3271,6 +3286,66 @@ extern "sysv64" fn linux_syscall_handler(
         }
         _ => LINUX_ENOSYS,
     }
+}
+
+fn linux_clone_thread(registers: LinuxSyscallFrame, user_rip: u64, user_rflags: u64) -> u64 {
+    if current_linux_tid() != Some(1) || ready_linux_thread_handle().is_some() {
+        return LINUX_EAGAIN;
+    }
+    let sibling_fs = ELF_PROBE_SIBLING_FS_BASE.load(Ordering::SeqCst);
+    let sibling_tls = ELF_PROBE_SIBLING_TLS.load(Ordering::SeqCst);
+    let sibling_stack = ELF_PROBE_SIBLING_STACK.load(Ordering::SeqCst);
+    let tls_size = ELF_PROBE_TLS_SIZE.load(Ordering::SeqCst);
+    let request = LinuxCloneRequest {
+        flags: registers.rdi,
+        child_stack: registers.rsi,
+        parent_tid: registers.rdx,
+        child_tid: registers.r8,
+        tls: registers.r9,
+    };
+    if sibling_fs == 0
+        || sibling_tls == 0
+        || sibling_stack == 0
+        || tls_size == 0
+        || request.child_stack != sibling_stack + PAGE_SIZE as u64
+        || request.tls != sibling_fs
+    {
+        return LINUX_EINVAL;
+    }
+    let sibling_context = LinuxTlsContext {
+        thread_pointer: sibling_fs as usize,
+        extent: sibling_tls as usize,
+        extent_size: tls_size as usize,
+    };
+    let Some(child) = reserve_linux_thread(sibling_context, sibling_stack as usize, PAGE_SIZE)
+    else {
+        return LINUX_EAGAIN;
+    };
+    let data_base = ELF_PROBE_DATA.load(Ordering::SeqCst);
+    let Ok(data_size) = usize::try_from(ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst)) else {
+        let _ = retire_linux_thread(child);
+        return LINUX_EFAULT;
+    };
+    let result = match publish_linux_clone(
+        child,
+        request,
+        registers,
+        user_rip,
+        user_rflags,
+        data_base,
+        data_size,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = retire_linux_thread(child);
+            return match error {
+                LinuxClonePublishError::InvalidRequest => LINUX_EINVAL,
+                LinuxClonePublishError::ParentTidFault => LINUX_EFAULT,
+            };
+        }
+    };
+    LINUX_CLONE_DISPATCHED.store(true, Ordering::SeqCst);
+    result.parent_rax
 }
 
 fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {

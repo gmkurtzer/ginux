@@ -773,6 +773,21 @@ if ! grep -q '^ginux: Linux child exit restored suspended parent' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux clone syscall dispatched' "$output_file"; then
+    echo "Boot test failed: the bounded Linux clone syscall was not dispatched." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux clone return values validated' "$output_file"; then
+    echo "Boot test failed: Linux clone return values were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux clone child TID cleared on exit' "$output_file"; then
+    echo "Boot test failed: the Linux clone child TID was not cleared on exit." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: per-thread Linux syscall stacks validated' "$output_file"; then
     echo "Boot test failed: per-thread Linux syscall stacks were not validated." >&2
     exit 1

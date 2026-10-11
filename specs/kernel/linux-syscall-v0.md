@@ -520,9 +520,9 @@ clears the context. An internal publication proof copies the TID to the
 parent-TID word only after construction, rolls every child execution field back
 when that copy is denied, and leaves the child-TID word untouched as required by
 `CLONE_CHILD_CLEARTID`. It restores the proof word and retires the child before
-ring-3 entry. The path is not reachable as `clone(2)` and does not make the
-child runnable. This does not yet make syscall state generally per-thread or
-connect Linux TLS switching to scheduler preemption.
+ring-3 entry. Syscall 56 exposes the same transaction only for the fixed
+preallocated sibling TLS and guarded stack. This does not yet make all syscall
+state per-thread or connect Linux TLS switching to timer preemption.
 The x86-64 `SYSCALL` entry frame now includes `rbx`, `rbp`, and `r12`-`r15` in
 addition to `rdi`, `rsi`, `rdx`, `r8`, `r9`, and `r10`; dispatch retains its
 original six argument indexes. All twelve values are restored before `SYSRETQ`.
@@ -532,15 +532,15 @@ The entry frame has one `repr(C)` Rust representation with the same twelve-word
 order as the assembly pushes. Clone construction persists all twelve words plus
 RIP, RSP, RFLAGS, RAX, and FS base in the generation-tagged child slot. A
 checked lookup reconstructs the state only for a matching live handle and
-rejects zeroed, retired, or stale-generation contexts. This lookup remains an
-internal proof; `SYSRETQ` still restores the calling thread's frame.
+rejects zeroed, retired, or stale-generation contexts. Cooperative yield and
+child exit can install the selected frame for `SYSRETQ`.
 An internal installer now couples that checked lookup to the thread-state and
 FS/copy-context transition. It performs every fallible lookup and MSR update
 before copying the target's registers, RIP, RSP, RFLAGS, and RAX into the output
 frame. Child installation moves TLS copy admission to the child; restoring the
 parent reverses it. A stale handle leaves both output frame and running identity
-untouched. The tested output remains local rather than the live assembly return
-frame.
+untouched. The clone/yield runtime applies the same operation to the live
+assembly return frame.
 The bounded `sched_yield` proof now exercises the live form of this operation.
 The handler receives a mutable pointer to the exact assembly-owned typed frame,
 revalidates and reinstalls the current thread's TLS context, rewrites all twelve
@@ -548,13 +548,16 @@ registers and the RIP/RSP/RFLAGS return globals while interrupts remain
 disabled, verifies the written state, and returns through `SYSRETQ`. The ring-3
 workload continuing afterward proves the live round trip. This milestone still
 selects only the caller on profiles without sibling resources.
-For the interpreted profile, the first `sched_yield` supplies an authenticated
-main-code child target. The kernel saves the caller, reserves the fixed sibling
-TLS and guarded stack, and redirects the live frame to that child. A child
-`exit(42)` clears its per-thread state, retires only that slot, selects the ready
-parent, and returns the parent through the same live-frame path. `exit_group(42)`
-remains the final process teardown. This is a single kernel-orchestrated proof
-child; `clone(2)`, repeated creation, and general scheduling remain undefined.
+For the interpreted profile, syscall 56 accepts only the exact bounded pthread
+flag set, fixed sibling TLS pointer, guarded stack top, and aligned TID word in
+the authenticated writable mapping. It atomically publishes the next monotonic
+TID and returns that same value to the parent; the child context retains a zero
+return. A subsequent
+`sched_yield` saves the caller and redirects the live frame to the ready child.
+The child `exit(42)` clears the child-TID word, retires only that slot, selects
+the ready parent, and returns it through the same live-frame path.
+`exit_group(42)` remains final process teardown. Repeated creation, parallel
+execution, timer preemption, and general Linux-thread scheduling are undefined.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
@@ -600,8 +603,9 @@ four-byte word inside the declared RW segment and returns the current table
 entry's TID 1. The bounded
 proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
 registered word and clears the pointer from that thread's slot;
-because this profile has no second thread or futex support, there is no waiter
-to wake. `rax = 273` (`__NR_set_robust_list`) registers one writable 24-byte
+the bounded clone child uses the same per-slot state, but blocking futex queues
+do not exist, so there is no waiter to wake. `rax = 273`
+(`__NR_set_robust_list`) registers one writable 24-byte
 robust-list head in the current generation-tagged thread slot. Other lengths return `-EINVAL`, and a head
 crossing the declared writable extent returns `-EFAULT`. `rax = 274`
 (`__NR_get_robust_list`) reports the retained head and length for PID 0 or the
@@ -666,7 +670,7 @@ does not provide persistent per-thread kernel stacks, `IRETQ` fallback, signal
 interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
-threads, general TLS state, or any syscall other than the exact bounded
+general thread allocation, general TLS state, or any syscall other than the exact bounded
 `read`, `pread64`, `write`, `readv`, `writev`, bounded
 `poll`/`ppoll`/`epoll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`,
 bounded device/runtime-file `openat`, `lseek`, console `ioctl`, `brk`, `uname`,
@@ -683,13 +687,15 @@ bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,
-`set_tid_address`, bounded robust-list registration/query, `exit`, and
-`exit_group` calls. There is no userspace thread creation, general TID
-allocation, clone syscall dispatch, persistent TID publication,
-clear-child-TID futex wake,
-or robust futex recovery yet; the two-slot table, guarded sibling stack, and
-internal child-context constructor are exercised
-only by the bounded kernel lifecycle proof. Every other call
+`set_tid_address`, bounded robust-list registration/query, the exact bounded
+`clone`, `exit`, and `exit_group` calls. `clone` requires
+`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID`,
+the fixed sibling stack and TLS resources, and one writable aligned TID word.
+It returns the published monotonic TID to the parent and zero to the
+cooperatively scheduled child; child exit clears the word before restoring the
+parent. There is no general TID
+allocation, repeated or parallel thread creation, clear-child-TID futex wake,
+or robust futex recovery yet. Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
 remains disarmed outside the proof. The current copy helpers cover only the one
