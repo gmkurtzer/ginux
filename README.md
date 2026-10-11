@@ -29,6 +29,9 @@ Its initial single thread reports PID/TID/process-group/session ID 1 and parent
 PID 0, matching an initial process namespace. A bounded
 `set_tid_address` registration returns TID 1 and clears the registered word as
 part of exit.
+One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
+ring-3 workload grows and shrinks the break, writes through the mapping, and
+confirms that an out-of-range request leaves the current break unchanged.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

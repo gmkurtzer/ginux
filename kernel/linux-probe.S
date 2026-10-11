@@ -22,6 +22,29 @@ ginux_linux_probe:
     cmp qword ptr [rsp + 240], 0x400100
     jne failure
 
+    xor edi, edi
+    mov eax, 12
+    syscall
+    cmp rax, 0x402000
+    jne failure
+    mov edi, 0x402080
+    mov eax, 12
+    syscall
+    cmp rax, 0x402080
+    jne failure
+    movabs rax, 0x4845415042524b21
+    mov qword ptr [0x402000], rax
+    mov edi, 0x403001
+    mov eax, 12
+    syscall
+    cmp rax, 0x402080
+    jne failure
+    mov edi, 0x402040
+    mov eax, 12
+    syscall
+    cmp rax, 0x402040
+    jne failure
+
     mov eax, 999
     syscall
     cmp rax, -38

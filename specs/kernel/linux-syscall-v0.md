@@ -4,7 +4,7 @@
 verified in QEMU; not a general syscall ABI.
 
 The bounded static ELF proof invokes the architectural x86-64 `SYSCALL`
-instruction with Linux register conventions. It first submits unsupported call
+instruction with Linux register conventions. It submits unsupported call
 999 and requires Linux `-ENOSYS` (-38) after resumption. It then uses `rax = 1`
 (`__NR_write`) with fd 1, the declared RW segment address, and an eight-byte
 length. The kernel validates all three arguments, enables supervisor access to
@@ -15,6 +15,12 @@ a fixed 390-byte Linux `utsname`. The kernel zero-initializes every byte, fills
 all six 65-byte fields, and enables supervisor access to user memory only for
 the copy-out, which is subject to the same declared-extent check. The probe
 checks success and the `Ginux` system name.
+The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x402000`,
+grow within one separately owned zero-filled RW/NX page, write through that
+mapping, and shrink the break. A request beyond `0x403000` follows Linux syscall
+semantics by returning the unchanged current break rather than a negative
+error. The page remains mapped for the lifetime of this bounded process and is
+scrubbed during teardown.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active
@@ -63,7 +69,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, output
 streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `uname`, `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`, credential queries,
+`write`, `brk`, `uname`, `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`, credential queries,
 the bounded process/session identity queries above, `set_tid_address`, `exit`,
 and `exit_group` calls. There is no thread
 creation, TID allocation, or clear-child-TID futex wake yet. Every other call

@@ -573,6 +573,11 @@ if ! grep -q '^ginux: Linux static executable metadata validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded brk heap validated' "$output_file"; then
+    echo "Boot test failed: Linux bounded brk heap was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

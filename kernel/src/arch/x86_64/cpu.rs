@@ -45,6 +45,7 @@ const FS_BASE_MSR: u32 = 0xc000_0100;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
 const LINUX_WRITE_SYSCALL: u64 = 1;
+const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
@@ -149,6 +150,8 @@ static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ENTRY: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -694,7 +697,12 @@ pub(crate) fn verify_linux_elf_entry(
     stack: usize,
     data: usize,
     data_size: usize,
+    heap: usize,
+    heap_size: usize,
 ) -> bool {
+    let Some(heap_limit) = heap.checked_add(heap_size) else {
+        return false;
+    };
     if ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst) {
         return false;
     }
@@ -707,6 +715,8 @@ pub(crate) fn verify_linux_elf_entry(
     ELF_PROBE_ENTRY.store((entry & !(PAGE_SIZE - 1)) as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(data as u64, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(data_size as u64, Ordering::SeqCst);
+    ELF_PROBE_BRK.store(heap as u64, Ordering::SeqCst);
+    ELF_PROBE_BRK_LIMIT.store(heap_limit as u64, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
@@ -717,11 +727,20 @@ pub(crate) fn verify_linux_elf_entry(
     let child_tid_cleared = clear_child_tid == data as u64 + LINUX_CLEAR_CHILD_TID_OFFSET
         && copy_from_linux_user(clear_child_tid, &mut cleared_tid)
         && cleared_tid == [0; size_of::<u32>()];
+    // SAFETY: the loader owns and retains the mapped heap page through this
+    // verification, and SMAP access is enabled only around the bounded read.
+    let heap_written = unsafe {
+        with_supervisor_user_access(|| {
+            (heap as *const u64).read_volatile() == 0x4845_4150_4252_4b21
+        })
+    };
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
-    inactive && completed && child_tid_cleared && msrs_restored
+    ELF_PROBE_BRK.store(0, Ordering::SeqCst);
+    ELF_PROBE_BRK_LIMIT.store(0, Ordering::SeqCst);
+    inactive && completed && child_tid_cleared && heap_written && msrs_restored
 }
 
 fn configure_linux_syscall() -> Option<[u64; 5]> {
@@ -1004,6 +1023,18 @@ extern "sysv64" fn linux_syscall_handler(
                 8
             } else {
                 LINUX_EFAULT
+            }
+        }
+        LINUX_BRK_SYSCALL => {
+            let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
+            let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
+            if first_argument == 0 {
+                current
+            } else if (limit - PAGE_SIZE as u64..=limit).contains(&first_argument) {
+                ELF_PROBE_BRK.store(first_argument, Ordering::SeqCst);
+                first_argument
+            } else {
+                current
             }
         }
         LINUX_GETPID_SYSCALL | LINUX_GETTID_SYSCALL => 1,
