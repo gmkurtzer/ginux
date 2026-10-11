@@ -44,12 +44,15 @@ load biases, accepts the dependency's intentionally unmapped ELF headers, and
 executes the complete probe through the linker-generated jump slot.
 After relocating itself, the interpreter now invokes the Linux syscall gate
 from its own RX range and opens `/init`. After inspecting it through a temporary
-read-only window, the interpreter reopens it and installs its authenticated
-header, four RX, and two RW/NX pages through exact `MAP_FIXED_NOREPLACE`
-contracts. It then captures the main image's sole `DT_NEEDED` string,
+read-only window, the interpreter reopens it, bounds its 56-byte program-header
+table to eight entries in the two-page window, and derives page-aligned mmap
+requests from each readable `PT_LOAD`. It installs the authenticated header,
+four RX, and two RW/NX pages through exact `MAP_FIXED_NOREPLACE` contracts. It
+then captures the main image's sole `DT_NEEDED` string,
 constructs `/lib64/<needed-name>` on its bounded stack, inspects that derived
-dependency path, and installs its RX page at `0x610000` and RW/NX page at
-`0x613000`. Duplicate placement and W+X are rejected before it applies
+dependency path, walks that file's `PT_LOAD` entries the same way, and installs
+its RX page at `0x610000` and RW/NX page at `0x613000`. Wrong offsets,
+duplicate placement, and W+X are rejected before it applies
 dependency and main relocations. The kernel installs only the interpreter for
 this stage; it authenticates and plans the main and dependency and reserves
 their zeroed frames, but both images' content and leaves are installed by

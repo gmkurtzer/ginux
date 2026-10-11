@@ -228,20 +228,35 @@ interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
 After applying its self-relocation, the linked interpreter enters the syscall
 gate from its own admitted RX extent and opens `/init`. It first inspects a
-temporary read-only window, then reopens the file and installs offset `0` at
-`0x3ff000` read-only/NX, offsets `0x1000..0x4000` at
+temporary read-only window, then reopens the file and walks its ELF program
+headers in userspace. The walker requires a 56-byte `e_phentsize`, one through
+eight headers wholly inside the two-page inspection window, readable
+`PT_LOAD` entries, congruent file/virtual page offsets, `p_filesz <= p_memsz`,
+one through four pages per load, no unknown permission bits, W^X, and no more
+than seven installed pages per image. Checked arithmetic rejects wraparound.
+It translates ELF `PF_R/PF_W/PF_X` into mmap protections and derives each
+page address and file offset from the selected load bias. The resulting main
+requests install offset `0` at `0x3ff000` read-only/NX, offsets `0x1000..0x4000` at
 `0x400000..0x403000` RX, and offsets `0x5000..0x6000` at
 `0x404000..0x405000` RW/NX through exact one-page `MAP_PRIVATE |
 MAP_FIXED_NOREPLACE` requests. The last writable page is later sealed
 read-only/NX by the admitted GNU RELRO transition. A repeated header request
 returns `-EEXIST`, and a W+X text request returns `-EINVAL`.
 
+This userspace walker is defense in depth over files already authenticated and
+fully validated by the kernel plan; it is not yet an independent general ELF
+validator. In particular, file identity, ELF class/machine, segment overlap,
+entry validity, dynamic metadata, and the final admitted page set remain
+kernel-enforced contracts.
+
 The main dynamic-table scan then captures the sole `DT_NEEDED` string-table
 offset, requires a nonzero bounded name, and constructs
 `/lib64/<needed-name>` on the mapped user stack. It inspects that derived file
-before reopening it and maps file offset `0x1000` RX at `0x610000` and offset
-`0x2000` RW/NX at `0x613000` through the same fixed contract. A repeated RX
-request returns `-EEXIST`; a W+X data request returns `-EINVAL`. Only then does
+before reopening it and applies the same program-header walker at dependency
+bias `0x610000`. The resulting requests map file offset `0x1000` RX at
+`0x610000` and offset `0x2000` RW/NX at `0x613000` through the same fixed
+contract. A repeated first-page
+request returns `-EEXIST`; a W+X executable request returns `-EINVAL`. Only then does
 it apply dependency and main relocations. The namespace still admits only
 `libginux.so`, so an altered or unterminated name fails closed. Syscall return
 validation accepts only the declared main and interpreter RX extents. The

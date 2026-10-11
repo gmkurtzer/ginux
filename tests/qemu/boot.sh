@@ -668,6 +668,11 @@ if ! grep -q '^ginux: userspace Linux runtime files discovered' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux PT_LOAD mappings derived' "$output_file"; then
+    echo "Boot test failed: the userspace Linux interpreter did not derive PT_LOAD mappings." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace Linux main segments mapped' "$output_file"; then
     echo "Boot test failed: the userspace Linux interpreter did not map main segments." >&2
     exit 1

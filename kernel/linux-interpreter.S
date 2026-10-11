@@ -221,87 +221,9 @@ ginux_linux_interpreter:
 .Ldiscover_main_file:
     lea rsi, [rip + .Lmain_path]
     call .Linspect_runtime_file
-
-    mov edi, -100
     lea rsi, [rip + .Lmain_path]
-    xor edx, edx
-    mov eax, 257
-    syscall
-    cmp rax, 2
-    jne .Linvalid_dynamic
-
-    mov edi, 0x400000
-    mov esi, 4096
-    mov edx, 7
-    mov r10d, 0x100002
-    mov r8d, 2
-    mov r9d, 0x1000
-    mov eax, 9
-    syscall
-    cmp rax, -22
-    jne .Linvalid_dynamic
-
-    mov edi, 0x400000
-    mov edx, 5
-    mov r9d, 0x2000
-    mov eax, 9
-    syscall
-    cmp rax, -22
-    jne .Linvalid_dynamic
-
-    mov edi, 0x610000
-    mov r9d, 0x1000
-    mov eax, 9
-    syscall
-    cmp rax, -22
-    jne .Linvalid_dynamic
-
-    mov edi, 0x3ff000
-    mov edx, 1
-    xor r9d, r9d
-    call .Lmap_main_page
-    mov eax, 9
-    syscall
-    cmp rax, -17
-    jne .Linvalid_dynamic
-
-    mov edi, 0x400000
-    mov edx, 5
-    mov r9d, 0x1000
-    call .Lmap_main_page
-    mov edi, 0x401000
-    mov r9d, 0x2000
-    call .Lmap_main_page
-    mov edi, 0x402000
-    mov r9d, 0x3000
-    call .Lmap_main_page
-    mov edi, 0x403000
-    mov r9d, 0x4000
-    call .Lmap_main_page
-
-    mov edi, 0x404000
-    mov edx, 3
-    mov r9d, 0x5000
-    call .Lmap_main_page
-    mov edi, 0x405000
-    mov r9d, 0x6000
-    call .Lmap_main_page
-
-    mov edi, 2
-    mov eax, 3
-    syscall
-    test rax, rax
-    jne .Linvalid_dynamic
-    ret
-
-.Lmap_main_page:
-    mov esi, 4096
-    mov r10d, 0x100002
-    mov r8d, 2
-    mov eax, 9
-    syscall
-    cmp rax, rdi
-    jne .Linvalid_dynamic
+    mov r14d, 0x3ff000
+    call .Lload_runtime_file
     ret
 
 .Ldiscover_dependency_file:
@@ -321,50 +243,167 @@ ginux_linux_interpreter:
 .Lneeded_path_ready:
     lea rsi, [rsp]
     call .Linspect_runtime_file
-
-    mov edi, -100
     lea rsi, [rsp]
+    mov r14d, 0x610000
+    call .Lload_runtime_file
+    add rsp, 32
+    ret
+
+.Lload_runtime_file:
+    push r15
+    mov edi, -100
     xor edx, edx
     mov eax, 257
     syscall
     cmp rax, 2
     jne .Linvalid_dynamic
 
-    mov edi, 0x610000
-    mov esi, 4096
-    mov edx, 5
-    mov r10d, 0x100002
+    xor edi, edi
+    mov esi, 8192
+    mov edx, 1
+    mov r10d, 2
     mov r8d, 2
-    mov r9d, 0x1000
+    xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, 0x610000
+    cmp rax, 0x40a000
     jne .Linvalid_dynamic
-    mov eax, 9
-    syscall
-    cmp rax, -17
+    cmp dword ptr [0x40a000], 0x464c457f
     jne .Linvalid_dynamic
 
-    mov edi, 0x613000
-    mov edx, 7
-    mov r9d, 0x2000
+    mov r12, qword ptr [0x40a020]
+    movzx r13d, word ptr [0x40a038]
+    cmp word ptr [0x40a036], 56
+    jne .Linvalid_dynamic
+    test r13d, r13d
+    jz .Linvalid_dynamic
+    cmp r13d, 8
+    ja .Linvalid_dynamic
+    mov rax, r13
+    imul rax, rax, 56
+    add rax, r12
+    jc .Linvalid_dynamic
+    cmp rax, 8192
+    ja .Linvalid_dynamic
+    add r12, 0x40a000
+    xor ebp, ebp
+    xor r15d, r15d
+
+.Lnext_program_header:
+    cmp dword ptr [r12], 1
+    jne .Ladvance_program_header
+    mov eax, dword ptr [r12 + 4]
+    test eax, -8
+    jnz .Linvalid_dynamic
+    test eax, 4
+    jz .Linvalid_dynamic
+    mov rbx, qword ptr [r12 + 40]
+    test rbx, rbx
+    jz .Linvalid_dynamic
+    mov rcx, qword ptr [r12 + 32]
+    cmp rcx, rbx
+    ja .Linvalid_dynamic
+
+    mov r9, qword ptr [r12 + 8]
+    mov rcx, qword ptr [r12 + 16]
+    mov rdx, r9
+    xor rdx, rcx
+    test edx, 4095
+    jnz .Linvalid_dynamic
+    and r9, -4096
+    add rcx, r14
+    jc .Linvalid_dynamic
+    mov rdi, rcx
+    and rdi, -4096
+    and ecx, 4095
+    add rbx, rcx
+    jc .Linvalid_dynamic
+    add rbx, 4095
+    jc .Linvalid_dynamic
+    shr rbx, 12
+    test rbx, rbx
+    jz .Linvalid_dynamic
+    cmp rbx, 4
+    ja .Linvalid_dynamic
+
+    xor edx, edx
+    test eax, 4
+    jz .Lload_write_flag
+    or edx, 1
+.Lload_write_flag:
+    test eax, 2
+    jz .Lload_execute_flag
+    or edx, 2
+.Lload_execute_flag:
+    test eax, 1
+    jz .Lmap_load_page
+    or edx, 4
+
+.Lmap_load_page:
+    cmp ebp, 7
+    jae .Linvalid_dynamic
+    mov esi, 4096
+    mov r10d, 0x100002
+    mov r8d, 2
+    test ebp, ebp
+    jnz .Ltest_load_wx
+    add r9, 4096
     mov eax, 9
     syscall
     cmp rax, -22
     jne .Linvalid_dynamic
-    mov edi, 0x613000
-    mov edx, 3
+    sub r9, 4096
+.Ltest_load_wx:
+    test edx, 4
+    jz .Linstall_load_page
+    test r15d, r15d
+    jnz .Linstall_load_page
+    or edx, 2
     mov eax, 9
     syscall
-    cmp rax, 0x613000
+    cmp rax, -22
+    jne .Linvalid_dynamic
+    xor edx, 2
+    mov r15d, 1
+.Linstall_load_page:
+    mov eax, 9
+    syscall
+    cmp rax, rdi
+    jne .Linvalid_dynamic
+    test ebp, ebp
+    jnz .Lload_page_installed
+    mov eax, 9
+    syscall
+    cmp rax, -17
+    jne .Linvalid_dynamic
+.Lload_page_installed:
+    inc ebp
+    add rdi, 4096
+    add r9, 4096
+    dec rbx
+    jnz .Lmap_load_page
+
+.Ladvance_program_header:
+    add r12, 56
+    dec r13d
+    jnz .Lnext_program_header
+    test ebp, ebp
+    jz .Linvalid_dynamic
+    cmp r15d, 1
     jne .Linvalid_dynamic
 
+    mov edi, 0x40a000
+    mov esi, 8192
+    mov eax, 11
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
     mov edi, 2
     mov eax, 3
     syscall
     test rax, rax
     jne .Linvalid_dynamic
-    add rsp, 32
+    pop r15
     ret
 
 .Linspect_runtime_file:

@@ -385,6 +385,15 @@ PROT_WRITE`. For `libginux.so`, they are offset `0x1000` at `0x610000` with
 `PROT_READ | PROT_EXEC` and offset `0x2000` at `0x613000` with `PROT_READ |
 PROT_WRITE`.
 
+The interpreter derives these requests from each authenticated file's bounded
+`PT_LOAD` table rather than embedding the valid page sequence. It supplies the
+kernel-selected load bias, translates ELF permissions, and issues one request
+per derived page. The kernel contract remains authoritative: a derived address,
+offset, or protection that does not exactly match the authenticated plan is
+rejected. The runtime proof deliberately submits a wrong first-page offset, a
+W+X executable request, and a repeated first-page request and requires
+`-EINVAL`, `-EINVAL`, and `-EEXIST`, respectively.
+
 The kernel copies each admitted file extent into its exact pre-reserved owned
 frame, zero-fills the remainder, requires the leaf to remain absent, and
 enforces W^X while installing it. Main and dependency mappings persist through
