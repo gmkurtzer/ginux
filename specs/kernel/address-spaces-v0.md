@@ -102,4 +102,5 @@ single-core bootstrap, and there is no exception-table recovery for a race or
 hardware fault during a copy.
 The current executable remains position-fixed and has no relocation policy,
 but its authenticated container supplies checked lengths and distinct control,
-service, and restart entry offsets.
+service, and restart entry offsets resolved from inline authenticated workload
+labels.

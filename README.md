@@ -26,9 +26,9 @@ make build
 
 `make build` deterministically regenerates the development manifest, bundle
 digest, and Ed25519 signature from `boot/manifest-v0.conf` and
-`control-plane/bootstrap.hex`, with its authenticated role entries declared in
-`control-plane/bootstrap-v0.conf`. Run `make manifest` directly when working on
-those inputs. Kernel and proof-workload ABI constants share the machine-readable
+`control-plane/bootstrap.hex`; that source declares its authenticated control,
+service, and restart entry labels inline. Run `make manifest` directly when
+working on those inputs. Kernel and proof-workload ABI constants share the machine-readable
 `specs/abi/control-v1.rs` source, and the manifest builder expands its symbolic
 feature and descriptor words before signing. The checked-in key is an RFC test
 identity and must not be treated as a production trust root.

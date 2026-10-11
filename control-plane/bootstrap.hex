@@ -1,4 +1,5 @@
 # write "BUFFER!\n" from the user code mapping through the bounded-copy call
+@entry control
 eb08
 425546464552210a
 4889cf
@@ -96,6 +97,7 @@ cd80
 0f859f000000
 
 # negotiate call-gate ABI v1 and its thirteen bootstrap features
+@entry service
 b800000000
 cd80
 3d@DISCOVERY_WORD_LE32
@@ -184,6 +186,7 @@ cd80
 488900
 
 # replacement service: negotiate ABI and block for a direct wakeup
+@entry restart
 b800000000
 cd80
 3d@DISCOVERY_WORD_LE32

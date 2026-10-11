@@ -25,8 +25,8 @@ const DEVELOPMENT_SEED: [u8; 32] = [
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 5 {
-        fail("usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ENTRY_CONFIG OUTPUT_RS");
+    if arguments.len() != 4 {
+        fail("usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX OUTPUT_RS");
     }
     let config = fs::read_to_string(&arguments[1]).unwrap_or_else(|error| {
         fail(&format!("cannot read {}: {error}", arguments[1]));
@@ -34,15 +34,11 @@ fn main() {
     let bundle_source = fs::read_to_string(&arguments[2]).unwrap_or_else(|error| {
         fail(&format!("cannot read {}: {error}", arguments[2]));
     });
-    let entry_source = fs::read_to_string(&arguments[3]).unwrap_or_else(|error| {
-        fail(&format!("cannot read {}: {error}", arguments[3]));
-    });
     let (sequence, grants) = parse_config(&config);
-    let code = decode_hex(&bundle_source);
+    let (code, entries) = decode_hex(&bundle_source);
     if code.is_empty() || code.len() > EXECUTABLE_MAX_CODE_SIZE {
         fail("control-plane code must contain 1 through 4096 bytes");
     }
-    let entries = parse_entries(&entry_source, code.len());
     let bundle = wrap_executable(&code, entries);
 
     let bundle_digest: [u8; 32] = Sha256::digest(&bundle).into();
@@ -68,7 +64,7 @@ fn main() {
         .sign(&manifest)
         .to_bytes();
     let output = render(&manifest, &manifest_digest, &signature, &bundle);
-    let output_path = Path::new(&arguments[4]);
+    let output_path = Path::new(&arguments[3]);
     fs::write(output_path, output).unwrap_or_else(|error| {
         fail(&format!("cannot write {}: {error}", output_path.display()));
     });
@@ -95,42 +91,6 @@ fn wrap_executable(code: &[u8], entries: [u32; 3]) -> Vec<u8> {
     executable.extend_from_slice(&0_u32.to_le_bytes());
     executable.extend_from_slice(code);
     executable
-}
-
-fn parse_entries(source: &str, code_size: usize) -> [u32; 3] {
-    let names = ["control", "service", "restart"];
-    let mut entries = [None; 3];
-    for raw_line in source.lines() {
-        let line = raw_line.split('#').next().unwrap_or("").trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Some((name, value)) = line.split_once('=') else {
-            fail("entry config lines must use NAME=OFFSET");
-        };
-        let Some(index) = names.iter().position(|candidate| *candidate == name.trim()) else {
-            fail(&format!("unknown executable entry: {}", name.trim()));
-        };
-        if entries[index].is_some() {
-            fail(&format!("duplicate executable entry: {}", names[index]));
-        }
-        let Some(value) = parse_integer(value) else {
-            fail(&format!("invalid executable entry: {}", names[index]));
-        };
-        let Ok(value) = u32::try_from(value) else {
-            fail(&format!("executable entry is too large: {}", names[index]));
-        };
-        entries[index] = Some(value);
-    }
-    let entries = entries.map(|entry| entry.unwrap_or_else(|| fail("entry config is incomplete")));
-    if entries.iter().any(|entry| *entry as usize >= code_size)
-        || entries[0] == entries[1]
-        || entries[0] == entries[2]
-        || entries[1] == entries[2]
-    {
-        fail("executable entries must be distinct offsets inside the code segment");
-    }
-    entries
 }
 
 fn parse_config(source: &str) -> (u64, Vec<(u64, u64)>) {
@@ -181,38 +141,63 @@ fn parse_integer(value: &str) -> Option<u64> {
     )
 }
 
-fn decode_hex(source: &str) -> Vec<u8> {
+fn decode_hex(source: &str) -> (Vec<u8>, [u32; 3]) {
     let discovery_word =
         ((u64::from(control_abi::VERSION)) << 16) | u64::from(control_abi::FEATURES);
     let descriptor_header = (control_abi::DESCRIPTOR_SIZE as u64)
         | ((u64::from(control_abi::VERSION)) << 32)
         | ((u64::from(control_abi::FEATURES)) << 48);
-    let expanded = source
-        .replace(
-            "@DISCOVERY_WORD_LE32",
-            &little_endian_hex(discovery_word, 4),
-        )
-        .replace(
-            "@ABI_DESCRIPTOR_HEADER_LE64",
-            &little_endian_hex(descriptor_header, 8),
-        );
-    let mut digits = String::new();
-    for line in expanded.lines() {
-        digits.extend(
-            line.split('#')
-                .next()
-                .unwrap_or("")
-                .chars()
-                .filter(|character| !character.is_whitespace()),
+    let names = ["control", "service", "restart"];
+    let mut entries = [None; 3];
+    let mut code = Vec::new();
+    for raw_line in source.lines() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix("@entry ") {
+            let name = name.trim();
+            let Some(index) = names.iter().position(|candidate| *candidate == name) else {
+                fail(&format!("unknown executable entry: {name}"));
+            };
+            if entries[index].is_some() {
+                fail(&format!("duplicate executable entry: {name}"));
+            }
+            entries[index] = Some(u32::try_from(code.len()).unwrap_or_else(|_| {
+                fail(&format!("executable entry is too large: {name}"));
+            }));
+            continue;
+        }
+        let digits = line
+            .replace(
+                "@DISCOVERY_WORD_LE32",
+                &little_endian_hex(discovery_word, 4),
+            )
+            .replace(
+                "@ABI_DESCRIPTOR_HEADER_LE64",
+                &little_endian_hex(descriptor_header, 8),
+            )
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>();
+        if !digits.len().is_multiple_of(2) || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            fail("bundle lines must contain entry labels or an even number of hexadecimal digits");
+        }
+        code.extend(
+            (0..digits.len())
+                .step_by(2)
+                .map(|offset| u8::from_str_radix(&digits[offset..offset + 2], 16).unwrap()),
         );
     }
-    if !digits.len().is_multiple_of(2) || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        fail("bundle must contain an even number of hexadecimal digits");
+    let entries = entries.map(|entry| entry.unwrap_or_else(|| fail("entry labels are incomplete")));
+    if entries.iter().any(|entry| *entry as usize >= code.len())
+        || entries[0] == entries[1]
+        || entries[0] == entries[2]
+        || entries[1] == entries[2]
+    {
+        fail("executable entries must be distinct labels inside the code segment");
     }
-    (0..digits.len())
-        .step_by(2)
-        .map(|offset| u8::from_str_radix(&digits[offset..offset + 2], 16).unwrap())
-        .collect()
+    (code, entries)
 }
 
 fn little_endian_hex(value: u64, width: usize) -> String {
