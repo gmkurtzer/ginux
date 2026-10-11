@@ -1170,7 +1170,7 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         return u64::MAX;
     }
     if service_exit
-        && (!ipc::retire_service(caller_domain) || !domain::retire_service(caller_domain))
+        && (!ipc::retire_service(caller_domain) || !domain::retire_clean_service(caller_domain))
     {
         return u64::MAX;
     }

@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 65;
+const CONTROL_CALL_BUDGET: u16 = 67;
 const SERVICE_CALL_BUDGET: u16 = 5;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
@@ -219,6 +219,7 @@ pub(crate) struct Manager {
     last_delivered_lifecycle_event: Option<LifecycleEvent>,
     last_delivered_fault_event: Option<LifecycleEvent>,
     last_delivered_ready_event: Option<LifecycleEvent>,
+    last_delivered_service_exit_event: Option<LifecycleEvent>,
     total_calls: u16,
     total_thread_attaches: u16,
     service_started: bool,
@@ -243,6 +244,7 @@ impl Manager {
             last_delivered_lifecycle_event: None,
             last_delivered_fault_event: None,
             last_delivered_ready_event: None,
+            last_delivered_service_exit_event: None,
             total_calls: 0,
             total_thread_attaches: 0,
             service_started: false,
@@ -673,6 +675,33 @@ impl Manager {
         self.service_id = None;
         self.last_retired_service_id = Some(id);
         true
+    }
+
+    fn retire_clean_service(&mut self, id: DomainId) -> bool {
+        let Some(service) = self
+            .domain(id)
+            .filter(|domain| {
+                domain.role == Role::SupervisedService
+                    && domain.active_threads == 0
+                    && domain.active_operations == 0
+            })
+            .and_then(|domain| domain.service)
+        else {
+            return false;
+        };
+        if self.service_id != Some(id)
+            || !self.lifecycle_events.push(LifecycleEvent {
+                kind: crate::control_abi::LIFECYCLE_SERVICE_EXITED,
+                domain: id,
+                service: Some(service),
+                detail: 0,
+                fault: None,
+                sequence: 0,
+            })
+        {
+            return false;
+        }
+        self.retire_service(id)
     }
 
     fn discard_unstarted_service(&mut self, id: DomainId) -> bool {
@@ -1703,7 +1732,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 75
+    control.remaining_calls == 0 && manager.total_calls == 77
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
@@ -1800,6 +1829,37 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
         return false;
     };
     if manager.quarantined_frame_owners[slot].is_some() || !manager.retire_service(id) {
+        return false;
+    }
+    manager.quarantined_frame_owners[slot] = Some(FrameQuarantine {
+        domain: id,
+        service,
+    });
+    true
+}
+
+pub(crate) fn retire_clean_service(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(owner) = crate::memory::FrameOwner::domain(domain_raw) else {
+        return false;
+    };
+    if crate::memory::owner_live_frame_count(owner)
+        != Some(crate::address_space::USER_ADDRESS_SPACE_FRAMES)
+    {
+        return false;
+    }
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    let Some(service) = manager.domain(id).and_then(|domain| domain.service) else {
+        return false;
+    };
+    let Some(slot) = manager.service_identity_slot(service) else {
+        return false;
+    };
+    if manager.quarantined_frame_owners[slot].is_some() || !manager.retire_clean_service(id) {
         return false;
     }
     manager.quarantined_frame_owners[slot] = Some(FrameQuarantine {
@@ -2060,6 +2120,9 @@ pub(crate) fn take_lifecycle_event() -> Option<u64> {
     if event.kind == crate::control_abi::LIFECYCLE_SERVICE_READY {
         manager.last_delivered_ready_event = Some(event);
     }
+    if event.kind == crate::control_abi::LIFECYCLE_SERVICE_EXITED {
+        manager.last_delivered_service_exit_event = Some(event);
+    }
     Some((u64::from(event.detail) << 56) | (encode_id(event.domain) << 8) | u64::from(event.kind))
 }
 
@@ -2152,6 +2215,24 @@ pub(crate) fn service_ready_was_delivered(domain_raw: u64) -> bool {
                     && event.fault.is_none()
                     && event.sequence == 2
             })
+        })
+    })
+}
+
+pub(crate) fn service_exit_was_delivered(domain_raw: u64) -> bool {
+    let id = decode_id(domain_raw);
+    global_manager().is_some_and(|manager| {
+        id.is_some_and(|id| {
+            manager
+                .last_delivered_service_exit_event
+                .is_some_and(|event| {
+                    event.kind == crate::control_abi::LIFECYCLE_SERVICE_EXITED
+                        && event.domain == id
+                        && event.service == manager.primary_service_identity
+                        && event.detail == 0
+                        && event.fault.is_none()
+                        && event.sequence == 3
+                })
         })
     })
 }

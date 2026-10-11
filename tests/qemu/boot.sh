@@ -868,6 +868,11 @@ if ! grep -q '^ginux: replacement service readiness delivered' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: replacement service clean exit delivered' "$output_file"; then
+    echo "Boot test failed: replacement service clean exit was not delivered." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: per-domain syscall budgets enforced' "$output_file"; then
     echo "Boot test failed: per-domain syscall accounting failed." >&2
     exit 1

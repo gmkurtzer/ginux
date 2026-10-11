@@ -402,6 +402,43 @@ cd80
 7502
 0f0b
 
+# consume and validate the replacement's clean-exit lifecycle event
+4889df
+b807000000
+cd80
+4989c5
+0fb6d0
+83fa07
+7402
+0f0b
+49c1ed08
+4d39fd
+7402
+0f0b
+
+# fetch and validate its structured clean-exit descriptor
+4889df
+48be6020000080000000
+ba18000000
+b80c000000
+cd80
+83f818
+7402
+0f0b
+488b06
+48bd1800000001000700
+4839e8
+7402
+0f0b
+488b4608
+4c39f8
+7402
+0f0b
+488b4610
+4883f803
+7402
+0f0b
+
 # build a versioned 32-byte create-auxiliary management request
 48be2021000080000000
 48b82000000001000100
@@ -845,7 +882,7 @@ cd80
 7402
 0f0b
 488b4610
-4883f806
+4883f807
 7402
 0f0b
 
@@ -868,7 +905,7 @@ cd80
 7402
 0f0b
 488b4610
-4883f806
+4883f807
 7402
 0f0b
 488b4618

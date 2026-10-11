@@ -63,6 +63,10 @@ Event kind 5 records a normal auxiliary exit. Its detail byte is the workload's
 bounded exit status, while kind 3 management stops and kind 4 faults retain
 zero detail. This lets supervision distinguish requested stop, normal exit,
 and contained fault without consulting mutable domain state.
+Event kind 7 records a supervised service's normal exit with zero detail. The
+normal exit path publishes it before removing the domain record, while the
+fault path continues to publish only kind 1. The control plane therefore does
+not infer health from an IPC peer closure alone.
 
 After the fault, the kernel creates one replacement domain generation with the
 same logical service identity and IPC-only delegation, explicitly rebinds the service side of the IPC
@@ -89,7 +93,8 @@ endpoint, the kernel publishes lifecycle kind 6 exactly once. The control plane
 consumes that record, rejects the original generation, and retains the exact
 replacement generation for validating reply provenance. Later blocking
 receives by that same generation do not republish readiness and are not an
-error. The single
+error. After the storage exchange, the control plane consumes kind 7 for the
+exact replacement generation and validates lifecycle sequence three. The single
 restart consumes the persistent control plane's fixed one-attempt bootstrap
 budget. The initial service creation does not consume that budget, and failed
 replacement setup does not refund it. A later service generation therefore

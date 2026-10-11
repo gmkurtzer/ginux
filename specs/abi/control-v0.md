@@ -98,6 +98,9 @@ Kind 6 reports that a supervised service generation has successfully run and
 blocked on its request endpoint. It carries the exact service domain and stable
 logical service identity with zero detail and no fault metadata. A generation
 publishes readiness at most once.
+Kind 7 reports a supervised service's clean exit with zero detail. It is
+distinct from kind 1 fault termination and retains the exact domain generation
+and stable primary-service identity.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes
@@ -247,12 +250,13 @@ action 4 has installed the private payload; all other bits are zero in version
 1. A created or merely loaded auxiliary returns zero. The ring-3 proof observes
 the bit clear after loading and set after initialization, before action 5 is
 allowed to succeed.
-The ring-3 control plane consumes both kind 3 stop records as they are
+The ring-3 control plane first consumes the replacement service's kind 7 clean
+exit and validates its descriptor at sequence three. It consumes both kind 3 stop records as they are
 published. After action 5 it voluntarily yields, resumes only after the
 workload has exited, consumes the kind 5 record, and validates the exact
 generation and status 42 from the packed result. It then uses operation 12 to
 validate the descriptor version, kind, detail, exact generation, and lifecycle
-sequence six. Operation 14 additionally proves that the exited auxiliary has
+sequence seven. Operation 14 additionally proves that the exited auxiliary has
 a nonzero stable logical service identity distinct from the primary managed
 service. The kernel verifier requires the lifecycle FIFO to be empty afterward;
 lifecycle observation is therefore a userspace control-plane responsibility in

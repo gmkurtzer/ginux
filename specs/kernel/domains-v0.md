@@ -95,6 +95,10 @@ creating an unsequenced teardown. A full event FIFO still permits retirement
 because its sticky overflow record preserves the first dropped auxiliary
 generation, sequence, and count; this matches the existing mandatory-teardown
 policy for service faults.
+The supervised primary service uses the same distinction: kind 1 reports a
+contained fault and kind 7 reports clean exit with zero detail. The replacement
+storage service's clean exit is delivered as lifecycle sequence three, after
+the original fault and replacement readiness records.
 Auxiliary registration and bounded one-page loading/admission are exposed to
 userspace, while auxiliaries deliberately have no restart policy. The boot
 proof stages and fully rolls back an unstarted auxiliary domain with a real

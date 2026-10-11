@@ -9,6 +9,11 @@ and returns the retained value 3. The control plane validates both replies and
 the kernel audits the final request and reply as sequence three from the exact
 replacement generation.
 
+After returning the value, the service exits normally. Supervision publishes a
+kind 7 clean-exit record for that exact generation, distinct from the original
+generation's kind 1 fault, and the control plane validates its structured
+descriptor.
+
 This is an execution and isolation proof, not a filesystem or stable storage
 ABI. The value is lost when the service exits or faults. There is one fixed
 value, one fixed command, one client, no names, no request identifiers, no
