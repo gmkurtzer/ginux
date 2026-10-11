@@ -44,9 +44,12 @@ independent console-write and host-read auxiliary services. It rejects a third
 registration, prevents retirement while an exact-generation operation is in
 flight, retires only the named auxiliary record, preserves the primary and
 unrelated auxiliary authority, and reuses the freed domain and registry slots
-with a new generation. Auxiliary registration is not yet exposed to userspace,
-attached to scheduler contexts, assigned address spaces, or integrated with
-the primary service's restart and frame-quarantine policy.
+with a new generation. Primary-supervised and auxiliary services have distinct
+roles. Only the primary role is admitted to the current scheduler and routed
+through IPC peer closure, fault reporting, restart, and frame quarantine;
+auxiliary thread attachment is rejected until those lifecycle contracts are
+defined. Auxiliary registration is not yet exposed to userspace, assigned
+address spaces, or integrated with an auxiliary supervision policy.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

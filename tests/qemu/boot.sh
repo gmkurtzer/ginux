@@ -288,6 +288,11 @@ if ! grep -q '^ginux: bounded auxiliary service registry verified' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: service lifecycle roles separated' "$output_file"; then
+    echo "Boot test failed: service lifecycle roles were not separated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded service restart policy verified' "$output_file"; then
     echo "Boot test failed: service restart policy validation failed." >&2
     exit 1

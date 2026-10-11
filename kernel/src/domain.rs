@@ -25,7 +25,8 @@ struct DomainId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Role {
     ControlPlane,
-    Service,
+    SupervisedService,
+    AuxiliaryService,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -273,7 +274,7 @@ impl Manager {
         if grants.is_empty() || grants.len() > MAX_BOOT_GRANTS || self.service_id.is_some() {
             return None;
         }
-        let id = self.construct_service_domain(grants)?;
+        let id = self.construct_service_domain(grants, Role::SupervisedService)?;
         self.service_id = Some(id);
         Some(id)
     }
@@ -286,13 +287,20 @@ impl Manager {
             .auxiliary_service_ids
             .iter()
             .position(Option::is_none)?;
-        let id = self.construct_service_domain(grants)?;
+        let id = self.construct_service_domain(grants, Role::AuxiliaryService)?;
         self.auxiliary_service_ids[registry_slot] = Some(id);
         Some(id)
     }
 
-    fn construct_service_domain(&mut self, grants: &[DelegationGrant]) -> Option<DomainId> {
+    fn construct_service_domain(
+        &mut self,
+        grants: &[DelegationGrant],
+        role: Role,
+    ) -> Option<DomainId> {
         if grants.is_empty() || grants.len() > MAX_BOOT_GRANTS {
+            return None;
+        }
+        if !matches!(role, Role::SupervisedService | Role::AuxiliaryService) {
             return None;
         }
         let control_id = self.control_plane_id?;
@@ -328,7 +336,7 @@ impl Manager {
         self.generations[slot] = generation;
         self.domains[slot] = Some(Domain {
             id,
-            role: Role::Service,
+            role,
             state: State::Ready,
             capabilities,
             boot_roots,
@@ -449,10 +457,46 @@ impl Manager {
         true
     }
 
+    fn attach_thread(&mut self, id: DomainId) -> bool {
+        let Some(total) = self.total_thread_attaches.checked_add(1) else {
+            return false;
+        };
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if domain.role == Role::AuxiliaryService || domain.active_threads >= domain.thread_limit {
+            return false;
+        }
+        domain.active_threads += 1;
+        self.total_thread_attaches = total;
+        true
+    }
+
+    fn detach_thread(&mut self, id: DomainId) -> bool {
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        let Some(active) = domain.active_threads.checked_sub(1) else {
+            return false;
+        };
+        domain.active_threads = active;
+        true
+    }
+
     fn retire_service(&mut self, id: DomainId) -> bool {
         if self.service_id != Some(id)
             || self.domain(id).is_none_or(|domain| {
-                domain.role != Role::Service
+                domain.role != Role::SupervisedService
                     || domain.active_threads != 0
                     || domain.active_operations != 0
             })
@@ -468,7 +512,7 @@ impl Manager {
     fn discard_unstarted_service(&mut self, id: DomainId) -> bool {
         if self.service_id != Some(id)
             || self.domain(id).is_none_or(|domain| {
-                domain.role != Role::Service
+                domain.role != Role::SupervisedService
                     || domain.active_threads != 0
                     || domain.active_operations != 0
             })
@@ -489,7 +533,7 @@ impl Manager {
             return false;
         };
         if self.domain(id).is_none_or(|domain| {
-            domain.role != Role::Service
+            domain.role != Role::AuxiliaryService
                 || domain.active_threads != 0
                 || domain.active_operations != 0
         }) {
@@ -590,7 +634,7 @@ pub(crate) fn initialize_boot_service_restart() -> Option<u64> {
 
 fn validate_boot_service(manager: &Manager, id: DomainId) -> Option<u64> {
     let service = manager.domain(id)?;
-    (service.role == Role::Service
+    (service.role == Role::SupervisedService
         && service.state == State::Ready
         && service.boot_root_count == 1
         && service.capabilities.boot_authority_is_sealed())
@@ -759,6 +803,10 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     let console_handle = manager.domain(console_service)?.boot_roots[0]?;
     let host_handle = manager.domain(host_service)?.boot_roots[0]?;
     if manager.service_id != Some(primary)
+        || manager.domain(primary)?.role != Role::SupervisedService
+        || manager.domain(console_service)?.role != Role::AuxiliaryService
+        || manager.domain(host_service)?.role != Role::AuxiliaryService
+        || manager.attach_thread(console_service)
         || manager
             .create_auxiliary_service_with_delegations(&[console_grant])
             .is_some()
@@ -933,48 +981,14 @@ pub(crate) fn attach_thread(domain_raw: u64) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
-    let Some(manager) = global_manager_mut() else {
-        return false;
-    };
-    let Some(total) = manager.total_thread_attaches.checked_add(1) else {
-        return false;
-    };
-    let Some(domain) = manager
-        .domains
-        .get_mut(usize::from(id.slot))
-        .and_then(Option::as_mut)
-        .filter(|domain| domain.id == id)
-    else {
-        return false;
-    };
-    if domain.active_threads >= domain.thread_limit {
-        return false;
-    }
-    domain.active_threads += 1;
-    manager.total_thread_attaches = total;
-    true
+    global_manager_mut().is_some_and(|manager| manager.attach_thread(id))
 }
 
 pub(crate) fn detach_thread(domain_raw: u64) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
-    let Some(manager) = global_manager_mut() else {
-        return false;
-    };
-    let Some(domain) = manager
-        .domains
-        .get_mut(usize::from(id.slot))
-        .and_then(Option::as_mut)
-        .filter(|domain| domain.id == id)
-    else {
-        return false;
-    };
-    let Some(active) = domain.active_threads.checked_sub(1) else {
-        return false;
-    };
-    domain.active_threads = active;
-    true
+    global_manager_mut().is_some_and(|manager| manager.detach_thread(id))
 }
 
 pub(crate) fn thread_budget_proof_complete() -> bool {
@@ -997,13 +1011,13 @@ pub(crate) fn service_restart_budget_proof_complete() -> bool {
     })
 }
 
-pub(crate) fn is_service_domain(domain_raw: u64) -> bool {
+pub(crate) fn is_supervised_service_domain(domain_raw: u64) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
     global_manager()
         .and_then(|manager| manager.domain(id))
-        .is_some_and(|domain| domain.role == Role::Service)
+        .is_some_and(|domain| domain.role == Role::SupervisedService)
 }
 
 pub(crate) fn retire_service(domain_raw: u64) -> bool {
@@ -1121,7 +1135,7 @@ pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> boo
     if manager.service_id != Some(id)
         || manager
             .domain(id)
-            .is_none_or(|domain| domain.role != Role::Service)
+            .is_none_or(|domain| domain.role != Role::SupervisedService)
     {
         return false;
     }

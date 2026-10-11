@@ -434,6 +434,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: auxiliary service registry invariant failed\r\n");
     }
     serial_write("ginux: bounded auxiliary service registry verified\r\n");
+    serial_write("ginux: service lifecycle roles separated\r\n");
     if !domain::verify_service_restart_budget_invariants() {
         kernel_fail("ginux: service restart budget invariant failed\r\n");
     }

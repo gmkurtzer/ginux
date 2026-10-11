@@ -1005,7 +1005,7 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX;
     };
-    let service_exit = domain::is_service_domain(caller_domain);
+    let service_exit = domain::is_supervised_service_domain(caller_domain);
     let action = scheduler::exit_runtime(
         frame,
         USER_CODE_SELECTOR,
@@ -1032,7 +1032,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         return u64::MAX;
     };
     let fault_domain = scheduler::current_domain();
-    let service_fault = fault_domain.is_some_and(domain::is_service_domain);
+    let service_fault = fault_domain.is_some_and(domain::is_supervised_service_domain);
     let fault_address: u64;
     unsafe {
         asm!("mov {}, cr2", out(reg) fault_address, options(nomem, nostack, preserves_flags));
