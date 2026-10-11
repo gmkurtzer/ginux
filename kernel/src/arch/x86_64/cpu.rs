@@ -1443,6 +1443,28 @@ fn linux_thread_return_context(handle: LinuxThreadHandle) -> Option<LinuxUserCon
     context.is_valid().then_some(context)
 }
 
+fn install_linux_thread_return(
+    handle: LinuxThreadHandle,
+    registers: &mut LinuxSyscallFrame,
+    rip: &mut u64,
+    rsp: &mut u64,
+    rflags: &mut u64,
+    rax: &mut u64,
+) -> bool {
+    let Some(context) = linux_thread_return_context(handle) else {
+        return false;
+    };
+    if !switch_linux_thread(handle) {
+        return false;
+    }
+    *registers = context.registers;
+    *rip = context.rip;
+    *rsp = context.rsp;
+    *rflags = context.rflags;
+    *rax = context.rax;
+    true
+}
+
 fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
     let slot = usize::from(handle.slot);
     let Some(context) = linux_thread_context(handle) else {
@@ -1770,6 +1792,31 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 PAGE_SIZE,
             )?;
             let selected = linux_thread_return_context(sibling_thread)?;
+            let mut installed_registers = LinuxSyscallFrame::ZERO;
+            let mut installed_rip = 0;
+            let mut installed_rsp = 0;
+            let mut installed_rflags = 0;
+            let mut installed_rax = u64::MAX;
+            let return_installed = install_linux_thread_return(
+                sibling_thread,
+                &mut installed_registers,
+                &mut installed_rip,
+                &mut installed_rsp,
+                &mut installed_rflags,
+                &mut installed_rax,
+            );
+            let sibling_copy_state =
+                linux_writable_user_range_contains(
+                    execution.sibling_tls as u64,
+                    execution.tls_size,
+                ) && !linux_writable_user_range_contains(execution.tls as u64, execution.tls_size);
+            let initial_restored = switch_linux_thread(initial_thread);
+            let initial_copy_state =
+                linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
+                    && !linux_writable_user_range_contains(
+                        execution.sibling_tls as u64,
+                        execution.tls_size,
+                    );
             let sibling_slot = usize::from(sibling_thread.slot);
             if !invalid_flags_rejected
                 || !invalid_stack_rejected
@@ -1781,6 +1828,15 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 || clone.child.fs_base != execution.sibling_fs_base as u64
                 || clone.child.registers != proof_registers
                 || selected != clone.child
+                || !return_installed
+                || installed_registers != clone.child.registers
+                || installed_rip != clone.child.rip
+                || installed_rsp != clone.child.rsp
+                || installed_rflags != clone.child.rflags
+                || installed_rax != clone.child.rax
+                || !sibling_copy_state
+                || !initial_restored
+                || !initial_copy_state
                 || LINUX_THREAD_RIPS[sibling_slot].load(Ordering::SeqCst) != clone.child.rip
                 || LINUX_THREAD_RSPS[sibling_slot].load(Ordering::SeqCst) != clone.child.rsp
                 || LINUX_THREAD_RFLAGS[sibling_slot].load(Ordering::SeqCst) != clone.child.rflags
@@ -1791,10 +1847,29 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             {
                 return Some(false);
             }
+            let mut stale_registers = proof_registers;
+            let mut stale_rip = 0x1111;
+            let mut stale_rsp = 0x2222;
+            let mut stale_rflags = 0x3333;
+            let mut stale_rax = 0x4444;
+            let stale_install_rejected = !install_linux_thread_return(
+                sibling_thread,
+                &mut stale_registers,
+                &mut stale_rip,
+                &mut stale_rsp,
+                &mut stale_rflags,
+                &mut stale_rax,
+            ) && stale_registers == proof_registers
+                && stale_rip == 0x1111
+                && stale_rsp == 0x2222
+                && stale_rflags == 0x3333
+                && stale_rax == 0x4444
+                && current_linux_tid() == Some(1);
             let replacement =
                 reserve_linux_thread(sibling_tls, execution.sibling_stack, PAGE_SIZE)?;
             Some(
-                replacement.tid == 3
+                stale_install_rejected
+                    && replacement.tid == 3
                     && replacement.slot == sibling_thread.slot
                     && replacement.generation != sibling_thread.generation
                     && LINUX_THREAD_CLEAR_CHILD_TIDS[usize::from(replacement.slot)]

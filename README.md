@@ -129,6 +129,13 @@ registers into generation-bound per-thread storage alongside RIP, RSP, RFLAGS,
 RAX, and FS base. A checked selector reconstructs the complete return context
 only for the matching live handle; retired handles and newly reused slots have
 no selectable context. Selection is not yet connected to `SYSRETQ`.
+A checked installer now validates the selected child first, switches the
+generation-tagged running state and FS/copy context, and then fills an exact
+return frame. Because all fallible work precedes the frame writes, a stale
+handle leaves every output word and the running parent unchanged. The boot
+proof installs the child, observes that copy admission moved to its TLS, and
+restores the parent with the reverse admission decision. This still uses a
+local proof frame rather than redirecting the live `SYSRETQ`.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.

@@ -743,6 +743,21 @@ if ! grep -q '^ginux: stale Linux return contexts rejected' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux child return frame installed atomically' "$output_file"; then
+    echo "Boot test failed: the Linux child return frame was not installed atomically." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux return ownership restored to parent' "$output_file"; then
+    echo "Boot test failed: Linux return ownership was not restored to the parent." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: stale Linux return installation left state unchanged' "$output_file"; then
+    echo "Boot test failed: stale Linux return installation changed state." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
     exit 1

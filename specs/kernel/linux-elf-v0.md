@@ -487,6 +487,15 @@ safe flags. Retirement zeroes every register. A stale handle and an empty
 replacement generation cannot select a context. The selector is not yet wired
 to the hardware return path.
 
+The internal return installer resolves and validates the complete target
+context, then switches the generation-tagged running slot and installs its
+FS/copy extent before writing the infallible output frame. The proof observes
+all child register values plus child-only TLS copy admission, switches back to
+the initial thread, and observes the admission decision reverse. Attempting to
+install the retired handle changes neither the caller-provided frame nor the
+current TID. The output is currently a local proof frame; the live assembly
+`SYSRETQ` state is not redirected yet.
+
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns
 different nonzero sentinel values to TIDs 1 and 2, switches between them, and
