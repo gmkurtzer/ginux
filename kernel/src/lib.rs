@@ -1,5 +1,7 @@
 #![no_std]
 
+mod arch;
+
 use core::arch::{asm, global_asm};
 use core::ffi::c_void;
 use core::mem::size_of;
@@ -25,6 +27,7 @@ global_asm!(
     .text
     .global ginux_kernel_stack_entry
 ginux_kernel_stack_entry:
+    cli
     lea rsp, [rip + {stack}]
     add rsp, {stack_size}
     and rsp, -16
@@ -105,6 +108,33 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("ginux: invalid UEFI memory map\r\n");
     }
+
+    let Some(memory_map_end) = boot_info
+        .memory_map_size
+        .checked_sub(1)
+        .and_then(|size| (boot_info.memory_map as usize).checked_add(size))
+    else {
+        kernel_fail("ginux: UEFI memory map address overflow\r\n");
+    };
+
+    let stack_start = core::ptr::addr_of!(KERNEL_STACK) as usize;
+    let required_addresses = [
+        kernel_main as *const () as usize,
+        boot_info as *const BootInfo as usize,
+        boot_info.memory_map as usize,
+        memory_map_end,
+        stack_start,
+        stack_start + KERNEL_STACK_SIZE - 1,
+        boot_info.reset_system as usize,
+    ];
+
+    // SAFETY: The entry trampoline disabled interrupts. The required live
+    // addresses and the page-table objects are checked against the complete
+    // transitional identity-map range before CR3 is changed.
+    if unsafe { arch::x86_64::paging::install_initial_identity_map(&required_addresses) }.is_err() {
+        kernel_fail("ginux: page-table transition failed\r\n");
+    }
+    serial_write("ginux: kernel page tables active\r\n");
 
     let summary = summarize_memory(boot_info);
     serial_write("ginux: memory descriptors: ");
