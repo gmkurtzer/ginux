@@ -568,6 +568,9 @@ the second reservation requires a scrubbed stack and a larger monotonic TID.
 `exit_group(42)` remains final process teardown. More than two sequential
 children, parallel execution, timer preemption, and general Linux-thread
 scheduling are undefined.
+While the first child is ready between its two parent selections, a second
+otherwise-valid syscall 56 request returns `-EAGAIN`. That rejection does not
+change either published TID word or replace the live child context.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control

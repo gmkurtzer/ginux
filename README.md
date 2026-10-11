@@ -153,7 +153,8 @@ after the syscall with `rax = 0`. Each child immediately requires its live
 `gettid()` result to match the published child-TID word and requires `FS:[0]`
 to contain its own sibling TLS/TCB pointer. The parent first yields to the
 child; the child yields back, and the resumed parent yields to the same child
-again. All three cooperative switches return zero in their resumed contexts.
+again. While that child is ready, a second live `clone` attempt returns
+`EAGAIN` without replacing it. All three cooperative switches return zero in their resumed contexts.
 The child then blocks in `FUTEX_WAIT` on the parent-TID word and restores the parent. An
 explicit `FUTEX_WAKE` makes the child ready. The parent then waits on the
 child-TID word, selecting the child again; its first wait resumes with zero.
@@ -163,7 +164,8 @@ parent's registers, FS base, and copy ownership. Both resumed waits return
 zero. The complete handshake then runs a second time through the reused slot;
 the kernel requires the guarded stack to be fully scrubbed first and the new
 child TID to exceed the first. Malformed requests return `EINVAL`, inaccessible TID writes
-return `EFAULT`, and occupied capacity returns `EAGAIN`. This remains a fixed
+return `EFAULT`, and occupied capacity returns `EAGAIN` without mutating the
+live slot. This remains a fixed
 two-slot, two-sequential-child proof without arbitrary allocation, more than
 one live child, preemption, futex timeouts, multiple waiters, requeue
 operations, or a general scheduler.

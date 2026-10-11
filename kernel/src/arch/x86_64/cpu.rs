@@ -356,6 +356,7 @@ static LINUX_FIRST_CHILD_TID: AtomicU32 = AtomicU32::new(0);
 static LINUX_CLONE_REUSE_VALIDATED: AtomicBool = AtomicBool::new(false);
 static LINUX_CHILD_GETTID_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_YIELD_SWITCH_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_CLONE_BUSY_REJECTION_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_EXPLICIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_EXIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -2056,6 +2057,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     LINUX_CLONE_REUSE_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CHILD_GETTID_COUNT.store(0, Ordering::SeqCst);
     LINUX_YIELD_SWITCH_COUNT.store(0, Ordering::SeqCst);
+    LINUX_CLONE_BUSY_REJECTION_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_EXPLICIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_EXIT_WAKE_COUNT.store(0, Ordering::SeqCst);
@@ -2316,6 +2318,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let clone_reuse_validated = LINUX_CLONE_REUSE_VALIDATED.swap(false, Ordering::SeqCst);
     let child_gettid_count = LINUX_CHILD_GETTID_COUNT.swap(0, Ordering::SeqCst);
     let yield_switch_count = LINUX_YIELD_SWITCH_COUNT.swap(0, Ordering::SeqCst);
+    let clone_busy_rejection_count = LINUX_CLONE_BUSY_REJECTION_COUNT.swap(0, Ordering::SeqCst);
     let futex_wait_block_count = LINUX_FUTEX_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let futex_explicit_wake_count = LINUX_FUTEX_EXPLICIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let futex_exit_wake_count = LINUX_FUTEX_EXIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
@@ -2327,6 +2330,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             && clone_reuse_validated
             && child_gettid_count == 2
             && yield_switch_count == 6
+            && clone_busy_rejection_count == 2
             && futex_wait_block_count == 4
             && futex_explicit_wake_count == 2
             && futex_exit_wake_count == 2)
@@ -2340,6 +2344,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             clone_reuse_validated,
             child_gettid_count == 2,
             yield_switch_count == 6,
+            clone_busy_rejection_count == 2,
             futex_wait_block_count == 4,
             futex_explicit_wake_count == 2,
             futex_exit_wake_count == 2,
@@ -2599,6 +2604,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 && clone_reuse_validated
                 && child_gettid_count == 2
                 && yield_switch_count == 6
+                && clone_busy_rejection_count == 2
                 && futex_wait_block_count == 4
                 && futex_explicit_wake_count == 2
                 && futex_exit_wake_count == 2)
@@ -3438,7 +3444,11 @@ extern "sysv64" fn linux_syscall_handler(
 }
 
 fn linux_clone_thread(registers: LinuxSyscallFrame, user_rip: u64, user_rflags: u64) -> u64 {
-    if current_linux_tid() != Some(1) || ready_linux_thread_handle().is_some() {
+    if current_linux_tid() != Some(1) {
+        return LINUX_EAGAIN;
+    }
+    if ready_linux_thread_handle().is_some() {
+        LINUX_CLONE_BUSY_REJECTION_COUNT.fetch_add(1, Ordering::SeqCst);
         return LINUX_EAGAIN;
     }
     let sibling_fs = ELF_PROBE_SIBLING_FS_BASE.load(Ordering::SeqCst);

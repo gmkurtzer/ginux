@@ -808,6 +808,11 @@ if ! grep -q '^ginux: bidirectional Linux sched_yield switching validated' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: occupied Linux clone capacity rejected live' "$output_file"; then
+    echo "Boot test failed: occupied Linux clone capacity was not rejected live." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux clone return values validated' "$output_file"; then
     echo "Boot test failed: Linux clone return values were not validated." >&2
     exit 1

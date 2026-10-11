@@ -519,6 +519,13 @@ linux_clone_repeat:
     mov ebp, edx
     mov eax, 24
     call syscall_expect_zero
+    mov edi, 0x13d0f00
+    mov esi, 0x411000
+    mov edx, ebp
+    lea r8d, [edx + 4]
+    mov r9d, 0x40efc0
+    mov eax, 56
+    call syscall_expect_eagain
     mov eax, 24
     call syscall_expect_zero
     mov rdi, rbp
