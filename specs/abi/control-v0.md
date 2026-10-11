@@ -98,7 +98,9 @@ most recently consumed concrete service-fault record to the user address in
 code, fault address, and instruction address, followed by a reserved zero
 `u64`. It uses the bounded writable-range copy rules and returns 48 or
 `UINT64_MAX - 2`. Overflow notifications have no synthetic fault record. The
-ring-3 proof validates the descriptor header before exhausting its call budget.
+ring-3 proof first requires denial with its console-only capability, then uses
+host-management authority and validates the descriptor header before
+exhausting its call budget. A denied request does not alter the retained record.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

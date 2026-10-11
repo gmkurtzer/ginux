@@ -488,6 +488,11 @@ if ! grep -q '^ginux: structured service fault delivered' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: service fault diagnostic authority enforced' "$output_file"; then
+    echo "Boot test failed: service fault diagnostic authority failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: service domain generation reuse verified' "$output_file"; then
     echo "Boot test failed: service-domain slot reuse accepted stale identity." >&2
     exit 1

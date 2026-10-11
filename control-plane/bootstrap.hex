@@ -200,6 +200,16 @@ cd80
 0f0b
 
 # control diagnostic trampoline: fetch retained service-fault details
+4889cf
+48be2020000080000000
+ba30000000
+b80b000000
+cd80
+83f8fd
+7402
+0f0b
+
+# retry with host-management authority
 4889df
 48be2020000080000000
 ba30000000
