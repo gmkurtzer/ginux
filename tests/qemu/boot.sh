@@ -68,8 +68,13 @@ if ! grep -q '^ginux: ACPI root pointer validated' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: measured boot manifest accepted' "$output_file"; then
-    echo "Boot test failed: the measured boot manifest was not accepted." >&2
+if ! grep -q '^ginux: signed boot manifest accepted' "$output_file"; then
+    echo "Boot test failed: the signed boot manifest was not accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: manifest signature rejection verified' "$output_file"; then
+    echo "Boot test failed: an invalid manifest signature was not rejected." >&2
     exit 1
 fi
 

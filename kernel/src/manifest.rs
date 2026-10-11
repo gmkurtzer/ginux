@@ -1,4 +1,5 @@
 use crate::crypto;
+use ed25519_dalek::{Signature, VerifyingKey};
 
 const MAGIC: &[u8; 8] = b"GINXMNF\0";
 const VERSION: u16 = 2;
@@ -6,6 +7,10 @@ const HEADER_SIZE: usize = 72;
 const GRANT_SIZE: usize = 16;
 const MAX_GRANTS: usize = 8;
 const ALLOWED_RIGHTS: u64 = 0x0f;
+const DEVELOPMENT_PUBLIC_KEY: [u8; 32] = [
+    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+];
 
 #[derive(Clone, Copy)]
 pub(crate) struct Grant {
@@ -27,10 +32,11 @@ pub(crate) struct Manifest {
 }
 
 impl Manifest {
-    pub(crate) fn parse_and_measure(
+    pub(crate) fn parse_and_verify(
         pointer: *const u8,
         size: usize,
         expected_digest: &[u8; 32],
+        signature: &[u8; 64],
         mapped_limit: usize,
     ) -> Option<Self> {
         if pointer.is_null()
@@ -45,7 +51,10 @@ impl Manifest {
         // SAFETY: BootInfo provides an immutable buffer with `size` bytes. Its
         // complete mapped range is validated before page-table activation.
         let bytes = unsafe { core::slice::from_raw_parts(pointer, size) };
-        if crypto::sha256(bytes) != *expected_digest || &bytes[..8] != MAGIC {
+        if crypto::sha256(bytes) != *expected_digest
+            || !verify_development_signature(bytes, signature)
+            || &bytes[..8] != MAGIC
+        {
             return None;
         }
         let version = read_u16(bytes, 8)?;
@@ -130,6 +139,28 @@ impl Manifest {
         let bytes = unsafe { core::slice::from_raw_parts(pointer, size) };
         crypto::sha256(bytes) == self.bundle_sha256
     }
+}
+
+pub(crate) fn verify_signature_rejection(
+    pointer: *const u8,
+    size: usize,
+    signature: &[u8; 64],
+) -> bool {
+    if pointer.is_null() || size == 0 {
+        return false;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts(pointer, size) };
+    let mut invalid = *signature;
+    invalid[0] ^= 1;
+    !verify_development_signature(bytes, &invalid)
+}
+
+fn verify_development_signature(message: &[u8], signature: &[u8; 64]) -> bool {
+    let Ok(key) = VerifyingKey::from_bytes(&DEVELOPMENT_PUBLIC_KEY) else {
+        return false;
+    };
+    key.verify_strict(message, &Signature::from_bytes(signature))
+        .is_ok()
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {

@@ -1,6 +1,6 @@
 # Boot Authority Manifest v0
 
-**Status:** Canonical measured envelope; unsigned.
+**Status:** Canonical development-signed envelope.
 
 All integers are little-endian. The canonical byte layout is:
 
@@ -27,8 +27,9 @@ control-plane capability table before its authority insertion path is sealed.
 The bundle range in handoff v2 must exactly match the recorded size and digest;
 only those verified bytes are copied into the ring-3 executable mapping.
 
-The kernel hashes the exact canonical bytes and requires equality with the
-digest in boot handoff v2. Sequence rollback storage, signature algorithm and
-key identifiers, signature bytes, additional bundle records, platform
-constraints, and independent site policy are required in later versions before
-M1 can claim an authenticated immutable boot.
+The kernel hashes the exact canonical bytes, requires equality with the digest
+in boot handoff v2, and strictly verifies its Ed25519 signature before parsing.
+The pinned key is an RFC test identity, not a deployer trust root. Sequence
+rollback storage, key identifiers and rotation, additional bundle records,
+platform constraints, and independent site policy remain required for a
+production authenticated boot.

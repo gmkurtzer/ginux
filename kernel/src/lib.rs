@@ -73,6 +73,7 @@ pub struct BootInfo {
     pub manifest: *const u8,
     pub manifest_size: usize,
     pub manifest_sha256: [u8; 32],
+    pub manifest_signature: [u8; 64],
     pub control_plane_bundle: *const u8,
     pub control_plane_bundle_size: usize,
     pub reset_system: ResetSystem,
@@ -140,19 +141,28 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     serial_write("ginux: versioned boot handoff accepted\r\n");
     serial_write("ginux: ACPI root pointer validated\r\n");
-    let Some(boot_manifest) = manifest::Manifest::parse_and_measure(
+    let Some(boot_manifest) = manifest::Manifest::parse_and_verify(
         boot_info.manifest,
         boot_info.manifest_size,
         &boot_info.manifest_sha256,
+        &boot_info.manifest_signature,
         arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
     ) else {
         kernel_fail("ginux: invalid measured boot manifest\r\n");
     };
-    serial_write("ginux: measured boot manifest accepted\r\nginux: manifest sequence: ");
+    serial_write("ginux: signed boot manifest accepted\r\nginux: manifest sequence: ");
     serial_write_u64(boot_manifest.sequence());
     serial_write("\r\nginux: manifest authority grants: ");
     serial_write_usize(boot_manifest.grant_count());
     serial_write("\r\n");
+    if !manifest::verify_signature_rejection(
+        boot_info.manifest,
+        boot_info.manifest_size,
+        &boot_info.manifest_signature,
+    ) {
+        kernel_fail("ginux: invalid manifest signature was accepted\r\n");
+    }
+    serial_write("ginux: manifest signature rejection verified\r\n");
     if !boot_manifest.bundle_matches(
         boot_info.control_plane_bundle,
         boot_info.control_plane_bundle_size,
