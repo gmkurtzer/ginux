@@ -174,21 +174,24 @@ scheduler proof then executes and retires that exact generation. New lifecycle
 actions must receive new action values and explicitly versioned layouts rather
 than repurposing existing fields.
 Action 2 requests stop of the exact generation in the source field and requires
-the object and rights fields to be zero. It immediately revokes the target's
-delegated roots. An unstarted, resource-free target is then retired and emits
-kind 3. Runtime stop is rejected until scheduler cancellation and resource
-drain are integrated with this action. The ring-3 proof stops its first created generation, verifies the
-sequenced retirement in the kernel, then creates a distinct generation for the
-live execution proof.
+the object and rights fields to be zero. An unstarted, resource-free target is
+retired directly. A queued target is accepted only while its context is ready:
+the scheduler removes it before execution, drains its thread accounting,
+releases its complete W^X hierarchy, revokes every delegated root, and emits
+kind 3. A running target is still rejected. The ring-3 proof stops one
+unstarted generation and one queued generation, verifies both sequenced
+retirements in the kernel, then creates a distinct generation for live
+execution.
 Action 3 loads and queues an unstarted auxiliary. The source field is its exact
 domain generation, the object field is a readable caller address, and the
 rights field is a byte length from 1 through 4096. The kernel allocates a fresh
 seven-frame W^X hierarchy, copies only that bounded range through the caller's
 validated mapping into the target's initially zeroed RX code frame, binds the
-resource record, and accounts one ready thread. Any failed stage releases what
-it acquired and returns `UINT64_MAX - 2`. The normal scheduler dispatches the
-target when the control context yields or exits; action 3 does not jump directly
-between domains. The hardware proof first supplies an unmapped source after
+resource record, and accounts one staged thread. Involuntary preemption does
+not admit a newly staged auxiliary; a voluntary yield, block, or exit makes it
+runnable. Any failed stage releases what it acquired and returns
+`UINT64_MAX - 2`. Action 3 does not jump directly between domains. The hardware
+proof first supplies an unmapped source after
 target allocation, requires failure, then successfully loads the same exact
 generation. The second allocation can succeed only if the failed transaction
 returned every target frame and left no resource binding behind.

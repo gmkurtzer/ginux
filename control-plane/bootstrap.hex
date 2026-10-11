@@ -428,6 +428,46 @@ cd80
 7402
 0f0b
 
+# cancel and retire the queued generation before it can execute
+66c746060200
+48c7461000000000
+48c7461800000000
+4889df
+ba20000000
+b80f000000
+cd80
+85c0
+7402
+0f0b
+
+# create a distinct generation for the hardware execution proof
+66c746060100
+48895e08
+48c7461001000000
+48c7461801000000
+4889df
+ba20000000
+b80f000000
+cd80
+4989c4
+48c1e830
+4885c0
+7402
+0f0b
+
+# load and queue the exit-only program into the new generation
+66c746060300
+4c896608
+48896e10
+48c7461807000000
+4889df
+ba20000000
+b80f000000
+cd80
+85c0
+7402
+0f0b
+
 # the diagnostics consumed the final budgeted call
 b800000000
 cd80

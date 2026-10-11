@@ -133,14 +133,19 @@ lifecycle growth. It creates only an unstarted domain: address-space constructio
 and scheduler admission remain a separate action 3 transaction. The ring-3 proof
 denies creation through a non-managing capability, then delegates attenuated
 host-read authority into the clean-exit workload through the authorized path.
-Management action 2 accepts only an unstarted, resource-free exact generation with zero unused fields,
-reuses the existing two-phase stop transition, and publishes normal auxiliary
-retirement. The proof creates and stops one unstarted generation before creating
-the separate generation admitted to hardware execution.
+Management action 2 accepts an unstarted or scheduler-ready exact generation
+with zero unused fields. For a queued target it removes the ready context,
+detaches its accounted thread, releases and unbinds its address space, then
+reuses the existing two-phase stop transition to publish normal auxiliary
+retirement. The proof stops one unstarted generation and one fully loaded,
+queued generation before creating the separate generation admitted to hardware
+execution. Running-context cancellation remains out of scope.
 Management action 3 performs bounded loading and scheduler admission. It
 accepts an exact ready generation plus a caller-owned source range of at most
 one page, constructs and retains the target's W^X hierarchy, then queues one
-accounted context. The control-plane proof writes a seven-byte exit program,
+accounted, staged context. Timer preemption cannot admit that context; a
+voluntary yield, block, or exit promotes it to ready. The control-plane proof
+writes a seven-byte exit program,
 first rejects an unmapped source with full allocation rollback, loads the same
 exact generation through this action, and exits; ordinary scheduler handoff
 dispatches the auxiliary before returning to the kernel verifier.

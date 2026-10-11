@@ -388,6 +388,19 @@ pub(crate) fn load_and_queue_auxiliary_from_current_user(
     true
 }
 
+pub(crate) fn stop_auxiliary_from_current_user(
+    supervisor: u64,
+    capability: u64,
+    domain_id: u64,
+) -> bool {
+    if domain::stop_auxiliary_service(supervisor, capability, domain_id) {
+        return true;
+    }
+    scheduler::cancel_ready_auxiliary(domain_id)
+        && release_auxiliary_address_space(domain_id)
+        && domain::stop_auxiliary_service(supervisor, capability, domain_id)
+}
+
 fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(slot) =
@@ -622,6 +635,28 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
     {
         return false;
     }
+    let Some(queued_stop_event) = domain::take_lifecycle_event() else {
+        return false;
+    };
+    let Some((queued_stop_kind, queued_stop_domain, queued_stop_sequence)) =
+        domain::last_lifecycle_event_audit()
+    else {
+        return false;
+    };
+    let Some(queued_stop_owner) = memory::FrameOwner::domain(queued_stop_domain) else {
+        return false;
+    };
+    if queued_stop_kind != crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
+        || queued_stop_sequence != 3
+        || queued_stop_domain == stopped_domain
+        || queued_stop_event
+            != ((queued_stop_domain << 8)
+                | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
+        || memory::owner_live_frame_count(queued_stop_owner) != Some(0)
+        || !domain::domain_is_retired(queued_stop_domain)
+    {
+        return false;
+    }
     let Some(executed_event) = domain::take_lifecycle_event() else {
         return false;
     };
@@ -634,8 +669,9 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
         return false;
     };
     executed_kind == crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
-        && executed_sequence == 3
+        && executed_sequence == 4
         && executed_domain != stopped_domain
+        && executed_domain != queued_stop_domain
         && executed_event
             == ((executed_domain << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
         && domain::last_lifecycle_service_identity().is_some()
@@ -691,7 +727,7 @@ pub(crate) fn verify_ring3_auxiliary_fault() -> bool {
         && event
             == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
         && domain::last_lifecycle_event_audit()
-            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 4))
+            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 5))
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::delivered_fault_matches(
             auxiliary,

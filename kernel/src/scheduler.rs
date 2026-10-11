@@ -17,6 +17,7 @@ struct ThreadId {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum State {
+    Staged,
     Ready,
     Running,
     Blocked,
@@ -416,7 +417,12 @@ impl Scheduler {
         None
     }
 
-    fn yield_current(&mut self, id: ThreadId, saved: UserContext) -> Option<Scheduled> {
+    fn yield_current(
+        &mut self,
+        id: ThreadId,
+        saved: UserContext,
+        admit_staged: bool,
+    ) -> Option<Scheduled> {
         if self.current != Some(id) {
             return None;
         }
@@ -430,6 +436,9 @@ impl Scheduler {
         thread.context = saved;
         thread.state = State::Ready;
         self.current = None;
+        if admit_staged {
+            self.admit_staged();
+        }
         self.schedule_next()
     }
 
@@ -451,6 +460,7 @@ impl Scheduler {
         thread.state = State::Blocked;
         thread.wait = Some(reason);
         self.current = None;
+        self.admit_staged();
         if let Some(next) = self.schedule_next() {
             return Some(next);
         }
@@ -512,14 +522,26 @@ impl Scheduler {
         }
         self.threads[usize::from(id.slot)] = None;
         self.current = None;
+        self.admit_staged();
         self.schedule_next()
+    }
+
+    fn admit_staged(&mut self) {
+        for thread in self.threads.iter_mut().flatten() {
+            if thread.state == State::Staged {
+                thread.state = State::Ready;
+            }
+        }
     }
 
     fn remove_ready_domain(&mut self, domain: u64) -> bool {
         let mut slot = None;
         for (index, thread) in self.threads.iter().enumerate() {
             if thread.is_some_and(|thread| thread.domain == domain) {
-                if slot.is_some() || thread.is_some_and(|thread| thread.state != State::Ready) {
+                if slot.is_some()
+                    || thread
+                        .is_some_and(|thread| !matches!(thread.state, State::Staged | State::Ready))
+                {
                     return false;
                 }
                 slot = Some(index);
@@ -686,11 +708,15 @@ pub(crate) fn queue_auxiliary(
     if !domain::attach_thread(domain_id) {
         return false;
     }
-    if runtime.scheduler.create(domain_id, context).is_none() {
+    let Some(thread) = runtime.scheduler.create(domain_id, context) else {
         let _ = domain::detach_thread(domain_id);
         return false;
-    }
+    };
     if runtime.scheduler.current.is_some() {
+        let Some(queued) = runtime.scheduler.thread_mut(thread) else {
+            return false;
+        };
+        queued.state = State::Staged;
         true
     } else {
         let Some(next) = runtime.scheduler.schedule_next() else {
@@ -700,6 +726,18 @@ pub(crate) fn queue_auxiliary(
         };
         next.context == context
     }
+}
+
+pub(crate) fn cancel_ready_auxiliary(domain_id: u64) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    if domain::service_failure_policy(domain_id) != Some(domain::ServiceFailurePolicy::StopOnly)
+        || !runtime.scheduler.remove_ready_domain(domain_id)
+    {
+        return false;
+    }
+    domain::detach_thread(domain_id)
 }
 
 pub(crate) fn rollback_service_restart(domain: u64, prior_owner: u64) -> bool {
@@ -834,7 +872,7 @@ pub(crate) fn yield_runtime(
         return RuntimeAction::Invalid;
     };
     let saved = frame.saved_context(0, root);
-    let Some(next) = runtime.scheduler.yield_current(current, saved) else {
+    let Some(next) = runtime.scheduler.yield_current(current, saved, true) else {
         return RuntimeAction::Invalid;
     };
     let Some(yields) = runtime.yields.checked_add(1) else {
@@ -876,7 +914,7 @@ pub(crate) fn preempt_runtime(
         return RuntimeAction::Invalid;
     };
     let saved = frame.saved_context(root);
-    let Some(next) = runtime.scheduler.yield_current(current, saved) else {
+    let Some(next) = runtime.scheduler.yield_current(current, saved, false) else {
         return RuntimeAction::Invalid;
     };
     let Some(preemptions) = runtime.preemptions.checked_add(1) else {
@@ -1137,8 +1175,10 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     if first_run.id != first
         || first_run.context != first_context
         || scheduler.thread(first)?.domain != 1
-        || scheduler.yield_current(second, second_context).is_some()
-        || scheduler.yield_current(first, first_saved)?.id != second
+        || scheduler
+            .yield_current(second, second_context, true)
+            .is_some()
+        || scheduler.yield_current(first, first_saved, true)?.id != second
         || scheduler.thread(first)?.state != State::Ready
         || scheduler.thread(second)?.state != State::Running
         || scheduler.exit_current(second)?.id != first
@@ -1211,7 +1251,7 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             .block_current(waiting_client, first_context, wait)?
             .id
             != unrelated
-        || closing.yield_current(unrelated, first_context)?.id != dying_service
+        || closing.yield_current(unrelated, first_context, true)?.id != dying_service
         || closing.cancel_blocked_peers(
             2,
             WaitReason::IpcReceive {

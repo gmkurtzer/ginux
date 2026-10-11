@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 31;
+const CONTROL_CALL_BUDGET: u16 = 34;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
@@ -1676,7 +1676,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 36
+    control.remaining_calls == 0 && manager.total_calls == 39
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
@@ -1733,7 +1733,7 @@ pub(crate) fn thread_budget_proof_complete() -> bool {
     };
     control.active_threads == 0
         && control.thread_limit == BOOTSTRAP_THREAD_LIMIT
-        && manager.total_thread_attaches == 5
+        && manager.total_thread_attaches == 6
 }
 
 pub(crate) fn service_restart_budget_proof_complete() -> bool {

@@ -890,7 +890,11 @@ fn create_auxiliary_service(
         control_abi::MANAGEMENT_STOP_AUXILIARY
             if request.object == 0
                 && request.rights == 0
-                && domain::stop_auxiliary_service(caller_domain, capability, request.source) =>
+                && address_space::stop_auxiliary_from_current_user(
+                    caller_domain,
+                    capability,
+                    request.source,
+                ) =>
         {
             0
         }

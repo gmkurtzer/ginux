@@ -42,11 +42,15 @@ looks up that registry entry, refuses release while a thread remains attached,
 then unbinds, zeroes, and returns all seven frames before removing the entry.
 The proof requires the entry to remain present after a rejected early release
 and requires the registry and allocator ownership count to be empty afterward.
+The userspace stop path may remove a scheduler-ready auxiliary, detach its
+thread reservation, and then release the same registry entry before publishing
+retirement. It cannot release a running address space.
 During the primary bootstrap workload, the control plane creates a fresh
 auxiliary generation and submits a seven-byte exit-only program through the
-bounded management loader. The scheduler admits exactly one thread against the
-registered root, dispatches it after the control plane exits, and handles its
-exit through the normal syscall path.
+bounded management loader. The scheduler stages exactly one thread against the
+registered root, keeps it staged across involuntary preemption, dispatches it
+after the control plane exits, and handles its exit through the normal syscall
+path.
 That path restores the kernel root, clears and releases all seven frames, and
 retires the exact domain generation before returning to the boot verifier.
 A second live auxiliary generation executes `UD2`. The architectural exception
