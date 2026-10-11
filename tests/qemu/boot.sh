@@ -593,6 +593,11 @@ if ! grep -q '^ginux: Linux directional VMA copies validated' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux root working directory validated' "$output_file"; then
+    echo "Boot test failed: Linux root working directory was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

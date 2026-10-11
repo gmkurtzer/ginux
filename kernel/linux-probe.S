@@ -155,6 +155,27 @@ ginux_linux_probe:
     cmp qword ptr [0x401008], 0x401000
     jne failure
 
+    mov edi, 0x401020
+    mov esi, 1
+    mov eax, 79
+    syscall
+    cmp rax, -34
+    jne failure
+    mov edi, 0x401200
+    mov esi, 2
+    mov eax, 79
+    syscall
+    cmp rax, -14
+    jne failure
+    mov edi, 0x401020
+    mov esi, 2
+    mov eax, 79
+    syscall
+    cmp rax, 2
+    jne failure
+    cmp word ptr [0x401020], 0x002f
+    jne failure
+
     mov edi, 0x401200
     mov eax, 63
     syscall

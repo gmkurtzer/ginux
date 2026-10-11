@@ -35,6 +35,8 @@ part of exit.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
+The initial filesystem view exposes only a working-directory identity of `/`;
+bounded `getcwd` returns it, while undersized and invalid buffers fail.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

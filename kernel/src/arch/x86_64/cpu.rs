@@ -49,6 +49,7 @@ const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
+const LINUX_GETCWD_SYSCALL: u64 = 79;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
@@ -68,6 +69,7 @@ const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
+const LINUX_ERANGE: u64 = u64::MAX - 33;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1093,6 +1095,15 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_EFAULT;
             }
             0
+        }
+        LINUX_GETCWD_SYSCALL => {
+            if buffer < 2 {
+                return LINUX_ERANGE;
+            }
+            if !copy_to_linux_user(first_argument, b"/\0") {
+                return LINUX_EFAULT;
+            }
+            2
         }
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
