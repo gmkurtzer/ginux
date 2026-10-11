@@ -31,6 +31,11 @@ creation and every saved-context transition prevents the kernel from admitting
 a user context that cannot be preempted by maskable interrupts. Yield
 atomically replaces the current thread's saved context before choosing another
 thread.
+Every scheduler-driven address-space activation also validates the selected
+context's saved RIP and RSP against the fixed executable and stack mappings in
+that root. Structurally valid pointers into guards, absent pages, or a stack's
+one-past-end boundary therefore fail before `IRETQ` rather than depending on a
+subsequent user fault.
 
 The QEMU boot gate covers two-thread ordering, rejected non-current yield,
 single-running-thread state, exit selection, idle behavior, slot reuse, domain

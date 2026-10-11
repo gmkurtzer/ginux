@@ -564,6 +564,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !arch::x86_64::cpu::user_mode_instruction_prevention_enabled()
         || !arch::x86_64::cpu::service_restart_stack_was_scrubbed()
         || !arch::x86_64::cpu::service_address_space_frames_were_transferred()
+        || !arch::x86_64::paging::verify_user_context_layout_invariants()
         || !domain::call_budget_proof_complete()
         || !domain::thread_budget_proof_complete()
         || domain::handle_permits(
@@ -603,6 +604,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: scheduler CR3 roots validated");
     serial_write("\r\nginux: bounded user page-table hierarchy validated");
     serial_write("\r\nginux: scheduler address-space ownership validated");
+    serial_write("\r\nginux: scheduler user mappings validated");
     serial_write("\r\nginux: one-shot user preemption completed");
     serial_write("\r\nginux: restarted service preemption completed");
     serial_write("\r\nginux: completed address-space frames reclaimed");

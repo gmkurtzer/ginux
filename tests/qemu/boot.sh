@@ -428,6 +428,11 @@ if ! grep -q '^ginux: scheduler address-space ownership validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: scheduler user mappings validated' "$output_file"; then
+    echo "Boot test failed: scheduler user mapping validation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: one-shot user preemption completed' "$output_file"; then
     echo "Boot test failed: the one-shot user preemption did not complete." >&2
     exit 1

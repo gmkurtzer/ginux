@@ -1108,6 +1108,12 @@ pub(crate) fn activate_user_root(root: u64) -> bool {
     let Some(owner) = scheduler::current_domain().and_then(memory::FrameOwner::domain) else {
         return false;
     };
+    let Some((instruction, stack)) = scheduler::current_instruction_and_stack() else {
+        return false;
+    };
+    if !paging::user_context_matches_layout(instruction, stack) {
+        return false;
+    }
     let Some(frames) = paging::validated_user_root_frames(root) else {
         return false;
     };

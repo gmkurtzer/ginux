@@ -653,6 +653,13 @@ pub(crate) fn current_address_space_root() -> Option<u64> {
         .map(|thread| thread.context.address_space_root)
 }
 
+pub(crate) fn current_instruction_and_stack() -> Option<(u64, u64)> {
+    let runtime = runtime_mut()?;
+    let current = runtime.scheduler.current?;
+    let context = runtime.scheduler.thread(current)?.context;
+    Some((context.rip, context.rsp))
+}
+
 pub(crate) fn fault_runtime(
     frame: &mut UserFaultFrame,
     fault_address: u64,

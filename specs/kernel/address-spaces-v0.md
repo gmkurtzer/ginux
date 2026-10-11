@@ -63,6 +63,12 @@ appear in the allocator's live ledger under the scheduler's exact current
 domain generation. This prevents an internally corrupted or stale scheduler
 root from silently widening a domain's mappings or borrowing another domain's
 frames.
+The scheduler also supplies the target context's saved instruction and stack
+pointers at this boundary. The instruction must fall inside the fixed
+read-only executable page, while the stack pointer must name the top or an
+interior byte of one of the two writable, non-executable stack pages. Guard
+pages and the one-past-end address above a stack are rejected. This is a
+transitional fixed-layout policy, not a general virtual-memory-area model.
 
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3

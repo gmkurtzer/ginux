@@ -16,6 +16,31 @@ const ADDRESS_MASK: usize = 0x000f_ffff_ffff_f000;
 const CR0_WRITE_PROTECT: usize = 1 << 16;
 
 pub(crate) const INITIAL_IDENTITY_LIMIT: usize = 1usize << 32;
+const USER_REGION_BASE: u64 = 1_u64 << 39;
+
+pub(crate) fn user_context_matches_layout(instruction: u64, stack: u64) -> bool {
+    let code_end = USER_REGION_BASE + PAGE_SIZE as u64;
+    let first_stack_start = USER_REGION_BASE + 2 * PAGE_SIZE as u64;
+    let first_stack_end = USER_REGION_BASE + 3 * PAGE_SIZE as u64;
+    let second_stack_start = USER_REGION_BASE + 4 * PAGE_SIZE as u64;
+    let second_stack_end = USER_REGION_BASE + 5 * PAGE_SIZE as u64;
+    (USER_REGION_BASE..code_end).contains(&instruction)
+        && ((first_stack_start < stack && stack <= first_stack_end)
+            || (second_stack_start < stack && stack <= second_stack_end))
+}
+
+pub(crate) fn verify_user_context_layout_invariants() -> bool {
+    let page = PAGE_SIZE as u64;
+    user_context_matches_layout(USER_REGION_BASE, USER_REGION_BASE + 3 * page)
+        && user_context_matches_layout(USER_REGION_BASE + page - 1, USER_REGION_BASE + 2 * page + 1)
+        && user_context_matches_layout(USER_REGION_BASE, USER_REGION_BASE + 5 * page)
+        && !user_context_matches_layout(USER_REGION_BASE - 1, USER_REGION_BASE + 3 * page)
+        && !user_context_matches_layout(USER_REGION_BASE + page, USER_REGION_BASE + 3 * page)
+        && !user_context_matches_layout(USER_REGION_BASE, USER_REGION_BASE + 2 * page)
+        && !user_context_matches_layout(USER_REGION_BASE, USER_REGION_BASE + 3 * page + 1)
+        && !user_context_matches_layout(USER_REGION_BASE, USER_REGION_BASE + 4 * page)
+        && !user_context_matches_layout(USER_REGION_BASE, USER_REGION_BASE + 5 * page + 1)
+}
 
 pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
     if root == 0 || root >= INITIAL_IDENTITY_LIMIT as u64 || !root.is_multiple_of(PAGE_SIZE as u64)
