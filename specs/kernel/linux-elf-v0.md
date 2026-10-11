@@ -47,21 +47,24 @@ root at their declared `0x400000` and `0x401000` addresses. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
 target leaves; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
-map. Before changing CR3, it rejects either target page if it overlaps the
+map. A seventh owned page at `0x404000` supplies a RW/NX stack; its adjacent
+pages remain supervisor-only. Before changing CR3, the proof rejects either
+segment target page if it overlaps the
 loaded kernel PE image. It then activates the root, observes both pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
 entry. The synthetic instruction stream issues one boot-only reserved
 verification call through the existing `INT 0x80` gate. That call is accepted
 only while an atomic probe flag is armed and returns directly to the saved
 kernel stack. The proof restores and reads back the kernel root, then clears
-and releases all six root/table/payload frames.
+and releases all seven root/table/payload/stack frames.
 
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the
-current low-linked kernel can survive the proof transition. The writable data
-page temporarily supplies the unused initial stack pointer; a Linux initial
-stack/auxiliary vector, scheduler ownership model, supported syscall surface,
-and general collision policy beyond the loaded kernel image are not defined
-yet. The loader does not relocate `ET_EXEC` images to the existing high test
-address, because doing so would violate ELF semantics and hide these remaining
-prerequisites.
+current low-linked kernel can survive the proof transition. The initial stack
+pointer is 16-byte aligned and names `argc = 0`, null `argv` and `envp`, an
+`AT_PAGESZ = 4096` pair, and `AT_NULL`; the probe checks `argc` from CPL3 before
+exiting. Argument strings, a complete auxiliary vector, scheduler ownership,
+the supported syscall surface, and general collision policy beyond the loaded
+kernel image are not defined yet. The loader does not relocate `ET_EXEC` images
+to the existing high test address, because doing so would violate ELF semantics
+and hide these remaining prerequisites.

@@ -8,7 +8,8 @@ M4 begins with a strict static x86-64 ELF64 parser profile. It is validated
 during boot, materializes bounded RX/RW page images with zero-filled BSS, and
 installs them at their declared addresses in a collision-checked page-table
 root, activates it, and executes a one-shot verification entry at ring 3. This
-is not yet a general Linux process or syscall environment; see
+entry receives a distinct RW/NX stack containing a minimal Linux-style initial
+vector. This is not yet a general Linux process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md).
 
 ## Quick start

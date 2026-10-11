@@ -518,8 +518,8 @@ if ! grep -q '^ginux: Linux ELF64 page images materialized' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux ELF64 entry executed at ring 3' "$output_file"; then
-    echo "Boot test failed: Linux ELF64 entry did not execute at ring 3." >&2
+if ! grep -q '^ginux: Linux ELF64 initial stack entered at ring 3' "$output_file"; then
+    echo "Boot test failed: Linux ELF64 initial stack was not entered at ring 3." >&2
     exit 1
 fi
 

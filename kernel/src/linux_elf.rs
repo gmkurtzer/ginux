@@ -12,7 +12,13 @@ const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
 pub(crate) const PROBE_EXIT_CALL: u32 = 0xffff_fffe;
-const PROBE_CODE: [u8; 9] = [0xb8, 0xfe, 0xff, 0xff, 0xff, 0xcd, 0x80, 0x0f, 0x0b];
+const PROBE_CODE: [u8; 16] = [
+    0x48, 0x83, 0x3c, 0x24, 0x00, // cmp qword ptr [rsp], 0 (argc)
+    0x75, 0x07, // jne fallback UD2
+    0xb8, 0xfe, 0xff, 0xff, 0xff, // mov eax, PROBE_EXIT_CALL
+    0xcd, 0x80, // int 0x80
+    0x0f, 0x0b, // fallback UD2
+];
 
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {

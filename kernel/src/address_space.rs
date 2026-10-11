@@ -63,11 +63,20 @@ pub(crate) fn verify_linux_elf_mapping(
     {
         return false;
     }
-    let Some(frames) = memory::allocate_frames::<6>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<7>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, table, first_page, second_page] = addresses;
+    let [root, pdpt, directory, table, first_page, second_page, stack_page] = addresses;
+    let stack_virtual_page = second
+        .virtual_page
+        .checked_add(3 * PAGE_SIZE as u64)
+        .unwrap_or(0);
+    let stack_indexes = indexes(stack_virtual_page);
+    if stack_virtual_page == 0 || stack_indexes[..3] != first_indexes[..3] {
+        let _ = memory::release_frames(memory::FrameOwner::KERNEL, frames);
+        return false;
+    }
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
         unsafe {
@@ -131,21 +140,44 @@ pub(crate) fn verify_linux_elf_mapping(
             table_entries
                 .add(second_indexes[3])
                 .write(second_page | flags(second));
+            table_entries
+                .add(stack_indexes[3])
+                .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
+
+            let stack_bytes = mapped_frame::<u8>(stack_page)?;
+            let stack_offset = PAGE_SIZE - u64::BITS as usize;
+            let stack_words = stack_bytes.add(stack_offset).cast::<u64>();
+            for (index, value) in [0_u64, 0, 0, 6, PAGE_SIZE as u64, 0, 0, 0]
+                .into_iter()
+                .enumerate()
+            {
+                stack_words.add(index).write(value);
+            }
 
             let first_entry = table_entries.add(first_indexes[3]).read();
             let second_entry = table_entries.add(second_indexes[3]).read();
+            let stack_entry = table_entries.add(stack_indexes[3]).read();
+            let lower_guard = table_entries.add(stack_indexes[3] - 1).read();
+            let upper_guard = table_entries.add(stack_indexes[3] + 1).read();
             let entries_valid = root_entries.add(256).read() == kernel_root.add(256).read()
                 && root_entries.add(256).read() & USER == 0
                 && first_entry & (PRESENT | USER) == PRESENT | USER
                 && first_entry & (WRITABLE | NO_EXECUTE) == 0
                 && second_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
+                && stack_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                    == PRESENT | WRITABLE | USER | NO_EXECUTE
+                && lower_guard & USER == 0
+                && upper_guard & USER == 0
                 && first_bytes[..first.bytes.len()] == *first.bytes
                 && first_bytes[first.bytes.len()..]
                     .iter()
                     .all(|byte| *byte == 0)
                 && second_bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
-                && second_bytes[8..].iter().all(|byte| *byte == 0);
+                && second_bytes[8..].iter().all(|byte| *byte == 0)
+                && stack_words.read() == 0
+                && stack_words.add(3).read() == 6
+                && stack_words.add(4).read() == PAGE_SIZE as u64;
             if !entries_valid {
                 return Some(false);
             }
@@ -161,7 +193,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 && observed
                 && cpu::verify_linux_elf_entry(
                     plan.entry as usize,
-                    (second.virtual_page + PAGE_SIZE as u64) as usize,
+                    (stack_virtual_page + stack_offset as u64) as usize,
                 );
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
