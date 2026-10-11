@@ -23,6 +23,15 @@ Direct delivery to a blocked receiver and creation of a blocking wait use the
 same endpoint lookup before touching scheduler state; neither path can bypass
 the generation binding merely because no queue operation is needed.
 
+Every queued word also carries the exact sender domain generation internally.
+Service-side dequeue requires the recorded source to equal the control-plane
+generation. Control-side dequeue rejects a zero or control-plane source and
+retains the service generation for supervision auditing. The hardware proof
+requires the reply preserved across restart to remain attributed to the
+original failed service, not the replacement, and the consumed request to
+remain attributed to the control plane. Closure records use the same envelope
+and require their source and retired-generation value to agree.
+
 The channel is object 3 in the signed boot authority manifest. Sending requires
 `WRITE`; receiving requires `READ`. The call gate resolves the supplied opaque
 handle through the sealed control-plane capability table before touching the
@@ -64,7 +73,8 @@ a replacement that was bound but never scheduled. It requires an empty request
 direction, removes only that binding, and deliberately emits no peer-closure
 record for a service that never became observable.
 
-This revision transfers only an immediate word and has no capability transfer,
+The scalar v1 receive result exposes only the immediate word; its source tag is
+currently kernel-auditable rather than returned to userspace. This revision has no capability transfer,
 cancellation request, timeout, or cleanup of queued replies after domain
 failure. It has one fixed control/service endpoint pair rather
 than allocatable endpoint objects. The global queue is safe only

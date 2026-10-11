@@ -483,6 +483,11 @@ if ! grep -q '^ginux: generation-bound IPC endpoints verified' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: generation-tagged IPC messages verified' "$output_file"; then
+    echo "Boot test failed: IPC message generations were not retained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: blocking IPC direct wake completed' "$output_file"; then
     echo "Boot test failed: blocking IPC did not wake the waiting service." >&2
     exit 1
