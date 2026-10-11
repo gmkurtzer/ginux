@@ -4,7 +4,7 @@
 use core::arch::asm;
 use core::ffi::c_void;
 use core::panic::PanicInfo;
-use ginux_kernel::{kernel_entry, BootInfo, ResetSystem};
+use ginux_kernel::{kernel_entry, BootInfo, ResetSystem, BOOT_INFO_MAGIC, BOOT_INFO_VERSION};
 
 type EfiHandle = *mut c_void;
 type EfiStatus = usize;
@@ -12,6 +12,33 @@ type EfiStatus = usize;
 const EFI_SUCCESS: EfiStatus = 0;
 const COM1: u16 = 0x3f8;
 const MEMORY_MAP_CAPACITY: usize = 128 * 1024;
+const ACPI_20_TABLE_GUID: EfiGuid = EfiGuid {
+    data1: 0x8868_e871,
+    data2: 0xe4f1,
+    data3: 0x11d3,
+    data4: [0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81],
+};
+const ACPI_10_TABLE_GUID: EfiGuid = EfiGuid {
+    data1: 0xeb9d_2d30,
+    data2: 0x2d88,
+    data3: 0x11d3,
+    data4: [0x9a, 0x16, 0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d],
+};
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[repr(C)]
+struct EfiGuid {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+#[repr(C)]
+struct EfiConfigurationTable {
+    vendor_guid: EfiGuid,
+    vendor_table: *const u8,
+}
 
 #[repr(C)]
 struct EfiTableHeader {
@@ -96,7 +123,7 @@ struct EfiSystemTable {
     runtime_services: *mut EfiRuntimeServices,
     boot_services: *mut EfiBootServices,
     number_of_table_entries: usize,
-    configuration_table: *mut c_void,
+    configuration_table: *const EfiConfigurationTable,
 }
 
 #[repr(C, align(16))]
@@ -146,14 +173,42 @@ extern "efiapi" fn efi_main(image: EfiHandle, system_table: *mut EfiSystemTable)
 
     // SAFETY: UEFI owns the system and service tables until ExitBootServices.
     // The handoff function validates the required pointers before using them.
-    let boot_info = unsafe { exit_boot_services(image, system_table) };
+    let acpi_rsdp = unsafe { find_acpi_rsdp(system_table) };
+    if acpi_rsdp.is_null() {
+        panic!("UEFI did not provide an ACPI root pointer");
+    }
+    let boot_info = unsafe { exit_boot_services(image, system_table, acpi_rsdp) };
 
     // SAFETY: Boot services have ended, the memory-map storage is static, and
     // the kernel entry never returns to firmware boot code.
     unsafe { kernel_entry(core::ptr::addr_of!(boot_info)) }
 }
 
-unsafe fn exit_boot_services(image: EfiHandle, system_table: *mut EfiSystemTable) -> BootInfo {
+unsafe fn find_acpi_rsdp(system_table: *const EfiSystemTable) -> *const u8 {
+    let table_count = (*system_table).number_of_table_entries;
+    let tables = (*system_table).configuration_table;
+    if tables.is_null() {
+        return core::ptr::null();
+    }
+
+    let mut acpi_v1 = core::ptr::null();
+    for index in 0..table_count {
+        let table = &*tables.add(index);
+        if table.vendor_guid == ACPI_20_TABLE_GUID {
+            return table.vendor_table;
+        }
+        if table.vendor_guid == ACPI_10_TABLE_GUID {
+            acpi_v1 = table.vendor_table;
+        }
+    }
+    acpi_v1
+}
+
+unsafe fn exit_boot_services(
+    image: EfiHandle,
+    system_table: *mut EfiSystemTable,
+    acpi_rsdp: *const u8,
+) -> BootInfo {
     let boot_services = (*system_table).boot_services;
     let runtime_services = (*system_table).runtime_services;
     if boot_services.is_null() || runtime_services.is_null() {
@@ -185,10 +240,14 @@ unsafe fn exit_boot_services(image: EfiHandle, system_table: *mut EfiSystemTable
         let status = ((*boot_services).exit_boot_services)(image, map_key);
         if status == EFI_SUCCESS {
             return BootInfo {
+                magic: BOOT_INFO_MAGIC,
+                version: BOOT_INFO_VERSION,
+                size: core::mem::size_of::<BootInfo>() as u32,
                 memory_map,
                 memory_map_size,
                 memory_descriptor_size: descriptor_size,
                 memory_descriptor_version: descriptor_version,
+                acpi_rsdp,
                 reset_system: (*runtime_services).reset_system,
             };
         }

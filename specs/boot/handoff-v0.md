@@ -1,6 +1,6 @@
 # Boot Handoff Contract v0
 
-**Status:** Experimental; internal to the unified EFI image.
+**Status:** Superseded by `handoff-v1.md`.
 
 ## Purpose
 

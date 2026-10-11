@@ -58,6 +58,16 @@ if ! grep -q '^ginux: kernel stack active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: versioned boot handoff accepted' "$output_file"; then
+    echo "Boot test failed: the versioned boot handoff was not accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: ACPI root pointer validated' "$output_file"; then
+    echo "Boot test failed: the ACPI root pointer was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: kernel page tables active' "$output_file"; then
     echo "Boot test failed: the kernel did not activate its own page tables." >&2
     exit 1

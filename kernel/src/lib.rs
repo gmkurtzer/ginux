@@ -19,6 +19,8 @@ const UEFI_PAGES_PER_MIB: u64 = 256;
 const PAGE_SIZE: usize = 4096;
 const KERNEL_STACK_SIZE: usize = 64 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
+pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
+pub const BOOT_INFO_VERSION: u32 = 1;
 
 #[repr(C, align(4096))]
 struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
@@ -54,10 +56,14 @@ pub type ResetSystem = unsafe extern "efiapi" fn(u32, usize, usize, *const c_voi
 /// layout so the boot/kernel boundary can evolve into a language-neutral ABI.
 #[repr(C)]
 pub struct BootInfo {
+    pub magic: u64,
+    pub version: u32,
+    pub size: u32,
     pub memory_map: *const u8,
     pub memory_map_size: usize,
     pub memory_descriptor_size: usize,
     pub memory_descriptor_version: u32,
+    pub acpi_rsdp: *const u8,
     pub reset_system: ResetSystem,
 }
 
@@ -102,6 +108,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
 
     let boot_info = &*boot_info;
+    if boot_info.magic != BOOT_INFO_MAGIC
+        || boot_info.version != BOOT_INFO_VERSION
+        || boot_info.size < size_of::<BootInfo>() as u32
+    {
+        kernel_fail("ginux: incompatible boot information\r\n");
+    }
     if boot_info.memory_map.is_null()
         || boot_info.memory_map_size == 0
         || boot_info.memory_descriptor_size < size_of::<UefiMemoryDescriptor>()
@@ -111,6 +123,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("ginux: invalid UEFI memory map\r\n");
     }
+
+    let Some(acpi_rsdp_end) = validate_acpi_rsdp(boot_info.acpi_rsdp) else {
+        kernel_fail("ginux: invalid ACPI root pointer\r\n");
+    };
+    serial_write("ginux: versioned boot handoff accepted\r\n");
+    serial_write("ginux: ACPI root pointer validated\r\n");
 
     let Some(memory_map_end) = boot_info
         .memory_map_size
@@ -132,6 +150,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_stack_start,
         stack_start + KERNEL_STACK_STORAGE_SIZE - 1,
         boot_info.reset_system as usize,
+        boot_info.acpi_rsdp as usize,
+        acpi_rsdp_end,
     ];
     let guard_pages = [0, kernel_stack_guard, double_fault_guard];
 
@@ -241,6 +261,52 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
     kernel_fail("ginux: firmware shutdown returned unexpectedly\r\n");
+}
+
+fn validate_acpi_rsdp(rsdp: *const u8) -> Option<usize> {
+    const RSDP_V1_SIZE: usize = 20;
+    const RSDP_V2_SIZE: usize = 36;
+    const RSDP_SIGNATURE: &[u8; 8] = b"RSD PTR ";
+
+    if rsdp.is_null() || rsdp as usize >= arch::x86_64::paging::INITIAL_IDENTITY_LIMIT {
+        return None;
+    }
+    // SAFETY: The UEFI configuration table supplied this physical pointer. We
+    // first inspect only the fixed ACPI 1.0 prefix, then bound any extended
+    // length before reading it.
+    unsafe {
+        for (offset, expected) in RSDP_SIGNATURE.iter().enumerate() {
+            if rsdp.add(offset).read() != *expected {
+                return None;
+            }
+        }
+        if checksum(rsdp, RSDP_V1_SIZE) != 0 {
+            return None;
+        }
+        let revision = rsdp.add(15).read();
+        let length = if revision >= 2 {
+            let length = core::ptr::read_unaligned(rsdp.add(20).cast::<u32>()) as usize;
+            if length < RSDP_V2_SIZE {
+                return None;
+            }
+            length
+        } else {
+            RSDP_V1_SIZE
+        };
+        let end = (rsdp as usize).checked_add(length.checked_sub(1)?)?;
+        if end >= arch::x86_64::paging::INITIAL_IDENTITY_LIMIT || checksum(rsdp, length) != 0 {
+            return None;
+        }
+        Some(end)
+    }
+}
+
+unsafe fn checksum(bytes: *const u8, length: usize) -> u8 {
+    let mut sum = 0_u8;
+    for offset in 0..length {
+        sum = sum.wrapping_add(bytes.add(offset).read());
+    }
+    sum
 }
 
 fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
