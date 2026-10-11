@@ -4,6 +4,7 @@ const MIN_LOAD_SEGMENT_COUNT: usize = 2;
 const MAX_LOAD_SEGMENT_COUNT: usize = 3;
 const MAX_PROGRAM_HEADER_COUNT: usize = 6;
 const PT_LOAD: u32 = 1;
+const PT_INTERP: u32 = 3;
 const PT_PHDR: u32 = 6;
 const PT_GNU_STACK: u32 = 0x6474_e551;
 const PT_GNU_RELRO: u32 = 0x6474_e552;
@@ -17,6 +18,7 @@ const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
 const MAX_EXECUTABLE_SEGMENT_PAGES: usize = 4;
 const MAX_OTHER_SEGMENT_PAGES: usize = 2;
+const MAX_INTERPRETER_PATH_SIZE: usize = 256;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (4 * PAGE_SIZE) as u64;
 const FIXTURE_DATA_OFFSET: usize = 0x4000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
@@ -40,6 +42,7 @@ pub(crate) struct Image<'a> {
     pub(crate) read_only: Option<Segment<'a>>,
     pub(crate) writable: Segment<'a>,
     pub(crate) relro: Option<Relro>,
+    pub(crate) interpreter: Option<&'a [u8]>,
 }
 
 #[derive(Clone, Copy)]
@@ -103,6 +106,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     let mut gnu_stack_seen = false;
     let mut phdr_address = None;
     let mut relro = None;
+    let mut interpreter = None;
     for index in 0..program_header_count {
         let header = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
         match read_u32(bytes, header)? {
@@ -118,6 +122,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
             }
             PT_GNU_RELRO if relro.is_none() => {
                 relro = Some(parse_relro(bytes, header)?);
+            }
+            PT_INTERP if interpreter.is_none() => {
+                interpreter = Some(parse_interpreter(bytes, header)?);
             }
             _ => return None,
         }
@@ -205,10 +212,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         read_only,
         writable,
         relro,
+        interpreter,
     })
 }
 
 pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
+    if image.interpreter.is_some() {
+        return None;
+    }
     Some(LoadPlan {
         entry: image.entry,
         program_headers: image.program_headers,
@@ -403,6 +414,27 @@ fn parse_relro(bytes: &[u8], header: usize) -> Option<Relro> {
         })
 }
 
+fn parse_interpreter(bytes: &[u8], header: usize) -> Option<&[u8]> {
+    if read_u32(bytes, header)? != PT_INTERP
+        || read_u32(bytes, header + 4)? != PF_READ
+        || read_u64(bytes, header + 16)? != 0
+        || read_u64(bytes, header + 24)? != 0
+        || read_u64(bytes, header + 48)? != 1
+    {
+        return None;
+    }
+    let offset = usize::try_from(read_u64(bytes, header + 8)?).ok()?;
+    let file_size = usize::try_from(read_u64(bytes, header + 32)?).ok()?;
+    if !(2..=MAX_INTERPRETER_PATH_SIZE).contains(&file_size)
+        || read_u64(bytes, header + 40)? != file_size as u64
+    {
+        return None;
+    }
+    let path = bytes.get(offset..offset.checked_add(file_size)?)?;
+    (path[0] == b'/' && path[file_size - 1] == 0 && !path[..file_size - 1].contains(&0))
+        .then_some(&path[..file_size - 1])
+}
+
 pub(crate) fn verify_parser() -> bool {
     let image = fixture();
     let Some(parsed) = parse(&image) else {
@@ -416,6 +448,7 @@ pub(crate) fn verify_parser() -> bool {
         || parsed.executable.memory_size != FIXTURE_EXECUTABLE_MEMORY_SIZE
         || parsed.executable.flags != PF_READ | PF_EXECUTE
         || parsed.read_only.is_some()
+        || parsed.interpreter.is_some()
         || parsed.writable.bytes != *b"PROBE!!\n"
         || parsed.writable.virtual_address != 0x40_4000
         || parsed.writable.memory_size != (PAGE_SIZE + 512) as u64
@@ -426,7 +459,10 @@ pub(crate) fn verify_parser() -> bool {
     {
         return false;
     }
-    if !verify_metadata_parser(&image) || !verify_relro_parser() {
+    if !verify_metadata_parser(&image)
+        || !verify_relro_parser()
+        || !verify_interpreter_parser(&image)
+    {
         return false;
     }
     let rejections = rejects(&image, 0, b'X')
@@ -536,6 +572,49 @@ fn configure_extended_metadata(bytes: &mut [u8]) {
     write_u16(bytes, 56, 5);
     write_gnu_stack(bytes, phdr_header);
     write_phdr(bytes, extended_phdr_header, 5);
+}
+
+#[inline(never)]
+fn verify_interpreter_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
+    const PATH: &[u8] = b"/lib64/ld-linux-x86-64.so.2\0";
+    const PATH_OFFSET: usize = 0x3f80;
+    const SECOND_PATH_OFFSET: usize = 0x3fc0;
+    let header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
+    let duplicate_header = ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE;
+    let mut candidate = *image;
+    write_u16(&mut candidate, 56, 4);
+    write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
+    let valid = parse(&candidate).is_some_and(|image| {
+        image.interpreter == Some(&PATH[..PATH.len() - 1]) && plan(&image).is_none()
+    });
+
+    candidate = *image;
+    write_u16(&mut candidate, 56, 5);
+    write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
+    write_interpreter(&mut candidate, duplicate_header, SECOND_PATH_OFFSET, PATH);
+    let duplicate_rejected = parse(&candidate).is_none();
+
+    candidate = *image;
+    write_u16(&mut candidate, 56, 4);
+    write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
+    candidate[PATH_OFFSET + PATH.len() - 1] = b'X';
+    let unterminated_rejected = parse(&candidate).is_none();
+
+    candidate = *image;
+    write_u16(&mut candidate, 56, 4);
+    write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
+    candidate[PATH_OFFSET] = b'l';
+    let relative_rejected = parse(&candidate).is_none();
+
+    candidate = *image;
+    write_u16(&mut candidate, 56, 4);
+    write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
+    write_u32(&mut candidate, header + 4, PF_READ | PF_WRITE);
+    valid
+        && duplicate_rejected
+        && unterminated_rejected
+        && relative_rejected
+        && parse(&candidate).is_none()
 }
 
 #[inline(never)]
@@ -808,6 +887,17 @@ fn write_phdr(bytes: &mut [u8], header: usize, program_header_count: usize) {
     write_u64(bytes, header + 32, table_size);
     write_u64(bytes, header + 40, table_size);
     write_u64(bytes, header + 48, 8);
+}
+
+fn write_interpreter(bytes: &mut [u8], header: usize, offset: usize, path: &[u8]) {
+    bytes[header..header + PROGRAM_HEADER_SIZE].fill(0);
+    write_u32(bytes, header, PT_INTERP);
+    write_u32(bytes, header + 4, PF_READ);
+    write_u64(bytes, header + 8, offset as u64);
+    write_u64(bytes, header + 32, path.len() as u64);
+    write_u64(bytes, header + 40, path.len() as u64);
+    write_u64(bytes, header + 48, 1);
+    bytes[offset..offset + path.len()].copy_from_slice(path);
 }
 
 fn write_relro(bytes: &mut [u8], header: usize, virtual_address: u64, memory_size: u64) {

@@ -82,9 +82,15 @@ RX extent while readable-code copy bounds begin at the exact non-page-base
 owned frame after exit.
 
 The strict profile prevents unsupported features from being silently
-interpreted with weaker semantics. It does not accept position-independent
-`ET_DYN`, load `PT_INTERP`, accept arbitrary program-header types, perform
-relocations, or support glibc.
+interpreted with weaker semantics. It recognizes at most one `PT_INTERP`
+record with read-only flags, zero virtual addresses, unit alignment, matching
+file/memory sizes, and a bounded absolute NUL-terminated path without embedded
+NUL bytes. Duplicate, relative, unterminated, writable, oversized, and
+out-of-file records are rejected. An image carrying valid interpreter metadata
+is represented by the parser but deliberately rejected by the page-image
+planner, so the kernel cannot enter its main executable at the wrong entry
+point. The profile does not yet accept position-independent `ET_DYN`, load or
+authenticate the named interpreter, perform relocations, or support glibc.
 
 ## Page-image plan
 

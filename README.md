@@ -7,8 +7,10 @@ The initial executable milestone is an x86-64 unified EFI image tested under QEM
 M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to six
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
-and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, and non-executable
-`PT_GNU_STACK` declarations. The profile is validated during boot,
+and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
+`PT_GNU_STACK`, and bounded `PT_INTERP` declarations. Interpreter-bearing
+images remain non-executable until the separate interpreter mapping path is
+implemented. The profile is validated during boot,
 plans and installs up to two RX/RW pages per segment with independently
 zero-filled BSS, including ELF and program headers in the first load page. The
 runtime proof owns every mapped frame, preserves per-page W^X permissions, and

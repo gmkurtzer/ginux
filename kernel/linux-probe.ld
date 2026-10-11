@@ -22,7 +22,7 @@ SECTIONS
         FILL(0)
         . = MAX(., 0x403001);
     } :text
-    ASSERT(SIZEOF(.text) <= 0x3f00, "Linux probe exceeds four-page executable profile")
+    ASSERT(SIZEOF(.text) <= 0x3e80, "Linux probe exceeds reserved four-page executable profile")
 
     . = 0x404000;
     .data : { *(.data) } :data
