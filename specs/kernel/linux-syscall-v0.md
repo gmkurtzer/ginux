@@ -1,7 +1,7 @@
 # Linux x86-64 Syscall Entry v0
 
-**Status:** Bounded error/`write`/`uname`/`getpid`/termination transitions
-verified in QEMU; not a general syscall ABI.
+**Status:** Bounded error/`write`/`uname`/`arch_prctl`/`getpid`/termination
+transitions verified in QEMU; not a general syscall ABI.
 
 The bounded static ELF proof invokes the architectural x86-64 `SYSCALL`
 instruction with Linux register conventions. It first submits unsupported call
@@ -12,8 +12,12 @@ user memory only around the bounded copy-in, verifies the expected bytes, and
 returns 8. Next, `rax = 63` (`__NR_uname`) and the exact RW segment base request
 a fixed 390-byte Linux `utsname`. The kernel zero-initializes every byte, fills
 all six 65-byte fields, and enables supervisor access to user memory only for
-the bounded copy-out. The probe checks success and the `Ginux` system name. It
-then uses `rax = 39` (`__NR_getpid`), requires PID 1 in `rax` after resumption,
+the bounded copy-out. The probe checks success and the `Ginux` system name.
+Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
+the exact RW segment base establishes a bounded TLS pointer; an FS-relative
+load in ring 3 verifies the original payload. The kernel saves the prior
+supervisor FS-base MSR before entry, restores it after exit, and reads it back.
+The probe then uses `rax = 39` (`__NR_getpid`), requires PID 1 after resumption,
 and finally uses `rax = 231` (`__NR_exit_group`) with `rdi = 42` (status).
 Immediately before entry, the kernel:
 
@@ -40,7 +44,8 @@ This milestone proves the hardware transition and Linux argument registers. It
 does not provide persistent per-thread kernel stacks, `IRETQ` fallback, signal
 interruption, restartable syscalls, scheduler integration, credentials, a
 general file-descriptor table, output streams, arbitrary user buffers,
-threads, or any syscall other than the exact bounded `write`, `uname`, `getpid`,
-`exit`, and `exit_group` calls. Every other call returns `-ENOSYS` without disarming
-the task, so a caller can handle the error and continue. The entire path
-remains disarmed outside the proof.
+threads, general TLS state, or any syscall other than the exact bounded
+`write`, `uname`, `arch_prctl(ARCH_SET_FS)`, `getpid`, `exit`, and `exit_group`
+calls. Every other call returns `-ENOSYS` without disarming the task, so a
+caller can handle the error and continue. The entire path remains disarmed
+outside the proof.

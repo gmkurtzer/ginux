@@ -63,7 +63,9 @@ entry at `0x400100`, while syscall return validation remains bounded to its
 that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
 Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. A
-bounded `uname(0x401000)` then copies a complete zero-initialized `utsname` into
+bounded `arch_prctl(ARCH_SET_FS, 0x401000)` then makes the payload available
+through an FS-relative TLS read. A bounded `uname(0x401000)` subsequently
+copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. It next
 issues `getpid`, verifies PID 1 after the kernel resumes it through `SYSRETQ`,
 verifies preserved first and fourth argument registers, and issues Linux

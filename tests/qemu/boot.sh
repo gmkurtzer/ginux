@@ -518,8 +518,8 @@ if ! grep -q '^ginux: Linux ELF headers mapped in executable segment' "$output_f
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux exit_group returned to supervisor' "$output_file"; then
-    echo "Boot test failed: Linux exit_group did not return to the supervisor." >&2
+if ! grep -q '^ginux: Linux FS-based TLS configured and restored' "$output_file"; then
+    echo "Boot test failed: Linux FS-based TLS was not validated." >&2
     exit 1
 fi
 

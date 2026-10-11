@@ -16,8 +16,9 @@ validates its argument and entry metadata from ring 3
 before terminating through the architectural x86-64 `SYSCALL` instruction
 after checking that an unsupported call returns `-ENOSYS`, performing bounded
 `write` copy-in and `uname` copy-out operations, and validating a `getpid()`
-result returned through `SYSRETQ`, using Linux register and syscall-number
-conventions. This is not yet a general Linux
+result returned through `SYSRETQ`. It also configures an FS-relative TLS base
+through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's prior
+FS base afterward. This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and
 [Linux Syscall Entry v0](specs/kernel/linux-syscall-v0.md).

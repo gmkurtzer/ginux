@@ -41,13 +41,16 @@ const EFER_MSR: u32 = 0xc000_0080;
 const STAR_MSR: u32 = 0xc000_0081;
 const LSTAR_MSR: u32 = 0xc000_0082;
 const FMASK_MSR: u32 = 0xc000_0084;
+const FS_BASE_MSR: u32 = 0xc000_0100;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
+const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
+const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
@@ -681,16 +684,16 @@ pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize, data: usize) ->
     ELF_PROBE_ENTRY.store((entry & !(PAGE_SIZE - 1)) as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(data as u64, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
-    restore_linux_syscall(saved_msrs);
+    let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
-    inactive && completed
+    inactive && completed && msrs_restored
 }
 
-fn configure_linux_syscall() -> Option<[u64; 4]> {
+fn configure_linux_syscall() -> Option<[u64; 5]> {
     let star = (0x20_u64 << 48) | (u64::from(KERNEL_CODE_SELECTOR) << 32);
     let lstar = ginux_linux_syscall_entry as *const () as u64;
     let fmask = (1_u64 << 9) | (1_u64 << 10) | (1_u64 << 18);
@@ -700,6 +703,7 @@ fn configure_linux_syscall() -> Option<[u64; 4]> {
             read_msr(STAR_MSR),
             read_msr(LSTAR_MSR),
             read_msr(FMASK_MSR),
+            read_msr(FS_BASE_MSR),
         ];
         write_msr(STAR_MSR, star);
         write_msr(LSTAR_MSR, lstar);
@@ -712,18 +716,24 @@ fn configure_linux_syscall() -> Option<[u64; 4]> {
         if valid {
             Some(saved)
         } else {
-            restore_linux_syscall(saved);
+            let _ = restore_linux_syscall(saved);
             None
         }
     }
 }
 
-fn restore_linux_syscall(saved: [u64; 4]) {
+fn restore_linux_syscall(saved: [u64; 5]) -> bool {
     unsafe {
+        write_msr(FS_BASE_MSR, saved[4]);
         write_msr(FMASK_MSR, saved[3]);
         write_msr(LSTAR_MSR, saved[2]);
         write_msr(STAR_MSR, saved[1]);
         write_msr(EFER_MSR, saved[0]);
+        read_msr(EFER_MSR) == saved[0]
+            && read_msr(STAR_MSR) == saved[1]
+            && read_msr(LSTAR_MSR) == saved[2]
+            && read_msr(FMASK_MSR) == saved[3]
+            && read_msr(FS_BASE_MSR) == saved[4]
     }
 }
 
@@ -968,6 +978,15 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_GETPID_SYSCALL => 1,
+        LINUX_ARCH_PRCTL_SYSCALL
+            if first_argument == LINUX_ARCH_SET_FS
+                && buffer == ELF_PROBE_DATA.load(Ordering::SeqCst) =>
+        {
+            // SAFETY: the bounded proof accepts only its declared canonical
+            // user-data base and restores the supervisor FS base afterward.
+            unsafe { write_msr(FS_BASE_MSR, buffer) };
+            0
+        }
         LINUX_UNAME_SYSCALL if first_argument == ELF_PROBE_DATA.load(Ordering::SeqCst) => {
             let mut name = [0_u8; LINUX_UTSNAME_SIZE];
             name[..6].copy_from_slice(b"Ginux\0");
