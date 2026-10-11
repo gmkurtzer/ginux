@@ -438,6 +438,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: auxiliary service quiescence enforced\r\n");
     serial_write("ginux: auxiliary supervision authority enforced\r\n");
     serial_write("ginux: auxiliary retirement events sequenced\r\n");
+    serial_write("ginux: auxiliary retirement publication atomic\r\n");
     if !domain::verify_service_restart_budget_invariants() {
         kernel_fail("ginux: service restart budget invariant failed\r\n");
     }

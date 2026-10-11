@@ -58,6 +58,9 @@ Repeated or stale stop requests fail closed, and a newly reused slot starts in
 the ready state. Successful retirement publishes lifecycle event kind 3 with
 the exact retired generation and no synthetic fault metadata. Reusing a domain
 slot therefore produces a distinct, monotonically sequenced audit record.
+Event publication precedes registry and capability-table removal; sequence
+exhaustion rejects retirement without losing the stopped domain record or
+creating an unsequenced teardown.
 Auxiliary registration is not yet exposed to userspace, assigned address
 spaces, or integrated with an auxiliary restart policy.
 

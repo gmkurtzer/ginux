@@ -308,6 +308,11 @@ if ! grep -q '^ginux: auxiliary retirement events sequenced' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary retirement publication atomic' "$output_file"; then
+    echo "Boot test failed: auxiliary retirement publication was not atomic." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded service restart policy verified' "$output_file"; then
     echo "Boot test failed: service restart policy validation failed." >&2
     exit 1

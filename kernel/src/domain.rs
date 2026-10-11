@@ -898,18 +898,28 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     }
     let first_retirement = manager.lifecycle_events.pop()?;
     let second_retirement = manager.lifecycle_events.pop()?;
+    if first_retirement.kind != 3
+        || first_retirement.domain != console_service
+        || first_retirement.detail != 0
+        || first_retirement.fault.is_some()
+        || first_retirement.sequence != 1
+        || second_retirement.kind != 3
+        || second_retirement.domain != replacement
+        || second_retirement.detail != 0
+        || second_retirement.fault.is_some()
+        || second_retirement.sequence != 2
+        || !manager.lifecycle_events.is_empty()
+        || !manager.request_auxiliary_stop(control, host_source, host_service)
+    {
+        return Some(false);
+    }
+    manager.lifecycle_events.next_sequence = u64::MAX;
     Some(
-        first_retirement.kind == 3
-            && first_retirement.domain == console_service
-            && first_retirement.detail == 0
-            && first_retirement.fault.is_none()
-            && first_retirement.sequence == 1
-            && second_retirement.kind == 3
-            && second_retirement.domain == replacement
-            && second_retirement.detail == 0
-            && second_retirement.fault.is_none()
-            && second_retirement.sequence == 2
-            && manager.lifecycle_events.is_empty(),
+        !manager.retire_auxiliary_service(host_service)
+            && manager.auxiliary_service_ids == [None, Some(host_service)]
+            && manager.domain(host_service)?.state == State::Stopping
+            && manager.lifecycle_events.is_empty()
+            && manager.lifecycle_events.next_sequence == u64::MAX,
     )
 }
 
