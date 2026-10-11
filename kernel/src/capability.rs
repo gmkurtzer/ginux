@@ -13,6 +13,14 @@ impl Rights {
         Self(self.0 | other.0)
     }
 
+    pub(crate) const fn from_bits(bits: u64) -> Option<Self> {
+        if bits != 0 && bits & !0x0f == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+
     const fn is_empty(self) -> bool {
         self.0 == 0
     }

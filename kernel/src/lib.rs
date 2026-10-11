@@ -5,6 +5,7 @@ mod arch;
 mod capability;
 mod crypto;
 mod domain;
+mod manifest;
 mod memory;
 mod scheduler;
 
@@ -25,7 +26,7 @@ const PAGE_SIZE: usize = 4096;
 const KERNEL_STACK_SIZE: usize = 64 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
-pub const BOOT_INFO_VERSION: u32 = 1;
+pub const BOOT_INFO_VERSION: u32 = 2;
 
 #[repr(C, align(4096))]
 struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
@@ -69,6 +70,9 @@ pub struct BootInfo {
     pub memory_descriptor_size: usize,
     pub memory_descriptor_version: u32,
     pub acpi_rsdp: *const u8,
+    pub manifest: *const u8,
+    pub manifest_size: usize,
+    pub manifest_sha256: [u8; 32],
     pub reset_system: ResetSystem,
 }
 
@@ -134,6 +138,19 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     serial_write("ginux: versioned boot handoff accepted\r\n");
     serial_write("ginux: ACPI root pointer validated\r\n");
+    let Some(boot_manifest) = manifest::Manifest::parse_and_measure(
+        boot_info.manifest,
+        boot_info.manifest_size,
+        &boot_info.manifest_sha256,
+        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+    ) else {
+        kernel_fail("ginux: invalid measured boot manifest\r\n");
+    };
+    serial_write("ginux: measured boot manifest accepted\r\nginux: manifest sequence: ");
+    serial_write_u64(boot_manifest.sequence());
+    serial_write("\r\nginux: manifest authority grants: ");
+    serial_write_usize(boot_manifest.grant_count());
+    serial_write("\r\n");
 
     let Some(memory_map_end) = boot_info
         .memory_map_size
@@ -157,6 +174,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.reset_system as usize,
         boot_info.acpi_rsdp as usize,
         acpi_rsdp_end,
+        boot_info.manifest as usize,
+        boot_info.manifest as usize + boot_info.manifest_size - 1,
     ];
     let guard_pages = [0, kernel_stack_guard, double_fault_guard];
 
@@ -277,7 +296,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: capability derivation and revocation verified\r\n");
 
-    let Some(control_plane) = domain::create_and_verify_control_plane() else {
+    let Some(control_plane) = domain::create_and_verify_control_plane(&boot_manifest) else {
         kernel_fail("ginux: control-plane domain construction failed\r\n");
     };
     serial_write("ginux: control-plane domain metadata sealed\r\nginux: control-plane domain ID: ");

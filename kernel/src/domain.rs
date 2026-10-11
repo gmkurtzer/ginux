@@ -1,4 +1,5 @@
 use crate::capability::{Handle, Rights, Table as CapabilityTable};
+use crate::manifest::Manifest;
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
@@ -93,19 +94,17 @@ impl Manager {
     }
 }
 
-pub(crate) fn create_and_verify_control_plane() -> Option<u64> {
+pub(crate) fn create_and_verify_control_plane(manifest: &Manifest) -> Option<u64> {
     const HOST_CONTROL: u64 = 1;
     const CONSOLE: u64 = 2;
-    let grants = [
-        BootGrant::new(
-            HOST_CONTROL,
-            Rights::READ.union(Rights::WRITE).union(Rights::MANAGE),
-        ),
-        BootGrant::new(CONSOLE, Rights::WRITE),
-    ];
+    let mut grants = [BootGrant::new(0, Rights::READ); MAX_BOOT_GRANTS];
+    for (index, grant) in manifest.grants().iter().enumerate() {
+        grants[index] = BootGrant::new(grant.object, Rights::from_bits(grant.rights)?);
+    }
+    let grants = &grants[..manifest.grant_count()];
     let mut manager = Manager::new();
-    let id = manager.create_control_plane(&grants)?;
-    if manager.create_control_plane(&grants).is_some() {
+    let id = manager.create_control_plane(grants)?;
+    if manager.create_control_plane(grants).is_some() {
         return None;
     }
     let domain = manager.domain(id)?;

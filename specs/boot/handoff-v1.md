@@ -1,6 +1,6 @@
 # Boot Handoff Contract v1
 
-**Status:** Experimental; internal to the unified EFI image.
+**Status:** Superseded by `handoff-v2.md`.
 
 ## Header and compatibility
 
