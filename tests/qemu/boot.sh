@@ -218,6 +218,16 @@ if ! grep -q '^ginux: control-plane W\^X mappings active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded executable container accepted' "$output_file"; then
+    echo "Boot test failed: the executable container was not accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: malformed executable containers rejected' "$output_file"; then
+    echo "Boot test failed: malformed executable containers were accepted." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: opaque capability handles enforced at call gate' "$output_file"; then
     echo "Boot test failed: opaque capability-handle enforcement failed." >&2
     exit 1

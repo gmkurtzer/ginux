@@ -150,6 +150,7 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 pub(crate) fn verify_ring3_control_plane(
     program: &[u8],
+    entry_offset: usize,
     host_handle: u64,
     console_handle: u64,
     ipc_handle: u64,
@@ -170,7 +171,14 @@ pub(crate) fn verify_ring3_control_plane(
     {
         return false;
     }
-    if program.is_empty() || program.len() > PAGE_SIZE {
+    let Some(expected_fault_offset) = entry_offset.checked_add(EXPECTED_FAULT_OFFSET) else {
+        return false;
+    };
+    if program.is_empty()
+        || program.len() > PAGE_SIZE
+        || entry_offset >= program.len()
+        || expected_fault_offset >= program.len()
+    {
         return false;
     }
     unsafe {
@@ -205,20 +213,20 @@ pub(crate) fn verify_ring3_control_plane(
         if !ipc::initialize_control_channel()
             || !scheduler::initialize_runtime(
                 [first_space.root, second_space.root],
-                USER_TEST_ADDRESS,
+                USER_TEST_ADDRESS + entry_offset,
                 [
                     USER_TEST_ADDRESS + 3 * PAGE_SIZE,
                     USER_TEST_ADDRESS + 3 * PAGE_SIZE,
                 ],
                 [host_handle, console_handle, ipc_handle],
-                USER_TEST_ADDRESS + EXPECTED_FAULT_OFFSET,
+                USER_TEST_ADDRESS + expected_fault_offset,
             )
         {
             return false;
         }
         activate(first_space.root);
         let handled = cpu::verify_user_syscall(
-            USER_TEST_ADDRESS,
+            USER_TEST_ADDRESS + entry_offset,
             USER_TEST_ADDRESS + 3 * PAGE_SIZE,
             host_handle,
             console_handle,

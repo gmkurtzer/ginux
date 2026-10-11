@@ -5,6 +5,7 @@ mod arch;
 mod capability;
 mod crypto;
 mod domain;
+mod executable;
 mod ipc;
 mod manifest;
 mod memory;
@@ -365,6 +366,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.control_plane_bundle,
         boot_info.control_plane_bundle_size,
     );
+    let Some(control_plane_image) = executable::parse(control_plane_bundle) else {
+        kernel_fail("\r\nginux: control-plane executable container invalid\r\n");
+    };
+    if !executable::verify_parser_rejections(control_plane_bundle) {
+        kernel_fail("\r\nginux: malformed executable containers accepted\r\n");
+    }
+    serial_write("\r\nginux: bounded executable container accepted");
+    serial_write("\r\nginux: malformed executable containers rejected");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }
@@ -376,7 +385,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: control-plane bootstrap handles unavailable\r\n");
     };
     if !address_space::verify_ring3_control_plane(
-        control_plane_bundle,
+        control_plane_image.code,
+        control_plane_image.entry_offset,
         host_handle,
         console_handle,
         ipc_handle,

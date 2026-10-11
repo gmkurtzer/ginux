@@ -50,5 +50,5 @@ This is not yet a stable syscall ABI. It has no structured arguments,
 preemption, signal model, IPC page, or complete fault-containment policy. The `INT 0x80`
 mechanism is a bring-up gate; the eventual ABI may use `SYSCALL/SYSRET` with a
 safe fallback.
-The current bundle is raw position-fixed machine code; a bounded executable
-container format and relocation policy are still required.
+The current executable remains position-fixed and has no relocation policy,
+but its authenticated container supplies checked lengths and an entry offset.

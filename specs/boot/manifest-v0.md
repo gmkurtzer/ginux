@@ -43,8 +43,9 @@ of the outer digest and signature checks.
 ## Development generation
 
 `make manifest` reads `boot/manifest-v0.conf` and
-`control-plane/bootstrap.hex`, builds the canonical bytes, hashes the bundle and
-manifest, signs the manifest with the documented RFC test seed, and regenerates
+`control-plane/bootstrap.hex`, wraps the decoded code in the canonical native
+executable container, hashes the complete bundle and manifest, signs the
+manifest with the documented RFC test seed, and regenerates
 `boot/efi/src/generated_boot.rs`. Normal build, check, run, and test targets
 regenerate this file first. Production signing must use a separate tool and
 non-repository key source after the trust-root policy is defined.
