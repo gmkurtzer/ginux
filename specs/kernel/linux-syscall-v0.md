@@ -1,10 +1,11 @@
 # Linux x86-64 Syscall Entry v0
 
-**Status:** Bounded `write`/`getpid`/`exit` transition verified in QEMU; not a
-general syscall ABI.
+**Status:** Bounded error/`write`/`getpid`/`exit` transitions verified in QEMU;
+not a general syscall ABI.
 
 The bounded static ELF proof invokes the architectural x86-64 `SYSCALL`
-instruction with Linux register conventions. It first uses `rax = 1`
+instruction with Linux register conventions. It first submits unsupported call
+999 and requires Linux `-ENOSYS` (-38) after resumption. It then uses `rax = 1`
 (`__NR_write`) with fd 1, the declared RW segment address, and an eight-byte
 length. The kernel validates all three arguments, enables supervisor access to
 user memory only around the bounded copy-in, verifies the expected bytes, and
@@ -36,5 +37,6 @@ does not provide persistent per-thread kernel stacks, `IRETQ` fallback, signal
 interruption, restartable syscalls, scheduler integration, credentials, a
 general file-descriptor table, output streams, arbitrary user buffers,
 `exit_group`, or any syscall other than the exact bounded `write`, `getpid`, and
-exit calls. An unexpected call cannot receive a successful result from this
-path, and the path is disarmed outside the proof.
+exit calls. Every other call returns `-ENOSYS` without disarming the task, so a
+caller can handle the error and continue. The entire path remains disarmed
+outside the proof.

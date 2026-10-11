@@ -49,8 +49,9 @@ pages remain supervisor-only. Before changing CR3, the proof rejects either
 segment target page if it overlaps the
 loaded kernel PE image. It then activates the root, observes both pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
-entry. The synthetic instruction stream first issues a bounded Linux
-`write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. It then
+entry. The synthetic instruction stream first verifies that unsupported call
+999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
+Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload,
 issues `getpid`, verifies PID 1 after the kernel resumes it through `SYSRETQ`,
 verifies preserved first and fourth argument registers, and issues Linux
 `exit(42)`. Those calls are

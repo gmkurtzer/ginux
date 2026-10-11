@@ -47,6 +47,7 @@ const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
+const LINUX_ENOSYS: u64 = u64::MAX - 37;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -969,10 +970,7 @@ extern "sysv64" fn linux_syscall_handler(
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
             u64::MAX
         }
-        _ => {
-            ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-            u64::MAX
-        }
+        _ => LINUX_ENOSYS,
     }
 }
 
