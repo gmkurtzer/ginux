@@ -513,6 +513,11 @@ if ! grep -q '^ginux: userspace auxiliary load and admission enforced' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
+    echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: stop-only auxiliary fault executed and contained' "$output_file"; then
     echo "Boot test failed: stop-only auxiliary fault was not contained." >&2
     exit 1

@@ -188,7 +188,10 @@ validated mapping into the target's initially zeroed RX code frame, binds the
 resource record, and accounts one ready thread. Any failed stage releases what
 it acquired and returns `UINT64_MAX - 2`. The normal scheduler dispatches the
 target when the control context yields or exits; action 3 does not jump directly
-between domains.
+between domains. The hardware proof first supplies an unmapped source after
+target allocation, requires failure, then successfully loads the same exact
+generation. The second allocation can succeed only if the failed transaction
+returned every target frame and left no resource binding behind.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

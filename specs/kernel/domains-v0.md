@@ -141,8 +141,9 @@ Management action 3 performs bounded loading and scheduler admission. It
 accepts an exact ready generation plus a caller-owned source range of at most
 one page, constructs and retains the target's W^X hierarchy, then queues one
 accounted context. The control-plane proof writes a seven-byte exit program,
-loads it through this action, and exits; ordinary scheduler handoff dispatches
-the auxiliary before returning to the kernel verifier.
+first rejects an unmapped source with full allocation rollback, loads the same
+exact generation through this action, and exits; ordinary scheduler handoff
+dispatches the auxiliary before returning to the kernel verifier.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but
