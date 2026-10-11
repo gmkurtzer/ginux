@@ -202,7 +202,8 @@ through the static path. The existing
 static runtime stack is now populated by a single bounded auxiliary-vector
 encoder using that common contract, and the interpreted proof checks the exact
 word positions of its dynamic values. A bounded execution proof installs only
-the interpreter's separate RX and RW/NX pages in the initial user root. It
+the interpreter's two-page RX extent and separate RW/NX page in the initial
+user root. It
 keeps absent leaves for the main image's read-only/NX header page, four RX
 pages, two RW/NX pages, the primary dependency's two RX, one read-only/NX, and
 one RW page, and the auxiliary dependency's one RX and one RW page. It
@@ -217,14 +218,18 @@ at `0x600200`.
 The interpreter is assembled from `linux-interpreter.S`; the runtime path links
 it as a five-header PIE with LLD, while the compact hand-built ELF remains a
 parser and planning fixture. The linked interpreter retains the linker-emitted
-null-only dynamic symbol/string/GNU-hash tables; those tables are validated but
+two-page executable load: its entry and relocation core occupy the first page,
+while the page-aligned runtime-file discovery code occupies the second. Both
+pages are authenticated, materialized into separately owned frames, mapped RX,
+validated after activation, scrubbed, and released as one bounded extent. The
+linked interpreter also retains null-only dynamic symbol/string/GNU-hash tables; those tables are validated but
 never used for resolution because its sole relocation is relative. The compact
 fixture bounds raw interpreter text to its non-overlapping `0x100..0x400`
 executable window. At runtime
 the linked interpreter first validates its mapped ELF magic, requires a
 56-byte program-header entry size, and bounds one through eight headers to its
 first 4096-byte RX page. It accepts exactly one nonempty `PT_DYNAMIC` whose
-equal file/memory size is a multiple of 16 bytes and contains at most 21
+equal file/memory size is a multiple of 16 bytes and contains at most 23
 entries, then derives that table's runtime address with checked addition. The
 compact fixture retains its fixed synthetic table offset to remain within its
 768-byte raw-text bound. Both forms derive their page-aligned load bias and scan each bounded dynamic table for

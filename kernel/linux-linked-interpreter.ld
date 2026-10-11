@@ -20,9 +20,11 @@ SECTIONS
 
     . = 0x200;
     .text : { *(.text) } :text
+
+    . = 0x1000;
     .text.discovery : { *(.text.discovery) } :text
     .rodata.loader : { *(.rodata.loader) } :text
-    ASSERT(. <= 0x1000, "Linux interpreter discovery exceeds its RX page")
+    ASSERT(. <= 0x2000, "Linux interpreter discovery exceeds its RX extent")
 
     . = 0x3000;
     .data : { *(.data) } :data

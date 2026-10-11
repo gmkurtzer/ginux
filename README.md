@@ -58,7 +58,10 @@ program headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and
 `DT_SONAME`. The kernel authenticates all four linker outputs, applies fixed
 load biases, accepts the dependencies' intentionally unmapped ELF headers, and
 executes the complete probe through the linker-generated jump slot.
-Before relocating itself, the linked interpreter validates its mapped ELF
+The authenticated interpreter occupies a bounded two-page RX extent plus one
+RW/NX page; its metadata/startup core remains on the first executable page and
+its runtime-file discovery path begins on the second. Before relocating itself,
+the linked interpreter validates its mapped ELF
 header and bounded program-header table and derives its sole `PT_DYNAMIC`
 address and entry count; it no longer embeds its linker layout. After applying
 that relocation, the interpreter bounds and scans its initial stack,

@@ -825,7 +825,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || main_ro.page_count != 1
         || main_rx.page_count != 4
         || main_rw.page_count != 2
-        || interpreter_rx.page_count != 1
+        || interpreter_rx.page_count != 2
         || interpreter_rw.page_count != 1
         || !dependency_contracts_valid
         || dependency_base_min
@@ -904,11 +904,11 @@ pub(crate) fn verify_interpreted_elf_mapping(
         return false;
     }
 
-    let Some(frames) = memory::allocate_frames::<12>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<13>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, interpreter_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page] =
+    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, interpreter_page, interpreter_tail_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page] =
         addresses;
     let kernel_root_physical = current_root();
     let mut main_frames = [None; 7];
@@ -978,6 +978,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
 
             let payloads = [
                 (interpreter_rx, 0, interpreter_page),
+                (interpreter_rx, 1, interpreter_tail_page),
                 (interpreter_rw, 0, interpreter_data),
             ];
             for (segment, page, frame) in payloads {
@@ -1006,6 +1007,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             interpreter_entries
                 .add(interpreter_indexes[3])
                 .write(interpreter_page | flags(interpreter_rx));
+            interpreter_entries
+                .add(interpreter_indexes[3] + 1)
+                .write(interpreter_tail_page | flags(interpreter_rx));
             interpreter_entries
                 .add(interpreter_rw_indexes[3])
                 .write(interpreter_data | flags(interpreter_rw));
@@ -1067,9 +1071,13 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     .all(|offset| main_entries.add(main_indexes[3] + offset).read() == 0)
                 && (0..main_rw.page_count)
                     .all(|offset| main_entries.add(main_rw_indexes[3] + offset).read() == 0)
-                && interpreter_entries.add(interpreter_indexes[3]).read()
-                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == PRESENT | USER
+                && (0..interpreter_rx.page_count).all(|offset| {
+                    interpreter_entries
+                        .add(interpreter_indexes[3] + offset)
+                        .read()
+                        & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                        == PRESENT | USER
+                })
                 && interpreter_entries.add(interpreter_rw_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == PRESENT | USER | WRITABLE | NO_EXECUTE
@@ -1097,6 +1105,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 && cpu::with_supervisor_user_access(|| {
                     (interpreter_rx.virtual_address as *const u8).read_volatile() == 0x7f
                         && (plan.initial_entry as *const u8).read_volatile() == 0x48
+                        && ((interpreter_rx.virtual_page + PAGE_SIZE as u64) as *const u8)
+                            .read_volatile()
+                            == interpreter_rx.bytes[PAGE_SIZE]
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
                 });

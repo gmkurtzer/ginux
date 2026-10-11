@@ -3056,7 +3056,8 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         crate::serial_write_bytes(b"\r\nginux: linked dynamic dependency plan failed");
         return false;
     };
-    if plan.dependencies[0].executable.page_count != 2
+    if plan.process.interpreter.executable.page_count != 2
+        || plan.dependencies[0].executable.page_count != 2
         || plan.dependencies[0].writable.page_count != 1
         || !plan.dependencies[0]
             .read_only

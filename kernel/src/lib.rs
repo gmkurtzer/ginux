@@ -625,6 +625,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
     serial_write("ginux: toolchain-linked Linux interpreter executed\r\n");
+    serial_write("ginux: two-page Linux interpreter RX mapping verified\r\n");
     serial_write("ginux: userspace Linux interpreter metadata discovered\r\n");
     serial_write("ginux: userspace Linux runtime files discovered\r\n");
     serial_write("ginux: userspace Linux PT_LOAD mappings derived\r\n");
