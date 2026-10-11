@@ -507,6 +507,9 @@ extern "sysv64" fn breakpoint_handler() {
 }
 
 extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    if !scheduler::charge_runtime_call() {
+        return u64::MAX;
+    }
     match number {
         1 => {
             if domain::control_plane_handle_permits(capability, 1, Rights::READ) {

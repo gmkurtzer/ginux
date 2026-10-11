@@ -2,6 +2,7 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_THREADS: usize = 8;
+const INITIAL_SYSCALL_BUDGET: u16 = 8;
 
 static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut RUNTIME: MaybeUninit<Runtime> = MaybeUninit::uninit();
@@ -24,6 +25,7 @@ struct Thread {
     domain: u64,
     state: State,
     context: UserContext,
+    syscall_budget: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -160,6 +162,7 @@ struct Runtime {
     scheduler: Scheduler,
     yields: u8,
     exits: u8,
+    syscalls: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -195,6 +198,7 @@ impl Scheduler {
             domain,
             state: State::Ready,
             context,
+            syscall_budget: INITIAL_SYSCALL_BUDGET,
         });
         Some(id)
     }
@@ -312,9 +316,31 @@ pub(crate) fn initialize_runtime(
             scheduler,
             yields: 0,
             exits: 0,
+            syscalls: 0,
         }));
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
+    true
+}
+
+pub(crate) fn charge_runtime_call() -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(current) = runtime.scheduler.current else {
+        return false;
+    };
+    let Some(thread) = runtime.scheduler.thread_mut(current) else {
+        return false;
+    };
+    let Some(remaining) = thread.syscall_budget.checked_sub(1) else {
+        return false;
+    };
+    let Some(syscalls) = runtime.syscalls.checked_add(1) else {
+        return false;
+    };
+    thread.syscall_budget = remaining;
+    runtime.syscalls = syscalls;
     true
 }
 
@@ -386,6 +412,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
     };
     runtime.yields == 2
         && runtime.exits == 2
+        && runtime.syscalls == 14
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)
 }

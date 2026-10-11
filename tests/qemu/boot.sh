@@ -233,6 +233,11 @@ if ! grep -q '^ginux: capability-gated bounded IPC verified' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: per-thread syscall budgets enforced' "$output_file"; then
+    echo "Boot test failed: per-thread syscall accounting failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: scheduler context lifecycle verified' "$output_file"; then
     echo "Boot test failed: scheduler context lifecycle invariants failed." >&2
     exit 1

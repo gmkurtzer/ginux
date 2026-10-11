@@ -33,7 +33,15 @@ other context and restores its registers through `IRETQ`; exit destroys the
 current slot and either resumes the remaining context or returns to the
 kernel. The boot succeeds only after exactly two yields and two exits.
 
+Each created thread also receives a fixed eight-call bootstrap budget. Every
+call-gate entry is charged before dispatch, including denied operations, yield,
+and exit. Exhaustion rejects further dispatch. The ring-3 proof accounts for
+exactly fourteen calls across its two threads, demonstrating that scheduling
+does not merge their budgets.
+
 This revision uses one guarded TSS privilege stack because execution is
 single-CPU and syscalls cannot nest. It stores no priority, budget, affinity,
-wait reason, or timer deadline and provides no preemption. Contexts in distinct
-address spaces are not yet switched.
+priority, CPU-time budget, affinity, wait reason, or timer deadline and provides
+no preemption. The syscall counter is a bring-up resource bound, not a complete
+resource-accounting policy. Contexts in distinct address spaces are not yet
+switched.
