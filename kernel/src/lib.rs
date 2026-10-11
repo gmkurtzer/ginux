@@ -5,6 +5,7 @@ mod arch;
 mod capability;
 mod domain;
 mod memory;
+mod scheduler;
 
 use core::arch::{asm, global_asm};
 use core::ffi::c_void;
@@ -307,6 +308,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
     serial_write("\r\nginux: ring-3 syscall round trip and exit handled");
+    if !scheduler::verify_scheduler_invariants() {
+        kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
+    }
+    serial_write("\r\nginux: scheduler lifecycle verified");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
