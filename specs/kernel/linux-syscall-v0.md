@@ -133,6 +133,12 @@ delivery is not yet implemented. The endpoints participate in `F_GETFD`,
 checks FIFO ordering across partial reads, failed-read non-consumption, full
 buffer backpressure, epoll readiness, EOF, broken-peer handling, and legacy
 `pipe` creation.
+`readv` and `writev` extend the same pipe semantics to one through four
+nonempty iovecs with an aggregate maximum of 256 bytes. `writev` gathers and
+validates every input range before appending any byte; `readv` validates every
+output range before scattering or consuming data. The proof injects an invalid
+later vector in each direction, then verifies that the complete original FIFO
+sequence remains available to a valid retry.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded

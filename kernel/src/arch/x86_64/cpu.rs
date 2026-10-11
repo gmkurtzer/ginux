@@ -2750,6 +2750,144 @@ fn linux_pipe_write(descriptor: u64, address: u64, count: u64) -> Option<u64> {
     Some(count)
 }
 
+fn linux_pipe_writev(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
+    if !linux_pipe_write_descriptor(descriptor) {
+        return None;
+    }
+    if ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+        return Some(LINUX_EPIPE);
+    }
+    let Ok(vector_count) = usize::try_from(count) else {
+        return Some(LINUX_EINVAL);
+    };
+    if !(1..=LINUX_IOV_LIMIT).contains(&vector_count) {
+        return Some(LINUX_EINVAL);
+    }
+    let mut table = [0_u8; LINUX_IOV_LIMIT * 16];
+    if !copy_from_linux_user(vectors, &mut table[..vector_count * 16]) {
+        return Some(LINUX_EFAULT);
+    }
+    let mut input = [0_u8; LINUX_PIPE_CAPACITY];
+    let mut total = 0_usize;
+    for vector in table[..vector_count * 16].as_chunks::<16>().0 {
+        let address = u64::from_ne_bytes(vector[..8].try_into().unwrap());
+        let length = u64::from_ne_bytes(vector[8..].try_into().unwrap());
+        let Ok(length) = usize::try_from(length) else {
+            return Some(LINUX_EINVAL);
+        };
+        let Some(end) = total.checked_add(length) else {
+            return Some(LINUX_EINVAL);
+        };
+        if length == 0 || end > LINUX_PIPE_CAPACITY {
+            return Some(LINUX_EINVAL);
+        }
+        if !copy_from_linux_user(address, &mut input[total..end]) {
+            return Some(LINUX_EFAULT);
+        }
+        total = end;
+    }
+    let current = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) as usize;
+    if total > LINUX_PIPE_CAPACITY - current {
+        return Some(
+            if ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+                LINUX_EAGAIN
+            } else {
+                LINUX_ENOSYS
+            },
+        );
+    }
+    for (target, source) in ELF_PROBE_PIPE_BUFFER[current..current + total]
+        .iter()
+        .zip(&input[..total])
+    {
+        target.store(*source, Ordering::SeqCst);
+    }
+    ELF_PROBE_PIPE_LENGTH.store((current + total) as u32, Ordering::SeqCst);
+    Some(total as u64)
+}
+
+fn linux_pipe_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
+    if !linux_pipe_read_descriptor(descriptor) {
+        return None;
+    }
+    let Ok(vector_count) = usize::try_from(count) else {
+        return Some(LINUX_EINVAL);
+    };
+    if !(1..=LINUX_IOV_LIMIT).contains(&vector_count) {
+        return Some(LINUX_EINVAL);
+    }
+    let mut table = [0_u8; LINUX_IOV_LIMIT * 16];
+    if !copy_from_linux_user(vectors, &mut table[..vector_count * 16]) {
+        return Some(LINUX_EFAULT);
+    }
+    let mut ranges = [(0_u64, 0_usize); LINUX_IOV_LIMIT];
+    let mut capacity = 0_usize;
+    for (index, vector) in table[..vector_count * 16]
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        let address = u64::from_ne_bytes(vector[..8].try_into().unwrap());
+        let length = u64::from_ne_bytes(vector[8..].try_into().unwrap());
+        let Ok(length) = usize::try_from(length) else {
+            return Some(LINUX_EINVAL);
+        };
+        let Some(end) = capacity.checked_add(length) else {
+            return Some(LINUX_EINVAL);
+        };
+        if length == 0 || end > LINUX_PIPE_CAPACITY {
+            return Some(LINUX_EINVAL);
+        }
+        if !linux_writable_user_range_contains(address, length) {
+            return Some(LINUX_EFAULT);
+        }
+        ranges[index] = (address, length);
+        capacity = end;
+    }
+    let length = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) as usize;
+    if length == 0 {
+        if ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+            return Some(0);
+        }
+        return Some(
+            if ELF_PROBE_PIPE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+                LINUX_EAGAIN
+            } else {
+                LINUX_ENOSYS
+            },
+        );
+    }
+    let returned = length.min(capacity);
+    let mut output = [0_u8; LINUX_PIPE_CAPACITY];
+    for (target, source) in output[..returned]
+        .iter_mut()
+        .zip(&ELF_PROBE_PIPE_BUFFER[..returned])
+    {
+        *target = source.load(Ordering::SeqCst);
+    }
+    let mut copied = 0;
+    for (address, range_length) in ranges[..vector_count].iter().copied() {
+        let amount = range_length.min(returned - copied);
+        if amount == 0 {
+            break;
+        }
+        if !copy_to_linux_user(address, &output[copied..copied + amount]) {
+            return Some(LINUX_EFAULT);
+        }
+        copied += amount;
+    }
+    for index in 0..length - returned {
+        let value = ELF_PROBE_PIPE_BUFFER[index + returned].load(Ordering::SeqCst);
+        ELF_PROBE_PIPE_BUFFER[index].store(value, Ordering::SeqCst);
+    }
+    for byte in &ELF_PROBE_PIPE_BUFFER[length - returned..length] {
+        byte.store(0, Ordering::SeqCst);
+    }
+    ELF_PROBE_PIPE_LENGTH.store((length - returned) as u32, Ordering::SeqCst);
+    Some(returned as u64)
+}
+
 fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u64) -> u64 {
     if !linux_epoll_descriptor(epoll) {
         return LINUX_EBADF;
@@ -3013,6 +3151,9 @@ fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
 }
 
 fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
+    if let Some(result) = linux_pipe_readv(descriptor, vectors, count) {
+        return result;
+    }
     let device = linux_device_descriptor(descriptor);
     let access = device & 3;
     if access != LINUX_DESCRIPTOR_INPUT
@@ -3095,6 +3236,9 @@ fn linux_bounded_console_write(address: u64, count: u64) -> u64 {
 }
 
 fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
+    if let Some(result) = linux_pipe_writev(descriptor, vectors, count) {
+        return result;
+    }
     let device = linux_device_descriptor(descriptor);
     let access = device & 3;
     let writable_device = device != 0 && (access == LINUX_DESCRIPTOR_OUTPUT || access == 3);

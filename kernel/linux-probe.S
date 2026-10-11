@@ -1936,6 +1936,43 @@ ginux_linux_probe:
     xor eax, eax
     call syscall_expect_eagain
 
+    mov qword ptr [0x404f00], 0x404ea0
+    mov qword ptr [0x404f08], 3
+    mov qword ptr [0x404f10], 0x405200
+    mov qword ptr [0x404f18], 5
+    mov edi, 4
+    mov esi, 0x404f00
+    mov edx, 2
+    mov eax, 20
+    call syscall_expect_efault
+    mov qword ptr [0x404f10], 0x404ea3
+    mov eax, 20
+    syscall
+    cmp rax, 8
+    jne failure
+
+    mov qword ptr [0x404f20], 0x404eb0
+    mov qword ptr [0x404f28], 3
+    mov qword ptr [0x404f30], 0x405200
+    mov qword ptr [0x404f38], 5
+    mov edi, 3
+    mov esi, 0x404f20
+    mov eax, 19
+    call syscall_expect_efault
+    mov qword ptr [0x404f30], 0x404eb8
+    mov eax, 19
+    syscall
+    cmp rax, 8
+    jne failure
+    cmp byte ptr [0x404eb0], 0x41
+    jne failure
+    cmp byte ptr [0x404eb2], 0x43
+    jne failure
+    cmp byte ptr [0x404eb8], 0x44
+    jne failure
+    cmp byte ptr [0x404ebc], 0x48
+    jne failure
+
     mov edi, 4
     mov esi, 0x404e00
     mov edx, 256
