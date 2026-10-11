@@ -9,6 +9,7 @@ mod executable;
 mod ipc;
 mod manifest;
 mod memory;
+mod pe;
 mod scheduler;
 
 use core::arch::{asm, global_asm};
@@ -30,7 +31,7 @@ const KERNEL_STACK_SIZE: usize = 64 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
-pub const BOOT_INFO_VERSION: u32 = 2;
+pub const BOOT_INFO_VERSION: u32 = 3;
 
 #[repr(C, align(4096))]
 struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
@@ -81,6 +82,8 @@ pub struct BootInfo {
     pub control_plane_bundle: *const u8,
     pub control_plane_bundle_size: usize,
     pub reset_system: ResetSystem,
+    pub image_base: *const u8,
+    pub image_size: usize,
 }
 
 #[repr(C)]
@@ -143,7 +146,27 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(acpi_rsdp_end) = validate_acpi_rsdp(boot_info.acpi_rsdp) else {
         kernel_fail("ginux: invalid ACPI root pointer\r\n");
     };
+    let Some(image_end) = boot_info
+        .image_size
+        .checked_sub(1)
+        .and_then(|size| (boot_info.image_base as usize).checked_add(size))
+    else {
+        kernel_fail("ginux: invalid loaded EFI image bounds\r\n");
+    };
+    if boot_info.image_base.is_null() || image_end >= arch::x86_64::paging::INITIAL_IDENTITY_LIMIT {
+        kernel_fail("ginux: loaded EFI image is outside the identity map\r\n");
+    }
+    let Some(image) = pe::inspect(boot_info.image_base, boot_info.image_size) else {
+        kernel_fail("ginux: invalid loaded EFI PE image\r\n");
+    };
     serial_write("ginux: versioned boot handoff accepted\r\n");
+    serial_write("ginux: loaded EFI PE image accepted\r\nginux: PE sections: ");
+    serial_write_usize(image.sections);
+    serial_write("\r\nginux: executable PE sections: ");
+    serial_write_usize(image.executable_sections);
+    serial_write("\r\nginux: writable PE sections: ");
+    serial_write_usize(image.writable_sections);
+    serial_write("\r\n");
     serial_write("ginux: ACPI root pointer validated\r\n");
     let Some(boot_manifest) = manifest::Manifest::parse_and_verify(
         boot_info.manifest,
@@ -199,6 +222,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let required_addresses = [
         kernel_main as *const () as usize,
         boot_info as *const BootInfo as usize,
+        boot_info.image_base as usize,
+        image_end,
         boot_info.memory_map as usize,
         memory_map_end,
         kernel_stack_start,

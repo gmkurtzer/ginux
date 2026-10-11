@@ -1,6 +1,6 @@
 # Boot Handoff Contract v2
 
-**Status:** Experimental; internal to the unified EFI image.
+**Status:** Superseded by `handoff-v3.md`.
 
 Version 2 retains the v1 header, UEFI memory map, ACPI RSDP, and shutdown entry,
 and adds immutable manifest and control-plane-bundle byte ranges plus the

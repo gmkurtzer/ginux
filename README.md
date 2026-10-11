@@ -79,4 +79,4 @@ fail-closed supervisor execution/access and user-mode instruction protection
 requirements. `QEMU_CPU` may select a different model only if it still
 advertises SMEP, SMAP, and UMIP.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v2](specs/boot/handoff-v2.md) for the firmware-to-kernel boundary, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v3](specs/boot/handoff-v3.md) for the firmware-to-kernel boundary, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.

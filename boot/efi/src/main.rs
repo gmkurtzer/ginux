@@ -29,6 +29,12 @@ const ACPI_10_TABLE_GUID: EfiGuid = EfiGuid {
     data3: 0x11d3,
     data4: [0x9a, 0x16, 0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d],
 };
+static LOADED_IMAGE_PROTOCOL_GUID: EfiGuid = EfiGuid {
+    data1: 0x5b1b_31a1,
+    data2: 0x9562,
+    data3: 0x11d2,
+    data4: [0x8e, 0x3f, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 #[repr(C)]
@@ -81,6 +87,25 @@ type GetMemoryMap =
     unsafe extern "efiapi" fn(*mut usize, *mut u8, *mut usize, *mut usize, *mut u32) -> EfiStatus;
 
 type ExitBootServices = unsafe extern "efiapi" fn(EfiHandle, usize) -> EfiStatus;
+type HandleProtocol =
+    unsafe extern "efiapi" fn(EfiHandle, *const EfiGuid, *mut *mut c_void) -> EfiStatus;
+
+#[repr(C)]
+struct EfiLoadedImageProtocol {
+    revision: u32,
+    parent_handle: EfiHandle,
+    system_table: *mut EfiSystemTable,
+    device_handle: EfiHandle,
+    file_path: *mut c_void,
+    reserved: *mut c_void,
+    load_options_size: u32,
+    load_options: *mut c_void,
+    image_base: *const u8,
+    image_size: u64,
+    image_code_type: u32,
+    image_data_type: u32,
+    unload: usize,
+}
 
 #[repr(C)]
 struct EfiBootServices {
@@ -101,7 +126,7 @@ struct EfiBootServices {
     install_protocol_interface: usize,
     reinstall_protocol_interface: usize,
     uninstall_protocol_interface: usize,
-    handle_protocol: usize,
+    handle_protocol: HandleProtocol,
     reserved: usize,
     register_protocol_notify: usize,
     locate_handle: usize,
@@ -219,6 +244,7 @@ unsafe fn exit_boot_services(
     if boot_services.is_null() || runtime_services.is_null() {
         panic!("UEFI service table is missing");
     }
+    let (image_base, image_size) = loaded_image_bounds(image, boot_services);
 
     let memory_map = core::ptr::addr_of_mut!(MEMORY_MAP_STORAGE.0).cast::<u8>();
 
@@ -260,11 +286,41 @@ unsafe fn exit_boot_services(
                 control_plane_bundle: CONTROL_PLANE_BUNDLE.as_ptr(),
                 control_plane_bundle_size: CONTROL_PLANE_BUNDLE.len(),
                 reset_system: (*runtime_services).reset_system,
+                image_base,
+                image_size,
             };
         }
     }
 
     panic!("failed to exit UEFI boot services");
+}
+
+unsafe fn loaded_image_bounds(
+    image: EfiHandle,
+    boot_services: *mut EfiBootServices,
+) -> (*const u8, usize) {
+    let mut interface = core::ptr::null_mut();
+    let status = ((*boot_services).handle_protocol)(
+        image,
+        core::ptr::addr_of!(LOADED_IMAGE_PROTOCOL_GUID),
+        &mut interface,
+    );
+    if status != EFI_SUCCESS || interface.is_null() {
+        panic!("UEFI loaded-image protocol is unavailable");
+    }
+    let loaded = &*interface.cast::<EfiLoadedImageProtocol>();
+    let Ok(image_size) = usize::try_from(loaded.image_size) else {
+        panic!("loaded EFI image is too large");
+    };
+    if loaded.image_base.is_null()
+        || image_size == 0
+        || (loaded.image_base as usize)
+            .checked_add(image_size)
+            .is_none()
+    {
+        panic!("loaded EFI image bounds are invalid");
+    }
+    (loaded.image_base, image_size)
 }
 
 #[panic_handler]

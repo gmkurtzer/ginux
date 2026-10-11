@@ -63,6 +63,21 @@ if ! grep -q '^ginux: versioned boot handoff accepted' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: loaded EFI PE image accepted' "$output_file"; then
+    echo "Boot test failed: the loaded EFI image metadata was rejected." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: PE sections: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the loaded EFI image has no validated PE sections." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: executable PE sections: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the loaded EFI image has no executable PE section." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: ACPI root pointer validated' "$output_file"; then
     echo "Boot test failed: the ACPI root pointer was not validated." >&2
     exit 1
