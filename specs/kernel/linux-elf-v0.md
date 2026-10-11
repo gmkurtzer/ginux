@@ -9,24 +9,28 @@ System-V or Linux ABI, `ET_EXEC`, and machine `EM_X86_64`. The ELF header and
 program-header sizes must match the published 64-bit layout. Section headers,
 processor flags, and extended counts are rejected rather than ignored.
 
-Exactly two program headers are accepted and both must be `PT_LOAD`. Each
-segment must be readable, nonempty in the file, contained within the supplied
-image, aligned to a nonzero power of two with congruent file and virtual
-addresses, and mapped wholly inside the lower canonical user range beginning at
-`0x10000`. File size may be smaller than memory size to represent zero-filled
-data. Physical addresses must be zero. The segments must not overlap.
+Exactly two `PT_LOAD` program headers are required. A third `PT_GNU_STACK`
+header is optional and must request read/write, non-executable memory with no
+file or virtual range. Each load segment must be readable, nonempty in the
+file, contained within the supplied image, aligned to a nonzero power of two
+with congruent file and virtual addresses, and mapped wholly inside the lower
+canonical user range beginning at `0x10000`. File size may be smaller than
+memory size to represent zero-filled data. Physical addresses must be zero.
+The segments must not overlap.
 
 The profile requires exactly one executable segment and one writable segment.
 Writable-executable mappings are rejected. The entry point must lie inside the
 executable segment. The boot verifier accepts a synthetic image with a bounded
 RX segment and an eight-byte file/512-byte memory RW segment, then rejects
 bad magic, wrong class, non-executable file type, wrong machine, an out-of-range
-entry point, W+X flags, overflowing file size, overlapping virtual ranges, a
-non-load program header, and truncation.
+entry point, W+X flags, overflowing file size, overlapping virtual ranges, an
+executable GNU stack, a non-load segment header, and truncation. The same image
+without the optional GNU stack header is also accepted.
 
 The strict profile prevents unsupported features from being silently
 interpreted with weaker semantics. It does not accept position-independent
-`ET_DYN`, load `PT_INTERP`, perform relocations, or support glibc.
+`ET_DYN`, load `PT_INTERP`, allow general program-header ordering, perform
+relocations, or support glibc.
 
 ## Page-image plan
 

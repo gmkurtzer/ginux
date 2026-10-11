@@ -566,7 +566,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !linux_elf::verify_parser() {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
     }
-    serial_write("ginux: bounded Linux ELF64 profile validated\r\n");
+    serial_write("ginux: non-executable Linux GNU stack enforced\r\n");
     if !linux_elf::verify_load_plan() {
         kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
     }

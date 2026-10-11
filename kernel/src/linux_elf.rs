@@ -1,8 +1,9 @@
 const ELF_HEADER_SIZE: usize = 64;
 const PROGRAM_HEADER_SIZE: usize = 56;
-const PROGRAM_HEADER_COUNT: usize = 2;
-const PROGRAM_TABLE_END: usize = ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * PROGRAM_HEADER_COUNT;
+const LOAD_SEGMENT_COUNT: usize = 2;
+const MAX_PROGRAM_HEADER_COUNT: usize = 3;
 const PT_LOAD: u32 = 1;
+const PT_GNU_STACK: u32 = 0x6474_e551;
 const ET_EXEC: u16 = 2;
 const EM_X86_64: u16 = 62;
 const PF_EXECUTE: u32 = 1;
@@ -61,7 +62,7 @@ pub(crate) struct Segment<'a> {
 
 pub(crate) struct Image<'a> {
     pub(crate) entry: u64,
-    pub(crate) segments: [Segment<'a>; PROGRAM_HEADER_COUNT],
+    pub(crate) segments: [Segment<'a>; LOAD_SEGMENT_COUNT],
 }
 
 #[derive(Clone, Copy)]
@@ -75,11 +76,11 @@ pub(crate) struct PlannedSegment<'a> {
 
 pub(crate) struct LoadPlan<'a> {
     pub(crate) entry: u64,
-    pub(crate) segments: [PlannedSegment<'a>; PROGRAM_HEADER_COUNT],
+    pub(crate) segments: [PlannedSegment<'a>; LOAD_SEGMENT_COUNT],
 }
 
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
-    if bytes.len() < PROGRAM_TABLE_END
+    if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * LOAD_SEGMENT_COUNT
         || bytes.get(0..4)? != b"\x7fELF"
         || bytes[4] != 2
         || bytes[5] != 1
@@ -95,16 +96,33 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         || read_u32(bytes, 48)? != 0
         || read_u16(bytes, 52)? != ELF_HEADER_SIZE as u16
         || read_u16(bytes, 54)? != PROGRAM_HEADER_SIZE as u16
-        || read_u16(bytes, 56)? != PROGRAM_HEADER_COUNT as u16
         || read_u16(bytes, 58)? != 0
         || read_u16(bytes, 60)? != 0
         || read_u16(bytes, 62)? != 0
     {
         return None;
     }
+    let program_header_count = usize::from(read_u16(bytes, 56)?);
+    if !(LOAD_SEGMENT_COUNT..=MAX_PROGRAM_HEADER_COUNT).contains(&program_header_count) {
+        return None;
+    }
+    let program_table_end =
+        ELF_HEADER_SIZE.checked_add(PROGRAM_HEADER_SIZE.checked_mul(program_header_count)?)?;
+    if program_table_end > bytes.len() {
+        return None;
+    }
     let entry = read_u64(bytes, 24)?;
-    let first = parse_segment(bytes, ELF_HEADER_SIZE)?;
-    let second = parse_segment(bytes, ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE)?;
+    let first = parse_segment(bytes, ELF_HEADER_SIZE, program_table_end)?;
+    let second = parse_segment(
+        bytes,
+        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
+        program_table_end,
+    )?;
+    if program_header_count == MAX_PROGRAM_HEADER_COUNT
+        && !valid_gnu_stack(bytes, ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE)
+    {
+        return None;
+    }
     let first_end = first.virtual_address.checked_add(first.memory_size)?;
     let second_end = second.virtual_address.checked_add(second.memory_size)?;
     if first.virtual_address < second_end && second.virtual_address < first_end {
@@ -161,7 +179,7 @@ pub(crate) fn materialize(segment: PlannedSegment<'_>, page: &mut [u8; PAGE_SIZE
     true
 }
 
-fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
+fn parse_segment(bytes: &[u8], header: usize, program_table_end: usize) -> Option<Segment<'_>> {
     if read_u32(bytes, header)? != PT_LOAD {
         return None;
     }
@@ -183,7 +201,7 @@ fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
         || virtual_address < MIN_USER_ADDRESS
         || end > MAX_USER_ADDRESS
         || end <= virtual_address
-        || offset < PROGRAM_TABLE_END
+        || offset < program_table_end
         || file_end > bytes.len()
         || alignment == 0
         || !alignment.is_power_of_two()
@@ -199,8 +217,19 @@ fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
     })
 }
 
+fn valid_gnu_stack(bytes: &[u8], header: usize) -> bool {
+    read_u32(bytes, header) == Some(PT_GNU_STACK)
+        && read_u32(bytes, header + 4) == Some(PF_READ | PF_WRITE)
+        && (8..48)
+            .step_by(8)
+            .all(|offset| read_u64(bytes, header + offset) == Some(0))
+        && read_u64(bytes, header + 48) == Some(16)
+}
+
 pub(crate) fn verify_parser() -> bool {
     let image = fixture();
+    let mut without_stack = image;
+    write_u16(&mut without_stack, 56, LOAD_SEGMENT_COUNT as u16);
     let Some(parsed) = parse(&image) else {
         return false;
     };
@@ -216,7 +245,8 @@ pub(crate) fn verify_parser() -> bool {
     {
         return false;
     }
-    rejects(&image, 0, b'X')
+    parse(&without_stack).is_some()
+        && rejects(&image, 0, b'X')
         && rejects(&image, 4, 1)
         && rejects_u16(&image, 16, 3)
         && rejects_u16(&image, 18, 3)
@@ -229,6 +259,12 @@ pub(crate) fn verify_parser() -> bool {
             0x40_0000,
         )
         && rejects_u32(&image, ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE, 3)
+        && rejects_u32(
+            &image,
+            ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE + 4,
+            PF_READ | PF_WRITE | PF_EXECUTE,
+        )
+        && rejects_u16(&image, 56, (MAX_PROGRAM_HEADER_COUNT + 1) as u16)
         && parse(&image[..image.len() - 1]).is_none()
 }
 
@@ -283,7 +319,7 @@ fn fixture() -> [u8; 424] {
     write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
     write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
     write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
-    write_u16(&mut bytes, 56, PROGRAM_HEADER_COUNT as u16);
+    write_u16(&mut bytes, 56, MAX_PROGRAM_HEADER_COUNT as u16);
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE,
@@ -302,6 +338,10 @@ fn fixture() -> [u8; 424] {
         512,
         PF_READ | PF_WRITE,
     );
+    let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
+    write_u32(&mut bytes, stack_header, PT_GNU_STACK);
+    write_u32(&mut bytes, stack_header + 4, PF_READ | PF_WRITE);
+    write_u64(&mut bytes, stack_header + 48, 16);
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(&PROBE_CODE);
     bytes[0x1a0..0x1a8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
     bytes
