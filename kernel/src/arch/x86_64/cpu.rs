@@ -992,9 +992,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     if matches!(action, RuntimeAction::Invalid) || !domain::detach_thread(fault_domain) {
         return u64::MAX;
     }
-    if service_fault
-        && (!matches!(action, RuntimeAction::Resume { .. }) || !scrub_service_restart_stack())
-    {
+    if service_fault && !scrub_service_restart_stack() {
         return u64::MAX;
     }
     if service_fault
@@ -1006,7 +1004,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     }
     if service_fault {
         let Some(replacement_domain) = domain::initialize_boot_service_restart() else {
-            return u64::MAX;
+            return resume_action(action);
         };
         let Some(replacement_handle) = domain::service_boot_handle() else {
             return u64::MAX;

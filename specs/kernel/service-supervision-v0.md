@@ -64,7 +64,14 @@ message, exits cleanly, and has its capability table retired. The single
 restart consumes the persistent control plane's fixed one-attempt bootstrap
 budget. The initial service creation does not consume that budget, and failed
 replacement setup does not refund it. A later service generation therefore
-cannot create an unbounded restart loop. This is not yet a configurable
+cannot create an unbounded restart loop. When no attempt remains, mandatory
+fault teardown and lifecycle reporting still complete, and the exception path
+resumes the surviving scheduler context without creating or binding another
+service domain. If no context survives, it returns normally to the suspended
+kernel continuation. Exhaustion is therefore a supervision outcome rather than
+a kernel panic. The local manager invariant exercises rejection after the
+budget is consumed; the current hardware workload exercises the successful
+one-restart path. This is not yet a configurable
 production policy. There is no backoff, state recovery, service identity separate from thread identity,
 request ID, replay protection, cancellation, outstanding-call cleanup, or
 health protocol. The four-record FIFO never overwrites queued events. Additional

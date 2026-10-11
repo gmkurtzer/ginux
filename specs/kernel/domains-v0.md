@@ -52,6 +52,9 @@ resolve authority. The boot proof runs the replacement through ABI negotiation
 and clean exit, then retires it again. Replacement creation consumes a fixed
 one-attempt budget stored in the persistent manager rather than in the reusable
 service record. Failed setup is fail-closed and does not restore the attempt.
+An exhausted budget rejects replacement construction without changing the
+manager, while fault teardown remains valid and the scheduler may resume a
+surviving peer.
 General restart policy and
 outstanding-operation cleanup remain undefined. The fault path also publishes a
 capability-gated service-fault event to a four-record FIFO before reusing the
