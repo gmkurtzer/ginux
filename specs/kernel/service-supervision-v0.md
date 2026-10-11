@@ -17,7 +17,9 @@ of the stale service domain/handle pair, one contained service fault, and no
 `GINUX_KERNEL_PANIC` marker.
 
 This proves failure isolation after a completed operation, not transparent
-service restart. There is no supervisor policy, service identity separate from
+service restart. The kernel verifies metadata replacement in the same domain
+slot with a new generation and rejects the retired ID, but does not execute the
+replacement. There is no supervisor policy, service identity separate from
 thread identity, request ID, replay protection, cancellation, outstanding-call
 cleanup, restart budget, health protocol, or general object revocation beyond
 retiring the service's local table. Those semantics must be defined before more
