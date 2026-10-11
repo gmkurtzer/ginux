@@ -10,7 +10,7 @@ writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
 `PT_GNU_STACK`, bounded `PT_INTERP`, and one- to three-entry relocation
 `PT_DYNAMIC` declarations. The symbol profile validates a two-entry symbol-table
-prefix, bounded string table, and one global function symbol used by
+prefix, bounded string table, one-bucket/two-chain SysV `DT_HASH`, and one global function symbol used by
 `R_X86_64_GLOB_DAT` and `R_X86_64_JUMP_SLOT`.
 Images whose expanded
 program-header table covers the entry point are rejected. A bounded proof maps
@@ -137,8 +137,10 @@ verified, including rejection of substituted, mutated, and truncated interpreter
 bytes. Synthetic userspace relative relocations are executed for both the
 interpreter and main image. The main image additionally proves direct symbol-index
 resolution through `R_X86_64_GLOB_DAT` and eager `R_X86_64_JUMP_SLOT` writes;
-symbol lookup, lazy binding, dependency graphs, symbol interposition, and a real
-userspace linker remain outside the profile.
+the userspace interpreter also verifies that the relocation's symbol index is
+the admitted hash bucket result. General multi-bucket lookup, lazy binding,
+dependency graphs, symbol interposition, and a real userspace linker remain
+outside the profile.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

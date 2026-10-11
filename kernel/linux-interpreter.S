@@ -23,19 +23,24 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], rdx
 
     mov edi, 0x404008
-    mov ecx, 8
+    mov ecx, 9
     xor eax, eax
     xor esi, esi
+    xor r8d, r8d
 .Lscan_main_dynamic:
     cmp qword ptr [rdi], 7
     cmove rax, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 6
     cmove rsi, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 4
+    cmove r8, qword ptr [rdi + 8]
     add rdi, 16
     loop .Lscan_main_dynamic
     test rax, rax
     jz .Linvalid_dynamic
     test rsi, rsi
+    jz .Linvalid_dynamic
+    test r8, r8
     jz .Linvalid_dynamic
     mov rcx, qword ptr [rax]
     mov rdx, qword ptr [rax + 16]
@@ -44,6 +49,8 @@ ginux_linux_interpreter:
     mov rcx, qword ptr [rax + 24]
     mov rdx, qword ptr [rax + 32]
     shr rdx, 32
+    cmp edx, dword ptr [r8 + 8]
+    jne .Linvalid_dynamic
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
     mov rdx, qword ptr [rsi + rdx + 8]

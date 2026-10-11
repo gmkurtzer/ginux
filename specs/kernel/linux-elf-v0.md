@@ -117,8 +117,12 @@ production-signed package manifest. The parser also accepts one bounded
 `PT_DYNAMIC` table containing one, two, or three `DT_RELA` records, its exact
 size and 24-byte entry size, and a terminating `DT_NULL`. The first record must
 be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must
-also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, and `DT_SYMENT`, with a
-24-byte symbol-entry size. Its second record must be `R_X86_64_GLOB_DAT`, use
+also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, `DT_SYMENT`, and `DT_HASH`,
+with a 24-byte symbol-entry size. The file-backed SysV hash table is bounded to
+one bucket and two chains. Its sole bucket must select symbol one, and both
+chain terminators must be zero. The kernel computes the symbol-name ELF hash to
+select that bucket rather than trusting a fixed table offset. The second record
+must be `R_X86_64_GLOB_DAT`, use
 symbol index one, have a zero addend, and reference a global/default-visible
 defined function symbol whose value and size remain inside the executable
 load. A third record must be `R_X86_64_JUMP_SLOT`, reference the same symbol,
@@ -129,8 +133,8 @@ an all-zero null entry followed by the referenced symbol. Its nonempty name must
 2-to-256-byte file-backed string table and terminate within that table. Every
 relocation target must be distinct, eight-byte aligned, and wholly inside the
 writable load. A one-record table may not carry partial symbol metadata.
-Duplicate tags, missing or mixed symbol metadata, unsupported relocation
-types or sizes, invalid symbol indexes/attributes/ranges/names, nonzero
+Duplicate tags, missing or mixed symbol metadata, malformed bucket/chain
+counts or links, unsupported relocation types or sizes, invalid symbol indexes/attributes/ranges/names, nonzero
 symbol-relocation addends, and executable relocation targets are rejected. The
 execution-oriented planning fixture uses a
 six-header main image: a dedicated read-only header load at `0x3ff000`, RX text
@@ -153,12 +157,13 @@ the activated user root, constructs the dynamic-process stack with the common
 auxiliary-vector encoder, and enters the relocated interpreter at `0x600100`.
 The interpreter is assembled from `linux-interpreter.S`; at runtime it derives
 its page-aligned load bias and scans each bounded dynamic table for the admitted
-relocation and symbol-table tags rather than depending on tag order or embedding
+relocation, symbol-table, and hash-table tags rather than depending on tag order or embedding
 their values in its instructions. It first writes the load-biased value `0x601234` to its writable
 relocation target `0x603080`, then writes the admitted main-image relative
 relocation value `0x400100` to the writable target `0x404100`. It then reads
-the admitted main symbol-table address, derives symbol entry one from each
-encoded index, and applies `R_X86_64_GLOB_DAT` value `0x400100` at `0x404108`
+the admitted main symbol and hash-table addresses, requires the encoded
+relocation index to equal the selected SysV hash bucket, and applies
+`R_X86_64_GLOB_DAT` value `0x400100` at `0x404108`
 and eager `R_X86_64_JUMP_SLOT` value `0x400100` at `0x404110` before jumping to
 the main entry at `0x400100`. The main workload requires all three relocated values for a dynamic startup and requires
 untouched zero targets for each static startup; after it exits, the kernel also
@@ -170,8 +175,9 @@ The complete ring-3 probe therefore runs with dynamic `AT_BASE`,
 main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
 restores its own root and scrubs and releases all nineteen page-table and
 payload frames. The direct relocation symbol index is already bound by the
-validated metadata; this profile does not yet perform name/hash lookup, lazy
-binding, symbol interposition, versioning, process dependency graphs, execute a general-purpose
+validated metadata; this profile does not yet perform general multi-bucket or
+cross-object name lookup, lazy binding, symbol interposition, versioning,
+process dependency graphs, execute a general-purpose
 dynamic linker, or support glibc.
 
 ## Page-image plan
