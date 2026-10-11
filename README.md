@@ -21,6 +21,7 @@ through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's prior
 FS base afterward. Pointer-bearing calls are constrained to the RW segment's
 declared ELF memory extent even though the containing page is larger; invalid
 ranges and write arguments return Linux `-EFAULT`, `-EBADF`, or `-EINVAL`.
+The ring-3 workload verifies each error and continues into valid calls.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
 This is not yet a general Linux

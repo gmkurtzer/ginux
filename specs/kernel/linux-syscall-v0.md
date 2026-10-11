@@ -60,4 +60,7 @@ segment; general VM-area lookup and cross-segment copies remain future work.
 Invalid `write` descriptors return `-EBADF`, unsupported bounded lengths return
 `-EINVAL`, and a `write` or `uname` range outside that segment returns
 `-EFAULT`. Boot verification covers the exact lower and upper boundaries, the
-first byte beyond the segment, and address-addition overflow.
+first byte beyond the segment, and address-addition overflow. The ring-3 probe
+also submits fd 2, a seven-byte write, and `uname` at the first mapped address
+beyond `p_memsz`; it requires the three errors above and then completes the
+valid syscall sequence, proving errors do not silently terminate the task.
