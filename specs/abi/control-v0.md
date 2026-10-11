@@ -26,6 +26,7 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 | 9 | bounded userspace reads |
 | 10 | structured ABI descriptor and bounded userspace writes |
 | 11 | structured service-fault details |
+| 12 | structured lifecycle-event details |
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
@@ -114,6 +115,14 @@ code, fault address, and instruction address, followed by a reserved zero
 ring-3 proof first requires denial with its console-only capability, then uses
 host-management authority and validates the descriptor header before
 exhausting its call budget. A denied request does not alter the retained record.
+Operation 12 requires the same host-management authority and writes a 24-byte
+little-endian descriptor for the most recently consumed lifecycle event. It
+contains `u32` size, `u16` ABI version, `u8` event kind, `u8` detail, `u64`
+generation-tagged domain ID, and `u64` monotonic lifecycle sequence. `RDX` must
+equal 24, and the same bounded writable-range validation applies. It returns 24
+or `UINT64_MAX - 2`. The ring-3 proof rejects the console capability, then
+validates the descriptor header, original service generation, and sequence one
+using host-management authority.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

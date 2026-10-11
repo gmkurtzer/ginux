@@ -28,7 +28,7 @@ cd80
 7402
 0f0b
 488b06
-48bd100000000100ff0f
+48bd100000000100ff1f
 4839e8
 7402
 0f0b
@@ -95,10 +95,10 @@ cd80
 83f808
 0f859f000000
 
-# negotiate call-gate ABI v1 and its nine bootstrap features
+# negotiate call-gate ABI v1 and its thirteen bootstrap features
 b800000000
 cd80
-3dff0f0100
+3dff1f0100
 0f858d000000
 
 # branch context 2 into the isolated service role
@@ -186,7 +186,7 @@ cd80
 # replacement service: negotiate ABI and block for a direct wakeup
 b800000000
 cd80
-3dff0f0100
+3dff1f0100
 0f85c5ffffff
 4c89c7
 b808000000
@@ -221,6 +221,40 @@ cd80
 488b06
 48bd3000000001000e00
 4839e8
+7402
+0f0b
+
+# reject lifecycle descriptor access through the console capability
+4889cf
+48be6020000080000000
+ba18000000
+b80c000000
+cd80
+83f8fd
+7402
+0f0b
+
+# fetch and validate the sequenced lifecycle descriptor with manage authority
+4889df
+48be6020000080000000
+ba18000000
+b80c000000
+cd80
+83f818
+7402
+0f0b
+488b06
+48bd1800000001000100
+4839e8
+7402
+0f0b
+49c1ea08
+488b4608
+4c39d0
+7402
+0f0b
+488b4610
+4883f801
 7402
 0f0b
 

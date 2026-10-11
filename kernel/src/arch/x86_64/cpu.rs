@@ -823,6 +823,7 @@ fn dispatch_charged_call(
         9 => console_write_buffer(caller_domain, capability, frame),
         10 => write_abi_descriptor(frame),
         11 => write_fault_descriptor(caller_domain, capability, frame),
+        12 => write_lifecycle_descriptor(caller_domain, capability, frame),
         _ => u64::MAX,
     }
 }
@@ -943,6 +944,24 @@ fn write_fault_descriptor(domain_id: u64, capability: u64, frame: *const UserTra
         return u64::MAX - 2;
     }
     let Some(descriptor) = domain::delivered_service_fault_descriptor() else {
+        return u64::MAX - 2;
+    };
+    if !address_space::copy_to_current_user(frame.first_argument(), &descriptor) {
+        return u64::MAX - 2;
+    }
+    descriptor.len() as u64
+}
+
+fn write_lifecycle_descriptor(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(domain_id, capability, 1, Rights::MANAGE)
+        || frame.second_argument() != control_abi::LIFECYCLE_DESCRIPTOR_SIZE as u64
+    {
+        return u64::MAX - 2;
+    }
+    let Some(descriptor) = domain::delivered_lifecycle_event_descriptor() else {
         return u64::MAX - 2;
     };
     if !address_space::copy_to_current_user(frame.first_argument(), &descriptor) {

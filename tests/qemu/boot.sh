@@ -563,6 +563,16 @@ if ! grep -q '^ginux: monotonic lifecycle events verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: structured lifecycle event delivered' "$output_file"; then
+    echo "Boot test failed: structured lifecycle event was not delivered." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: lifecycle diagnostic authority enforced' "$output_file"; then
+    echo "Boot test failed: lifecycle diagnostic authority was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: service fault metadata matched' "$output_file"; then
     echo "Boot test failed: service fault metadata did not match." >&2
     exit 1

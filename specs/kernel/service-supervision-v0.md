@@ -18,6 +18,10 @@ manage-authorized operation copies a versioned 48-byte diagnostic record into
 validated writable user memory. The ring-3 workload validates its header, and
 the kernel gate checks the retained record against the authenticated
 instruction address.
+Another manage-authorized operation copies a 24-byte lifecycle descriptor with
+the consumed event's kind, detail, exact domain generation, and monotonic
+sequence. The ring-3 workload proves that console authority is insufficient and
+validates the original service generation and sequence one.
 
 The CPL3 exception path removes only the service context, switches back to the
 client's CR3, releases the service's domain thread reservation, retires the
