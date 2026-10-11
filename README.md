@@ -10,8 +10,9 @@ installs them at their declared addresses in a collision-checked page-table
 root, activates it, and executes a one-shot verification entry at ring 3. This
 entry receives a distinct RW/NX stack containing a minimal Linux-style initial
 vector and terminates through the architectural x86-64 `SYSCALL` instruction
-after validating a `getpid()` result returned through `SYSRETQ`, using Linux
-register and syscall-number conventions. This is not yet a general Linux
+after a bounded `write(1, data, 8)` copy-in and a `getpid()` result returned
+through `SYSRETQ`, using Linux register and syscall-number conventions. This is
+not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and
 [Linux Syscall Entry v0](specs/kernel/linux-syscall-v0.md).

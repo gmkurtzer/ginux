@@ -43,6 +43,7 @@ const LSTAR_MSR: u32 = 0xc000_0082;
 const FMASK_MSR: u32 = 0xc000_0084;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
+const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
@@ -123,6 +124,7 @@ static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ENTRY: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -411,7 +413,7 @@ ginux_linux_syscall_entry:
     push r10
     mov [rip + {linux_kernel_frame}], rsp
     mov rdi, rax
-    mov rsi, [rsp + 40]
+    mov rsi, rsp
     mov rdx, [rip + {linux_user_rsp}]
     mov rcx, [rip + {linux_user_rip}]
     mov r8, [rip + {linux_user_rflags}]
@@ -662,7 +664,7 @@ pub(crate) fn execute_auxiliary(
     };
 }
 
-pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize) -> bool {
+pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize, data: usize) -> bool {
     if ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst) {
         return false;
     }
@@ -673,12 +675,14 @@ pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize) -> bool {
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     ELF_PROBE_STACK.store(stack as u64, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store(entry as u64, Ordering::SeqCst);
+    ELF_PROBE_DATA.store(data as u64, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
     restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
+    ELF_PROBE_DATA.store(0, Ordering::SeqCst);
     inactive && completed
 }
 
@@ -915,11 +919,21 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
 
 extern "sysv64" fn linux_syscall_handler(
     number: u64,
-    status: u64,
+    registers: *const u64,
     user_stack: u64,
     user_rip: u64,
     user_rflags: u64,
 ) -> u64 {
+    if registers.is_null() {
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return u64::MAX;
+    }
+    // SAFETY: the assembly entry stub passes the base of six saved registers.
+    let registers = unsafe { core::slice::from_raw_parts(registers, 6) };
+    let register = |index: usize| registers[index];
+    let count = register(3);
+    let buffer = register(4);
+    let first_argument = register(5);
     let entry = ELF_PROBE_ENTRY.load(Ordering::SeqCst);
     if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
         || user_stack != ELF_PROBE_STACK.load(Ordering::SeqCst)
@@ -930,8 +944,27 @@ extern "sysv64" fn linux_syscall_handler(
         return u64::MAX;
     }
     match number {
+        LINUX_WRITE_SYSCALL
+            if first_argument == 1
+                && buffer == ELF_PROBE_DATA.load(Ordering::SeqCst)
+                && count == 8 =>
+        {
+            let matches = unsafe {
+                with_supervisor_user_access(|| {
+                    (0..8).all(|offset| {
+                        (buffer as *const u8).add(offset).read_volatile() == offset as u8 + 1
+                    })
+                })
+            };
+            if matches {
+                8
+            } else {
+                ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+                u64::MAX
+            }
+        }
         LINUX_GETPID_SYSCALL => 1,
-        LINUX_EXIT_SYSCALL if status == LINUX_PROBE_EXIT_STATUS => {
+        LINUX_EXIT_SYSCALL if first_argument == LINUX_PROBE_EXIT_STATUS => {
             ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
             u64::MAX

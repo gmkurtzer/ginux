@@ -18,18 +18,15 @@ data. Physical addresses must be zero. The segments must not overlap.
 
 The profile requires exactly one executable segment and one writable segment.
 Writable-executable mappings are rejected. The entry point must lie inside the
-executable segment. The boot verifier accepts a synthetic image with a one-byte
+executable segment. The boot verifier accepts a synthetic image with a bounded
 RX segment and an eight-byte file/sixteen-byte memory RW segment, then rejects
 bad magic, wrong class, non-executable file type, wrong machine, an out-of-range
 entry point, W+X flags, overflowing file size, overlapping virtual ranges, a
 non-load program header, and truncation.
 
-This milestone is parser evidence only. It does not map ELF segments, zero BSS,
-construct a Linux initial stack or auxiliary vector, execute Linux machine
-code, implement Linux syscalls, accept position-independent `ET_DYN`, load
-`PT_INTERP`, perform relocations, or support glibc. Those are separate M4
-milestones. The strict profile prevents unsupported features from being
-silently interpreted with weaker semantics while those pieces are absent.
+The strict profile prevents unsupported features from being silently
+interpreted with weaker semantics. It does not accept position-independent
+`ET_DYN`, load `PT_INTERP`, perform relocations, or support glibc.
 
 ## Page-image plan
 
@@ -52,9 +49,11 @@ pages remain supervisor-only. Before changing CR3, the proof rejects either
 segment target page if it overlaps the
 loaded kernel PE image. It then activates the root, observes both pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
-entry. The synthetic instruction stream issues Linux `getpid`, verifies PID 1
-after the kernel resumes it through `SYSRETQ`, verifies preserved first and
-fourth argument registers, and then issues Linux `exit(42)`. Those calls are
+entry. The synthetic instruction stream first issues a bounded Linux
+`write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. It then
+issues `getpid`, verifies PID 1 after the kernel resumes it through `SYSRETQ`,
+verifies preserved first and fourth argument registers, and issues Linux
+`exit(42)`. Those calls are
 accepted only while an atomic probe flag is armed; exit returns directly to the
 saved kernel stack. The proof restores and reads back the kernel root, then
 clears and releases all seven root/table/payload/stack frames.
