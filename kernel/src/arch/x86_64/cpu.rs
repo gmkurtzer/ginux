@@ -48,6 +48,10 @@ const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
+const LINUX_GETUID_SYSCALL: u64 = 102;
+const LINUX_GETGID_SYSCALL: u64 = 104;
+const LINUX_GETEUID_SYSCALL: u64 = 107;
+const LINUX_GETEGID_SYSCALL: u64 = 108;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
@@ -987,6 +991,10 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_GETPID_SYSCALL => 1,
+        LINUX_GETUID_SYSCALL
+        | LINUX_GETGID_SYSCALL
+        | LINUX_GETEUID_SYSCALL
+        | LINUX_GETEGID_SYSCALL => 0,
         LINUX_ARCH_PRCTL_SYSCALL
             if first_argument == LINUX_ARCH_SET_FS
                 && buffer == ELF_PROBE_DATA.load(Ordering::SeqCst) =>

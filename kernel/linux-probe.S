@@ -42,6 +42,23 @@ ginux_linux_probe:
     cmp dword ptr [rdi], 0x756e6947
     jne failure
 
+    mov eax, 102
+    syscall
+    test rax, rax
+    jne failure
+    mov eax, 104
+    syscall
+    test rax, rax
+    jne failure
+    mov eax, 107
+    syscall
+    test rax, rax
+    jne failure
+    mov eax, 108
+    syscall
+    test rax, rax
+    jne failure
+
     mov r10d, 0x12345678
     mov edi, 0x11223344
     mov eax, 39
