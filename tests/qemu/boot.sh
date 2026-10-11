@@ -418,6 +418,11 @@ if ! grep -q '^ginux: control-plane W\^X mappings active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary address-space transaction verified' "$output_file"; then
+    echo "Boot test failed: auxiliary address-space transaction failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded executable container accepted' "$output_file"; then
     echo "Boot test failed: the executable container was not accepted." >&2
     exit 1

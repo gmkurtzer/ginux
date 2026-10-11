@@ -23,6 +23,13 @@ guard page. The kernel mapping remains supervisor-only in both roots.
 
 Completed proof address-space page-table and data frames are cleared and
 returned through the allocator's generation-checked live-ownership ledger.
+The boot gate also constructs a real zero-thread auxiliary domain, assigns it a
+seven-frame W^X address space under that exact domain generation, and proves
+that domain discard is rejected while any frame remains live. It then clears
+and releases all frames, discards the unstarted domain without emitting a
+lifecycle event, and rejects its stale domain/capability pair. This is the
+transactional setup/rollback path needed before auxiliary scheduling, not an
+executable auxiliary workload.
 There is no
 address-space identifier or TLB shootdown protocol, and the kernel mapping
 remains transitional.

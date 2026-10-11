@@ -615,6 +615,27 @@ impl Manager {
         true
     }
 
+    fn discard_unstarted_auxiliary_service(&mut self, id: DomainId) -> bool {
+        let Some(registry_slot) = self
+            .auxiliary_service_ids
+            .iter()
+            .position(|registered| *registered == Some(id))
+        else {
+            return false;
+        };
+        if self.domain(id).is_none_or(|domain| {
+            domain.role != Role::AuxiliaryService
+                || domain.state != State::Ready
+                || domain.active_threads != 0
+                || domain.active_operations != 0
+        }) {
+            return false;
+        }
+        self.domains[usize::from(id.slot)] = None;
+        self.auxiliary_service_ids[registry_slot] = None;
+        true
+    }
+
     fn retire_auxiliary_service(&mut self, id: DomainId) -> bool {
         let Some(registry_slot) = self
             .auxiliary_service_ids
@@ -787,6 +808,44 @@ pub(crate) fn initialize_boot_service_restart() -> Option<u64> {
     }
     let id = manager.restart_service()?;
     validate_boot_service(manager, id)
+}
+
+pub(crate) fn initialize_boot_auxiliary_service(
+    root_index: usize,
+    object: u64,
+    rights: Rights,
+) -> Option<u64> {
+    let manager = global_manager_mut()?;
+    let control = manager.domain(manager.control_plane_id?)?;
+    let source = control.boot_roots.get(root_index).copied().flatten()?;
+    let id = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
+        source,
+        object,
+        rights,
+    }])?;
+    let domain = manager.domain(id)?;
+    (domain.role == Role::AuxiliaryService
+        && domain.state == State::Ready
+        && domain.thread_limit == 0
+        && domain.boot_root_count == 1
+        && domain.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
+pub(crate) fn auxiliary_boot_handle(domain_raw: u64, root_index: usize) -> Option<u64> {
+    let id = decode_id(domain_raw)?;
+    let domain = global_manager()?.domain(id)?;
+    if domain.role != Role::AuxiliaryService {
+        return None;
+    }
+    Some(
+        domain
+            .boot_roots
+            .get(root_index)
+            .copied()
+            .flatten()?
+            .to_raw(),
+    )
 }
 
 fn validate_boot_service(manager: &Manager, id: DomainId) -> Option<u64> {
@@ -1602,6 +1661,19 @@ pub(crate) fn discard_unstarted_service(domain_raw: u64) -> bool {
         return false;
     };
     manager.discard_unstarted_service(id)
+}
+
+pub(crate) fn discard_unstarted_auxiliary_service(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(owner) = crate::memory::FrameOwner::domain(domain_raw) else {
+        return false;
+    };
+    if crate::memory::owner_live_frame_count(owner) != Some(0) {
+        return false;
+    }
+    global_manager_mut().is_some_and(|manager| manager.discard_unstarted_auxiliary_service(id))
 }
 
 pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> bool {

@@ -84,7 +84,9 @@ because its sticky overflow record preserves the first dropped auxiliary
 generation, sequence, and count; this matches the existing mandatory-teardown
 policy for service faults.
 Auxiliary registration is not yet exposed to userspace, assigned address
-spaces, or integrated with an auxiliary restart policy.
+spaces for execution, or integrated with an auxiliary restart policy. The boot
+proof does stage and fully roll back an unstarted auxiliary domain with a real
+allocator-owned W^X address space; no thread can attach during that transaction.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

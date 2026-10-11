@@ -289,6 +289,39 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
     valid && space.release()
 }
 
+pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
+    let Some(auxiliary) =
+        domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)
+    else {
+        return false;
+    };
+    let (Some(handle), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        let _ = domain::discard_unstarted_auxiliary_service(auxiliary);
+        return false;
+    };
+    let kernel_root = current_root();
+    let Some(space) = WxAddressSpace::new(kernel_root, owner) else {
+        let _ = domain::discard_unstarted_auxiliary_service(auxiliary);
+        return false;
+    };
+    let valid = space.permissions_are_valid(kernel_root)
+        && memory::owner_live_frame_count(owner) == Some(USER_ADDRESS_SPACE_FRAMES)
+        && domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+        && !domain::discard_unstarted_auxiliary_service(auxiliary);
+    if !space.release()
+        || memory::owner_live_frame_count(owner) != Some(0)
+        || !domain::discard_unstarted_auxiliary_service(auxiliary)
+    {
+        return false;
+    }
+    valid
+        && domain::domain_is_retired(auxiliary)
+        && !domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+}
+
 pub(crate) fn verify_ring3_control_plane(
     program: &[u8],
     entry_offsets: [usize; 3],
