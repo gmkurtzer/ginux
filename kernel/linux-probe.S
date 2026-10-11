@@ -3390,9 +3390,9 @@ ginux_linux_initialize:
     cmp qword ptr [rax], rax
     jne .Lmain_init_done
     movabs rcx, 0x534c5458554e4947
-    cmp qword ptr fs:[-16], rcx
+    cmp qword ptr fs:[ginux_main_tls_template@TPOFF], rcx
     jne .Lmain_init_done
-    cmp qword ptr fs:[-8], 0
+    cmp qword ptr fs:[ginux_main_tls_zero@TPOFF], 0
     jne .Lmain_init_done
     inc qword ptr [rip + ginux_main_init_state]
 .Lmain_init_done:
@@ -3445,12 +3445,14 @@ ginux_main_init_state:
 .section .tdata,"awT",@progbits
 .balign 8
 .global ginux_main_tls_template
+.hidden ginux_main_tls_template
 ginux_main_tls_template:
     .ascii "GINUXTLS"
 
 .section .tbss,"awT",@nobits
 .balign 8
 .global ginux_main_tls_zero
+.hidden ginux_main_tls_zero
 ginux_main_tls_zero:
     .space 8
 #endif

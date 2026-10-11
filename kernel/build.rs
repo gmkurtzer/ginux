@@ -156,6 +156,14 @@ fn main() {
         status.success(),
         "clang failed to assemble linked Linux dependency-graph main probe"
     );
+    let linked_graph_main_elf = fs::read(&linked_graph_main_object)
+        .expect("failed to read linked Linux dependency-graph main object");
+    assert_eq!(
+        elf_section_relocation_type_count(&linked_graph_main_elf, b".text", 23)
+            .expect("failed to inspect linked Linux main TLS relocations"),
+        2,
+        "linked Linux main must contain exactly two R_X86_64_TPOFF32 references"
+    );
     let linked_dependency_object = output.join("linux-linked-dependency.o");
     let status = Command::new(&clang)
         .args([
@@ -505,6 +513,58 @@ fn elf_section_has_relocations(elf: &[u8], wanted: &[u8]) -> Option<bool> {
         }
     }
     Some(false)
+}
+
+fn elf_section_relocation_type_count(
+    elf: &[u8],
+    wanted: &[u8],
+    relocation_type: u32,
+) -> Option<usize> {
+    (elf.get(..6)? == b"\x7fELF\x02\x01").then_some(())?;
+    let section_offset = usize::try_from(read_u64(elf, 40)?).ok()?;
+    let entry_size = usize::from(read_u16(elf, 58)?);
+    let count = usize::from(read_u16(elf, 60)?);
+    let names_index = usize::from(read_u16(elf, 62)?);
+    if entry_size < 64 || names_index >= count {
+        return None;
+    }
+    let names_header = section_offset.checked_add(names_index.checked_mul(entry_size)?)?;
+    let names_offset = usize::try_from(read_u64(elf, names_header + 24)?).ok()?;
+    let names_size = usize::try_from(read_u64(elf, names_header + 32)?).ok()?;
+    let names = elf.get(names_offset..names_offset.checked_add(names_size)?)?;
+    let mut target = None;
+    for index in 0..count {
+        let header = section_offset.checked_add(index.checked_mul(entry_size)?)?;
+        let name_offset = usize::try_from(read_u32(elf, header)?).ok()?;
+        let name = names.get(name_offset..)?.split(|byte| *byte == 0).next()?;
+        if name == wanted {
+            target = Some(index);
+            break;
+        }
+    }
+    let target = u32::try_from(target?).ok()?;
+    let mut matching = 0;
+    for index in 0..count {
+        let header = section_offset.checked_add(index.checked_mul(entry_size)?)?;
+        let section_type = read_u32(elf, header + 4)?;
+        let size = usize::try_from(read_u64(elf, header + 32)?).ok()?;
+        let relocation_entry_size = usize::try_from(read_u64(elf, header + 56)?).ok()?;
+        let target_index = read_u32(elf, header + 44)?;
+        if matches!(section_type, 4 | 9) && size != 0 && target_index == target {
+            let minimum_entry_size = if section_type == 4 { 24 } else { 16 };
+            if relocation_entry_size < minimum_entry_size || size % relocation_entry_size != 0 {
+                return None;
+            }
+            let offset = usize::try_from(read_u64(elf, header + 24)?).ok()?;
+            let relocations = elf.get(offset..offset.checked_add(size)?)?;
+            for relocation in relocations.chunks_exact(relocation_entry_size) {
+                if read_u64(relocation, 8)? as u32 == relocation_type {
+                    matching += 1;
+                }
+            }
+        }
+    }
+    Some(matching)
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {

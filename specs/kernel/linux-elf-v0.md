@@ -357,7 +357,10 @@ bytes from `.tdata`, and retains zeroes through the `.tbss` tail. The following
 16 bytes form a minimal TCB whose first word points to itself and whose second
 word is zero. The kernel programs FS before entering the interpreter. Both the
 main preinitializer and kernel verify the initialized value, zero tail, and
-self pointer. On exit, the prior supervisor FS base is restored and the owned
+self pointer. The preinitializer names both hidden TLS symbols through
+`R_X86_64_TPOFF32`. The build requires exactly two such object relocations, and
+LLD resolves them to `-16` and `-8` without adding a dynamic relocation type.
+On exit, the prior supervisor FS base is restored and the owned
 TLS frame is zeroed and released; the live-frame count must return to its
 pre-execution value. The later bounded `arch_prctl(ARCH_SET_FS)` proof may
 replace the initial base, but is not the loader's TLS construction mechanism.

@@ -39,9 +39,12 @@ owned RW/NX page, copies `.tdata`, leaves `.tbss` zero, and places the bounded
 static block below a 64-byte-aligned x86-64 variant-II thread pointer. A minimal
 16-byte TCB contains its own address. FS is activated before the interpreter,
 and the main preinitializer refuses to advance unless its TLS template, zero
-tail, and self pointer are correct. Teardown scrubs and releases the TLS frame
-and restores the supervisor's prior FS base. TLS relocations, multiple modules,
-and per-thread allocation remain unimplemented.
+tail, and self pointer are correct. Its accesses name the hidden TLS symbols
+through `R_X86_64_TPOFF32`; LLD resolves both offsets without adding a dynamic
+relocation class, proving the toolchain layout matches the loader. Teardown
+scrubs and releases the TLS frame and restores the supervisor's prior FS base.
+TLS relocations, multiple modules, and per-thread allocation remain
+unimplemented.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

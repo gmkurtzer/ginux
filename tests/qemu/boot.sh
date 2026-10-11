@@ -608,6 +608,11 @@ if ! grep -q '^ginux: Linux TLS active before initializers' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: linker-resolved Linux TLS symbols executed' "$output_file"; then
+    echo "Boot test failed: linker-resolved Linux TLS symbols were not executed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux TLS frame scrubbed and released' "$output_file"; then
     echo "Boot test failed: the Linux TLS frame was not scrubbed and released." >&2
     exit 1
