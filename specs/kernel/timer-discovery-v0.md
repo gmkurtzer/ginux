@@ -40,6 +40,8 @@ fallback for its lifetime. Linux `clock_gettime` accepts `CLOCK_MONOTONIC` and
 reads cannot move backward, and the complete output range is validated before
 copy-out. Unsupported clock IDs return `-EINVAL` and invalid destinations
 return `-EFAULT` without a partial write.
+`clock_getres` reports the same source's one-tick duration, rounded up to a
+normalized `timespec`; a null output pointer is accepted as a support query.
 
 This does not provide realtime, boot-time, process/thread CPU clocks, clock
 adjustment, sleeping, vDSO acceleration, cross-CPU synchronization, or a

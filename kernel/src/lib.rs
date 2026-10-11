@@ -650,6 +650,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux fixed scheduler policy validated\r\n");
     serial_write("ginux: Linux fixed process priority validated\r\n");
     serial_write("ginux: Linux bounded monotonic clocks validated\r\n");
+    serial_write("ginux: Linux bounded clock resolution validated\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

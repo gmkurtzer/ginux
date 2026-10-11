@@ -179,6 +179,10 @@ otherwise. Both clocks share a private process epoch, return a normalized
 proof. Other clock IDs return `-EINVAL`; an invalid output range returns
 `-EFAULT` without changing its valid prefix. Realtime, CPU clocks, sleeping,
 adjustment, and a vDSO remain unsupported.
+`rax = 229` (`__NR_clock_getres`) exposes the corresponding single-tick
+resolution, rounded up to a normalized `timespec`. A null result pointer is a
+valid support query. Clock selection and copy errors match `clock_gettime`, and
+the complete result is validated before copy-out.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x405000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x406000` follows Linux syscall
@@ -319,7 +323,7 @@ bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
-bounded `clock_gettime`,
+bounded `clock_gettime`/`clock_getres`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,

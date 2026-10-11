@@ -100,6 +100,7 @@ const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_GETDENTS64_SYSCALL: u64 = 217;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
+const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_OPENAT_SYSCALL: u64 = 257;
 const LINUX_NEWFSTATAT_SYSCALL: u64 = 262;
@@ -1584,6 +1585,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_GETDENTS64_SYSCALL => linux_getdents64(first_argument, buffer, count),
         LINUX_CLOCK_GETTIME_SYSCALL => linux_clock_gettime(first_argument, buffer),
+        LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
         LINUX_STATX_SYSCALL => linux_statx(buffer, count, register(0), register(2)),
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
@@ -1616,6 +1618,27 @@ fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
     let mut timespec = [0_u8; 16];
     timespec[..8].copy_from_slice(&seconds.to_ne_bytes());
     timespec[8..].copy_from_slice(&nanoseconds.to_ne_bytes());
+    if !copy_to_linux_user(output_address, &timespec) {
+        return LINUX_EFAULT;
+    }
+    0
+}
+
+fn linux_clock_getres(clock: u64, output_address: u64) -> u64 {
+    if !matches!(clock, LINUX_CLOCK_MONOTONIC | LINUX_CLOCK_MONOTONIC_RAW) {
+        return LINUX_EINVAL;
+    }
+    let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);
+    if frequency == 0 {
+        return LINUX_ENOSYS;
+    }
+    if output_address == 0 {
+        return 0;
+    }
+    let resolution = NANOSECONDS_PER_SECOND.div_ceil(frequency);
+    let mut timespec = [0_u8; 16];
+    timespec[..8].copy_from_slice(&(resolution / NANOSECONDS_PER_SECOND).to_ne_bytes());
+    timespec[8..].copy_from_slice(&(resolution % NANOSECONDS_PER_SECOND).to_ne_bytes());
     if !copy_to_linux_user(output_address, &timespec) {
         return LINUX_EFAULT;
     }
