@@ -18,7 +18,7 @@ const PAGE_SIZE: usize = 4096;
 const MAX_EXECUTABLE_SEGMENT_PAGES: usize = 4;
 const MAX_OTHER_SEGMENT_PAGES: usize = 2;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (4 * PAGE_SIZE) as u64;
-const FIXTURE_DATA_OFFSET: usize = 0x3600;
+const FIXTURE_DATA_OFFSET: usize = 0x4000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
@@ -426,7 +426,7 @@ pub(crate) fn verify_parser() -> bool {
     {
         return false;
     }
-    if !verify_metadata_parser(&image) {
+    if !verify_metadata_parser(&image) || !verify_relro_parser() {
         return false;
     }
     let rejections = rejects(&image, 0, b'X')
@@ -527,7 +527,7 @@ fn verify_metadata_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
     candidate = *image;
     write_gnu_stack(&mut candidate, stack_header);
     write_u64(&mut candidate, stack_header + 48, 0);
-    parse(&candidate).is_some() && verify_relro_parser()
+    parse(&candidate).is_some()
 }
 
 fn configure_extended_metadata(bytes: &mut [u8]) {
