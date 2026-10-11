@@ -53,6 +53,21 @@ impl FrameLease {
         self.address
     }
 
+    pub(crate) const fn generation(self) -> u32 {
+        self.generation
+    }
+
+    pub(crate) const fn from_parts(address: u64, generation: u32) -> Option<Self> {
+        if address < LOW_MEMORY_LIMIT || !address.is_multiple_of(PAGE_SIZE) || generation == 0 {
+            None
+        } else {
+            Some(Self {
+                address,
+                generation,
+            })
+        }
+    }
+
     pub(crate) fn direct_map_address(self) -> Option<usize> {
         paging::direct_map_range_address(self.address, PAGE_SIZE as usize)
     }

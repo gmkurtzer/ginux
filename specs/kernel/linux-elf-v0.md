@@ -288,8 +288,10 @@ using another in-window bias return `-EINVAL`. Only then does
 it apply dependency and main relocations. The namespace still admits only
 `libginux.so`, so an altered or unterminated name fails closed. Syscall return
 validation accepts only the declared main and interpreter RX extents. The
-kernel authenticates and plans all images and reserves the main and dependency
-frames, but their content and leaf installation are now userspace-driven.
+kernel authenticates and plans all images and reserves the main frames.
+Dependency frames are allocated from the tracked kernel pool only when the
+admitted mmap requests arrive; their content and both images' leaf installation
+are userspace-driven.
 The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
 those bytes. The executable dynamic interpreter, main, and dependency instead
@@ -298,15 +300,16 @@ The complete ring-3 probe therefore runs with dynamic `AT_BASE`, main-image
 `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. Dependency dynamic
 metadata, entry, and relocation targets are translated from the authenticated
 canonical plan by the selected bias before validation. The kernel
-restores its own root and scrubs and releases all twenty-one page-table and
-payload frames. This profile performs one exact cross-object name match; it
+restores its own root, scrubs every payload, releases the two demand-allocated
+dependency leases, and requires the kernel-owned live-frame count to return to
+its pre-execution value. This profile performs one exact cross-object name match; it
 does not support multiple dependencies, transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
 lazy binding, a general-purpose dynamic linker, or glibc. The main bias and
 entry are startup-metadata-driven. The sole dependency now selects among 16
-page-aligned candidate biases in one fixed window, but its frames are still
-pre-reserved and its relative page layout remains a kernel-authenticated
-contract; randomization and general placement are not implemented.
+page-aligned candidate biases in one fixed window and receives frames on
+demand, but its relative page layout remains a kernel-authenticated contract;
+randomization and general placement are not implemented.
 
 ## Page-image plan
 

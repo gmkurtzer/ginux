@@ -355,9 +355,11 @@ static ELF_PROBE_DEPENDENCY_BASE_END: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DEPENDENCY_SELECTED_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DEPENDENCY_RX_RELATIVE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DEPENDENCY_RX_FRAME: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_DEPENDENCY_RX_GENERATION: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_DEPENDENCY_RX_OFFSET: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DEPENDENCY_RW_RELATIVE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DEPENDENCY_RW_FRAME: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_DEPENDENCY_RW_GENERATION: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_DEPENDENCY_RW_OFFSET: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DEPENDENCY_MAPPINGS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
@@ -983,22 +985,22 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) dependency_base_min: usize,
     pub(crate) dependency_base_end: usize,
     pub(crate) dependency_rx_relative: usize,
-    pub(crate) dependency_rx_frame: u64,
     pub(crate) dependency_rx_offset: u64,
     pub(crate) dependency_rw_relative: usize,
-    pub(crate) dependency_rw_frame: u64,
     pub(crate) dependency_rw_offset: u64,
 }
 
 pub(crate) struct LinuxElfResult {
     pub(crate) valid: bool,
     pub(crate) dependency_base: u64,
+    pub(crate) dependency_frames: [Option<memory::FrameLease>; 2],
 }
 
 impl LinuxElfResult {
     pub(crate) const FAILED: Self = Self {
         valid: false,
         dependency_base: 0,
+        dependency_frames: [None; 2],
     };
 }
 
@@ -1061,11 +1063,13 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_DEPENDENCY_SELECTED_BASE.store(0, Ordering::SeqCst);
     ELF_PROBE_DEPENDENCY_RX_RELATIVE
         .store(execution.dependency_rx_relative as u64, Ordering::SeqCst);
-    ELF_PROBE_DEPENDENCY_RX_FRAME.store(execution.dependency_rx_frame, Ordering::SeqCst);
+    ELF_PROBE_DEPENDENCY_RX_FRAME.store(0, Ordering::SeqCst);
+    ELF_PROBE_DEPENDENCY_RX_GENERATION.store(0, Ordering::SeqCst);
     ELF_PROBE_DEPENDENCY_RX_OFFSET.store(execution.dependency_rx_offset, Ordering::SeqCst);
     ELF_PROBE_DEPENDENCY_RW_RELATIVE
         .store(execution.dependency_rw_relative as u64, Ordering::SeqCst);
-    ELF_PROBE_DEPENDENCY_RW_FRAME.store(execution.dependency_rw_frame, Ordering::SeqCst);
+    ELF_PROBE_DEPENDENCY_RW_FRAME.store(0, Ordering::SeqCst);
+    ELF_PROBE_DEPENDENCY_RW_GENERATION.store(0, Ordering::SeqCst);
     ELF_PROBE_DEPENDENCY_RW_OFFSET.store(execution.dependency_rw_offset, Ordering::SeqCst);
     ELF_PROBE_DEPENDENCY_MAPPINGS.store(0, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
@@ -1242,20 +1246,41 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let observed_dependency_rx_relative =
         ELF_PROBE_DEPENDENCY_RX_RELATIVE.swap(0, Ordering::SeqCst);
     let observed_dependency_rx_frame = ELF_PROBE_DEPENDENCY_RX_FRAME.swap(0, Ordering::SeqCst);
+    let observed_dependency_rx_generation =
+        ELF_PROBE_DEPENDENCY_RX_GENERATION.swap(0, Ordering::SeqCst);
     let observed_dependency_rx_offset = ELF_PROBE_DEPENDENCY_RX_OFFSET.swap(0, Ordering::SeqCst);
     let observed_dependency_rw_relative =
         ELF_PROBE_DEPENDENCY_RW_RELATIVE.swap(0, Ordering::SeqCst);
     let observed_dependency_rw_frame = ELF_PROBE_DEPENDENCY_RW_FRAME.swap(0, Ordering::SeqCst);
+    let observed_dependency_rw_generation =
+        ELF_PROBE_DEPENDENCY_RW_GENERATION.swap(0, Ordering::SeqCst);
     let observed_dependency_rw_offset = ELF_PROBE_DEPENDENCY_RW_OFFSET.swap(0, Ordering::SeqCst);
+    let dependency_frames = [
+        memory::FrameLease::from_parts(
+            observed_dependency_rx_frame,
+            observed_dependency_rx_generation,
+        ),
+        memory::FrameLease::from_parts(
+            observed_dependency_rw_frame,
+            observed_dependency_rw_generation,
+        ),
+    ];
+    let dependency_frames_valid = match dependency_frames {
+        [None, None] => expected_dependency_mappings == 0,
+        [Some(rx), Some(rw)] => {
+            expected_dependency_mappings != 0
+                && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[rx, rw])
+        }
+        _ => false,
+    };
     let dependency_mappings_valid = observed_dependency_mappings == expected_dependency_mappings
         && observed_dependency_base_min == execution.dependency_base_min as u64
         && observed_dependency_base_end == execution.dependency_base_end as u64
         && observed_dependency_rx_relative == execution.dependency_rx_relative as u64
-        && observed_dependency_rx_frame == execution.dependency_rx_frame
         && observed_dependency_rx_offset == execution.dependency_rx_offset
         && observed_dependency_rw_relative == execution.dependency_rw_relative as u64
-        && observed_dependency_rw_frame == execution.dependency_rw_frame
         && observed_dependency_rw_offset == execution.dependency_rw_offset
+        && dependency_frames_valid
         && if expected_dependency_mappings == 0 {
             observed_dependency_base == 0
         } else {
@@ -1323,6 +1348,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     LinuxElfResult {
         valid,
         dependency_base: observed_dependency_base,
+        dependency_frames,
     }
 }
 
@@ -2325,6 +2351,7 @@ fn linux_mmap_fixed_file(
         mapping_state,
         relative_address,
         selectable_base,
+        allocate_frame,
     ) = if file_kind == LINUX_FILE_INIT {
         let Some(index) = ELF_PROBE_MAIN_ADDRESSES
             .iter()
@@ -2341,6 +2368,7 @@ fn linux_mmap_fixed_file(
             &ELF_PROBE_MAIN_MAPPINGS,
             0,
             false,
+            false,
         )
     } else if file_kind == LINUX_FILE_DEPENDENCY {
         let rx_offset = ELF_PROBE_DEPENDENCY_RX_OFFSET.load(Ordering::SeqCst);
@@ -2348,23 +2376,25 @@ fn linux_mmap_fixed_file(
         if offset == rx_offset && protection == (LINUX_PROT_READ | LINUX_PROT_EXEC) {
             (
                 1,
-                ELF_PROBE_DEPENDENCY_RX_FRAME.load(Ordering::SeqCst),
+                0,
                 rx_offset,
                 PAGE_SIZE as u64,
                 LINUX_PROT_READ | LINUX_PROT_EXEC,
                 &ELF_PROBE_DEPENDENCY_MAPPINGS,
                 ELF_PROBE_DEPENDENCY_RX_RELATIVE.load(Ordering::SeqCst),
                 true,
+                true,
             )
         } else if offset == rw_offset && protection == (LINUX_PROT_READ | LINUX_PROT_WRITE) {
             (
                 2,
-                ELF_PROBE_DEPENDENCY_RW_FRAME.load(Ordering::SeqCst),
+                0,
                 rw_offset,
                 PAGE_SIZE as u64,
                 LINUX_PROT_READ | LINUX_PROT_WRITE,
                 &ELF_PROBE_DEPENDENCY_MAPPINGS,
                 ELF_PROBE_DEPENDENCY_RW_RELATIVE.load(Ordering::SeqCst),
+                true,
                 true,
             )
         } else {
@@ -2374,7 +2404,7 @@ fn linux_mmap_fixed_file(
         return LINUX_EACCES;
     };
     if address == 0
-        || frame == 0
+        || !allocate_frame && frame == 0
         || file_size == 0
         || file_size > PAGE_SIZE as u64
         || offset != expected_offset
@@ -2408,7 +2438,7 @@ fn linux_mmap_fixed_file(
             return LINUX_EINVAL;
         }
     }
-    if mapping_state.load(Ordering::SeqCst) & bit != 0 {
+    if !allocate_frame && mapping_state.load(Ordering::SeqCst) & bit != 0 {
         return LINUX_EEXIST;
     }
     let Ok(start) = usize::try_from(offset) else {
@@ -2431,14 +2461,50 @@ fn linux_mmap_fixed_file(
     else {
         return LINUX_EINVAL;
     };
+    let allocated_frame = if allocate_frame {
+        let Some([lease]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+            return LINUX_ENOMEM;
+        };
+        Some(lease)
+    } else {
+        None
+    };
+    let frame = allocated_frame.map_or(frame, memory::FrameLease::address);
+    if mapping_state.load(Ordering::SeqCst) & bit != 0 {
+        if let Some(lease) = allocated_frame {
+            let _ = memory::release_frames(memory::FrameOwner::KERNEL, [lease]);
+        }
+        return LINUX_EEXIST;
+    }
     if !address_space::prepare_linux_frame(frame, &file[start..end]) {
+        if let Some(lease) = allocated_frame {
+            let _ = memory::release_frames(memory::FrameOwner::KERNEL, [lease]);
+        }
         return LINUX_ENOMEM;
     }
     let writable = protection & LINUX_PROT_WRITE != 0;
     let executable = protection & LINUX_PROT_EXEC != 0;
     if !address_space::map_current_linux_file_page(address, frame, writable, executable) {
-        let _ = address_space::prepare_linux_frame(frame, &[]);
+        let scrubbed = address_space::prepare_linux_frame(frame, &[]);
+        if let Some(lease) = allocated_frame.filter(|_| scrubbed) {
+            let _ = memory::release_frames(memory::FrameOwner::KERNEL, [lease]);
+        }
         return LINUX_EEXIST;
+    }
+    if let Some(lease) = allocated_frame {
+        let (frame_state, generation_state) = if bit == 1 {
+            (
+                &ELF_PROBE_DEPENDENCY_RX_FRAME,
+                &ELF_PROBE_DEPENDENCY_RX_GENERATION,
+            )
+        } else {
+            (
+                &ELF_PROBE_DEPENDENCY_RW_FRAME,
+                &ELF_PROBE_DEPENDENCY_RW_GENERATION,
+            )
+        };
+        frame_state.store(lease.address(), Ordering::SeqCst);
+        generation_state.store(lease.generation(), Ordering::SeqCst);
     }
     mapping_state.fetch_or(bit, Ordering::SeqCst);
     address

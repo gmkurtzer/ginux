@@ -399,18 +399,23 @@ deliberately submits a wrong first-page offset, a W+X executable request, a
 repeated first-page request, and a dependency page at a different in-window
 bias and requires `-EINVAL`, `-EINVAL`, `-EEXIST`, and `-EINVAL`, respectively.
 
-The kernel copies each admitted file extent into its exact pre-reserved owned
-frame, zero-fills the remainder, requires the leaf to remain absent, and
-enforces W^X while installing it. The dependency window is preflighted against
-all other admitted mappings before execution. Main and dependency mappings persist through
+The kernel copies each admitted main extent into its exact pre-reserved owned
+frame. Each admitted dependency page instead receives a generation-tracked
+kernel frame on demand. Both paths zero-fill the remainder, require the leaf to
+remain absent, and enforce W^X while installing it. The dependency window is
+preflighted against all other admitted mappings before execution. A duplicate
+dependency request exercises allocate-then-release rollback before returning
+`-EEXIST`. Main and dependency mappings persist through
 process exit; the admitted RELRO operation may only remove write permission
 from the second main data page. Every required contract must be consumed once
 before successful process completion. A duplicate returns `-EEXIST`; another
 file, address, offset, size, flag, or permission set is rejected. Descriptor
-cursors remain unchanged. This is bounded userspace-owned loading for two
-preauthenticated images with pre-reserved frames and one fixed dependency
-window, not ASLR, a general executable allocator, or authority to map
-unauthenticated bytes.
+cursors remain unchanged. On exit the inactive process root is retained while
+the dependency frames are scrubbed and their exact generation leases are
+released; the kernel-owned live-frame count must return to its pre-execution
+value. This is bounded userspace-owned loading for two preauthenticated images
+with pre-reserved main frames and one fixed dependency window, not ASLR, a
+general executable allocator, or authority to map unauthenticated bytes.
 `rax = 11` (`__NR_munmap`) accepts only the complete active scratch extent, clears its
 hardware leaves, invalidates their TLB entries, and scrubs the physical frames
 before reuse. Repeating a supported exact unmap succeeds. The anonymous probe

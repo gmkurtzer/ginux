@@ -525,10 +525,8 @@ pub(crate) fn verify_linux_elf_mapping(
                     dependency_base_min: 0,
                     dependency_base_end: 0,
                     dependency_rx_relative: 0,
-                    dependency_rx_frame: 0,
                     dependency_rx_offset: 0,
                     dependency_rw_relative: 0,
-                    dependency_rw_frame: 0,
                     dependency_rw_offset: 0,
                 })
                 .valid;
@@ -551,6 +549,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
     protected_start: u64,
     protected_size: usize,
 ) -> bool {
+    let Some(kernel_frames_before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL)
+    else {
+        return false;
+    };
     let plan = &dependency_plan.process;
     let Some(main_ro) = plan.main.read_only else {
         return false;
@@ -765,13 +767,14 @@ pub(crate) fn verify_interpreted_elf_mapping(
         return false;
     }
 
-    let Some(frames) = memory::allocate_frames::<21>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<19>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, main_ro_page, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data, dependency_page, dependency_data, heap_page, stack_page, mmap_page, mmap_tail_page] =
+    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, main_ro_page, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page] =
         addresses;
     let kernel_root_physical = current_root();
+    let mut dependency_frames = [None; 2];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [
@@ -849,8 +852,6 @@ pub(crate) fn verify_interpreted_elf_mapping(
             zero_frame(stack_page)?;
             zero_frame(mmap_page)?;
             zero_frame(mmap_tail_page)?;
-            zero_frame(dependency_page)?;
-            zero_frame(dependency_data)?;
             for frame in [
                 main_ro_page,
                 main_page,
@@ -1018,15 +1019,14 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_base_min: dependency_base_min as usize,
                     dependency_base_end: dependency_base_end as usize,
                     dependency_rx_relative: dependency_rx_relative as usize,
-                    dependency_rx_frame: dependency_page,
                     dependency_rx_offset: dependency_rx.file_page,
                     dependency_rw_relative: dependency_rw_relative as usize,
-                    dependency_rw_frame: dependency_data,
                     dependency_rw_offset: dependency_rw.file_page,
                 })
             } else {
                 cpu::LinuxElfResult::FAILED
             };
+            dependency_frames = execution_result.dependency_frames;
             let executed = observed && execution_result.valid;
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
@@ -1056,6 +1056,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 .unwrap_or(0);
             let actual_dependency_rx_indexes = indexes(actual_dependency_rx_page);
             let actual_dependency_rw_indexes = indexes(actual_dependency_rw_page);
+            let [dependency_rx_frame, dependency_rw_frame] = execution_result
+                .dependency_frames
+                .map(|frame| frame.map(memory::FrameLease::address).unwrap_or(0));
             let dependency_base_valid = executed
                 && selected_dependency_base >= dependency_base_min
                 && selected_dependency_base < dependency_base_end
@@ -1066,12 +1069,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     .add(actual_dependency_rx_indexes[3])
                     .read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == dependency_page | PRESENT | USER
+                    == dependency_rx_frame | PRESENT | USER
                 && interpreter_entries
                     .add(actual_dependency_rw_indexes[3])
                     .read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == dependency_data | PRESENT | USER | WRITABLE | NO_EXECUTE;
+                    == dependency_rw_frame | PRESENT | USER | WRITABLE | NO_EXECUTE;
             let interpreter_relocated = cpu::with_supervisor_user_access(|| {
                 (interpreter_dynamic.relocation_target as *const u64).read_volatile()
                     == interpreter_relocation_value
@@ -1185,7 +1188,21 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let cleared = frames
         .iter()
         .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
-    valid && cleared && memory::release_frames(memory::FrameOwner::KERNEL, frames)
+    let dependency_cleared = dependency_frames
+        .iter()
+        .flatten()
+        .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
+    let frames_released = cleared && memory::release_frames(memory::FrameOwner::KERNEL, frames);
+    let mut dependency_frames_released = dependency_cleared;
+    if dependency_cleared {
+        for frame in dependency_frames.into_iter().flatten() {
+            dependency_frames_released &=
+                memory::release_frames(memory::FrameOwner::KERNEL, [frame]);
+        }
+    }
+    let frame_count_restored =
+        memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(kernel_frames_before);
+    valid && frames_released && dependency_frames_released && frame_count_restored
 }
 
 struct RegisteredAuxiliaryAddressSpace {
