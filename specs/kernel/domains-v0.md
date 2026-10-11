@@ -57,8 +57,12 @@ registration, prevents retirement while an exact-generation operation is in
 flight, retires only the named auxiliary record, preserves the primary and
 unrelated auxiliary authority, and reuses the freed domain and registry slots
 with a new generation. Primary-supervised and auxiliary services have distinct
-roles. Only the primary role is admitted to the current scheduler and routed
-through IPC peer closure, fault reporting, restart, and frame quarantine;
+roles and stored failure policies. Primary generations are restart-managed;
+auxiliary identities are stop-only. The CPU fault and exit path consults the
+stored policy before entering restart and frame-quarantine handling rather
+than inferring that behavior from a role name. Only the primary role is
+admitted to the current scheduler and routed through IPC peer closure, fault
+reporting, restart, and frame quarantine;
 auxiliary domains receive an explicit zero-thread admission limit until those
 lifecycle contracts are defined. The scheduler applies the stored limit rather
 than granting admission from a role name. In-flight operation admission is
@@ -89,6 +93,9 @@ proof does stage and fully roll back an unstarted auxiliary domain with a real
 allocator-owned W^X address space. A validated exact-generation resource bind
 temporarily permits one accounted thread reservation, but no scheduler context
 is queued during this transaction.
+Stop-only execution remains disabled until auxiliary scheduler removal,
+address-space release, authority revocation, and lifecycle publication form a
+single fail-closed teardown transaction.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

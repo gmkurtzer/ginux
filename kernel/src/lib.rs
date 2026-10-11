@@ -443,6 +443,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded auxiliary service registry verified\r\n");
     serial_write("ginux: service lifecycle roles separated\r\n");
+    serial_write("ginux: service failure policies separated\r\n");
     serial_write("ginux: domain resource admission policies verified\r\n");
     serial_write("ginux: auxiliary service quiescence enforced\r\n");
     serial_write("ginux: auxiliary supervision authority enforced\r\n");

@@ -42,6 +42,12 @@ enum State {
     Stopping,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ServiceFailurePolicy {
+    RestartManaged,
+    StopOnly,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct BootGrant {
     object: u64,
@@ -57,6 +63,7 @@ impl BootGrant {
 struct Domain {
     id: DomainId,
     service: Option<ServiceId>,
+    failure_policy: Option<ServiceFailurePolicy>,
     role: Role,
     state: State,
     capabilities: CapabilityTable,
@@ -254,6 +261,7 @@ impl Manager {
         self.domains[slot] = Some(Domain {
             id,
             service: None,
+            failure_policy: None,
             role: Role::ControlPlane,
             state: State::Ready,
             capabilities,
@@ -424,6 +432,11 @@ impl Manager {
         self.domains[slot] = Some(Domain {
             id,
             service: Some(identity),
+            failure_policy: Some(if role == Role::SupervisedService {
+                ServiceFailurePolicy::RestartManaged
+            } else {
+                ServiceFailurePolicy::StopOnly
+            }),
             role,
             state: State::Ready,
             capabilities,
@@ -1289,12 +1302,15 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     let host_handle = manager.domain(host_service)?.boot_roots[0]?;
     if manager.service_id != Some(primary)
         || manager.domain(primary)?.role != Role::SupervisedService
+        || manager.domain(primary)?.failure_policy != Some(ServiceFailurePolicy::RestartManaged)
         || Some(primary_identity) != manager.primary_service_identity
         || manager.domain(primary)?.thread_limit != BOOTSTRAP_THREAD_LIMIT
         || manager.domain(console_service)?.role != Role::AuxiliaryService
+        || manager.domain(console_service)?.failure_policy != Some(ServiceFailurePolicy::StopOnly)
         || console_identity.slot == host_identity.slot
         || manager.domain(console_service)?.thread_limit != 0
         || manager.domain(host_service)?.role != Role::AuxiliaryService
+        || manager.domain(host_service)?.failure_policy != Some(ServiceFailurePolicy::StopOnly)
         || manager.domain(host_service)?.thread_limit != 0
         || manager.attach_thread(console_service)
         || manager
@@ -1333,6 +1349,7 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
         || replacement.slot != console_service.slot
         || replacement_identity.slot != console_identity.slot
         || replacement_identity.generation <= console_identity.generation
+        || manager.domain(replacement)?.failure_policy != Some(ServiceFailurePolicy::StopOnly)
         || manager.auxiliary_service_ids != [Some(replacement), Some(host_service)]
         || !manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
         || manager.permits(console_service, console_handle, 2, Rights::WRITE)
@@ -1418,7 +1435,10 @@ fn verify_service_restart_budget_invariants_inner() -> Option<bool> {
     manager.create_control_plane(&grants)?;
     let service = manager.create_initial_service()?;
     let service_identity = manager.domain(service)?.service?;
-    if manager.create_initial_service().is_some() || manager.restart_service().is_some() {
+    if manager.domain(service)?.failure_policy != Some(ServiceFailurePolicy::RestartManaged)
+        || manager.create_initial_service().is_some()
+        || manager.restart_service().is_some()
+    {
         return Some(false);
     }
     if !manager.retire_service(service) {
@@ -1428,6 +1448,7 @@ fn verify_service_restart_budget_invariants_inner() -> Option<bool> {
     let replacement_identity = manager.domain(replacement)?.service?;
     if replacement == service
         || replacement_identity != service_identity
+        || manager.domain(replacement)?.failure_policy != Some(ServiceFailurePolicy::RestartManaged)
         || !manager.discard_unstarted_service(replacement)
     {
         return Some(false);
@@ -1579,13 +1600,11 @@ pub(crate) fn service_restart_budget_proof_complete() -> bool {
     })
 }
 
-pub(crate) fn is_supervised_service_domain(domain_raw: u64) -> bool {
-    let Some(id) = decode_id(domain_raw) else {
-        return false;
-    };
+pub(crate) fn service_failure_policy(domain_raw: u64) -> Option<ServiceFailurePolicy> {
+    let id = decode_id(domain_raw)?;
     global_manager()
         .and_then(|manager| manager.domain(id))
-        .is_some_and(|domain| domain.role == Role::SupervisedService)
+        .and_then(|domain| domain.failure_policy)
 }
 
 pub(crate) fn retire_service(domain_raw: u64) -> bool {
