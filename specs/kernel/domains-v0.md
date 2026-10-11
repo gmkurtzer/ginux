@@ -3,7 +3,12 @@
 **Status:** Sealed control-plane and delegated service domains executing at ring 3.
 
 The kernel constructs one initial control-plane domain and one isolated service
-domain in a four-slot bootstrap table retained for the kernel lifetime. A domain
+domain in a four-slot bootstrap table retained for the kernel lifetime. The
+manager now also has two bounded auxiliary-service registry slots, allowing the
+remaining domain records to be registered without replacing the primary
+restart-managed service. Auxiliary construction validates every delegation
+before publishing a domain, and registry saturation fails without allocating a
+record. A domain
 identifier combines a fixed-table slot and generation so stale identifiers
 cannot name a later occupant. The record has an explicit role and lifecycle
 state, a generation-tagged lifecycle parent, and a domain-local capability
@@ -33,6 +38,15 @@ root's bounded provenance chain, so revoking the control-plane source
 invalidates the root and its derived children without relying on cooperative
 service cleanup. Per-root records prevent a future multi-capability service
 from validating one root through an unrelated source.
+
+The local registry invariant keeps the primary IPC service live while creating
+independent console-write and host-read auxiliary services. It rejects a third
+registration, prevents retirement while an exact-generation operation is in
+flight, retires only the named auxiliary record, preserves the primary and
+unrelated auxiliary authority, and reuses the freed domain and registry slots
+with a new generation. Auxiliary registration is not yet exposed to userspace,
+attached to scheduler contexts, assigned address spaces, or integrated with
+the primary service's restart and frame-quarantine policy.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

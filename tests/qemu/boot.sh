@@ -283,6 +283,11 @@ if ! grep -q '^ginux: domain lifecycle ancestry verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded auxiliary service registry verified' "$output_file"; then
+    echo "Boot test failed: auxiliary service registry invariant failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded service restart policy verified' "$output_file"; then
     echo "Boot test failed: service restart policy validation failed." >&2
     exit 1

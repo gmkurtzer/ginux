@@ -11,6 +11,7 @@ const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
 const SERVICE_RESTART_BUDGET: u16 = 1;
 const EVENT_CAPACITY: usize = 4;
+const MAX_AUXILIARY_SERVICES: usize = MAX_DOMAINS - 2;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_MANAGER: MaybeUninit<Manager> = MaybeUninit::uninit();
@@ -178,6 +179,7 @@ pub(crate) struct Manager {
     control_plane_created: bool,
     control_plane_id: Option<DomainId>,
     service_id: Option<DomainId>,
+    auxiliary_service_ids: [Option<DomainId>; MAX_AUXILIARY_SERVICES],
     last_retired_service_id: Option<DomainId>,
     lifecycle_events: EventQueue,
     last_delivered_service_fault: Option<LifecycleEvent>,
@@ -197,6 +199,7 @@ impl Manager {
             control_plane_created: false,
             control_plane_id: None,
             service_id: None,
+            auxiliary_service_ids: [None; MAX_AUXILIARY_SERVICES],
             last_retired_service_id: None,
             lifecycle_events: EventQueue::new(),
             last_delivered_service_fault: None,
@@ -270,6 +273,28 @@ impl Manager {
         if grants.is_empty() || grants.len() > MAX_BOOT_GRANTS || self.service_id.is_some() {
             return None;
         }
+        let id = self.construct_service_domain(grants)?;
+        self.service_id = Some(id);
+        Some(id)
+    }
+
+    fn create_auxiliary_service_with_delegations(
+        &mut self,
+        grants: &[DelegationGrant],
+    ) -> Option<DomainId> {
+        let registry_slot = self
+            .auxiliary_service_ids
+            .iter()
+            .position(Option::is_none)?;
+        let id = self.construct_service_domain(grants)?;
+        self.auxiliary_service_ids[registry_slot] = Some(id);
+        Some(id)
+    }
+
+    fn construct_service_domain(&mut self, grants: &[DelegationGrant]) -> Option<DomainId> {
+        if grants.is_empty() || grants.len() > MAX_BOOT_GRANTS {
+            return None;
+        }
         let control_id = self.control_plane_id?;
         let control = self.domain(control_id)?;
         if grants.iter().any(|grant| {
@@ -315,7 +340,6 @@ impl Manager {
             parent: Some(control_id),
             delegated_roots,
         });
-        self.service_id = Some(id);
         Some(id)
     }
 
@@ -453,6 +477,26 @@ impl Manager {
         }
         self.domains[usize::from(id.slot)] = None;
         self.service_id = None;
+        true
+    }
+
+    fn retire_auxiliary_service(&mut self, id: DomainId) -> bool {
+        let Some(registry_slot) = self
+            .auxiliary_service_ids
+            .iter()
+            .position(|registered| *registered == Some(id))
+        else {
+            return false;
+        };
+        if self.domain(id).is_none_or(|domain| {
+            domain.role != Role::Service
+                || domain.active_threads != 0
+                || domain.active_operations != 0
+        }) {
+            return false;
+        }
+        self.domains[usize::from(id.slot)] = None;
+        self.auxiliary_service_ids[registry_slot] = None;
         true
     }
 }
@@ -684,6 +728,74 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
 
 pub(crate) fn verify_domain_ancestry_invariants() -> bool {
     verify_domain_ancestry_invariants_inner().unwrap_or(false)
+}
+
+pub(crate) fn verify_auxiliary_service_registry_invariants() -> bool {
+    verify_auxiliary_service_registry_invariants_inner().unwrap_or(false)
+}
+
+fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    let control = manager.create_control_plane(&grants)?;
+    let primary = manager.create_service()?;
+    let console_source = manager.domain(control)?.boot_roots[1]?;
+    let host_source = manager.domain(control)?.boot_roots[0]?;
+    let console_grant = DelegationGrant {
+        source: console_source,
+        object: 2,
+        rights: Rights::WRITE,
+    };
+    let console_service = manager.create_auxiliary_service_with_delegations(&[console_grant])?;
+    let host_service = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
+        source: host_source,
+        object: 1,
+        rights: Rights::READ,
+    }])?;
+    let console_handle = manager.domain(console_service)?.boot_roots[0]?;
+    let host_handle = manager.domain(host_service)?.boot_roots[0]?;
+    if manager.service_id != Some(primary)
+        || manager
+            .create_auxiliary_service_with_delegations(&[console_grant])
+            .is_some()
+        || manager.auxiliary_service_ids != [Some(console_service), Some(host_service)]
+        || !manager.is_descendant(control, console_service)
+        || !manager.is_descendant(control, host_service)
+        || !manager.permits(console_service, console_handle, 2, Rights::WRITE)
+        || manager.permits(console_service, console_handle, 2, Rights::READ)
+        || !manager.permits(host_service, host_handle, 1, Rights::READ)
+        || manager.permits(host_service, host_handle, 1, Rights::MANAGE)
+        || !manager.begin_operation(console_service)
+        || manager.retire_auxiliary_service(console_service)
+        || !manager.end_operation(console_service)
+        || manager.retire_service(console_service)
+        || !manager.retire_auxiliary_service(console_service)
+        || manager.domain(console_service).is_some()
+        || manager.is_descendant(control, console_service)
+        || manager.service_id != Some(primary)
+        || !manager.permits(host_service, host_handle, 1, Rights::READ)
+    {
+        return Some(false);
+    }
+    let replacement = manager.create_auxiliary_service_with_delegations(&[console_grant])?;
+    let replacement_handle = manager.domain(replacement)?.boot_roots[0]?;
+    Some(
+        replacement != console_service
+            && replacement.slot == console_service.slot
+            && manager.auxiliary_service_ids == [Some(replacement), Some(host_service)]
+            && manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
+            && !manager.permits(console_service, console_handle, 2, Rights::WRITE)
+            && manager.permits(
+                primary,
+                manager.domain(primary)?.boot_roots[0]?,
+                3,
+                Rights::READ,
+            ),
+    )
 }
 
 fn verify_domain_ancestry_invariants_inner() -> Option<bool> {
