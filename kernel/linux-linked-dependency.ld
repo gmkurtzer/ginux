@@ -3,6 +3,7 @@ ENTRY(ginux_dependency_symbol)
 PHDRS
 {
     text PT_LOAD FLAGS(5);
+    rodata PT_LOAD FLAGS(4);
     data PT_LOAD FLAGS(6);
     dynamic PT_DYNAMIC FLAGS(6);
     stack PT_GNU_STACK FLAGS(6);
@@ -14,6 +15,9 @@ SECTIONS
     .text : { *(.text) } :text
     . = 0x1000;
     .text.secondary : { *(.text.secondary) } :text
+
+    . = 0x2000;
+    .rodata : { *(.rodata) } :rodata
 
     . = 0x3000;
     .dynamic : { *(.dynamic) } :data :dynamic

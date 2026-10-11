@@ -384,9 +384,10 @@ offsets `0x5000..0x6000` at `0x404000..0x405000` with `PROT_READ |
 PROT_WRITE`. For `libginux.so`, the kernel admits a page-aligned base in the
 half-open range `0x610000..0x620000`. Offset `0x1000` must be RX at relative
 address zero, offset `0x2000` must be RX at relative address `0x1000`, and
-offset `0x3000` must be RW/NX at relative address `0x3000`. The current
+offset `0x3000` must be R/NX at relative address `0x2000`; offset `0x4000` must
+be RW/NX at relative address `0x3000`. The current
 interpreter selects base `0x618000`, producing mappings at `0x618000`,
-`0x619000`, and `0x61b000`.
+`0x619000`, `0x61a000`, and `0x61b000`.
 
 The interpreter derives these requests from each authenticated file's bounded
 `PT_LOAD` table rather than embedding the valid page sequence. It supplies the

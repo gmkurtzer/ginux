@@ -31,6 +31,10 @@ ginux_dependency_symbol:
     mov eax, 0x47584e32
     ret
 
+.section .rodata,"a",@progbits
+.Ldependency_read_only:
+    .quad 0x594c4e4f44414552
+
 .section .data.rel.ro,"aw",@progbits
     .quad .Lginux_dependency_local
 #endif

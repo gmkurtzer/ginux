@@ -369,7 +369,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     let dynamic_relocations = dynamic_metadata.map(|metadata| metadata.relocations);
     let mapped_program_table_end = program_headers
         .checked_add(u64::try_from(program_header_count.checked_mul(PROGRAM_HEADER_SIZE)?).ok()?)?;
-    if (program_headers..mapped_program_table_end).contains(&entry) {
+    if program_headers != 0 && (program_headers..mapped_program_table_end).contains(&entry) {
         return None;
     }
     Some(Image {
@@ -2466,7 +2466,10 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
     };
     if plan.dependency.executable.page_count != 2
         || plan.dependency.writable.page_count != 1
-        || plan.dependency.read_only.is_some()
+        || !plan
+            .dependency
+            .read_only
+            .is_some_and(|segment| segment.page_count == 1)
     {
         crate::serial_write_bytes(b"\r\nginux: linked DSO page-contract fixture mismatch");
         return false;

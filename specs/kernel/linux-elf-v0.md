@@ -176,8 +176,8 @@ encoder using that common contract, and the interpreted proof checks the exact
 word positions of its dynamic values. A bounded execution proof installs only
 the interpreter's separate RX and RW/NX pages in the initial user root. It
 keeps absent leaves for the main image's read-only/NX header page, four RX
-pages, two RW/NX pages, and the dependency's two RX and one RW pages. It allocates each
-of those ten payload frames only when the matching authenticated mmap request
+pages, two RW/NX pages, and the dependency's two RX, one read-only/NX, and one
+RW page. It allocates each of those eleven payload frames only when the matching authenticated mmap request
 arrives. It also owns bounded heap, stack, and two `mmap` payload frames. The
 proof verifies that the main and dependency leaves begin absent, validates
 their userspace-installed contents and permissions after execution, and
@@ -280,13 +280,13 @@ offset, requires a nonzero bounded name, and constructs
 `/lib64/<needed-name>` on the mapped user stack. It inspects that derived file
 before reopening it and applies the same program-header walker at dependency
 bias `0x618000`. The resulting requests map file offset `0x1000` RX at
-`0x618000`, offset `0x2000` RX at `0x619000`, and offset `0x3000` RW/NX at
-`0x61b000`. The kernel accepts a
+`0x618000`, offset `0x2000` RX at `0x619000`, offset `0x3000` R/NX at
+`0x61a000`, and offset `0x4000` RW/NX at `0x61b000`. The kernel accepts a
 page-aligned base only within `0x610000..0x620000`, binds the first admitted
 dependency request, and requires the later page to use the same bias while
 preserving every relative displacement from a bounded eight-entry page
 contract table derived from the authenticated plan. The current fixture
-consumes three entries. A repeated first-page
+consumes four entries and proves RX, R/NX, and RW/NX mappings. A repeated first-page
 request returns `-EEXIST`; a W+X executable request and an otherwise-valid page
 using another in-window bias return `-EINVAL`. Only then does
 it apply dependency and main relocations. The namespace still admits only
@@ -303,7 +303,7 @@ The complete ring-3 probe therefore runs with dynamic `AT_BASE`, main-image
 `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. Dependency dynamic
 metadata, entry, and relocation targets are translated from the authenticated
 canonical plan by the selected bias before validation. The kernel
-restores its own root, scrubs every payload, releases all ten demand-allocated
+restores its own root, scrubs every payload, releases all eleven demand-allocated
 main and dependency leases, and requires the kernel-owned live-frame count to
 return to its pre-execution value. This profile performs one exact cross-object name match; it
 does not support multiple dependencies, transitive dependency graphs, search

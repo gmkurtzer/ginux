@@ -377,7 +377,7 @@ ginux_linux_interpreter:
     mov edx, 3
     mov r10d, 0x100002
     mov r8d, 2
-    mov r9d, 0x3000
+    mov r9d, 0x4000
     mov eax, 9
     syscall
     cmp rax, -22
