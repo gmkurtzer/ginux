@@ -643,6 +643,11 @@ if ! grep -q '^ginux: Linux bounded pipe introspection validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux anonymous descriptor metadata validated' "$output_file"; then
+    echo "Boot test failed: Linux anonymous descriptor metadata was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux bounded syscall stack movement validated' "$output_file"; then
     echo "Boot test failed: Linux bounded syscall stack movement was not validated." >&2
     exit 1

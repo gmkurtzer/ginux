@@ -114,6 +114,11 @@ the monotonic deadline has elapsed. The descriptor also participates in
 and epoll together, observes one-shot readiness, verifies failed-read
 non-consumption, consumes periodic and already-expired absolute timers, and
 releases both descriptors.
+`fstat` on an open epoll, eventfd, or timerfd descriptor reports the shared
+bounded anonymous-inode identity with mode `0600` and no `S_IF*` file-type
+bits. This matches Linux's observable anonymous-inode convention while making
+no claim of a general inode namespace. Closed descriptors still return
+`-EBADF`, and complete output-range validation remains atomic.
 `rax = 22` (`__NR_pipe`) and `rax = 293` (`__NR_pipe2`) allocate one
 process-local unidirectional pipe using the two lowest free auxiliary
 descriptors and atomically copy the read and write descriptor numbers to an

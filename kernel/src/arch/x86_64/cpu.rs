@@ -171,6 +171,7 @@ const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
 const LINUX_STAT_FIFO_MODE: u32 = 0o010600;
+const LINUX_STAT_ANONYMOUS_MODE: u32 = 0o600;
 const LINUX_STATX_BASIC_STATS: u32 = 0x7ff;
 const LINUX_STATX_RESERVED: u32 = 0x8000_0000;
 const LINUX_WRITE_LIMIT: usize = 256;
@@ -3721,6 +3722,12 @@ fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
     }
     if linux_pipe_descriptor(descriptor) {
         return Some(linux_stat(LINUX_STAT_FIFO_MODE, 3));
+    }
+    if linux_epoll_descriptor(descriptor)
+        || linux_eventfd_descriptor(descriptor)
+        || linux_timerfd_descriptor(descriptor)
+    {
+        return Some(linux_stat(LINUX_STAT_ANONYMOUS_MODE, 4));
     }
     let device = linux_device_descriptor(descriptor);
     (device != 0).then(|| {

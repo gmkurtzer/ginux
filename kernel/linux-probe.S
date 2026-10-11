@@ -1321,6 +1321,17 @@ ginux_linux_probe:
     mov edx, 0x802
     mov eax, 72
     call syscall_expect_zero
+    mov edi, 2
+    mov esi, 0x404350
+    mov eax, 5
+    call syscall_expect_zero
+    cmp dword ptr [0x404368], 0x180
+    jne failure
+    mov edi, 3
+    mov eax, 5
+    call syscall_expect_zero
+    cmp dword ptr [0x404368], 0x180
+    jne failure
     mov eax, 8
     syscall
     cmp rax, -29
@@ -1625,6 +1636,11 @@ ginux_linux_probe:
     mov edx, 0x802
     mov eax, 72
     call syscall_expect_zero
+    mov esi, 0x404350
+    mov eax, 5
+    call syscall_expect_zero
+    cmp dword ptr [0x404368], 0x180
+    jne failure
     mov eax, 8
     syscall
     cmp rax, -29
