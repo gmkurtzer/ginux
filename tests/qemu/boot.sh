@@ -118,6 +118,11 @@ if ! grep -q '^ginux: NX-by-default identity map active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: PE executable identity pages read-only' "$output_file"; then
+    echo "Boot test failed: executable PE pages remain writable." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: supervisor write protection active' "$output_file"; then
     echo "Boot test failed: supervisor write protection is inactive." >&2
     exit 1

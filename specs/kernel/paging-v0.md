@@ -24,13 +24,15 @@ builder reads back every protected PTE after loading CR3.
 
 Before constructing entries with the NX bit, the kernel requires CPUID NX
 support, enables `EFER.NXE`, and reads it back. Every 2 MiB identity mapping and
-every newly split 4 KiB mapping starts non-executable. Only pages covered by
-the final UEFI map's `EfiLoaderCode` or `EfiRuntimeServicesCode` descriptors
-have NX cleared. Loader data, stacks, page tables, conventional memory, ACPI,
-MMIO, and boot-service remnants therefore remain non-executable. The kernel
-walks the full active identity hierarchy after activation and again after the
-ring-3 workload, requiring every executable leaf to be justified by one of
-those code descriptors and every unsplit region to remain NX.
+every newly split 4 KiB mapping starts non-executable. Only pages covered by a
+validated executable PE section or the final UEFI map's
+`EfiRuntimeServicesCode` descriptors have NX cleared. PE executable pages also
+have `WRITABLE` cleared before CR3 activation. Loader data, stacks, page tables,
+conventional memory, ACPI, MMIO, and boot-service remnants therefore remain
+non-executable. The kernel walks the full active identity hierarchy after
+activation and again after the ring-3 workload, requiring every executable
+leaf to have a PE/runtime-code justification, every PE executable leaf to be
+read-only, and every unsplit region to remain NX.
 
 Before writing CR3, the kernel verifies that its current code, stack, boot information, UEFI memory map, shutdown runtime-service entry, and page-table objects all fall within the mapped range. The kernel reads CR3 back and verifies that it identifies the expected PML4.
 
@@ -55,8 +57,8 @@ Interrupts remain disabled during and after the transition. They cannot be enabl
 
 This map is intentionally transitional:
 
-- Loader/runtime code is executable but still writable through the identity
-  alias; code immutability is not complete.
+- PE executable sections are read-only, but UEFI runtime-service code remains
+  writable because the kernel does not own its implementation contract.
 - Read-only data, mutable data, MMIO, and firmware regions are not yet
   separated beyond the executable/non-executable boundary.
 - Most identity-map aliases remain writable, so this revision does not yet make
@@ -65,6 +67,6 @@ This map is intentionally transitional:
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.
 
 Untrusted code executes only in domain roots where this identity map is
-supervisor-only. Later paging revisions must remove writable code aliases,
-provide explicit MMIO mappings and direct-map bounds, and replace UEFI memory
-types with kernel-owned image-section metadata.
+supervisor-only. Later paging revisions must replace the firmware shutdown
+dependency, provide explicit MMIO mappings and direct-map bounds, and define
+permissions for dynamically loaded kernel modules.

@@ -18,6 +18,8 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
   the ring-3 workload.
 - Execute-disable support required and `EFER.NXE` enabled before the kernel
   page-table switch so non-code identity mappings can be NX by default.
+- Validated executable PE pages mapped read-only under `CR0.WP` and rechecked
+  after the full ring-3 workload.
 - Supervisor-mode execution prevention (`CR4.SMEP`) required by the declared
   virtual CPU contract, enabled before ring-3 execution, and rechecked after
   the ring-3 workload.

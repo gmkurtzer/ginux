@@ -17,9 +17,9 @@ header, invalid section alignment, out-of-range virtual sections, and any
 section marked both writable and executable. At least one executable section
 must exist.
 
-This establishes authoritative image-section boundaries for subsequent kernel
-W^X enforcement. The current paging revision still uses final UEFI memory types
-for its executable allowlist; it does not yet derive leaf permissions from PE
-sections. The image bounds are firmware-provided metadata and are not a
-cryptographic measurement. The manifest and control-plane bundle retain the v2
-signature and measurement rules.
+This establishes authoritative image-section boundaries for kernel W^X
+enforcement. The paging builder makes only validated executable PE sections and
+UEFI runtime-service code executable; executable PE pages are read-only. The
+image bounds are firmware-provided metadata and are not a cryptographic
+measurement. The manifest and control-plane bundle retain the v2 signature and
+measurement rules.

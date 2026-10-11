@@ -260,6 +260,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if unsafe {
         arch::x86_64::paging::install_initial_identity_map(
             boot_info,
+            &image,
             &required_addresses,
             &guard_pages,
         )
@@ -270,11 +271,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: kernel page tables active\r\n");
     if !arch::x86_64::cpu::execute_disable_enabled()
-        || !arch::x86_64::paging::identity_map_is_nx_by_default(boot_info)
+        || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
     {
-        kernel_fail("ginux: NX-by-default identity map inactive\r\n");
+        kernel_fail("ginux: kernel identity-map W^X inactive\r\n");
     }
     serial_write("ginux: NX-by-default identity map active\r\n");
+    serial_write("ginux: PE executable identity pages read-only\r\n");
     if !arch::x86_64::paging::supervisor_write_protect_enabled() {
         kernel_fail("ginux: supervisor write protection inactive\r\n");
     }
@@ -509,7 +511,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
         || !arch::x86_64::paging::static_page_tables_are_read_only()
-        || !arch::x86_64::paging::identity_map_is_nx_by_default(boot_info)
+        || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
         || !arch::x86_64::cpu::execute_disable_enabled()
         || !arch::x86_64::cpu::supervisor_execution_prevention_enabled()
         || !arch::x86_64::cpu::supervisor_access_prevention_enabled()

@@ -7,12 +7,20 @@ const SECTION_HEADER_SIZE: usize = 40;
 const MAX_SECTIONS: usize = 96;
 const SECTION_EXECUTE: u32 = 0x2000_0000;
 const SECTION_WRITE: u32 = 0x8000_0000;
+const PAGE_SIZE: usize = 4096;
 
-#[derive(Clone, Copy)]
 pub(crate) struct ImageSummary {
     pub(crate) sections: usize,
     pub(crate) executable_sections: usize,
     pub(crate) writable_sections: usize,
+    executable_ranges: [(usize, usize); MAX_SECTIONS],
+    executable_range_count: usize,
+}
+
+impl ImageSummary {
+    pub(crate) fn executable_ranges(&self) -> &[(usize, usize)] {
+        &self.executable_ranges[..self.executable_range_count]
+    }
 }
 
 pub(crate) fn inspect(base: *const u8, mapped_size: usize) -> Option<ImageSummary> {
@@ -40,6 +48,7 @@ pub(crate) fn inspect(base: *const u8, mapped_size: usize) -> Option<ImageSummar
     let image_size = read_u32(base, mapped_size, optional + 56)? as usize;
     if section_alignment < 4096
         || !section_alignment.is_power_of_two()
+        || !(base as usize).is_multiple_of(PAGE_SIZE)
         || image_size == 0
         || image_size > mapped_size
     {
@@ -53,15 +62,18 @@ pub(crate) fn inspect(base: *const u8, mapped_size: usize) -> Option<ImageSummar
 
     let mut executable_sections = 0_usize;
     let mut writable_sections = 0_usize;
+    let mut executable_ranges = [(0_usize, 0_usize); MAX_SECTIONS];
+    let mut executable_range_count = 0_usize;
     for index in 0..sections {
         let section = section_table.checked_add(index.checked_mul(SECTION_HEADER_SIZE)?)?;
         let virtual_size = read_u32(base, mapped_size, section + 8)? as usize;
         let virtual_address = read_u32(base, mapped_size, section + 12)? as usize;
         let characteristics = read_u32(base, mapped_size, section + 36)?;
         if virtual_size != 0
-            && virtual_address
-                .checked_add(virtual_size)
-                .is_none_or(|end| end > image_size)
+            && (!virtual_address.is_multiple_of(section_alignment)
+                || virtual_address
+                    .checked_add(virtual_size)
+                    .is_none_or(|end| end > image_size))
         {
             return None;
         }
@@ -70,13 +82,25 @@ pub(crate) fn inspect(base: *const u8, mapped_size: usize) -> Option<ImageSummar
         if executable && writable {
             return None;
         }
+        if executable && virtual_size != 0 {
+            let start = (base as usize).checked_add(virtual_address)?;
+            let raw_end = start.checked_add(virtual_size)?;
+            let end = raw_end.checked_add(PAGE_SIZE - 1)? / PAGE_SIZE * PAGE_SIZE;
+            if end > (base as usize).checked_add(mapped_size)? {
+                return None;
+            }
+            executable_ranges[executable_range_count] = (start, end);
+            executable_range_count += 1;
+        }
         executable_sections += usize::from(executable);
         writable_sections += usize::from(writable);
     }
-    (executable_sections != 0).then_some(ImageSummary {
+    (executable_range_count != 0).then_some(ImageSummary {
         sections,
         executable_sections,
         writable_sections,
+        executable_ranges,
+        executable_range_count,
     })
 }
 

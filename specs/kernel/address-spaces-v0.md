@@ -14,9 +14,9 @@ restoration. Page-table and data frames are distinct and remain owned under
 generation-tagged leases until the proof address space is released.
 
 This proves controlled construction and hardware activation, not process
-isolation completeness. The transitional kernel mapping is still broadly
-writable, but it is NX by default and executable only for UEFI loader/runtime
-code descriptors. A second hardware-tested layout provides a
+isolation completeness. The transitional kernel mapping is NX by default;
+validated executable PE pages are read-only, while firmware runtime code is
+still writable. A second hardware-tested layout provides a
 user-readable/executable, non-writable code page and two
 user-readable/writable, non-executable stack pages, each preceded by an absent
 guard page. The kernel mapping remains supervisor-only in both roots.

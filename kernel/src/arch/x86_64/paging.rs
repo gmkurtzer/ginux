@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::{BootInfo, UefiMemoryDescriptor, EFI_LOADER_CODE, EFI_RUNTIME_SERVICES_CODE};
+use crate::{pe::ImageSummary, BootInfo, UefiMemoryDescriptor, EFI_RUNTIME_SERVICES_CODE};
 
 const ENTRY_COUNT: usize = 512;
 const DIRECTORY_COUNT: usize = 4;
@@ -48,6 +48,7 @@ pub(crate) enum PagingError {
 /// pointers and the statically linked page-table objects.
 pub(crate) unsafe fn install_initial_identity_map(
     boot_info: &BootInfo,
+    image: &ImageSummary,
     required_addresses: &[usize],
     guard_pages: &[usize],
 ) -> Result<(), PagingError> {
@@ -130,7 +131,7 @@ pub(crate) unsafe fn install_initial_identity_map(
     let descriptor_count = boot_info.memory_map_size / boot_info.memory_descriptor_size;
     for index in 0..descriptor_count {
         let descriptor = read_descriptor(boot_info, index);
-        let Some((start, end)) = executable_bounds(descriptor)? else {
+        let Some((start, end)) = runtime_code_bounds(descriptor)? else {
             continue;
         };
         let first_region = start / LARGE_PAGE_SIZE as usize;
@@ -145,9 +146,22 @@ pub(crate) unsafe fn install_initial_identity_map(
             )?;
         }
     }
+    for &(start, end) in image.executable_ranges() {
+        let first_region = start / LARGE_PAGE_SIZE as usize;
+        let last_region = (end - 1) / LARGE_PAGE_SIZE as usize;
+        for region in first_region..=last_region {
+            ensure_fine_region(
+                region,
+                &mut fine_regions,
+                &mut fine_count,
+                fine_tables,
+                directories,
+            )?;
+        }
+    }
     for index in 0..descriptor_count {
         let descriptor = read_descriptor(boot_info, index);
-        let Some((start, end)) = executable_bounds(descriptor)? else {
+        let Some((start, end)) = runtime_code_bounds(descriptor)? else {
             continue;
         };
         for address in (start..end).step_by(PAGE_SIZE) {
@@ -162,6 +176,21 @@ pub(crate) unsafe fn install_initial_identity_map(
             let entries = core::ptr::addr_of_mut!((*fine_tables.add(fine_index)).0).cast::<u64>();
             let value = entries.add(page).read();
             entries.add(page).write(value & !NO_EXECUTE);
+        }
+    }
+    for &(start, end) in image.executable_ranges() {
+        for address in (start..end).step_by(PAGE_SIZE) {
+            let region = address / LARGE_PAGE_SIZE as usize;
+            let Some(fine_index) = fine_regions[..fine_count]
+                .iter()
+                .position(|candidate| *candidate == region)
+            else {
+                return Err(PagingError::ExecutableMapInvalid);
+            };
+            let page = (address % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
+            let entries = core::ptr::addr_of_mut!((*fine_tables.add(fine_index)).0).cast::<u64>();
+            let value = entries.add(page).read();
+            entries.add(page).write(value & !(NO_EXECUTE | WRITABLE));
         }
     }
 
@@ -266,7 +295,7 @@ pub(crate) unsafe fn install_initial_identity_map(
             return Err(PagingError::HardeningFailed);
         }
     }
-    if !identity_map_is_nx_by_default(boot_info) {
+    if !identity_map_obeys_wx(boot_info, image) {
         return Err(PagingError::HardeningFailed);
     }
 
@@ -351,7 +380,7 @@ pub(crate) fn static_page_tables_are_read_only() -> bool {
     })
 }
 
-pub(crate) fn identity_map_is_nx_by_default(boot_info: &BootInfo) -> bool {
+pub(crate) fn identity_map_obeys_wx(boot_info: &BootInfo, image: &ImageSummary) -> bool {
     unsafe {
         let directories = core::ptr::addr_of!(PAGE_DIRECTORIES).cast::<PageTable>();
         for region in 0..DIRECTORY_COUNT * ENTRY_COUNT {
@@ -365,7 +394,7 @@ pub(crate) fn identity_map_is_nx_by_default(boot_info: &BootInfo) -> bool {
             let region_end = region_start + LARGE_PAGE_SIZE as usize;
             if entry & LARGE_PAGE != 0 {
                 if entry & NO_EXECUTE == 0
-                    || range_contains_executable(boot_info, region_start, region_end)
+                    || range_contains_executable(boot_info, image, region_start, region_end)
                 {
                     return false;
                 }
@@ -378,8 +407,13 @@ pub(crate) fn identity_map_is_nx_by_default(boot_info: &BootInfo) -> bool {
                     continue;
                 }
                 let address = region_start + page * PAGE_SIZE;
-                let executable = range_contains_executable(boot_info, address, address + PAGE_SIZE);
-                if executable == (leaf & NO_EXECUTE != 0) {
+                let image_code = image
+                    .executable_ranges()
+                    .iter()
+                    .any(|(start, end)| address < *end && *start < address + PAGE_SIZE);
+                let executable = image_code
+                    || range_contains_runtime_code(boot_info, address, address + PAGE_SIZE);
+                if executable == (leaf & NO_EXECUTE != 0) || (image_code && leaf & WRITABLE != 0) {
                     return false;
                 }
             }
@@ -395,12 +429,10 @@ unsafe fn read_descriptor(boot_info: &BootInfo, index: usize) -> UefiMemoryDescr
     core::ptr::read_unaligned(address.cast::<UefiMemoryDescriptor>())
 }
 
-fn executable_bounds(
+fn runtime_code_bounds(
     descriptor: UefiMemoryDescriptor,
 ) -> Result<Option<(usize, usize)>, PagingError> {
-    if descriptor.memory_type != EFI_LOADER_CODE
-        && descriptor.memory_type != EFI_RUNTIME_SERVICES_CODE
-    {
+    if descriptor.memory_type != EFI_RUNTIME_SERVICES_CODE {
         return Ok(None);
     }
     let start = usize::try_from(descriptor.physical_start)
@@ -420,11 +452,11 @@ fn executable_bounds(
     Ok((start < end).then_some((start, end)))
 }
 
-fn range_contains_executable(boot_info: &BootInfo, start: usize, end: usize) -> bool {
+fn range_contains_runtime_code(boot_info: &BootInfo, start: usize, end: usize) -> bool {
     let descriptor_count = boot_info.memory_map_size / boot_info.memory_descriptor_size;
     for index in 0..descriptor_count {
         let descriptor = unsafe { read_descriptor(boot_info, index) };
-        let Ok(Some((code_start, code_end))) = executable_bounds(descriptor) else {
+        let Ok(Some((code_start, code_end))) = runtime_code_bounds(descriptor) else {
             continue;
         };
         if start < code_end && code_start < end {
@@ -432,6 +464,19 @@ fn range_contains_executable(boot_info: &BootInfo, start: usize, end: usize) -> 
         }
     }
     false
+}
+
+fn range_contains_executable(
+    boot_info: &BootInfo,
+    image: &ImageSummary,
+    start: usize,
+    end: usize,
+) -> bool {
+    range_contains_runtime_code(boot_info, start, end)
+        || image
+            .executable_ranges()
+            .iter()
+            .any(|(code_start, code_end)| start < *code_end && *code_start < end)
 }
 
 unsafe fn zero_entries(entries: *mut u64) {
