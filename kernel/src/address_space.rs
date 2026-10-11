@@ -21,6 +21,13 @@ const EXPECTED_FAULT_OFFSET: usize = 515;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 
+pub(crate) fn expected_service_fault_instruction(control_entry_offset: usize) -> Option<u64> {
+    USER_TEST_ADDRESS
+        .checked_add(control_entry_offset)?
+        .checked_add(EXPECTED_FAULT_OFFSET)
+        .and_then(|address| u64::try_from(address).ok())
+}
+
 pub(crate) fn copy_from_current_user(address: u64, output: &mut [u8]) -> bool {
     if output.is_empty() {
         return false;
@@ -289,10 +296,11 @@ pub(crate) fn verify_ring3_control_plane(
         return false;
     }
     let [control_entry_offset, service_entry_offset, service_restart_offset] = entry_offsets;
-    let Some(expected_fault_offset) = control_entry_offset.checked_add(EXPECTED_FAULT_OFFSET)
+    let Some(expected_fault_instruction) = expected_service_fault_instruction(control_entry_offset)
     else {
         return false;
     };
+    let expected_fault_offset = expected_fault_instruction as usize - USER_TEST_ADDRESS;
     if program.is_empty()
         || program.len() > PAGE_SIZE
         || entry_offsets.iter().any(|entry| *entry >= program.len())

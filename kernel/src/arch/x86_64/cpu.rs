@@ -896,6 +896,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     unsafe {
         asm!("mov {}, cr2", out(reg) fault_address, options(nomem, nostack, preserves_flags));
     }
+    let fault_metadata = frame.metadata(fault_address);
     let action = scheduler::fault_runtime(
         frame,
         fault_address,
@@ -918,7 +919,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         return u64::MAX;
     }
     if service_fault
-        && (!domain::record_service_fault(fault_domain)
+        && (!domain::record_service_fault(fault_domain, fault_metadata)
             || !ipc::retire_service(fault_domain)
             || !domain::retire_service(fault_domain))
     {

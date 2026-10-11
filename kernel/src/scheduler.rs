@@ -111,6 +111,17 @@ pub(crate) struct UserFaultFrame {
     ss: u64,
 }
 
+impl UserFaultFrame {
+    pub(crate) fn metadata(&self, address: u64) -> crate::domain::FaultMetadata {
+        crate::domain::FaultMetadata {
+            vector: self.vector,
+            error: self.error,
+            address,
+            instruction: self.rip,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct UserInterruptFrame {

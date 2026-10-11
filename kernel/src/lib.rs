@@ -523,8 +523,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     ) {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
+    let Some(expected_fault_instruction) =
+        address_space::expected_service_fault_instruction(control_plane_image.entries[0])
+    else {
+        kernel_fail("\r\nginux: service fault instruction overflowed\r\n");
+    };
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
+        || !domain::delivered_service_fault_matches(
+            service_domain,
+            domain::FaultMetadata {
+                vector: 14,
+                error: 6,
+                address: 0,
+                instruction: expected_fault_instruction,
+            },
+        )
         || !arch::x86_64::paging::static_page_tables_are_read_only()
         || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
         || !arch::x86_64::paging::identity_range_is_read_only_data(
@@ -591,6 +605,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: faulted service domain authority retired");
     serial_write("\r\nginux: service fault event delivered to control plane");
     serial_write("\r\nginux: service fault event generation matched");
+    serial_write("\r\nginux: service fault metadata matched");
     serial_write("\r\nginux: service domain generation reuse verified");
     serial_write("\r\nginux: failed service stack scrubbed before restart");
     serial_write("\r\nginux: service frame ownership transferred to replacement");

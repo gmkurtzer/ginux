@@ -12,6 +12,12 @@ then attempts a measured write through address zero. The absent null page
 raises a user-mode write page fault. Containment validates vector 14, error bits
 for a user write to a non-present page, the authenticated faulting instruction,
 and `CR2 == 0` before restarting the service.
+The lifecycle record retains those four values alongside the faulted domain
+generation. After the control plane consumes the event, the kernel gate checks
+the retained record against the authenticated instruction address. The v0 call
+still returns only the packed event kind and generation; a later structured
+event operation must expose the diagnostic fields without changing operation
+7's established ABI.
 
 The CPL3 exception path removes only the service context, switches back to the
 client's CR3, releases the service's domain thread reservation, retires the

@@ -68,6 +68,15 @@ struct LifecycleEvent {
     kind: u8,
     domain: DomainId,
     detail: u8,
+    fault: Option<FaultMetadata>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FaultMetadata {
+    pub(crate) vector: u64,
+    pub(crate) error: u64,
+    pub(crate) address: u64,
+    pub(crate) instruction: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -118,6 +127,7 @@ impl EventQueue {
                 kind: 2,
                 domain: overflow.first_domain,
                 detail: overflow.dropped,
+                fault: None,
             });
         }
         let event = self.events[self.head].take()?;
@@ -139,7 +149,7 @@ pub(crate) struct Manager {
     service_id: Option<DomainId>,
     last_retired_service_id: Option<DomainId>,
     lifecycle_events: EventQueue,
-    last_delivered_service_fault: Option<DomainId>,
+    last_delivered_service_fault: Option<LifecycleEvent>,
     total_calls: u16,
     total_thread_attaches: u16,
 }
@@ -613,7 +623,7 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
     manager.retire_service(id)
 }
 
-pub(crate) fn record_service_fault(domain_raw: u64) -> bool {
+pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
@@ -631,13 +641,14 @@ pub(crate) fn record_service_fault(domain_raw: u64) -> bool {
         kind: 1,
         domain: id,
         detail: 0,
+        fault: Some(fault),
     })
 }
 
 pub(crate) fn take_service_fault() -> Option<u64> {
     let manager = global_manager_mut()?;
     let event = manager.lifecycle_events.pop()?;
-    manager.last_delivered_service_fault = Some(event.domain);
+    manager.last_delivered_service_fault = Some(event);
     Some((u64::from(event.detail) << 56) | (encode_id(event.domain) << 8) | u64::from(event.kind))
 }
 
@@ -646,7 +657,24 @@ pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
         return false;
     };
     global_manager().is_some_and(|manager| {
-        manager.lifecycle_events.is_empty() && manager.last_delivered_service_fault == Some(id)
+        manager.lifecycle_events.is_empty()
+            && manager
+                .last_delivered_service_fault
+                .is_some_and(|event| event.domain == id)
+    })
+}
+
+pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMetadata) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager().is_some_and(|manager| {
+        manager.last_delivered_service_fault.is_some_and(|event| {
+            event.kind == 1
+                && event.domain == id
+                && event.detail == 0
+                && event.fault == Some(expected)
+        })
     })
 }
 
@@ -658,6 +686,12 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
             generation: 7,
         },
         detail: 0,
+        fault: Some(FaultMetadata {
+            vector: 14,
+            error: 6,
+            address: 0,
+            instruction: 0x1000,
+        }),
     };
     let mut queue = EventQueue::new();
     queue.pop().is_none()
@@ -666,21 +700,25 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
             kind: 2,
             domain: first.domain,
             detail: 0,
+            fault: None,
         })
         && queue.push(LifecycleEvent {
             kind: 3,
             domain: first.domain,
             detail: 0,
+            fault: None,
         })
         && queue.push(LifecycleEvent {
             kind: 4,
             domain: first.domain,
             detail: 0,
+            fault: None,
         })
         && queue.push(LifecycleEvent {
             kind: 5,
             domain: first.domain,
             detail: 0,
+            fault: None,
         })
         && queue.push(LifecycleEvent {
             kind: 6,
@@ -689,12 +727,14 @@ pub(crate) fn verify_lifecycle_event_invariants() -> bool {
                 generation: 9,
             },
             detail: 0,
+            fault: None,
         })
         && queue.pop() == Some(first)
         && queue.push(LifecycleEvent {
             kind: 7,
             domain: first.domain,
             detail: 0,
+            fault: None,
         })
         && queue.pop().is_some_and(|event| event.kind == 2)
         && queue.pop().is_some_and(|event| event.kind == 3)

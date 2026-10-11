@@ -56,7 +56,12 @@ service slot. The queue never overwrites an undelivered record and clears each
 consumed slot. The event carries the retired generation-tagged domain ID,
 not merely the reusable slot. The control proof compares it with the child ID
 supplied at initial entry, so the replacement generation cannot be mistaken for
-the faulted service.
+the faulted service. Concrete fault events also retain the architectural vector,
+error code, fault address, and instruction address. Delivery preserves that
+record after the packed event word is consumed, and the boot gate requires it
+to match the measured page-fault site exactly. Overflow notifications contain
+only the dropped count and first domain generation; they do not invent fault
+metadata for records the bounded queue could not retain.
 
 Each domain also owns a fixed bootstrap call budget. Charging resolves the
 current generation-tagged domain before dispatch, so threads cannot gain calls

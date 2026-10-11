@@ -57,6 +57,10 @@ queue retains one sticky overflow notification. After the four concrete events
 are consumed, operation 7 returns event kind 2, the first dropped domain in
 bits 8-55, and a saturating dropped-record count in bits 56-63. Consuming that
 notification clears the overflow state.
+For a concrete service fault, the kernel retains vector, error code, fault
+address, and instruction address with the consumed record for supervision
+auditing. Operation 7 does not expose those fields in ABI v1; adding a
+structured event-detail operation remains required.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes
