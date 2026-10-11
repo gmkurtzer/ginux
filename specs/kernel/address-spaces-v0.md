@@ -34,6 +34,10 @@ context. It then issues an exit call, which deliberately abandons the saved
 user frame and returns on a kernel-owned stack. The kernel restores its original
 CR3. The entry stub preserves every non-result general-purpose register.
 
+The current measured payload additionally proves capability enforcement: a
+console-only grant is denied for a host-control operation, while the appropriate
+manifest-derived grant succeeds.
+
 This is not yet a stable syscall ABI or scheduler. It has no arguments,
 preemption, signal model, IPC page, or fault-containment policy. The `INT 0x80`
 mechanism is a bring-up gate; the eventual ABI may use `SYSCALL/SYSRET` with a

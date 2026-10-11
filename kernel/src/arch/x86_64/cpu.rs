@@ -2,7 +2,7 @@ use core::arch::{asm, global_asm};
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use crate::{serial_write, serial_write_u64};
+use crate::{capability::Rights, domain, serial_write, serial_write_u64};
 
 const KERNEL_CODE_SELECTOR: u16 = 0x08;
 const KERNEL_DATA_SELECTOR: u16 = 0x10;
@@ -272,6 +272,7 @@ ginux_syscall_entry:
     push r15
     mov r12, rsp
     mov rdi, rax
+    mov rsi, [r12 + 72]
     and rsp, -16
     call {syscall_handler}
     cmp rax, -1
@@ -332,7 +333,7 @@ pub(crate) fn verify_user_syscall(entry: usize, stack: usize) -> bool {
     // syscall gate abandons the user frame and returns on the saved kernel
     // stack, with interrupts disabled throughout.
     unsafe { ginux_user_enter(entry, stack) };
-    SYSCALL_STATE.load(Ordering::SeqCst) == 3
+    SYSCALL_STATE.load(Ordering::SeqCst) == 7
 }
 
 pub(crate) fn verify_breakpoint() -> bool {
@@ -461,14 +462,21 @@ extern "sysv64" fn breakpoint_handler() {
     serial_write("ginux: breakpoint exception handled\r\n");
 }
 
-extern "sysv64" fn syscall_handler(number: u64) -> u64 {
+extern "sysv64" fn syscall_handler(number: u64, capability: u64) -> u64 {
     match number {
         1 => {
-            SYSCALL_STATE.fetch_or(1, Ordering::SeqCst);
-            0x4758
+            if usize::try_from(capability)
+                .is_ok_and(|root| domain::control_plane_permits(root, 1, Rights::READ))
+            {
+                SYSCALL_STATE.fetch_or(2, Ordering::SeqCst);
+                0x4758
+            } else {
+                SYSCALL_STATE.fetch_or(1, Ordering::SeqCst);
+                u64::MAX - 1
+            }
         }
         2 => {
-            SYSCALL_STATE.fetch_or(2, Ordering::SeqCst);
+            SYSCALL_STATE.fetch_or(4, Ordering::SeqCst);
             u64::MAX
         }
         _ => u64::MAX,

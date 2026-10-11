@@ -359,7 +359,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !address_space::verify_ring3_control_plane(control_plane_bundle) {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
-    serial_write("\r\nginux: ring-3 syscall round trip and exit handled");
+    serial_write("\r\nginux: capability-gated syscall denial and grant verified");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }

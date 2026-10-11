@@ -218,8 +218,8 @@ if ! grep -q '^ginux: control-plane W\^X mappings active' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: ring-3 syscall round trip and exit handled' "$output_file"; then
-    echo "Boot test failed: ring-3 control-plane syscall round trip failed." >&2
+if ! grep -q '^ginux: capability-gated syscall denial and grant verified' "$output_file"; then
+    echo "Boot test failed: capability-gated syscall enforcement failed." >&2
     exit 1
 fi
 
