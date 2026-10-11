@@ -79,6 +79,7 @@ const LINUX_CLONE_SYSVSEM: u64 = 0x0004_0000;
 const LINUX_CLONE_SETTLS: u64 = 0x0008_0000;
 const LINUX_CLONE_PARENT_SETTID: u64 = 0x0010_0000;
 const LINUX_CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
+const LINUX_CLONE_CHILD_SETTID: u64 = 0x0100_0000;
 const LINUX_BOUNDED_THREAD_CLONE_FLAGS: u64 = LINUX_CLONE_VM
     | LINUX_CLONE_FS
     | LINUX_CLONE_FILES
@@ -87,7 +88,8 @@ const LINUX_BOUNDED_THREAD_CLONE_FLAGS: u64 = LINUX_CLONE_VM
     | LINUX_CLONE_SYSVSEM
     | LINUX_CLONE_SETTLS
     | LINUX_CLONE_PARENT_SETTID
-    | LINUX_CLONE_CHILD_CLEARTID;
+    | LINUX_CLONE_CHILD_CLEARTID
+    | LINUX_CLONE_CHILD_SETTID;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_FCNTL_SYSCALL: u64 = 72;
@@ -1201,7 +1203,7 @@ struct LinuxCloneResult {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum LinuxClonePublishError {
     InvalidRequest,
-    ParentTidFault,
+    TidFault,
 }
 
 impl LinuxUserContext {
@@ -1432,10 +1434,20 @@ fn publish_linux_clone(
         parent_writable_size,
     )
     .ok_or(LinuxClonePublishError::InvalidRequest)?;
-    let tid = handle.tid;
-    if !copy_to_linux_user(request.parent_tid, &tid.to_ne_bytes()) {
+    if !linux_writable_user_range_contains(request.parent_tid, size_of::<u32>())
+        || !linux_writable_user_range_contains(request.child_tid, size_of::<u32>())
+    {
         clear_linux_thread_execution(usize::from(handle.slot));
-        return Err(LinuxClonePublishError::ParentTidFault);
+        return Err(LinuxClonePublishError::TidFault);
+    }
+    // SAFETY: construction and the active current-thread copy boundary admit
+    // both aligned words before either write. Interrupts remain disabled, so
+    // their mappings cannot change between validation and publication.
+    unsafe {
+        with_supervisor_user_access(|| {
+            (request.parent_tid as *mut u32).write_volatile(handle.tid);
+            (request.child_tid as *mut u32).write_volatile(handle.tid);
+        });
     }
     Ok(result)
 }
@@ -2131,7 +2143,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                     execution.sibling_stack as u64,
                     PAGE_SIZE,
                 ),
-                Err(LinuxClonePublishError::ParentTidFault)
+                Err(LinuxClonePublishError::TidFault)
             );
             let slot = usize::from(child.slot);
             let rollback_clean = LINUX_THREAD_RIPS[slot].load(Ordering::SeqCst) == 0
@@ -2168,7 +2180,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             let publication_visible = unsafe {
                 with_supervisor_user_access(|| {
                     let visible = (parent_tid as *const u32).read_volatile() == child.tid
-                        && (child_tid as *const u32).read_volatile() == saved_child_tid;
+                        && (child_tid as *const u32).read_volatile() == child.tid;
                     (parent_tid as *mut u32).write_volatile(saved_parent_tid);
                     (child_tid as *mut u32).write_volatile(saved_child_tid);
                     visible
@@ -3340,7 +3352,7 @@ fn linux_clone_thread(registers: LinuxSyscallFrame, user_rip: u64, user_rflags: 
             let _ = retire_linux_thread(child);
             return match error {
                 LinuxClonePublishError::InvalidRequest => LINUX_EINVAL,
-                LinuxClonePublishError::ParentTidFault => LINUX_EFAULT,
+                LinuxClonePublishError::TidFault => LINUX_EFAULT,
             };
         }
     };

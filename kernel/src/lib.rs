@@ -658,7 +658,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux child return context constructed\r\n");
     serial_write("ginux: Linux child context cleared on slot reuse\r\n");
     serial_write("ginux: failed Linux clone publication rolled back\r\n");
-    serial_write("ginux: Linux parent TID publication validated\r\n");
+    serial_write("ginux: Linux parent and child TID publication validated\r\n");
     serial_write("ginux: unpublished Linux child retired cleanly\r\n");
     serial_write("ginux: full Linux syscall register frame preserved\r\n");
     serial_write("ginux: typed Linux syscall frame validated\r\n");
@@ -673,6 +673,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux clone syscall dispatched\r\n");
     serial_write("ginux: Linux clone return values validated\r\n");
     serial_write("ginux: Linux clone child TID cleared on exit\r\n");
+    serial_write("ginux: Linux clone parent TID preserved on child exit\r\n");
     serial_write("ginux: per-thread Linux syscall stacks validated\r\n");
     serial_write("ginux: bounded Linux TID lifecycle validated\r\n");
     serial_write("ginux: stale Linux thread handles rejected\r\n");

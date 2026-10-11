@@ -516,10 +516,11 @@ An internal constructor additionally validates the exact bounded pthread-style
 clone flag set and prepares the sibling's post-syscall RIP, guarded RSP,
 RFLAGS, zero child return, FS base, and child-clear-TID registration. Invalid
 flags or stack pointers are rejected before mutation, and slot retirement
-clears the context. An internal publication proof copies the TID to the
-parent-TID word only after construction, rolls every child execution field back
-when that copy is denied, and leaves the child-TID word untouched as required by
-`CLONE_CHILD_CLEARTID`. It restores the proof word and retires the child before
+clears the context. An internal publication proof copies the TID to distinct
+parent- and child-TID words only after construction and rolls every child
+execution field back when either target is denied. `CLONE_CHILD_SETTID`
+publishes the child word, while `CLONE_CHILD_CLEARTID` registers that same word
+for exit. The proof restores both words and retires the child before
 ring-3 entry. Syscall 56 exposes the same transaction only for the fixed
 preallocated sibling TLS and guarded stack. This does not yet make all syscall
 state per-thread or connect Linux TLS switching to timer preemption.
@@ -549,12 +550,13 @@ disabled, verifies the written state, and returns through `SYSRETQ`. The ring-3
 workload continuing afterward proves the live round trip. This milestone still
 selects only the caller on profiles without sibling resources.
 For the interpreted profile, syscall 56 accepts only the exact bounded pthread
-flag set, fixed sibling TLS pointer, guarded stack top, and aligned TID word in
-the authenticated writable mapping. It atomically publishes the next monotonic
-TID and returns that same value to the parent; the child context retains a zero
-return. A subsequent
+flag set, fixed sibling TLS pointer, guarded stack top, and distinct aligned
+parent- and child-TID words in the authenticated writable mapping. It publishes
+the next monotonic TID to both words and returns that same value to the parent;
+the child context retains a zero return. A subsequent
 `sched_yield` saves the caller and redirects the live frame to the ready child.
-The child `exit(42)` clears the child-TID word, retires only that slot, selects
+The child `exit(42)` clears only the child-TID word, preserves the parent-TID
+word, retires only that slot, selects
 the ready parent, and returns it through the same live-frame path.
 `exit_group(42)` remains final process teardown. Repeated creation, parallel
 execution, timer preemption, and general Linux-thread scheduling are undefined.
@@ -689,9 +691,9 @@ credential, supplementary-group, and capability queries, fixed `personality`, bo
 identity queries above,
 `set_tid_address`, bounded robust-list registration/query, the exact bounded
 `clone`, `exit`, and `exit_group` calls. `clone` requires
-`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID`,
-the fixed sibling stack and TLS resources, and one writable aligned TID word.
-It returns the published monotonic TID to the parent and zero to the
+`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID`,
+the fixed sibling stack and TLS resources, and distinct writable aligned parent-
+and child-TID words. It publishes the TID to both words, returns it to the parent and zero to the
 cooperatively scheduled child; child exit clears the word before restoring the
 parent. There is no general TID
 allocation, repeated or parallel thread creation, clear-child-TID futex wake,

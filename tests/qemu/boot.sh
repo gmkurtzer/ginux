@@ -713,8 +713,8 @@ if ! grep -q '^ginux: failed Linux clone publication rolled back' "$output_file"
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux parent TID publication validated' "$output_file"; then
-    echo "Boot test failed: Linux parent TID publication was not validated." >&2
+if ! grep -q '^ginux: Linux parent and child TID publication validated' "$output_file"; then
+    echo "Boot test failed: Linux parent and child TID publication was not validated." >&2
     exit 1
 fi
 
@@ -785,6 +785,11 @@ fi
 
 if ! grep -q '^ginux: Linux clone child TID cleared on exit' "$output_file"; then
     echo "Boot test failed: the Linux clone child TID was not cleared on exit." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux clone parent TID preserved on child exit' "$output_file"; then
+    echo "Boot test failed: the Linux clone parent TID changed on child exit." >&2
     exit 1
 fi
 

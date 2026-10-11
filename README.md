@@ -107,15 +107,15 @@ bounded stack ownership and cleanup, not memory isolation within the shared
 process address space.
 An internal clone constructor now accepts exactly the bounded shared-VM,
 shared-files, shared-signal-handler, thread-group, SysV-semaphore, TLS,
-parent-TID, and child-clear-TID flag set. It requires the reserved stack top,
+parent-TID, child-set-TID, and child-clear-TID flag set. It requires the reserved stack top,
 the sibling TLS pointer, aligned TID words inside the parent's writable stack,
 and a safe return RIP/RFLAGS pair. It records a child context that resumes after
 the eventual syscall with `rax = 0`, while the parent result is the child's TID.
 Malformed flags and stack bounds fail without changing the slot, and retirement
 clears the saved context before generation reuse. An internal publication proof
 then exercises the current-thread copy boundary: denial rolls the entire child
-execution state back to empty, while success writes the child TID to the exact
-parent-TID word only after the complete context exists. The proof restores the
+execution state back to empty, while success writes the child TID to distinct
+parent- and child-TID words only after the complete context exists. The proof restores the
 initial stack word and retires the unpublished child. The ring-3 path exposes
 the same transaction as syscall 56 for one fixed sibling context.
 The Linux `SYSCALL` entry now captures and restores `rbx`, `rbp`, and
@@ -143,15 +143,16 @@ current TLS context, writes all twelve registers plus RIP/RSP/RFLAGS into the
 assembly-owned return state, reads the result back, and resumes successfully
 through `SYSRETQ`.
 The interpreted runtime now calls bounded x86-64 `clone(2)` with exactly
-`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID`.
+`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID`.
 The call accepts only the authenticated sibling TLS pointer, guarded stack top,
-and aligned TID word in the main writable mapping. The parent receives the
-monotonically allocated child TID and observes the same value in that word; the
-child resumes after the syscall with `rax = 0`. A cooperative
+and distinct aligned parent- and child-TID words in the main writable mapping.
+Both words receive the monotonically allocated child TID before either thread
+returns to ring 3; the parent receives that same value, while the child resumes
+after the syscall with `rax = 0`. A cooperative
 `sched_yield` saves the complete parent frame and selects the child through the
-live `SYSRETQ` state. The child calls `exit(42)`, clears its child-TID word,
-retires only itself, and restores the parent's registers, FS base, and copy
-ownership. Malformed requests return `EINVAL`, inaccessible parent-TID writes
+live `SYSRETQ` state. The child calls `exit(42)`, clears only its child-TID word,
+leaves the parent-TID word intact, retires itself, and restores the parent's
+registers, FS base, and copy ownership. Malformed requests return `EINVAL`, inaccessible TID writes
 return `EFAULT`, and occupied capacity returns `EAGAIN`. This remains a fixed
 two-slot, one-child profile without arbitrary allocation, simultaneous
 execution, preemption, blocking futex wakeups, or a general scheduler.

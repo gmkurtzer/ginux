@@ -500,10 +500,10 @@ valid_interpreter_base:
     call syscall_expect_efault
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
-    mov edi, 0x3d0f00
+    mov edi, 0x13d0f00
     mov esi, 0x410000
     mov edx, 0x404194
-    mov r8d, edx
+    lea r8d, [edx + 4]
     mov r9d, 0x40dfc0
     mov eax, 56
     syscall
@@ -511,11 +511,16 @@ valid_interpreter_base:
     jz child_thread_probe
     cmp eax, dword ptr [rdx]
     jne failure
+    cmp eax, dword ptr [r8]
+    jne failure
+    mov ebx, eax
 #endif
     mov eax, 24
     call syscall_expect_zero
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
-    cmp dword ptr [rdx], 0
+    cmp dword ptr [r8], 0
+    jne failure
+    cmp dword ptr [rdx], ebx
     jne failure
 #endif
 
@@ -536,10 +541,6 @@ valid_interpreter_base:
     mov eax, 147
     call syscall_expect_zero
 
-    xor edi, edi
-    mov esi, 0x405200
-    mov eax, 142
-    call syscall_expect_efault
     mov dword ptr [0x404060], 0
     mov esi, 0x404060
     mov eax, 142

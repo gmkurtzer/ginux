@@ -456,7 +456,7 @@ same process address space; this proves bounded ownership, guarded layout, and
 cleanup rather than intra-process memory isolation.
 
 The internal clone constructor accepts only
-`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID`.
+`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID`.
 It requires the exact reserved sibling stack top, the sibling thread pointer,
 four-byte-aligned parent/child TID addresses wholly inside one declared parent
 writable extent, a lower-canonical nonzero return RIP, and RFLAGS with the
@@ -468,14 +468,14 @@ rejected before slot mutation. Retirement clears every saved field, and the
 same slot's next generation must begin with an empty context.
 
 The internal publication transaction constructs that context before copying the
-child TID to the exact parent-TID word. A target admitted by the request extent
+child TID to distinct parent- and child-TID words. A target admitted by the request extent
 but denied by the active current-thread copy boundary forces all saved execution
 state and the child-clear-TID registration back to zero. A valid publication is
 read back through SMAP-controlled access while the child context remains ready;
-the proof then restores the original parent stack word and retires the child.
-`CLONE_CHILD_CLEARTID` registers but does not write the child-TID word. The
-ring-3 clone path uses the same transaction and later clears that registered
-word when the child exits.
+the proof then restores both original words and retires the child.
+`CLONE_CHILD_SETTID` publishes the child word before the child can return to
+ring 3. `CLONE_CHILD_CLEARTID` registers that same word for clearing when the
+child exits.
 
 The child slot persists the complete typed x86-64 syscall frame: `r15`, `r14`,
 `r13`, `r12`, `rbp`, `rbx`, `r10`, `r9`, `r8`, `rdx`, `rsi`, and `rdi`, followed
@@ -497,14 +497,15 @@ current TID. The runtime uses the same checked operation on the live assembly
 return frame.
 
 The interpreted runtime invokes x86-64 syscall 56 with the exact bounded clone
-flags, authenticated sibling TLS pointer, guarded stack top, and one aligned
-TID word in the main writable segment. Publication makes the complete child
-context ready before writing the allocated TID to the parent-TID word. The
-parent observes the same TID as its return value, while the child later resumes
-after the syscall with `rax = 0`.
+flags, authenticated sibling TLS pointer, guarded stack top, and distinct
+aligned parent- and child-TID words in the main writable segment. Publication
+makes the complete child context ready before writing the allocated TID to both
+words. The parent observes the same TID as its return value, while the child
+later resumes after the syscall with `rax = 0`.
 `sched_yield` persists the parent and selects that ready child through
 `SYSRETQ`. Its authenticated trampoline calls `exit(42)`; the kernel zeroes the
-registered child-TID word, retires that slot, and restores the parent's saved
+registered child-TID word, leaves the parent-TID word unchanged, retires that
+slot, and restores the parent's saved
 registers, RIP/RSP/RFLAGS, FS base, and copy extent. The resumed parent verifies
 the zeroed word. This proves one complete userspace clone-parent-child-parent
 sequence, not repeated creation, simultaneous execution, or general scheduling.
