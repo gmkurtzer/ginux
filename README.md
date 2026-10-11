@@ -13,7 +13,8 @@ and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
 `R_X86_64_JUMP_SLOT` record in a separate one-entry `DT_JMPREL` table described
 by `DT_PLTRELSZ` and `DT_PLTREL`; the current interpreted fixtures use that
 conventional split. The symbol profile validates a two-entry symbol-table
-prefix, bounded string table, one-bucket/two-chain SysV `DT_HASH`, and one
+prefix, bounded string table, either a one-bucket legacy SysV `DT_HASH` or a
+one-bucket/one-word-bloom `DT_GNU_HASH`, and one
 global function symbol used by `R_X86_64_GLOB_DAT` and
 `R_X86_64_JUMP_SLOT`. The interpreted proof admits exactly one `DT_NEEDED`
 name. Its undefined main-image symbol is matched to the same defined symbol in
@@ -155,8 +156,9 @@ eager `GLOB_DAT` and `JUMP_SLOT` self-bindings. The main image proves one
 cross-object symbol resolution through `R_X86_64_GLOB_DAT` and eager
 `R_X86_64_JUMP_SLOT`; the jump slot is called in ring 3 and returns a checked
 value from dependency code. The userspace interpreter verifies that the
-relocation's symbol index is the admitted SysV hash bucket result in both
-objects, follows each validated symbol-name offset into its `DT_STRTAB`, and
+relocation's symbol index is the admitted SysV main-image or GNU dependency
+hash bucket result, follows each validated symbol-name offset into its
+`DT_STRTAB`, and
 requires the complete NUL-terminated names to match. Multiple dependencies,
 transitive graphs, search paths, alternate SONAME selection,
 symbol-version processing, interposition, multi-bucket lookup, lazy binding,

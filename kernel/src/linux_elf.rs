@@ -43,6 +43,7 @@ const DT_SYMENT: u64 = 11;
 const DT_SONAME: u64 = 14;
 const DT_PLTREL: u64 = 20;
 const DT_JMPREL: u64 = 23;
+const DT_GNU_HASH: u64 = 0x6fff_fef5;
 const R_X86_64_GLOB_DAT: u32 = 6;
 const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_RELATIVE: u64 = 8;
@@ -100,6 +101,7 @@ pub(crate) struct DynamicRelocations {
     pub(crate) string_table_address: Option<u64>,
     pub(crate) string_table_size: usize,
     pub(crate) hash_table_address: Option<u64>,
+    pub(crate) hash_is_gnu: bool,
     pub(crate) symbol_relocation: Option<SymbolRelocation>,
     pub(crate) jump_slot_relocation: Option<SymbolRelocation>,
     pub(crate) symbol_defined: bool,
@@ -382,6 +384,7 @@ pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
         string_table_address: None,
         string_table_size: 0,
         hash_table_address: None,
+        hash_is_gnu: false,
         symbol_relocation: None,
         jump_slot_relocation: None,
         symbol_defined: false,
@@ -614,6 +617,7 @@ pub(crate) fn plan_position_independent<'a>(
                 Some(address) => Some(address.checked_add(load_bias)?),
                 None => None,
             },
+            hash_is_gnu: dynamic.hash_is_gnu,
             symbol_relocation: match dynamic.symbol_relocation {
                 Some(relocation) => Some(SymbolRelocation {
                     target: relocation.target.checked_add(load_bias)?,
@@ -906,6 +910,7 @@ fn parse_dynamic_relocations<'a>(
     let mut symbol_table_address = None;
     let mut symbol_entry_size = None;
     let mut hash_table_address = None;
+    let mut hash_is_gnu = false;
     let mut needed_name_offset = None;
     let mut soname_offset = None;
     let mut jump_relocation_address = None;
@@ -929,6 +934,9 @@ fn parse_dynamic_relocations<'a>(
             DT_SYMTAB if symbol_table_address.replace(value).is_none() => {}
             DT_SYMENT if symbol_entry_size.replace(value).is_none() => {}
             DT_HASH if hash_table_address.replace(value).is_none() => {}
+            DT_GNU_HASH if hash_table_address.replace(value).is_none() => {
+                hash_is_gnu = true;
+            }
             DT_NEEDED if needed_name_offset.replace(value).is_none() => {}
             DT_SONAME if soname_offset.replace(value).is_none() => {}
             DT_JMPREL if jump_relocation_address.replace(value).is_none() => {}
@@ -1080,21 +1088,11 @@ fn parse_dynamic_relocations<'a>(
                 }
                 None => None,
             };
-            let hash_table = virtual_file_bytes(loads, hash, 5 * 4)?;
-            let bucket_count = read_u32(hash_table, 0)?;
-            let chain_count = read_u32(hash_table, 4)?;
-            if bucket_count != 1 || chain_count != 2 {
-                return None;
-            }
-            let bucket_offset = 8_usize.checked_add(
-                usize::try_from(elf_hash(name) % bucket_count)
-                    .ok()?
-                    .checked_mul(4)?,
-            )?;
-            let chains_offset = 8_usize.checked_add(usize::try_from(bucket_count).ok()? * 4)?;
-            let bucket = read_u32(hash_table, bucket_offset)?;
-            let null_chain = read_u32(hash_table, chains_offset)?;
-            let symbol_chain = read_u32(hash_table, chains_offset + 4)?;
+            let hash_matches = if hash_is_gnu {
+                validate_gnu_hash(loads, hash, name, symbol_index)?
+            } else {
+                validate_sysv_hash(loads, hash, name, symbol_index)?
+            };
             let executable = loads
                 .iter()
                 .flatten()
@@ -1105,9 +1103,7 @@ fn parse_dynamic_relocations<'a>(
             let symbol_defined = read_u16(symbol, 6)? != 0;
             if name_offset == 0
                 || name.is_empty()
-                || bucket != symbol_index
-                || null_chain != 0
-                || symbol_chain != 0
+                || !hash_matches
                 || symbol[4] != 0x12
                 || symbol[5] != 0
                 || symbol_defined
@@ -1186,6 +1182,7 @@ fn parse_dynamic_relocations<'a>(
             string_table_address,
             string_table_size,
             hash_table_address,
+            hash_is_gnu,
             symbol_relocation,
             jump_slot_relocation,
             symbol_defined,
@@ -1214,6 +1211,59 @@ fn elf_hash(name: &[u8]) -> u32 {
         let high = hash & 0xf000_0000;
         (hash ^ (high >> 24)) & !high
     })
+}
+
+fn gnu_hash(name: &[u8]) -> u32 {
+    name.iter().fold(5381_u32, |hash, byte| {
+        hash.wrapping_mul(33).wrapping_add(u32::from(*byte))
+    })
+}
+
+fn validate_sysv_hash(
+    loads: &[Option<Segment<'_>>],
+    address: u64,
+    name: &[u8],
+    symbol_index: u32,
+) -> Option<bool> {
+    let table = virtual_file_bytes(loads, address, 5 * 4)?;
+    let bucket_count = read_u32(table, 0)?;
+    let chain_count = read_u32(table, 4)?;
+    if bucket_count != 1 || chain_count != 2 {
+        return Some(false);
+    }
+    let bucket_offset = 8_usize.checked_add(
+        usize::try_from(elf_hash(name) % bucket_count)
+            .ok()?
+            .checked_mul(4)?,
+    )?;
+    let chains_offset = 8_usize.checked_add(usize::try_from(bucket_count).ok()? * 4)?;
+    Some(
+        read_u32(table, bucket_offset)? == symbol_index
+            && read_u32(table, chains_offset)? == 0
+            && read_u32(table, chains_offset + 4)? == 0,
+    )
+}
+
+fn validate_gnu_hash(
+    loads: &[Option<Segment<'_>>],
+    address: u64,
+    name: &[u8],
+    symbol_index: u32,
+) -> Option<bool> {
+    const BLOOM_SHIFT: u32 = 5;
+    let table = virtual_file_bytes(loads, address, 32)?;
+    let hash = gnu_hash(name);
+    let bloom = read_u64(table, 16)?;
+    let bloom_mask = (1_u64 << (hash % 64)) | (1_u64 << ((hash >> BLOOM_SHIFT) % 64));
+    Some(
+        read_u32(table, 0)? == 1
+            && read_u32(table, 4)? == symbol_index
+            && read_u32(table, 8)? == 1
+            && read_u32(table, 12)? == BLOOM_SHIFT
+            && bloom & bloom_mask == bloom_mask
+            && read_u32(table, 24)? == symbol_index
+            && read_u32(table, 28)? == (hash | 1),
+    )
 }
 
 pub(crate) fn verify_parser() -> bool {
@@ -1652,6 +1702,7 @@ pub(crate) fn verify_interpreted_plan() -> bool {
                 && dynamic.string_table_address == Some(0x40_4108)
                 && dynamic.string_table_size == 25
                 && dynamic.hash_table_address == Some(0x40_4124)
+                && !dynamic.hash_is_gnu
                 && !dynamic.symbol_defined
                 && dynamic.symbol_relocation.is_some_and(|relocation| {
                     relocation.target == 0x40_5108
@@ -1686,6 +1737,7 @@ pub(crate) fn verify_interpreted_plan() -> bool {
                     && dynamic.string_table_address.is_none()
                     && dynamic.string_table_size == 0
                     && dynamic.hash_table_address.is_none()
+                    && !dynamic.hash_is_gnu
                     && dynamic.symbol_relocation.is_none()
                     && dynamic.jump_slot_relocation.is_none()
                     && !dynamic.symbol_defined
@@ -1701,6 +1753,7 @@ pub(crate) fn verify_interpreted_plan() -> bool {
             .dynamic_relocations
             .is_some_and(|dynamic| {
                 dynamic.symbol_defined
+                    && dynamic.hash_is_gnu
                     && dynamic
                         .symbol_relocation
                         .is_some_and(|relocation| relocation.symbol_value == 0x61_0100)
@@ -1873,7 +1926,28 @@ fn verify_dependency_authentication_rejections(
 }
 
 pub(crate) fn verify_dynamic_relocation_rejections() -> bool {
-    (0..32).all(dynamic_relocation_rejected)
+    (0..32).all(dynamic_relocation_rejected) && (0..7).all(gnu_hash_rejected)
+}
+
+#[inline(never)]
+fn gnu_hash_rejected(case: u8) -> bool {
+    const DATA_OFFSET: usize = 0x200;
+    const DYNAMIC_OFFSET: usize = DATA_OFFSET + 8;
+    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 13 * DYNAMIC_ENTRY_SIZE;
+    const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
+    const HASH_OFFSET: usize = (STRTAB_OFFSET + 25 + 3) & !3;
+    let mut image = compact_dependency_fixture();
+    match case {
+        0 => write_u32(&mut image, HASH_OFFSET, 0),
+        1 => write_u32(&mut image, HASH_OFFSET + 4, 0),
+        2 => write_u32(&mut image, HASH_OFFSET + 8, 0),
+        3 => write_u32(&mut image, HASH_OFFSET + 12, 0),
+        4 => write_u64(&mut image, HASH_OFFSET + 16, 0),
+        5 => write_u32(&mut image, HASH_OFFSET + 24, 0),
+        6 => write_u32(&mut image, HASH_OFFSET + 28, 0),
+        _ => return false,
+    }
+    parse(&image).is_none()
 }
 
 #[inline(never)]
@@ -2361,7 +2435,7 @@ fn compact_dependency_fixture() -> [u8; 1024] {
     const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     const STRING_TABLE: &[u8] = b"\0ginux_probe\0libginux.so\0";
     const HASH_OFFSET: usize = (STRTAB_OFFSET + STRING_TABLE.len() + 3) & !3;
-    const RELA_OFFSET: usize = (HASH_OFFSET + 20 + 7) & !7;
+    const RELA_OFFSET: usize = (HASH_OFFSET + 32 + 7) & !7;
     let mut bytes = [0_u8; 1024];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
@@ -2427,9 +2501,15 @@ fn compact_dependency_fixture() -> [u8; 1024] {
         DEPENDENCY_CODE.len() as u64,
     );
     bytes[STRTAB_OFFSET..STRTAB_OFFSET + STRING_TABLE.len()].copy_from_slice(STRING_TABLE);
+    let symbol_hash = gnu_hash(b"ginux_probe");
+    let bloom = (1_u64 << (symbol_hash % 64)) | (1_u64 << ((symbol_hash >> 5) % 64));
     write_u32(&mut bytes, HASH_OFFSET, 1);
-    write_u32(&mut bytes, HASH_OFFSET + 4, 2);
+    write_u32(&mut bytes, HASH_OFFSET + 4, 1);
     write_u32(&mut bytes, HASH_OFFSET + 8, 1);
+    write_u32(&mut bytes, HASH_OFFSET + 12, 5);
+    write_u64(&mut bytes, HASH_OFFSET + 16, bloom);
+    write_u32(&mut bytes, HASH_OFFSET + 24, 1);
+    write_u32(&mut bytes, HASH_OFFSET + 28, symbol_hash | 1);
     for (index, (tag, value)) in [
         (DT_SYMENT, SYMBOL_ENTRY_SIZE as u64),
         (DT_RELA, 0x3000 + (RELA_OFFSET - DATA_OFFSET) as u64),
@@ -2438,7 +2518,7 @@ fn compact_dependency_fixture() -> [u8; 1024] {
         (DT_SYMTAB, 0x3000 + (SYMTAB_OFFSET - DATA_OFFSET) as u64),
         (DT_RELASZ, (2 * RELA_ENTRY_SIZE) as u64),
         (DT_STRSZ, STRING_TABLE.len() as u64),
-        (DT_HASH, 0x3000 + (HASH_OFFSET - DATA_OFFSET) as u64),
+        (DT_GNU_HASH, 0x3000 + (HASH_OFFSET - DATA_OFFSET) as u64),
         (DT_SONAME, 13),
         (
             DT_JMPREL,

@@ -599,6 +599,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux PLT relocation metadata validated\r\n");
     serial_write("ginux: split Linux PLT relocation table validated\r\n");
     serial_write("ginux: bounded Linux SysV hash metadata validated\r\n");
+    serial_write("ginux: bounded Linux GNU hash metadata validated\r\n");
     if !linux_elf::verify_unresolved_dynamic_image_rejected() {
         kernel_fail("ginux: unresolved dynamic Linux image admitted as static\r\n");
     }

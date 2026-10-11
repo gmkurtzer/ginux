@@ -133,11 +133,14 @@ table must be exactly one 24-byte `DT_RELA` record. Partial triplets, another
 relocation encoding, wrong sizes, overlap with the primary table, and split
 tables attached to other primary-table sizes are rejected. The first record must
 be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must
-also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, `DT_SYMENT`, and `DT_HASH`,
-with a 24-byte symbol-entry size. The file-backed SysV hash table is bounded to
-one bucket and two chains. Its sole bucket must select symbol one, and both
-chain terminators must be zero. The kernel computes the symbol-name ELF hash to
-select that bucket rather than trusting a fixed table offset. The second record
+also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, and `DT_SYMENT`, plus exactly
+one of `DT_HASH` or `DT_GNU_HASH`, with a 24-byte symbol-entry size. The
+file-backed SysV form is bounded to one bucket and two chains. Its sole bucket
+must select symbol one, and both chain terminators must be zero. The GNU form is
+bounded to one bucket, symbol offset one, one 64-bit bloom word, bloom shift
+five, and one terminating chain word. Its bloom bits, bucket, and chain must
+match the GNU hash of the admitted symbol name. The kernel computes either
+symbol-name hash rather than trusting a fixed table offset. The second record
 must be `R_X86_64_GLOB_DAT`, use
 symbol index one, have a zero addend, and reference a global/default-visible
 function symbol. A self-contained image must define it with a value and size
@@ -152,8 +155,8 @@ an all-zero null entry followed by the referenced symbol. Its nonempty name must
 2-to-256-byte file-backed string table and terminate within that table. Every
 relocation target must be distinct, eight-byte aligned, and wholly inside the
 writable load. A one-record table may not carry partial symbol metadata.
-Duplicate tags, missing or mixed symbol metadata, malformed bucket/chain
-counts or links, unsupported relocation types or sizes, invalid symbol indexes/attributes/ranges/names, nonzero
+Duplicate tags, mixed hash styles, missing or mixed symbol metadata, malformed
+bucket, bloom, or chain metadata, unsupported relocation types or sizes, invalid symbol indexes/attributes/ranges/names, nonzero
 symbol-relocation addends, and executable relocation targets are rejected. The
 execution-oriented planning fixture uses a
 six-header main image: a dedicated read-only header load at `0x3ff000`, RX text
@@ -186,7 +189,7 @@ relocation at `0x6131c0` and self-resolves its eager `GLOB_DAT` and split-table
 dependency entry value `0x610100`. It writes the admitted main-image relative
 relocation value `0x400100` to the RELRO target `0x405100`, reads the main and
 dependency symbol and hash-table addresses, requires symbol index one to be the
-selected SysV hash bucket in both objects, follows both symbol-name offsets
+selected SysV main-image bucket and GNU dependency bucket, follows both symbol-name offsets
 through their validated `DT_STRTAB` ranges, and compares the complete
 NUL-terminated names before resolving the undefined main symbol to the
 dependency entry. It writes that value through

@@ -63,7 +63,7 @@ ginux_linux_interpreter:
 .Lscan_dependency_dynamic:
     cmp qword ptr [rdi], 6
     cmove r9, qword ptr [rdi + 8]
-    cmp qword ptr [rdi], 4
+    cmp qword ptr [rdi], 0x6ffffef5
     cmove r10, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 7
     cmove r11, qword ptr [rdi + 8]
@@ -99,7 +99,7 @@ ginux_linux_interpreter:
     add rcx, 0x610000
     mov rdx, qword ptr [r11 + 32]
     shr rdx, 32
-    cmp edx, dword ptr [r10 + 8]
+    cmp edx, dword ptr [r10 + 24]
     jne .Linvalid_dynamic
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
@@ -112,7 +112,7 @@ ginux_linux_interpreter:
     add rcx, 0x610000
     mov rdx, qword ptr [rbp + 8]
     shr rdx, 32
-    cmp edx, dword ptr [r10 + 8]
+    cmp edx, dword ptr [r10 + 24]
     jne .Linvalid_dynamic
     add r12, qword ptr [rbp + 16]
     mov qword ptr [rcx], r12
@@ -126,7 +126,7 @@ ginux_linux_interpreter:
     shr rdx, 32
     cmp edx, dword ptr [r8 + 8]
     jne .Linvalid_dynamic
-    cmp edx, dword ptr [r10 + 8]
+    cmp edx, dword ptr [r10 + 24]
     jne .Linvalid_dynamic
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
