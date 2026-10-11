@@ -233,6 +233,11 @@ if ! grep -q '^ginux: bounded executable container accepted' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: authenticated executable entry points accepted' "$output_file"; then
+    echo "Boot test failed: authenticated executable entry points were not accepted." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: malformed executable containers rejected' "$output_file"; then
     echo "Boot test failed: malformed executable containers were accepted." >&2
     exit 1

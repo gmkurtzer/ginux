@@ -1,12 +1,12 @@
 const MAGIC: &[u8; 8] = b"GINXBIN\0";
-const VERSION: u16 = 1;
-const HEADER_SIZE: usize = 32;
+const VERSION: u16 = 2;
+const HEADER_SIZE: usize = 40;
 const MAX_CODE_SIZE: usize = 4096;
 const MAX_SIZE: usize = HEADER_SIZE + MAX_CODE_SIZE;
 
 pub(crate) struct Image<'a> {
     pub(crate) code: &'a [u8],
-    pub(crate) entry_offset: usize,
+    pub(crate) entries: [usize; 3],
 }
 
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
@@ -16,16 +16,25 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     let version = read_u16(bytes, 8)?;
     let header_size = usize::from(read_u16(bytes, 10)?);
     let total_size = usize::try_from(read_u32(bytes, 12)?).ok()?;
-    let entry_offset = usize::try_from(read_u32(bytes, 16)?).ok()?;
-    let code_size = usize::try_from(read_u32(bytes, 20)?).ok()?;
-    let flags = read_u32(bytes, 24)?;
-    let reserved = read_u32(bytes, 28)?;
+    let code_size = usize::try_from(read_u32(bytes, 16)?).ok()?;
+    let entry_count = read_u16(bytes, 20)?;
+    let flags = read_u16(bytes, 22)?;
+    let entries = [
+        usize::try_from(read_u32(bytes, 24)?).ok()?,
+        usize::try_from(read_u32(bytes, 28)?).ok()?,
+        usize::try_from(read_u32(bytes, 32)?).ok()?,
+    ];
+    let reserved = read_u32(bytes, 36)?;
     if version != VERSION
         || header_size != HEADER_SIZE
         || total_size != bytes.len()
         || code_size == 0
         || code_size > MAX_CODE_SIZE
-        || entry_offset >= code_size
+        || entry_count != 3
+        || entries.iter().any(|entry| *entry >= code_size)
+        || entries[0] == entries[1]
+        || entries[0] == entries[2]
+        || entries[1] == entries[2]
         || HEADER_SIZE.checked_add(code_size)? != bytes.len()
         || flags != 0
         || reserved != 0
@@ -34,7 +43,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     }
     Some(Image {
         code: bytes.get(HEADER_SIZE..)?,
-        entry_offset,
+        entries,
     })
 }
 
@@ -49,7 +58,7 @@ pub(crate) fn verify_parser_rejections(bytes: &[u8]) -> bool {
         return false;
     }
     candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[8] = 2;
+    candidate[8] = 1;
     if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
@@ -64,22 +73,34 @@ pub(crate) fn verify_parser_rejections(bytes: &[u8]) -> bool {
         return false;
     }
     candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[20..24].copy_from_slice(&0_u32.to_le_bytes());
+    candidate[16..20].copy_from_slice(&0_u32.to_le_bytes());
     if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
     candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[24] = 1;
+    candidate[20] = 2;
     if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
     candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[28] = 1;
+    candidate[22] = 1;
     if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
     candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+    candidate[36] = 1;
+    if parse(&candidate[..bytes.len()]).is_some() {
+        return false;
+    }
+    candidate[..bytes.len()].copy_from_slice(bytes);
+    candidate[24..28].copy_from_slice(&u32::MAX.to_le_bytes());
+    if parse(&candidate[..bytes.len()]).is_some() {
+        return false;
+    }
+    candidate[..bytes.len()].copy_from_slice(bytes);
+    let mut primary = [0_u8; 4];
+    primary.copy_from_slice(&candidate[24..28]);
+    candidate[28..32].copy_from_slice(&primary);
     parse(&candidate[..bytes.len()]).is_none() && parse(&bytes[..bytes.len() - 1]).is_none()
 }
 

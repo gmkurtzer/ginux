@@ -10,8 +10,6 @@ const USER: u64 = 1 << 2;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const USER_TEST_ADDRESS: usize = 1usize << 39;
 const EXPECTED_FAULT_OFFSET: usize = 249;
-const SERVICE_ENTRY_OFFSET: usize = 136;
-const SERVICE_RESTART_OFFSET: usize = 251;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 const EXTENDED_CPUID_MAX: u32 = 0x8000_0000;
@@ -166,7 +164,7 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 pub(crate) fn verify_ring3_control_plane(
     program: &[u8],
-    entry_offset: usize,
+    entry_offsets: [usize; 3],
     domains: [u64; 2],
     handles: [[u64; 3]; 2],
 ) -> bool {
@@ -186,18 +184,14 @@ pub(crate) fn verify_ring3_control_plane(
     {
         return false;
     }
-    let Some(expected_fault_offset) = entry_offset.checked_add(EXPECTED_FAULT_OFFSET) else {
-        return false;
-    };
-    let Some(service_entry_offset) = entry_offset.checked_add(SERVICE_ENTRY_OFFSET) else {
-        return false;
-    };
-    let Some(service_restart_offset) = entry_offset.checked_add(SERVICE_RESTART_OFFSET) else {
+    let [control_entry_offset, service_entry_offset, service_restart_offset] = entry_offsets;
+    let Some(expected_fault_offset) = control_entry_offset.checked_add(EXPECTED_FAULT_OFFSET)
+    else {
         return false;
     };
     if program.is_empty()
         || program.len() > PAGE_SIZE
-        || entry_offset >= program.len()
+        || entry_offsets.iter().any(|entry| *entry >= program.len())
         || expected_fault_offset >= program.len()
         || service_entry_offset >= program.len()
         || service_restart_offset >= program.len()
@@ -238,7 +232,7 @@ pub(crate) fn verify_ring3_control_plane(
                 domains,
                 [first_space.root, second_space.root],
                 [
-                    USER_TEST_ADDRESS + entry_offset,
+                    USER_TEST_ADDRESS + control_entry_offset,
                     USER_TEST_ADDRESS + service_entry_offset,
                 ],
                 [
@@ -254,7 +248,7 @@ pub(crate) fn verify_ring3_control_plane(
         }
         activate(first_space.root);
         let handled = cpu::verify_user_syscall(
-            USER_TEST_ADDRESS + entry_offset,
+            USER_TEST_ADDRESS + control_entry_offset,
             USER_TEST_ADDRESS + 3 * PAGE_SIZE,
             handles[0][0],
             handles[0][1],

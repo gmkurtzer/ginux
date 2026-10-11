@@ -380,6 +380,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: malformed executable containers accepted\r\n");
     }
     serial_write("\r\nginux: bounded executable container accepted");
+    serial_write("\r\nginux: authenticated executable entry points accepted");
     serial_write("\r\nginux: malformed executable containers rejected\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
@@ -407,7 +408,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     if !address_space::verify_ring3_control_plane(
         control_plane_image.code,
-        control_plane_image.entry_offset,
+        control_plane_image.entries,
         [control_plane, service_domain],
         [
             [host_handle, console_handle, ipc_handle],

@@ -10,8 +10,8 @@ const MAGIC: &[u8; 8] = b"GINXMNF\0";
 const VERSION: u16 = 2;
 const HEADER_SIZE: u16 = 72;
 const EXECUTABLE_MAGIC: &[u8; 8] = b"GINXBIN\0";
-const EXECUTABLE_VERSION: u16 = 1;
-const EXECUTABLE_HEADER_SIZE: u16 = 32;
+const EXECUTABLE_VERSION: u16 = 2;
+const EXECUTABLE_HEADER_SIZE: u16 = 40;
 const EXECUTABLE_MAX_CODE_SIZE: usize = 4096;
 const DEVELOPMENT_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -20,8 +20,8 @@ const DEVELOPMENT_SEED: [u8; 32] = [
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 4 {
-        fail("usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX OUTPUT_RS");
+    if arguments.len() != 5 {
+        fail("usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ENTRY_CONFIG OUTPUT_RS");
     }
     let config = fs::read_to_string(&arguments[1]).unwrap_or_else(|error| {
         fail(&format!("cannot read {}: {error}", arguments[1]));
@@ -29,12 +29,16 @@ fn main() {
     let bundle_source = fs::read_to_string(&arguments[2]).unwrap_or_else(|error| {
         fail(&format!("cannot read {}: {error}", arguments[2]));
     });
+    let entry_source = fs::read_to_string(&arguments[3]).unwrap_or_else(|error| {
+        fail(&format!("cannot read {}: {error}", arguments[3]));
+    });
     let (sequence, grants) = parse_config(&config);
     let code = decode_hex(&bundle_source);
     if code.is_empty() || code.len() > EXECUTABLE_MAX_CODE_SIZE {
         fail("control-plane code must contain 1 through 4096 bytes");
     }
-    let bundle = wrap_executable(&code);
+    let entries = parse_entries(&entry_source, code.len());
+    let bundle = wrap_executable(&code, entries);
 
     let bundle_digest: [u8; 32] = Sha256::digest(&bundle).into();
     let total_size = usize::from(HEADER_SIZE) + grants.len() * 16;
@@ -59,7 +63,7 @@ fn main() {
         .sign(&manifest)
         .to_bytes();
     let output = render(&manifest, &manifest_digest, &signature, &bundle);
-    let output_path = Path::new(&arguments[3]);
+    let output_path = Path::new(&arguments[4]);
     fs::write(output_path, output).unwrap_or_else(|error| {
         fail(&format!("cannot write {}: {error}", output_path.display()));
     });
@@ -70,19 +74,58 @@ fn main() {
     );
 }
 
-fn wrap_executable(code: &[u8]) -> Vec<u8> {
+fn wrap_executable(code: &[u8], entries: [u32; 3]) -> Vec<u8> {
     let total_size = usize::from(EXECUTABLE_HEADER_SIZE) + code.len();
     let mut executable = Vec::with_capacity(total_size);
     executable.extend_from_slice(EXECUTABLE_MAGIC);
     executable.extend_from_slice(&EXECUTABLE_VERSION.to_le_bytes());
     executable.extend_from_slice(&EXECUTABLE_HEADER_SIZE.to_le_bytes());
     executable.extend_from_slice(&(total_size as u32).to_le_bytes());
-    executable.extend_from_slice(&0_u32.to_le_bytes());
     executable.extend_from_slice(&(code.len() as u32).to_le_bytes());
-    executable.extend_from_slice(&0_u32.to_le_bytes());
+    executable.extend_from_slice(&3_u16.to_le_bytes());
+    executable.extend_from_slice(&0_u16.to_le_bytes());
+    for entry in entries {
+        executable.extend_from_slice(&entry.to_le_bytes());
+    }
     executable.extend_from_slice(&0_u32.to_le_bytes());
     executable.extend_from_slice(code);
     executable
+}
+
+fn parse_entries(source: &str, code_size: usize) -> [u32; 3] {
+    let names = ["control", "service", "restart"];
+    let mut entries = [None; 3];
+    for raw_line in source.lines() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            fail("entry config lines must use NAME=OFFSET");
+        };
+        let Some(index) = names.iter().position(|candidate| *candidate == name.trim()) else {
+            fail(&format!("unknown executable entry: {}", name.trim()));
+        };
+        if entries[index].is_some() {
+            fail(&format!("duplicate executable entry: {}", names[index]));
+        }
+        let Some(value) = parse_integer(value) else {
+            fail(&format!("invalid executable entry: {}", names[index]));
+        };
+        let Ok(value) = u32::try_from(value) else {
+            fail(&format!("executable entry is too large: {}", names[index]));
+        };
+        entries[index] = Some(value);
+    }
+    let entries = entries.map(|entry| entry.unwrap_or_else(|| fail("entry config is incomplete")));
+    if entries.iter().any(|entry| *entry as usize >= code_size)
+        || entries[0] == entries[1]
+        || entries[0] == entries[2]
+        || entries[1] == entries[2]
+    {
+        fail("executable entries must be distinct offsets inside the code segment");
+    }
+    entries
 }
 
 fn parse_config(source: &str) -> (u64, Vec<(u64, u64)>) {

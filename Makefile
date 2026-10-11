@@ -27,7 +27,7 @@ doctor:
 	@tools/qemu/doctor.sh
 
 manifest:
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex control-plane/bootstrap-v0.conf boot/efi/src/generated_boot.rs
 
 build: manifest
 	@echo "Building Ginux for $(TARGET) ($(PROFILE))"

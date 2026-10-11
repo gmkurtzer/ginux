@@ -26,7 +26,8 @@ make build
 
 `make build` deterministically regenerates the development manifest, bundle
 digest, and Ed25519 signature from `boot/manifest-v0.conf` and
-`control-plane/bootstrap.hex`. Run `make manifest` directly when working on
+`control-plane/bootstrap.hex`, with its authenticated role entries declared in
+`control-plane/bootstrap-v0.conf`. Run `make manifest` directly when working on
 those inputs. The checked-in key is an RFC test identity and must not be treated
 as a production trust root.
 

@@ -42,8 +42,9 @@ of the outer digest and signature checks.
 
 ## Development generation
 
-`make manifest` reads `boot/manifest-v0.conf` and
-`control-plane/bootstrap.hex`, wraps the decoded code in the canonical native
+`make manifest` reads `boot/manifest-v0.conf`,
+`control-plane/bootstrap.hex`, and `control-plane/bootstrap-v0.conf`. It wraps
+the decoded code and named role-entry offsets in the canonical native
 executable container, hashes the complete bundle and manifest, signs the
 manifest with the documented RFC test seed, and regenerates
 `boot/efi/src/generated_boot.rs`. Normal build, check, run, and test targets
