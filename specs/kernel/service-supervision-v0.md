@@ -49,8 +49,10 @@ Every accepted event receives a nonzero monotonic internal sequence; dequeue
 rejects zero or non-monotonic records. A full FIFO still consumes sequence
 numbers for dropped records, while its later summary identifies the first
 dropped sequence and the saturating drop count. Sequence exhaustion rejects a
-new event without modifying the FIFO or overflow state. Event kind occupies the low eight
-bits and the generation-tagged domain ID occupies the next 48 bits.
+new event without modifying the FIFO or overflow state. Event kind 3 records a
+cleanly retired auxiliary service generation and carries no fault metadata.
+Event kind occupies the low eight bits and the generation-tagged domain ID
+occupies the next 48 bits.
 
 After the fault, the kernel creates one replacement domain generation with the
 same IPC-only delegation, explicitly rebinds the service side of the IPC

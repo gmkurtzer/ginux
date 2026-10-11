@@ -541,6 +541,15 @@ impl Manager {
         }) {
             return false;
         }
+        if !self.lifecycle_events.push(LifecycleEvent {
+            kind: 3,
+            domain: id,
+            detail: 0,
+            fault: None,
+            sequence: 0,
+        }) {
+            return false;
+        }
         self.domains[usize::from(id.slot)] = None;
         self.auxiliary_service_ids[registry_slot] = None;
         true
@@ -870,21 +879,37 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     }
     let replacement = manager.create_auxiliary_service_with_delegations(&[console_grant])?;
     let replacement_handle = manager.domain(replacement)?.boot_roots[0]?;
+    if replacement == console_service
+        || replacement.slot != console_service.slot
+        || manager.auxiliary_service_ids != [Some(replacement), Some(host_service)]
+        || !manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
+        || manager.permits(console_service, console_handle, 2, Rights::WRITE)
+        || manager.retire_auxiliary_service(replacement)
+        || !manager.request_auxiliary_stop(control, host_source, replacement)
+        || !manager.retire_auxiliary_service(replacement)
+        || !manager.permits(
+            primary,
+            manager.domain(primary)?.boot_roots[0]?,
+            3,
+            Rights::READ,
+        )
+    {
+        return Some(false);
+    }
+    let first_retirement = manager.lifecycle_events.pop()?;
+    let second_retirement = manager.lifecycle_events.pop()?;
     Some(
-        replacement != console_service
-            && replacement.slot == console_service.slot
-            && manager.auxiliary_service_ids == [Some(replacement), Some(host_service)]
-            && manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
-            && !manager.permits(console_service, console_handle, 2, Rights::WRITE)
-            && !manager.retire_auxiliary_service(replacement)
-            && manager.request_auxiliary_stop(control, host_source, replacement)
-            && manager.retire_auxiliary_service(replacement)
-            && manager.permits(
-                primary,
-                manager.domain(primary)?.boot_roots[0]?,
-                3,
-                Rights::READ,
-            ),
+        first_retirement.kind == 3
+            && first_retirement.domain == console_service
+            && first_retirement.detail == 0
+            && first_retirement.fault.is_none()
+            && first_retirement.sequence == 1
+            && second_retirement.kind == 3
+            && second_retirement.domain == replacement
+            && second_retirement.detail == 0
+            && second_retirement.fault.is_none()
+            && second_retirement.sequence == 2
+            && manager.lifecycle_events.is_empty(),
     )
 }
 

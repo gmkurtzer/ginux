@@ -55,8 +55,11 @@ The stop transition requires the persistent control-plane generation and its
 host-control capability with `MANAGE`; an auxiliary service cannot supervise a
 peer, and a control-plane capability for another object is insufficient.
 Repeated or stale stop requests fail closed, and a newly reused slot starts in
-the ready state. Auxiliary registration is not yet exposed to userspace,
-assigned address spaces, or integrated with an auxiliary restart policy.
+the ready state. Successful retirement publishes lifecycle event kind 3 with
+the exact retired generation and no synthetic fault metadata. Reusing a domain
+slot therefore produces a distinct, monotonically sequenced audit record.
+Auxiliary registration is not yet exposed to userspace, assigned address
+spaces, or integrated with an auxiliary restart policy.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but
