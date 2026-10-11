@@ -1,7 +1,7 @@
 # Linux ELF64 Profile v0
 
-**Status:** Strict static x86-64 parser profile verified in QEMU; loading and
-execution are not yet implemented.
+**Status:** Strict static x86-64 parser and inactive mapping profile verified in
+QEMU; execution is not yet implemented.
 
 The first Linux-compatibility boundary accepts a deliberately bounded ELF64
 profile. Files must be little-endian ELF class 64, current ELF version,
@@ -42,12 +42,16 @@ segment's file tail through `p_memsz` and all remaining page bytes are zero.
 The QEMU verifier checks the exact RX instruction byte, RW data bytes, W^X
 metadata, and every zero-filled byte in both pages.
 
-The pages are not installed into a page table yet. Ginux now has a
-supervisor-only higher-half alias for its initial 4 GiB physical map, with the
-same leaf permissions as the transitional identity map. Kernel code and frame
-accesses still use low identity addresses, however, so mapping a normal Linux
-`ET_EXEC` image at `0x400000` would replace mappings on which the kernel still
-depends. Those accesses must migrate to the direct map before an ELF domain can
-own conventional lower-half virtual addresses. The loader will not relocate
-`ET_EXEC` images to the existing high test address, because doing so would
-violate ELF semantics and hide this prerequisite.
+The QEMU proof installs the two pages into a newly allocated, inactive x86-64
+root at their declared `0x400000` and `0x401000` addresses. It privately clones
+the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
+target leaves; retains the supervisor-only higher-half direct map; and verifies
+RX versus RW/NX permissions plus exact materialized contents through the direct
+map. The six root/table/payload frames are cleared and released afterward.
+
+This address space is deliberately not activated. It retains supervisor-only
+low identity leaves around the ELF pages so the current low-linked kernel could
+eventually handle a transition, but collision checks against every live kernel
+mapping and a Linux stack/entry contract are not defined yet. The loader does
+not relocate `ET_EXEC` images to the existing high test address, because doing
+so would violate ELF semantics and hide these remaining prerequisites.

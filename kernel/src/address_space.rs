@@ -21,9 +21,124 @@ const EXPECTED_FAULT_OFFSET: usize = 515;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
+const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 
 static mut AUXILIARY_ADDRESS_SPACES: [Option<RegisteredAuxiliaryAddressSpace>;
     domain::MAX_AUXILIARY_SERVICES] = [const { None }; domain::MAX_AUXILIARY_SERVICES];
+
+pub(crate) fn verify_linux_elf_mapping(plan: &crate::linux_elf::LoadPlan<'_>) -> bool {
+    let [first, second] = plan.segments;
+    let indexes = |address: u64| {
+        [
+            ((address >> 39) & 0x1ff) as usize,
+            ((address >> 30) & 0x1ff) as usize,
+            ((address >> 21) & 0x1ff) as usize,
+            ((address >> 12) & 0x1ff) as usize,
+        ]
+    };
+    let first_indexes = indexes(first.virtual_page);
+    let second_indexes = indexes(second.virtual_page);
+    if first_indexes[..3] != second_indexes[..3]
+        || first_indexes[0] != 0
+        || first_indexes[1] != 0
+        || first.writable == first.executable
+        || second.writable == second.executable
+        || first.writable == second.writable
+        || plan.entry < first.virtual_page
+        || plan.entry >= first.virtual_page + PAGE_SIZE as u64
+    {
+        return false;
+    }
+    let Some(frames) = memory::allocate_frames::<6>(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let addresses = frames.map(memory::FrameLease::address);
+    let [root, pdpt, directory, table, first_page, second_page] = addresses;
+    let valid = (|| -> Option<bool> {
+        unsafe {
+            for frame in [root, pdpt, directory, table] {
+                zero_frame(frame)?;
+            }
+            let kernel_root = mapped_frame::<u64>(current_root())?;
+            let root_entries = mapped_frame::<u64>(root)?;
+            let pdpt_entries = mapped_frame::<u64>(pdpt)?;
+            let directory_entries = mapped_frame::<u64>(directory)?;
+            let table_entries = mapped_frame::<u64>(table)?;
+            root_entries.add(256).write(kernel_root.add(256).read());
+            root_entries.write(pdpt | PRESENT | WRITABLE | USER);
+
+            let kernel_pdpt_physical = kernel_root.read() & ADDRESS_MASK;
+            let kernel_pdpt = mapped_frame::<u64>(kernel_pdpt_physical)?;
+            core::ptr::copy_nonoverlapping(kernel_pdpt, pdpt_entries, ENTRY_COUNT);
+            let kernel_directory_physical = kernel_pdpt.read() & ADDRESS_MASK;
+            let kernel_directory = mapped_frame::<u64>(kernel_directory_physical)?;
+            core::ptr::copy_nonoverlapping(kernel_directory, directory_entries, ENTRY_COUNT);
+            pdpt_entries.write(directory | PRESENT | WRITABLE | USER);
+
+            let original = kernel_directory.add(first_indexes[2]).read();
+            if original & PRESENT == 0
+                || original & LARGE_PAGE != 0 && original & PAGE_ATTRIBUTE_TABLE != 0
+            {
+                return None;
+            }
+            if original & LARGE_PAGE != 0 {
+                let base = original & ADDRESS_MASK;
+                let flags = original & !ADDRESS_MASK & !LARGE_PAGE;
+                for index in 0..ENTRY_COUNT {
+                    table_entries
+                        .add(index)
+                        .write((base + (index * PAGE_SIZE) as u64) | flags);
+                }
+            } else {
+                let original_table = mapped_frame::<u64>(original & ADDRESS_MASK)?;
+                core::ptr::copy_nonoverlapping(original_table, table_entries, ENTRY_COUNT);
+            }
+            directory_entries
+                .add(first_indexes[2])
+                .write(table | PRESENT | WRITABLE | USER);
+
+            let first_bytes = &mut *(mapped_frame::<u8>(first_page)? as *mut [u8; PAGE_SIZE]);
+            let second_bytes = &mut *(mapped_frame::<u8>(second_page)? as *mut [u8; PAGE_SIZE]);
+            if !crate::linux_elf::materialize(first, first_bytes)
+                || !crate::linux_elf::materialize(second, second_bytes)
+            {
+                return None;
+            }
+            let flags = |segment: crate::linux_elf::PlannedSegment<'_>| {
+                PRESENT
+                    | USER
+                    | if segment.writable { WRITABLE } else { 0 }
+                    | if segment.executable { 0 } else { NO_EXECUTE }
+            };
+            table_entries
+                .add(first_indexes[3])
+                .write(first_page | flags(first));
+            table_entries
+                .add(second_indexes[3])
+                .write(second_page | flags(second));
+
+            let first_entry = table_entries.add(first_indexes[3]).read();
+            let second_entry = table_entries.add(second_indexes[3]).read();
+            Some(
+                root_entries.add(256).read() == kernel_root.add(256).read()
+                    && root_entries.add(256).read() & USER == 0
+                    && first_entry & (PRESENT | USER) == PRESENT | USER
+                    && first_entry & (WRITABLE | NO_EXECUTE) == 0
+                    && second_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                        == PRESENT | WRITABLE | USER | NO_EXECUTE
+                    && first_bytes[0] == 0xc3
+                    && first_bytes[1..].iter().all(|byte| *byte == 0)
+                    && second_bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
+                    && second_bytes[8..].iter().all(|byte| *byte == 0),
+            )
+        }
+    })()
+    .unwrap_or(false);
+    let cleared = frames
+        .iter()
+        .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
+    valid && cleared && memory::release_frames(memory::FrameOwner::KERNEL, frames)
+}
 
 struct RegisteredAuxiliaryAddressSpace {
     domain: u64,

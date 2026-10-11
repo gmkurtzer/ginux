@@ -518,6 +518,11 @@ if ! grep -q '^ginux: Linux ELF64 page images materialized' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux ELF64 virtual mappings validated' "$output_file"; then
+    echo "Boot test failed: Linux ELF64 virtual mappings were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1
