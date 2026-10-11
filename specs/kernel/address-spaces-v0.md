@@ -93,7 +93,9 @@ validated lower-canonical user ranges. They reject absent, supervisor-only, or
 large-page mappings at every level; writes additionally require effective
 writable permission, while reads stage the result before use. Each operation
 also requires active CR3 to match the current scheduler record before walking
-the mapping. The hardware workload verifies that a copy spanning a readable
+the mapping. It revalidates the fixed hierarchy and its exact generation-tagged
+allocator ownership at each copy boundary rather than relying only on the most
+recent CR3 activation check. The hardware workload verifies that a copy spanning a readable
 page and an absent guard page is rejected before any bytes are consumed. This is not yet
 a general copyin/copyout subsystem: mappings cannot mutate concurrently in the
 single-core bootstrap, and there is no exception-table recovery for a race or

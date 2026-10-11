@@ -104,6 +104,14 @@ exhausting its call budget. A denied request does not alter the retained record.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
+Before either bounded copy direction touches user memory, the kernel requires
+active CR3 to equal the scheduler's current root, revalidates the complete
+fixed page-table hierarchy, and confirms every page-table and payload frame is
+still live under the calling domain's exact generation in the allocator
+ledger. Per-page permission checks then apply to the requested range. This
+recheck narrows the interval in which internal page-table corruption could turn
+an otherwise bounded ABI copy into cross-domain access; concurrent mapping
+mutation remains unsupported in the single-core bootstrap.
 Unknown operations terminate the proof program without granting an operation.
 
 At initial entry, `RBX` contains the host-control handle, `RCX` contains the

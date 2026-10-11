@@ -3,7 +3,7 @@ use core::arch::asm;
 use crate::{
     arch::x86_64::{
         apic::LocalApic,
-        cpu,
+        cpu, paging,
         timer::{self, LocalApicCalibration},
     },
     ipc, memory, scheduler,
@@ -39,7 +39,7 @@ pub(crate) fn copy_from_current_user(address: u64, output: &mut [u8]) -> bool {
         return false;
     }
     let root = current_root();
-    if scheduler::current_address_space_root() != Some(root) {
+    if !current_user_root_is_owned(root) {
         return false;
     }
     for offset in 0..output.len() {
@@ -71,7 +71,7 @@ pub(crate) fn copy_to_current_user(address: u64, input: &[u8]) -> bool {
         return false;
     }
     let root = current_root();
-    if scheduler::current_address_space_root() != Some(root) {
+    if !current_user_root_is_owned(root) {
         return false;
     }
     for offset in 0..input.len() {
@@ -90,6 +90,19 @@ pub(crate) fn copy_to_current_user(address: u64, input: &[u8]) -> bool {
         });
     }
     true
+}
+
+fn current_user_root_is_owned(root: u64) -> bool {
+    if scheduler::current_address_space_root() != Some(root) {
+        return false;
+    }
+    let Some(owner) = scheduler::current_domain().and_then(memory::FrameOwner::domain) else {
+        return false;
+    };
+    let Some(frames) = paging::validated_user_root_frames(root) else {
+        return false;
+    };
+    memory::frame_addresses_owned_by(owner, &frames)
 }
 
 fn user_address_has_permissions(root: u64, address: u64, required: u64) -> bool {
