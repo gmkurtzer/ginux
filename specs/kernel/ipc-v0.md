@@ -107,7 +107,11 @@ endpoint's most recent accepted delivery without consuming another record. It
 distinguishes messages from closures and exposes the source generation,
 sequence, and value. The bootstrap proof validates the original service's
 queued reply; descriptor state is endpoint-local but remains a single latest
-record rather than a history. This revision has no capability transfer,
+record rather than a history. Retiring a service clears its side's descriptor
+state before a replacement can bind, preventing the new generation from
+observing the old generation's request values. The control side retains its own
+accepted replies and closures. Message sequence counters remain channel-wide
+across replacement and are not reset with descriptor state. This revision has no capability transfer,
 cancellation request, timeout, or cleanup of queued replies after domain
 failure. It has one fixed control/service endpoint pair rather
 than allocatable endpoint objects. The global queue is safe only

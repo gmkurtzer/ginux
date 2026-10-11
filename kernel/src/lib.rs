@@ -496,6 +496,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }
+    serial_write("ginux: generation-scoped IPC diagnostics verified\r\n");
     serial_write("ginux: monotonic sequence exhaustion contained\r\n");
     let (Some(host_handle), Some(console_handle), Some(ipc_handle), Some(service_ipc_handle)) = (
         domain::control_plane_boot_handle(0),

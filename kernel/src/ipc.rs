@@ -243,13 +243,18 @@ impl Duplex {
             return false;
         }
         self.requests.clear();
+        self.last_service_delivery = None;
         self.service_domain = None;
         self.next_closure_sequence = next;
         true
     }
 
     fn bind_service(&mut self, domain: u64) -> bool {
-        if domain == 0 || domain == self.control_domain || self.service_domain.is_some() {
+        if domain == 0
+            || domain == self.control_domain
+            || self.service_domain.is_some()
+            || self.last_service_delivery.is_some()
+        {
             return false;
         }
         self.service_domain = Some(domain);
@@ -257,7 +262,10 @@ impl Duplex {
     }
 
     fn rollback_service_binding(&mut self, domain: u64) -> bool {
-        if self.service_domain != Some(domain) || self.requests.len != 0 {
+        if self.service_domain != Some(domain)
+            || self.requests.len != 0
+            || self.last_service_delivery.is_some()
+        {
             return false;
         }
         self.service_domain = None;
@@ -554,6 +562,7 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.send(control, 70)
         && channel.send(service, 80)
         && channel.retire_service(service)
+        && channel.last_service_delivery.is_none()
         && !channel.retire_service(service)
         && !channel.send(service, 90)
         && channel.service_side(service).is_none()
@@ -563,6 +572,7 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.receive(control) == Receive::Message(80)
         && channel.receive(control) == Receive::PeerClosed(service)
         && channel.bind_service(replacement)
+        && channel.delivery_audit(replacement).is_none()
         && channel.peer_domain(control) == Some(replacement)
         && channel.peer_domain(replacement) == Some(control)
         && channel.service_side(replacement) == Some(true)
@@ -584,6 +594,7 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.last_service_message_sequence == 7
         && channel.last_control_closure_domain == Some(replacement)
         && channel.last_control_closure_sequence == 2
+        && channel.last_service_delivery.is_none()
         && channel.last_control_delivery
             == Some(DeliveryAudit {
                 kind: PEER_CLOSURE_DELIVERY,

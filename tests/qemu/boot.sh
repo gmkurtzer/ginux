@@ -368,6 +368,11 @@ if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: generation-scoped IPC diagnostics verified' "$output_file"; then
+    echo "Boot test failed: IPC diagnostics crossed a service generation." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^USER_OK' "$output_file")" -ne 1 ]]; then
     echo "Boot test failed: the control-plane console record count is invalid." >&2
     exit 1

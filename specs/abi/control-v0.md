@@ -137,6 +137,8 @@ must equal 32, and bounded writable-range validation applies. It returns 32 or
 `UINT64_MAX - 2`. The descriptor is observational and does not dequeue data.
 The ring-3 proof rejects console authority, then validates the original
 service generation, reply sequence one, and value 2 using IPC read authority.
+Service-side descriptor state is cleared at retirement and must be empty when
+a replacement generation binds; channel-wide sequence counters continue.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
