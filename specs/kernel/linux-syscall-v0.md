@@ -32,6 +32,10 @@ identity for the initial root view, not a general VFS or directory state.
 bounded NUL-terminated pathname, and returns `/init` without a terminator. A
 zero output size returns `-EINVAL`; invalid pathname or output ranges return
 `-EFAULT`. Other paths return `-ENOENT`. This is not a general procfs.
+`rax = 267` (`__NR_readlinkat`) exposes the same exact link when the directory
+descriptor is `AT_FDCWD`. Its pathname, output, length, and errors use the same
+bounded implementation. Other directory descriptors return `-EBADF`; this is
+not a general directory-descriptor or `*at` interface.
 `rax = 95` (`__NR_umask`) atomically replaces the single process's permission
 mask, returns the previous value, and ignores bits outside `0777`. The initial
 value is `022`; the proof changes it twice and restores it before exit.
@@ -142,7 +146,8 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `writev`, `fstat`, `brk`, `uname`, `getcwd`, bounded `readlink`,
+`write`, `writev`, `fstat`, `brk`, `uname`, `getcwd`, bounded
+`readlink`/`readlinkat`,
 bounded read-only `mprotect`,
 `umask`, read-only `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,

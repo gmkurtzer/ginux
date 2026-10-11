@@ -71,6 +71,7 @@ const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
+const LINUX_READLINKAT_SYSCALL: u64 = 267;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
@@ -95,6 +96,7 @@ const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_IOV_LIMIT: usize = 4;
+const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1205,23 +1207,12 @@ extern "sysv64" fn linux_syscall_handler(
             }
             2
         }
-        LINUX_READLINK_SYSCALL => {
-            if count == 0 {
-                return LINUX_EINVAL;
+        LINUX_READLINK_SYSCALL => linux_readlink_self(first_argument, buffer, count),
+        LINUX_READLINKAT_SYSCALL => {
+            if first_argument as u32 != LINUX_AT_FDCWD {
+                return LINUX_EBADF;
             }
-            let mut path = [0_u8; 16];
-            let path_length = match copy_linux_c_string(first_argument, &mut path) {
-                Ok(length) => length,
-                Err(error) => return error,
-            };
-            if &path[..path_length] != b"/proc/self/exe" {
-                return LINUX_ENOENT;
-            }
-            let output_length = usize::try_from(count).unwrap_or(usize::MAX).min(5);
-            if !copy_to_linux_user(buffer, &b"/init"[..output_length]) {
-                return LINUX_EFAULT;
-            }
-            output_length as u64
+            linux_readlink_self(buffer, count, register(0))
         }
         LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
         LINUX_GETRLIMIT_SYSCALL => {
@@ -1293,6 +1284,25 @@ fn copy_linux_robust_list(head_address: u64, size_address: u64) -> bool {
     let head = ELF_PROBE_ROBUST_LIST.load(Ordering::SeqCst).to_ne_bytes();
     let size = (LINUX_ROBUST_LIST_HEAD_SIZE as u64).to_ne_bytes();
     copy_to_linux_user(head_address, &head) && copy_to_linux_user(size_address, &size)
+}
+
+fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64) -> u64 {
+    if output_size == 0 {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; 16];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    if &path[..path_length] != b"/proc/self/exe" {
+        return LINUX_ENOENT;
+    }
+    let output_length = usize::try_from(output_size).unwrap_or(usize::MAX).min(5);
+    if !copy_to_linux_user(output_address, &b"/init"[..output_length]) {
+        return LINUX_EFAULT;
+    }
+    output_length as u64
 }
 
 fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {

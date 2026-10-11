@@ -234,6 +234,46 @@ ginux_linux_probe:
     cmp byte ptr [0x401044], 't'
     jne failure
 
+    mov edi, -100
+    lea rsi, [rip + proc_self_exe]
+    mov edx, 0x401040
+    mov r10d, 5
+    mov eax, 267
+    syscall
+    cmp rax, 5
+    jne failure
+    cmp dword ptr [0x401040], 0x696e692f
+    jne failure
+    cmp byte ptr [0x401044], 't'
+    jne failure
+
+    mov edi, -99
+    lea rsi, [rip + proc_self_exe]
+    mov edx, 0x401040
+    mov r10d, 5
+    mov eax, 267
+    syscall
+    cmp rax, -9
+    jne failure
+
+    mov edi, -100
+    lea rsi, [rip + proc_self_exe]
+    mov edx, 0x401040
+    xor r10d, r10d
+    mov eax, 267
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, -100
+    lea rsi, [rip + proc_self_exe]
+    mov edx, 0x402200
+    mov r10d, 5
+    mov eax, 267
+    syscall
+    cmp rax, -14
+    jne failure
+
     mov edi, 0x3f
     mov eax, 95
     syscall

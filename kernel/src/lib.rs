@@ -607,6 +607,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux directional VMA copies validated\r\n");
     serial_write("ginux: Linux root working directory validated\r\n");
     serial_write("ginux: Linux proc self executable link validated\r\n");
+    serial_write("ginux: Linux proc self executable link-at validated\r\n");
     serial_write("ginux: Linux process umask state validated\r\n");
     serial_write("ginux: Linux console descriptor metadata validated\r\n");
     serial_write("ginux: Linux saved credential queries validated\r\n");
