@@ -123,8 +123,15 @@ page-granular overlap among all main, interpreter, and dependency loads. Wrong
 names, wrong internal SONAMEs, wrong digests, truncation, and an overlapping
 dependency bias are rejected. An authenticated dependency exporting a
 different symbol name is also rejected. The parser also accepts one bounded
-`PT_DYNAMIC` table containing one, two, or three `DT_RELA` records, its exact
-size and 24-byte entry size, and a terminating `DT_NULL`. The first record must
+`PT_DYNAMIC` table describing one, two, or three relocation records, the exact
+primary `DT_RELA` size and 24-byte entry size, and a terminating `DT_NULL`.
+One- and two-record profiles keep every record in the primary table. A
+three-record profile may do the same, or may keep its first two records in the
+primary table and describe one non-overlapping `R_X86_64_JUMP_SLOT` record with
+the all-or-none `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL` triplet. The split
+table must be exactly one 24-byte `DT_RELA` record. Partial triplets, another
+relocation encoding, wrong sizes, overlap with the primary table, and split
+tables attached to other primary-table sizes are rejected. The first record must
 be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must
 also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, `DT_SYMENT`, and `DT_HASH`,
 with a 24-byte symbol-entry size. The file-backed SysV hash table is bounded to
@@ -170,11 +177,12 @@ the activated user root, constructs the dynamic-process stack with the common
 auxiliary-vector encoder, and enters the relocated interpreter at `0x600100`.
 The interpreter is assembled from `linux-interpreter.S`; at runtime it derives
 its page-aligned load bias and scans each bounded dynamic table for the admitted
-relocation, symbol-table, and hash-table tags rather than depending on tag order or embedding
-their values in its instructions. It first writes the load-biased value `0x601234` to its writable
+primary relocation, split PLT relocation, symbol-table, and hash-table tags
+rather than depending on tag order or embedding their values in its
+instructions. It first writes the load-biased value `0x601234` to its writable
 relocation target `0x603080`. It then applies the dependency's relative
-relocation at `0x613180` and self-resolves its eager `GLOB_DAT` and
-`JUMP_SLOT` targets at `0x613188` and `0x613190`; all three receive the
+relocation at `0x6131c0` and self-resolves its eager `GLOB_DAT` and split-table
+`JUMP_SLOT` targets at `0x6131c8` and `0x6131d0`; all three receive the
 dependency entry value `0x610100`. It writes the admitted main-image relative
 relocation value `0x400100` to the RELRO target `0x405100`, reads the main and
 dependency symbol and hash-table addresses, requires symbol index one to be the
@@ -197,7 +205,7 @@ main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
 restores its own root and scrubs and releases all twenty-one page-table and
 payload frames. This profile performs one exact cross-object name match; it
 does not support multiple dependencies, transitive dependency graphs, search
-paths, `SONAME`, symbol versions, interposition, general multi-bucket lookup,
+paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
 lazy binding, a general-purpose dynamic linker, or glibc.
 
 ## Page-image plan

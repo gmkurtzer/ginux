@@ -623,6 +623,11 @@ if ! grep -q '^ginux: bounded Linux PLT relocation metadata validated' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: split Linux PLT relocation table validated' "$output_file"; then
+    echo "Boot test failed: the split Linux PLT relocation table was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux SysV hash metadata validated' "$output_file"; then
     echo "Boot test failed: bounded Linux SysV hash metadata was not validated." >&2
     exit 1

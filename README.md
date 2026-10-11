@@ -9,7 +9,10 @@ program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
 `PT_GNU_STACK`, bounded `PT_INTERP`, and one- to three-entry relocation
-`PT_DYNAMIC` declarations. The symbol profile validates a two-entry symbol-table
+`PT_DYNAMIC` declarations. Three-relocation images may place the eager
+`R_X86_64_JUMP_SLOT` record in a separate one-entry `DT_JMPREL` table described
+by `DT_PLTRELSZ` and `DT_PLTREL`; the current interpreted fixtures use that
+conventional split. The symbol profile validates a two-entry symbol-table
 prefix, bounded string table, one-bucket/two-chain SysV `DT_HASH`, and one
 global function symbol used by `R_X86_64_GLOB_DAT` and
 `R_X86_64_JUMP_SLOT`. The interpreted proof admits exactly one `DT_NEEDED`
@@ -155,7 +158,7 @@ value from dependency code. The userspace interpreter verifies that the
 relocation's symbol index is the admitted SysV hash bucket result in both
 objects, follows each validated symbol-name offset into its `DT_STRTAB`, and
 requires the complete NUL-terminated names to match. Multiple dependencies,
-transitive graphs, search paths, SONAME and
+transitive graphs, search paths, alternate SONAME selection,
 symbol-version processing, interposition, multi-bucket lookup, lazy binding,
 and a real userspace linker remain outside the profile.
 This is not yet a general Linux

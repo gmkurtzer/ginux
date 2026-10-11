@@ -25,12 +25,13 @@ const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (4 * PAGE_SIZE) as u64;
 const FIXTURE_DATA_OFFSET: usize = 0x4000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const INTERPRETED_FIXTURE_SIZE: usize =
-    FIXTURE_DATA_OFFSET + 8 + 10 * DYNAMIC_ENTRY_SIZE + 2 * SYMBOL_ENTRY_SIZE + 28 + 20;
+    FIXTURE_DATA_OFFSET + 8 + 13 * DYNAMIC_ENTRY_SIZE + 2 * SYMBOL_ENTRY_SIZE + 28 + 20;
 const DYNAMIC_ENTRY_SIZE: usize = 16;
 const RELA_ENTRY_SIZE: usize = 24;
 const SYMBOL_ENTRY_SIZE: usize = 24;
 const DT_NULL: u64 = 0;
 const DT_NEEDED: u64 = 1;
+const DT_PLTRELSZ: u64 = 2;
 const DT_HASH: u64 = 4;
 const DT_STRTAB: u64 = 5;
 const DT_SYMTAB: u64 = 6;
@@ -40,6 +41,8 @@ const DT_RELAENT: u64 = 9;
 const DT_STRSZ: u64 = 10;
 const DT_SYMENT: u64 = 11;
 const DT_SONAME: u64 = 14;
+const DT_PLTREL: u64 = 20;
+const DT_JMPREL: u64 = 23;
 const R_X86_64_GLOB_DAT: u32 = 6;
 const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_RELATIVE: u64 = 8;
@@ -89,6 +92,7 @@ pub(crate) struct Relro {
 pub(crate) struct DynamicRelocations {
     pub(crate) table_address: u64,
     pub(crate) relocation_address: u64,
+    pub(crate) jump_relocation_address: Option<u64>,
     pub(crate) relocation_count: usize,
     pub(crate) relocation_target: u64,
     pub(crate) relocation_addend: u64,
@@ -370,6 +374,7 @@ pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
     image.dynamic_relocations = Some(DynamicRelocations {
         table_address: 0x40_4008,
         relocation_address: 0x40_4100,
+        jump_relocation_address: None,
         relocation_count: 1,
         relocation_target: 0x40_4200,
         relocation_addend: 0x40_0100,
@@ -589,6 +594,10 @@ pub(crate) fn plan_position_independent<'a>(
         Some(dynamic) => Some(DynamicRelocations {
             table_address: dynamic.table_address.checked_add(load_bias)?,
             relocation_address: dynamic.relocation_address.checked_add(load_bias)?,
+            jump_relocation_address: match dynamic.jump_relocation_address {
+                Some(address) => Some(address.checked_add(load_bias)?),
+                None => None,
+            },
             relocation_count: dynamic.relocation_count,
             relocation_target: dynamic.relocation_target.checked_add(load_bias)?,
             relocation_addend: dynamic.relocation_addend,
@@ -861,7 +870,7 @@ fn parse_dynamic_table(bytes: &[u8], header: usize) -> Option<DynamicTable<'_>> 
     if read_u32(bytes, header + 4)? != PF_READ | PF_WRITE
         || physical_address != 0 && physical_address != virtual_address
         || file_size != memory_size
-        || !(2..=10).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
+        || !(2..=13).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
         || !file_size.is_multiple_of(DYNAMIC_ENTRY_SIZE)
         || alignment != 8
         || file_offset % alignment != virtual_address % alignment
@@ -899,6 +908,9 @@ fn parse_dynamic_relocations<'a>(
     let mut hash_table_address = None;
     let mut needed_name_offset = None;
     let mut soname_offset = None;
+    let mut jump_relocation_address = None;
+    let mut jump_relocation_size = None;
+    let mut jump_relocation_kind = None;
     let mut terminated = false;
     let entries = table.bytes.as_chunks::<DYNAMIC_ENTRY_SIZE>().0;
     for (index, entry) in entries.iter().enumerate() {
@@ -919,6 +931,9 @@ fn parse_dynamic_relocations<'a>(
             DT_HASH if hash_table_address.replace(value).is_none() => {}
             DT_NEEDED if needed_name_offset.replace(value).is_none() => {}
             DT_SONAME if soname_offset.replace(value).is_none() => {}
+            DT_JMPREL if jump_relocation_address.replace(value).is_none() => {}
+            DT_PLTRELSZ if jump_relocation_size.replace(value).is_none() => {}
+            DT_PLTREL if jump_relocation_kind.replace(value).is_none() => {}
             _ => return None,
         }
     }
@@ -935,8 +950,33 @@ fn parse_dynamic_relocations<'a>(
     {
         return None;
     }
-    let relocation_count = usize::try_from(rela_size).ok()? / RELA_ENTRY_SIZE;
-    let rela = virtual_file_bytes(loads, rela_address, relocation_count * RELA_ENTRY_SIZE)?;
+    let primary_relocation_count = usize::try_from(rela_size).ok()? / RELA_ENTRY_SIZE;
+    let jump_rela = match (
+        jump_relocation_address,
+        jump_relocation_size,
+        jump_relocation_kind,
+    ) {
+        (None, None, None) => None,
+        (Some(address), Some(size), Some(kind))
+            if primary_relocation_count == 2
+                && size == RELA_ENTRY_SIZE as u64
+                && kind == DT_RELA =>
+        {
+            let primary_end = rela_address.checked_add(rela_size)?;
+            let jump_end = address.checked_add(size)?;
+            if rela_address < jump_end && address < primary_end {
+                return None;
+            }
+            Some(virtual_file_bytes(loads, address, RELA_ENTRY_SIZE)?)
+        }
+        _ => return None,
+    };
+    let relocation_count = primary_relocation_count + usize::from(jump_rela.is_some());
+    let rela = virtual_file_bytes(
+        loads,
+        rela_address,
+        primary_relocation_count * RELA_ENTRY_SIZE,
+    )?;
     let target = read_u64(rela, 0)?;
     let info = read_u64(rela, 8)?;
     let addend = read_u64(rela, 16)?;
@@ -1091,7 +1131,10 @@ fn parse_dynamic_relocations<'a>(
                 addend: symbol_addend,
             };
             let jump_slot_relocation = if count == 3 {
-                let third = &rela[2 * RELA_ENTRY_SIZE..3 * RELA_ENTRY_SIZE];
+                let third = match jump_rela {
+                    Some(rela) => rela,
+                    None => &rela[2 * RELA_ENTRY_SIZE..3 * RELA_ENTRY_SIZE],
+                };
                 let jump_target = read_u64(third, 0)?;
                 let jump_info = read_u64(third, 8)?;
                 let jump_addend = read_u64(third, 16)?;
@@ -1135,6 +1178,7 @@ fn parse_dynamic_relocations<'a>(
         relocations: DynamicRelocations {
             table_address: table.virtual_address,
             relocation_address: rela_address,
+            jump_relocation_address,
             relocation_count,
             relocation_target: target,
             relocation_addend: addend,
@@ -1595,13 +1639,19 @@ pub(crate) fn verify_interpreted_plan() -> bool {
             dynamic.table_address == 0x40_4008
                 && dynamic.relocation_address
                     == 0x3f_f000 + (ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE) as u64
+                && dynamic.jump_relocation_address
+                    == Some(
+                        0x3f_f000
+                            + (ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE + 2 * RELA_ENTRY_SIZE)
+                                as u64,
+                    )
                 && dynamic.relocation_count == 3
                 && dynamic.relocation_target == 0x40_5100
                 && dynamic.relocation_addend == 0x40_0100
-                && dynamic.symbol_table_address == Some(0x40_40a8)
-                && dynamic.string_table_address == Some(0x40_40d8)
+                && dynamic.symbol_table_address == Some(0x40_40d8)
+                && dynamic.string_table_address == Some(0x40_4108)
                 && dynamic.string_table_size == 25
-                && dynamic.hash_table_address == Some(0x40_40f4)
+                && dynamic.hash_table_address == Some(0x40_4124)
                 && !dynamic.symbol_defined
                 && dynamic.symbol_relocation.is_some_and(|relocation| {
                     relocation.target == 0x40_5108
@@ -1823,14 +1873,14 @@ fn verify_dependency_authentication_rejections(
 }
 
 pub(crate) fn verify_dynamic_relocation_rejections() -> bool {
-    (0..28).all(dynamic_relocation_rejected)
+    (0..32).all(dynamic_relocation_rejected)
 }
 
 #[inline(never)]
 fn dynamic_relocation_rejected(case: u8) -> bool {
     const RELA_OFFSET: usize = ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE;
     const DYNAMIC_OFFSET: usize = FIXTURE_DATA_OFFSET + 8;
-    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 10 * DYNAMIC_ENTRY_SIZE;
+    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 13 * DYNAMIC_ENTRY_SIZE;
     const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     const HASH_OFFSET: usize = (STRTAB_OFFSET + 25 + 3) & !3;
     let mut image = interpreted_main_fixture();
@@ -1879,6 +1929,14 @@ fn dynamic_relocation_rejected(case: u8) -> bool {
         25 => write_u64(&mut image, DYNAMIC_OFFSET + 8 * DYNAMIC_ENTRY_SIZE, DT_RELA),
         26 => write_u64(&mut image, DYNAMIC_OFFSET + 8 * DYNAMIC_ENTRY_SIZE + 8, 0),
         27 => write_u64(&mut image, DYNAMIC_OFFSET + 8 * DYNAMIC_ENTRY_SIZE + 8, 25),
+        28 => write_u64(&mut image, DYNAMIC_OFFSET + 9 * DYNAMIC_ENTRY_SIZE, DT_RELA),
+        29 => write_u64(&mut image, DYNAMIC_OFFSET + 10 * DYNAMIC_ENTRY_SIZE + 8, 0),
+        30 => write_u64(&mut image, DYNAMIC_OFFSET + 11 * DYNAMIC_ENTRY_SIZE + 8, 0),
+        31 => write_u64(
+            &mut image,
+            DYNAMIC_OFFSET + 9 * DYNAMIC_ENTRY_SIZE + 8,
+            0x3f_f000 + RELA_OFFSET as u64,
+        ),
         _ => return false,
     }
     parse(&image).is_none()
@@ -2070,7 +2128,7 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
     const STRING_TABLE: &[u8] = b"\0ginux_probe\0libginux.so\0";
     const PATH_OFFSET: usize = 0x3f80;
     const DYNAMIC_OFFSET: usize = FIXTURE_DATA_OFFSET + 8;
-    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 10 * DYNAMIC_ENTRY_SIZE;
+    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 13 * DYNAMIC_ENTRY_SIZE;
     const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     const HASH_OFFSET: usize = (STRTAB_OFFSET + STRING_TABLE.len() + 3) & !3;
     let mut bytes = [0_u8; INTERPRETED_FIXTURE_SIZE];
@@ -2131,7 +2189,7 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
         ELF_HEADER_SIZE + 5 * PROGRAM_HEADER_SIZE,
         DYNAMIC_OFFSET,
         0x40_4008,
-        10 * DYNAMIC_ENTRY_SIZE,
+        13 * DYNAMIC_ENTRY_SIZE,
     );
     write_u64(&mut bytes, RELA_OFFSET, 0x40_5100);
     write_u64(&mut bytes, RELA_OFFSET + 8, R_X86_64_RELATIVE);
@@ -2164,10 +2222,16 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
         (DT_STRTAB, 0x400000 + STRTAB_OFFSET as u64),
         (DT_RELAENT, RELA_ENTRY_SIZE as u64),
         (DT_SYMTAB, 0x400000 + SYMTAB_OFFSET as u64),
-        (DT_RELASZ, (3 * RELA_ENTRY_SIZE) as u64),
+        (DT_RELASZ, (2 * RELA_ENTRY_SIZE) as u64),
         (DT_STRSZ, STRING_TABLE.len() as u64),
         (DT_HASH, 0x400000 + HASH_OFFSET as u64),
         (DT_NEEDED, 13),
+        (
+            DT_JMPREL,
+            0x3f_f000 + (RELA_OFFSET + 2 * RELA_ENTRY_SIZE) as u64,
+        ),
+        (DT_PLTRELSZ, RELA_ENTRY_SIZE as u64),
+        (DT_PLTREL, DT_RELA),
         (DT_NULL, 0),
     ]
     .into_iter()
@@ -2293,7 +2357,7 @@ fn compact_position_independent_fixture() -> [u8; 2048] {
 fn compact_dependency_fixture() -> [u8; 1024] {
     const DATA_OFFSET: usize = 0x200;
     const DYNAMIC_OFFSET: usize = DATA_OFFSET + 8;
-    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 10 * DYNAMIC_ENTRY_SIZE;
+    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 13 * DYNAMIC_ENTRY_SIZE;
     const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     const STRING_TABLE: &[u8] = b"\0ginux_probe\0libginux.so\0";
     const HASH_OFFSET: usize = (STRTAB_OFFSET + STRING_TABLE.len() + 3) & !3;
@@ -2334,12 +2398,12 @@ fn compact_dependency_fixture() -> [u8; 1024] {
         ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE,
         DYNAMIC_OFFSET,
         0x3008,
-        10 * DYNAMIC_ENTRY_SIZE,
+        13 * DYNAMIC_ENTRY_SIZE,
     );
     for (index, (target, kind, symbol, addend)) in [
-        (0x3180, R_X86_64_RELATIVE as u32, 0_u32, 0x100),
-        (0x3188, R_X86_64_GLOB_DAT, 1, 0),
-        (0x3190, R_X86_64_JUMP_SLOT, 1, 0),
+        (0x31c0, R_X86_64_RELATIVE as u32, 0_u32, 0x100),
+        (0x31c8, R_X86_64_GLOB_DAT, 1, 0),
+        (0x31d0, R_X86_64_JUMP_SLOT, 1, 0),
     ]
     .into_iter()
     .enumerate()
@@ -2372,10 +2436,16 @@ fn compact_dependency_fixture() -> [u8; 1024] {
         (DT_STRTAB, 0x3000 + (STRTAB_OFFSET - DATA_OFFSET) as u64),
         (DT_RELAENT, RELA_ENTRY_SIZE as u64),
         (DT_SYMTAB, 0x3000 + (SYMTAB_OFFSET - DATA_OFFSET) as u64),
-        (DT_RELASZ, (3 * RELA_ENTRY_SIZE) as u64),
+        (DT_RELASZ, (2 * RELA_ENTRY_SIZE) as u64),
         (DT_STRSZ, STRING_TABLE.len() as u64),
         (DT_HASH, 0x3000 + (HASH_OFFSET - DATA_OFFSET) as u64),
         (DT_SONAME, 13),
+        (
+            DT_JMPREL,
+            0x3000 + (RELA_OFFSET + 2 * RELA_ENTRY_SIZE - DATA_OFFSET) as u64,
+        ),
+        (DT_PLTRELSZ, RELA_ENTRY_SIZE as u64),
+        (DT_PLTREL, DT_RELA),
         (DT_NULL, 0),
     ]
     .into_iter()

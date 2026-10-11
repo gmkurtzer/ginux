@@ -23,7 +23,8 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], rdx
 
     mov edi, 0x404008
-    mov ecx, 10
+    mov ecx, 13
+    xor ebx, ebx
     xor eax, eax
     xor esi, esi
     xor r8d, r8d
@@ -37,6 +38,8 @@ ginux_linux_interpreter:
     cmove r8, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 5
     cmove r13, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 23
+    cmove rbx, qword ptr [rdi + 8]
     add rdi, 16
     loop .Lscan_main_dynamic
     test rax, rax
@@ -47,13 +50,16 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     test r13, r13
     jz .Linvalid_dynamic
+    test rbx, rbx
+    jz .Linvalid_dynamic
 
     mov edi, 0x613008
-    mov ecx, 10
+    mov ecx, 13
     xor r9d, r9d
     xor r10d, r10d
     xor r11d, r11d
     xor r14d, r14d
+    xor ebp, ebp
 .Lscan_dependency_dynamic:
     cmp qword ptr [rdi], 6
     cmove r9, qword ptr [rdi + 8]
@@ -63,6 +69,8 @@ ginux_linux_interpreter:
     cmove r11, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 5
     cmove r14, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 23
+    cmove rbp, qword ptr [rdi + 8]
     add rdi, 16
     loop .Lscan_dependency_dynamic
     test r9, r9
@@ -73,10 +81,13 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     test r14, r14
     jz .Linvalid_dynamic
+    test rbp, rbp
+    jz .Linvalid_dynamic
     add r9, 0x610000
     add r10, 0x610000
     add r11, 0x610000
     add r14, 0x610000
+    add rbp, 0x610000
 
     mov rcx, qword ptr [r11]
     add rcx, 0x610000
@@ -97,13 +108,13 @@ ginux_linux_interpreter:
     add r12, qword ptr [r11 + 40]
     mov qword ptr [rcx], r12
 
-    mov rcx, qword ptr [r11 + 48]
+    mov rcx, qword ptr [rbp]
     add rcx, 0x610000
-    mov rdx, qword ptr [r11 + 56]
+    mov rdx, qword ptr [rbp + 8]
     shr rdx, 32
     cmp edx, dword ptr [r10 + 8]
     jne .Linvalid_dynamic
-    add r12, qword ptr [r11 + 64]
+    add r12, qword ptr [rbp + 16]
     mov qword ptr [rcx], r12
 
     mov rcx, qword ptr [rax]
@@ -136,14 +147,14 @@ ginux_linux_interpreter:
     add rdx, qword ptr [rax + 40]
     mov qword ptr [rcx], rdx
 
-    mov rcx, qword ptr [rax + 48]
-    mov rdx, qword ptr [rax + 56]
+    mov rcx, qword ptr [rbx]
+    mov rdx, qword ptr [rbx + 8]
     shr rdx, 32
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
     mov rdx, qword ptr [r9 + rdx + 8]
     add rdx, 0x610000
-    add rdx, qword ptr [rax + 64]
+    add rdx, qword ptr [rbx + 16]
     mov qword ptr [rcx], rdx
 
     mov eax, 0x400100
