@@ -519,3 +519,13 @@ readable_payload:
     .byte 1, 2, 3, 4, 5, 6, 7, 8
 proc_self_exe:
     .asciz "/proc/self/exe"
+
+.section .data
+.balign 8
+.global ginux_linux_probe_data
+ginux_linux_probe_data:
+    .byte 1, 2, 3, 4, 5, 6, 7, 8
+
+.section .bss
+.balign 8
+    .space 4600

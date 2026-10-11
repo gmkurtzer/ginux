@@ -18,6 +18,7 @@ const MAX_SEGMENT_PAGES: usize = 2;
 const FIXTURE_DATA_OFFSET: usize = 0x1000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
+const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
 
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
@@ -67,13 +68,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         || read_u16(bytes, 18)? != EM_X86_64
         || read_u32(bytes, 20)? != 1
         || read_u64(bytes, 32)? != ELF_HEADER_SIZE as u64
-        || read_u64(bytes, 40)? != 0
         || read_u32(bytes, 48)? != 0
         || read_u16(bytes, 52)? != ELF_HEADER_SIZE as u16
         || read_u16(bytes, 54)? != PROGRAM_HEADER_SIZE as u16
-        || read_u16(bytes, 58)? != 0
-        || read_u16(bytes, 60)? != 0
-        || read_u16(bytes, 62)? != 0
     {
         return None;
     }
@@ -450,6 +447,24 @@ pub(crate) fn verify_load_plan() -> bool {
             );
             parse(&oversized).is_some_and(|image| plan(&image).is_none())
         }
+}
+
+pub(crate) fn verify_linked_probe() -> bool {
+    let Some(image) = parse(LINKED_PROBE) else {
+        return false;
+    };
+    image.entry == 0x40_0100
+        && image.program_headers == 0x20_0040
+        && image.program_header_count == 5
+        && image.executable.virtual_address == 0x40_0100
+        && image.executable.bytes == PROBE_CODE
+        && image
+            .read_only
+            .is_some_and(|segment| segment.virtual_address == 0x20_0000)
+        && image.writable.virtual_address == 0x40_2000
+        && image.writable.bytes == [1, 2, 3, 4, 5, 6, 7, 8]
+        && image.writable.memory_size == 4608
+        && plan(&image).is_none()
 }
 
 pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usize) -> bool {

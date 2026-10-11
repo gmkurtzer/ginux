@@ -1,8 +1,9 @@
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{env, ffi::OsString, fs, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=linux-probe.S");
     println!("cargo:rerun-if-env-changed=CLANG");
+    println!("cargo:rerun-if-env-changed=LLD");
 
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set"));
     let object = output.join("linux-probe.o");
@@ -17,6 +18,67 @@ fn main() {
     let elf = fs::read(&object).expect("failed to read Linux probe object");
     let text = elf_section(&elf, b".text").expect("Linux probe object has no .text section");
     fs::write(output.join("linux-probe.bin"), text).expect("failed to write Linux probe bytes");
+
+    let linked = output.join("linux-probe.elf");
+    let (lld, toolchain_library) = linker();
+    let mut link = Command::new(lld);
+    link.args([
+        "-flavor",
+        "gnu",
+        "-m",
+        "elf_x86_64",
+        "-static",
+        "-nostdlib",
+        "-e",
+        "ginux_linux_probe",
+        "-Ttext",
+        "0x400100",
+        "-Tdata",
+        "0x402000",
+    ])
+    .arg(&object)
+    .arg("-o")
+    .arg(&linked);
+    if let Some(directory) = toolchain_library {
+        #[cfg(target_os = "macos")]
+        link.env("DYLD_LIBRARY_PATH", &directory);
+        #[cfg(not(target_os = "macos"))]
+        link.env("LD_LIBRARY_PATH", &directory);
+    }
+    let status = link.status().expect("failed to run LLD for Linux probe");
+    assert!(status.success(), "LLD failed to link Linux probe");
+}
+
+fn linker() -> (OsString, Option<PathBuf>) {
+    if let Some(linker) = env::var_os("LLD") {
+        return (linker, None);
+    }
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let output = Command::new(rustc)
+        .args(["--print", "sysroot"])
+        .output()
+        .expect("failed to discover Rust sysroot");
+    assert!(output.status.success(), "rustc did not report its sysroot");
+    let sysroot = PathBuf::from(
+        String::from_utf8(output.stdout)
+            .expect("Rust sysroot was not UTF-8")
+            .trim(),
+    );
+    let host = env::var("HOST").expect("Cargo HOST is set");
+    let executable = if cfg!(windows) {
+        "rust-lld.exe"
+    } else {
+        "rust-lld"
+    };
+    (
+        sysroot
+            .join("lib/rustlib")
+            .join(host)
+            .join("bin")
+            .join(executable)
+            .into_os_string(),
+        Some(sysroot.join("lib")),
+    )
 }
 
 fn elf_section<'a>(elf: &'a [u8], wanted: &[u8]) -> Option<&'a [u8]> {

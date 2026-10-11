@@ -6,8 +6,9 @@ profile verified in QEMU.
 The first Linux-compatibility boundary accepts a deliberately bounded ELF64
 profile. Files must be little-endian ELF class 64, current ELF version,
 System-V or Linux ABI, `ET_EXEC`, and machine `EM_X86_64`. The ELF header and
-program-header sizes must match the published 64-bit layout. Section headers,
-processor flags, and extended counts are rejected rather than ignored.
+program-header sizes must match the published 64-bit layout. Section-header
+metadata is not consulted by the runtime loader; processor flags and extended
+program-header counts are rejected.
 
 Two or three `PT_LOAD` program headers are accepted. Exactly one must be
 executable and exactly one writable; an optional third load must be read-only.
@@ -38,6 +39,13 @@ entry point, W+X flags, overflowing file size, overlapping virtual ranges, an
 executable GNU stack, malformed or duplicate metadata, unsupported header
 types, and truncation. Images with neither metadata header, either one, or both
 are accepted when their declarations are valid.
+
+The build also feeds the same assembly through the Rust toolchain's LLD to
+produce a genuine static ELF with separate read-only header, RX text, and RW
+data/BSS loads, populated section-header metadata, `PT_PHDR`, and
+`PT_GNU_STACK`. The boot verifier parses that linked artifact, checks its entry,
+header-table address/count, exact code and initialized data, 4608-byte data/BSS
+extent, and confirms that planning still rejects the unsupported third load.
 
 The current page-image planner and runtime mapper deliberately accept only the
 two-load executable/writable form. A parsed third read-only load fails planning

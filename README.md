@@ -85,9 +85,11 @@ digest, and Ed25519 signature from `boot/manifest-v0.conf` and
 `control-plane/bootstrap.hex`; that source declares its authenticated control,
 service, and restart entry labels inline. Run `make manifest` directly when
 working on those inputs. The kernel build assembles `kernel/linux-probe.S` as
-an x86-64 ELF object and extracts its `.text` section for the Linux
-compatibility image, keeping the proof workload readable on both macOS and
-Linux hosts. Override the assembler with `CLANG=/path/to/clang`. Kernel and
+an x86-64 ELF object, extracts its `.text` section for the executable runtime
+proof, and also links a complete static ELF with the Rust toolchain's LLD for
+parser compatibility verification. This tests ordinary linker metadata on
+both macOS and Linux hosts. Override the tools with `CLANG=/path/to/clang` or
+`LLD=/path/to/rust-lld`. Kernel and
 proof-workload ABI constants share the machine-readable
 `specs/abi/control-v2.rs` source, and the manifest builder expands its symbolic
 feature and descriptor words before signing. The checked-in key is an RFC test
