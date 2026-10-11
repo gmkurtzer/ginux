@@ -42,10 +42,12 @@ segment's file tail through `p_memsz` and all remaining page bytes are zero.
 The QEMU verifier checks the exact RX instruction byte, RW data bytes, W^X
 metadata, and every zero-filled byte in both pages.
 
-The pages are not installed into a page table yet. The current kernel relies on
-a low identity map in PML4 slot zero, which conflicts with safely mapping a
-normal Linux `ET_EXEC` image at `0x400000` while retaining a stable kernel
-physical-memory view. Ginux must first establish a higher-half kernel mapping
-and/or separate privileged direct map. The loader will not relocate `ET_EXEC`
-images to the existing high test address, because doing so would violate ELF
-semantics and hide this prerequisite.
+The pages are not installed into a page table yet. Ginux now has a
+supervisor-only higher-half alias for its initial 4 GiB physical map, with the
+same leaf permissions as the transitional identity map. Kernel code and frame
+accesses still use low identity addresses, however, so mapping a normal Linux
+`ET_EXEC` image at `0x400000` would replace mappings on which the kernel still
+depends. Those accesses must migrate to the direct map before an ELF domain can
+own conventional lower-half virtual addresses. The loader will not relocate
+`ET_EXEC` images to the existing high test address, because doing so would
+violate ELF semantics and hide this prerequisite.

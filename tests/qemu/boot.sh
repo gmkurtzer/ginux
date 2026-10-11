@@ -118,6 +118,11 @@ if ! grep -q '^ginux: NX-by-default identity map active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: supervisor-only higher-half direct map active' "$output_file"; then
+    echo "Boot test failed: higher-half direct-map alias was not active." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: PE executable identity pages read-only' "$output_file"; then
     echo "Boot test failed: executable PE pages remain writable." >&2
     exit 1

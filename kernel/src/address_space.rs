@@ -180,6 +180,7 @@ impl AddressSpace {
             root_entries
                 .add(1)
                 .write(user_pdpt | PRESENT | WRITABLE | USER);
+            root_entries.add(256).write(kernel_pml4.add(256).read());
             (user_pdpt as *mut u64).write(user_directory | PRESENT | WRITABLE | USER);
             (user_directory as *mut u64).write(user_table | PRESENT | WRITABLE | USER);
             (user_table as *mut u64).write(user_frame | PRESENT | WRITABLE | USER);
@@ -198,7 +199,12 @@ impl AddressSpace {
             let root = self.root as *const u64;
             let kernel = kernel_root as *const u64;
             let kernel_entry = kernel.read();
-            if root.read() != kernel_entry || kernel_entry & USER != 0 {
+            let direct_entry = kernel.add(256).read();
+            if root.read() != kernel_entry
+                || kernel_entry & USER != 0
+                || root.add(256).read() != direct_entry
+                || direct_entry & USER != 0
+            {
                 return false;
             }
             let user_root_entry = root.add(1).read();
@@ -206,7 +212,7 @@ impl AddressSpace {
                 return false;
             }
             for index in 2..ENTRY_COUNT {
-                if root.add(index).read() != 0 {
+                if index != 256 && root.add(index).read() != 0 {
                     return false;
                 }
             }
@@ -1276,6 +1282,9 @@ impl WxAddressSpace {
             let root_entries = root as *mut u64;
             root_entries.write((kernel_root as *const u64).read());
             root_entries.add(1).write(pdpt | PRESENT | WRITABLE | USER);
+            root_entries
+                .add(256)
+                .write((kernel_root as *const u64).add(256).read());
             (pdpt as *mut u64).write(directory | PRESENT | WRITABLE | USER);
             (directory as *mut u64).write(table | PRESENT | WRITABLE | USER);
             let entries = table as *mut u64;
@@ -1303,7 +1312,11 @@ impl WxAddressSpace {
     fn permissions_are_valid(&self, kernel_root: u64) -> bool {
         unsafe {
             let root = self.root as *const u64;
-            if root.read() != (kernel_root as *const u64).read() || root.read() & USER != 0 {
+            if root.read() != (kernel_root as *const u64).read()
+                || root.read() & USER != 0
+                || root.add(256).read() != (kernel_root as *const u64).add(256).read()
+                || root.add(256).read() & USER != 0
+            {
                 return false;
             }
             let pdpt = (root.add(1).read() & ADDRESS_MASK) as *const u64;

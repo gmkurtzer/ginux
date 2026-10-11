@@ -10,12 +10,15 @@ const MAX_FINE_TABLES: usize = 8;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
+const ACCESSED: u64 = 1 << 5;
 const LARGE_PAGE: u64 = 1 << 7;
 const NO_EXECUTE: u64 = 1 << 63;
 const ADDRESS_MASK: usize = 0x000f_ffff_ffff_f000;
 const CR0_WRITE_PROTECT: usize = 1 << 16;
 
 pub(crate) const INITIAL_IDENTITY_LIMIT: usize = 1usize << 32;
+pub(crate) const DIRECT_MAP_BASE: usize = 0xffff_8000_0000_0000;
+const DIRECT_MAP_PML4_INDEX: usize = 256;
 const USER_REGION_BASE: u64 = 1_u64 << 39;
 
 pub(crate) fn user_context_matches_layout(instruction: u64, stack: u64) -> bool {
@@ -49,14 +52,26 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
     }
     let entries = root as *const u64;
     let kernel_entry = unsafe { core::ptr::addr_of!(PML4.0).cast::<u64>().read() };
+    let kernel_direct_entry = unsafe {
+        core::ptr::addr_of!(PML4.0)
+            .cast::<u64>()
+            .add(DIRECT_MAP_PML4_INDEX)
+            .read()
+    };
     let shared = unsafe { entries.read() };
     let user = unsafe { entries.add(1).read() };
+    let direct = unsafe { entries.add(DIRECT_MAP_PML4_INDEX).read() };
     if shared != kernel_entry
+        || direct != kernel_direct_entry
         || shared & PRESENT == 0
         || shared & USER != 0
+        || direct & PRESENT == 0
+        || direct & USER != 0
         || user & (PRESENT | WRITABLE | USER) != (PRESENT | WRITABLE | USER)
         || user & (LARGE_PAGE | NO_EXECUTE) != 0
-        || !(2..ENTRY_COUNT).all(|index| unsafe { entries.add(index).read() == 0 })
+        || !(2..ENTRY_COUNT).all(|index| {
+            index == DIRECT_MAP_PML4_INDEX || unsafe { entries.add(index).read() == 0 }
+        })
     {
         return None;
     }
@@ -196,6 +211,8 @@ pub(crate) unsafe fn install_initial_identity_map(
     zero_entries(pdpt);
 
     pml4.write((pdpt_address as u64) | PRESENT | WRITABLE);
+    pml4.add(DIRECT_MAP_PML4_INDEX)
+        .write((pdpt_address as u64) | PRESENT | WRITABLE);
 
     for directory_index in 0..DIRECTORY_COUNT {
         let directory = directories.add(directory_index);
@@ -482,6 +499,27 @@ pub(crate) fn supervisor_write_protect_enabled() -> bool {
         );
     }
     cr0 & CR0_WRITE_PROTECT != 0
+}
+
+pub(crate) fn direct_map_address(physical: usize) -> Option<usize> {
+    if physical >= INITIAL_IDENTITY_LIMIT {
+        return None;
+    }
+    DIRECT_MAP_BASE.checked_add(physical)
+}
+
+pub(crate) fn direct_map_alias_is_valid() -> bool {
+    let pml4 = unsafe { core::ptr::addr_of!(PML4.0).cast::<u64>() };
+    let identity = unsafe { pml4.read() };
+    let direct = unsafe { pml4.add(DIRECT_MAP_PML4_INDEX).read() };
+    if (identity ^ direct) & !ACCESSED != 0 || direct & PRESENT == 0 || direct & USER != 0 {
+        return false;
+    }
+    let physical = core::ptr::addr_of!(PML4) as usize;
+    let Some(alias) = direct_map_address(physical) else {
+        return false;
+    };
+    unsafe { (alias as *const u64).read() == (physical as *const u64).read() }
 }
 
 pub(crate) fn static_page_tables_are_read_only() -> bool {

@@ -279,6 +279,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: kernel identity-map W^X inactive\r\n");
     }
     serial_write("ginux: NX-by-default identity map active\r\n");
+    if !arch::x86_64::paging::direct_map_alias_is_valid() {
+        kernel_fail("ginux: higher-half direct-map alias invalid\r\n");
+    }
+    serial_write("ginux: supervisor-only higher-half direct map active\r\n");
     serial_write("ginux: PE executable identity pages read-only\r\n");
     serial_write("ginux: PE image section permissions enforced\r\n");
     if !arch::x86_64::paging::identity_range_is_read_only_data(

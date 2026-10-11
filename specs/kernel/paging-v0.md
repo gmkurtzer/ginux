@@ -11,11 +11,24 @@ Remove the kernel's dependency on firmware-owned page tables while preserving th
 The kernel constructs and activates its own four-level x86-64 page tables:
 
 - PML4 entry 0 addresses one page-directory-pointer table.
+- PML4 entry 256 addresses the same page-directory-pointer table, providing a
+  higher-half alias beginning at `0xffff800000000000`.
 - The first four pointer-table entries address four page directories.
 - Most page-directory entries identity-map 2 MiB pages.
 - Regions containing protected pages or executable UEFI descriptors are split
   into 4 KiB mappings.
 - The resulting transitional address space identity maps physical addresses from 0 through 4 GiB.
+
+The higher-half alias covers that same 4 GiB physical range and is
+supervisor-only. It deliberately shares the identity map's complete lower-level
+hierarchy rather than using separately permissive leaves. Consequently, every
+read-only, non-present, and NX decision—including guard pages, kernel image
+permissions, and sealed page-table pages—is identical through both aliases.
+Every derived domain root copies both supervisor-only kernel PML4 entries, and
+root validation rejects a missing, altered, or user-accessible direct-map entry.
+The kernel verifies the alias after CR3 activation by comparing its PML4 entry
+with the identity entry, excluding only the hardware-maintained Accessed bit,
+and reading the PML4 page through both addresses.
 
 Physical page zero and the pages immediately below and above the bootstrap,
 privilege-transition, and double-fault stacks are deliberately not present.
@@ -74,6 +87,11 @@ This map is intentionally transitional:
 - Most identity-map aliases remain writable, so this revision does not yet make
   kernel text or user-code physical frames immutable through every alias.
 - Addresses above 4 GiB are unavailable.
+- Kernel code and most physical-frame operations still use identity addresses;
+  the higher-half alias is present but is not yet the exclusive physical-memory
+  access path.
+- The low identity mapping cannot be replaced by conventional Linux lower-half
+  mappings until those kernel accesses migrate to the direct map.
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.
 
 Untrusted code executes only in domain roots where this identity map is
