@@ -268,6 +268,11 @@ if ! grep -q '^ginux: capability-gated bounded IPC verified' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated service request-reply completed' "$output_file"; then
+    echo "Boot test failed: isolated service request/reply did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: per-thread syscall budgets enforced' "$output_file"; then
     echo "Boot test failed: per-thread syscall accounting failed." >&2
     exit 1

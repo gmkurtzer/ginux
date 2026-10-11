@@ -3,14 +3,14 @@
 b801000000
 cd80
 3dfeffffff
-0f85bd000000
+0f85be000000
 
 # mov rdi, rbx; allowed host read with host-control handle
 4889df
 b801000000
 cd80
 3d58470000
-0f85a8000000
+0f85a9000000
 
 # reject IPC send through a capability for the wrong object
 4889cf
@@ -18,7 +18,7 @@ cd80
 b804000000
 cd80
 3dfdffffff
-0f8590000000
+0f8591000000
 
 # reject console write through the host-control capability
 4889df
@@ -27,7 +27,7 @@ ba08000000
 b806000000
 cd80
 3dfdffffff
-0f856c000000
+0f856d000000
 
 # write "USER_OK\n" through the console capability
 4889cf
@@ -36,17 +36,17 @@ ba08000000
 b806000000
 cd80
 83f808
-0f854a000000
+0f854b000000
 
 # negotiate call-gate ABI v1 and its six bootstrap features
 b800000000
 cd80
 3d3f000100
-0f8538000000
+0f8539000000
 
-# context 2 deliberately raises invalid-opcode for containment proof
+# branch context 2 into the isolated service role
 4983f902
-7434
+7435
 
 # enqueue this context's identity through the IPC capability
 4c89c7
@@ -54,23 +54,37 @@ cd80
 b804000000
 cd80
 85c0
-7521
+7522
 
 # cooperatively yield once, then require a zero resume result
 b803000000
 cd80
 85c0
-7516
+7517
 
-# dequeue and require this context's FIFO message
+# dequeue and require the service's transformed reply
 4c89c7
 b805000000
 cd80
-4c39c8
+4883f802
 7507
 
-# exit; first ud2 is failure, second is the expected context-2 fault
+# client exit; ud2 is the common failure target
 b802000000
 cd80
 0f0b
+
+# service: receive request 1, reply 2, then fault for supervision proof
+4c89c7
+b805000000
+cd80
+4883f801
+75ee
+48ffc0
+4889c6
+4c89c7
+b804000000
+cd80
+85c0
+75da
 0f0b
