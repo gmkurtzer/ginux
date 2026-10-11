@@ -23,7 +23,7 @@ Writable-executable mappings are rejected. The entry point must lie inside the
 executable segment. The boot verifier accepts a synthetic image whose bounded
 RX segment starts at file offset zero, includes its ELF/program headers and
 code, and uses a non-page-base entry. Its RW segment has eight file bytes and a
-512-byte memory extent. The verifier then rejects
+4608-byte memory extent spanning two pages. The verifier then rejects
 bad magic, wrong class, non-executable file type, wrong machine, an out-of-range
 entry point, W+X flags, overflowing file size, overlapping virtual ranges, an
 executable GNU stack, a non-load segment header, and truncation. The same image
@@ -47,20 +47,20 @@ preserves the ELF and program-header tables and places instructions at their
 file-relative offset. The writable segment's file tail through `p_memsz` and
 all remaining page bytes are zero. The QEMU verifier checks the ELF magic,
 exact RX instructions, RW data bytes, W^X metadata, and every zero-filled tail
-byte. Runtime address-space installation remains deliberately restricted to
-one page per segment and fails closed on a two-page plan until the mapper owns
-and tears down the additional frames.
+byte. Runtime address-space installation owns and tears down every planned
+page, including a second BSS-only RW/NX page.
 
-The QEMU proof installs the two pages into a newly allocated x86-64
-root at their declared `0x400000` and `0x401000` addresses. It privately clones
+The QEMU proof installs an RX page at `0x400000` and two RW/NX pages at
+`0x401000` and `0x402000` into a newly allocated x86-64 root. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
-target leaves; retains the supervisor-only higher-half direct map; and verifies
+segment ranges; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
-map. A seventh owned page at `0x402000` supplies one zero-filled RW/NX heap
-page. An eighth owned page at `0x404000` supplies a RW/NX stack; its adjacent
-pages remain supervisor-only. Before changing CR3, the proof rejects either
+map. An owned page at `0x403000` supplies one zero-filled RW/NX heap page. The
+page at `0x404000` remains an unmapped lower stack guard, and an owned page at
+`0x405000` supplies a RW/NX stack; `0x406000` remains an upper guard. Before
+changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.
-It then activates the root, observes both ELF pages through
+It then activates the root, observes all three ELF pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
 entry at `0x400100`, while syscall return validation remains bounded to its
 `0x400000` executable page. The proof instructions live in checked-in x86-64
@@ -76,8 +76,8 @@ the declared data segment; invalid operation and destination tests require
 `uname(0x401000)` subsequently
 copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. Both
-copy directions are checked against the segment's 512-byte `p_memsz`, rather
-than the rest of its mapped 4096-byte page. Copy helpers also accept heap bytes
+copy directions are checked against the segment's 4608-byte `p_memsz`, rather
+than the rest of its final mapped page. Copy helpers also accept heap bytes
 strictly below the current break, not the entire mapped heap page, and ranges
 wholly inside the user stack page. Copy-in additionally permits the declared
 RX ELF memory extent; copy-out does not. The proof reads an embedded RX payload
@@ -94,8 +94,8 @@ registered word before completing exit and verifies it after returning from
 ring 3. Those calls are
 accepted only while an atomic probe flag is armed; exit returns directly to the
 saved kernel stack. The kernel verifies a ring-3 heap write after exit. The
-proof restores and reads back the kernel root, then clears and releases all
-eight root/table/payload/heap/stack frames.
+proof restores and reads back the kernel root, then clears and releases all ten
+root/table/reserved-segment/heap/stack frames.
 
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the

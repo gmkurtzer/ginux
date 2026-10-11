@@ -571,10 +571,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
     }
     serial_write("ginux: bounded multi-page Linux ELF plan verified\r\n");
-    serial_write("ginux: Linux ELF headers mapped in executable segment\r\n");
     if !linux_elf::verify_mapped_load_plan(boot_info.image_base as u64, boot_info.image_size) {
         kernel_fail("ginux: Linux ELF64 address-space mapping failed\r\n");
     }
+    serial_write("ginux: Linux ELF headers mapped in executable segment\r\n");
+    serial_write("ginux: bounded multi-page Linux ELF mapping verified\r\n");
     serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
     serial_write("ginux: Linux proof workload assembled from source\r\n");
     serial_write("ginux: Linux container-local root credentials verified\r\n");

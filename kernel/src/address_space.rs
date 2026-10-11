@@ -44,13 +44,22 @@ pub(crate) fn verify_linux_elf_mapping(
     };
     let first_indexes = indexes(first.virtual_page);
     let second_indexes = indexes(second.virtual_page);
+    let first_last_page = first
+        .virtual_page
+        .checked_add((first.page_count - 1) as u64 * PAGE_SIZE as u64)
+        .unwrap_or(0);
+    let second_last_page = second
+        .virtual_page
+        .checked_add((second.page_count - 1) as u64 * PAGE_SIZE as u64)
+        .unwrap_or(0);
+    let first_last_indexes = indexes(first_last_page);
+    let second_last_indexes = indexes(second_last_page);
     let heap_virtual_page = second
         .virtual_page
-        .checked_add(PAGE_SIZE as u64)
+        .checked_add(second.page_count as u64 * PAGE_SIZE as u64)
         .unwrap_or(0);
-    let stack_virtual_page = second
-        .virtual_page
-        .checked_add(3 * PAGE_SIZE as u64)
+    let stack_virtual_page = heap_virtual_page
+        .checked_add(2 * PAGE_SIZE as u64)
         .unwrap_or(0);
     let heap_indexes = indexes(heap_virtual_page);
     let stack_indexes = indexes(stack_virtual_page);
@@ -63,32 +72,39 @@ pub(crate) fn verify_linux_elf_mapping(
     };
     if protected_size == 0
         || overlaps_protected(first.virtual_page)
+        || overlaps_protected(first_last_page)
         || overlaps_protected(second.virtual_page)
+        || overlaps_protected(second_last_page)
+        || first_last_page == 0
+        || second_last_page == 0
         || heap_virtual_page == 0
         || stack_virtual_page == 0
         || overlaps_protected(heap_virtual_page)
         || overlaps_protected(stack_virtual_page)
         || first_indexes[..3] != second_indexes[..3]
+        || first_last_indexes[..3] != first_indexes[..3]
+        || second_last_indexes[..3] != first_indexes[..3]
         || heap_indexes[..3] != first_indexes[..3]
         || stack_indexes[..3] != first_indexes[..3]
         || first_indexes[0] != 0
         || first_indexes[1] != 0
-        || first.page_count != 1
-        || second.page_count != 1
-        || first.writable == first.executable
-        || second.writable == second.executable
-        || first.writable == second.writable
+        || first.writable
+        || !first.executable
+        || !second.writable
+        || second.executable
+        || first_last_page >= second.virtual_page
         || plan.entry < first.virtual_page
         || plan.entry >= first.virtual_page + PAGE_SIZE as u64
         || !cpu::verify_linux_copy_bounds(second.virtual_page, second.memory_size)
     {
         return false;
     }
-    let Some(frames) = memory::allocate_frames::<8>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<10>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, table, first_page, second_page, heap_page, stack_page] = addresses;
+    let [root, pdpt, directory, table, first_page, first_tail_page, second_page, second_tail_page, heap_page, stack_page] =
+        addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
         unsafe {
@@ -134,9 +150,17 @@ pub(crate) fn verify_linux_elf_mapping(
                 .write(table | PRESENT | WRITABLE | USER);
 
             let first_bytes = &mut *(mapped_frame::<u8>(first_page)? as *mut [u8; PAGE_SIZE]);
+            let first_tail_bytes =
+                &mut *(mapped_frame::<u8>(first_tail_page)? as *mut [u8; PAGE_SIZE]);
             let second_bytes = &mut *(mapped_frame::<u8>(second_page)? as *mut [u8; PAGE_SIZE]);
+            let second_tail_bytes =
+                &mut *(mapped_frame::<u8>(second_tail_page)? as *mut [u8; PAGE_SIZE]);
             if !crate::linux_elf::materialize(first, first_bytes)
                 || !crate::linux_elf::materialize(second, second_bytes)
+                || first.page_count == 2
+                    && !crate::linux_elf::materialize_page(first, 1, first_tail_bytes)
+                || second.page_count == 2
+                    && !crate::linux_elf::materialize_page(second, 1, second_tail_bytes)
                 || zero_frame(heap_page).is_none()
             {
                 return None;
@@ -151,9 +175,19 @@ pub(crate) fn verify_linux_elf_mapping(
             table_entries
                 .add(first_indexes[3])
                 .write(first_page | flags(first));
+            if first.page_count == 2 {
+                table_entries
+                    .add(first_indexes[3] + 1)
+                    .write(first_tail_page | flags(first));
+            }
             table_entries
                 .add(second_indexes[3])
                 .write(second_page | flags(second));
+            if second.page_count == 2 {
+                table_entries
+                    .add(second_indexes[3] + 1)
+                    .write(second_tail_page | flags(second));
+            }
             table_entries
                 .add(heap_indexes[3])
                 .write(heap_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
@@ -220,29 +254,47 @@ pub(crate) fn verify_linux_elf_mapping(
             );
 
             let first_entry = table_entries.add(first_indexes[3]).read();
+            let first_tail_entry = table_entries.add(first_indexes[3] + 1).read();
             let second_entry = table_entries.add(second_indexes[3]).read();
+            let second_tail_entry = table_entries.add(second_indexes[3] + 1).read();
             let heap_entry = table_entries.add(heap_indexes[3]).read();
             let stack_entry = table_entries.add(stack_indexes[3]).read();
             let lower_guard = table_entries.add(stack_indexes[3] - 1).read();
             let upper_guard = table_entries.add(stack_indexes[3] + 1).read();
+            let page_matches = |segment: crate::linux_elf::PlannedSegment<'_>,
+                                page_index: usize,
+                                page: &[u8; PAGE_SIZE]| {
+                let file_start = page_index * PAGE_SIZE;
+                if file_start >= segment.bytes.len() {
+                    return page.iter().all(|byte| *byte == 0);
+                }
+                let file_end = segment.bytes.len().min(file_start + PAGE_SIZE);
+                let file_length = file_end - file_start;
+                page[..file_length] == segment.bytes[file_start..file_end]
+                    && page[file_length..].iter().all(|byte| *byte == 0)
+            };
             let entries_valid = root_entries.add(256).read() == kernel_root.add(256).read()
                 && root_entries.add(256).read() & USER == 0
                 && first_entry & (PRESENT | USER) == PRESENT | USER
                 && first_entry & (WRITABLE | NO_EXECUTE) == 0
+                && (first.page_count == 1
+                    || first_tail_entry & (PRESENT | USER) == PRESENT | USER
+                        && first_tail_entry & (WRITABLE | NO_EXECUTE) == 0)
                 && second_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
+                && (second.page_count == 1
+                    || second_tail_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                        == PRESENT | WRITABLE | USER | NO_EXECUTE)
                 && heap_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
                 && stack_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
                 && lower_guard & USER == 0
                 && upper_guard & USER == 0
-                && first_bytes[..first.bytes.len()] == *first.bytes
-                && first_bytes[first.bytes.len()..]
-                    .iter()
-                    .all(|byte| *byte == 0)
-                && second_bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
-                && second_bytes[8..].iter().all(|byte| *byte == 0)
+                && page_matches(first, 0, first_bytes)
+                && (first.page_count == 1 || page_matches(first, 1, first_tail_bytes))
+                && page_matches(second, 0, second_bytes)
+                && (second.page_count == 1 || page_matches(second, 1, second_tail_bytes))
                 && heap_bytes.iter().all(|byte| *byte == 0)
                 && stack_words.read() == 1
                 && stack_words.add(1).read() == argument_address

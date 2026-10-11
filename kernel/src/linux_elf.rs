@@ -250,7 +250,7 @@ pub(crate) fn verify_parser() -> bool {
         || parsed.segments[0].flags != PF_READ | PF_EXECUTE
         || parsed.segments[1].bytes != [1, 2, 3, 4, 5, 6, 7, 8]
         || parsed.segments[1].virtual_address != 0x40_1000
-        || parsed.segments[1].memory_size != 512
+        || parsed.segments[1].memory_size != (PAGE_SIZE + 512) as u64
         || parsed.segments[1].flags != PF_READ | PF_WRITE
     {
         return false;
@@ -288,12 +288,7 @@ pub(crate) fn verify_load_plan() -> bool {
     };
     let mut executable_page = [0xa5_u8; PAGE_SIZE];
     let mut writable_page = [0xa5_u8; PAGE_SIZE];
-    let mut multi_page_image = image;
-    write_u64(
-        &mut multi_page_image,
-        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 40,
-        (PAGE_SIZE + 512) as u64,
-    );
+    let multi_page_image = image;
     let Some(multi_page_plan) = parse(&multi_page_image).and_then(|image| plan(&image)) else {
         return false;
     };
@@ -314,7 +309,7 @@ pub(crate) fn verify_load_plan() -> bool {
             .iter()
             .all(|byte| *byte == 0)
         && current_plan.segments[1].virtual_page == 0x40_1000
-        && current_plan.segments[1].page_count == 1
+        && current_plan.segments[1].page_count == 2
         && current_plan.segments[1].writable
         && !current_plan.segments[1].executable
         && writable_page[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
@@ -372,7 +367,7 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
         FIXTURE_DATA_OFFSET as u64,
         0x40_1000,
         8,
-        512,
+        (PAGE_SIZE + 512) as u64,
         PF_READ | PF_WRITE,
     );
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
