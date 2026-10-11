@@ -54,6 +54,7 @@ const LINUX_GETEUID_SYSCALL: u64 = 107;
 const LINUX_GETEGID_SYSCALL: u64 = 108;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
+const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
@@ -63,6 +64,7 @@ const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
+const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -142,6 +144,7 @@ static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ENTRY: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -699,15 +702,21 @@ pub(crate) fn verify_linux_elf_entry(
     ELF_PROBE_ENTRY.store((entry & !(PAGE_SIZE - 1)) as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(data as u64, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(data_size as u64, Ordering::SeqCst);
+    ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
+    let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
+    let mut cleared_tid = [0xff_u8; size_of::<u32>()];
+    let child_tid_cleared = clear_child_tid == data as u64 + LINUX_CLEAR_CHILD_TID_OFFSET
+        && copy_from_linux_user(clear_child_tid, &mut cleared_tid)
+        && cleared_tid == [0; size_of::<u32>()];
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
-    inactive && completed && msrs_restored
+    inactive && completed && child_tid_cleared && msrs_restored
 }
 
 fn configure_linux_syscall() -> Option<[u64; 5]> {
@@ -993,6 +1002,13 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_GETPID_SYSCALL | LINUX_GETTID_SYSCALL => 1,
+        LINUX_SET_TID_ADDRESS_SYSCALL => {
+            if !linux_user_range_contains(first_argument, size_of::<u32>()) {
+                return LINUX_EFAULT;
+            }
+            ELF_PROBE_CLEAR_CHILD_TID.store(first_argument, Ordering::SeqCst);
+            1
+        }
         LINUX_GETUID_SYSCALL
         | LINUX_GETGID_SYSCALL
         | LINUX_GETEUID_SYSCALL
@@ -1032,6 +1048,10 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {
+            let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.load(Ordering::SeqCst);
+            if clear_child_tid == 0 || !copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes()) {
+                return LINUX_EFAULT;
+            }
             ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
             u64::MAX

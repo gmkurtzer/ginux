@@ -558,6 +558,11 @@ if ! grep -q '^ginux: Linux FS base query validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux clear-child-TID exit action validated' "$output_file"; then
+    echo "Boot test failed: Linux clear-child-TID exit action was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

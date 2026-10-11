@@ -25,7 +25,9 @@ ranges and write arguments return Linux `-EFAULT`, `-EBADF`, or `-EINVAL`.
 The ring-3 workload verifies each error and continues into valid calls.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
-Its initial single thread reports both PID 1 and TID 1.
+Its initial single thread reports both PID 1 and TID 1. A bounded
+`set_tid_address` registration returns TID 1 and clears the registered word as
+part of exit.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

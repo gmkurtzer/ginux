@@ -114,6 +114,19 @@ ginux_linux_probe:
     cmp rax, 1
     jne failure
 
+    mov edi, 0x401200
+    mov eax, 218
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov dword ptr [0x401190], 0x12345678
+    mov edi, 0x401190
+    mov eax, 218
+    syscall
+    cmp rax, 1
+    jne failure
+
     mov r10d, 0x12345678
     mov edi, 0x11223344
     mov eax, 39

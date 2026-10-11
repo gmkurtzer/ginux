@@ -75,8 +75,10 @@ the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 512-byte `p_memsz`, rather
 than the rest of its mapped 4096-byte page. It next
 issues `getpid`, verifies PID 1 after the kernel resumes it through `SYSRETQ`,
-verifies preserved first and fourth argument registers, and issues Linux
-`exit_group(42)`. Those calls are
+registers a bounded clear-child-TID word, verifies preserved first and fourth
+argument registers, and issues Linux `exit_group(42)`. The kernel clears the
+registered word before completing exit and verifies it after returning from
+ring 3. Those calls are
 accepted only while an atomic probe flag is armed; exit returns directly to the
 saved kernel stack. The proof restores and reads back the kernel root, then
 clears and releases all seven root/table/payload/stack frames.
