@@ -274,6 +274,7 @@ static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP_ACTIVE: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_MMAP_WRITABLE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
@@ -884,6 +885,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_MMAP.store(execution.mmap as u64, Ordering::SeqCst);
     ELF_PROBE_MMAP_FRAME.store(execution.mmap_frame, Ordering::SeqCst);
     ELF_PROBE_MMAP_ACTIVE.store(false, Ordering::SeqCst);
+    ELF_PROBE_MMAP_WRITABLE.store(false, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
     ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
@@ -921,9 +923,12 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && ELF_PROBE_DIRECTORY_CURSOR.swap(0, Ordering::SeqCst) == 0;
     let clock_state_valid = ELF_PROBE_CLOCK_EPOCH.swap(0, Ordering::SeqCst) != 0
         && ELF_PROBE_CLOCK_FREQUENCY.swap(0, Ordering::SeqCst) == clock_frequency;
-    let mmap_state_valid = !ELF_PROBE_MMAP_ACTIVE.swap(false, Ordering::SeqCst)
-        && ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64
-        && ELF_PROBE_MMAP_FRAME.swap(0, Ordering::SeqCst) == execution.mmap_frame;
+    let mmap_inactive = !ELF_PROBE_MMAP_ACTIVE.swap(false, Ordering::SeqCst);
+    let mmap_not_writable = !ELF_PROBE_MMAP_WRITABLE.swap(false, Ordering::SeqCst);
+    let mmap_address_valid = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64;
+    let mmap_frame_valid = ELF_PROBE_MMAP_FRAME.swap(0, Ordering::SeqCst) == execution.mmap_frame;
+    let mmap_state_valid =
+        mmap_inactive && mmap_not_writable && mmap_address_valid && mmap_frame_valid;
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
         == LINUX_INITIAL_PROCESS_NAME
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
@@ -1287,25 +1292,33 @@ extern "sysv64" fn linux_syscall_handler(
         ),
         LINUX_MUNMAP_SYSCALL => linux_munmap(first_argument, buffer),
         LINUX_MPROTECT_SYSCALL => {
-            let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
-            let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
-            if relro == 0
-                || relro_size == 0
-                || relro_size > PAGE_SIZE as u64
-                || first_argument != relro
-                || !relro.is_multiple_of(PAGE_SIZE as u64)
+            if !first_argument.is_multiple_of(PAGE_SIZE as u64)
                 || buffer != PAGE_SIZE as u64
                 || count != LINUX_PROT_READ
             {
                 return LINUX_EINVAL;
             }
-            if ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst) != 0
-                || !crate::address_space::protect_current_user_page_read_only(first_argument)
+            let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
+            let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
+            if first_argument == relro
+                && relro_size != 0
+                && relro_size <= PAGE_SIZE as u64
+                && ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst) == 0
+                && address_space::protect_current_user_page_read_only(first_argument)
             {
-                return LINUX_EINVAL;
+                ELF_PROBE_READ_ONLY_DATA_PAGE.store(first_argument, Ordering::SeqCst);
+                return 0;
             }
-            ELF_PROBE_READ_ONLY_DATA_PAGE.store(first_argument, Ordering::SeqCst);
-            0
+            let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+            if first_argument == mapping
+                && ELF_PROBE_MMAP_ACTIVE.load(Ordering::SeqCst)
+                && ELF_PROBE_MMAP_WRITABLE.load(Ordering::SeqCst)
+                && address_space::protect_current_user_page_read_only(first_argument)
+            {
+                ELF_PROBE_MMAP_WRITABLE.store(false, Ordering::SeqCst);
+                return 0;
+            }
+            LINUX_EINVAL
         }
         LINUX_IOCTL_SYSCALL => {
             let device = linux_device_descriptor(first_argument);
@@ -1669,6 +1682,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
         return LINUX_ENOMEM;
     }
     ELF_PROBE_MMAP_ACTIVE.store(true, Ordering::SeqCst);
+    ELF_PROBE_MMAP_WRITABLE.store(true, Ordering::SeqCst);
     mapping
 }
 
@@ -1685,6 +1699,7 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
         return LINUX_EINVAL;
     }
     ELF_PROBE_MMAP_ACTIVE.store(false, Ordering::SeqCst);
+    ELF_PROBE_MMAP_WRITABLE.store(false, Ordering::SeqCst);
     0
 }
 
@@ -2324,6 +2339,7 @@ fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {
     }
     let mmap_base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
     if ELF_PROBE_MMAP_ACTIVE.load(Ordering::SeqCst)
+        && ELF_PROBE_MMAP_WRITABLE.load(Ordering::SeqCst)
         && linux_range_contains(mmap_base, PAGE_SIZE as u64, address, length)
     {
         return true;
@@ -2358,6 +2374,19 @@ fn linux_range_contains(base: u64, size: u64, address: u64, length: usize) -> bo
             .is_some_and(|end| end <= base.saturating_add(size))
 }
 
+fn linux_readable_user_range_contains(address: u64, length: usize) -> bool {
+    if linux_writable_user_range_contains(address, length) {
+        return true;
+    }
+    ELF_PROBE_MMAP_ACTIVE.load(Ordering::SeqCst)
+        && linux_range_contains(
+            ELF_PROBE_MMAP.load(Ordering::SeqCst),
+            PAGE_SIZE as u64,
+            address,
+            length,
+        )
+}
+
 pub(crate) fn verify_linux_copy_bounds(base: u64, size: usize) -> bool {
     size >= LINUX_UTSNAME_SIZE
         && linux_range_contains(base, size as u64, base, LINUX_UTSNAME_SIZE)
@@ -2384,7 +2413,7 @@ fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
     let data_size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
     if !linux_range_contains(code_base, code_size, address, output.len())
         && !linux_range_contains(data_base, data_size, address, output.len())
-        && !linux_writable_user_range_contains(address, output.len())
+        && !linux_readable_user_range_contains(address, output.len())
     {
         return false;
     }

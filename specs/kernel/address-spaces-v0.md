@@ -43,6 +43,8 @@ That Linux proof also reserves one physical frame behind an initially absent
 leaf at `0x409000`. Its bounded anonymous mapping call validates an exact
 RW/NX request before installing the leaf; unmap clears the leaf, invalidates
 the local translation, and scrubs the frame before it can be installed again.
+While active, its writable leaf can be irreversibly sealed read-only; copy
+permissions change with the hardware leaf, and unmap accepts either state.
 The gate observes the leaf absent after ring-3 exit. This is a single-core,
 single-slot lifecycle, not a general VMA allocator or TLB-shootdown protocol.
 

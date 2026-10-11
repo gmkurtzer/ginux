@@ -674,8 +674,7 @@ pub(crate) fn unmap_current_linux_page(address: u64, frame: u64) -> bool {
     unsafe {
         let value = entry.read();
         if value & ADDRESS_MASK != frame
-            || value & (PRESENT | WRITABLE | USER | NO_EXECUTE)
-                != PRESENT | WRITABLE | USER | NO_EXECUTE
+            || value & (PRESENT | USER | NO_EXECUTE) != PRESENT | USER | NO_EXECUTE
         {
             return false;
         }

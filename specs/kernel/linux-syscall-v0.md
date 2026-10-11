@@ -289,16 +289,19 @@ foreign PIDs return `-ESRCH`. Both eight-byte output ranges are validated before
 either is changed. Exit discards the registration, but no robust futex traversal
 or recovery is attempted.
 
-`rax = 10` (`__NR_mprotect`) supports one irreversible transition: the page
-named by the parsed `PT_GNU_RELRO` range may become read-only/NX for the rest of
-the process lifetime. The normalized range must be present, nonempty, and no
-larger than one page; the address and 4096-byte length must be page-aligned and
-exact, and the only accepted protection is `PROT_READ`. All other requests
-return `-EINVAL`. The kernel clears the hardware leaf's writable bit, invalidates
-that translation, and records the VMA change before resuming userspace. The
-probe confirms that a subsequent `write` can still copy from the page while
-`uname` copy-out returns `-EFAULT`. Repeating the transition is rejected. This
-is a bounded RELRO mechanism, not a general memory-management API. The probe
+`rax = 10` (`__NR_mprotect`) supports one irreversible transition on either the
+page named by the parsed `PT_GNU_RELRO` range or the active anonymous mapping:
+the exact page may become read-only/NX. The RELRO seal lasts for the process
+lifetime; an anonymous seal lasts until unmap, and a later anonymous mapping
+starts from a freshly scrubbed RW/NX frame. The normalized range must be
+present, the address and 4096-byte length must be page-aligned and exact, and
+the only accepted protection is `PROT_READ`. All other requests return
+`-EINVAL`. The kernel clears the hardware leaf's writable bit, invalidates that
+translation, and records the VMA change before resuming userspace. The probe
+confirms that copy-in remains available while `uname` copy-out returns
+`-EFAULT`, repeated sealing is rejected, a read-only mapping can still be
+unmapped, and remapping restores writable state without prior contents. This
+is a bounded write seal, not a general memory-management API. The probe
 finally uses `rax = 231`
 (`__NR_exit_group`) with `rdi = 42` (status).
 Immediately before entry, the kernel:

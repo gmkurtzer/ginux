@@ -693,6 +693,11 @@ if ! grep -q '^ginux: Linux bounded anonymous mapping lifecycle validated' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux anonymous mapping write seal validated' "$output_file"; then
+    echo "Boot test failed: Linux anonymous mapping write seal was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux heap copy bounds validated' "$output_file"; then
     echo "Boot test failed: Linux heap copy bounds were not validated." >&2
     exit 1
