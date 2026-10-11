@@ -558,6 +558,26 @@ if ! grep -q '^ginux: owned root frame scrubbed and released' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded read-only root index constructed' "$output_file"; then
+    echo "Boot test failed: the read-only root index was not constructed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: root lookups resolved only owned image bytes' "$output_file"; then
+    echo "Boot test failed: root lookups escaped owned image bytes." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: invalid root lookup paths denied' "$output_file"; then
+    echo "Boot test failed: invalid root lookup paths were accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: indexed root frame scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the indexed root frame was not reclaimed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: non-executable Linux GNU stack enforced' "$output_file"; then
     echo "Boot test failed: Linux GNU stack policy was not enforced." >&2
     exit 1

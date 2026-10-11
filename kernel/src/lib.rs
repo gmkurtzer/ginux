@@ -606,6 +606,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured root image copied into owned memory\r\n");
     serial_write("ginux: owned root image remained source-independent\r\n");
     serial_write("ginux: owned root frame scrubbed and released\r\n");
+    if !initramfs::verify_read_only_index(root_image) {
+        kernel_fail("ginux: read-only root index failed\r\n");
+    }
+    serial_write("ginux: bounded read-only root index constructed\r\n");
+    serial_write("ginux: root lookups resolved only owned image bytes\r\n");
+    serial_write("ginux: invalid root lookup paths denied\r\n");
+    serial_write("ginux: indexed root frame scrubbed and released\r\n");
     if !linux_elf::verify_parser() {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
     }

@@ -9,6 +9,7 @@ const MAX_NAME_SIZE: usize = 256;
 const MAX_FILE_SIZE: usize = 8 * 1024 * 1024;
 const MAX_VERIFICATION_IMAGE_SIZE: usize = 4096;
 const PAGE_SIZE: usize = 4096;
+const MAX_INDEXED_ENTRIES: usize = 16;
 const TYPE_MASK: u32 = 0o170000;
 const DIRECTORY: u32 = 0o040000;
 const REGULAR: u32 = 0o100000;
@@ -403,5 +404,133 @@ pub(crate) fn verify_owned_materialization(source: &[u8]) -> bool {
         && independent
         && restored
         && released
+        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
+}
+
+#[derive(Clone, Copy)]
+struct RootNode {
+    name_offset: u16,
+    name_size: u16,
+    data_offset: u16,
+    data_size: u16,
+    mode: u32,
+}
+
+const EMPTY_ROOT_NODE: RootNode = RootNode {
+    name_offset: 0,
+    name_size: 0,
+    data_offset: 0,
+    data_size: 0,
+    mode: 0,
+};
+
+struct ReadOnlyRoot {
+    image: OwnedRoot,
+    nodes: [RootNode; MAX_INDEXED_ENTRIES],
+    node_count: usize,
+}
+
+impl ReadOnlyRoot {
+    fn build(image: OwnedRoot) -> Option<Self> {
+        let Some((nodes, node_count)) = Self::build_nodes(&image) else {
+            let _ = image.release();
+            return None;
+        };
+        Some(Self {
+            image,
+            nodes,
+            node_count,
+        })
+    }
+
+    fn build_nodes(image: &OwnedRoot) -> Option<([RootNode; MAX_INDEXED_ENTRIES], usize)> {
+        let bytes = image.bytes()?;
+        let archive = parse(bytes)?;
+        if archive.entry_count() > MAX_INDEXED_ENTRIES {
+            return None;
+        }
+        let base = bytes.as_ptr() as usize;
+        let mut nodes = [EMPTY_ROOT_NODE; MAX_INDEXED_ENTRIES];
+        let mut offset = 0;
+        let mut node_count = 0;
+        loop {
+            let (entry, next, trailer) = parse_entry(bytes, offset)?;
+            if trailer {
+                break;
+            }
+            let name_offset = (entry.name.as_ptr() as usize).checked_sub(base)?;
+            let data_offset = (entry.data.as_ptr() as usize).checked_sub(base)?;
+            nodes[node_count] = RootNode {
+                name_offset: u16::try_from(name_offset).ok()?,
+                name_size: u16::try_from(entry.name.len()).ok()?,
+                data_offset: u16::try_from(data_offset).ok()?,
+                data_size: u16::try_from(entry.data.len()).ok()?,
+                mode: entry.mode,
+            };
+            node_count += 1;
+            offset = next;
+        }
+        (node_count == archive.entry_count()).then_some((nodes, node_count))
+    }
+
+    fn lookup(&self, name: &[u8]) -> Option<Entry<'_>> {
+        if !valid_name(name) {
+            return None;
+        }
+        let bytes = self.image.bytes()?;
+        for node in &self.nodes[..self.node_count] {
+            let name_start = usize::from(node.name_offset);
+            let name_end = name_start.checked_add(usize::from(node.name_size))?;
+            let stored_name = bytes.get(name_start..name_end)?;
+            if stored_name == name {
+                let data_start = usize::from(node.data_offset);
+                let data_end = data_start.checked_add(usize::from(node.data_size))?;
+                return Some(Entry {
+                    name: stored_name,
+                    data: bytes.get(data_start..data_end)?,
+                    mode: node.mode,
+                });
+            }
+        }
+        None
+    }
+
+    fn release(self) -> bool {
+        self.image.release()
+    }
+}
+
+pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let Some(image) = OwnedRoot::materialize(source) else {
+        return false;
+    };
+    let Some(root) = ReadOnlyRoot::build(image) else {
+        return false;
+    };
+    let base = root.image.frame.direct_map_address();
+    let init = root.lookup(b"init");
+    let valid = root.node_count == 6
+        && init.is_some_and(|entry| {
+            entry.mode == 0o100555
+                && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
+                && base.is_some_and(|start| {
+                    let address = entry.data.as_ptr() as usize;
+                    (start..start + PAGE_SIZE).contains(&address)
+                })
+        })
+        && [b"dev" as &[u8], b"etc", b"proc", b"sys", b"tmp"]
+            .iter()
+            .all(|name| {
+                root.lookup(name)
+                    .is_some_and(|entry| entry.mode & TYPE_MASK == DIRECTORY)
+            })
+        && root.lookup(b"missing").is_none()
+        && root.lookup(b"../init").is_none()
+        && root.lookup(b"/init").is_none();
+    valid
+        && root.release()
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }

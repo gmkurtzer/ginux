@@ -28,9 +28,15 @@ bytes, a zero tail, allocator ownership, and no source alias. It deliberately
 mutates and restores the private copy to prove the measured boot source does
 not change, then scrubs the complete frame before releasing its lease.
 
+A second lifecycle proof constructs a fixed index of at most 16 nodes. Each
+node stores only checked name and data offsets inside the owned image; no node
+retains a pointer into the handed boot source. Exact `init` and directory
+lookups resolve into the owned frame, while missing, absolute, and traversal
+paths fail. Destroying the index scrubs and releases its image frame.
+
 The `init` data is only a format marker; it is not yet a Linux ELF executable,
 PID 1, a mounted VFS root, or a runnable container image. Mount semantics,
 ownership beyond normalized root metadata, hard links, special nodes, extended
 attributes, compression, loading the image separately from the EFI binary,
-multi-page materialization, persistent ownership, and VFS publication are
-outside v0.
+multi-page materialization, persistent ownership, directory traversal APIs,
+mounts, mutable nodes, and VFS or service publication are outside v0.
