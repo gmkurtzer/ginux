@@ -6,13 +6,19 @@ The bootstrap scheduler owns eight fixed thread slots. A thread identifier
 contains a slot and generation, and each thread belongs to one native domain.
 The current lifecycle is:
 
-`absent -> Ready -> Running -> Ready ... -> absent`
+`absent -> Ready -> Running -> (Ready | Blocked) ... -> absent`
 
 Only the scheduler selects a `Ready` thread as `Running`. A yield is accepted
 only from the current running identity, returns it to `Ready`, and selects the
 next ready slot round-robin. Exit is likewise restricted to the current thread,
 removes it, and selects another ready thread. Slot reuse increments generation,
 so stale identifiers cannot observe or control a replacement.
+
+A blocking IPC receive atomically saves the current context, marks it
+`Blocked`, and selects another ready thread. If none exists, the transition is
+rolled back and the caller remains `Running`. A peer send writes its word into
+the sole blocked peer's saved result register and changes it to `Ready`; it
+does not grant authority or attach a new thread.
 
 Each thread owns a C-layout saved context containing all general-purpose
 registers, user RIP/RSP/RFLAGS, and its page-table root. Creation and yield
@@ -42,18 +48,20 @@ current proof, a timer preempts context 1 to context 2, which receives an IPC re
 expected invalid-opcode fault. The scheduler removes it, queues one replacement
 service generation on the retained service address space, rearms the timer, and
 switches back to context 1. The survivor consumes the reply and fault event,
-then the second preemption dispatches the replacement. It negotiates the ABI,
-exits cleanly, and resumes the control context, which verifies budget
-exhaustion and exits. The boot succeeds only after exactly two preemptions, no
-cooperative yields, one contained fault, two normal exits, one restart, and
-four cross-root dispatches.
+then the second preemption dispatches the replacement. It negotiates the ABI
+and blocks on an empty inbound IPC direction, resuming the control context.
+The control context directly wakes it with a message, verifies budget
+exhaustion, and exits. The awakened replacement observes the message and exits
+cleanly. The boot succeeds only after exactly two preemptions, no cooperative
+yields, one contained fault, two normal exits, one restart, one block/wake
+pair, and five cross-root dispatches.
 
 Call budgets belong to domains rather than threads. The control domain receives
-10 charged calls and each service generation receives three. Every call-gate
+11 charged calls and each service generation receives three. Every call-gate
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 14 charged calls, deliberately exhausts the control domain, and requires
+exactly 16 charged calls, deliberately exhausts the control domain, and requires
 its next discovery call to be rejected before it exits.
 
 This revision uses one guarded TSS privilege stack because execution is

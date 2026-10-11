@@ -3,14 +3,14 @@
 b801000000
 cd80
 3dfeffffff
-0f85fb000000
+0f8507010000
 
 # mov rdi, rbx; allowed host read with host-control handle
 4889df
 b801000000
 cd80
 3d58470000
-0f85e6000000
+0f85f2000000
 
 # reject IPC send through a capability for the wrong object
 4889cf
@@ -18,7 +18,7 @@ cd80
 b804000000
 cd80
 3dfdffffff
-0f85ce000000
+0f85da000000
 
 # reject console write through the host-control capability
 4889df
@@ -27,7 +27,7 @@ ba08000000
 b806000000
 cd80
 3dfdffffff
-0f85aa000000
+0f85b6000000
 
 # write "USER_OK\n" through the console capability
 4889cf
@@ -36,17 +36,17 @@ ba08000000
 b806000000
 cd80
 83f808
-0f8588000000
+0f8594000000
 
-# negotiate call-gate ABI v1 and its seven bootstrap features
+# negotiate call-gate ABI v1 and its eight bootstrap features
 b800000000
 cd80
-3d7f000100
-0f8576000000
+3dff000100
+0f8582000000
 
 # branch context 2 into the isolated service role
 4983f902
-7472
+747e
 
 # enqueue this context's identity through the IPC capability
 4c89c7
@@ -54,7 +54,7 @@ cd80
 b804000000
 cd80
 85c0
-755f
+756b
 
 # wait for the kernel's calibrated one-shot to preempt this context
 b900000001
@@ -67,27 +67,35 @@ e2fc
 b805000000
 cd80
 4883f802
-7544
+7550
 
 # reject fault-event receipt through the console capability
 4889cf
 b807000000
 cd80
 3dfdffffff
-0f852f000000
+0f853b000000
 
 # consume the service-fault event through host-control manage authority
 4889df
 b807000000
 cd80
 4883f801
-751f
+752b
 
 # wait for the rearmed one-shot to dispatch the replacement service
 b900000001
 f390
 e2fc
 31c0
+
+# send value 3 directly to the blocked replacement service
+4c89c7
+6a03
+5e
+b004
+cd80
+85c0
 
 # require the exhausted control-domain call budget to reject another call
 b800000000
@@ -115,11 +123,18 @@ cd80
 75da
 0f0b
 
-# replacement service: negotiate ABI, then exit cleanly
+# replacement service: negotiate ABI and block for a direct wakeup
 b800000000
 cd80
-3d7f000100
+3dff000100
 0f85c6ffffff
+4c89c7
+b808000000
+cd80
+4883f803
+0f85b2ffffff
+
+# replacement exits after receiving the control message
 b802000000
 cd80
 0f0b

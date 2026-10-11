@@ -17,7 +17,7 @@ const TSS_SELECTOR: u16 = 0x18;
 pub(crate) const USER_DATA_SELECTOR: u16 = 0x2b;
 pub(crate) const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
-const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_007f;
+const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_00ff;
 const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
@@ -567,11 +567,11 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
             let Some(frame) = (unsafe { frame.as_ref() }) else {
                 return u64::MAX;
             };
+            let message = frame.first_argument();
+            let from_service = domain::is_service_domain(caller_domain);
             if domain::handle_permits(caller_domain, capability, 3, Rights::WRITE)
-                && ipc::send(
-                    domain::is_service_domain(caller_domain),
-                    frame.first_argument(),
-                )
+                && (scheduler::wake_ipc_peer(caller_domain, message)
+                    || ipc::send(from_service, message))
             {
                 0
             } else {
@@ -593,7 +593,26 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
                 u64::MAX - 2
             }
         }
+        8 => blocking_receive(caller_domain, capability, frame),
         _ => u64::MAX,
+    }
+}
+
+fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    if !domain::handle_permits(domain_id, capability, 3, Rights::READ) {
+        return u64::MAX - 2;
+    }
+    if let Some(message) = ipc::receive(domain::is_service_domain(domain_id)) {
+        return message;
+    }
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return u64::MAX;
+    };
+    let action = scheduler::block_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
+    if matches!(action, RuntimeAction::Invalid) {
+        u64::MAX - 2
+    } else {
+        resume_action(action)
     }
 }
 

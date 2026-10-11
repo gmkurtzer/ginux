@@ -18,6 +18,7 @@ struct ThreadId {
 enum State {
     Ready,
     Running,
+    Blocked,
 }
 
 #[derive(Clone, Copy)]
@@ -307,6 +308,8 @@ struct Runtime {
     expected_fault_observed: bool,
     service_restart_context: UserContext,
     restarts: u8,
+    blocks: u8,
+    wakes: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -391,6 +394,52 @@ impl Scheduler {
         thread.state = State::Ready;
         self.current = None;
         self.schedule_next()
+    }
+
+    fn block_current(&mut self, id: ThreadId, saved: UserContext) -> Option<Scheduled> {
+        if self.current != Some(id) || !saved.is_valid() {
+            return None;
+        }
+        let thread = self.thread_mut(id)?;
+        if thread.state != State::Running {
+            return None;
+        }
+        let previous = thread.context;
+        thread.context = saved;
+        thread.state = State::Blocked;
+        self.current = None;
+        if let Some(next) = self.schedule_next() {
+            return Some(next);
+        }
+        let thread = self.thread_mut(id)?;
+        thread.context = previous;
+        thread.state = State::Running;
+        self.current = Some(id);
+        None
+    }
+
+    fn wake_blocked_peer(&mut self, sender_domain: u64, result: u64) -> bool {
+        let mut blocked_slot = None;
+        for (slot, thread) in self.threads.iter().enumerate() {
+            let Some(thread) = thread else {
+                continue;
+            };
+            if thread.state == State::Blocked && thread.domain != sender_domain {
+                if blocked_slot.is_some() {
+                    return false;
+                }
+                blocked_slot = Some(slot);
+            }
+        }
+        let Some(slot) = blocked_slot else {
+            return false;
+        };
+        let Some(thread) = self.threads[slot].as_mut() else {
+            return false;
+        };
+        thread.context.rax = result;
+        thread.state = State::Ready;
+        true
     }
 
     fn exit_current(&mut self, id: ThreadId) -> Option<Scheduled> {
@@ -494,6 +543,8 @@ pub(crate) fn initialize_runtime(
             expected_fault_observed: false,
             service_restart_context,
             restarts: 0,
+            blocks: 0,
+            wakes: 0,
         }));
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
@@ -660,6 +711,62 @@ pub(crate) fn preempt_runtime(
     }
 }
 
+pub(crate) fn block_runtime(
+    frame: &mut UserTrapFrame,
+    code_selector: u16,
+    data_selector: u16,
+) -> RuntimeAction {
+    if !frame.selectors_match(code_selector, data_selector) {
+        return RuntimeAction::Invalid;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(current) = runtime.scheduler.current else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(root) = runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.address_space_root)
+    else {
+        return RuntimeAction::Invalid;
+    };
+    let saved = frame.saved_context(0, root);
+    let Some(next) = runtime.scheduler.block_current(current, saved) else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(blocks) = runtime.blocks.checked_add(1) else {
+        return RuntimeAction::Invalid;
+    };
+    runtime.blocks = blocks;
+    if next.context.address_space_root != root {
+        let Some(switches) = runtime.address_space_switches.checked_add(1) else {
+            return RuntimeAction::Invalid;
+        };
+        runtime.address_space_switches = switches;
+    }
+    frame.restore(next.context, code_selector, data_selector);
+    RuntimeAction::Resume {
+        result: next.context.rax,
+        address_space_root: next.context.address_space_root,
+    }
+}
+
+pub(crate) fn wake_ipc_peer(sender_domain: u64, result: u64) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(wakes) = runtime.wakes.checked_add(1) else {
+        return false;
+    };
+    if !runtime.scheduler.wake_blocked_peer(sender_domain, result) {
+        return false;
+    }
+    runtime.wakes = wakes;
+    true
+}
+
 pub(crate) fn exit_runtime(
     frame: &mut UserTrapFrame,
     code_selector: u16,
@@ -714,8 +821,10 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.exits == 2
         && runtime.faults == 1
         && runtime.restarts == 1
+        && runtime.blocks == 1
+        && runtime.wakes == 1
         && runtime.expected_fault_observed
-        && runtime.address_space_switches == 4
+        && runtime.address_space_switches == 5
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)
 }
@@ -804,12 +913,31 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     }
 
     let replacement = scheduler.create(2, second_context)?;
-    Some(
-        replacement != first
-            && replacement.slot == first.slot
-            && scheduler.thread(first).is_none()
-            && scheduler.thread(replacement)?.domain == 2,
-    )
+    let generation_valid = replacement != first
+        && replacement.slot == first.slot
+        && scheduler.thread(first).is_none()
+        && scheduler.thread(replacement)?.domain == 2;
+
+    let mut blocking = Scheduler::new();
+    let blocked = blocking.create(1, first_context)?;
+    let peer = blocking.create(2, second_context)?;
+    if blocking.schedule_next()?.id != blocked
+        || blocking.block_current(blocked, first_context)?.id != peer
+        || blocking.thread(blocked)?.state != State::Blocked
+        || !blocking.wake_blocked_peer(2, 77)
+        || blocking.thread(blocked)?.state != State::Ready
+        || blocking.exit_current(peer)?.context.rax != 77
+    {
+        return Some(false);
+    }
+
+    let mut lone = Scheduler::new();
+    let lone_id = lone.create(1, first_context)?;
+    let _ = lone.schedule_next()?;
+    let rollback = lone.block_current(lone_id, first_context).is_none()
+        && lone.current == Some(lone_id)
+        && lone.thread(lone_id)?.state == State::Running;
+    Some(generation_valid && rollback)
 }
 
 const fn test_context(rax: u64, rip: u64, rsp: u64, root: u64) -> UserContext {

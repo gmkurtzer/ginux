@@ -22,10 +22,18 @@ generation-checked domain role after capability validation; callers cannot
 choose it as an argument. The boot gate also requires both queues to be empty
 at completion.
 
-This revision transfers only an immediate word and has no blocking wait,
-capability transfer, cancellation, timeout, peer-close notification, or cleanup
-of queued words after domain failure. It has one fixed control/service endpoint
-pair rather than allocatable endpoint objects. The global queue is safe only
+Operation 8 adds one blocking receive path. If its inbound queue is empty, the
+current context becomes blocked only when another context can run. A peer send
+then bypasses the queue, writes the word into the blocked context's result
+register, and makes it ready. The QEMU proof preempts into the replacement
+service, blocks it, resumes control, wakes the service with value 3, and later
+observes 3 as the receive result. There is at most one bootstrap waiter, and a
+failed block rolls back atomically.
+
+This revision transfers only an immediate word and has no capability transfer,
+cancellation, timeout, peer-close notification, or cleanup of queued words
+after domain failure. It has one fixed control/service endpoint pair rather
+than allocatable endpoint objects. The global queue is safe only
 for the current single-CPU model. The timer handler does not access IPC, and
 call-gate entries execute with interrupts disabled; locking is still required
 before SMP or kernel preemption.

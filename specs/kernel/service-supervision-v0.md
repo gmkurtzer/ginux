@@ -29,8 +29,10 @@ After the fault, the kernel creates one replacement domain generation with the
 same IPC-only delegation and queues a fresh context on the retained service
 address space. It rearms the APIC one-shot, returns to the client, and then
 preempts that client to run the replacement. The replacement negotiates ABI
-v1, exits cleanly, and has its capability table retired before the client
-finishes. The single restart is a fixed
+v1 and blocks on an empty request direction. The client wakes it with a direct
+message, exhausts its call budget, and exits. The replacement then observes the
+message, exits cleanly, and has its capability table retired. The single
+restart is a fixed
 proof action, not a production policy. There is no backoff, configurable
 restart budget, state recovery, service identity separate from thread identity,
 request ID, replay protection, cancellation, outstanding-call cleanup, or
