@@ -45,11 +45,14 @@ with mode `S_IFCHR | 0600`, one link, and a 4096-byte preferred block size. The
 destination range is validated. Unknown descriptors return `-EBADF`; an invalid
 range returns `-EFAULT` without changing its valid prefix. This is descriptor
 metadata for the bounded console profile, not a general inode or VFS query.
-`rax = 16` (`__NR_ioctl`) accepts only `TIOCGWINSZ` on descriptors 0 and 1. It
+`rax = 16` (`__NR_ioctl`) accepts `TCGETS` and `TIOCGWINSZ` on descriptors 0 and
+1. `TCGETS` copies a zero-initialized 36-byte x86-64 Linux `termios`, explicitly
+describing the current console as having no kernel line discipline. `TIOCGWINSZ`
 copies an eight-byte Linux `winsize` reporting 24 rows and 80 columns, with
 pixel dimensions zero. Unknown descriptors return `-EBADF`, unsupported
 requests return `-ENOTTY`, and invalid destinations return `-EFAULT`. This is a
-fixed early-console contract, not terminal state or a general ioctl mechanism.
+fixed early-console contract, not mutable terminal state or a general ioctl
+mechanism.
 `rax = 3` (`__NR_close`) irreversibly clears descriptor 0 or 1 from the bounded
 process-local console table. Closing an unknown or already closed descriptor
 returns `-EBADF`; subsequent `fstat` and `ioctl` calls observe the closure. No

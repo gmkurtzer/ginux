@@ -613,6 +613,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux process umask state validated\r\n");
     serial_write("ginux: Linux console descriptor metadata validated\r\n");
     serial_write("ginux: Linux fixed console geometry validated\r\n");
+    serial_write("ginux: Linux fixed console termios validated\r\n");
     serial_write("ginux: Linux console descriptor close validated\r\n");
     serial_write("ginux: Linux console descriptor duplication validated\r\n");
     serial_write("ginux: Linux targeted descriptor duplication validated\r\n");

@@ -104,6 +104,7 @@ const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_IOV_LIMIT: usize = 4;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
+const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_DESCRIPTOR_INPUT: u8 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
@@ -1127,14 +1128,22 @@ extern "sysv64" fn linux_syscall_handler(
             if !linux_console_descriptor_open(first_argument) {
                 return LINUX_EBADF;
             }
-            if buffer != LINUX_TIOCGWINSZ {
-                return LINUX_ENOTTY;
-            }
-            let mut window = [0_u8; 8];
-            window[..2].copy_from_slice(&24_u16.to_ne_bytes());
-            window[2..4].copy_from_slice(&80_u16.to_ne_bytes());
-            if !copy_to_linux_user(count, &window) {
-                return LINUX_EFAULT;
+            match buffer {
+                LINUX_TCGETS => {
+                    let termios = [0_u8; 36];
+                    if !copy_to_linux_user(count, &termios) {
+                        return LINUX_EFAULT;
+                    }
+                }
+                LINUX_TIOCGWINSZ => {
+                    let mut window = [0_u8; 8];
+                    window[..2].copy_from_slice(&24_u16.to_ne_bytes());
+                    window[2..4].copy_from_slice(&80_u16.to_ne_bytes());
+                    if !copy_to_linux_user(count, &window) {
+                        return LINUX_EFAULT;
+                    }
+                }
+                _ => return LINUX_ENOTTY,
             }
             0
         }

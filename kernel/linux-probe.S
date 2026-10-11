@@ -345,7 +345,7 @@ ginux_linux_probe:
     jne failure
 
     mov edi, 1
-    mov esi, 0x5401
+    mov esi, 0x5402
     mov edx, 0x402280
     mov eax, 16
     syscall
@@ -791,6 +791,21 @@ ginux_linux_probe:
     mov eax, 1
     syscall
     cmp rax, 8
+    jne failure
+
+    movabs rax, 0x1122334455667788
+    mov qword ptr [0x402280], rax
+    mov qword ptr [0x402298], rax
+    mov edi, 1
+    mov esi, 0x5401
+    mov edx, 0x402280
+    mov eax, 16
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x402280], 0
+    jne failure
+    cmp qword ptr [0x402298], 0
     jne failure
 
     mov edi, 2
