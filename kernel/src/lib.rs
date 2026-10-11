@@ -1,6 +1,7 @@
 #![no_std]
 
 mod arch;
+mod capability;
 mod memory;
 
 use core::arch::{asm, global_asm};
@@ -266,6 +267,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: local APIC timer interrupt failed\r\n");
     }
     serial_write("ginux: local APIC timer interrupt handled\r\n");
+
+    if !capability::verify_authority_invariants() {
+        kernel_fail("ginux: capability authority invariant failed\r\n");
+    }
+    serial_write("ginux: capability derivation and revocation verified\r\n");
 
     let summary = summarize_memory(boot_info);
     serial_write("ginux: memory descriptors: ");
