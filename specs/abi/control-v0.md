@@ -219,7 +219,9 @@ stack page, then records its target virtual address in `RSI` and its length in
 `RDX`. It rejects absent, running, blocked, ambiguous, or wrong-generation
 contexts. The hardware proof initializes both a subsequently cancelled workload
 and the executed workload; the latter validates the pointer, length, and bytes
-before exiting.
+before exiting. The executed auxiliary also invokes operation 15 with its
+console-only capability and requires denial, proving that reaching the call
+gate cannot expand a workload into host-management authority.
 Action 5 starts a staged auxiliary. The source field is its exact domain
 generation and the object and rights fields must be zero. The scheduler changes
 that one unambiguous, initialized context from `Staged` to `Ready`; normal

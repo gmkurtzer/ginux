@@ -175,6 +175,9 @@ rejected rather than aliasing a reused slot.
 The management flags query separately exposes the initialization latch without
 changing the lifecycle state enumeration, allowing the control plane to prove
 that private initialization completed before requesting admission.
+The normally exiting auxiliary attempts the management call gate with its only
+delegated console capability and is denied before request parsing. Its domain
+cannot create, inspect, start, or stop peer workloads.
 It also starts a separate initialized generation and dispatches it. That
 workload executes one cooperative yield; the control plane resumes, observes
 the exact generation as quiescent and ready, and stops it before it can execute

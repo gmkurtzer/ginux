@@ -558,6 +558,11 @@ if ! grep -q '^ginux: userspace auxiliary service identity enforced' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary management authority denied' "$output_file"; then
+    echo "Boot test failed: auxiliary management authority was not denied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
     echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
     exit 1

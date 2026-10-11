@@ -91,7 +91,7 @@ Call budgets belong to domains rather than threads. The control domain receives
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 65 charged calls across all generations, deliberately exhausts the
+exactly 66 charged calls across all generations, deliberately exhausts the
 control domain, and requires its next discovery call to be rejected before it
 exits.
 

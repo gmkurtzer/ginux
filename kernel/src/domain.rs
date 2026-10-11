@@ -1698,7 +1698,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 65
+    control.remaining_calls == 0 && manager.total_calls == 66
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
