@@ -633,6 +633,26 @@ if ! grep -q '^ginux: observer capability revoked on exit' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: write-only network configurator isolated' "$output_file"; then
+    echo "Boot test failed: write-only network configurator was not isolated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: network observation denied to configurator' "$output_file"; then
+    echo "Boot test failed: network configurator observation was not denied." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: denied network copy-out left memory unchanged' "$output_file"; then
+    echo "Boot test failed: denied network copy-out changed userspace memory." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: configurator capability revoked on exit' "$output_file"; then
+    echo "Boot test failed: configurator network capability survived exit." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
     echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
     exit 1

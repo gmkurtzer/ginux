@@ -937,6 +937,94 @@ pub(crate) fn verify_ring3_network_observer() -> bool {
         && domain::take_lifecycle_event().is_none()
 }
 
+pub(crate) fn verify_ring3_network_configurator() -> bool {
+    const NETWORK_CONFIGURATOR_PROGRAM: &[u8] = &[
+        0x48, 0x89, 0xcf, 0x48, 0x83, 0xec, 0x08, 0x48, 0xb8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33,
+        0x22, 0x11, 0x48, 0x89, 0x04, 0x24, 0x6a, 0x0a, 0x5e, 0x48, 0x8d, 0x14,
+        0x24, // snapshot denied
+        0xb8, 0x10, 0, 0, 0, 0xcd, 0x80, 0x83, 0xf8, 0xfd, 0x74, 0x02, 0x0f, 0x0b, 0x48, 0xbb,
+        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x48, 0x39, 0x1c, 0x24, 0x74, 0x02, 0x0f,
+        0x0b, 0x6a, 0x02, 0x5e, 0x31, 0xd2, // set link down
+        0xb8, 0x10, 0, 0, 0, 0xcd, 0x80, 0x85, 0xc0, 0x74, 0x02, 0x0f, 0x0b, 0x6a, 0x01, 0x5e,
+        0x31, 0xd2, // direct link query denied
+        0xb8, 0x10, 0, 0, 0, 0xcd, 0x80, 0x83, 0xf8, 0xfd, 0x74, 0x02, 0x0f, 0x0b, 0x6a, 0x02,
+        0x5e, 0x6a, 0x01, 0x5a, // restore link up
+        0xb8, 0x10, 0, 0, 0, 0xcd, 0x80, 0x85, 0xc0, 0x74, 0x02, 0x0f, 0x0b, 0x48, 0x83, 0xc4,
+        0x08, 0x6a, 0x2c, 0x5e, 0xb8, 0x02, 0, 0, 0, 0xcd, 0x80, 0x0f, 0x0b,
+    ];
+    let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
+        3,
+        crate::control_abi::NETWORK_DEVICE_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) else {
+        return false;
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let Some(space) = WxAddressSpace::new(kernel_root, owner) else {
+        return false;
+    };
+    if !space.permissions_are_valid(kernel_root) {
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in NETWORK_CONFIGURATOR_PROGRAM.iter().enumerate() {
+            space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let root = space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(auxiliary, space)
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_auxiliary(entry, stack, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && !domain::handle_permits(
+            auxiliary,
+            handle,
+            crate::control_abi::NETWORK_DEVICE_OBJECT,
+            crate::capability::Rights::READ,
+        )
+        && !domain::handle_permits(
+            auxiliary,
+            handle,
+            crate::control_abi::NETWORK_DEVICE_OBJECT,
+            crate::capability::Rights::WRITE,
+        )
+        && cpu::network_link_is_up()
+        && cpu::network_configuration_generation() == 7
+        && event
+            == Some(
+                (44_u64 << 56)
+                    | (auxiliary << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && domain::last_lifecycle_event_audit()
+            == Some((
+                crate::control_abi::LIFECYCLE_AUXILIARY_EXITED,
+                auxiliary,
+                10,
+            ))
+        && domain::last_lifecycle_event_detail() == Some(44)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none()
+}
+
 pub(crate) fn verify_ring3_auxiliary_fault() -> bool {
     const INVALID_OPCODE_PROGRAM: [u8; 2] = [0x0f, 0x0b];
     let Some(auxiliary) =
@@ -983,7 +1071,7 @@ pub(crate) fn verify_ring3_auxiliary_fault() -> bool {
         && event
             == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
         && domain::last_lifecycle_event_audit()
-            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 10))
+            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 11))
         && domain::last_lifecycle_event_detail() == Some(0)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::delivered_fault_matches(

@@ -306,6 +306,8 @@ next-hop. The current single-CPU non-nested call gate serializes the copy with
 all configuration mutations.
 The boot proof also delegates only `READ` authority to a separate observer,
 which can use command 10 but receives `UINT64_MAX - 2` from command 2.
+A separate `WRITE`-only configurator can use command 2 but is denied commands 1
+and 10 before any snapshot bytes are copied to its supplied address.
 Unknown commands, invalid arguments, and
 denial return `UINT64_MAX - 2`. This is a
 device-authorization skeleton only; it exposes no packets, general route table,

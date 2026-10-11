@@ -698,6 +698,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: read-only network observer isolated");
     serial_write("\r\nginux: network mutation denied to observer");
     serial_write("\r\nginux: observer capability revoked on exit");
+    if !address_space::verify_ring3_network_configurator() {
+        kernel_fail("\r\nginux: ring-3 network configurator invariant failed\r\n");
+    }
+    serial_write("\r\nginux: write-only network configurator isolated");
+    serial_write("\r\nginux: network observation denied to configurator");
+    serial_write("\r\nginux: denied network copy-out left memory unchanged");
+    serial_write("\r\nginux: configurator capability revoked on exit");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }

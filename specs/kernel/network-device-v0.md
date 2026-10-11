@@ -64,6 +64,13 @@ unchanged. It exits with status 43; its lifecycle record is consumed and its
 read capability is revoked with its domain. This observer has no implicit
 write authority merely because it can inspect kernel-owned network state.
 
+The inverse proof gives a third isolated service only object-4 `WRITE`
+authority. Snapshot and link-query commands are denied before copying or
+revealing state; a sentinel in its writable stack remains unchanged. It can
+bring the link down and restore it, advancing the generation for both effective
+changes, then exits with status 44 and loses its capability. Read and write
+network authority are therefore independently delegable.
+
 Before exit the service also installs and reads back `10.0.2.15/24`. This is not
 yet a network stack or virtual NIC. Link and IPv4 state are kernel-owned scalar
 values and are not backed by hardware. There is no packet transport, MAC
