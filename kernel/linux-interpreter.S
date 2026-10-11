@@ -846,6 +846,78 @@ ginux_linux_interpreter:
     jne .Linvalid_dynamic
 
     mov edi, 2
+    lea rsi, [rip + .Lhostname_relative]
+    mov rdx, rsp
+    xor r10d, r10d
+    mov eax, 262
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 24], 0x816d
+    jne .Linvalid_dynamic
+    cmp qword ptr [rsp + 48], 6
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    lea rsi, [rip + .Lhostname_relative]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 3
+    jne .Linvalid_dynamic
+    mov edi, 3
+    mov rsi, rsp
+    mov edx, 6
+    xor eax, eax
+    syscall
+    cmp rax, 6
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp], 0x756e6967
+    jne .Linvalid_dynamic
+    cmp word ptr [rsp + 4], 0x0a78
+    jne .Linvalid_dynamic
+    mov edi, 3
+    lea rsi, [rip + .Lhostname_relative]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, -20
+    jne .Linvalid_dynamic
+    mov edi, 3
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    lea rsi, [rip + .Lhostname_relative]
+    mov edx, 4
+    mov eax, 269
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    mov edi, 2
+    lea rsi, [rip + .Lhostname_relative]
+    mov edx, 2
+    mov eax, 269
+    syscall
+    cmp rax, -13
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+
+    mov edi, -100
+    lea rsi, [rip + .Lhostname_cwd]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne .Linvalid_dynamic
+    mov edi, 2
     mov eax, 3
     syscall
     test rax, rax
@@ -1418,6 +1490,10 @@ ginux_linux_interpreter:
     .asciz "/init"
 .Lhostname_path:
     .asciz "/etc/hostname"
+.Lhostname_relative:
+    .asciz "hostname"
+.Lhostname_cwd:
+    .asciz "etc/hostname"
 .Letc_path:
     .asciz "/etc"
 .Lroot_path:

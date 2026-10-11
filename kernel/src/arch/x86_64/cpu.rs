@@ -3372,8 +3372,8 @@ extern "sysv64" fn linux_syscall_handler(
             register(1),
         ),
         LINUX_PPOLL_SYSCALL => linux_ppoll(first_argument, buffer, count, register(0), register(2)),
-        LINUX_FACCESSAT_SYSCALL => linux_faccessat(buffer, count, 0),
-        LINUX_FACCESSAT2_SYSCALL => linux_faccessat(buffer, count, register(0)),
+        LINUX_FACCESSAT_SYSCALL => linux_faccessat(first_argument, buffer, count, 0),
+        LINUX_FACCESSAT2_SYSCALL => linux_faccessat(first_argument, buffer, count, register(0)),
         LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
         LINUX_GETRLIMIT_SYSCALL => {
             let Some(limit) = linux_resource_limit(first_argument) else {
@@ -3454,7 +3454,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_GETDENTS64_SYSCALL => linux_getdents64(first_argument, buffer, count),
         LINUX_CLOCK_GETTIME_SYSCALL => linux_clock_gettime(first_argument, buffer),
         LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
-        LINUX_STATX_SYSCALL => linux_statx(buffer, count, register(0), register(2)),
+        LINUX_STATX_SYSCALL => linux_statx(first_argument, buffer, count, register(0), register(2)),
         LINUX_EXIT_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS && current_linux_tid() != Some(1) =>
         {
@@ -4355,21 +4355,49 @@ fn linux_measured_directory_path(kind: u8) -> Option<&'static [u8]> {
     }
 }
 
-fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
+fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u8>, u64> {
+    if path.starts_with(b"/") {
+        return Ok(None);
+    }
+    if directory as u32 == LINUX_AT_FDCWD {
+        return match path {
+            b"etc/hostname" => Ok(Some(LINUX_FILE_ROOT_HOSTNAME)),
+            _ => Err(LINUX_ENOENT),
+        };
+    }
+    let state = linux_device_descriptor(directory);
+    if state == 0 {
+        return Err(LINUX_EBADF);
+    }
+    if state & LINUX_DEVICE_DIRECTORY == 0 {
+        return Err(LINUX_ENOTDIR);
+    }
+    match (state & !3, path) {
+        (LINUX_ROOT_ETC_DIRECTORY, b"hostname") => Ok(Some(LINUX_FILE_ROOT_HOSTNAME)),
+        _ => Err(LINUX_ENOENT),
+    }
+}
+
+fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
     let mut path = [0_u8; 32];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    let kind = match path {
-        b"/dev/null" => 0,
-        b"/dev/zero" => LINUX_DEVICE_ZERO,
-        b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
-        path => match linux_root_directory_kind(path).or_else(|| linux_runtime_file_kind(path)) {
-            Some(kind) => kind,
-            None => return LINUX_ENOENT,
+    let kind = match linux_relative_file_kind(directory, path) {
+        Ok(Some(kind)) => kind,
+        Ok(None) => match path {
+            b"/dev/null" => 0,
+            b"/dev/zero" => LINUX_DEVICE_ZERO,
+            b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
+            path => match linux_root_directory_kind(path).or_else(|| linux_runtime_file_kind(path))
+            {
+                Some(kind) => kind,
+                None => return LINUX_ENOENT,
+            },
         },
+        Err(error) => return error,
     };
     let access = flags & 3;
     if access == 3 || flags & !(3 | LINUX_O_CLOEXEC | LINUX_O_DIRECTORY) != 0 {
@@ -4401,7 +4429,7 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
     descriptor
 }
 
-fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {
+fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags: u64) -> u64 {
     if flags != 0 {
         return LINUX_EINVAL;
     }
@@ -4410,15 +4438,21 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
         Ok(length) => length,
         Err(error) => return error,
     };
-    let stat = match &path[..path_length] {
-        b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => {
+    let path = &path[..path_length];
+    let relative_kind = match linux_relative_file_kind(directory, path) {
+        Ok(kind) => kind,
+        Err(error) => return error,
+    };
+    let stat = match (relative_kind, path) {
+        (Some(kind), _) => linux_regular_file_stat(kind),
+        (None, b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty") => {
             linux_stat(LINUX_STAT_CHARACTER_DEVICE_MODE, 1)
         }
-        path if linux_root_directory_kind(path).is_some() => linux_stat(
+        (None, path) if linux_root_directory_kind(path).is_some() => linux_stat(
             LINUX_STAT_DIRECTORY_MODE,
             linux_root_directory_inode(linux_root_directory_kind(path).unwrap_or(0)).unwrap_or(0),
         ),
-        path => match linux_runtime_file_kind(path) {
+        (None, path) => match linux_runtime_file_kind(path) {
             Some(kind) => linux_regular_file_stat(kind),
             None => return LINUX_ENOENT,
         },
@@ -4429,7 +4463,7 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
     0
 }
 
-fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
+fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u64 {
     if flags != 0 || mode & !7 != 0 {
         return LINUX_EINVAL;
     }
@@ -4438,7 +4472,15 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
         Ok(length) => length,
         Err(error) => return error,
     };
-    let directory = match &path[..path_length] {
+    let path = &path[..path_length];
+    let relative_kind = match linux_relative_file_kind(directory, path) {
+        Ok(kind) => kind,
+        Err(error) => return error,
+    };
+    if relative_kind.is_some() {
+        return if mode & 2 != 0 { LINUX_EACCES } else { 0 };
+    }
+    let directory = match path {
         b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => false,
         path if linux_root_directory_kind(path).is_some() => true,
         path if linux_runtime_file_kind(path).is_some() => {
@@ -4456,7 +4498,7 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
     }
 }
 
-fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u64 {
+fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u64 {
     if flags != 0 || mask & u64::from(LINUX_STATX_RESERVED) != 0 {
         return LINUX_EINVAL;
     }
@@ -4465,18 +4507,29 @@ fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u
         Ok(length) => length,
         Err(error) => return error,
     };
-    let (inode, minor, mode, size) = match &path[..path_length] {
-        b"/dev/null" => (1_u64, 3_u32, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
-        b"/dev/zero" => (2, 5, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
-        b"/dev/console" => (3, 1, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
-        b"/dev/tty" => (3, 0, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
-        path if linux_root_directory_kind(path).is_some() => (
+    let path = &path[..path_length];
+    let relative_kind = match linux_relative_file_kind(directory, path) {
+        Ok(kind) => kind,
+        Err(error) => return error,
+    };
+    let (inode, minor, mode, size) = match (relative_kind, path) {
+        (Some(kind), _) => (
+            linux_regular_file_inode(kind).unwrap_or(0),
+            0,
+            LINUX_STAT_REGULAR_MODE,
+            linux_regular_file(kind).map_or(0, |file| file.len() as u64),
+        ),
+        (None, b"/dev/null") => (1_u64, 3_u32, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
+        (None, b"/dev/zero") => (2, 5, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
+        (None, b"/dev/console") => (3, 1, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
+        (None, b"/dev/tty") => (3, 0, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
+        (None, path) if linux_root_directory_kind(path).is_some() => (
             linux_root_directory_inode(linux_root_directory_kind(path).unwrap_or(0)).unwrap_or(0),
             0,
             LINUX_STAT_DIRECTORY_MODE,
             0,
         ),
-        path => match linux_runtime_file_kind(path) {
+        (None, path) => match linux_runtime_file_kind(path) {
             Some(kind) => (
                 linux_regular_file_inode(kind).unwrap_or(0),
                 0,

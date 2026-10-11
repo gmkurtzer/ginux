@@ -63,7 +63,10 @@ Linux `/` directory likewise enumerates the six direct measured children in
 archive order. The measured `proc`, `sys`, and `tmp` nodes open as immutable,
 currently empty directories; the proof opens and enumerates `proc`. `dev`
 retains its synthetic device children while its directory node comes from the
-measured root. The
+measured root. An open `/etc` descriptor also resolves the single relative
+component `hostname` for `openat`, `newfstatat`, `faccessat`, `faccessat2`, and
+`statx`; the fixed root working directory resolves `etc/hostname`. A regular
+file descriptor is rejected as a lookup base. The
 existing `/init` Linux name remains a separately authenticated executable
 fixture until executable loading is connected to the measured root.
 

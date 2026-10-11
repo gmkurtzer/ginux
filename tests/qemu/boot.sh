@@ -1763,6 +1763,16 @@ if ! grep -q '^ginux: measured-root Linux empty directory opened' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: measured-root Linux dirfd lookup validated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux dirfd lookup was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured-root Linux relative metadata validated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux relative metadata was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

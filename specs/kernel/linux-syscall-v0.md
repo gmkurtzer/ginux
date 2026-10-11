@@ -312,8 +312,12 @@ also open as immutable directories and currently enumerate only `.` and `..`;
 the ring-3 proof exercises `/proc`. `/dev` remains the separately populated
 synthetic device directory. Directory descriptor metadata and pathname
 metadata use stable profile-local inode numbers. There is no `/lib64` directory
-enumeration, relative pathname traversal, general VFS, or userspace `execve`;
-the kernel authenticates
+enumeration. Relative lookup is bounded to `hostname` beneath an open `/etc`
+descriptor and `etc/hostname` beneath `AT_FDCWD`; `openat`, `newfstatat`,
+`faccessat`, `faccessat2`, and `statx` share that resolution. A closed or
+unknown base returns `-EBADF`, a regular-file base returns `-ENOTDIR`, and other
+relative names return `-ENOENT`. This is not general component traversal, a
+general VFS, or userspace `execve`; the kernel authenticates
 and plans the fixed interpreter, main, and two-DSO executable graph. The kernel
 installs the interpreter needed to bootstrap ring 3; that interpreter installs
 the main and both dependencies' admitted segments through the fixed mapping
