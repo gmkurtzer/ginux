@@ -52,6 +52,7 @@ const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
 const LINUX_DUP_SYSCALL: u64 = 32;
+const LINUX_DUP2_SYSCALL: u64 = 33;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
@@ -1135,6 +1136,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
+        LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
             let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
@@ -1450,6 +1452,35 @@ fn linux_console_dup(descriptor: u64) -> u64 {
             .is_ok()
         {
             return target as u64;
+        }
+    }
+}
+
+fn linux_console_dup2(source: u64, target: u64) -> u64 {
+    if source >= 2 || target >= 2 {
+        return LINUX_EBADF;
+    }
+    loop {
+        let current = ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst);
+        let state = (current >> (source * 2)) & 0b11;
+        if state == 0 {
+            return LINUX_EBADF;
+        }
+        if source == target {
+            return target;
+        }
+        let shift = target * 2;
+        let mask = 0b11_u8 << shift;
+        if ELF_PROBE_CONSOLE_DESCRIPTORS
+            .compare_exchange(
+                current,
+                (current & !mask) | (state << shift),
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+        {
+            return target;
         }
     }
 }

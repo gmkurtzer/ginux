@@ -59,6 +59,10 @@ the same two slots, preserving whether it is the input or output endpoint. An
 invalid source returns `-EBADF`; no free slot returns `-EMFILE`. The probe
 closes fd 0, duplicates fd 1 into it, writes through the new fd 0, and closes
 both slots. There is still no general allocation or inherited table.
+`rax = 33` (`__NR_dup2`) atomically replaces either bounded target slot with an
+open source's endpoint type. Equal source and target descriptors return the
+target unchanged. A closed source or a descriptor outside the two-slot limit
+returns `-EBADF`.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 2,
@@ -160,7 +164,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `writev`, `close`, `dup`, `fstat`, bounded console `ioctl`, `brk`,
+`write`, `writev`, `close`, `dup`, `dup2`, `fstat`, bounded console `ioctl`, `brk`,
 `uname`,
 `getcwd`,
 bounded `readlink`/`readlinkat`,

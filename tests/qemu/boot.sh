@@ -708,6 +708,11 @@ if ! grep -q '^ginux: Linux console descriptor duplication validated' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux targeted descriptor duplication validated' "$output_file"; then
+    echo "Boot test failed: Linux targeted descriptor duplication was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1
