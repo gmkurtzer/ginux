@@ -512,6 +512,8 @@ pub(crate) fn verify_linux_elf_mapping(
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     initial_fs_base: 0,
+                    tls: 0,
+                    tls_size: 0,
                     code: first.virtual_address as usize,
                     code_size: first.memory_size,
                     loader_code: 0,
@@ -578,6 +580,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
         return false;
     };
     let Some(tls_start_offset) = LINUX_TLS_THREAD_POINTER_OFFSET.checked_sub(tls_block_size) else {
+        return false;
+    };
+    let Some(tls_extent_size) = tls_block_size.checked_add(LINUX_TLS_TCB_SIZE) else {
         return false;
     };
     let interpreter_rx = plan.interpreter.executable;
@@ -1216,6 +1221,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     initial_fs_base: tls_base as usize,
+                    tls: tls_virtual_page as usize + tls_start_offset,
+                    tls_size: tls_extent_size,
                     code: main_rx.virtual_address as usize,
                     code_size: main_rx.memory_size,
                     loader_code: interpreter_rx.virtual_address as usize,

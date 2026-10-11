@@ -333,6 +333,8 @@ static ELF_PROBE_LOADER_CODE_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_LOADER_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_TLS: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_TLS_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_RELRO: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_RELRO_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
@@ -1001,6 +1003,8 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) entry: usize,
     pub(crate) stack: usize,
     pub(crate) initial_fs_base: usize,
+    pub(crate) tls: usize,
+    pub(crate) tls_size: usize,
     pub(crate) code: usize,
     pub(crate) code_size: usize,
     pub(crate) loader_code: usize,
@@ -1041,6 +1045,25 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let Some(heap_limit) = execution.heap.checked_add(execution.heap_size) else {
         return LinuxElfResult::FAILED;
     };
+    let tls_contract_valid = if execution.tls_size == 0 {
+        execution.tls == 0 && execution.initial_fs_base == 0
+    } else {
+        execution.tls != 0
+            && execution.initial_fs_base >= execution.tls
+            && execution
+                .tls
+                .checked_add(execution.tls_size)
+                .is_some_and(|end| {
+                    end <= 1 << 47
+                        && execution
+                            .initial_fs_base
+                            .checked_add(16)
+                            .is_some_and(|tcb_end| tcb_end <= end)
+                })
+    };
+    if !tls_contract_valid {
+        return LinuxElfResult::FAILED;
+    }
     if ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst) {
         return LinuxElfResult::FAILED;
     }
@@ -1073,6 +1096,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_LOADER_CODE_SIZE.store(execution.loader_code_size as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(execution.data as u64, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(execution.data_size as u64, Ordering::SeqCst);
+    ELF_PROBE_TLS.store(execution.tls as u64, Ordering::SeqCst);
+    ELF_PROBE_TLS_SIZE.store(execution.tls_size as u64, Ordering::SeqCst);
     ELF_PROBE_RELRO.store(execution.relro as u64, Ordering::SeqCst);
     ELF_PROBE_RELRO_SIZE.store(execution.relro_size as u64, Ordering::SeqCst);
     ELF_PROBE_BRK.store(execution.heap as u64, Ordering::SeqCst);
@@ -1186,6 +1211,16 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+    let tls_copy_bounds_valid = execution.tls_size == 0
+        || linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
+            && execution
+                .tls
+                .checked_sub(1)
+                .is_some_and(|before| !linux_writable_user_range_contains(before as u64, 1))
+            && execution
+                .tls
+                .checked_add(execution.tls_size - 1)
+                .is_some_and(|last| !linux_writable_user_range_contains(last as u64, 2));
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -1418,6 +1453,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_LOADER_CODE_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
+    let tls_state_valid = ELF_PROBE_TLS.swap(0, Ordering::SeqCst) == execution.tls as u64
+        && ELF_PROBE_TLS_SIZE.swap(0, Ordering::SeqCst) == execution.tls_size as u64;
     ELF_PROBE_RELRO.store(0, Ordering::SeqCst);
     ELF_PROBE_RELRO_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_BRK.store(0, Ordering::SeqCst);
@@ -1434,6 +1471,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         && mmap_state_valid
         && main_mapping_contract_valid
         && dependency_mappings_valid
+        && tls_state_valid
+        && tls_copy_bounds_valid
         && process_name_restored
         && no_new_privileges_enforced
         && signal_mask_restored
@@ -4468,6 +4507,14 @@ fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {
         && (protected_page == 0
             || !linux_ranges_overlap(address, length, protected_page, PAGE_SIZE))
     {
+        return true;
+    }
+    if linux_range_contains(
+        ELF_PROBE_TLS.load(Ordering::SeqCst),
+        ELF_PROBE_TLS_SIZE.load(Ordering::SeqCst),
+        address,
+        length,
+    ) {
         return true;
     }
     let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);

@@ -613,6 +613,16 @@ if ! grep -q '^ginux: linker-resolved Linux TLS symbols executed' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^TLS_OK!$' "$output_file"; then
+    echo "Boot test failed: userspace could not write directly from initial TLS." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: bounded Linux TLS syscall copies validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux TLS syscall copies were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux TLS frame scrubbed and released' "$output_file"; then
     echo "Boot test failed: the Linux TLS frame was not scrubbed and released." >&2
     exit 1

@@ -43,6 +43,10 @@ tail, and self pointer are correct. Its accesses name the hidden TLS symbols
 through `R_X86_64_TPOFF32`; LLD resolves both offsets without adding a dynamic
 relocation class, proving the toolchain layout matches the loader. Teardown
 scrubs and releases the TLS frame and restores the supervisor's prior FS base.
+The kernel admits only the live static-block-plus-TCB extent to syscall copy
+validation; the interpreter writes the initialized `TLS_OK!` value directly
+from FS-relative storage before invoking the preinitializer, while one-byte
+underflow and overflow ranges are rejected internally.
 TLS relocations, multiple modules, and per-thread allocation remain
 unimplemented.
 A compact userspace interpreter assembled from its own source derives its load

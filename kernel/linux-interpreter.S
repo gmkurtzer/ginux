@@ -304,6 +304,15 @@ ginux_linux_interpreter:
     push r8
     push r13
     push rbx
+    mov rsi, qword ptr fs:[0]
+    sub rsi, 16
+    mov edi, 1
+    mov edx, 8
+    mov eax, 1
+    syscall
+    cmp rax, 8
+    jne .Linvalid_dynamic
+    mov rax, qword ptr [rsp + 32]
     mov rcx, qword ptr [rax]
     add rcx, r15
     mov rdx, qword ptr [rip + .Lmain_preinit_array]

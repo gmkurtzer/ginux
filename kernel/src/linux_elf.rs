@@ -236,7 +236,7 @@ pub(crate) fn verify_tls_template_metadata() -> bool {
         return false;
     };
     let linked_valid = main.program_header_count == 9
-        && template.bytes == b"GINUXTLS"
+        && template.bytes == b"TLS_OK!\n"
         && template.memory_size == 16
         && template.alignment == 8
         && plan.tls.is_some_and(|relocated| {

@@ -360,6 +360,11 @@ main preinitializer and kernel verify the initialized value, zero tail, and
 self pointer. The preinitializer names both hidden TLS symbols through
 `R_X86_64_TPOFF32`. The build requires exactly two such object relocations, and
 LLD resolves them to `-16` and `-8` without adding a dynamic relocation type.
+Only the live static-block-plus-TCB extent is added to the syscall-copy
+contract. The kernel verifies that the exact extent is admitted and one-byte
+underflow and overflow ranges are rejected. Before invoking the preinitializer,
+the userspace interpreter proves the readable path with `write(1, TP - 16, 8)`,
+which emits the initialized `TLS_OK!` template.
 On exit, the prior supervisor FS base is restored and the owned
 TLS frame is zeroed and released; the live-frame count must return to its
 pre-execution value. The later bounded `arch_prctl(ARCH_SET_FS)` proof may
