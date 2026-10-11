@@ -22,7 +22,8 @@ const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
-const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
+const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE + PAGE_SIZE;
+const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -429,12 +430,24 @@ pub(crate) fn double_fault_guard_page() -> usize {
     core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize
 }
 
+pub(crate) fn double_fault_upper_guard_page() -> usize {
+    core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize + EXCEPTION_STACK_TOP_OFFSET
+}
+
+pub(crate) fn double_fault_stack_top() -> usize {
+    core::ptr::addr_of!(DOUBLE_FAULT_STACK) as usize + EXCEPTION_STACK_TOP_OFFSET
+}
+
 pub(crate) fn privilege_stack_guard_page() -> usize {
     core::ptr::addr_of!(PRIVILEGE_STACK) as usize
 }
 
+pub(crate) fn privilege_stack_upper_guard_page() -> usize {
+    core::ptr::addr_of!(PRIVILEGE_STACK) as usize + EXCEPTION_STACK_TOP_OFFSET
+}
+
 pub(crate) fn privilege_stack_top() -> usize {
-    core::ptr::addr_of!(PRIVILEGE_STACK) as usize + EXCEPTION_STACK_STORAGE_SIZE
+    core::ptr::addr_of!(PRIVILEGE_STACK) as usize + EXCEPTION_STACK_TOP_OFFSET
 }
 
 /// Installs a non-exception interrupt gate while interrupts are disabled.
@@ -468,10 +481,8 @@ fn install_user_interrupt_gate(vector: u8, handler: usize) -> bool {
 
 unsafe fn install_gdt_and_tss() {
     let tss_address = core::ptr::addr_of!(TSS) as u64;
-    let privilege_stack_end =
-        core::ptr::addr_of!(PRIVILEGE_STACK) as u64 + EXCEPTION_STACK_STORAGE_SIZE as u64;
-    let exception_stack_end =
-        core::ptr::addr_of!(DOUBLE_FAULT_STACK) as u64 + EXCEPTION_STACK_STORAGE_SIZE as u64;
+    let privilege_stack_end = privilege_stack_top() as u64;
+    let exception_stack_end = double_fault_stack_top() as u64;
     TSS.interrupt_stacks[0] = exception_stack_end;
     TSS.privilege_stacks[0] = privilege_stack_end;
 

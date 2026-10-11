@@ -26,7 +26,8 @@ const EFI_CONVENTIONAL_MEMORY: u32 = 7;
 const UEFI_PAGES_PER_MIB: u64 = 256;
 const PAGE_SIZE: usize = 4096;
 const KERNEL_STACK_SIZE: usize = 64 * 1024;
-const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
+const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
+const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
 pub const BOOT_INFO_VERSION: u32 = 2;
 
@@ -48,7 +49,7 @@ ginux_kernel_stack_entry:
     ud2
 "#,
     stack = sym KERNEL_STACK,
-    stack_size = const KERNEL_STACK_STORAGE_SIZE,
+    stack_size = const KERNEL_STACK_TOP_OFFSET,
     kernel_main = sym kernel_main,
 );
 
@@ -189,15 +190,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let stack_start = core::ptr::addr_of!(KERNEL_STACK) as usize;
     let kernel_stack_guard = stack_start;
     let kernel_stack_start = stack_start + PAGE_SIZE;
+    let kernel_stack_upper_guard = stack_start + KERNEL_STACK_TOP_OFFSET;
     let double_fault_guard = arch::x86_64::cpu::double_fault_guard_page();
+    let double_fault_upper_guard = arch::x86_64::cpu::double_fault_upper_guard_page();
     let privilege_stack_guard = arch::x86_64::cpu::privilege_stack_guard_page();
+    let privilege_stack_upper_guard = arch::x86_64::cpu::privilege_stack_upper_guard_page();
     let required_addresses = [
         kernel_main as *const () as usize,
         boot_info as *const BootInfo as usize,
         boot_info.memory_map as usize,
         memory_map_end,
         kernel_stack_start,
-        stack_start + KERNEL_STACK_STORAGE_SIZE - 1,
+        kernel_stack_upper_guard - 1,
         boot_info.reset_system as usize,
         boot_info.acpi_rsdp as usize,
         acpi_rsdp_end,
@@ -207,12 +211,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.control_plane_bundle as usize + boot_info.control_plane_bundle_size - 1,
         privilege_stack_guard + PAGE_SIZE,
         arch::x86_64::cpu::privilege_stack_top() - 1,
+        double_fault_guard + PAGE_SIZE,
+        arch::x86_64::cpu::double_fault_stack_top() - 1,
     ];
     let guard_pages = [
         0,
         kernel_stack_guard,
+        kernel_stack_upper_guard,
         privilege_stack_guard,
+        privilege_stack_upper_guard,
         double_fault_guard,
+        double_fault_upper_guard,
     ];
 
     // SAFETY: The entry trampoline disabled interrupts. The required live
@@ -226,7 +235,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: page-table transition failed\r\n");
     }
     serial_write("ginux: kernel page tables active\r\n");
-    serial_write("ginux: null and stack guard pages active\r\n");
+    serial_write("ginux: null and bidirectional stack guard pages active\r\n");
 
     let Some(platform) = arch::x86_64::acpi::discover(
         boot_info.acpi_rsdp,

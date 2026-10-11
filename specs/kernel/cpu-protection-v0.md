@@ -8,6 +8,8 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
 - A 64-bit TSS loaded through its system descriptor.
 - A guarded 16 KiB privilege stack dedicated to ring-3 entries.
 - A 16 KiB interrupt-stack-table allocation dedicated to double faults.
+- Absent lower and upper guard pages around the bootstrap,
+  privilege-transition, and double-fault stacks.
 - An IDT with present interrupt gates for all 32 architectural exception
   vectors.
 
@@ -28,8 +30,9 @@ on the interrupted stack.
 
 TSS RSP0 names a dedicated privilege stack rather than the suspended kernel
 call stack. This prevents repeated user calls from overwriting the kernel
-continuation. Its first page is absent in the active kernel and domain page
-tables. The stack is shared by the single bootstrap CPU. Ring-3 execution
+continuation. The pages immediately below and above every native kernel stack
+are absent in the active kernel and domain page tables. The privilege stack is
+shared by the single bootstrap CPU. Ring-3 execution
 admits two non-nested APIC timer interrupts, whose interrupt gate clears IF; kernel handlers
 never re-enable interrupts, so privilege-stack uses cannot nest in this proof.
 
