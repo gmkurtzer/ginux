@@ -613,6 +613,11 @@ if ! grep -q '^ginux: combined Linux static TLS materialized' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: ordered Linux dependency TLS layout materialized' "$output_file"; then
+    echo "Boot test failed: ordered Linux dependency TLS was not materialized." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux TLS active before initializers' "$output_file"; then
     echo "Boot test failed: Linux TLS was not active before initializers." >&2
     exit 1
@@ -625,6 +630,11 @@ fi
 
 if ! grep -q '^ginux: toolchain-driven Linux dependency TLS relocation applied' "$output_file"; then
     echo "Boot test failed: the toolchain-driven Linux dependency TLS relocation was not applied." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: toolchain-driven Linux auxiliary TLS relocation applied' "$output_file"; then
+    echo "Boot test failed: the toolchain-driven Linux auxiliary TLS relocation was not applied." >&2
     exit 1
 fi
 

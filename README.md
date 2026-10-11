@@ -33,16 +33,16 @@ The linker-produced main also carries an authenticated read-only `PT_TLS` view
 of its writable load: eight initialized bytes, sixteen total bytes, and
 eight-byte alignment. The parser caps both TLS size and alignment at 64 bytes,
 requires matching file and virtual displacement inside the writable load, and
-rejects malformed or duplicate declarations. Planning preserves both templates
-and applies the main and dependency biases. The interpreted execution proof
-allocates a separate owned RW/NX page and constructs a deterministic two-module
-static layout: the primary DSO occupies `TP-32..TP-16`, the main occupies
-`TP-16..TP`, and both initialized `.tdata` regions retain zeroed `.tbss` tails.
-A minimal
-16-byte TCB contains its own address. FS is activated before the interpreter,
+rejects malformed or duplicate declarations. Planning preserves all three
+templates and applies the main and dependency biases. The interpreted execution
+proof allocates a separate owned RW/NX page and constructs a deterministic
+three-module static layout: the auxiliary DSO occupies `TP-48..TP-32`, the
+primary DSO occupies `TP-32..TP-16`, the main occupies `TP-16..TP`, and all
+initialized `.tdata` regions retain zeroed `.tbss` tails. A minimal 16-byte TCB
+contains its own address. FS is activated before the interpreter,
 and the main preinitializer refuses to advance unless its TLS template, zero
-tail, and self pointer are correct. The primary DSO's direct initializer also
-refuses to advance unless its initialized and zero-filled regions are correct.
+tail, and self pointer are correct. Both DSOs' direct initializers also refuse
+to advance unless their initialized and zero-filled regions are correct.
 The main accesses name the hidden TLS symbols
 through `R_X86_64_TPOFF32`; LLD resolves both offsets without adding a dynamic
 relocation class, proving the toolchain layout matches the loader. Teardown
@@ -51,14 +51,15 @@ The kernel admits only the live static-block-plus-TCB extent to syscall copy
 validation; the interpreter writes the initialized `TLS_OK!` value directly
 from FS-relative storage before invoking the preinitializer, while one-byte
 underflow and overflow ranges are rejected internally.
-The primary DSO names its hidden TLS template through one toolchain-emitted
+Each DSO names its hidden TLS template through one toolchain-emitted
 `R_X86_64_GOTTPOFF` object reference. LLD converts that reference into a
 bounded `R_X86_64_TPOFF64` GOT relocation and marks the object `DF_STATIC_TLS`.
-The userspace interpreter validates the exact relocation shape and installs
-`-32`; the DSO initializer loads that value from its GOT before using it as an
-FS-relative offset. Malformed types, symbol indexes, addends, alignments, and
-targets are rejected. Additional TLS modules, dynamic TLS, and per-thread
-allocation remain unimplemented.
+The userspace interpreter validates both exact relocation shapes and installs
+`-32` for the primary DSO and `-48` for the auxiliary DSO; each initializer
+loads its value from its GOT before using it as an FS-relative offset. Malformed
+types, symbol indexes, addends, alignments, and targets are rejected. TLS
+modules beyond the bounded graph, dynamic TLS, and per-thread allocation
+remain unimplemented.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

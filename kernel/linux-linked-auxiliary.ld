@@ -5,6 +5,7 @@ PHDRS
     text PT_LOAD FLAGS(5);
     data PT_LOAD FLAGS(6);
     dynamic PT_DYNAMIC FLAGS(6);
+    tls PT_TLS FLAGS(4);
     stack PT_GNU_STACK FLAGS(6);
 }
 
@@ -24,6 +25,8 @@ SECTIONS
     .got.plt : { *(.got.plt) } :data
     .init_array : { *(.init_array) } :data
     .data : { *(.data) } :data
+    .tdata : { *(.tdata) } :data :tls
+    .tbss (NOLOAD) : { *(.tbss) } :data :tls
 
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 }

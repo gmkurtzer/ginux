@@ -193,17 +193,34 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
                 })
         })
         && auxiliary.soname == Some(AUXILIARY)
-        && auxiliary.tls.is_none()
+        && auxiliary.program_header_count == 5
+        && auxiliary.tls.is_some_and(|template| {
+            template.bytes == b"AUXTLS!\n"
+                && template.memory_size == 16
+                && template.alignment == 8
+                && plan.dependencies[1].tls.is_some_and(|relocated| {
+                    relocated.bytes == template.bytes
+                        && relocated.file_offset == template.file_offset
+                        && relocated.virtual_address
+                            == template
+                                .virtual_address
+                                .checked_add(dependency_authorities[1].load_bias)
+                                .unwrap_or(0)
+                        && relocated.memory_size == template.memory_size
+                        && relocated.alignment == template.alignment
+                })
+        })
         && auxiliary.needed_libraries == [None; 2]
         && auxiliary.dynamic_symbol == Some(b"ginux_auxiliary_symbol")
         && auxiliary.dynamic_relocations.is_some_and(|dynamic| {
-            dynamic.symbol_defined
+            dynamic.relocation_count == 4
+                && dynamic.symbol_defined
                 && dynamic.init_function.is_some()
                 && dynamic.preinit_array.is_none()
                 && dynamic.symbol_relocation.is_some()
                 && dynamic.jump_slot_relocation.is_some()
                 && dynamic.init_array == Some(dynamic.relocation_target)
-                && dynamic.tls_relocation_target.is_none()
+                && dynamic.tls_relocation_target.is_some()
         })
         && plan.dependency_bases == [0x61_0000, 0x63_0000]
         && plan.process.main_entry == 0x40_0100

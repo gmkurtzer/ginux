@@ -356,12 +356,14 @@ entry validity, dynamic metadata, and the final admitted page set remain
 kernel-enforced contracts.
 
 The initial-thread execution profile allocates a separate owned RW/NX page for
-the main image and primary DSO TLS templates. It rounds each `p_memsz` up to
+the main image and both DSO TLS templates. It rounds each `p_memsz` up to
 `p_align` and constructs one deterministic x86-64 variant-II static layout:
-the primary DSO occupies `TP-32..TP-16`, the main occupies `TP-16..TP`, and the
-thread pointer remains 64-byte aligned. The loader copies each `p_filesz`
-region from `.tdata` and retains zeroes through both `.tbss` tails. The
-following 16 bytes form a minimal TCB whose first word points to itself and
+the auxiliary DSO occupies `TP-48..TP-32`, the primary DSO occupies
+`TP-32..TP-16`, the main occupies `TP-16..TP`, and the thread pointer remains
+64-byte aligned. The loader places dependencies in authenticated order outward
+from the main block, copies each `p_filesz` region from `.tdata`, and retains
+zeroes through all three `.tbss` tails. The following 16 bytes form a minimal
+TCB whose first word points to itself and
 whose second word is zero. The kernel programs FS before entering the
 interpreter. The main preinitializer and kernel verify the main initialized
 value, zero tail, and self pointer. The preinitializer names both hidden TLS symbols through
@@ -376,19 +378,20 @@ On exit, the prior supervisor FS base is restored and the owned
 TLS frame is zeroed and released; the live-frame count must return to its
 pre-execution value. The later bounded `arch_prctl(ARCH_SET_FS)` proof may
 replace the initial base, but is not the loader's TLS construction mechanism.
-The primary authenticated DSO carries a second bounded `PT_TLS` template with
-the eight-byte `DSOTLS!\n` value, sixteen total bytes, and eight-byte alignment.
-Parsing binds it to the DSO's digest and `DT_SONAME`, and planning relocates its
-metadata by the canonical dependency bias. Its direct initializer reads the
-assigned initialized value and zero tail before allowing its constructor to
-advance, so successful execution proves dependency TLS is live before
-constructors. The source names the hidden template through one
+The authenticated DSOs carry bounded `PT_TLS` templates with the eight-byte
+`DSOTLS!\n` and `AUXTLS!\n` values, sixteen total bytes, and eight-byte
+alignment. Parsing binds each template to its DSO digest and `DT_SONAME`, and
+planning relocates its metadata by the canonical dependency bias. Each direct
+initializer reads its assigned initialized value and zero tail before allowing
+its constructor to advance, so successful execution proves dependency TLS is
+live before constructors. Each source names its hidden template through one
 `R_X86_64_GOTTPOFF` object relocation. LLD emits a `R_X86_64_TPOFF64` GOT
 relocation and `DT_FLAGS = DF_STATIC_TLS`; the userspace interpreter requires
-that exact symbol-zero, zero-addend shape and installs the assigned `-32`
-module offset. The initializer loads the offset from the relocated GOT rather
-than encoding it in its instruction stream. Additional TLS modules, dynamic
-TLS, and per-thread allocation remain outside the execution profile.
+each exact symbol-zero, zero-addend shape and installs the assigned `-32` or
+`-48` module offset. The initializers load their offsets from the relocated GOT
+rather than encoding them in their instruction streams. TLS modules beyond the
+bounded dependency graph, dynamic TLS, and per-thread allocation remain
+outside the execution profile.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
@@ -397,8 +400,7 @@ dynamic-table address by adding the selected bias to `p_vaddr`; the linked main
 and dependency scans no longer embed their dynamic addresses or entry counts.
 The userspace scans require `DT_RELASZ = 96`, `DT_RELAENT = 24`,
 `DT_RELACOUNT = 2`, `DT_PLTRELSZ = 48`, and `DT_PLTREL = DT_RELA` for the
-main. The primary TLS-bearing dependency requires `DT_RELASZ = 72`, while the
-TLS-free auxiliary dependency requires `DT_RELASZ = 48`; both require
+main. Both TLS-bearing dependencies require `DT_RELASZ = 72`,
 `DT_RELAENT = 24`, `DT_RELACOUNT = 1`, `DT_PLTRELSZ = 24`, and
 `DT_PLTREL = DT_RELA`. A missing or different value fails before relocation.
 The interpreter keeps its bounded startup scratch in the zero-fill tail after

@@ -18,6 +18,12 @@ ginux_auxiliary_symbol:
 ginux_auxiliary_init:
     cmp qword ptr [0x404008], 1
     jne .Lauxiliary_init_done
+    mov rdx, qword ptr [rip + ginux_auxiliary_tls_template@GOTTPOFF]
+    movabs rax, 0x0a21534c54585541
+    cmp qword ptr fs:[rdx], rax
+    jne .Lauxiliary_init_done
+    cmp qword ptr fs:[rdx + 8], 0
+    jne .Lauxiliary_init_done
     mov qword ptr [rip + .Lauxiliary_initialized], 0x47
 .Lauxiliary_init_done:
     ret
@@ -55,3 +61,17 @@ ginux_auxiliary_init:
 .section .data,"aw",@progbits
 .Lauxiliary_initialized:
     .quad 0
+
+.section .tdata,"awT",@progbits
+.balign 8
+.global ginux_auxiliary_tls_template
+.hidden ginux_auxiliary_tls_template
+ginux_auxiliary_tls_template:
+    .ascii "AUXTLS!\n"
+
+.section .tbss,"awT",@nobits
+.balign 8
+.global ginux_auxiliary_tls_zero
+.hidden ginux_auxiliary_tls_zero
+ginux_auxiliary_tls_zero:
+    .space 8

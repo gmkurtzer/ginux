@@ -633,9 +633,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: interpreted Linux ELF64 address-space mapping failed\r\n");
     }
     serial_write("ginux: combined Linux static TLS materialized\r\n");
+    serial_write("ginux: ordered Linux dependency TLS layout materialized\r\n");
     serial_write("ginux: Linux TLS active before initializers\r\n");
     serial_write("ginux: Linux dependency TLS active before constructors\r\n");
     serial_write("ginux: toolchain-driven Linux dependency TLS relocation applied\r\n");
+    serial_write("ginux: toolchain-driven Linux auxiliary TLS relocation applied\r\n");
     serial_write("ginux: linker-resolved Linux TLS symbols executed\r\n");
     serial_write("ginux: bounded Linux TLS syscall copies validated\r\n");
     serial_write("ginux: Linux TLS frame scrubbed and released\r\n");
