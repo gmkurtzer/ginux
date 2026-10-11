@@ -66,7 +66,9 @@ Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. A
 bounded `arch_prctl(ARCH_SET_FS, 0x401000)` then makes the payload available
 through an FS-relative TLS read. A bounded `uname(0x401000)` subsequently
 copies a complete zero-initialized `utsname` into
-the declared data segment, where the probe validates the system name. It next
+the declared data segment, where the probe validates the system name. Both
+copy directions are checked against the segment's 512-byte `p_memsz`, rather
+than the rest of its mapped 4096-byte page. It next
 issues `getpid`, verifies PID 1 after the kernel resumes it through `SYSRETQ`,
 verifies preserved first and fourth argument registers, and issues Linux
 `exit_group(42)`. Those calls are

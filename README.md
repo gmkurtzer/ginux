@@ -18,7 +18,9 @@ after checking that an unsupported call returns `-ENOSYS`, performing bounded
 `write` copy-in and `uname` copy-out operations, and validating a `getpid()`
 result returned through `SYSRETQ`. It also configures an FS-relative TLS base
 through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's prior
-FS base afterward. This is not yet a general Linux
+FS base afterward. Pointer-bearing calls are constrained to the RW segment's
+declared ELF memory extent even though the containing page is larger. This is
+not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and
 [Linux Syscall Entry v0](specs/kernel/linux-syscall-v0.md).

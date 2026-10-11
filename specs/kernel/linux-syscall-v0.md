@@ -8,11 +8,13 @@ instruction with Linux register conventions. It first submits unsupported call
 999 and requires Linux `-ENOSYS` (-38) after resumption. It then uses `rax = 1`
 (`__NR_write`) with fd 1, the declared RW segment address, and an eight-byte
 length. The kernel validates all three arguments, enables supervisor access to
-user memory only around the bounded copy-in, verifies the expected bytes, and
-returns 8. Next, `rax = 63` (`__NR_uname`) and the exact RW segment base request
+user memory only around a copy-in constrained by the RW segment's declared ELF
+memory extent, verifies the expected bytes, and returns 8. Next, `rax = 63`
+(`__NR_uname`) and the exact RW segment base request
 a fixed 390-byte Linux `utsname`. The kernel zero-initializes every byte, fills
 all six 65-byte fields, and enables supervisor access to user memory only for
-the bounded copy-out. The probe checks success and the `Ginux` system name.
+the copy-out, which is subject to the same declared-extent check. The probe
+checks success and the `Ginux` system name.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. The kernel saves the prior
@@ -48,4 +50,5 @@ threads, general TLS state, or any syscall other than the exact bounded
 `write`, `uname`, `arch_prctl(ARCH_SET_FS)`, `getpid`, `exit`, and `exit_group`
 calls. Every other call returns `-ENOSYS` without disarming the task, so a
 caller can handle the error and continue. The entire path remains disarmed
-outside the proof.
+outside the proof. The current copy helpers cover only the one declared RW
+segment; general VM-area lookup and cross-segment copies remain future work.

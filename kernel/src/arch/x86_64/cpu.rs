@@ -132,6 +132,7 @@ static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ENTRY: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -671,7 +672,12 @@ pub(crate) fn execute_auxiliary(
     };
 }
 
-pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize, data: usize) -> bool {
+pub(crate) fn verify_linux_elf_entry(
+    entry: usize,
+    stack: usize,
+    data: usize,
+    data_size: usize,
+) -> bool {
     if ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst) {
         return false;
     }
@@ -683,6 +689,7 @@ pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize, data: usize) ->
     ELF_PROBE_STACK.store(stack as u64, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store((entry & !(PAGE_SIZE - 1)) as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(data as u64, Ordering::SeqCst);
+    ELF_PROBE_DATA_SIZE.store(data_size as u64, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -690,6 +697,7 @@ pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize, data: usize) ->
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
+    ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
     inactive && completed && msrs_restored
 }
 
@@ -963,13 +971,9 @@ extern "sysv64" fn linux_syscall_handler(
                 && buffer == ELF_PROBE_DATA.load(Ordering::SeqCst)
                 && count == 8 =>
         {
-            let matches = unsafe {
-                with_supervisor_user_access(|| {
-                    (0..8).all(|offset| {
-                        (buffer as *const u8).add(offset).read_volatile() == offset as u8 + 1
-                    })
-                })
-            };
+            let mut bytes = [0_u8; 8];
+            let matches =
+                copy_from_linux_user(buffer, &mut bytes) && bytes == [1, 2, 3, 4, 5, 6, 7, 8];
             if matches {
                 8
             } else {
@@ -995,16 +999,9 @@ extern "sysv64" fn linux_syscall_handler(
             name[195..198].copy_from_slice(b"#1\0");
             name[260..267].copy_from_slice(b"x86_64\0");
             name[325..337].copy_from_slice(b"localdomain\0");
-            // SAFETY: the proof accepts only the declared RW segment base, and
-            // its ELF memory size contains the complete fixed Linux structure.
-            unsafe {
-                with_supervisor_user_access(|| {
-                    core::ptr::copy_nonoverlapping(
-                        name.as_ptr(),
-                        first_argument as *mut u8,
-                        name.len(),
-                    );
-                });
+            if !copy_to_linux_user(first_argument, &name) {
+                ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+                return u64::MAX;
             }
             0
         }
@@ -1017,6 +1014,47 @@ extern "sysv64" fn linux_syscall_handler(
         }
         _ => LINUX_ENOSYS,
     }
+}
+
+fn linux_user_range_contains(address: u64, length: usize) -> bool {
+    let base = ELF_PROBE_DATA.load(Ordering::SeqCst);
+    let size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
+    length != 0
+        && address >= base
+        && address
+            .checked_add(length as u64)
+            .is_some_and(|end| end <= base.saturating_add(size))
+}
+
+fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
+    if !linux_user_range_contains(address, output.len()) {
+        return false;
+    }
+    // SAFETY: the range is contained by the active probe's declared RW ELF
+    // segment, which remains mapped in the current root for the whole call.
+    unsafe {
+        with_supervisor_user_access(|| {
+            for (offset, byte) in output.iter_mut().enumerate() {
+                *byte = (address as *const u8).add(offset).read_volatile();
+            }
+        });
+    }
+    true
+}
+
+fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {
+    if !linux_user_range_contains(address, input.len()) {
+        return false;
+    }
+    // SAFETY: see copy_from_linux_user; this probe segment is writable.
+    unsafe {
+        with_supervisor_user_access(|| {
+            for (offset, byte) in input.iter().enumerate() {
+                (address as *mut u8).add(offset).write_volatile(*byte);
+            }
+        });
+    }
+    true
 }
 
 fn dispatch_charged_call(

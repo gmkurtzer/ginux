@@ -233,6 +233,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     plan.entry as usize,
                     (stack_virtual_page + stack_offset as u64) as usize,
                     second.virtual_page as usize,
+                    second.memory_size,
                 );
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
