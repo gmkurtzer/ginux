@@ -1627,6 +1627,181 @@ ginux_linux_probe:
     mov eax, 3
     call syscall_expect_zero
 
+    xor edi, edi
+    xor esi, esi
+    mov eax, 283
+    call syscall_expect_einval
+    mov edi, 1
+    mov esi, 2
+    mov eax, 283
+    call syscall_expect_einval
+
+    xor edi, edi
+    mov eax, 291
+    syscall
+    cmp rax, 2
+    jne failure
+    mov edi, 1
+    mov esi, 0x80800
+    mov eax, 283
+    syscall
+    cmp rax, 3
+    jne failure
+    mov eax, 283
+    syscall
+    cmp rax, -24
+    jne failure
+
+    mov edi, 3
+    mov esi, 1
+    mov eax, 72
+    syscall
+    cmp rax, 1
+    jne failure
+    mov esi, 3
+    mov eax, 72
+    syscall
+    cmp rax, 0x802
+    jne failure
+    mov eax, 8
+    syscall
+    cmp rax, -29
+    jne failure
+    mov esi, 0x404e00
+    mov edx, 8
+    mov eax, 1
+    call syscall_expect_einval
+
+    mov esi, 0x404e20
+    mov eax, 287
+    call syscall_expect_zero
+    cmp qword ptr [0x404e20], 0
+    jne failure
+    cmp qword ptr [0x404e38], 0
+    jne failure
+    mov esi, 0x404e00
+    xor eax, eax
+    call syscall_expect_eagain
+
+    xor esi, esi
+    mov edx, 0x405200
+    xor r10d, r10d
+    mov eax, 286
+    call syscall_expect_efault
+    mov qword ptr [0x404e00], 0
+    mov qword ptr [0x404e08], 1000000000
+    mov qword ptr [0x404e10], 0
+    mov qword ptr [0x404e18], 1
+    mov edx, 0x404e00
+    mov eax, 286
+    call syscall_expect_einval
+
+    mov qword ptr [0x404e08], 0
+    mov r10d, 0x404e40
+    mov eax, 286
+    call syscall_expect_zero
+    cmp qword ptr [0x404e40], 0
+    jne failure
+    cmp qword ptr [0x404e58], 0
+    jne failure
+
+    mov dword ptr [0x404d00], 1
+    movabs rax, 0x54494d4552464433
+    mov qword ptr [0x404d04], rax
+    mov edi, 2
+    mov esi, 1
+    mov edx, 3
+    mov r10d, 0x404d00
+    mov eax, 233
+    call syscall_expect_zero
+    mov esi, 0x404d20
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 232
+    syscall
+    cmp rax, 1
+    jne failure
+    movabs rax, 0x54494d4552464433
+    cmp qword ptr [0x404d24], rax
+    jne failure
+
+    mov edi, 3
+    mov esi, 0x4051fc
+    mov edx, 8
+    xor eax, eax
+    call syscall_expect_efault
+    mov esi, 0x404e60
+    mov edx, 8
+    xor eax, eax
+    syscall
+    cmp rax, 8
+    jne failure
+    cmp qword ptr [0x404e60], 1
+    jne failure
+    mov edi, 2
+    mov esi, 0x404d20
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 232
+    call syscall_expect_zero
+    mov edi, 3
+    mov esi, 0x404e60
+    mov edx, 8
+    xor eax, eax
+    call syscall_expect_eagain
+
+    mov qword ptr [0x404e08], 1
+    mov qword ptr [0x404e18], 1
+    xor esi, esi
+    mov edx, 0x404e00
+    mov r10d, 0x404e40
+    mov eax, 286
+    call syscall_expect_zero
+    cmp qword ptr [0x404e48], 0
+    jne failure
+    mov esi, 0x404e20
+    mov eax, 287
+    call syscall_expect_zero
+    cmp qword ptr [0x404e28], 1
+    jne failure
+    mov esi, 0x404e60
+    mov edx, 8
+    xor eax, eax
+    syscall
+    cmp rax, 8
+    jne failure
+    cmp qword ptr [0x404e60], 0
+    je failure
+
+    mov edi, 3
+    mov qword ptr [0x404e08], 0
+    mov esi, 1
+    mov edx, 0x404e00
+    xor r10d, r10d
+    mov eax, 286
+    call syscall_expect_zero
+    mov esi, 0x404e60
+    mov edx, 8
+    xor eax, eax
+    syscall
+    cmp rax, 8
+    jne failure
+    cmp qword ptr [0x404e60], 0
+    je failure
+
+    mov edi, 2
+    mov esi, 2
+    mov edx, 3
+    xor r10d, r10d
+    mov eax, 233
+    call syscall_expect_zero
+    mov edi, 3
+    mov eax, 3
+    call syscall_expect_zero
+    mov edi, 2
+    mov eax, 3
+    call syscall_expect_zero
+
     movabs rax, 0x72657a2f7665642f
     mov qword ptr [0x404340], rax
     mov word ptr [0x404348], 0x006f

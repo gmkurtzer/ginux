@@ -95,6 +95,25 @@ value. `poll` and epoll report `POLLIN`/`EPOLLIN` while nonzero and
 counter in the simultaneous epoll descriptor, observes readiness appear after
 a write, preserves readiness across a failed read, drains it, verifies
 full-counter backpressure, and closes both descriptors.
+`rax = 283` (`__NR_timerfd_create`) allocates one process-local
+`CLOCK_MONOTONIC` timer in the lowest free auxiliary descriptor. It accepts
+`TFD_CLOEXEC` and `TFD_NONBLOCK`; unsupported clocks or flags return `-EINVAL`,
+and a second timer or full table returns `-EMFILE`. `rax = 286`
+(`__NR_timerfd_settime`) accepts a complete 32-byte x86-64 `itimerspec`,
+normalized nonnegative times, and relative or `TFD_TIMER_ABSTIME` arming.
+Zero initial expiration disarms the timer. The optional old value is validated
+and copied before state changes. `rax = 287` (`__NR_timerfd_gettime`) reports
+the interval and time until the next expiration. Reads require exactly one
+eight-byte result, preserve pending expiration state on `-EFAULT`, return the
+number of accumulated periodic expirations, disarm a consumed one-shot, and
+advance a periodic deadline. A disarmed or unexpired nonblocking read returns
+`-EAGAIN`; a corresponding blocking read returns `-ENOSYS` until descriptor
+wait queues exist. `poll` and epoll expose `POLLIN`/`EPOLLIN` dynamically once
+the monotonic deadline has elapsed. The descriptor also participates in
+`F_GETFD`, `F_SETFD`, `F_GETFL`, `lseek`, and `close`. The proof creates timerfd
+and epoll together, observes one-shot readiness, verifies failed-read
+non-consumption, consumes periodic and already-expired absolute timers, and
+releases both descriptors.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded

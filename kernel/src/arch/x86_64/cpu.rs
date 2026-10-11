@@ -122,7 +122,10 @@ const LINUX_PPOLL_SYSCALL: u64 = 271;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_EPOLL_PWAIT_SYSCALL: u64 = 281;
+const LINUX_TIMERFD_CREATE_SYSCALL: u64 = 283;
 const LINUX_EVENTFD_SYSCALL: u64 = 284;
+const LINUX_TIMERFD_SETTIME_SYSCALL: u64 = 286;
+const LINUX_TIMERFD_GETTIME_SYSCALL: u64 = 287;
 const LINUX_EVENTFD2_SYSCALL: u64 = 290;
 const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
@@ -181,6 +184,8 @@ const LINUX_EPOLL_CTL_MOD: u64 = 3;
 const LINUX_EPOLL_SUPPORTED_EVENTS: u32 = (LINUX_POLLIN | LINUX_POLLOUT) as u32;
 const LINUX_EFD_SEMAPHORE: u64 = 1;
 const LINUX_EFD_NONBLOCK: u64 = 0x800;
+const LINUX_TFD_TIMER_ABSTIME: u64 = 1;
+const LINUX_TFD_NONBLOCK: u64 = 0x800;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
@@ -325,6 +330,10 @@ static ELF_PROBE_EPOLL_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_EVENTFD_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_EVENTFD_COUNTER: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_EVENTFD_FLAGS: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_TIMERFD_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_TIMERFD_FLAGS: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_TIMERFD_INTERVAL: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_TIMERFD_DEADLINE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DIRECTORY_CURSORS: [AtomicU8; 2] = [const { AtomicU8::new(0) }; 2];
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
@@ -949,6 +958,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_EVENTFD_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_EVENTFD_COUNTER.store(0, Ordering::SeqCst);
     ELF_PROBE_EVENTFD_FLAGS.store(0, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_DESCRIPTOR.store(0, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_FLAGS.store(0, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
     for cursor in &ELF_PROBE_DIRECTORY_CURSORS {
         cursor.store(0, Ordering::SeqCst);
     }
@@ -986,6 +999,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         u64::from(ELF_PROBE_EVENTFD_DESCRIPTOR.load(Ordering::SeqCst)),
         ELF_PROBE_EVENTFD_COUNTER.load(Ordering::SeqCst),
         u64::from(ELF_PROBE_EVENTFD_FLAGS.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst)),
+        u64::from(ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst)),
+        ELF_PROBE_TIMERFD_INTERVAL.load(Ordering::SeqCst),
+        ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst),
     ];
     let mut devices_closed = true;
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
@@ -1005,6 +1022,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && ELF_PROBE_EVENTFD_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EVENTFD_COUNTER.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EVENTFD_FLAGS.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_TIMERFD_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_TIMERFD_FLAGS.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_TIMERFD_INTERVAL.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_TIMERFD_DEADLINE.swap(0, Ordering::SeqCst) == 0
         && cursors_reset;
     if !descriptor_state_valid {
         serial_write("ginux: Linux descriptor state leak:");
@@ -1360,7 +1381,8 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_LSEEK_SYSCALL => {
-            if linux_eventfd_descriptor(first_argument) {
+            if linux_eventfd_descriptor(first_argument) || linux_timerfd_descriptor(first_argument)
+            {
                 return LINUX_ESPIPE;
             }
             let device = linux_device_descriptor(first_argument);
@@ -1671,8 +1693,13 @@ extern "sysv64" fn linux_syscall_handler(
             linux_readlink_self(buffer, count, register(0))
         }
         LINUX_EPOLL_CREATE1_SYSCALL => linux_epoll_create1(first_argument),
+        LINUX_TIMERFD_CREATE_SYSCALL => linux_timerfd_create(first_argument, buffer),
         LINUX_EVENTFD_SYSCALL => linux_eventfd(first_argument, 0),
         LINUX_EVENTFD2_SYSCALL => linux_eventfd(first_argument, buffer),
+        LINUX_TIMERFD_SETTIME_SYSCALL => {
+            linux_timerfd_settime(first_argument, buffer, count, register(0))
+        }
+        LINUX_TIMERFD_GETTIME_SYSCALL => linux_timerfd_gettime(first_argument, buffer),
         LINUX_EPOLL_PWAIT_SYSCALL => linux_epoll_pwait(
             first_argument,
             buffer,
@@ -1812,6 +1839,13 @@ fn linux_elapsed_time() -> Option<(u64, u64)> {
         ticks / frequency,
         ticks % frequency * NANOSECONDS_PER_SECOND / frequency,
     ))
+}
+
+fn linux_elapsed_nanoseconds() -> Option<u64> {
+    let (seconds, nanoseconds) = linux_elapsed_time()?;
+    seconds
+        .checked_mul(NANOSECONDS_PER_SECOND)
+        .and_then(|value| value.checked_add(nanoseconds))
 }
 
 fn linux_clock_supported(clock: u64) -> bool {
@@ -2192,6 +2226,9 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     if let Some(result) = linux_eventfd_read(descriptor, address, count) {
         return result;
     }
+    if let Some(result) = linux_timerfd_read(descriptor, address, count) {
+        return result;
+    }
     let device = linux_device_descriptor(descriptor);
     if device & LINUX_DEVICE_DIRECTORY != 0 {
         return LINUX_EISDIR;
@@ -2395,6 +2432,157 @@ fn linux_eventfd_write(descriptor: u64, address: u64, count: u64) -> Option<u64>
     Some(8)
 }
 
+fn linux_timerfd_create(clock: u64, flags: u64) -> u64 {
+    if clock != LINUX_CLOCK_MONOTONIC || flags & !(LINUX_TFD_NONBLOCK | LINUX_O_CLOEXEC) != 0 {
+        return LINUX_EINVAL;
+    }
+    if ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst) != 0 {
+        return LINUX_EMFILE;
+    }
+    let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
+        .find(|descriptor| linux_aux_descriptor_free(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    ELF_PROBE_TIMERFD_FLAGS.store(flags as u32, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_DESCRIPTOR.store(descriptor as u8, Ordering::SeqCst);
+    if flags & LINUX_O_CLOEXEC != 0 {
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
+    } else {
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+    }
+    descriptor
+}
+
+fn linux_timerfd_settime(descriptor: u64, flags: u64, new_address: u64, old_address: u64) -> u64 {
+    if !linux_timerfd_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    if flags & !LINUX_TFD_TIMER_ABSTIME != 0 {
+        return LINUX_EINVAL;
+    }
+    if old_address != 0 && !linux_writable_user_range_contains(old_address, 32) {
+        return LINUX_EFAULT;
+    }
+    let mut specification = [0_u8; 32];
+    if !copy_from_linux_user(new_address, &mut specification) {
+        return LINUX_EFAULT;
+    }
+    let Some(interval) = linux_timespec_nanoseconds(&specification[..16]) else {
+        return LINUX_EINVAL;
+    };
+    let Some(value) = linux_timespec_nanoseconds(&specification[16..]) else {
+        return LINUX_EINVAL;
+    };
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return LINUX_ENOSYS;
+    };
+    let old = linux_timerfd_specification(now);
+    let deadline = if value == 0 {
+        0
+    } else if flags & LINUX_TFD_TIMER_ABSTIME != 0 {
+        value
+    } else {
+        let Some(deadline) = now.checked_add(value) else {
+            return LINUX_EINVAL;
+        };
+        deadline
+    };
+    if old_address != 0 && !copy_to_linux_user(old_address, &old) {
+        return LINUX_EFAULT;
+    }
+    ELF_PROBE_TIMERFD_INTERVAL.store(interval, Ordering::SeqCst);
+    ELF_PROBE_TIMERFD_DEADLINE.store(deadline, Ordering::SeqCst);
+    0
+}
+
+fn linux_timerfd_gettime(descriptor: u64, address: u64) -> u64 {
+    if !linux_timerfd_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return LINUX_ENOSYS;
+    };
+    let specification = linux_timerfd_specification(now);
+    if !copy_to_linux_user(address, &specification) {
+        return LINUX_EFAULT;
+    }
+    0
+}
+
+fn linux_timerfd_read(descriptor: u64, address: u64, count: u64) -> Option<u64> {
+    if !linux_timerfd_descriptor(descriptor) {
+        return None;
+    }
+    if count != 8 {
+        return Some(LINUX_EINVAL);
+    }
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return Some(LINUX_ENOSYS);
+    };
+    let deadline = ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst);
+    if deadline == 0 || now < deadline {
+        return Some(
+            if ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst) & LINUX_TFD_NONBLOCK as u32 != 0 {
+                LINUX_EAGAIN
+            } else {
+                LINUX_ENOSYS
+            },
+        );
+    }
+    let interval = ELF_PROBE_TIMERFD_INTERVAL.load(Ordering::SeqCst);
+    let expirations = now
+        .saturating_sub(deadline)
+        .checked_div(interval)
+        .map_or(1, |elapsed| elapsed + 1);
+    if !copy_to_linux_user(address, &expirations.to_ne_bytes()) {
+        return Some(LINUX_EFAULT);
+    }
+    let next = if interval == 0 {
+        0
+    } else {
+        deadline.saturating_add(expirations.saturating_mul(interval))
+    };
+    ELF_PROBE_TIMERFD_DEADLINE.store(next, Ordering::SeqCst);
+    Some(8)
+}
+
+fn linux_timespec_nanoseconds(timespec: &[u8]) -> Option<u64> {
+    let seconds = i64::from_ne_bytes(timespec[..8].try_into().ok()?);
+    let nanoseconds = i64::from_ne_bytes(timespec[8..16].try_into().ok()?);
+    if seconds < 0 || !(0..NANOSECONDS_PER_SECOND as i64).contains(&nanoseconds) {
+        return None;
+    }
+    (seconds as u64)
+        .checked_mul(NANOSECONDS_PER_SECOND)
+        .and_then(|value| value.checked_add(nanoseconds as u64))
+}
+
+fn linux_timerfd_specification(now: u64) -> [u8; 32] {
+    let interval = ELF_PROBE_TIMERFD_INTERVAL.load(Ordering::SeqCst);
+    let deadline = ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst);
+    let remaining = if deadline == 0 {
+        0
+    } else if now < deadline {
+        deadline - now
+    } else if interval == 0 {
+        0
+    } else {
+        interval - (now - deadline) % interval
+    };
+    let mut specification = [0_u8; 32];
+    linux_store_timespec(&mut specification[..16], interval);
+    linux_store_timespec(&mut specification[16..], remaining);
+    specification
+}
+
+fn linux_store_timespec(timespec: &mut [u8], nanoseconds: u64) {
+    timespec[..8].copy_from_slice(&(nanoseconds / NANOSECONDS_PER_SECOND).to_ne_bytes());
+    timespec[8..16].copy_from_slice(&(nanoseconds % NANOSECONDS_PER_SECOND).to_ne_bytes());
+}
+
 fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u64) -> u64 {
     if !linux_epoll_descriptor(epoll) {
         return LINUX_EBADF;
@@ -2523,6 +2711,7 @@ fn linux_descriptor_open(descriptor: u64) -> bool {
         || linux_device_descriptor(descriptor) != 0
         || linux_epoll_descriptor(descriptor)
         || linux_eventfd_descriptor(descriptor)
+        || linux_timerfd_descriptor(descriptor)
 }
 
 fn linux_epoll_descriptor(descriptor: u64) -> bool {
@@ -2535,11 +2724,17 @@ fn linux_eventfd_descriptor(descriptor: u64) -> bool {
         && u64::from(ELF_PROBE_EVENTFD_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
 }
 
+fn linux_timerfd_descriptor(descriptor: u64) -> bool {
+    descriptor >= LINUX_AUX_DESCRIPTOR_FIRST
+        && u64::from(ELF_PROBE_TIMERFD_DESCRIPTOR.load(Ordering::SeqCst)) == descriptor
+}
+
 fn linux_aux_descriptor_free(descriptor: u64) -> bool {
     (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor)
         && linux_device_descriptor(descriptor) == 0
         && !linux_epoll_descriptor(descriptor)
         && !linux_eventfd_descriptor(descriptor)
+        && !linux_timerfd_descriptor(descriptor)
 }
 
 fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
@@ -2571,6 +2766,11 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
         }
         return returned;
     }
+    if linux_timerfd_descriptor(descriptor) {
+        let deadline = ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst);
+        let ready = deadline != 0 && linux_elapsed_nanoseconds().is_some_and(|now| now >= deadline);
+        return if ready { requested & LINUX_POLLIN } else { 0 };
+    }
     let device = linux_device_descriptor(descriptor);
     if device == 0 {
         return LINUX_POLLNVAL;
@@ -2589,6 +2789,9 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
 fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
     if let Some(result) = linux_eventfd_write(descriptor, address, count) {
         return result;
+    }
+    if linux_timerfd_descriptor(descriptor) {
+        return LINUX_EINVAL;
     }
     let device = linux_device_descriptor(descriptor);
     let access = device & 3;
@@ -2797,6 +3000,14 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
         return 0;
     }
+    if linux_timerfd_descriptor(descriptor) {
+        ELF_PROBE_TIMERFD_DESCRIPTOR.store(0, Ordering::SeqCst);
+        ELF_PROBE_TIMERFD_FLAGS.store(0, Ordering::SeqCst);
+        ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
+        ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+        return 0;
+    }
     if ELF_PROBE_DEVICE_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
         .swap(0, Ordering::SeqCst)
         == 0
@@ -2942,6 +3153,27 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
                 LINUX_F_GETFL => {
                     2 | u64::from(
                         ELF_PROBE_EVENTFD_FLAGS.load(Ordering::SeqCst) & LINUX_EFD_NONBLOCK as u32,
+                    )
+                }
+                _ => LINUX_EINVAL,
+            };
+        }
+        if linux_timerfd_descriptor(descriptor) {
+            return match command {
+                LINUX_F_GETFD => {
+                    u64::from((ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst) >> descriptor) & 1)
+                }
+                LINUX_F_SETFD => {
+                    if argument & u64::from(LINUX_FD_CLOEXEC) != 0 {
+                        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
+                    } else {
+                        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+                    }
+                    0
+                }
+                LINUX_F_GETFL => {
+                    2 | u64::from(
+                        ELF_PROBE_TIMERFD_FLAGS.load(Ordering::SeqCst) & LINUX_TFD_NONBLOCK as u32,
                     )
                 }
                 _ => LINUX_EINVAL,
