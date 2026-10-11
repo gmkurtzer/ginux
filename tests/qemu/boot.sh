@@ -78,6 +78,21 @@ if ! grep -q '^ginux: null and stack guard pages active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: ACPI MADT validated' "$output_file"; then
+    echo "Boot test failed: ACPI MADT discovery did not complete." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: enabled processors: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: ACPI reported no enabled processors." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: I/O APICs: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: ACPI reported no I/O APICs." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: GDT/TSS/IDT active' "$output_file"; then
     echo "Boot test failed: kernel CPU protection tables are not active." >&2
     exit 1

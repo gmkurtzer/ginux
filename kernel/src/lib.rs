@@ -168,6 +168,24 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: kernel page tables active\r\n");
     serial_write("ginux: null and stack guard pages active\r\n");
 
+    let Some(platform) = arch::x86_64::acpi::discover(
+        boot_info.acpi_rsdp,
+        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+    ) else {
+        kernel_fail("ginux: ACPI platform discovery failed\r\n");
+    };
+    serial_write("ginux: ACPI MADT validated\r\nginux: enabled processors: ");
+    serial_write_usize(platform.enabled_processors);
+    serial_write("\r\nginux: I/O APICs: ");
+    serial_write_usize(platform.io_apics);
+    serial_write("\r\nginux: MADT local APIC address: ");
+    serial_write_u64(platform.local_apic_address);
+    serial_write("\r\nginux: first I/O APIC address: ");
+    serial_write_u64(u64::from(platform.first_io_apic_address));
+    serial_write("\r\nginux: first I/O APIC GSI base: ");
+    serial_write_u64(u64::from(platform.first_io_apic_gsi));
+    serial_write("\r\n");
+
     if !arch::x86_64::cpu::install() {
         kernel_fail("ginux: architectural exception gates invalid\r\n");
     }
@@ -180,6 +198,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(local_apic) = arch::x86_64::apic::discover() else {
         kernel_fail("ginux: enabled local APIC not found\r\n");
     };
+    if local_apic.mode == arch::x86_64::apic::Mode::XApic
+        && local_apic.physical_base != platform.local_apic_address
+    {
+        kernel_fail("ginux: CPUID/MSR and ACPI disagree on local APIC\r\n");
+    }
     serial_write("ginux: local APIC discovered\r\nginux: local APIC ID: ");
     serial_write_u64(u64::from(local_apic.id));
     serial_write("\r\nginux: local APIC mode: ");
