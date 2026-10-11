@@ -22,8 +22,17 @@ ginux_linux_interpreter:
     add rdx, rbx
     mov qword ptr [rcx], rdx
 
+    mov edi, 0x405200
+    cmp qword ptr [rdi], 1
+    je .Llinked_main_dynamic
     mov edi, 0x404008
     mov ecx, 13
+    xor r15d, r15d
+    jmp .Lmain_dynamic_ready
+.Llinked_main_dynamic:
+    mov ecx, 17
+    mov r15d, 0x3ff000
+.Lmain_dynamic_ready:
     xor ebx, ebx
     xor eax, eax
     xor esi, esi
@@ -52,9 +61,21 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     test rbx, rbx
     jz .Linvalid_dynamic
+    add rax, r15
+    add rsi, r15
+    add r8, r15
+    add r13, r15
+    add rbx, r15
 
+    mov edi, 0x613000
+    cmp qword ptr [rdi], 14
+    je .Llinked_dependency_dynamic
     mov edi, 0x613008
     mov ecx, 13
+    jmp .Ldependency_dynamic_ready
+.Llinked_dependency_dynamic:
+    mov ecx, 15
+.Ldependency_dynamic_ready:
     xor r9d, r9d
     xor r10d, r10d
     xor r11d, r11d
@@ -118,10 +139,13 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], r12
 
     mov rcx, qword ptr [rax]
+    add rcx, r15
     mov rdx, qword ptr [rax + 16]
+    add rdx, r15
     mov qword ptr [rcx], rdx
 
     mov rcx, qword ptr [rax + 24]
+    add rcx, r15
     mov rdx, qword ptr [rax + 32]
     shr rdx, 32
     cmp edx, dword ptr [r8 + 8]
@@ -148,6 +172,7 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], rdx
 
     mov rcx, qword ptr [rbx]
+    add rcx, r15
     mov rdx, qword ptr [rbx + 8]
     shr rdx, 32
     lea rdx, [rdx + rdx * 2]

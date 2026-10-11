@@ -2,7 +2,7 @@ const ELF_HEADER_SIZE: usize = 64;
 pub(crate) const PROGRAM_HEADER_SIZE: usize = 56;
 const MIN_LOAD_SEGMENT_COUNT: usize = 2;
 const MAX_LOAD_SEGMENT_COUNT: usize = 3;
-const MAX_PROGRAM_HEADER_COUNT: usize = 6;
+const MAX_PROGRAM_HEADER_COUNT: usize = 8;
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
@@ -32,6 +32,7 @@ const SYMBOL_ENTRY_SIZE: usize = 24;
 const DT_NULL: u64 = 0;
 const DT_NEEDED: u64 = 1;
 const DT_PLTRELSZ: u64 = 2;
+const DT_PLTGOT: u64 = 3;
 const DT_HASH: u64 = 4;
 const DT_STRTAB: u64 = 5;
 const DT_SYMTAB: u64 = 6;
@@ -42,8 +43,12 @@ const DT_STRSZ: u64 = 10;
 const DT_SYMENT: u64 = 11;
 const DT_SONAME: u64 = 14;
 const DT_PLTREL: u64 = 20;
+const DT_DEBUG: u64 = 21;
 const DT_JMPREL: u64 = 23;
+const DT_FLAGS_1: u64 = 0x6fff_fffb;
+const DT_RELACOUNT: u64 = 0x6fff_fff9;
 const DT_GNU_HASH: u64 = 0x6fff_fef5;
+const DF_1_PIE: u64 = 0x0800_0000;
 const R_X86_64_GLOB_DAT: u32 = 6;
 const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_RELATIVE: u64 = 8;
@@ -51,6 +56,9 @@ const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.
 const INTERPRETER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-interpreter.bin"));
 const DEPENDENCY_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-dependency.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
+const LINKED_DYNAMIC_MAIN: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/linux-linked-main.elf"));
+const LINKED_DYNAMIC_DEPENDENCY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libginux.so"));
 
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
@@ -317,7 +325,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
             }
         }
     }
-    let program_headers = loads.iter().flatten().find_map(|segment| {
+    let mapped_program_headers = loads.iter().flatten().find_map(|segment| {
         let table_offset = ELF_HEADER_SIZE as u64;
         let table_end = program_table_end as u64;
         (segment.file_offset <= table_offset
@@ -330,7 +338,12 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
                     .virtual_address
                     .checked_add(table_offset - segment.file_offset)
             })?
-    })?;
+    });
+    let program_headers = match mapped_program_headers {
+        Some(address) => address,
+        None if kind == ImageKind::PositionIndependent && phdr_address.is_none() => 0,
+        None => return None,
+    };
     if phdr_address.is_some_and(|address| address != program_headers) {
         return None;
     }
@@ -420,6 +433,46 @@ pub(crate) fn plan_authenticated_dependency<'main, 'interpreter, 'dependency>(
     dependency_authority: &DependencyAuthority<'_>,
     dependency_bytes: &'dependency [u8],
 ) -> Option<DependencyLoadPlan<'main, 'interpreter, 'dependency>> {
+    plan_authenticated_dependency_at(
+        main,
+        None,
+        interpreter_authority,
+        interpreter_bytes,
+        interpreter_base,
+        dependency_authority,
+        dependency_bytes,
+    )
+}
+
+fn plan_authenticated_pie_dependency<'main, 'interpreter, 'dependency>(
+    main: &Image<'main>,
+    main_base: u64,
+    interpreter_authority: &InterpreterAuthority<'_>,
+    interpreter_bytes: &'interpreter [u8],
+    interpreter_base: u64,
+    dependency_authority: &DependencyAuthority<'_>,
+    dependency_bytes: &'dependency [u8],
+) -> Option<DependencyLoadPlan<'main, 'interpreter, 'dependency>> {
+    plan_authenticated_dependency_at(
+        main,
+        Some(main_base),
+        interpreter_authority,
+        interpreter_bytes,
+        interpreter_base,
+        dependency_authority,
+        dependency_bytes,
+    )
+}
+
+fn plan_authenticated_dependency_at<'main, 'interpreter, 'dependency>(
+    main: &Image<'main>,
+    main_base: Option<u64>,
+    interpreter_authority: &InterpreterAuthority<'_>,
+    interpreter_bytes: &'interpreter [u8],
+    interpreter_base: u64,
+    dependency_authority: &DependencyAuthority<'_>,
+    dependency_bytes: &'dependency [u8],
+) -> Option<DependencyLoadPlan<'main, 'interpreter, 'dependency>> {
     if main.interpreter != Some(interpreter_authority.path)
         || main.needed_library != Some(dependency_authority.name)
         || crate::crypto::sha256(interpreter_bytes) != interpreter_authority.sha256
@@ -431,7 +484,9 @@ pub(crate) fn plan_authenticated_dependency<'main, 'interpreter, 'dependency>(
     let dependency_image = parse(dependency_bytes)?;
     let main_dynamic = main.dynamic_relocations?;
     let dependency_dynamic = dependency_image.dynamic_relocations?;
-    if main.dynamic_symbol.is_none()
+    if main.program_headers == 0
+        || interpreter.program_headers == 0
+        || main.dynamic_symbol.is_none()
         || main.dynamic_symbol != dependency_image.dynamic_symbol
         || main_dynamic.symbol_defined
         || !dependency_dynamic.symbol_defined
@@ -440,7 +495,10 @@ pub(crate) fn plan_authenticated_dependency<'main, 'interpreter, 'dependency>(
     {
         return None;
     }
-    let main_plan = plan_executable(main)?;
+    let main_plan = match main_base {
+        Some(base) => plan_position_independent_at(main, base, true)?,
+        None => plan_executable(main)?,
+    };
     let interpreter_plan = plan_position_independent(&interpreter, interpreter_base)?;
     let dependency_plan =
         plan_position_independent(&dependency_image, dependency_authority.load_bias)?;
@@ -573,8 +631,16 @@ pub(crate) fn plan_position_independent<'a>(
     image: &Image<'a>,
     load_bias: u64,
 ) -> Option<LoadPlan<'a>> {
+    plan_position_independent_at(image, load_bias, false)
+}
+
+fn plan_position_independent_at<'a>(
+    image: &Image<'a>,
+    load_bias: u64,
+    allow_interpreter: bool,
+) -> Option<LoadPlan<'a>> {
     if image.kind != ImageKind::PositionIndependent
-        || image.interpreter.is_some()
+        || image.interpreter.is_some() && !allow_interpreter
         || load_bias < MIN_USER_ADDRESS
         || !load_bias.is_multiple_of(PAGE_SIZE as u64)
     {
@@ -621,7 +687,11 @@ pub(crate) fn plan_position_independent<'a>(
             symbol_relocation: match dynamic.symbol_relocation {
                 Some(relocation) => Some(SymbolRelocation {
                     target: relocation.target.checked_add(load_bias)?,
-                    symbol_value: relocation.symbol_value.checked_add(load_bias)?,
+                    symbol_value: if dynamic.symbol_defined {
+                        relocation.symbol_value.checked_add(load_bias)?
+                    } else {
+                        relocation.symbol_value
+                    },
                     ..relocation
                 }),
                 None => None,
@@ -629,7 +699,11 @@ pub(crate) fn plan_position_independent<'a>(
             jump_slot_relocation: match dynamic.jump_slot_relocation {
                 Some(relocation) => Some(SymbolRelocation {
                     target: relocation.target.checked_add(load_bias)?,
-                    symbol_value: relocation.symbol_value.checked_add(load_bias)?,
+                    symbol_value: if dynamic.symbol_defined {
+                        relocation.symbol_value.checked_add(load_bias)?
+                    } else {
+                        relocation.symbol_value
+                    },
                     ..relocation
                 }),
                 None => None,
@@ -844,10 +918,11 @@ fn parse_relro(bytes: &[u8], header: usize) -> Option<Relro> {
 }
 
 fn parse_interpreter(bytes: &[u8], header: usize) -> Option<&[u8]> {
+    let virtual_address = read_u64(bytes, header + 16)?;
+    let physical_address = read_u64(bytes, header + 24)?;
     if read_u32(bytes, header)? != PT_INTERP
         || read_u32(bytes, header + 4)? != PF_READ
-        || read_u64(bytes, header + 16)? != 0
-        || read_u64(bytes, header + 24)? != 0
+        || physical_address != 0 && physical_address != virtual_address
         || read_u64(bytes, header + 48)? != 1
     {
         return None;
@@ -874,7 +949,7 @@ fn parse_dynamic_table(bytes: &[u8], header: usize) -> Option<DynamicTable<'_>> 
     if read_u32(bytes, header + 4)? != PF_READ | PF_WRITE
         || physical_address != 0 && physical_address != virtual_address
         || file_size != memory_size
-        || !(2..=13).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
+        || !(2..=17).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
         || !file_size.is_multiple_of(DYNAMIC_ENTRY_SIZE)
         || alignment != 8
         || file_offset % alignment != virtual_address % alignment
@@ -916,6 +991,10 @@ fn parse_dynamic_relocations<'a>(
     let mut jump_relocation_address = None;
     let mut jump_relocation_size = None;
     let mut jump_relocation_kind = None;
+    let mut plt_got = None;
+    let mut debug = None;
+    let mut flags_1 = None;
+    let mut relative_count = None;
     let mut terminated = false;
     let entries = table.bytes.as_chunks::<DYNAMIC_ENTRY_SIZE>().0;
     for (index, entry) in entries.iter().enumerate() {
@@ -942,6 +1021,10 @@ fn parse_dynamic_relocations<'a>(
             DT_JMPREL if jump_relocation_address.replace(value).is_none() => {}
             DT_PLTRELSZ if jump_relocation_size.replace(value).is_none() => {}
             DT_PLTREL if jump_relocation_kind.replace(value).is_none() => {}
+            DT_PLTGOT if plt_got.replace(value).is_none() => {}
+            DT_DEBUG if debug.replace(value).is_none() => {}
+            DT_FLAGS_1 if flags_1.replace(value).is_none() => {}
+            DT_RELACOUNT if relative_count.replace(value).is_none() => {}
             _ => return None,
         }
     }
@@ -956,6 +1039,17 @@ fn parse_dynamic_relocations<'a>(
             || value == (2 * RELA_ENTRY_SIZE) as u64
             || value == (3 * RELA_ENTRY_SIZE) as u64)
     {
+        return None;
+    }
+    let writable_end = writable.virtual_address.checked_add(writable.memory_size)?;
+    if !optional_dynamic_tags_valid(
+        plt_got,
+        debug,
+        flags_1,
+        relative_count,
+        writable.virtual_address,
+        writable_end,
+    ) {
         return None;
     }
     let primary_relocation_count = usize::try_from(rela_size).ok()? / RELA_ENTRY_SIZE;
@@ -988,7 +1082,6 @@ fn parse_dynamic_relocations<'a>(
     let target = read_u64(rela, 0)?;
     let info = read_u64(rela, 8)?;
     let addend = read_u64(rela, 16)?;
-    let writable_end = writable.virtual_address.checked_add(writable.memory_size)?;
     if info != R_X86_64_RELATIVE
         || !target.is_multiple_of(8)
         || target < writable.virtual_address
@@ -1219,26 +1312,44 @@ fn gnu_hash(name: &[u8]) -> u32 {
     })
 }
 
+fn optional_dynamic_tags_valid(
+    plt_got: Option<u64>,
+    debug: Option<u64>,
+    flags_1: Option<u64>,
+    relative_count: Option<u64>,
+    writable_start: u64,
+    writable_end: u64,
+) -> bool {
+    !plt_got.is_some_and(|address| {
+        !address.is_multiple_of(8)
+            || address < writable_start
+            || address.checked_add(32).is_none_or(|end| end > writable_end)
+    }) && debug.is_none_or(|value| value == 0)
+        && flags_1.is_none_or(|value| value == DF_1_PIE)
+        && relative_count.is_none_or(|count| count == 1)
+}
+
 fn validate_sysv_hash(
     loads: &[Option<Segment<'_>>],
     address: u64,
     name: &[u8],
     symbol_index: u32,
 ) -> Option<bool> {
-    let table = virtual_file_bytes(loads, address, 5 * 4)?;
-    let bucket_count = read_u32(table, 0)?;
-    let chain_count = read_u32(table, 4)?;
-    if bucket_count != 1 || chain_count != 2 {
+    let header = virtual_file_bytes(loads, address, 8)?;
+    let bucket_count = usize::try_from(read_u32(header, 0)?).ok()?;
+    let chain_count = usize::try_from(read_u32(header, 4)?).ok()?;
+    if !(1..=2).contains(&bucket_count) || chain_count != 2 {
         return Some(false);
     }
-    let bucket_offset = 8_usize.checked_add(
-        usize::try_from(elf_hash(name) % bucket_count)
-            .ok()?
-            .checked_mul(4)?,
-    )?;
-    let chains_offset = 8_usize.checked_add(usize::try_from(bucket_count).ok()? * 4)?;
+    let table_size = 8_usize.checked_add(bucket_count.checked_add(chain_count)?.checked_mul(4)?)?;
+    let table = virtual_file_bytes(loads, address, table_size)?;
+    let selected = usize::try_from(elf_hash(name)).ok()? % bucket_count;
+    let buckets_valid = (0..bucket_count).all(|index| {
+        read_u32(table, 8 + index * 4) == Some(if index == selected { symbol_index } else { 0 })
+    });
+    let chains_offset = 8 + bucket_count * 4;
     Some(
-        read_u32(table, bucket_offset)? == symbol_index
+        buckets_valid
             && read_u32(table, chains_offset)? == 0
             && read_u32(table, chains_offset + 4)? == 0,
     )
@@ -1250,16 +1361,18 @@ fn validate_gnu_hash(
     name: &[u8],
     symbol_index: u32,
 ) -> Option<bool> {
-    const BLOOM_SHIFT: u32 = 5;
     let table = virtual_file_bytes(loads, address, 32)?;
     let hash = gnu_hash(name);
+    let bloom_shift = read_u32(table, 12)?;
+    if bloom_shift >= 64 {
+        return Some(false);
+    }
     let bloom = read_u64(table, 16)?;
-    let bloom_mask = (1_u64 << (hash % 64)) | (1_u64 << ((hash >> BLOOM_SHIFT) % 64));
+    let bloom_mask = (1_u64 << (hash % 64)) | (1_u64 << ((hash >> bloom_shift) % 64));
     Some(
         read_u32(table, 0)? == 1
             && read_u32(table, 4)? == symbol_index
             && read_u32(table, 8)? == 1
-            && read_u32(table, 12)? == BLOOM_SHIFT
             && bloom & bloom_mask == bloom_mask
             && read_u32(table, 24)? == symbol_index
             && read_u32(table, 28)? == (hash | 1),
@@ -1926,7 +2039,20 @@ fn verify_dependency_authentication_rejections(
 }
 
 pub(crate) fn verify_dynamic_relocation_rejections() -> bool {
-    (0..32).all(dynamic_relocation_rejected) && (0..7).all(gnu_hash_rejected)
+    (0..32).all(dynamic_relocation_rejected)
+        && (0..7).all(gnu_hash_rejected)
+        && verify_optional_dynamic_tag_rejections()
+}
+
+fn verify_optional_dynamic_tag_rejections() -> bool {
+    let start = 0x5000;
+    let end = 0x6400;
+    optional_dynamic_tags_valid(Some(0x6300), Some(0), Some(DF_1_PIE), Some(1), start, end)
+        && !optional_dynamic_tags_valid(Some(0x6301), None, None, None, start, end)
+        && !optional_dynamic_tags_valid(Some(0x63e8), None, None, None, start, end)
+        && !optional_dynamic_tags_valid(None, Some(1), None, None, start, end)
+        && !optional_dynamic_tags_valid(None, None, Some(0), None, start, end)
+        && !optional_dynamic_tags_valid(None, None, None, Some(2), start, end)
 }
 
 #[inline(never)]
@@ -1941,7 +2067,7 @@ fn gnu_hash_rejected(case: u8) -> bool {
         0 => write_u32(&mut image, HASH_OFFSET, 0),
         1 => write_u32(&mut image, HASH_OFFSET + 4, 0),
         2 => write_u32(&mut image, HASH_OFFSET + 8, 0),
-        3 => write_u32(&mut image, HASH_OFFSET + 12, 0),
+        3 => write_u32(&mut image, HASH_OFFSET + 12, 64),
         4 => write_u64(&mut image, HASH_OFFSET + 16, 0),
         5 => write_u32(&mut image, HASH_OFFSET + 24, 0),
         6 => write_u32(&mut image, HASH_OFFSET + 28, 0),
@@ -2167,10 +2293,13 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
 pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_size: usize) -> bool {
     const PATH: &[u8] = b"/lib64/ld-ginux.so";
     const DEPENDENCY: &[u8] = b"libginux.so";
-    let main_bytes = interpreted_main_fixture();
     let interpreter_bytes = compact_position_independent_fixture();
-    let dependency_bytes = compact_dependency_fixture();
-    let Some(main) = parse(&main_bytes) else {
+    let Some(main) = parse(LINKED_DYNAMIC_MAIN) else {
+        crate::serial_write_bytes(b"\r\nginux: linked dynamic main parse failed");
+        return false;
+    };
+    let Some(dependency) = parse(LINKED_DYNAMIC_DEPENDENCY) else {
+        crate::serial_write_bytes(b"\r\nginux: linked dynamic dependency parse failed");
         return false;
     };
     let authority = InterpreterAuthority {
@@ -2179,19 +2308,59 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
     };
     let dependency_authority = DependencyAuthority {
         name: DEPENDENCY,
-        sha256: crate::crypto::sha256(&dependency_bytes),
+        sha256: crate::crypto::sha256(LINKED_DYNAMIC_DEPENDENCY),
         load_bias: 0x61_0000,
     };
-    let Some(plan) = plan_authenticated_dependency(
+    if main.dynamic_symbol != dependency.dynamic_symbol {
+        crate::serial_write_bytes(b"\r\nginux: linked dynamic symbol mismatch");
+        return false;
+    }
+    if main.interpreter != Some(PATH)
+        || main.needed_library != Some(DEPENDENCY)
+        || dependency.soname != Some(DEPENDENCY)
+    {
+        crate::serial_write_bytes(b"\r\nginux: linked dynamic identity mismatch");
+        return false;
+    }
+    if plan_position_independent_at(&main, 0x3f_f000, true).is_none() {
+        crate::serial_write_bytes(b"\r\nginux: linked PIE main planning failed");
+        return false;
+    }
+    if plan_position_independent(&dependency, 0x61_0000).is_none() {
+        crate::serial_write_bytes(b"\r\nginux: linked DSO planning failed");
+        return false;
+    }
+    let Some(plan) = plan_authenticated_pie_dependency(
         &main,
+        0x3f_f000,
         &authority,
         &interpreter_bytes,
         0x60_0000,
         &dependency_authority,
-        &dependency_bytes,
+        LINKED_DYNAMIC_DEPENDENCY,
     ) else {
+        crate::serial_write_bytes(b"\r\nginux: linked dynamic dependency plan failed");
         return false;
     };
+    let main_symbols_unresolved = plan
+        .process
+        .main
+        .dynamic_relocations
+        .is_some_and(|dynamic| {
+            !dynamic.symbol_defined
+                && dynamic
+                    .symbol_relocation
+                    .is_some_and(|relocation| relocation.symbol_value == 0)
+                && dynamic
+                    .jump_slot_relocation
+                    .is_some_and(|relocation| relocation.symbol_value == 0)
+        });
+    if !main_symbols_unresolved {
+        crate::serial_write_bytes(
+            b"\r\nginux: linked PIE symbols resolved before dependency binding",
+        );
+        return false;
+    }
     crate::address_space::verify_interpreted_elf_mapping(&plan, protected_start, protected_size)
 }
 

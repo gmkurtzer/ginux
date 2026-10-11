@@ -1,7 +1,19 @@
 .intel_syntax noprefix
 .section .text
 .global ginux_linux_probe
+#ifdef GINUX_LINKED
+.type ginux_dependency_symbol,@function
+#endif
 ginux_linux_probe:
+#ifdef GINUX_LINKED
+    mov rax, qword ptr [rip + ginux_dependency_symbol@GOTPCREL]
+    test rax, rax
+    jz failure
+    call ginux_dependency_symbol@PLT
+    movabs rcx, 0x59434e45444e4947
+    cmp rax, rcx
+    jne failure
+#endif
     cmp qword ptr [rsp], 1
     jne failure
     mov rax, qword ptr [rsp + 8]
@@ -15,6 +27,7 @@ ginux_linux_probe:
     jz static_relocation_state
     cmp rax, 0x600000
     jne failure
+#ifndef GINUX_LINKED
     cmp qword ptr [0x405100], 0x400100
     jne failure
     cmp qword ptr [0x405108], 0x610100
@@ -25,6 +38,7 @@ ginux_linux_probe:
     movabs rcx, 0x59434e45444e4947
     cmp rax, rcx
     jne failure
+#endif
     jmp valid_interpreter_base
 static_relocation_state:
     cmp qword ptr [0x405100], 0
@@ -3190,4 +3204,20 @@ ginux_linux_probe_data:
 
 .section .data.rel.ro,"aw",@progbits
 .balign 8
-    .space 512
+#ifdef GINUX_LINKED
+    .space 256
+    .quad ginux_linux_probe
+    .space 248
+#else
+    .space 256
+.global ginux_main_relative_slot
+ginux_main_relative_slot:
+    .quad 0
+.global ginux_main_glob_dat_slot
+ginux_main_glob_dat_slot:
+    .quad 0
+.global ginux_main_jump_slot
+ginux_main_jump_slot:
+    .quad 0
+    .space 232
+#endif

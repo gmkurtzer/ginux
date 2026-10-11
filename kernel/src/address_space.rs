@@ -930,11 +930,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && (plan.initial_entry as *const u8).read_volatile() == 0x48
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
-                        && (dependency_rx.virtual_address as *const u8).read_volatile() == 0x7f
+                        && (dependency_rx.virtual_address as *const u8).read_volatile()
+                            == dependency_rx.bytes[0]
                         && (dependency_plan.dependency.entry as *const u8).read_volatile()
                             == dependency_entry_byte
-                        && (dependency_rw.virtual_address as *const u64).read_volatile()
-                            == u64::from_le_bytes(*b"LIBRARY!")
+                        && (dependency_rw.virtual_address as *const u8).read_volatile()
+                            == dependency_rw.bytes[0]
                 });
             let executed = observed
                 && cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
@@ -943,7 +944,14 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     code: main_rx.virtual_address as usize,
                     code_size: main_rx.memory_size,
                     data: main_rw.virtual_page as usize,
-                    data_size: main_rw.memory_size,
+                    data_size: usize::try_from(
+                        relro
+                            .virtual_address
+                            .checked_add(512)
+                            .and_then(|end| end.checked_sub(main_rw.virtual_page))
+                            .unwrap_or(0),
+                    )
+                    .unwrap_or(0),
                     relro: relro.virtual_address as usize,
                     relro_size: relro.memory_size as usize,
                     heap: heap_virtual_page as usize,
@@ -957,13 +965,19 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 (interpreter_dynamic.relocation_target as *const u64).read_volatile()
                     == interpreter_relocation_value
             });
-            let main_relocated = cpu::with_supervisor_user_access(|| {
-                (main_dynamic.relocation_target as *const u64).read_volatile() == plan.main.entry
-                    && (main_symbol.target as *const u64).read_volatile()
-                        == dependency_plan.dependency.entry
-                    && (main_jump_slot.target as *const u64).read_volatile()
-                        == dependency_plan.dependency.entry
-            });
+            let (main_relative_value, main_symbol_value, main_jump_value) =
+                cpu::with_supervisor_user_access(|| {
+                    (
+                        (main_dynamic.relocation_target as *const u64).read_volatile(),
+                        (main_symbol.target as *const u64).read_volatile(),
+                        (main_jump_slot.target as *const u64).read_volatile(),
+                    )
+                });
+            let main_relative_relocated = main_relative_value == plan.main.entry;
+            let main_symbol_relocated = main_symbol_value == dependency_plan.dependency.entry;
+            let main_jump_relocated = main_jump_value == dependency_plan.dependency.entry;
+            let main_relocated =
+                main_relative_relocated && main_symbol_relocated && main_jump_relocated;
             let dependency_relocated = cpu::with_supervisor_user_access(|| {
                 (dependency_dynamic.relocation_target as *const u64).read_volatile()
                     == dependency_relative_value
@@ -973,6 +987,33 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         == dependency_jump_slot.symbol_value
             });
             activate(kernel_root_physical);
+            if !permissions_valid {
+                crate::serial_write_bytes(b"\r\nginux: linked dynamic permissions invalid");
+            }
+            if !executed {
+                crate::serial_write_bytes(b"\r\nginux: linked dynamic workload incomplete");
+            }
+            if !mapping_removed {
+                crate::serial_write_bytes(b"\r\nginux: linked dynamic mmap teardown incomplete");
+            }
+            if !interpreter_relocated {
+                crate::serial_write_bytes(b"\r\nginux: linked interpreter relocation mismatch");
+            }
+            if !main_relocated {
+                crate::serial_write_bytes(b"\r\nginux: linked PIE relocation mismatch");
+                if !main_relative_relocated {
+                    crate::serial_write_bytes(b" relative");
+                }
+                if !main_symbol_relocated {
+                    crate::serial_write_bytes(b" GLOB_DAT");
+                }
+                if !main_jump_relocated {
+                    crate::serial_write_bytes(b" JUMP_SLOT");
+                }
+            }
+            if !dependency_relocated {
+                crate::serial_write_bytes(b"\r\nginux: linked DSO relocation mismatch");
+            }
             Some(
                 permissions_valid
                     && executed

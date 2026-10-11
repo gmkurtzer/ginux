@@ -658,6 +658,16 @@ if ! grep -q '^ginux: bounded interpreted Linux ELF mapping verified' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: toolchain-linked Linux PIE and shared object executed' "$output_file"; then
+    echo "Boot test failed: the toolchain-linked Linux PIE/shared-object pair was not executed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: linker-emitted Linux dynamic tags validated' "$output_file"; then
+    echo "Boot test failed: linker-emitted Linux dynamic tags were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: separate-header interpreted Linux mapping verified' "$output_file"; then
     echo "Boot test failed: separate-header interpreted Linux mapping was not verified." >&2
     exit 1

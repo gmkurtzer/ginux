@@ -5,7 +5,7 @@ const LINUX_PROBE_ENTRY_OFFSET: usize = 0x100;
 const LINUX_PROBE_EXECUTABLE_PAGES: usize = 4;
 const LINUX_PROBE_MAX_TEXT_SIZE: usize =
     LINUX_PROBE_EXECUTABLE_PAGES * PAGE_SIZE - LINUX_PROBE_ENTRY_OFFSET;
-const LINUX_INTERPRETER_MAX_TEXT_SIZE: usize = 640;
+const LINUX_INTERPRETER_MAX_TEXT_SIZE: usize = 704;
 const LINUX_DEPENDENCY_MAX_TEXT_SIZE: usize = 64;
 
 fn main() {
@@ -13,14 +13,17 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-interpreter.S");
     println!("cargo:rerun-if-changed=linux-dependency.S");
     println!("cargo:rerun-if-changed=linux-probe.ld");
+    println!("cargo:rerun-if-changed=linux-linked-main.ld");
+    println!("cargo:rerun-if-changed=linux-linked-dependency.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
     println!("cargo:rerun-if-env-changed=GINUX_LINUX_PROBE_EXPORT");
+    println!("cargo:rerun-if-env-changed=GINUX_LINUX_DYNAMIC_EXPORT_DIR");
 
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set"));
     let object = output.join("linux-probe.o");
     let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
-    let status = Command::new(clang)
+    let status = Command::new(&clang)
         .args(["-target", "x86_64-none-elf", "-c", "linux-probe.S", "-o"])
         .arg(&object)
         .status()
@@ -79,7 +82,7 @@ fn main() {
 
     let dependency_object = output.join("linux-dependency.o");
     let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
-    let status = Command::new(clang)
+    let status = Command::new(&clang)
         .args([
             "-target",
             "x86_64-none-elf",
@@ -112,6 +115,105 @@ fn main() {
     fs::write(output.join("linux-dependency.bin"), dependency_text)
         .expect("failed to write Linux dependency bytes");
 
+    let linked_main_object = output.join("linux-linked-main.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-DGINUX_LINKED",
+            "-c",
+            "linux-probe.S",
+            "-o",
+        ])
+        .arg(&linked_main_object)
+        .status()
+        .expect("failed to assemble linked Linux main probe");
+    assert!(
+        status.success(),
+        "clang failed to assemble linked Linux main probe"
+    );
+    let linked_dependency_object = output.join("linux-linked-dependency.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-DGINUX_LINKED",
+            "-c",
+            "linux-dependency.S",
+            "-o",
+        ])
+        .arg(&linked_dependency_object)
+        .status()
+        .expect("failed to assemble linked Linux dependency");
+    assert!(
+        status.success(),
+        "clang failed to assemble linked Linux dependency"
+    );
+
+    let linked_dependency = output.join("libginux.so");
+    let linked_dependency_script =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+            .join("linux-linked-dependency.ld");
+    let (lld, toolchain_library) = linker();
+    let mut dependency_link = Command::new(&lld);
+    dependency_link
+        .args([
+            "-flavor",
+            "gnu",
+            "-m",
+            "elf_x86_64",
+            "-shared",
+            "-nostdlib",
+            "--soname",
+            "libginux.so",
+            "--hash-style=gnu",
+            "-T",
+        ])
+        .arg(&linked_dependency_script)
+        .arg(&linked_dependency_object)
+        .arg("-o")
+        .arg(&linked_dependency);
+    configure_linker_library_path(&mut dependency_link, toolchain_library.as_ref());
+    let status = dependency_link
+        .status()
+        .expect("failed to link Linux dependency");
+    assert!(status.success(), "LLD failed to link Linux dependency");
+
+    let linked_main = output.join("linux-linked-main.elf");
+    let linked_main_script =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+            .join("linux-linked-main.ld");
+    let mut main_link = Command::new(&lld);
+    main_link
+        .args([
+            "-flavor",
+            "gnu",
+            "-m",
+            "elf_x86_64",
+            "-pie",
+            "-nostdlib",
+            "--dynamic-linker",
+            "/lib64/ld-ginux.so",
+            "--hash-style=sysv",
+            "-T",
+        ])
+        .arg(&linked_main_script)
+        .arg(&linked_main_object)
+        .arg(&linked_dependency)
+        .arg("-o")
+        .arg(&linked_main);
+    configure_linker_library_path(&mut main_link, toolchain_library.as_ref());
+    let status = main_link.status().expect("failed to link Linux main probe");
+    assert!(status.success(), "LLD failed to link Linux main probe");
+    if let Some(directory) = env::var_os("GINUX_LINUX_DYNAMIC_EXPORT_DIR") {
+        let directory = PathBuf::from(directory);
+        fs::create_dir_all(&directory).expect("failed to create Linux dynamic export directory");
+        fs::copy(&linked_main, directory.join("linux-linked-main.elf"))
+            .expect("failed to export linked Linux main");
+        fs::copy(&linked_dependency, directory.join("libginux.so"))
+            .expect("failed to export linked Linux dependency");
+    }
+
     let linked = output.join("linux-probe.elf");
     let link_script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
         .join("linux-probe.ld");
@@ -142,6 +244,15 @@ fn main() {
     assert!(status.success(), "LLD failed to link Linux probe");
     if let Some(destination) = env::var_os("GINUX_LINUX_PROBE_EXPORT") {
         fs::copy(&linked, destination).expect("failed to export linked Linux probe");
+    }
+}
+
+fn configure_linker_library_path(command: &mut Command, directory: Option<&PathBuf>) {
+    if let Some(directory) = directory {
+        #[cfg(target_os = "macos")]
+        command.env("DYLD_LIBRARY_PATH", directory);
+        #[cfg(not(target_os = "macos"))]
+        command.env("LD_LIBRARY_PATH", directory);
     }
 }
 

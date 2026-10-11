@@ -4,7 +4,7 @@ Ginux is an immutable, capability-secure, container-native operating system for 
 
 The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. A separate isolated service probes and configures link, IPv4, default-gateway, and one static-route record through the first manifest-authorized network-device contract in control ABI v2; a monotonic generation makes effective configuration changes observable and rejects stale whole-state applies. Distinct read-only and write-only services prove that observation and mutation authority can be delegated independently, and a faulted network service is retired without losing mediated state or panicking the kernel. Packet I/O and a general route table remain deliberately unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
 
-M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to six
+M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to eight
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
@@ -30,17 +30,25 @@ relocation plus the main image's relative and symbol-based relocations. The
 symbol relocations resolve to the authenticated dependency, and the interpreter
 also applies the dependency's own relative and self-symbol relocations before
 transferring control to the main entry. The main workload calls through the
-resolved jump slot; dependency code validates all three of its relocated slots
-and returns a checked value before the full
+resolved jump slot; the loader validates all three dependency relocations and
+dependency code returns a checked value before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
 target. The kernel then restores its root and scrubs every owned frame.
 The build rejects unresolved ELF relocation records in all three raw embedded
 text payloads before extracting their bytes.
+The executable QEMU path now goes beyond the synthetic metadata fixtures: LLD
+produces an `ET_DYN` PIE main and a separate `libginux.so`, including program
+headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and `DT_SONAME`.
+The kernel authenticates both linker outputs, applies a fixed PIE load bias,
+accepts the dependency's intentionally unmapped ELF headers, and executes the
+complete probe through the linker-generated jump slot. Linker-private metadata
+remains mapped but outside the probe's bounded syscall-copy data extent.
 Interpreter and dependency selection bind the exact `PT_INTERP` path or
 `DT_NEEDED` name and SHA-256 digest before parsing or mapping. The dependency's
 own `DT_SONAME` must equal both the requested name and the authority record. A
 production authority source and general dynamic linking remain unimplemented.
-Malformed dynamic tables,
+The admitted linker tag subset also validates `DT_PLTGOT`, zero `DT_DEBUG`, one
+counted relative relocation, and `DF_1_PIE`. Malformed dynamic tables,
 duplicate tags, unsupported relocations, and relocation targets outside writable memory
 are rejected before mapping.
 The static planner also rejects any image carrying dynamic relocation metadata,
@@ -200,9 +208,11 @@ parser compatibility verification. The checked-in linker script fixes its
 read-only headers at `0x3ff000`, a four-page RX load with entry at `0x400100`,
 and RW data/BSS at `0x404000`, matching the ring-3 workload's bounded layout.
 This tests ordinary
-linker metadata on both macOS and Linux hosts. `make linux-probe` builds that
-artifact directly at `build/linux-probe.elf` for inspection without assembling
-the EFI filesystem. Override the tools with `CLANG=/path/to/clang` or
+linker metadata on both macOS and Linux hosts. `make linux-probe` builds the
+static artifact at `build/linux-probe.elf` and the executable dynamic pair at
+`build/linux-dynamic/linux-linked-main.elf` and
+`build/linux-dynamic/libginux.so` for inspection without assembling the EFI
+filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and
 proof-workload ABI constants share the machine-readable
 `specs/abi/control-v2.rs` source, and the manifest builder expands its symbolic

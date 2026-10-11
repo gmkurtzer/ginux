@@ -23,12 +23,15 @@ must exactly describe the in-image program-header table at its derived mapped
 address. One `PT_GNU_RELRO` header is optional. It must be read-only, start on
 the final page of the writable load, end exactly with that load, and cover no
 more than one page. This profile rounds the declaration out to its containing
-page when userspace seals it with `mprotect`. Up to six recognized headers may
+page when userspace seals it with `mprotect`. Up to eight recognized headers may
 appear in any order. The parser
 normalizes load segments by executable, read-only, and writable role before
 planning. The parser accepts images without RELRO, while the current executable
 mapping proof requires it so the memory transition has an authenticated target.
-Unknown and duplicate metadata headers are rejected. Each load
+Unknown and duplicate metadata headers are rejected. A position-independent
+dependency may omit a mapped program-header table when it has no `PT_PHDR`;
+its headers are not published through `AT_PHDR`. Main executables and
+interpreters still require mapped program headers. Each load
 segment must be readable, nonempty in the
 file, contained within the supplied image, aligned to a nonzero power of two
 with congruent file and virtual addresses, and mapped wholly inside the lower
@@ -194,15 +197,27 @@ through their validated `DT_STRTAB` ranges, and compares the complete
 NUL-terminated names before resolving the undefined main symbol to the
 dependency entry. It writes that value through
 `R_X86_64_GLOB_DAT` at `0x405108` and eager `R_X86_64_JUMP_SLOT` at `0x405110`
-before jumping to the main entry at `0x400100`. The main workload calls the
-dependency through the jump slot; dependency code checks all three of its own
-relocation targets before returning the expected value. The main workload also
+before jumping to the main entry at `0x400100`. In the synthetic fixture, the
+main workload calls the dependency through the jump slot and dependency code
+checks all three of its own relocation targets before returning the expected value. The main workload also
 requires all three main-image relocated values for a dynamic startup and
 untouched zero targets for each static startup; after it exits, the kernel also
 validates the interpreter's relocated target through the still-active user root.
-Because the build embeds raw `.text` rather than linking these three proof
-payloads, it parses each assembler object and rejects any nonempty `SHT_REL` or
-`SHT_RELA` section targeting `.text` before extracting the bytes.
+The runtime execution proof now replaces the synthetic main and dependency
+containers with LLD outputs. LLD links an eight-header `ET_DYN` PIE main with
+SysV hashing and a header-unmapped `libginux.so` with GNU hashing. The main is
+loaded with bias `0x3ff000`; the dependency retains bias `0x610000`. Their
+linker-owned GOT/PLT slots and split relocation tables drive the same userspace
+interpreter and the complete syscall workload. The parser admits the exact
+linker metadata used here: an in-range 32-byte `DT_PLTGOT`, zero `DT_DEBUG`,
+`DT_RELACOUNT = 1`, and optional `DT_FLAGS_1 = DF_1_PIE`; duplicates or other
+values are rejected. The main's linker metadata tail remains mapped for the
+interpreter but is intentionally outside the workload's bounded syscall-copy
+extent, preserving the existing `0x404000..0x405200` data contract.
+The build still extracts raw `.text` for the static and synthetic parser
+fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
+those bytes. The executable dynamic main and dependency instead retain LLD's
+complete ELF metadata.
 The complete ring-3 probe therefore runs with dynamic `AT_BASE`,
 main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
 restores its own root and scrubs and releases all twenty-one page-table and
