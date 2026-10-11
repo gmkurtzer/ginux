@@ -427,9 +427,12 @@ Immediately before entry, the kernel:
 Unlike an interrupt gate, `SYSCALL` does not switch stacks. The entry stub
 therefore disables interrupts, clears AC and DF, captures the user RSP, and
 switches immediately to the kernel stack saved by the ring-3 entry trampoline
-before calling Rust. The bounded handler requires the exact expected initial
-stack pointer, a return RIP inside the RX page, and user flags without IOPL or
-VM while an atomic boot-probe flag is armed. `write` and `getpid` return through
+before calling Rust. The bounded handler requires RSP to remain anywhere in
+the owned one-page stack mapping between its two unmapped guards, a return RIP
+inside the RX extent, and user flags without IOPL or VM while an atomic
+boot-probe flag is armed. The proof invokes `getpid` through a nested function
+call, so the captured RSP differs from its initial value while remaining in
+the owned page. `write` and `getpid` return through
 `SYSRETQ`. Before Rust dispatch, the assembly stub saves `rdi`, `rsi`, `rdx`,
 `r8`, `r9`, and `r10`; it restores them before resumption, leaving only the
 architecturally clobbered `rax`, `rcx`, and `r11` changed. The resumed code

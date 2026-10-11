@@ -1337,7 +1337,7 @@ extern "sysv64" fn linux_syscall_handler(
     let code_start = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
     let code_end = code_start.saturating_add(ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst));
     if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
-        || user_stack != ELF_PROBE_STACK.load(Ordering::SeqCst)
+        || !linux_user_stack_pointer_valid(user_stack)
         || !(code_start..code_end).contains(&user_rip)
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
@@ -1774,6 +1774,15 @@ extern "sysv64" fn linux_syscall_handler(
         }
         _ => LINUX_ENOSYS,
     }
+}
+
+fn linux_user_stack_pointer_valid(user_stack: u64) -> bool {
+    let configured = ELF_PROBE_STACK.load(Ordering::SeqCst);
+    let base = configured & !(PAGE_SIZE as u64 - 1);
+    configured != 0
+        && user_stack
+            .checked_sub(base)
+            .is_some_and(|offset| offset < PAGE_SIZE as u64)
 }
 
 fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {

@@ -3289,11 +3289,20 @@ resolution_valid:
     cmp edi, 0x11223344
     jne failure
 
+    call nested_getpid
+    cmp rax, 1
+    jne failure
+
     mov edi, 42
     mov eax, 231
     syscall
 failure:
     ud2
+
+nested_getpid:
+    mov eax, 39
+    syscall
+    ret
 
 .balign 8
 readable_payload:
