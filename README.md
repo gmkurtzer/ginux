@@ -41,7 +41,7 @@ epoll path, including nonblocking saturation and semaphore reads. A bounded
 monotonic timerfd adds one-shot and periodic clock-driven readiness with
 relative or absolute arming. One bounded nonblocking pipe pair provides a
 256-byte FIFO with atomic scalar or vectored I/O, poll/epoll readiness, EOF,
-and broken-peer behavior. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
+broken-peer behavior, FIFO metadata, and byte-count introspection. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
 retires either initial console descriptor. Bounded `dup` reuses the lowest closed slot and preserves whether
 the console endpoint is input or output; `dup2` provides exact-slot replacement.
 `fcntl(F_GETFD/F_GETFL)` exposes the bounded descriptor and endpoint flags. It also

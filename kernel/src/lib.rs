@@ -602,6 +602,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux bounded pipe notification validated\r\n");
     serial_write("ginux: Linux atomic vectored pipe I/O validated\r\n");
     serial_write("ginux: Linux mutable descriptor status flags validated\r\n");
+    serial_write("ginux: Linux bounded pipe introspection validated\r\n");
     serial_write("ginux: Linux bounded syscall stack movement validated\r\n");
     serial_write("ginux: Linux callable syscall assertion helpers validated\r\n");
     serial_write("ginux: Linux container-local root credentials verified\r\n");

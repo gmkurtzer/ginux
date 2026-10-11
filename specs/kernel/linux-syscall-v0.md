@@ -133,6 +133,13 @@ delivery is not yet implemented. The endpoints participate in `F_GETFD`,
 checks FIFO ordering across partial reads, failed-read non-consumption, full
 buffer backpressure, epoll readiness, EOF, broken-peer handling, and legacy
 `pipe` creation.
+`fstat` reports either pipe endpoint as a fixed `S_IFIFO | 0600` object with a
+4096-byte preferred block size. `ioctl(FIONREAD)` copies the current 32-bit
+FIFO byte count for either endpoint; invalid output memory returns `-EFAULT`
+without changing the pipe, and other pipe ioctls return `-ENOTTY`. Other open
+anonymous descriptors now also return `-ENOTTY`, rather than `-EBADF`, for an
+unsupported ioctl. This metadata is process-local compatibility state, not a
+general inode or ioctl implementation.
 `readv` and `writev` extend the same pipe semantics to one through four
 nonempty iovecs with an aggregate maximum of 256 bytes. `writev` gathers and
 validates every input range before appending any byte; `readv` validates every

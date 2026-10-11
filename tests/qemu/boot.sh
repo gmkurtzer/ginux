@@ -638,6 +638,11 @@ if ! grep -q '^ginux: Linux mutable descriptor status flags validated' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded pipe introspection validated' "$output_file"; then
+    echo "Boot test failed: Linux bounded pipe introspection was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux bounded syscall stack movement validated' "$output_file"; then
     echo "Boot test failed: Linux bounded syscall stack movement was not validated." >&2
     exit 1

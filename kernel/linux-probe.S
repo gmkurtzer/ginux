@@ -1865,6 +1865,22 @@ ginux_linux_probe:
     jne failure
 
     mov edi, 3
+    mov esi, 0x404350
+    mov eax, 5
+    call syscall_expect_zero
+    cmp dword ptr [0x404368], 0x1180
+    jne failure
+    mov esi, 0x541b
+    mov edx, 0x404ec0
+    mov eax, 16
+    call syscall_expect_zero
+    cmp dword ptr [0x404ec0], 8
+    jne failure
+    mov edx, 0x405200
+    mov eax, 16
+    call syscall_expect_efault
+
+    mov edi, 3
     mov esi, 0x4051fc
     mov edx, 8
     xor eax, eax
@@ -1877,6 +1893,13 @@ ginux_linux_probe:
     jne failure
     cmp byte ptr [0x404eb2], 0x43
     jne failure
+    mov esi, 0x541b
+    mov edx, 0x404ec0
+    mov eax, 16
+    call syscall_expect_zero
+    cmp dword ptr [0x404ec0], 5
+    jne failure
+    mov edi, 3
     mov esi, 0x404eb8
     mov edx, 5
     xor eax, eax

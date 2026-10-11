@@ -170,6 +170,7 @@ const LINUX_MADV_DONTNEED: u64 = 4;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
+const LINUX_STAT_FIFO_MODE: u32 = 0o010600;
 const LINUX_STATX_BASIC_STATS: u32 = 0x7ff;
 const LINUX_STATX_RESERVED: u32 = 0x8000_0000;
 const LINUX_WRITE_LIMIT: usize = 256;
@@ -194,6 +195,7 @@ const LINUX_PIPE_CAPACITY: usize = 256;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
+const LINUX_FIONREAD: u64 = 0x541b;
 const LINUX_DESCRIPTOR_INPUT: u8 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
 const LINUX_DEVICE_ZERO: u8 = 1 << 2;
@@ -1486,12 +1488,26 @@ extern "sysv64" fn linux_syscall_handler(
             LINUX_EINVAL
         }
         LINUX_IOCTL_SYSCALL => {
+            if linux_pipe_descriptor(first_argument) {
+                if buffer != LINUX_FIONREAD {
+                    return LINUX_ENOTTY;
+                }
+                let available = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst);
+                if !copy_to_linux_user(count, &available.to_ne_bytes()) {
+                    return LINUX_EFAULT;
+                }
+                return 0;
+            }
             let device = linux_device_descriptor(first_argument);
             if device != 0 && device & LINUX_DEVICE_CONSOLE == 0 {
                 return LINUX_ENOTTY;
             }
             if device == 0 && !linux_console_descriptor_open(first_argument) {
-                return LINUX_EBADF;
+                return if linux_descriptor_open(first_argument) {
+                    LINUX_ENOTTY
+                } else {
+                    LINUX_EBADF
+                };
             }
             match buffer {
                 LINUX_TCGETS => {
@@ -3702,6 +3718,9 @@ fn linux_console_stat() -> [u8; LINUX_STAT_SIZE] {
 fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
     if linux_console_descriptor_open(descriptor) {
         return Some(linux_console_stat());
+    }
+    if linux_pipe_descriptor(descriptor) {
+        return Some(linux_stat(LINUX_STAT_FIFO_MODE, 3));
     }
     let device = linux_device_descriptor(descriptor);
     (device != 0).then(|| {
