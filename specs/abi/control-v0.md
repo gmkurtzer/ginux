@@ -94,6 +94,10 @@ domain in bits 8-55 and the workload's eight-bit exit status in bits 56-63 of
 operation 7's packed result; the structured lifecycle descriptor exposes the
 same value in its detail byte. It carries no fault metadata and is distinct
 from a management-requested kind 3 stop.
+Kind 6 reports that a supervised service generation has successfully run and
+blocked on its request endpoint. It carries the exact service domain and stable
+logical service identity with zero detail and no fault metadata. A generation
+publishes readiness at most once.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes
@@ -248,7 +252,7 @@ published. After action 5 it voluntarily yields, resumes only after the
 workload has exited, consumes the kind 5 record, and validates the exact
 generation and status 42 from the packed result. It then uses operation 12 to
 validate the descriptor version, kind, detail, exact generation, and lifecycle
-sequence five. Operation 14 additionally proves that the exited auxiliary has
+sequence six. Operation 14 additionally proves that the exited auxiliary has
 a nonzero stable logical service identity distinct from the primary managed
 service. The kernel verifier requires the lifecycle FIFO to be empty afterward;
 lifecycle observation is therefore a userspace control-plane responsibility in

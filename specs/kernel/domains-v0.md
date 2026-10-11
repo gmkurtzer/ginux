@@ -84,6 +84,9 @@ slot therefore produces a distinct, monotonically sequenced audit record.
 Normal workload exit instead publishes lifecycle kind 5 with its bounded
 eight-bit status in the detail field. Management stop remains kind 3 with zero
 detail, and auxiliary fault remains kind 4 with zero detail and fault metadata.
+Supervised-service readiness publishes kind 6 with zero detail after the exact
+generation runs and blocks on its request endpoint; each generation can
+publish it only once.
 The ring-3 workload proves an out-of-range status cannot remove or retire its
 thread before publishing status 42 from the same context.
 Event publication precedes registry and capability-table removal; sequence

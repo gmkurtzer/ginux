@@ -82,7 +82,10 @@ v1 and blocks on an empty request direction. The client wakes it directly with
 request 3, yields, and requires the replacement's transformed reply 4. The
 replacement then exits cleanly and has its capability table retired. This
 proves that restart restores request/reply service, rather than merely creating
-a context that can exit. The single
+a context that can exit. When the replacement first blocks on its empty request
+endpoint, the kernel publishes lifecycle kind 6 exactly once. The control plane
+consumes that record, rejects the original generation, and retains the exact
+replacement generation for validating reply provenance. The single
 restart consumes the persistent control plane's fixed one-attempt bootstrap
 budget. The initial service creation does not consume that budget, and failed
 replacement setup does not refund it. A later service generation therefore

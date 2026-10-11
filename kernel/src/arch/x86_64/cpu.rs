@@ -972,6 +972,13 @@ fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) 
     if matches!(action, RuntimeAction::Invalid) {
         u64::MAX - 2
     } else {
+        if service_side
+            && domain::service_failure_policy(domain_id)
+                == Some(domain::ServiceFailurePolicy::RestartManaged)
+            && !domain::record_service_ready(domain_id)
+        {
+            return u64::MAX;
+        }
         resume_action(action)
     }
 }

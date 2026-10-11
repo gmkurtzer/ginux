@@ -639,6 +639,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if replacement_domain == service_domain
         || domain::service_boot_handle().is_some()
         || !domain::domain_is_retired(replacement_domain)
+        || !domain::service_ready_was_delivered(replacement_domain)
         || !domain::service_restart_budget_proof_complete()
     {
         kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
@@ -732,6 +733,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: service frame ownership transferred to replacement");
     serial_write("\r\nginux: replacement service context executed");
     serial_write("\r\nginux: replacement service request-reply completed");
+    serial_write("\r\nginux: replacement service readiness delivered");
     serial_write("\r\nginux: per-domain syscall budgets enforced");
     serial_write("\r\nginux: per-domain thread budgets enforced");
     serial_write("\r\nginux: in-flight domain operations drained");

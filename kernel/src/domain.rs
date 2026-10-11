@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 61;
+const CONTROL_CALL_BUDGET: u16 = 62;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
@@ -66,6 +66,7 @@ struct Domain {
     failure_policy: Option<ServiceFailurePolicy>,
     terminal_fault: Option<FaultMetadata>,
     terminal_exit_status: Option<u8>,
+    readiness_published: bool,
     role: Role,
     state: State,
     capabilities: CapabilityTable,
@@ -217,6 +218,7 @@ pub(crate) struct Manager {
     lifecycle_events: EventQueue,
     last_delivered_lifecycle_event: Option<LifecycleEvent>,
     last_delivered_fault_event: Option<LifecycleEvent>,
+    last_delivered_ready_event: Option<LifecycleEvent>,
     total_calls: u16,
     total_thread_attaches: u16,
     service_started: bool,
@@ -240,6 +242,7 @@ impl Manager {
             lifecycle_events: EventQueue::new(),
             last_delivered_lifecycle_event: None,
             last_delivered_fault_event: None,
+            last_delivered_ready_event: None,
             total_calls: 0,
             total_thread_attaches: 0,
             service_started: false,
@@ -268,6 +271,7 @@ impl Manager {
             failure_policy: None,
             terminal_fault: None,
             terminal_exit_status: None,
+            readiness_published: false,
             role: Role::ControlPlane,
             state: State::Ready,
             capabilities,
@@ -445,6 +449,7 @@ impl Manager {
             }),
             terminal_fault: None,
             terminal_exit_status: None,
+            readiness_published: false,
             role,
             state: State::Ready,
             capabilities,
@@ -1698,7 +1703,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 69
+    control.remaining_calls == 0 && manager.total_calls == 70
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
@@ -1999,12 +2004,57 @@ pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> boo
     })
 }
 
+pub(crate) fn record_service_ready(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    let Some(service) = manager
+        .domain(id)
+        .filter(|domain| {
+            domain.role == Role::SupervisedService
+                && domain.state == State::Ready
+                && !domain.readiness_published
+        })
+        .and_then(|domain| domain.service)
+    else {
+        return false;
+    };
+    if manager.service_id != Some(id)
+        || !manager.lifecycle_events.push(LifecycleEvent {
+            kind: crate::control_abi::LIFECYCLE_SERVICE_READY,
+            domain: id,
+            service: Some(service),
+            detail: 0,
+            fault: None,
+            sequence: 0,
+        })
+    {
+        return false;
+    }
+    let Some(domain) = manager
+        .domains
+        .get_mut(usize::from(id.slot))
+        .and_then(Option::as_mut)
+        .filter(|domain| domain.id == id)
+    else {
+        return false;
+    };
+    domain.readiness_published = true;
+    true
+}
+
 pub(crate) fn take_lifecycle_event() -> Option<u64> {
     let manager = global_manager_mut()?;
     let event = manager.lifecycle_events.pop()?;
     manager.last_delivered_lifecycle_event = Some(event);
     if event.fault.is_some() {
         manager.last_delivered_fault_event = Some(event);
+    }
+    if event.kind == crate::control_abi::LIFECYCLE_SERVICE_READY {
+        manager.last_delivered_ready_event = Some(event);
     }
     Some((u64::from(event.detail) << 56) | (encode_id(event.domain) << 8) | u64::from(event.kind))
 }
@@ -2084,6 +2134,22 @@ pub(crate) fn last_fault_service_identity() -> Option<u64> {
     Some(encode_service_id(
         global_manager()?.last_delivered_fault_event?.service?,
     ))
+}
+
+pub(crate) fn service_ready_was_delivered(domain_raw: u64) -> bool {
+    let id = decode_id(domain_raw);
+    global_manager().is_some_and(|manager| {
+        id.is_some_and(|id| {
+            manager.last_delivered_ready_event.is_some_and(|event| {
+                event.kind == crate::control_abi::LIFECYCLE_SERVICE_READY
+                    && event.domain == id
+                    && event.service == manager.primary_service_identity
+                    && event.detail == 0
+                    && event.fault.is_none()
+                    && event.sequence == 2
+            })
+        })
+    })
 }
 
 pub(crate) fn delivered_lifecycle_event_descriptor(

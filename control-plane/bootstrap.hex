@@ -349,6 +349,20 @@ cd80
 7402
 0f0b
 
+# consume replacement readiness and retain its exact generation in r15
+4889df
+b807000000
+cd80
+4989c7
+0fb6d0
+83fa06
+7402
+0f0b
+49c1ef08
+4d39d7
+7502
+0f0b
+
 # build a versioned 32-byte create-auxiliary management request
 48be2021000080000000
 48b82000000001000100
@@ -792,7 +806,7 @@ cd80
 7402
 0f0b
 488b4610
-4883f805
+4883f806
 7402
 0f0b
 
@@ -815,7 +829,7 @@ cd80
 7402
 0f0b
 488b4610
-4883f805
+4883f806
 7402
 0f0b
 488b4618
