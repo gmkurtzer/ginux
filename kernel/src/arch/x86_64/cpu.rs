@@ -1111,6 +1111,10 @@ fn linux_user_range_contains(address: u64, length: usize) -> bool {
     if linux_range_contains(base, size, address, length) {
         return true;
     }
+    let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
+    if linux_range_contains(stack_base, PAGE_SIZE as u64, address, length) {
+        return true;
+    }
     let brk = ELF_PROBE_BRK.load(Ordering::SeqCst);
     let heap_base = ELF_PROBE_BRK_LIMIT
         .load(Ordering::SeqCst)

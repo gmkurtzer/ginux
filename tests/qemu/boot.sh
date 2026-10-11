@@ -583,6 +583,11 @@ if ! grep -q '^ginux: Linux heap copy bounds validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux stack copy bounds validated' "$output_file"; then
+    echo "Boot test failed: Linux stack copy bounds were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1
