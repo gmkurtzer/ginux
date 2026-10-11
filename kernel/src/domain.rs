@@ -819,6 +819,58 @@ pub(crate) fn verify_auxiliary_service_registry_invariants() -> bool {
     verify_auxiliary_service_registry_invariants_inner().unwrap_or(false)
 }
 
+pub(crate) fn verify_auxiliary_retirement_overflow_invariants() -> bool {
+    verify_auxiliary_retirement_overflow_invariants_inner().unwrap_or(false)
+}
+
+fn verify_auxiliary_retirement_overflow_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    let control = manager.create_control_plane(&grants)?;
+    let host_source = manager.domain(control)?.boot_roots[0]?;
+    let auxiliary = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
+        source: host_source,
+        object: 1,
+        rights: Rights::READ,
+    }])?;
+    for kind in 10..14 {
+        if !manager.lifecycle_events.push(LifecycleEvent {
+            kind,
+            domain: control,
+            detail: 0,
+            fault: None,
+            sequence: 0,
+        }) {
+            return Some(false);
+        }
+    }
+    if !manager.request_auxiliary_stop(control, host_source, auxiliary)
+        || !manager.retire_auxiliary_service(auxiliary)
+        || manager.domain(auxiliary).is_some()
+    {
+        return Some(false);
+    }
+    for sequence in 1..=4 {
+        let event = manager.lifecycle_events.pop()?;
+        if event.domain != control || event.sequence != sequence {
+            return Some(false);
+        }
+    }
+    let overflow = manager.lifecycle_events.pop()?;
+    Some(
+        overflow.kind == 2
+            && overflow.domain == auxiliary
+            && overflow.detail == 1
+            && overflow.fault.is_none()
+            && overflow.sequence == 5
+            && manager.lifecycle_events.is_empty(),
+    )
+}
+
 fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     let grants = [
         BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),

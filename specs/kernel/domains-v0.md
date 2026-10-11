@@ -60,7 +60,10 @@ the exact retired generation and no synthetic fault metadata. Reusing a domain
 slot therefore produces a distinct, monotonically sequenced audit record.
 Event publication precedes registry and capability-table removal; sequence
 exhaustion rejects retirement without losing the stopped domain record or
-creating an unsequenced teardown.
+creating an unsequenced teardown. A full event FIFO still permits retirement
+because its sticky overflow record preserves the first dropped auxiliary
+generation, sequence, and count; this matches the existing mandatory-teardown
+policy for service faults.
 Auxiliary registration is not yet exposed to userspace, assigned address
 spaces, or integrated with an auxiliary restart policy.
 
