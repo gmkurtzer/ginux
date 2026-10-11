@@ -525,6 +525,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: auxiliary address-space lifecycle failed\r\n");
     }
     serial_write("\r\nginux: auxiliary address-space transaction verified");
+    serial_write("\r\nginux: concurrent auxiliary address spaces isolated");
     serial_write("\r\nginux: auxiliary scheduler admission resource-gated");
     serial_write("\r\nginux: auxiliary address-space ownership retained");
     serial_write("\r\nginux: auxiliary runtime teardown path connected");

@@ -438,6 +438,11 @@ if ! grep -q '^ginux: auxiliary address-space transaction verified' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: concurrent auxiliary address spaces isolated' "$output_file"; then
+    echo "Boot test failed: concurrent auxiliary address spaces were not isolated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: auxiliary scheduler admission resource-gated' "$output_file"; then
     echo "Boot test failed: auxiliary scheduler admission was not resource-gated." >&2
     exit 1

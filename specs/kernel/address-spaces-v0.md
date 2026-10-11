@@ -23,17 +23,20 @@ guard page. The kernel mapping remains supervisor-only in both roots.
 
 Completed proof address-space page-table and data frames are cleared and
 returned through the allocator's generation-checked live-ownership ledger.
-The boot gate also constructs a real zero-thread auxiliary domain, assigns it a
-seven-frame W^X address space under that exact domain generation, and proves
+The boot gate also constructs both supported zero-thread auxiliary domains and
+assigns each a seven-frame W^X address space under its exact domain generation.
+It proves their page-table and user-frame leases are physically disjoint and
 that domain discard is rejected while any frame remains live. Thread admission
-remains zero until the validated root and every reachable frame match that
-generation in the allocator ledger. Binding raises the stored thread limit to
-one; the proof reserves exactly one thread, rejects a second, and refuses to
-unbind until that reservation is released. It then unbinds, clears and releases
-all frames, discards the unstarted domain without emitting a lifecycle event,
-and rejects its stale domain/capability pair. No scheduler context is queued,
-so this is the transactional admission path rather than an executable
-auxiliary workload.
+remains zero until each validated root and every reachable frame match that
+generation in the allocator ledger. Binding raises each stored thread limit to
+one; the proof reserves one thread per domain, rejects a second in either, and
+refuses to unbind either space until both reservations are released. It then
+releases the first space while requiring the second registry entry and all
+seven of its frames to remain intact, releases the second, and discards both
+unstarted domains without emitting lifecycle events. Both stale
+domain/capability pairs are rejected. No scheduler context is queued, so this
+is the concurrent transactional admission path rather than executable
+auxiliary workloads.
 The kernel retains the complete frame leases in a fixed-capacity registry keyed
 by the exact auxiliary domain generation after a successful bind. Its capacity
 is the domain subsystem's shared maximum auxiliary-service count, so identity

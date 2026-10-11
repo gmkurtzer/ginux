@@ -1755,7 +1755,7 @@ pub(crate) fn thread_budget_proof_complete() -> bool {
     };
     control.active_threads == 0
         && control.thread_limit == BOOTSTRAP_THREAD_LIMIT
-        && manager.total_thread_attaches == 7
+        && manager.total_thread_attaches == 8
 }
 
 pub(crate) fn service_restart_budget_proof_complete() -> bool {

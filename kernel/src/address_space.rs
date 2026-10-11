@@ -298,44 +298,97 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 }
 
 pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
-    let Some(auxiliary) =
+    let Some(first_auxiliary) =
         domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)
     else {
         return false;
     };
-    let (Some(handle), Some(owner)) = (
-        domain::auxiliary_boot_handle(auxiliary, 0),
-        memory::FrameOwner::domain(auxiliary),
+    let Some(second_auxiliary) =
+        domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)
+    else {
+        let _ = domain::discard_unstarted_auxiliary_service(first_auxiliary);
+        return false;
+    };
+    let (Some(first_handle), Some(first_owner), Some(second_handle), Some(second_owner)) = (
+        domain::auxiliary_boot_handle(first_auxiliary, 0),
+        memory::FrameOwner::domain(first_auxiliary),
+        domain::auxiliary_boot_handle(second_auxiliary, 0),
+        memory::FrameOwner::domain(second_auxiliary),
     ) else {
-        let _ = domain::discard_unstarted_auxiliary_service(auxiliary);
+        let _ = domain::discard_unstarted_auxiliary_service(first_auxiliary);
+        let _ = domain::discard_unstarted_auxiliary_service(second_auxiliary);
         return false;
     };
     let kernel_root = current_root();
-    let Some(space) = WxAddressSpace::new(kernel_root, owner) else {
-        let _ = domain::discard_unstarted_auxiliary_service(auxiliary);
+    let Some(first_space) = WxAddressSpace::new(kernel_root, first_owner) else {
+        let _ = domain::discard_unstarted_auxiliary_service(first_auxiliary);
+        let _ = domain::discard_unstarted_auxiliary_service(second_auxiliary);
         return false;
     };
-    let valid = space.permissions_are_valid(kernel_root)
-        && memory::owner_live_frame_count(owner) == Some(USER_ADDRESS_SPACE_FRAMES)
-        && domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
-        && !domain::discard_unstarted_auxiliary_service(auxiliary)
-        && register_auxiliary_address_space(auxiliary, space)
+    let Some(second_space) = WxAddressSpace::new(kernel_root, second_owner) else {
+        let _ = first_space.release();
+        let _ = domain::discard_unstarted_auxiliary_service(first_auxiliary);
+        let _ = domain::discard_unstarted_auxiliary_service(second_auxiliary);
+        return false;
+    };
+    let valid = first_space.permissions_are_valid(kernel_root)
+        && second_space.permissions_are_valid(kernel_root)
+        && first_space.is_disjoint_from(&second_space)
+        && memory::owner_live_frame_count(first_owner) == Some(USER_ADDRESS_SPACE_FRAMES)
+        && memory::owner_live_frame_count(second_owner) == Some(USER_ADDRESS_SPACE_FRAMES)
+        && domain::handle_permits(
+            first_auxiliary,
+            first_handle,
+            2,
+            crate::capability::Rights::WRITE,
+        )
+        && domain::handle_permits(
+            second_auxiliary,
+            second_handle,
+            2,
+            crate::capability::Rights::WRITE,
+        )
+        && !domain::discard_unstarted_auxiliary_service(first_auxiliary)
+        && !domain::discard_unstarted_auxiliary_service(second_auxiliary)
+        && register_auxiliary_address_space(first_auxiliary, first_space)
+        && register_auxiliary_address_space(second_auxiliary, second_space)
+        && registered_auxiliary_address_space_count() == 2
+        && domain::attach_thread(first_auxiliary)
+        && domain::attach_thread(second_auxiliary)
+        && !domain::attach_thread(first_auxiliary)
+        && !domain::attach_thread(second_auxiliary)
+        && !release_auxiliary_address_space(first_auxiliary)
+        && !release_auxiliary_address_space(second_auxiliary)
+        && registered_auxiliary_address_space_count() == 2
+        && domain::detach_thread(first_auxiliary)
+        && domain::detach_thread(second_auxiliary)
+        && release_auxiliary_address_space(first_auxiliary)
         && registered_auxiliary_address_space_count() == 1
-        && domain::attach_thread(auxiliary)
-        && !domain::attach_thread(auxiliary)
-        && !release_auxiliary_address_space(auxiliary)
-        && registered_auxiliary_address_space_count() == 1
-        && domain::detach_thread(auxiliary)
-        && release_auxiliary_address_space(auxiliary)
+        && memory::owner_live_frame_count(second_owner) == Some(USER_ADDRESS_SPACE_FRAMES)
+        && release_auxiliary_address_space(second_auxiliary)
         && registered_auxiliary_address_space_count() == 0;
-    if memory::owner_live_frame_count(owner) != Some(0)
-        || !domain::discard_unstarted_auxiliary_service(auxiliary)
+    if memory::owner_live_frame_count(first_owner) != Some(0)
+        || memory::owner_live_frame_count(second_owner) != Some(0)
+        || !domain::discard_unstarted_auxiliary_service(first_auxiliary)
+        || !domain::discard_unstarted_auxiliary_service(second_auxiliary)
     {
         return false;
     }
     valid
-        && domain::domain_is_retired(auxiliary)
-        && !domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+        && domain::domain_is_retired(first_auxiliary)
+        && domain::domain_is_retired(second_auxiliary)
+        && !domain::handle_permits(
+            first_auxiliary,
+            first_handle,
+            2,
+            crate::capability::Rights::WRITE,
+        )
+        && !domain::handle_permits(
+            second_auxiliary,
+            second_handle,
+            2,
+            crate::capability::Rights::WRITE,
+        )
 }
 
 fn registered_auxiliary_address_space_count() -> usize {
