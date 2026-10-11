@@ -38,6 +38,8 @@ not consume a number, and service retirement or replacement rebinding does not
 reset either direction. Dequeue rejects a number that is not greater than the
 last accepted number for that direction. Retirement may deliberately discard
 requests for the old service, so gaps are valid and contiguity is not required.
+Exhausting either message sequence rejects both direct and queued sends without
+waking a waiter, changing audit state, or inserting a record.
 The local invariant injects zero and out-of-order envelopes, verifies that a
 full-queue send does not advance the counter, and proves that sequencing
 continues across service replacement. The QEMU proof audits sequence one in
@@ -92,7 +94,8 @@ observes the original and replacement generations in order after both have
 retired, audits closure sequence two for the replacement, then requires the
 closure FIFO to be empty. Retirement fails closed if the FIFO is full or the
 sequence space is exhausted rather than discarding an unobserved closure or
-reusing a number.
+reusing a number. Closure-sequence exhaustion leaves the service bound and its
+pending requests intact.
 The restart transaction has a separate exact-generation rollback operation for
 a replacement that was bound but never scheduled. It requires an empty request
 direction, removes only that binding, and deliberately emits no peer-closure

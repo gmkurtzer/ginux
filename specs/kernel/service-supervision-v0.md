@@ -44,7 +44,8 @@ belonged to the original faulted generation and carried lifecycle sequence one.
 Every accepted event receives a nonzero monotonic internal sequence; dequeue
 rejects zero or non-monotonic records. A full FIFO still consumes sequence
 numbers for dropped records, while its later summary identifies the first
-dropped sequence and the saturating drop count. Event kind occupies the low eight
+dropped sequence and the saturating drop count. Sequence exhaustion rejects a
+new event without modifying the FIFO or overflow state. Event kind occupies the low eight
 bits and the generation-tagged domain ID occupies the next 48 bits.
 
 After the fault, the kernel creates one replacement domain generation with the

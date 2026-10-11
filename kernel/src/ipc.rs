@@ -406,6 +406,29 @@ pub(crate) fn verify_channel_invariants() -> bool {
         sequence: 0,
         value: service,
     }) && zero_closure.receive(control) == Receive::Empty;
+    let Some(mut exhausted_request) = Duplex::new(control, service) else {
+        return false;
+    };
+    exhausted_request.next_request_sequence = u64::MAX;
+    let exhausted_request_rejected = !exhausted_request.send_with_direct(control, 10, |_, _| true)
+        && exhausted_request.requests.len == 0
+        && exhausted_request.last_service_message_source.is_none();
+    let Some(mut exhausted_reply) = Duplex::new(control, service) else {
+        return false;
+    };
+    exhausted_reply.next_reply_sequence = u64::MAX;
+    let exhausted_reply_rejected = !exhausted_reply.send(service, 10)
+        && exhausted_reply.replies.len == 0
+        && exhausted_reply.last_control_message_source.is_none();
+    let Some(mut exhausted_closure) = Duplex::new(control, service) else {
+        return false;
+    };
+    let exhausted_closure_rejected = exhausted_closure.send(control, 10) && {
+        exhausted_closure.next_closure_sequence = u64::MAX;
+        !exhausted_closure.retire_service(service)
+            && exhausted_closure.service_domain == Some(service)
+            && exhausted_closure.receive(service) == Receive::Message(10)
+    };
     let Some(mut direct) = Duplex::new(control, service) else {
         return false;
     };
@@ -427,6 +450,9 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && zero_sequence_rejected
         && stale_closure_rejected
         && zero_closure_rejected
+        && exhausted_request_rejected
+        && exhausted_reply_rejected
+        && exhausted_closure_rejected
         && direct_sequence_shared
         && channel.receive(control) == Receive::Empty
         && channel.receive(service) == Receive::Empty

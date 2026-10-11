@@ -363,6 +363,11 @@ if ! grep -q '^ginux: malformed executable containers rejected' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
+    echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^USER_OK' "$output_file")" -ne 1 ]]; then
     echo "Boot test failed: the control-plane console record count is invalid." >&2
     exit 1
