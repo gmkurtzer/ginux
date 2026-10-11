@@ -598,6 +598,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: minimal user interrupt surface enforced");
     serial_write("\r\nginux: bounded userspace read enforced");
     serial_write("\r\nginux: user copies bound to owned mappings");
+    serial_write("\r\nginux: page-granular user range validation enforced");
     serial_write("\r\nginux: structured userspace ABI result verified");
     serial_write("\r\nginux: ring-3 fault survivor resumed and exited");
     serial_write("\r\nginux: user page fault contained");

@@ -112,6 +112,10 @@ ledger. Per-page permission checks then apply to the requested range. This
 recheck narrows the interval in which internal page-table corruption could turn
 an otherwise bounded ABI copy into cross-domain access; concurrent mapping
 mutation remains unsupported in the single-core bootstrap.
+Permission validation walks each covered page exactly once rather than once per
+byte. The end address remains exclusive, so an aligned end does not inspect the
+following page, while a range containing even one byte of a guard page is
+rejected before the copy begins.
 Unknown operations terminate the proof program without granting an operation.
 
 At initial entry, `RBX` contains the host-control handle, `RCX` contains the

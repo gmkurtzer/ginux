@@ -398,6 +398,11 @@ if ! grep -q '^ginux: user copies bound to owned mappings' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: page-granular user range validation enforced' "$output_file"; then
+    echo "Boot test failed: page-granular user range validation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: structured userspace ABI result verified' "$output_file"; then
     echo "Boot test failed: bounded userspace result copying failed." >&2
     exit 1

@@ -42,13 +42,8 @@ pub(crate) fn copy_from_current_user(address: u64, output: &mut [u8]) -> bool {
     if !current_user_root_is_owned(root) {
         return false;
     }
-    for offset in 0..output.len() {
-        let Some(byte_address) = address.checked_add(offset as u64) else {
-            return false;
-        };
-        if !user_address_has_permissions(root, byte_address, 0) {
-            return false;
-        }
+    if !user_range_has_permissions(root, address, end, 0) {
+        return false;
     }
     unsafe {
         cpu::with_supervisor_user_access(|| {
@@ -74,13 +69,8 @@ pub(crate) fn copy_to_current_user(address: u64, input: &[u8]) -> bool {
     if !current_user_root_is_owned(root) {
         return false;
     }
-    for offset in 0..input.len() {
-        let Some(byte_address) = address.checked_add(offset as u64) else {
-            return false;
-        };
-        if !user_address_has_permissions(root, byte_address, WRITABLE) {
-            return false;
-        }
+    if !user_range_has_permissions(root, address, end, WRITABLE) {
+        return false;
     }
     unsafe {
         cpu::with_supervisor_user_access(|| {
@@ -103,6 +93,27 @@ fn current_user_root_is_owned(root: u64) -> bool {
         return false;
     };
     memory::frame_addresses_owned_by(owner, &frames)
+}
+
+fn user_range_has_permissions(root: u64, start: u64, end: u64, required: u64) -> bool {
+    if start >= end {
+        return false;
+    }
+    let page_mask = !(PAGE_SIZE as u64 - 1);
+    let mut page = start & page_mask;
+    let last = (end - 1) & page_mask;
+    loop {
+        if !user_address_has_permissions(root, page, required) {
+            return false;
+        }
+        if page == last {
+            return true;
+        }
+        let Some(next) = page.checked_add(PAGE_SIZE as u64) else {
+            return false;
+        };
+        page = next;
+    }
 }
 
 fn user_address_has_permissions(root: u64, address: u64, required: u64) -> bool {
