@@ -49,7 +49,7 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
 
     mov edi, 0x613008
-    mov ecx, 9
+    mov ecx, 10
     xor r9d, r9d
     xor r10d, r10d
     xor r11d, r11d

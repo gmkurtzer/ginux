@@ -603,6 +603,11 @@ if ! grep -q '^ginux: authenticated Linux dependency bytes enforced' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux dependency SONAME identity bound' "$output_file"; then
+    echo "Boot test failed: Linux dependency SONAME identity was not bound." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux relative relocation metadata validated' "$output_file"; then
     echo "Boot test failed: bounded Linux relative relocation metadata was not validated." >&2
     exit 1

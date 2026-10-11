@@ -590,6 +590,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux interpreter resolution plan validated\r\n");
     serial_write("ginux: measured Linux interpreter bytes enforced\r\n");
     serial_write("ginux: authenticated Linux dependency bytes enforced\r\n");
+    serial_write("ginux: Linux dependency SONAME identity bound\r\n");
     if !linux_elf::verify_dynamic_relocation_rejections() {
         kernel_fail("ginux: malformed Linux dynamic relocation metadata accepted\r\n");
     }

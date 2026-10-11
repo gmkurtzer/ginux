@@ -114,14 +114,15 @@ the resolved bytes before it parses, plans, maps, or executes the interpreter;
 wrong-path, wrong-digest, mutated, and truncated candidates are rejected. The
 authority record is currently a synthetic proof input rather than a
 production-signed package manifest. An interpreted main image may additionally
-name exactly one dependency with `DT_NEEDED`. A dependency authority record
-binds that exact string to a SHA-256 digest and fixed page-aligned load bias.
+name exactly one dependency with `DT_NEEDED`. The dependency must declare one
+nonempty `DT_SONAME`; a dependency authority record binds that exact string to
+a SHA-256 digest and fixed page-aligned load bias.
 The kernel authenticates the bytes before parsing or mapping the dependency,
 requires a non-interpreted `ET_DYN` image with no nested `DT_NEEDED`, and rejects
 page-granular overlap among all main, interpreter, and dependency loads. Wrong
-names, wrong digests, truncation, and an overlapping dependency bias are
-rejected. An authenticated dependency exporting a different symbol name is
-also rejected. The parser also accepts one bounded
+names, wrong internal SONAMEs, wrong digests, truncation, and an overlapping
+dependency bias are rejected. An authenticated dependency exporting a
+different symbol name is also rejected. The parser also accepts one bounded
 `PT_DYNAMIC` table containing one, two, or three `DT_RELA` records, its exact
 size and 24-byte entry size, and a terminating `DT_NULL`. The first record must
 be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must

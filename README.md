@@ -33,8 +33,10 @@ target. The kernel then restores its root and scrubs every owned frame.
 The build rejects unresolved ELF relocation records in all three raw embedded
 text payloads before extracting their bytes.
 Interpreter and dependency selection bind the exact `PT_INTERP` path or
-`DT_NEEDED` name and SHA-256 digest before parsing or mapping. A production
-authority source and general dynamic linking remain unimplemented. Malformed dynamic tables,
+`DT_NEEDED` name and SHA-256 digest before parsing or mapping. The dependency's
+own `DT_SONAME` must equal both the requested name and the authority record. A
+production authority source and general dynamic linking remain unimplemented.
+Malformed dynamic tables,
 duplicate tags, unsupported relocations, and relocation targets outside writable memory
 are rejected before mapping.
 The static planner also rejects any image carrying dynamic relocation metadata,
@@ -142,9 +144,10 @@ interpreter image while preserving distinct initial-entry, `AT_ENTRY`, and
 `AT_BASE` values. The bounded synthetic interpreter-first execution path is
 verified, including rejection of substituted, mutated, and truncated interpreter
 bytes. The dependency is independently authenticated by exact name and digest,
-mapped W^X at a non-overlapping bias, and rejected if it requests another
-dependency. Synthetic userspace relative relocations are executed for the
-interpreter, main image, and dependency. The dependency also receives its own
+requires a matching internal `DT_SONAME`, is mapped W^X at a non-overlapping
+bias, and is rejected if it requests another dependency. Synthetic userspace
+relative relocations are executed for the interpreter, main image, and
+dependency. The dependency also receives its own
 eager `GLOB_DAT` and `JUMP_SLOT` self-bindings. The main image proves one
 cross-object symbol resolution through `R_X86_64_GLOB_DAT` and eager
 `R_X86_64_JUMP_SLOT`; the jump slot is called in ring 3 and returns a checked

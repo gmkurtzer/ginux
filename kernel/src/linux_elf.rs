@@ -39,6 +39,7 @@ const DT_RELASZ: u64 = 8;
 const DT_RELAENT: u64 = 9;
 const DT_STRSZ: u64 = 10;
 const DT_SYMENT: u64 = 11;
+const DT_SONAME: u64 = 14;
 const R_X86_64_GLOB_DAT: u32 = 6;
 const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_RELATIVE: u64 = 8;
@@ -69,6 +70,7 @@ pub(crate) struct Image<'a> {
     pub(crate) dynamic_relocations: Option<DynamicRelocations>,
     pub(crate) dynamic_symbol: Option<&'a [u8]>,
     pub(crate) needed_library: Option<&'a [u8]>,
+    pub(crate) soname: Option<&'a [u8]>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -104,6 +106,7 @@ struct DynamicMetadata<'a> {
     relocations: DynamicRelocations,
     symbol_name: Option<&'a [u8]>,
     needed_library: Option<&'a [u8]>,
+    soname: Option<&'a [u8]>,
 }
 
 #[derive(Clone, Copy)]
@@ -348,6 +351,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         dynamic_relocations,
         dynamic_symbol: dynamic_metadata.and_then(|metadata| metadata.symbol_name),
         needed_library: dynamic_metadata.and_then(|metadata| metadata.needed_library),
+        soname: dynamic_metadata.and_then(|metadata| metadata.soname),
     })
 }
 
@@ -424,6 +428,7 @@ pub(crate) fn plan_authenticated_dependency<'main, 'interpreter, 'dependency>(
         || main_dynamic.symbol_defined
         || !dependency_dynamic.symbol_defined
         || dependency_image.needed_library.is_some()
+        || dependency_image.soname != Some(dependency_authority.name)
     {
         return None;
     }
@@ -893,6 +898,7 @@ fn parse_dynamic_relocations<'a>(
     let mut symbol_entry_size = None;
     let mut hash_table_address = None;
     let mut needed_name_offset = None;
+    let mut soname_offset = None;
     let mut terminated = false;
     let entries = table.bytes.as_chunks::<DYNAMIC_ENTRY_SIZE>().0;
     for (index, entry) in entries.iter().enumerate() {
@@ -912,6 +918,7 @@ fn parse_dynamic_relocations<'a>(
             DT_SYMENT if symbol_entry_size.replace(value).is_none() => {}
             DT_HASH if hash_table_address.replace(value).is_none() => {}
             DT_NEEDED if needed_name_offset.replace(value).is_none() => {}
+            DT_SONAME if soname_offset.replace(value).is_none() => {}
             _ => return None,
         }
     }
@@ -948,6 +955,7 @@ fn parse_dynamic_relocations<'a>(
         symbol_entry_size,
         hash_table_address,
         needed_name_offset,
+        soname_offset,
     );
     let (
         symbol_table_address,
@@ -958,10 +966,11 @@ fn parse_dynamic_relocations<'a>(
         jump_slot_relocation,
         symbol_name,
         needed_library,
+        soname,
         symbol_defined,
     ) = match (relocation_count, symbol_metadata) {
-        (1, (None, None, None, None, None, None)) => {
-            (None, None, 0, None, None, None, None, None, false)
+        (1, (None, None, None, None, None, None, None)) => {
+            (None, None, 0, None, None, None, None, None, None, false)
         }
         (
             count @ (2 | 3),
@@ -972,6 +981,7 @@ fn parse_dynamic_relocations<'a>(
                 Some(symbol_size),
                 Some(hash),
                 needed_offset,
+                soname_offset,
             ),
         ) if symbol_size == SYMBOL_ENTRY_SIZE as u64
             && (2..=MAX_INTERPRETER_PATH_SIZE as u64).contains(&string_size) =>
@@ -1021,6 +1031,15 @@ fn parse_dynamic_relocations<'a>(
                 }
                 None => None,
             };
+            let soname = match soname_offset {
+                Some(offset) => {
+                    let offset = usize::try_from(offset).ok()?;
+                    let candidate = string_table.get(offset..)?;
+                    let length = candidate.iter().position(|byte| *byte == 0)?;
+                    (length != 0).then_some(&candidate[..length])
+                }
+                None => None,
+            };
             let hash_table = virtual_file_bytes(loads, hash, 5 * 4)?;
             let bucket_count = read_u32(hash_table, 0)?;
             let chain_count = read_u32(hash_table, 4)?;
@@ -1056,7 +1075,10 @@ fn parse_dynamic_relocations<'a>(
                         || symbol_value >= executable_end
                         || symbol_size > executable_end.checked_sub(symbol_value)?)
                 || !symbol_defined
-                    && (needed_library.is_none() || symbol_value != 0 || symbol_size != 0)
+                    && (needed_library.is_none()
+                        || soname.is_some()
+                        || symbol_value != 0
+                        || symbol_size != 0)
                 || symbol_defined && needed_library.is_some()
             {
                 return None;
@@ -1103,6 +1125,7 @@ fn parse_dynamic_relocations<'a>(
                 jump_slot_relocation,
                 Some(name),
                 needed_library,
+                soname,
                 symbol_defined,
             )
         }
@@ -1125,6 +1148,7 @@ fn parse_dynamic_relocations<'a>(
         },
         symbol_name,
         needed_library,
+        soname,
     })
 }
 
@@ -1699,6 +1723,19 @@ fn verify_dependency_authentication_rejections(
         sha256: crate::crypto::sha256(&mismatched_symbol_dependency),
         ..*dependency_authority
     };
+    let mut mismatched_soname_dependency = [0_u8; 1024];
+    mismatched_soname_dependency.copy_from_slice(dependency_bytes);
+    let Some(soname) = mismatched_soname_dependency
+        .windows(b"libginux.so".len())
+        .position(|candidate| candidate == b"libginux.so")
+    else {
+        return false;
+    };
+    mismatched_soname_dependency[soname] = b'x';
+    let mismatched_soname_authority = DependencyAuthority {
+        sha256: crate::crypto::sha256(&mismatched_soname_dependency),
+        ..*dependency_authority
+    };
     plan_authenticated_dependency(
         main,
         &wrong_path,
@@ -1772,6 +1809,15 @@ fn verify_dependency_authentication_rejections(
             0x60_0000,
             &mismatched_symbol_authority,
             &mismatched_symbol_dependency,
+        )
+        .is_none()
+        && plan_authenticated_dependency(
+            main,
+            authority,
+            interpreter_bytes,
+            0x60_0000,
+            &mismatched_soname_authority,
+            &mismatched_soname_dependency,
         )
         .is_none()
 }
@@ -2247,9 +2293,9 @@ fn compact_position_independent_fixture() -> [u8; 2048] {
 fn compact_dependency_fixture() -> [u8; 1024] {
     const DATA_OFFSET: usize = 0x200;
     const DYNAMIC_OFFSET: usize = DATA_OFFSET + 8;
-    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 9 * DYNAMIC_ENTRY_SIZE;
+    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 10 * DYNAMIC_ENTRY_SIZE;
     const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
-    const STRING_TABLE: &[u8] = b"\0ginux_probe\0";
+    const STRING_TABLE: &[u8] = b"\0ginux_probe\0libginux.so\0";
     const HASH_OFFSET: usize = (STRTAB_OFFSET + STRING_TABLE.len() + 3) & !3;
     const RELA_OFFSET: usize = (HASH_OFFSET + 20 + 7) & !7;
     let mut bytes = [0_u8; 1024];
@@ -2288,7 +2334,7 @@ fn compact_dependency_fixture() -> [u8; 1024] {
         ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE,
         DYNAMIC_OFFSET,
         0x3008,
-        9 * DYNAMIC_ENTRY_SIZE,
+        10 * DYNAMIC_ENTRY_SIZE,
     );
     for (index, (target, kind, symbol, addend)) in [
         (0x3180, R_X86_64_RELATIVE as u32, 0_u32, 0x100),
@@ -2329,6 +2375,7 @@ fn compact_dependency_fixture() -> [u8; 1024] {
         (DT_RELASZ, (3 * RELA_ENTRY_SIZE) as u64),
         (DT_STRSZ, STRING_TABLE.len() as u64),
         (DT_HASH, 0x3000 + (HASH_OFFSET - DATA_OFFSET) as u64),
+        (DT_SONAME, 13),
         (DT_NULL, 0),
     ]
     .into_iter()
