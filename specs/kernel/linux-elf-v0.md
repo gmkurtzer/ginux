@@ -36,17 +36,20 @@ relocations, or support glibc.
 
 ## Page-image plan
 
-The next bounded loader step accepts only segments whose virtual address is
-page-aligned and whose complete memory image fits in one 4096-byte page. It
-preserves the ELF virtual addresses and derives separate executable/read-only
-and writable/non-executable page metadata. Materialization first zeroes the
-whole destination page and then copies the file bytes. A load segment may begin
+The bounded page-image planner accepts page-aligned segments of at most two
+4096-byte pages. It preserves ELF virtual addresses and derives separate
+executable/read-only and writable/non-executable metadata. Each page is first
+zeroed and then receives only its intersecting file bytes, so a second BSS-only
+page is entirely zero. A request for a third page is rejected. A load segment
+may begin
 at file offset zero, as real ELF images commonly do, so the first mapped page
 preserves the ELF and program-header tables and places instructions at their
 file-relative offset. The writable segment's file tail through `p_memsz` and
 all remaining page bytes are zero. The QEMU verifier checks the ELF magic,
 exact RX instructions, RW data bytes, W^X metadata, and every zero-filled tail
-byte.
+byte. Runtime address-space installation remains deliberately restricted to
+one page per segment and fails closed on a two-page plan until the mapper owns
+and tears down the additional frames.
 
 The QEMU proof installs the two pages into a newly allocated x86-64
 root at their declared `0x400000` and `0x401000` addresses. It privately clones

@@ -73,6 +73,8 @@ pub(crate) fn verify_linux_elf_mapping(
         || stack_indexes[..3] != first_indexes[..3]
         || first_indexes[0] != 0
         || first_indexes[1] != 0
+        || first.page_count != 1
+        || second.page_count != 1
         || first.writable == first.executable
         || second.writable == second.executable
         || first.writable == second.writable
