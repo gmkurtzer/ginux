@@ -6,7 +6,7 @@ use crate::{
         cpu, paging,
         timer::{self, LocalApicCalibration},
     },
-    domain, ipc, memory, scheduler,
+    domain, ipc, memory, network, scheduler,
 };
 
 const PAGE_SIZE: usize = 4096;
@@ -838,11 +838,11 @@ pub(crate) fn verify_ring3_network_service() -> bool {
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             crate::capability::Rights::WRITE,
         )
-        && cpu::network_link_is_up()
-        && cpu::network_ipv4_configuration() == 0x0000_0018_0a00_040f
-        && cpu::network_ipv4_gateway() == 0
-        && cpu::network_configuration_generation() == 5
-        && cpu::network_route() == (0x0000_0018_c0a8_3200, 0x0a00_0402)
+        && network::link_is_up()
+        && network::ipv4_configuration() == 0x0000_0018_0a00_040f
+        && network::ipv4_gateway() == 0
+        && network::generation() == 5
+        && network::route() == (0x0000_0018_c0a8_3200, 0x0a00_0402)
         && event
             == Some(
                 (42_u64 << 56)
@@ -922,8 +922,8 @@ pub(crate) fn verify_ring3_network_observer() -> bool {
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             crate::capability::Rights::WRITE,
         )
-        && cpu::network_link_is_up()
-        && cpu::network_configuration_generation() == 5
+        && network::link_is_up()
+        && network::generation() == 5
         && event
             == Some(
                 (43_u64 << 56)
@@ -1017,8 +1017,8 @@ pub(crate) fn verify_ring3_network_configurator() -> bool {
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             crate::capability::Rights::WRITE,
         )
-        && cpu::network_link_is_up()
-        && cpu::network_configuration_generation() == 9
+        && network::link_is_up()
+        && network::generation() == 9
         && event
             == Some(
                 (44_u64 << 56)

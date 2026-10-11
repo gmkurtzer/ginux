@@ -5,6 +5,12 @@
 Boot object 4 names the first network-device mediation boundary. The signed
 development manifest grants the control plane read/write authority, and the
 kernel delegates that bounded authority to an isolated stop-only service.
+The architecture-independent `kernel/src/network.rs` module owns the bounded
+state, validation rules, generation counter, snapshot, and whole-state apply.
+The x86-64 call gate owns capability checks plus safe user copy-in/copy-out and
+then delegates policy-free state operations to that module. This separation
+does not make the current scalar model a network stack: packet protocols,
+hardware queues, drivers, and general routing remain outside this kernel core.
 Control ABI v2 operation 16 uses `RSI` as a command and `RDX` as its argument.
 Read-authorized command 0 requires a zero reserved argument and returns a fixed
 descriptor word containing device-contract version 9, MTU 1500, and one queue.

@@ -3,14 +3,14 @@ use core::arch::{
     x86_64::{__cpuid, __cpuid_count},
 };
 use core::mem::size_of;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use super::{paging, timer};
 
 use crate::{
     address_space,
     capability::Rights,
-    control_abi, domain, ipc, memory, scheduler,
+    control_abi, domain, ipc, memory, network, scheduler,
     scheduler::{RuntimeAction, UserFaultFrame, UserTrapFrame},
     serial_write, serial_write_u64,
 };
@@ -114,12 +114,6 @@ static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
-static NETWORK_LINK_UP: AtomicBool = AtomicBool::new(false);
-static NETWORK_IPV4_CONFIGURATION: AtomicU64 = AtomicU64::new(0);
-static NETWORK_IPV4_GATEWAY: AtomicU64 = AtomicU64::new(0);
-static NETWORK_CONFIGURATION_GENERATION: AtomicU64 = AtomicU64::new(0);
-static NETWORK_ROUTE_DESTINATION: AtomicU64 = AtomicU64::new(0);
-static NETWORK_ROUTE_GATEWAY: AtomicU64 = AtomicU64::new(0);
 static mut USER_RETURN_STACK: u64 = 0;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
@@ -892,33 +886,27 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
                     Rights::READ,
                 ) =>
         {
-            u64::from(NETWORK_LINK_UP.load(Ordering::Acquire))
+            u64::from(network::link_is_up())
         }
         control_abi::NETWORK_DEVICE_SET_LINK
-            if argument <= 1
-                && domain::handle_permits(
-                    caller_domain,
-                    capability,
-                    control_abi::NETWORK_DEVICE_OBJECT,
-                    Rights::WRITE,
-                ) =>
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::NETWORK_DEVICE_OBJECT,
+                Rights::WRITE,
+            ) =>
         {
-            if NETWORK_LINK_UP.swap(argument != 0, Ordering::AcqRel) != (argument != 0) {
-                record_network_configuration_change();
-            }
-            0
+            network_result(network::set_link(argument))
         }
         control_abi::NETWORK_DEVICE_SET_IPV4
-            if valid_ipv4_configuration(argument)
-                && domain::handle_permits(
-                    caller_domain,
-                    capability,
-                    control_abi::NETWORK_DEVICE_OBJECT,
-                    Rights::WRITE,
-                ) =>
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::NETWORK_DEVICE_OBJECT,
+                Rights::WRITE,
+            ) =>
         {
-            apply_ipv4_configuration(argument);
-            0
+            network_result(network::set_ipv4(argument))
         }
         control_abi::NETWORK_DEVICE_QUERY_IPV4
             if argument == 0
@@ -929,21 +917,17 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
                     Rights::READ,
                 ) =>
         {
-            NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire)
+            network::ipv4_configuration()
         }
         control_abi::NETWORK_DEVICE_SET_GATEWAY
-            if valid_ipv4_gateway(argument)
-                && domain::handle_permits(
-                    caller_domain,
-                    capability,
-                    control_abi::NETWORK_DEVICE_OBJECT,
-                    Rights::WRITE,
-                ) =>
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::NETWORK_DEVICE_OBJECT,
+                Rights::WRITE,
+            ) =>
         {
-            if NETWORK_IPV4_GATEWAY.swap(argument, Ordering::AcqRel) != argument {
-                record_network_configuration_change();
-            }
-            0
+            network_result(network::set_gateway(argument))
         }
         control_abi::NETWORK_DEVICE_QUERY_GATEWAY
             if argument == 0
@@ -954,7 +938,7 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
                     Rights::READ,
                 ) =>
         {
-            NETWORK_IPV4_GATEWAY.load(Ordering::Acquire)
+            network::ipv4_gateway()
         }
         control_abi::NETWORK_DEVICE_QUERY_GENERATION
             if argument == 0
@@ -965,7 +949,7 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
                     Rights::READ,
                 ) =>
         {
-            NETWORK_CONFIGURATION_GENERATION.load(Ordering::Acquire)
+            network::generation()
         }
         control_abi::NETWORK_DEVICE_SET_ROUTE
             if domain::handle_permits(
@@ -1027,38 +1011,28 @@ fn apply_network_configuration(address: u64) -> u64 {
     if version != control_abi::NETWORK_APPLY_VERSION || reserved != 0 {
         return u64::MAX - 2;
     }
-    let generation = NETWORK_CONFIGURATION_GENERATION.load(Ordering::Acquire);
-    if expected_generation != generation {
-        return control_abi::NETWORK_RESULT_STALE_GENERATION;
+    match network::apply(
+        expected_generation,
+        network::Configuration {
+            link,
+            ipv4,
+            gateway,
+            route_destination,
+            route_gateway,
+        },
+    ) {
+        Ok(generation) => generation,
+        Err(network::ApplyError::Stale) => control_abi::NETWORK_RESULT_STALE_GENERATION,
+        Err(network::ApplyError::Invalid) => u64::MAX - 2,
     }
-    if link > 1
-        || !valid_ipv4_configuration(ipv4)
-        || gateway >> 32 != 0
-        || (gateway != 0 && !valid_ipv4_gateway_for_configuration(gateway as u32, ipv4))
-        || route_destination >> 40 != 0
-        || route_gateway >> 32 != 0
-    {
-        return u64::MAX - 2;
+}
+
+fn network_result(success: bool) -> u64 {
+    if success {
+        0
+    } else {
+        u64::MAX - 2
     }
-    let destination = route_destination as u32;
-    let prefix = (route_destination >> 32) as u8;
-    if !valid_network_route_for_configuration(destination, prefix, route_gateway as u32, ipv4) {
-        return u64::MAX - 2;
-    }
-    let changed = NETWORK_LINK_UP.load(Ordering::Acquire) != (link != 0)
-        || NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire) != ipv4
-        || NETWORK_IPV4_GATEWAY.load(Ordering::Acquire) != gateway
-        || NETWORK_ROUTE_DESTINATION.load(Ordering::Acquire) != route_destination
-        || NETWORK_ROUTE_GATEWAY.load(Ordering::Acquire) != route_gateway;
-    if changed {
-        NETWORK_LINK_UP.store(link != 0, Ordering::Release);
-        NETWORK_IPV4_CONFIGURATION.store(ipv4, Ordering::Release);
-        NETWORK_IPV4_GATEWAY.store(gateway, Ordering::Release);
-        NETWORK_ROUTE_DESTINATION.store(route_destination, Ordering::Release);
-        NETWORK_ROUTE_GATEWAY.store(route_gateway, Ordering::Release);
-        record_network_configuration_change();
-    }
-    NETWORK_CONFIGURATION_GENERATION.load(Ordering::Acquire)
 }
 
 fn network_request_word(
@@ -1088,27 +1062,15 @@ fn set_network_route(address: u64) -> u64 {
     let destination = u32::from_le_bytes([record[0], record[1], record[2], record[3]]);
     let prefix = record[4];
     let gateway = u32::from_le_bytes([record[8], record[9], record[10], record[11]]);
-    if !valid_network_route(destination, prefix, gateway) {
-        return u64::MAX - 2;
-    }
-    let packed_destination = u64::from(destination) | (u64::from(prefix) << 32);
-    let changed = NETWORK_ROUTE_DESTINATION.load(Ordering::Acquire) != packed_destination
-        || NETWORK_ROUTE_GATEWAY.load(Ordering::Acquire) != u64::from(gateway);
-    if changed {
-        NETWORK_ROUTE_DESTINATION.store(packed_destination, Ordering::Release);
-        NETWORK_ROUTE_GATEWAY.store(u64::from(gateway), Ordering::Release);
-        record_network_configuration_change();
-    }
-    0
+    network_result(network::set_route(destination, prefix, gateway))
 }
 
 fn query_network_route(address: u64) -> u64 {
-    let packed_destination = NETWORK_ROUTE_DESTINATION.load(Ordering::Acquire);
-    let gateway = NETWORK_ROUTE_GATEWAY.load(Ordering::Acquire) as u32;
+    let (packed_destination, gateway) = network::route();
     let mut record = [0_u8; control_abi::NETWORK_ROUTE_RECORD_SIZE];
     record[0..4].copy_from_slice(&(packed_destination as u32).to_le_bytes());
     record[4] = (packed_destination >> 32) as u8;
-    record[8..12].copy_from_slice(&gateway.to_le_bytes());
+    record[8..12].copy_from_slice(&(gateway as u32).to_le_bytes());
     if !address_space::copy_to_current_user(address, &record) {
         return u64::MAX - 2;
     }
@@ -1116,14 +1078,15 @@ fn query_network_route(address: u64) -> u64 {
 }
 
 fn query_network_snapshot(address: u64) -> u64 {
+    let state = network::snapshot();
     let words = [
         control_abi::NETWORK_SNAPSHOT_VERSION,
-        NETWORK_CONFIGURATION_GENERATION.load(Ordering::Acquire),
-        u64::from(NETWORK_LINK_UP.load(Ordering::Acquire)),
-        NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire),
-        NETWORK_IPV4_GATEWAY.load(Ordering::Acquire),
-        NETWORK_ROUTE_DESTINATION.load(Ordering::Acquire),
-        NETWORK_ROUTE_GATEWAY.load(Ordering::Acquire),
+        state[0],
+        state[1],
+        state[2],
+        state[3],
+        state[4],
+        state[5],
     ];
     let mut snapshot = [0_u8; control_abi::NETWORK_SNAPSHOT_SIZE];
     for (index, word) in words.iter().enumerate() {
@@ -1134,112 +1097,6 @@ fn query_network_snapshot(address: u64) -> u64 {
         return u64::MAX - 2;
     }
     control_abi::NETWORK_SNAPSHOT_SIZE as u64
-}
-
-fn valid_network_route(destination: u32, prefix: u8, gateway: u32) -> bool {
-    valid_network_route_for_configuration(
-        destination,
-        prefix,
-        gateway,
-        NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire),
-    )
-}
-
-fn valid_network_route_for_configuration(
-    destination: u32,
-    prefix: u8,
-    gateway: u32,
-    configuration: u64,
-) -> bool {
-    if destination == 0 && prefix == 0 && gateway == 0 {
-        return true;
-    }
-    if prefix == 0 || prefix > 32 || gateway == 0 {
-        return false;
-    }
-    let mask = u32::MAX << (32 - u32::from(prefix));
-    destination & mask == destination
-        && valid_ipv4_gateway_for_configuration(gateway, configuration)
-}
-
-fn record_network_configuration_change() {
-    let _ = NETWORK_CONFIGURATION_GENERATION.try_update(
-        Ordering::AcqRel,
-        Ordering::Acquire,
-        |generation| Some(generation.saturating_add(1)),
-    );
-}
-
-fn valid_ipv4_configuration(configuration: u64) -> bool {
-    let address = configuration as u32;
-    let prefix = (configuration >> 32) as u8;
-    configuration >> 40 == 0 && prefix <= 32 && (address != 0 || prefix == 0)
-}
-
-fn valid_ipv4_gateway(gateway: u64) -> bool {
-    if gateway >> 32 != 0 {
-        return false;
-    }
-    let gateway = gateway as u32;
-    if gateway == 0 {
-        return true;
-    }
-    valid_ipv4_gateway_for_configuration(
-        gateway,
-        NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire),
-    )
-}
-
-fn valid_ipv4_gateway_for_configuration(gateway: u32, configuration: u64) -> bool {
-    let address = configuration as u32;
-    let prefix = (configuration >> 32) as u8;
-    if address == 0 || prefix == 0 {
-        return false;
-    }
-    let mask = u32::MAX << (32 - u32::from(prefix));
-    let network = address & mask;
-    let broadcast = network | !mask;
-    gateway & mask == network && gateway != address && gateway != network && gateway != broadcast
-}
-
-fn apply_ipv4_configuration(configuration: u64) {
-    if NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire) == configuration {
-        return;
-    }
-    NETWORK_IPV4_CONFIGURATION.store(configuration, Ordering::Release);
-    let gateway = NETWORK_IPV4_GATEWAY.load(Ordering::Acquire) as u32;
-    if gateway != 0 && !valid_ipv4_gateway_for_configuration(gateway, configuration) {
-        NETWORK_IPV4_GATEWAY.store(0, Ordering::Release);
-    }
-    let route_gateway = NETWORK_ROUTE_GATEWAY.load(Ordering::Acquire) as u32;
-    if route_gateway != 0 && !valid_ipv4_gateway_for_configuration(route_gateway, configuration) {
-        NETWORK_ROUTE_DESTINATION.store(0, Ordering::Release);
-        NETWORK_ROUTE_GATEWAY.store(0, Ordering::Release);
-    }
-    record_network_configuration_change();
-}
-
-pub(crate) fn network_link_is_up() -> bool {
-    NETWORK_LINK_UP.load(Ordering::Acquire)
-}
-
-pub(crate) fn network_ipv4_configuration() -> u64 {
-    NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire)
-}
-
-pub(crate) fn network_ipv4_gateway() -> u64 {
-    NETWORK_IPV4_GATEWAY.load(Ordering::Acquire)
-}
-
-pub(crate) fn network_configuration_generation() -> u64 {
-    NETWORK_CONFIGURATION_GENERATION.load(Ordering::Acquire)
-}
-
-pub(crate) fn network_route() -> (u64, u64) {
-    (
-        NETWORK_ROUTE_DESTINATION.load(Ordering::Acquire),
-        NETWORK_ROUTE_GATEWAY.load(Ordering::Acquire),
-    )
 }
 
 fn create_auxiliary_service(

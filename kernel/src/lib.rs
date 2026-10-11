@@ -10,6 +10,7 @@ mod executable;
 mod ipc;
 mod manifest;
 mod memory;
+mod network;
 mod pe;
 mod scheduler;
 
