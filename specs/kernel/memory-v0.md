@@ -20,7 +20,7 @@ The kernel validates that:
 - The total map length is an exact multiple of the supplied stride.
 - Page totals use saturating arithmetic while parsing untrusted firmware data.
 
-The initial allocator sorts and merges conventional ranges, rejects range arithmetic overflow, excludes the first MiB, and limits allocations to the currently mapped physical ceiling. Allocation is monotonic and returns distinct 4 KiB frames; deallocation and boot-service-memory reclamation are not yet supported. The QEMU gate allocates two frames, verifies independent volatile access, and clears both frames.
+The initial allocator sorts and merges conventional ranges, rejects range arithmetic overflow, excludes the first MiB, and limits allocations to the currently mapped physical ceiling. Allocation is monotonic and returns distinct 4 KiB frames; deallocation and boot-service-memory reclamation are not yet supported. Multi-frame reservations stage allocator state and commit only when every requested frame is available. Failed or zero-length reservations leave range cursors and allocation accounting unchanged. Address-space construction reserves its complete five- or seven-frame budget before writing any page table. The QEMU gate verifies rollback across discontiguous ranges, then reserves two real frames, verifies independent volatile access, and clears both frames.
 
 The allocator initializes exactly once and remains live for the kernel lifetime.
 Reinitialization is rejected so no subsystem can reconstruct the UEFI inventory

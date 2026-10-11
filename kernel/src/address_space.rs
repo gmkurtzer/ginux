@@ -25,11 +25,8 @@ struct AddressSpace {
 
 impl AddressSpace {
     fn with_single_user_page(kernel_root: u64) -> Option<Self> {
-        let root = memory::allocate_frame()?;
-        let user_pdpt = memory::allocate_frame()?;
-        let user_directory = memory::allocate_frame()?;
-        let user_table = memory::allocate_frame()?;
-        let user_frame = memory::allocate_frame()?;
+        let [root, user_pdpt, user_directory, user_table, user_frame] =
+            memory::allocate_frames::<5>()?;
         let frames = [root, user_pdpt, user_directory, user_table, user_frame];
         if frames.iter().any(|frame| frame % PAGE_SIZE as u64 != 0) {
             return None;
@@ -249,13 +246,8 @@ struct WxAddressSpace {
 
 impl WxAddressSpace {
     fn new(kernel_root: u64) -> Option<Self> {
-        let root = memory::allocate_frame()?;
-        let pdpt = memory::allocate_frame()?;
-        let directory = memory::allocate_frame()?;
-        let table = memory::allocate_frame()?;
-        let code = memory::allocate_frame()?;
-        let first_stack = memory::allocate_frame()?;
-        let second_stack = memory::allocate_frame()?;
+        let [root, pdpt, directory, table, code, first_stack, second_stack] =
+            memory::allocate_frames::<7>()?;
         let frames = [
             root,
             pdpt,

@@ -354,6 +354,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: physical frame allocation test failed\r\n");
     }
     serial_write("\r\nginux: physical frame allocator active");
+    serial_write("\r\nginux: atomic frame reservations verified");
     if !address_space::verify_isolated_user_mapping() {
         kernel_fail("\r\nginux: isolated address-space test failed\r\n");
     }
@@ -469,7 +470,10 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
     ) {
         return false;
     }
-    let (Some(first), Some(second)) = (memory::allocate_frame(), memory::allocate_frame()) else {
+    if !memory::verify_reservation_invariants() {
+        return false;
+    }
+    let Some([first, second]) = memory::allocate_frames::<2>() else {
         return false;
     };
     if first == second || first % 4096 != 0 || second % 4096 != 0 {

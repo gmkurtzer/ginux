@@ -17,10 +17,12 @@ struct Range {
 
 const EMPTY_RANGE: Range = Range { next: 0, end: 0 };
 
+#[derive(Clone, Copy)]
 pub(crate) struct FrameAllocator {
     ranges: [Range; MAX_RANGES],
     range_count: usize,
     active_range: usize,
+    allocated_frames: u64,
 }
 
 impl FrameAllocator {
@@ -29,6 +31,7 @@ impl FrameAllocator {
             ranges: [EMPTY_RANGE; MAX_RANGES],
             range_count: 0,
             active_range: 0,
+            allocated_frames: 0,
         };
         let count = boot_info.memory_map_size / boot_info.memory_descriptor_size;
 
@@ -58,17 +61,38 @@ impl FrameAllocator {
         (allocator.range_count != 0).then_some(allocator)
     }
 
-    pub(crate) fn allocate(&mut self) -> Option<u64> {
+    pub(crate) fn reserve<const N: usize>(&mut self) -> Option<[u64; N]> {
+        if N == 0 {
+            return None;
+        }
+        let mut staged = *self;
+        let mut frames = [0_u64; N];
+        for frame in &mut frames {
+            *frame = staged.allocate_one()?;
+        }
+        *self = staged;
+        Some(frames)
+    }
+
+    fn allocate_one(&mut self) -> Option<u64> {
         while self.active_range < self.range_count {
             let range = &mut self.ranges[self.active_range];
             if range.next < range.end {
                 let frame = range.next;
                 range.next += PAGE_SIZE;
+                self.allocated_frames = self.allocated_frames.checked_add(1)?;
                 return Some(frame);
             }
             self.active_range += 1;
         }
         None
+    }
+
+    fn available_frames(&self) -> u64 {
+        self.ranges[..self.range_count]
+            .iter()
+            .map(|range| (range.end - range.next) / PAGE_SIZE)
+            .sum()
     }
 
     fn insert_range(&mut self, range: Range) -> Option<()> {
@@ -112,7 +136,7 @@ pub(crate) fn initialize(boot_info: &BootInfo, ceiling: u64) -> bool {
     true
 }
 
-pub(crate) fn allocate_frame() -> Option<u64> {
+pub(crate) fn allocate_frames<const N: usize>() -> Option<[u64; N]> {
     if !INITIALIZED.load(Ordering::Acquire) {
         return None;
     }
@@ -121,6 +145,37 @@ pub(crate) fn allocate_frame() -> Option<u64> {
     // serialized until an SMP-safe allocator replaces this path.
     unsafe {
         let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
-        (*allocator).allocate()
+        (*allocator).reserve::<N>()
     }
+}
+
+pub(crate) fn verify_reservation_invariants() -> bool {
+    let mut allocator = FrameAllocator {
+        ranges: [EMPTY_RANGE; MAX_RANGES],
+        range_count: 2,
+        active_range: 0,
+        allocated_frames: 0,
+    };
+    allocator.ranges[0] = Range {
+        next: 0x10_0000,
+        end: 0x10_2000,
+    };
+    allocator.ranges[1] = Range {
+        next: 0x20_0000,
+        end: 0x20_1000,
+    };
+    let Some(first) = allocator.reserve::<2>() else {
+        return false;
+    };
+    let before_failure = allocator;
+    first == [0x10_0000, 0x10_1000]
+        && allocator.reserve::<2>().is_none()
+        && allocator.active_range == before_failure.active_range
+        && allocator.ranges[0].next == before_failure.ranges[0].next
+        && allocator.ranges[1].next == before_failure.ranges[1].next
+        && allocator.allocated_frames == before_failure.allocated_frames
+        && allocator.available_frames() == 1
+        && allocator.reserve::<1>() == Some([0x20_0000])
+        && allocator.available_frames() == 0
+        && allocator.reserve::<0>().is_none()
 }
