@@ -48,6 +48,10 @@ RX code frame. The scheduler admits exactly one thread against the registered
 root, enters it at ring 3, and handles its exit through the normal syscall path.
 That path restores the kernel root, clears and releases all seven frames, and
 retires the exact domain generation before returning to the boot verifier.
+A second live auxiliary generation executes `UD2`. The architectural exception
+path removes its scheduler context, records vector 6 with a zero non-page-fault
+address, restores the kernel root, releases its complete hierarchy, and emits
+the stop-only fault lifecycle record without attempting a restart.
 There is no
 address-space identifier or TLB shootdown protocol, and the kernel mapping
 remains transitional.

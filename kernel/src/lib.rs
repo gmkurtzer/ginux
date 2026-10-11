@@ -592,7 +592,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || domain::last_lifecycle_event_audit() != Some((1, service_domain, 1))
         || domain::last_lifecycle_service_identity() != Some(service_identity)
         || domain::primary_service_identity() != Some(service_identity)
-        || !domain::delivered_service_fault_matches(
+        || !domain::delivered_fault_matches(
             service_domain,
             domain::FaultMetadata {
                 vector: 14,
@@ -656,6 +656,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: ring-3 auxiliary exit invariant failed\r\n");
     }
     serial_write("\r\nginux: stop-only auxiliary context executed and retired");
+    if !address_space::verify_ring3_auxiliary_fault() {
+        kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
+    }
+    serial_write("\r\nginux: stop-only auxiliary fault executed and contained");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v1 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");

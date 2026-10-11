@@ -1950,15 +1950,17 @@ pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
     })
 }
 
-pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMetadata) -> bool {
+pub(crate) fn delivered_fault_matches(domain_raw: u64, expected: FaultMetadata) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
     global_manager().is_some_and(|manager| {
         manager.last_delivered_lifecycle_event.is_some_and(|event| {
-            event.kind == crate::control_abi::LIFECYCLE_SERVICE_FAULT
-                && event.domain == id
-                && event.service == manager.primary_service_identity
+            matches!(
+                event.kind,
+                crate::control_abi::LIFECYCLE_SERVICE_FAULT
+                    | crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+            ) && event.domain == id
                 && event.detail == 0
                 && event.fault == Some(expected)
         })

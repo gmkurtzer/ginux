@@ -119,7 +119,11 @@ exit-only auxiliary context after the primary workload. It requires ring-3
 execution, clean stop-only retirement, exact lifecycle domain/service identity,
 stale capability rejection, an empty address-space registry, and zero remaining
 owned frames. General userspace creation and arbitrary auxiliary programs are
-not yet exposed.
+not yet exposed. A second hardware-gated auxiliary context deliberately raises
+`#UD`; the proof requires lifecycle kind 4, exact domain and stable service
+identity, vector/error/instruction metadata, zero remaining authority and
+frames, and no restart. Only page faults report `CR2`; other exception kinds
+record a zero fault-address field instead of leaking stale page-fault state.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

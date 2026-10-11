@@ -116,6 +116,10 @@ pub(crate) struct UserFaultFrame {
 }
 
 impl UserFaultFrame {
+    pub(crate) const fn is_page_fault(&self) -> bool {
+        self.vector == 14
+    }
+
     pub(crate) fn metadata(&self, address: u64) -> crate::domain::FaultMetadata {
         crate::domain::FaultMetadata {
             vector: self.vector,

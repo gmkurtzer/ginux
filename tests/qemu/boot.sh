@@ -498,6 +498,11 @@ if ! grep -q '^ginux: stop-only auxiliary context executed and retired' "$output
     exit 1
 fi
 
+if ! grep -q '^ginux: stop-only auxiliary fault executed and contained' "$output_file"; then
+    echo "Boot test failed: stop-only auxiliary fault was not contained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: control call ABI v1 negotiated' "$output_file"; then
     echo "Boot test failed: control call ABI negotiation failed." >&2
     exit 1

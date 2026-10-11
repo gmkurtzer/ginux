@@ -579,7 +579,7 @@ pub(crate) fn verify_user_syscall(
     SYSCALL_STATE.load(Ordering::SeqCst) == 31
 }
 
-pub(crate) fn execute_auxiliary_exit(
+pub(crate) fn execute_auxiliary(
     entry: usize,
     stack: usize,
     console_handle: u64,
@@ -1093,10 +1093,15 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     let fault_domain = scheduler::current_domain();
     let failure_policy = fault_domain.and_then(domain::service_failure_policy);
     let service_fault = failure_policy == Some(domain::ServiceFailurePolicy::RestartManaged);
-    let fault_address: u64;
-    unsafe {
-        asm!("mov {}, cr2", out(reg) fault_address, options(nomem, nostack, preserves_flags));
-    }
+    let fault_address = if frame.is_page_fault() {
+        let address: u64;
+        unsafe {
+            asm!("mov {}, cr2", out(reg) address, options(nomem, nostack, preserves_flags));
+        }
+        address
+    } else {
+        0
+    };
     let fault_metadata = frame.metadata(fault_address);
     let action = scheduler::fault_runtime(
         frame,
