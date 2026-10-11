@@ -897,6 +897,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: unlisted measured-root directory opened\r\n");
     serial_write("ginux: nested measured-root dirfd traversal validated\r\n");
     serial_write("ginux: measured-root traversal components rejected\r\n");
+    serial_write("ginux: expanded measured-root index capacity validated\r\n");
     serial_write("ginux: Linux saved credential queries validated\r\n");
     serial_write("ginux: Linux supplementary root group validated\r\n");
     serial_write("ginux: Linux fixed execution personality validated\r\n");

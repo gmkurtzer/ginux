@@ -1828,6 +1828,11 @@ if ! grep -q '^ginux: measured-root traversal components rejected' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: expanded measured-root index capacity validated' "$output_file"; then
+    echo "Boot test failed: expanded measured-root index capacity was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

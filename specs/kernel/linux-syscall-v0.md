@@ -317,7 +317,9 @@ Opening `/` with `O_DIRECTORY` exposes `.`, `..`, `dev`, `etc`, `proc`, `sys`,
 `tmp`, `var`, and `init`, with the seven non-dot entries obtained from the measured-root
 index in archive order. The complete result is staged in a fixed 256-byte
 kernel buffer before copy-out. Measured directory descriptors retain a bounded
-one-based index selector and recover their path from the same immutable index.
+one-based index selector and recover their path from the same immutable
+64-node index. The current 17-entry image explicitly crosses the former
+16-node publication limit.
 The measured `/proc`, `/sys`, `/tmp`, and `/var` nodes open without individual
 pathname cases. The ring-3 proof enumerates the otherwise unlisted `/var`,
 opens its `lib` child relative to that descriptor, and rejects `../lib` before

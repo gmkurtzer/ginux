@@ -127,7 +127,8 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
-    append_newc_entry(&mut archive, 17, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
+    append_newc_entry(&mut archive, 18, 0, "TRAILER!!!", &[]);
     archive
 }
 

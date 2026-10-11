@@ -22,13 +22,13 @@ Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
 The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
-`var/lib`, `var/lib/state`, the native `init` marker, `etc/hostname`,
+`var/lib`, `var/lib/state`, `var/lib/version`, the native `init` marker, `etc/hostname`,
 `etc/os-release`, `etc/motd`, and four build-produced Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and
 auxiliary DSO. The hostname is immutable mode `0555` with exact contents
 `ginux\n`; `os-release` is immutable mode `0555` with exact contents
 `NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`; and the nested
-state file contains `ready\n`. The ELF entries must byte-match the authenticated artifacts compiled
+state file contains `ready\n` and the version marker contains `0\n`. The ELF entries must byte-match the authenticated artifacts compiled
 into the kernel's bounded execution plan.
 
 After validation, the current roughly 73 KiB proof image is copied into a
@@ -41,8 +41,9 @@ before releasing every lease. The parser's general 16 MiB bound remains
 broader than this v0 publication capacity; images above 128 KiB fail closed
 during materialization.
 
-A second lifecycle proof constructs a fixed index of at most 16 nodes; the
-current proof deliberately occupies all 16 slots. Each
+A second lifecycle proof constructs a fixed index of at most 64 nodes. The
+17-entry proof crosses the former 16-node limit while remaining representable
+by the private one-byte descriptor selector. Each
 node stores only checked 32-bit name and data offsets inside the owned image; no node
 retains a pointer into the handed boot source. Exact `init` and directory
 lookups resolve into the owned allocation, while missing, absolute, and
@@ -87,7 +88,7 @@ same way. Multi-component names are accepted only when every component is
 nonempty and is neither `.` nor `..`; the proof rejects `../lib`. The proof
 obtains `motd` metadata without a kernel filename case. A regular file
 descriptor is rejected as a lookup base. The
-file or directory selector is bounded by the 16-node publication index and is neither a
+file or directory selector is bounded by the 64-node publication index and is neither a
 persistent inode nor a public ABI.
 
 The Linux-visible `/init` and `/lib64/*` names resolve to the four internal
