@@ -22,6 +22,10 @@ SECTIONS
     .rela.dyn : { *(.rela.dyn) } :headers
     .rela.plt : { *(.rela.plt) } :headers
 
+    . = 0x1000;
+    .text.file_mmap : { *(.text.file_mmap) } :text
+    ASSERT(SIZEOF(.text.file_mmap) <= 0x100, "Linux file mmap proof exceeds reserved prefix")
+
     . = 0x1100;
     .text : { *(.text) *(.text.*) } :text
 

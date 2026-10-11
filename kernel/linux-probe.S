@@ -2262,6 +2262,10 @@ valid_interpreter_base:
     mov eax, 257
     call syscall_expect_two
 
+#ifdef GINUX_LINKED
+    call linked_file_mmap_test
+#endif
+
     mov edi, 2
     mov esi, 0x404380
     mov edx, 4
@@ -3264,6 +3268,50 @@ nested_getpid:
     mov eax, 39
     syscall
     ret
+
+#ifdef GINUX_LINKED
+.section .text.file_mmap,"ax",@progbits
+linked_file_mmap_test:
+    xor edi, edi
+    mov esi, 8192
+    mov edx, 1
+    mov r10d, 2
+    mov r8d, 2
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40a000
+    jne failure
+    cmp dword ptr [0x40a000], 0x464c457f
+    jne failure
+    cmp byte ptr [0x40a200], 0x48
+    jne failure
+    cmp byte ptr [0x40b4a0], 0
+    jne failure
+
+    mov edi, 2
+    mov esi, 0x40a000
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 17
+    call syscall_expect_efault
+
+    mov edi, 0x40a000
+    mov esi, 8192
+    mov eax, 11
+    call syscall_expect_zero
+
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 1
+    mov r10d, 2
+    mov r8d, 2
+    mov r9d, 1
+    mov eax, 9
+    call syscall_expect_einval
+    ret
+.section .text
+#endif
 
 .balign 8
 readable_payload:

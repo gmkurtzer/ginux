@@ -151,6 +151,7 @@ const LINUX_EAGAIN: u64 = u64::MAX - 10;
 const LINUX_EPIPE: u64 = u64::MAX - 31;
 const LINUX_EACCES: u64 = u64::MAX - 12;
 const LINUX_EEXIST: u64 = u64::MAX - 16;
+const LINUX_ENODEV: u64 = u64::MAX - 18;
 const LINUX_ENOTDIR: u64 = u64::MAX - 19;
 const LINUX_EISDIR: u64 = u64::MAX - 20;
 const LINUX_ENOMEM: u64 = u64::MAX - 11;
@@ -332,6 +333,7 @@ static ELF_PROBE_MMAP_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP_TAIL_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP_PAGES: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_MMAP_WRITABLE: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_MMAP_FILE: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
@@ -962,6 +964,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_MMAP_TAIL_FRAME.store(execution.mmap_frames[1], Ordering::SeqCst);
     ELF_PROBE_MMAP_PAGES.store(0, Ordering::SeqCst);
     ELF_PROBE_MMAP_WRITABLE.store(false, Ordering::SeqCst);
+    ELF_PROBE_MMAP_FILE.store(0, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
     ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
@@ -1084,12 +1087,16 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && ELF_PROBE_CLOCK_FREQUENCY.swap(0, Ordering::SeqCst) == clock_frequency;
     let mmap_inactive = ELF_PROBE_MMAP_PAGES.swap(0, Ordering::SeqCst) == 0;
     let mmap_not_writable = !ELF_PROBE_MMAP_WRITABLE.swap(false, Ordering::SeqCst);
+    let mmap_file_released = ELF_PROBE_MMAP_FILE.swap(0, Ordering::SeqCst) == 0;
     let mmap_address_valid = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64;
     let mmap_frames_valid = ELF_PROBE_MMAP_FRAME.swap(0, Ordering::SeqCst)
         == execution.mmap_frames[0]
         && ELF_PROBE_MMAP_TAIL_FRAME.swap(0, Ordering::SeqCst) == execution.mmap_frames[1];
-    let mmap_state_valid =
-        mmap_inactive && mmap_not_writable && mmap_address_valid && mmap_frames_valid;
+    let mmap_state_valid = mmap_inactive
+        && mmap_not_writable
+        && mmap_file_released
+        && mmap_address_valid
+        && mmap_frames_valid;
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
         == LINUX_INITIAL_PROCESS_NAME
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
@@ -2023,12 +2030,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
         length if length == 2 * PAGE_SIZE as u64 => 2,
         _ => return LINUX_EINVAL,
     };
-    if address != 0
-        || protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
-        || flags != (LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS)
-        || fd != u64::MAX
-        || offset != 0
-    {
+    if address != 0 {
         return LINUX_EINVAL;
     }
     if ELF_PROBE_MMAP_PAGES.load(Ordering::SeqCst) != 0 {
@@ -2036,20 +2038,80 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
     }
     let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
     let frame = ELF_PROBE_MMAP_FRAME.load(Ordering::SeqCst);
-    if mapping == 0 || frame == 0 || !address_space::map_current_linux_page(mapping, frame) {
+    let tail_frame = ELF_PROBE_MMAP_TAIL_FRAME.load(Ordering::SeqCst);
+    if mapping == 0 || frame == 0 || pages == 2 && tail_frame == 0 {
         return LINUX_ENOMEM;
     }
-    if pages == 2 {
-        let tail_frame = ELF_PROBE_MMAP_TAIL_FRAME.load(Ordering::SeqCst);
-        if tail_frame == 0
-            || !address_space::map_current_linux_page(mapping + PAGE_SIZE as u64, tail_frame)
+
+    let file_kind = if flags == (LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS) {
+        if protection != (LINUX_PROT_READ | LINUX_PROT_WRITE) || fd != u64::MAX || offset != 0 {
+            return LINUX_EINVAL;
+        }
+        0
+    } else {
+        if protection != LINUX_PROT_READ || flags != LINUX_MAP_PRIVATE {
+            return LINUX_EINVAL;
+        }
+        let state = linux_device_descriptor(fd);
+        let Some(file) = linux_regular_file(state) else {
+            return if linux_descriptor_open(fd) {
+                LINUX_ENODEV
+            } else {
+                LINUX_EBADF
+            };
+        };
+        if state & 3 != LINUX_DESCRIPTOR_INPUT || !offset.is_multiple_of(PAGE_SIZE as u64) {
+            return LINUX_EINVAL;
+        }
+        let Ok(start) = usize::try_from(offset) else {
+            return LINUX_EINVAL;
+        };
+        let mapped_length = usize::from(pages) * PAGE_SIZE;
+        if start >= file.len()
+            || start
+                .checked_add(mapped_length)
+                .is_none_or(|end| end > file.len().next_multiple_of(PAGE_SIZE))
         {
-            let _ = address_space::unmap_current_linux_page(mapping, frame);
+            return LINUX_EINVAL;
+        }
+        let first_end = start.saturating_add(PAGE_SIZE).min(file.len());
+        if !address_space::prepare_linux_frame(frame, &file[start..first_end]) {
             return LINUX_ENOMEM;
         }
+        if pages == 2 {
+            let tail_start = start + PAGE_SIZE;
+            let tail_end = tail_start.saturating_add(PAGE_SIZE).min(file.len());
+            if !address_space::prepare_linux_frame(tail_frame, &file[tail_start..tail_end]) {
+                let _ = address_space::prepare_linux_frame(frame, &[]);
+                return LINUX_ENOMEM;
+            }
+        }
+        state & LINUX_FILE_MASK
+    };
+
+    let writable = file_kind == 0;
+    let map_page = |address, frame| {
+        if writable {
+            address_space::map_current_linux_page(address, frame)
+        } else {
+            address_space::map_current_linux_read_only_page(address, frame)
+        }
+    };
+    if !map_page(mapping, frame) {
+        let _ = address_space::prepare_linux_frame(frame, &[]);
+        if pages == 2 {
+            let _ = address_space::prepare_linux_frame(tail_frame, &[]);
+        }
+        return LINUX_ENOMEM;
+    }
+    if pages == 2 && !map_page(mapping + PAGE_SIZE as u64, tail_frame) {
+        let _ = address_space::unmap_current_linux_page(mapping, frame);
+        let _ = address_space::prepare_linux_frame(tail_frame, &[]);
+        return LINUX_ENOMEM;
     }
     ELF_PROBE_MMAP_PAGES.store(pages, Ordering::SeqCst);
-    ELF_PROBE_MMAP_WRITABLE.store(true, Ordering::SeqCst);
+    ELF_PROBE_MMAP_WRITABLE.store(writable, Ordering::SeqCst);
+    ELF_PROBE_MMAP_FILE.store(file_kind, Ordering::SeqCst);
     mapping
 }
 
@@ -2077,6 +2139,7 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
     }
     ELF_PROBE_MMAP_PAGES.store(0, Ordering::SeqCst);
     ELF_PROBE_MMAP_WRITABLE.store(false, Ordering::SeqCst);
+    ELF_PROBE_MMAP_FILE.store(0, Ordering::SeqCst);
     0
 }
 
@@ -2085,6 +2148,7 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     let pages = ELF_PROBE_MMAP_PAGES.load(Ordering::SeqCst);
     if address != mapping
         || pages == 0
+        || ELF_PROBE_MMAP_FILE.load(Ordering::SeqCst) != 0
         || length != u64::from(pages) * PAGE_SIZE as u64
         || advice != LINUX_MADV_DONTNEED
     {

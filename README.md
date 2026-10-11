@@ -127,18 +127,23 @@ A separate one- or two-page anonymous `mmap` extent is installed RW/NX on
 demand, removed from the hardware page table by exact `munmap`, scrubbed, and
 proven zero on reuse. Bounded `MADV_DONTNEED` also zeros it in place without
 widening a sealed read-only extent, while `mincore` reports each page resident
-only while active.
-General mapping placement and file-backed mappings are not implemented.
+only while active. The same fixed slot can instead expose a one- or two-page
+private read-only/NX window into an immutable runtime ELF file. File offsets
+must be page aligned, partial final pages are zero-filled, syscall copy-out
+cannot modify the mapping, and unmap scrubs both payload frames.
+General mapping placement, writable or shared file mappings, and arbitrary
+filesystem-backed mappings are not implemented.
 The root view retains a fixed working-directory identity of `/`; bounded
 `getcwd` returns it, while undersized and invalid buffers fail.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 `readlink` result is `/init`.
 An immutable runtime-file view exposes the exact authenticated `/init`,
 `/lib64/ld-ginux.so`, and `/lib64/libginux.so` bytes as read-only regular files.
-Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, metadata, and
-access checks operate on those files. This is not directory traversal, a
-general VFS, file-backed `mmap`, or userspace-driven executable loading; the
-kernel still authenticates, plans, and maps the fixed runtime trio directly.
+Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, private
+read-only `mmap`, metadata, and access checks operate on those files. This is
+not directory traversal, a general VFS, or userspace-driven executable
+loading; the kernel still authenticates, plans, and maps the fixed runtime
+trio directly.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
 Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and

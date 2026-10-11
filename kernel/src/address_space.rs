@@ -1175,6 +1175,14 @@ pub(crate) fn protect_current_linux_pages_read_only(address: u64, frames: &[u64]
 }
 
 pub(crate) fn map_current_linux_page(address: u64, frame: u64) -> bool {
+    map_current_linux_page_with_permissions(address, frame, true)
+}
+
+pub(crate) fn map_current_linux_read_only_page(address: u64, frame: u64) -> bool {
+    map_current_linux_page_with_permissions(address, frame, false)
+}
+
+fn map_current_linux_page_with_permissions(address: u64, frame: u64, writable: bool) -> bool {
     if address >= 1 << 47
         || !address.is_multiple_of(PAGE_SIZE as u64)
         || !frame.is_multiple_of(PAGE_SIZE as u64)
@@ -1189,11 +1197,30 @@ pub(crate) fn map_current_linux_page(address: u64, frame: u64) -> bool {
         if entry.read() != 0 {
             return false;
         }
-        entry.write(frame | PRESENT | WRITABLE | USER | NO_EXECUTE);
+        let flags = PRESENT | USER | NO_EXECUTE | if writable { WRITABLE } else { 0 };
+        entry.write(frame | flags);
         asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
-        entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
-            == (frame | PRESENT | WRITABLE | USER | NO_EXECUTE)
+        entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE) == (frame | flags)
     }
+}
+
+pub(crate) fn prepare_linux_frame(frame: u64, bytes: &[u8]) -> bool {
+    if bytes.len() > PAGE_SIZE
+        || !frame.is_multiple_of(PAGE_SIZE as u64)
+        || !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return false;
+    }
+    unsafe {
+        if zero_frame(frame).is_none() {
+            return false;
+        }
+        let Some(output) = mapped_frame::<u8>(frame) else {
+            return false;
+        };
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), output, bytes.len());
+    }
+    true
 }
 
 pub(crate) fn unmap_current_linux_page(address: u64, frame: u64) -> bool {
