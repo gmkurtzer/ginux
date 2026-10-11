@@ -163,6 +163,10 @@ Management action 5 accepts an exact staged generation with zero unused fields
 and changes only its scheduler state to ready. The proof explicitly starts the
 fully initialized generation before exiting the control plane. Repeated start
 and all non-staged states are rejected.
+The control-plane proof consumes each requested-stop event in ring 3. It then
+yields to the explicitly started workload, resumes after its normal exit, and
+validates kind 5, the exact generation, and status 42 before exhausting its own
+budget. The kernel requires no auxiliary events to remain queued.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

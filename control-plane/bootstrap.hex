@@ -387,6 +387,17 @@ cd80
 7402
 0f0b
 
+# consume and validate its management-stop lifecycle event
+4889df
+b807000000
+cd80
+4c89e2
+48c1e208
+4883ca03
+4839d0
+7402
+0f0b
+
 # create the distinct generation used by the hardware execution proof
 66c746060100
 48895e08
@@ -472,6 +483,17 @@ cd80
 7402
 0f0b
 
+# consume and validate the queued-cancellation lifecycle event
+4889df
+b807000000
+cd80
+4c89e2
+48c1e208
+4883ca03
+4839d0
+7402
+0f0b
+
 # create a distinct generation for the hardware execution proof
 66c746060100
 48895e08
@@ -523,6 +545,26 @@ ba20000000
 b80f000000
 cd80
 85c0
+7402
+0f0b
+
+# hand off voluntarily, then resume after the auxiliary exits
+b803000000
+cd80
+85c0
+7402
+0f0b
+
+# consume kind 5, exact generation, and exit status 42
+4889df
+b807000000
+cd80
+4d89e5
+49c1e508
+48ba000000000000002a
+4909d5
+4983cd05
+4c39e8
 7402
 0f0b
 

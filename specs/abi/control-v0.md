@@ -138,6 +138,8 @@ code, fault address, and instruction address, followed by a reserved zero
 ring-3 proof first requires denial with its console-only capability, then uses
 host-management authority and validates the descriptor header before
 exhausting its call budget. A denied request does not alter the retained record.
+The retained fault record is independent of the general lifecycle delivery
+cursor: consuming a later clean stop or exit event does not replace it.
 Operation 12 requires the same host-management authority and writes a 24-byte
 little-endian descriptor for the most recently consumed lifecycle event. It
 contains `u32` size, `u16` ABI version, `u8` event kind, `u8` detail, `u64`
@@ -220,6 +222,13 @@ generation and the object and rights fields must be zero. The scheduler changes
 that one unambiguous context from `Staged` to `Ready`; normal scheduling may
 dispatch it immediately after the management call returns. Repeated starts and
 absent, ready, running, blocked, or wrong-generation targets fail closed.
+The ring-3 control plane consumes both kind 3 stop records as they are
+published. After action 5 it voluntarily yields, resumes only after the
+workload has exited, consumes the kind 5 record, and validates the exact
+generation and status 42 from the packed result. The kernel verifier requires
+the lifecycle FIFO to be empty afterward; lifecycle observation is therefore a
+userspace control-plane responsibility in this proof rather than deferred
+kernel-only inspection.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

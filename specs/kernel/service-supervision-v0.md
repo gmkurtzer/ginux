@@ -23,8 +23,9 @@ the consumed event's kind, detail, exact domain generation, and monotonic
 sequence. The ring-3 workload proves that console authority is insufficient and
 validates the original service generation and sequence one.
 The delivery cursor is lifecycle-generic: consuming a clean auxiliary
-retirement replaces the prior event. Fault-detail queries then fail rather than
-returning stale metadata from an older fault.
+retirement replaces the prior event exposed by lifecycle queries. Fault-detail
+queries use a distinct retained-fault cursor, so subsequent clean lifecycle
+traffic cannot erase the most recently delivered fault diagnostic.
 
 The CPL3 exception path removes only the service context, switches back to the
 client's CR3, releases the service's domain thread reservation, retires the

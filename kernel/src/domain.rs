@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 37;
+const CONTROL_CALL_BUDGET: u16 = 41;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
@@ -216,6 +216,7 @@ pub(crate) struct Manager {
     last_retired_service_id: Option<DomainId>,
     lifecycle_events: EventQueue,
     last_delivered_lifecycle_event: Option<LifecycleEvent>,
+    last_delivered_fault_event: Option<LifecycleEvent>,
     total_calls: u16,
     total_thread_attaches: u16,
     service_started: bool,
@@ -238,6 +239,7 @@ impl Manager {
             last_retired_service_id: None,
             lifecycle_events: EventQueue::new(),
             last_delivered_lifecycle_event: None,
+            last_delivered_fault_event: None,
             total_calls: 0,
             total_thread_attaches: 0,
             service_started: false,
@@ -1683,7 +1685,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 42
+    control.remaining_calls == 0 && manager.total_calls == 46
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
@@ -1988,6 +1990,9 @@ pub(crate) fn take_lifecycle_event() -> Option<u64> {
     let manager = global_manager_mut()?;
     let event = manager.lifecycle_events.pop()?;
     manager.last_delivered_lifecycle_event = Some(event);
+    if event.fault.is_some() {
+        manager.last_delivered_fault_event = Some(event);
+    }
     Some((u64::from(event.detail) << 56) | (encode_id(event.domain) << 8) | u64::from(event.kind))
 }
 
@@ -1996,7 +2001,7 @@ pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
         return false;
     };
     global_manager().is_some_and(|manager| {
-        manager.last_delivered_lifecycle_event.is_some_and(|event| {
+        manager.last_delivered_fault_event.is_some_and(|event| {
             event.kind == crate::control_abi::LIFECYCLE_SERVICE_FAULT
                 && event.domain == id
                 && event.service == manager.primary_service_identity
@@ -2010,7 +2015,7 @@ pub(crate) fn delivered_fault_matches(domain_raw: u64, expected: FaultMetadata) 
         return false;
     };
     global_manager().is_some_and(|manager| {
-        manager.last_delivered_lifecycle_event.is_some_and(|event| {
+        manager.last_delivered_fault_event.is_some_and(|event| {
             matches!(
                 event.kind,
                 crate::control_abi::LIFECYCLE_SERVICE_FAULT
@@ -2024,7 +2029,7 @@ pub(crate) fn delivered_fault_matches(domain_raw: u64, expected: FaultMetadata) 
 
 pub(crate) fn delivered_fault_descriptor() -> Option<[u8; crate::control_abi::FAULT_DESCRIPTOR_SIZE]>
 {
-    let event = global_manager()?.last_delivered_lifecycle_event?;
+    let event = global_manager()?.last_delivered_fault_event?;
     if !matches!(
         event.kind,
         crate::control_abi::LIFECYCLE_SERVICE_FAULT | crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
@@ -2047,6 +2052,11 @@ pub(crate) fn last_lifecycle_event_audit() -> Option<(u8, u64, u64)> {
     Some((event.kind, encode_id(event.domain), event.sequence))
 }
 
+pub(crate) fn last_fault_event_audit() -> Option<(u8, u64, u64)> {
+    let event = global_manager()?.last_delivered_fault_event?;
+    Some((event.kind, encode_id(event.domain), event.sequence))
+}
+
 pub(crate) fn last_lifecycle_event_detail() -> Option<u8> {
     Some(global_manager()?.last_delivered_lifecycle_event?.detail)
 }
@@ -2054,6 +2064,12 @@ pub(crate) fn last_lifecycle_event_detail() -> Option<u8> {
 pub(crate) fn last_lifecycle_service_identity() -> Option<u64> {
     Some(encode_service_id(
         global_manager()?.last_delivered_lifecycle_event?.service?,
+    ))
+}
+
+pub(crate) fn last_fault_service_identity() -> Option<u64> {
+    Some(encode_service_id(
+        global_manager()?.last_delivered_fault_event?.service?,
     ))
 }
 

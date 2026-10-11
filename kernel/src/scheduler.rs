@@ -1119,7 +1119,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;
     };
-    runtime.yields == 0
+    runtime.yields == 1
         && runtime.preemptions == 2
         && runtime.exits == 3
         && runtime.faults == 1
@@ -1129,7 +1129,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.last_wake_source == Some(runtime.control_domain)
         && runtime.last_wake_sequence == Some(2)
         && runtime.expected_fault_observed
-        && (5..=6).contains(&runtime.address_space_switches)
+        && (6..=7).contains(&runtime.address_space_switches)
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)
 }

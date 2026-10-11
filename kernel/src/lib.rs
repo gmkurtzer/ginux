@@ -589,8 +589,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
-        || domain::last_lifecycle_event_audit() != Some((1, service_domain, 1))
-        || domain::last_lifecycle_service_identity() != Some(service_identity)
+        || domain::last_fault_event_audit() != Some((1, service_domain, 1))
+        || domain::last_fault_service_identity() != Some(service_identity)
         || domain::primary_service_identity() != Some(service_identity)
         || !domain::delivered_fault_matches(
             service_domain,
@@ -663,6 +663,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: userspace auxiliary load and admission enforced");
     serial_write("\r\nginux: private auxiliary payload initialization enforced");
     serial_write("\r\nginux: explicit auxiliary start authority enforced");
+    serial_write("\r\nginux: userspace auxiliary lifecycle observation enforced");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }
