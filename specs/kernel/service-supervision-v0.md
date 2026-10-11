@@ -23,7 +23,9 @@ Before a normal exit or contained fault removes a domain's running context, it
 wakes receivers already blocked on the opposite side of IPC object 3 with the
 peer-closed result. Matching includes the endpoint direction, so teardown does
 not release unrelated waits. This prevents the last surviving client from
-remaining permanently blocked when its service disappears.
+remaining permanently blocked when its service disappears. Each service
+retirement also leaves a generation-tagged sticky closure record for receivers
+that were not blocked at teardown; replacement binding does not erase it.
 
 Before retiring the faulted service, the kernel records one pending lifecycle
 event naming that service generation. The control plane can consume event kind

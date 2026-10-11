@@ -11,6 +11,14 @@ struct Duplex {
     service_domain: Option<u64>,
     requests: Channel,
     replies: Channel,
+    service_closures: Channel,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Receive {
+    Message(u64),
+    Empty,
+    PeerClosed(u64),
 }
 
 impl Duplex {
@@ -23,6 +31,7 @@ impl Duplex {
             service_domain: Some(service_domain),
             requests: Channel::new(),
             replies: Channel::new(),
+            service_closures: Channel::new(),
         })
     }
 
@@ -36,23 +45,32 @@ impl Duplex {
         }
     }
 
-    fn receive(&mut self, domain: u64) -> Option<u64> {
+    fn receive(&mut self, domain: u64) -> Receive {
         if self.service_side(domain) == Some(true) {
-            self.requests.receive()
+            self.requests
+                .receive()
+                .map_or(Receive::Empty, Receive::Message)
         } else if self.service_side(domain) == Some(false) {
-            self.replies.receive()
+            self.replies.receive().map_or_else(
+                || {
+                    self.service_closures
+                        .receive()
+                        .map_or(Receive::Empty, Receive::PeerClosed)
+                },
+                Receive::Message,
+            )
         } else {
-            None
+            Receive::Empty
         }
     }
 
     fn retire_service(&mut self, domain: u64) -> bool {
-        if self.service_domain != Some(domain) {
+        if self.service_domain != Some(domain) || self.service_closures.len == CAPACITY {
             return false;
         }
         self.requests.clear();
         self.service_domain = None;
-        true
+        self.service_closures.send(domain)
     }
 
     fn bind_service(&mut self, domain: u64) -> bool {
@@ -139,8 +157,8 @@ pub(crate) fn send(domain: u64, message: u64) -> bool {
     channel_mut().is_some_and(|channel| channel.send(domain, message))
 }
 
-pub(crate) fn receive(domain: u64) -> Option<u64> {
-    channel_mut()?.receive(domain)
+pub(crate) fn receive(domain: u64) -> Receive {
+    channel_mut().map_or(Receive::Empty, |channel| channel.receive(domain))
 }
 
 pub(crate) fn service_side(domain: u64) -> Option<bool> {
@@ -164,8 +182,8 @@ pub(crate) fn verify_channel_invariants() -> bool {
     let Some(mut channel) = Duplex::new(control, service) else {
         return false;
     };
-    channel.receive(control).is_none()
-        && channel.receive(service).is_none()
+    channel.receive(control) == Receive::Empty
+        && channel.receive(service) == Receive::Empty
         && channel.service_side(control) == Some(false)
         && channel.service_side(service) == Some(true)
         && channel.service_side(replacement).is_none()
@@ -174,31 +192,35 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.send(control, 30)
         && channel.send(control, 40)
         && !channel.send(control, 50)
-        && channel.receive(control).is_none()
-        && channel.receive(service) == Some(10)
-        && channel.receive(service) == Some(20)
+        && channel.receive(control) == Receive::Empty
+        && channel.receive(service) == Receive::Message(10)
+        && channel.receive(service) == Receive::Message(20)
         && channel.send(control, 50)
-        && channel.receive(service) == Some(30)
-        && channel.receive(service) == Some(40)
-        && channel.receive(service) == Some(50)
+        && channel.receive(service) == Receive::Message(30)
+        && channel.receive(service) == Receive::Message(40)
+        && channel.receive(service) == Receive::Message(50)
         && channel.send(service, 60)
-        && channel.receive(service).is_none()
-        && channel.receive(control) == Some(60)
+        && channel.receive(service) == Receive::Empty
+        && channel.receive(control) == Receive::Message(60)
         && channel.send(control, 70)
         && channel.send(service, 80)
         && channel.retire_service(service)
         && !channel.retire_service(service)
         && !channel.send(service, 90)
         && channel.service_side(service).is_none()
-        && channel.receive(service).is_none()
+        && channel.receive(service) == Receive::Empty
         && !channel.send(control, 90)
-        && channel.receive(control) == Some(80)
+        && channel.receive(control) == Receive::Message(80)
+        && channel.receive(control) == Receive::PeerClosed(service)
         && channel.bind_service(replacement)
         && channel.service_side(replacement) == Some(true)
         && !channel.bind_service(service)
-        && channel.receive(replacement).is_none()
+        && channel.receive(replacement) == Receive::Empty
         && channel.send(control, 100)
-        && channel.receive(replacement) == Some(100)
+        && channel.receive(replacement) == Receive::Message(100)
+        && channel.retire_service(replacement)
+        && channel.receive(control) == Receive::PeerClosed(replacement)
+        && channel.receive(control) == Receive::Empty
         && channel.is_empty()
 }
 

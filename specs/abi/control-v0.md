@@ -22,6 +22,7 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 | 5 | bounded console writes |
 | 6 | service-fault events |
 | 7 | blocking IPC receive |
+| 8 | sticky generation-tagged IPC peer closure |
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
@@ -36,6 +37,8 @@ Operation 4 sends the `RSI` word to IPC object 3 and requires write authority;
 operation 5 receives one word and requires read authority. The kernel selects
 the request or reply direction from the caller's domain role, so an endpoint
 cannot receive its own outbound words. IPC failure returns `UINT64_MAX - 2`.
+After queued replies are drained, operation 5 returns `UINT64_MAX - 4` once
+for each generation-tagged service closure retained by the endpoint.
 Operation 6 writes one through eight packed bytes from `RSI`, with the byte
 count in `RDX`, and requires write authority on console object 2. It returns
 the byte count or `UINT64_MAX - 2` on denial or invalid input.
@@ -59,7 +62,8 @@ no runnable thread, it returns `UINT64_MAX - 2` without changing scheduler state
 If the opposite endpoint's domain exits or faults while the caller is blocked,
 the kernel makes the caller ready and operation 8 returns
 `UINT64_MAX - 4`. Cleanup matches both object and endpoint direction; unrelated
-waiters are not released.
+waiters are not released. A caller arriving after teardown receives the same
+result from the sticky closure queue instead of blocking on a dead peer.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

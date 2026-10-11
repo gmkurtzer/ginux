@@ -38,10 +38,10 @@ cd80
 83f808
 0f859f000000
 
-# negotiate call-gate ABI v1 and its eight bootstrap features
+# negotiate call-gate ABI v1 and its nine bootstrap features
 b800000000
 cd80
-3dff000100
+3dff010100
 0f858d000000
 
 # branch context 2 into the isolated service role
@@ -129,7 +129,7 @@ cd80
 # replacement service: negotiate ABI and block for a direct wakeup
 b800000000
 cd80
-3dff000100
+3dff010100
 0f85c5ffffff
 4c89c7
 b808000000

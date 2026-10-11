@@ -20,7 +20,7 @@ const TSS_SELECTOR: u16 = 0x18;
 pub(crate) const USER_DATA_SELECTOR: u16 = 0x2b;
 pub(crate) const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
-const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_00ff;
+const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_01ff;
 const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
@@ -727,7 +727,11 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         }
         5 => {
             if domain::handle_permits(caller_domain, capability, 3, Rights::READ) {
-                ipc::receive(caller_domain).unwrap_or(u64::MAX - 2)
+                match ipc::receive(caller_domain) {
+                    ipc::Receive::Message(message) => message,
+                    ipc::Receive::PeerClosed(_) => scheduler::IPC_PEER_CLOSED,
+                    ipc::Receive::Empty => u64::MAX - 2,
+                }
             } else {
                 u64::MAX - 2
             }
@@ -749,8 +753,10 @@ fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) 
     if !domain::handle_permits(domain_id, capability, 3, Rights::READ) {
         return u64::MAX - 2;
     }
-    if let Some(message) = ipc::receive(domain_id) {
-        return message;
+    match ipc::receive(domain_id) {
+        ipc::Receive::Message(message) => return message,
+        ipc::Receive::PeerClosed(_) => return scheduler::IPC_PEER_CLOSED,
+        ipc::Receive::Empty => {}
     }
     let Some(service_side) = ipc::service_side(domain_id) else {
         return u64::MAX - 2;

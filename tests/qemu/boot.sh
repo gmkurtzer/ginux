@@ -428,6 +428,11 @@ if ! grep -q '^ginux: blocked IPC peer-close cleanup verified' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: sticky IPC peer closure delivered' "$output_file"; then
+    echo "Boot test failed: a late IPC receiver did not observe peer closure." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated service request-reply completed' "$output_file"; then
     echo "Boot test failed: isolated service request/reply did not complete." >&2
     exit 1

@@ -51,11 +51,18 @@ selected immediately even when it was the last surviving context. The
 scheduler invariant proves that object/direction mismatches stay blocked and
 that an unrelated ready context remains unchanged.
 
+Service retirement also appends the exact retired domain generation to a
+bounded four-record closure FIFO. Control-side receive drains already-produced
+replies first, then returns the peer-closed outcome once per queued generation.
+Binding a replacement does not erase an older closure record, so a late
+receiver cannot confuse restart with an empty live channel. The QEMU gate
+observes the original and replacement generations in order after both have
+retired, then requires the closure FIFO to be empty. Retirement fails closed if
+the FIFO is full rather than discarding an unobserved closure.
+
 This revision transfers only an immediate word and has no capability transfer,
-cancellation request, timeout, persistent close state, or cleanup of queued
-replies after domain failure. Peer-close currently wakes only receivers already
-blocked at teardown; a later receive cannot yet observe the prior closure. It
-has one fixed control/service endpoint pair rather
+cancellation request, timeout, or cleanup of queued replies after domain
+failure. It has one fixed control/service endpoint pair rather
 than allocatable endpoint objects. The global queue is safe only
 for the current single-CPU model. The timer handler does not access IPC, and
 call-gate entries execute with interrupts disabled; locking is still required

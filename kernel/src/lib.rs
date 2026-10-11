@@ -557,6 +557,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
     }
+    if ipc::receive(control_plane) != ipc::Receive::PeerClosed(service_domain)
+        || ipc::receive(control_plane) != ipc::Receive::PeerClosed(replacement_domain)
+        || ipc::receive(control_plane) != ipc::Receive::Empty
+    {
+        kernel_fail("\r\nginux: sticky IPC peer closure invariant failed\r\n");
+    }
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v1 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
@@ -573,6 +579,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: blocking IPC direct wake completed");
     serial_write("\r\nginux: IPC wait-key matching enforced");
     serial_write("\r\nginux: blocked IPC peer-close cleanup verified");
+    serial_write("\r\nginux: sticky IPC peer closure delivered");
     serial_write("\r\nginux: isolated service request-reply completed");
     serial_write("\r\nginux: service domain authority restricted to IPC");
     serial_write("\r\nginux: faulted service domain authority retired");
