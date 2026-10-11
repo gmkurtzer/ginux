@@ -1165,6 +1165,27 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
     crate::address_space::verify_linux_elf_mapping(&plan, protected_start, protected_size)
 }
 
+pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_size: usize) -> bool {
+    const PATH: &[u8] = b"/lib64/ld-ginux.so";
+    const PATH_WITH_NUL: &[u8] = b"/lib64/ld-ginux.so\0";
+    let mut main_bytes = fixture();
+    write_u16(&mut main_bytes, 56, 4);
+    write_interpreter(
+        &mut main_bytes,
+        ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE,
+        0x3f80,
+        PATH_WITH_NUL,
+    );
+    let interpreter_bytes = compact_position_independent_fixture();
+    let (Some(main), Some(interpreter)) = (parse(&main_bytes), parse(&interpreter_bytes)) else {
+        return false;
+    };
+    let Some(plan) = plan_interpreted(&main, PATH, &interpreter, 0x60_0000) else {
+        return false;
+    };
+    crate::address_space::verify_interpreted_elf_mapping(&plan, protected_start, protected_size)
+}
+
 fn fixture() -> [u8; FIXTURE_SIZE] {
     let mut bytes = [0_u8; FIXTURE_SIZE];
     bytes[0..4].copy_from_slice(b"\x7fELF");

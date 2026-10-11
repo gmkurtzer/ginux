@@ -9,8 +9,11 @@ program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
 `PT_GNU_STACK`, and bounded `PT_INTERP` declarations. Interpreter-bearing
-images remain non-executable until the separate interpreter mapping path is
-implemented. The profile is validated during boot,
+images remain non-executable until the interpreter-first entry path is
+implemented. A bounded proof already maps a resolved `ET_EXEC` main image and
+relocated `ET_DYN` interpreter into separate W^X regions, validates both through
+the activated user root, restores the kernel root, and scrubs every owned frame.
+The profile is validated during boot,
 plans and installs up to two RX/RW pages per segment with independently
 zero-filled BSS, including ELF and program headers in the first load page. The
 runtime proof owns every mapped frame, preserves per-page W^X permissions, and
@@ -108,8 +111,8 @@ The bounded ELF parser and page-image planner also validate checked,
 page-aligned load-bias plans for position-independent `ET_DYN` images. Dynamic
 execution planning binds an exact `PT_INTERP` path to a non-overlapping relocated
 interpreter image while preserving distinct initial-entry, `AT_ENTRY`, and
-`AT_BASE` values. Relocation and combined-image mapping remain outside the
-executable profile.
+`AT_BASE` values. The combined-image mapper is verified, but dynamic relocation
+and interpreter-first execution remain outside the executable profile.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

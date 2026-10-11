@@ -593,6 +593,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: Linux ELF headers mapped in executable segment\r\n");
     serial_write("ginux: bounded multi-page Linux ELF mapping verified\r\n");
+    if !linux_elf::verify_mapped_interpreted_plan(boot_info.image_base as u64, boot_info.image_size)
+    {
+        kernel_fail("ginux: interpreted Linux ELF64 address-space mapping failed\r\n");
+    }
+    serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
     serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
     serial_write("ginux: Linux proof workload assembled from source\r\n");
     serial_write("ginux: Linux bounded console writes validated\r\n");

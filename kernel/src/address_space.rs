@@ -534,6 +534,209 @@ pub(crate) fn verify_linux_elf_mapping(
     valid && cleared && memory::release_frames(memory::FrameOwner::KERNEL, frames)
 }
 
+pub(crate) fn verify_interpreted_elf_mapping(
+    plan: &crate::linux_elf::InterpretedLoadPlan<'_, '_>,
+    protected_start: u64,
+    protected_size: usize,
+) -> bool {
+    let main_rx = plan.main.executable;
+    let main_rw = plan.main.writable;
+    let interpreter_rx = plan.interpreter.executable;
+    let interpreter_rw = plan.interpreter.writable;
+    let indexes = |address: u64| {
+        [
+            ((address >> 39) & 0x1ff) as usize,
+            ((address >> 30) & 0x1ff) as usize,
+            ((address >> 21) & 0x1ff) as usize,
+            ((address >> 12) & 0x1ff) as usize,
+        ]
+    };
+    let main_indexes = indexes(main_rx.virtual_page);
+    let main_rw_indexes = indexes(main_rw.virtual_page);
+    let interpreter_indexes = indexes(interpreter_rx.virtual_page);
+    let interpreter_rw_indexes = indexes(interpreter_rw.virtual_page);
+    let Some(protected_end) = protected_start.checked_add(protected_size as u64) else {
+        return false;
+    };
+    let overlaps_protected = |segment: crate::linux_elf::PlannedSegment<'_>| {
+        (0..segment.page_count).any(|page| {
+            let start = segment
+                .virtual_page
+                .saturating_add((page * PAGE_SIZE) as u64);
+            let end = start.saturating_add(PAGE_SIZE as u64);
+            start < protected_end && protected_start < end
+        })
+    };
+    if protected_size == 0
+        || plan.main.read_only.is_some()
+        || plan.interpreter.read_only.is_some()
+        || main_rx.page_count != 4
+        || main_rw.page_count != 2
+        || interpreter_rx.page_count != 1
+        || interpreter_rw.page_count != 1
+        || main_indexes[..2] != interpreter_indexes[..2]
+        || main_indexes[..3] != main_rw_indexes[..3]
+        || interpreter_indexes[..3] != interpreter_rw_indexes[..3]
+        || main_indexes[2] == interpreter_indexes[2]
+        || main_indexes[0] != 0
+        || main_indexes[1] != 0
+        || main_indexes[3] + main_rx.page_count > ENTRY_COUNT
+        || main_rw_indexes[3] + main_rw.page_count > ENTRY_COUNT
+        || interpreter_indexes[3] + interpreter_rx.page_count > ENTRY_COUNT
+        || interpreter_rw_indexes[3] + interpreter_rw.page_count > ENTRY_COUNT
+        || overlaps_protected(main_rx)
+        || overlaps_protected(main_rw)
+        || overlaps_protected(interpreter_rx)
+        || overlaps_protected(interpreter_rw)
+        || main_rx.writable
+        || !main_rx.executable
+        || !main_rw.writable
+        || main_rw.executable
+        || interpreter_rx.writable
+        || !interpreter_rx.executable
+        || !interpreter_rw.writable
+        || interpreter_rw.executable
+    {
+        return false;
+    }
+
+    let Some(frames) = memory::allocate_frames::<13>(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let addresses = frames.map(memory::FrameLease::address);
+    let [root, pdpt, directory, main_table, interpreter_table, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data] =
+        addresses;
+    let kernel_root_physical = current_root();
+    let valid = (|| -> Option<bool> {
+        unsafe {
+            for frame in [root, pdpt, directory, main_table, interpreter_table] {
+                zero_frame(frame)?;
+            }
+            let kernel_root = mapped_frame::<u64>(kernel_root_physical)?;
+            let root_entries = mapped_frame::<u64>(root)?;
+            let pdpt_entries = mapped_frame::<u64>(pdpt)?;
+            let directory_entries = mapped_frame::<u64>(directory)?;
+            let main_entries = mapped_frame::<u64>(main_table)?;
+            let interpreter_entries = mapped_frame::<u64>(interpreter_table)?;
+            root_entries.add(256).write(kernel_root.add(256).read());
+            root_entries.write(pdpt | PRESENT | WRITABLE | USER);
+
+            let kernel_pdpt = mapped_frame::<u64>(kernel_root.read() & ADDRESS_MASK)?;
+            core::ptr::copy_nonoverlapping(kernel_pdpt, pdpt_entries, ENTRY_COUNT);
+            let kernel_directory =
+                mapped_frame::<u64>(kernel_pdpt.add(main_indexes[1]).read() & ADDRESS_MASK)?;
+            core::ptr::copy_nonoverlapping(kernel_directory, directory_entries, ENTRY_COUNT);
+            pdpt_entries
+                .add(main_indexes[1])
+                .write(directory | PRESENT | WRITABLE | USER);
+
+            for (directory_index, table_entries, table_frame) in [
+                (main_indexes[2], main_entries, main_table),
+                (
+                    interpreter_indexes[2],
+                    interpreter_entries,
+                    interpreter_table,
+                ),
+            ] {
+                let original = kernel_directory.add(directory_index).read();
+                if original & PRESENT == 0
+                    || original & LARGE_PAGE != 0 && original & PAGE_ATTRIBUTE_TABLE != 0
+                {
+                    return None;
+                }
+                if original & LARGE_PAGE != 0 {
+                    let base = original & ADDRESS_MASK;
+                    let flags = original & !ADDRESS_MASK & !LARGE_PAGE;
+                    for index in 0..ENTRY_COUNT {
+                        table_entries
+                            .add(index)
+                            .write((base + (index * PAGE_SIZE) as u64) | flags);
+                    }
+                } else {
+                    let original_table = mapped_frame::<u64>(original & ADDRESS_MASK)?;
+                    core::ptr::copy_nonoverlapping(original_table, table_entries, ENTRY_COUNT);
+                }
+                directory_entries
+                    .add(directory_index)
+                    .write(table_frame | PRESENT | WRITABLE | USER);
+            }
+
+            let payloads = [
+                (main_rx, 0, main_page),
+                (main_rx, 1, main_tail),
+                (main_rx, 2, main_third),
+                (main_rx, 3, main_fourth),
+                (main_rw, 0, main_data),
+                (main_rw, 1, main_data_tail),
+                (interpreter_rx, 0, interpreter_page),
+                (interpreter_rw, 0, interpreter_data),
+            ];
+            for (segment, page, frame) in payloads {
+                let bytes = &mut *(mapped_frame::<u8>(frame)? as *mut [u8; PAGE_SIZE]);
+                if !crate::linux_elf::materialize_page(segment, page, bytes) {
+                    return None;
+                }
+            }
+            let flags = |segment: crate::linux_elf::PlannedSegment<'_>| {
+                PRESENT
+                    | USER
+                    | if segment.writable { WRITABLE } else { 0 }
+                    | if segment.executable { 0 } else { NO_EXECUTE }
+            };
+            for (offset, frame) in [main_page, main_tail, main_third, main_fourth]
+                .into_iter()
+                .enumerate()
+            {
+                main_entries
+                    .add(main_indexes[3] + offset)
+                    .write(frame | flags(main_rx));
+            }
+            for (offset, frame) in [main_data, main_data_tail].into_iter().enumerate() {
+                main_entries
+                    .add(main_rw_indexes[3] + offset)
+                    .write(frame | flags(main_rw));
+            }
+            interpreter_entries
+                .add(interpreter_indexes[3])
+                .write(interpreter_page | flags(interpreter_rx));
+            interpreter_entries
+                .add(interpreter_rw_indexes[3])
+                .write(interpreter_data | flags(interpreter_rw));
+
+            let permissions_valid = main_entries.add(main_indexes[3]).read()
+                & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                == PRESENT | USER
+                && main_entries.add(main_rw_indexes[3]).read()
+                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == PRESENT | USER | WRITABLE | NO_EXECUTE
+                && interpreter_entries.add(interpreter_indexes[3]).read()
+                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == PRESENT | USER
+                && interpreter_entries.add(interpreter_rw_indexes[3]).read()
+                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == PRESENT | USER | WRITABLE | NO_EXECUTE;
+            activate(root);
+            let observed = current_root() == root
+                && cpu::with_supervisor_user_access(|| {
+                    (main_rx.virtual_address as *const u8).read_volatile() == 0x7f
+                        && (main_rw.virtual_address as *const u64).read_volatile()
+                            == u64::from_le_bytes(*b"PROBE!!\n")
+                        && (interpreter_rx.virtual_address as *const u8).read_volatile() == 0x7f
+                        && (plan.initial_entry as *const u8).read_volatile() == 0xc3
+                        && (interpreter_rw.virtual_address as *const u64).read_volatile()
+                            == u64::from_le_bytes(*b"DYNAMIC!")
+                });
+            activate(kernel_root_physical);
+            Some(permissions_valid && observed && current_root() == kernel_root_physical)
+        }
+    })()
+    .unwrap_or(false);
+    let cleared = frames
+        .iter()
+        .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
+    valid && cleared && memory::release_frames(memory::FrameOwner::KERNEL, frames)
+}
+
 struct RegisteredAuxiliaryAddressSpace {
     domain: u64,
     space: WxAddressSpace,
