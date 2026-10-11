@@ -483,6 +483,11 @@ if ! grep -q '^ginux: service fault metadata matched' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: structured service fault delivered' "$output_file"; then
+    echo "Boot test failed: structured service fault delivery failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: service domain generation reuse verified' "$output_file"; then
     echo "Boot test failed: service-domain slot reuse accepted stale identity." >&2
     exit 1

@@ -25,6 +25,7 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 | 8 | sticky generation-tagged IPC peer closure |
 | 9 | bounded userspace reads |
 | 10 | structured ABI descriptor and bounded userspace writes |
+| 11 | structured service-fault details |
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
@@ -59,8 +60,7 @@ bits 8-55, and a saturating dropped-record count in bits 56-63. Consuming that
 notification clears the overflow state.
 For a concrete service fault, the kernel retains vector, error code, fault
 address, and instruction address with the consumed record for supervision
-auditing. Operation 7 does not expose those fields in ABI v1; adding a
-structured event-detail operation remains required.
+auditing.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes
@@ -91,6 +91,14 @@ and opens SMAP only for the bounded write. It returns 16 or
 `UINT64_MAX - 2`. The ring-3 proof stores it on a writable stack page, checks
 every field, and requires the same operation to reject its read-only code page
 before continuing.
+Operation 11 requires manage authority on host-control object 1 and writes the
+most recently consumed concrete service-fault record to the user address in
+`RSI`; `RDX` must equal 48. The little-endian record contains `u32` size,
+`u16` ABI version, `u16` vector, and `u64` values for domain generation, error
+code, fault address, and instruction address, followed by a reserved zero
+`u64`. It uses the bounded writable-range copy rules and returns 48 or
+`UINT64_MAX - 2`. Overflow notifications have no synthetic fault record. The
+ring-3 proof validates the descriptor header before exhausting its call budget.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

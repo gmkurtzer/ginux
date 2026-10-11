@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 16;
+const CONTROL_CALL_BUDGET: u16 = 17;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const EVENT_CAPACITY: usize = 4;
@@ -541,7 +541,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 21
+    control.remaining_calls == 0 && manager.total_calls == 22
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
@@ -676,6 +676,22 @@ pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMe
                 && event.fault == Some(expected)
         })
     })
+}
+
+pub(crate) fn delivered_service_fault_descriptor(
+) -> Option<[u8; crate::control_abi::FAULT_DESCRIPTOR_SIZE]> {
+    let event = global_manager()?.last_delivered_service_fault?;
+    if event.kind != 1 || event.detail != 0 {
+        return None;
+    }
+    let fault = event.fault?;
+    crate::control_abi::fault_descriptor(
+        fault.vector,
+        encode_id(event.domain),
+        fault.error,
+        fault.address,
+        fault.instruction,
+    )
 }
 
 pub(crate) fn verify_lifecycle_event_invariants() -> bool {
