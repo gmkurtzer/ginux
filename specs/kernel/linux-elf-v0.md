@@ -127,7 +127,9 @@ assembly; the build uses Clang to produce an ELF relocatable and extracts its
 hand-encoded. Repeated success and errno assertions use callable assembly
 helpers. Each helper executes `SYSCALL` from a nested return frame inside the
 owned stack page, preserving every individual call-site assertion while
-avoiding duplicated branch sequences. This recovered more than 2.5 KiB of the
+avoiding duplicated branch sequences. Helpers cover common errno results and
+the repeated positive return values 1, 2, 3, 5, 8, 152, and 256. Together they
+recover more than 3.2 KiB of the
 fixed four-page executable budget without removing compatibility cases. The
 instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
