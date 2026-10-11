@@ -172,6 +172,9 @@ must name a nonzero logical service distinct from the primary managed service.
 Before yielding, the control plane queries the exact auxiliary generation and
 observes its created, staged, and ready states. A query after retirement is
 rejected rather than aliasing a reused slot.
+It also starts a separate initialized generation, observes it as ready, and
+stops it before dispatch. Teardown removes its scheduler context and address
+space without executing its first instruction.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

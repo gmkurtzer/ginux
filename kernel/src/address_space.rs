@@ -660,7 +660,7 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
         return false;
     };
     executed_kind == crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
-        && executed_sequence == 4
+        && executed_sequence == 5
         && domain::last_lifecycle_event_detail() == Some(42)
         && domain::last_lifecycle_service_identity().is_some()
         && scheduler::current_domain().is_none()
@@ -716,7 +716,7 @@ pub(crate) fn verify_ring3_auxiliary_fault() -> bool {
         && event
             == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
         && domain::last_lifecycle_event_audit()
-            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 5))
+            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 6))
         && domain::last_lifecycle_event_detail() == Some(0)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::delivered_fault_matches(

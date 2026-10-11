@@ -553,6 +553,11 @@ if ! grep -q '^ginux: queued auxiliary cancellation and teardown enforced' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: ready auxiliary cancellation and teardown enforced' "$output_file"; then
+    echo "Boot test failed: ready auxiliary cancellation was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: stop-only auxiliary fault executed and contained' "$output_file"; then
     echo "Boot test failed: stop-only auxiliary fault was not contained." >&2
     exit 1

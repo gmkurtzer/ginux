@@ -29,6 +29,7 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 | 12 | structured lifecycle-event details |
 | 13 | structured IPC delivery details |
 | 14 | structured lifecycle service identity |
+| 15 | bounded auxiliary lifecycle management |
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
@@ -233,7 +234,7 @@ published. After action 5 it voluntarily yields, resumes only after the
 workload has exited, consumes the kind 5 record, and validates the exact
 generation and status 42 from the packed result. It then uses operation 12 to
 validate the descriptor version, kind, detail, exact generation, and lifecycle
-sequence four. Operation 14 additionally proves that the exited auxiliary has
+sequence five. Operation 14 additionally proves that the exited auxiliary has
 a nonzero stable logical service identity distinct from the primary managed
 service. The kernel verifier requires the lifecycle FIFO to be empty afterward;
 lifecycle observation is therefore a userspace control-plane responsibility in
