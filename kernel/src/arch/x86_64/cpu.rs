@@ -43,6 +43,7 @@ const LSTAR_MSR: u32 = 0xc000_0082;
 const FMASK_MSR: u32 = 0xc000_0084;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
+const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 
@@ -121,9 +122,13 @@ static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_ENTRY: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
+static mut LINUX_USER_RSP: u64 = 0;
+static mut LINUX_USER_RIP: u64 = 0;
+static mut LINUX_USER_RFLAGS: u64 = 0;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
     reserved0: 0,
@@ -392,13 +397,22 @@ ginux_linux_syscall_entry:
     cli
     clac
     cld
+    mov [rip + {linux_user_rsp}], rsp
+    mov [rip + {linux_user_rip}], rcx
+    mov [rip + {linux_user_rflags}], r11
     mov rdx, rsp
+    mov r8, r11
     mov rsi, rdi
     mov rdi, rax
     mov rsp, [rip + {user_return_stack}]
     and rsp, -16
     call {linux_syscall_handler}
-    jmp ginux_user_return_kernel
+    cmp rax, -1
+    je ginux_user_return_kernel
+    mov rcx, [rip + {linux_user_rip}]
+    mov r11, [rip + {linux_user_rflags}]
+    mov rsp, [rip + {linux_user_rsp}]
+    sysretq
 ginux_user_return_kernel:
     mov rsp, [rip + {user_return_stack}]
     pop r15
@@ -415,6 +429,9 @@ ginux_user_return_kernel:
     syscall_handler = sym syscall_handler,
     linux_syscall_handler = sym linux_syscall_handler,
     user_return_stack = sym USER_RETURN_STACK,
+    linux_user_rsp = sym LINUX_USER_RSP,
+    linux_user_rip = sym LINUX_USER_RIP,
+    linux_user_rflags = sym LINUX_USER_RFLAGS,
     user_data = const USER_DATA_SELECTOR as u64,
     user_code = const USER_CODE_SELECTOR as u64,
 );
@@ -634,11 +651,13 @@ pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize) -> bool {
     };
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     ELF_PROBE_STACK.store(stack as u64, Ordering::SeqCst);
+    ELF_PROBE_ENTRY.store(entry as u64, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
     restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
+    ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
     inactive && completed
 }
 
@@ -873,15 +892,34 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
     result
 }
 
-extern "sysv64" fn linux_syscall_handler(number: u64, status: u64, user_stack: u64) {
-    if ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
-        && number == LINUX_EXIT_SYSCALL
-        && status == LINUX_PROBE_EXIT_STATUS
-        && user_stack == ELF_PROBE_STACK.load(Ordering::SeqCst)
+extern "sysv64" fn linux_syscall_handler(
+    number: u64,
+    status: u64,
+    user_stack: u64,
+    user_rip: u64,
+    user_rflags: u64,
+) -> u64 {
+    let entry = ELF_PROBE_ENTRY.load(Ordering::SeqCst);
+    if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
+        || user_stack != ELF_PROBE_STACK.load(Ordering::SeqCst)
+        || !(entry..entry + PAGE_SIZE as u64).contains(&user_rip)
+        || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
-        ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return u64::MAX;
     }
-    ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+    match number {
+        LINUX_GETPID_SYSCALL => 1,
+        LINUX_EXIT_SYSCALL if status == LINUX_PROBE_EXIT_STATUS => {
+            ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
+            ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+            u64::MAX
+        }
+        _ => {
+            ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+            u64::MAX
+        }
+    }
 }
 
 fn dispatch_charged_call(
