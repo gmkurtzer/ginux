@@ -1798,6 +1798,16 @@ if ! grep -q '^ginux: generic measured-root Linux file validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: index-driven measured child lookup validated' "$output_file"; then
+    echo "Boot test failed: index-driven measured child lookup was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: unlisted measured-root Linux file validated' "$output_file"; then
+    echo "Boot test failed: an unlisted measured-root Linux file was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

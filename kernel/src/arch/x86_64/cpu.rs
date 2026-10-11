@@ -4321,9 +4321,18 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
             LINUX_FILE_AUXILIARY_DEPENDENCY,
             b"linux/libginux-aux.so" as &[u8],
         ),
-        b"/etc/hostname" => (LINUX_FILE_ROOT_HOSTNAME, b"etc/hostname" as &[u8]),
-        b"/etc/os-release" => (LINUX_FILE_ROOT_GENERIC, b"etc/os-release" as &[u8]),
-        _ => return None,
+        _ => {
+            let root_name = path.strip_prefix(b"/")?;
+            if root_name.starts_with(b"linux/") {
+                return None;
+            }
+            let kind = if root_name == b"etc/hostname" {
+                LINUX_FILE_ROOT_HOSTNAME
+            } else {
+                LINUX_FILE_ROOT_GENERIC
+            };
+            (kind, root_name)
+        }
     };
     let node = initramfs::published_regular_file_node(root_name)?;
     Some(kind | (u16::from(node) << LINUX_ROOT_NODE_SHIFT))
@@ -4368,12 +4377,19 @@ fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, 
     if path.starts_with(b"/") {
         return Ok(None);
     }
+    if path.is_empty() || path == b"." || path == b".." {
+        return Err(LINUX_ENOENT);
+    }
+    let mut absolute = [0_u8; 64];
+    absolute[0] = b'/';
     if directory as u32 == LINUX_AT_FDCWD {
-        return match path {
-            b"etc/hostname" => Ok(linux_runtime_file_kind(b"/etc/hostname")),
-            b"etc/os-release" => Ok(linux_runtime_file_kind(b"/etc/os-release")),
-            _ => Err(LINUX_ENOENT),
+        let Some(output) = absolute.get_mut(1..1 + path.len()) else {
+            return Err(LINUX_ENOENT);
         };
+        output.copy_from_slice(path);
+        return linux_runtime_file_kind(&absolute[..1 + path.len()])
+            .map(Some)
+            .ok_or(LINUX_ENOENT);
     }
     let state = linux_device_descriptor(directory);
     if state == 0 {
@@ -4382,13 +4398,29 @@ fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, 
     if state & LINUX_DEVICE_DIRECTORY == 0 {
         return Err(LINUX_ENOTDIR);
     }
-    match (state & !3, path) {
-        (LINUX_ROOT_ETC_DIRECTORY, b"hostname") => Ok(linux_runtime_file_kind(b"/etc/hostname")),
-        (LINUX_ROOT_ETC_DIRECTORY, b"os-release") => {
-            Ok(linux_runtime_file_kind(b"/etc/os-release"))
-        }
-        _ => Err(LINUX_ENOENT),
+    if path.contains(&b'/') {
+        return Err(LINUX_ENOENT);
     }
+    let Some(parent) = linux_measured_directory_path(state) else {
+        return Err(LINUX_ENOENT);
+    };
+    let Some(output) = absolute.get_mut(1..1 + parent.len()) else {
+        return Err(LINUX_ENOENT);
+    };
+    output.copy_from_slice(parent);
+    let mut length = 1 + parent.len();
+    if !parent.is_empty() {
+        absolute[length] = b'/';
+        length += 1;
+    }
+    let Some(output) = absolute.get_mut(length..length + path.len()) else {
+        return Err(LINUX_ENOENT);
+    };
+    output.copy_from_slice(path);
+    length += path.len();
+    linux_runtime_file_kind(&absolute[..length])
+        .map(Some)
+        .ok_or(LINUX_ENOENT)
 }
 
 fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {

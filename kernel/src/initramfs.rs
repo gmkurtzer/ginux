@@ -213,7 +213,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 12
+    archive.entry_count() == 13
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -230,6 +230,9 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
         && archive
             .find(b"etc/os-release")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"NAME=Ginux\nID=ginux\n")
+        && archive
+            .find(b"etc/motd")
+            .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"Welcome to Ginux\n")
         && archive.find(b"linux/init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
         })
@@ -691,7 +694,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 12
+    let valid = root.node_count == 13
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -712,6 +715,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
         && root
             .lookup(b"etc/os-release")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"NAME=Ginux\nID=ginux\n")
+        && root
+            .lookup(b"etc/motd")
+            .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"Welcome to Ginux\n")
         && root.lookup(b"linux/init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
         })

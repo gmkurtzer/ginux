@@ -274,12 +274,13 @@ unknown mode bits or flags return `-EINVAL`, with the same path errors as
 
 The immutable runtime namespace also recognizes `/init`,
 `/lib64/ld-ginux.so`, `/lib64/libginux.so`, `/lib64/libginux-aux.so`,
-`/etc/hostname`, and `/etc/os-release`. All six resolve through the retained, independently measured
+`/etc/hostname`, `/etc/os-release`, and `/etc/motd`. These resolve through the retained, independently measured
 initramfs index. The first four are aliases for internal `linux/*` entries that
 must byte-match the build-authenticated ELF artifacts used by the bounded
 execution plan; they are no longer served directly from the kernel's embedded
 fixture slices. `/etc/hostname` resolves to exact `ginux\n` bytes and
-`/etc/os-release` to exact `NAME=Ginux\nID=ginux\n` bytes. Each descriptor
+`/etc/os-release` to exact `NAME=Ginux\nID=ginux\n` bytes; `/etc/motd` contains
+exact `Welcome to Ginux\n` bytes. Each descriptor
 stores a bounded one-based measured-root node selector separately from its
 file role; reads and metadata recover the indexed immutable bytes instead of
 dispatching content through a per-file kernel case. `openat`
@@ -300,12 +301,14 @@ opens `/etc/hostname`, validates all six bytes, mode `0555`, size 6, and
 return `-EACCES`. It also opens `os-release` relative to `/etc`, validates all
 20 bytes, mode `0555`, size 20, and writable-open denial through the generic
 indexed-file role. These measured-root files are not executable or mappable.
+The proof also resolves `motd` relative to the open `/etc` descriptor and
+validates immutable mode `0555` and size 17 without a kernel filename case.
 
 The same profile opens `/etc` read-only with `O_DIRECTORY`. Its `getdents64`
-result is staged atomically and contains `.`, `..`, `hostname`, and
-`os-release` regular files derived from the retained measured-root index. A second call returns EOF;
+result is staged atomically and contains `.`, `..`, `hostname`, `os-release`,
+and `motd` regular files derived from the retained measured-root index. A second call returns EOF;
 `lseek(fd, 0, SEEK_SET)` rewinds the one-shot cursor. A buffer below the exact
-112-byte result returns `-EINVAL` without advancing that cursor. `fstat`,
+136-byte result returns `-EINVAL` without advancing that cursor. `fstat`,
 `newfstatat`, and `statx` expose immutable directory mode `0555`; writable
 opens return `-EISDIR`, and `O_DIRECTORY` against `/etc/hostname` returns
 `-ENOTDIR`.
@@ -318,9 +321,11 @@ also open as immutable directories and currently enumerate only `.` and `..`;
 the ring-3 proof exercises `/proc`. `/dev` remains the separately populated
 synthetic device directory. Directory descriptor metadata and pathname
 metadata use stable profile-local inode numbers. There is no `/lib64` directory
-enumeration. Relative lookup is bounded to `hostname` and `os-release` beneath an open `/etc`
-descriptor and their `etc/*` forms beneath `AT_FDCWD`; `openat`, `newfstatat`,
-`faccessat`, `faccessat2`, and `statx` share that resolution. A closed or
+enumeration. Relative lookup constructs a bounded path from an open measured
+directory and a single child name, then consults the retained index; `AT_FDCWD`
+uses the same lookup for bounded relative paths. `openat`, `newfstatat`,
+`faccessat`, `faccessat2`, and `statx` share the result. Nested dirfd traversal
+remains unsupported. A closed or
 unknown base returns `-EBADF`, a regular-file base returns `-ENOTDIR`, and other
 relative names return `-ENOENT`. This is not general component traversal, a
 general VFS, or userspace `execve`; the kernel authenticates

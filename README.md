@@ -17,17 +17,18 @@ shutdown and is published to the control plane as read-only capability object
 reads, and cursor-based direct-child enumeration; the ring-3 proof reads `init`
 and enumerates `dev` while rejecting the wrong capability,
 traversal, and an invalid output range. The Linux syscall profile now resolves
-`/etc/hostname` and `/etc/os-release` from that same measured, retained index.
+`/etc/hostname`, `/etc/os-release`, and `/etc/motd` from that same measured, retained index.
 Linux file descriptors carry a bounded one-based index selector rather than a
 kernel-specialized content identity, so the generic `os-release` file uses the
 same read and metadata path as the executable graph. The ring-3 interpreter
 validates exact contents and metadata and proves writable access is denied. It
-also opens `/etc`, enumerates both measured children, and verifies directory
+also opens `/etc`, enumerates all three measured children, and verifies directory
 metadata, EOF, cursor rewind, and atomic undersized-buffer rejection. The Linux `/` view enumerates every
 direct measured child, while measured `proc`, `sys`, and `tmp` nodes open as
 immutable empty directories; `dev` retains its synthetic device entries. A
-bounded dirfd-relative contract resolves both files below an open `/etc` and
-shares that lookup across open, metadata, and access checks. The current native
+bounded index-driven contract resolves any direct measured regular child below
+an open measured directory; `motd` proves the syscall layer needs no
+per-filename case. Open, metadata, and access checks share that lookup. The current native
 `init` remains a format marker, not PID 1, but the Linux-visible `/init` and
 `/lib64/*` paths map to internal measured-root entries. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. The archive
