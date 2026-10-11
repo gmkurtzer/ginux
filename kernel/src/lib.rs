@@ -599,6 +599,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux two-slot auxiliary descriptor table validated\r\n");
     serial_write("ginux: Linux bounded eventfd notification validated\r\n");
     serial_write("ginux: Linux bounded syscall stack movement validated\r\n");
+    serial_write("ginux: Linux callable syscall assertion helpers validated\r\n");
     serial_write("ginux: Linux container-local root credentials verified\r\n");
     serial_write("ginux: Linux errno recovery verified in ring 3\r\n");
     serial_write("ginux: Linux single-thread signal mask validated\r\n");

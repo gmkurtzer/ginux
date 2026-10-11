@@ -124,7 +124,12 @@ entry at `0x400100`, while syscall return validation remains bounded to its
 declared executable extent. The proof instructions live in checked-in x86-64
 assembly; the build uses Clang to produce an ELF relocatable and extracts its
 `.text` section, so branch layout is assembler-validated instead of
-hand-encoded. The instruction stream first verifies that unsupported call
+hand-encoded. Repeated success and errno assertions use callable assembly
+helpers. Each helper executes `SYSCALL` from a nested return frame inside the
+owned stack page, preserving every individual call-site assertion while
+avoiding duplicated branch sequences. This recovered more than 2.5 KiB of the
+fixed four-page executable budget without removing compatibility cases. The
+instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
 Linux `write(1, 0x404000, 8)` whose kernel copy-in verifies the RW payload. A
 bounded `arch_prctl(ARCH_SET_FS, 0x404000)` then makes the payload available

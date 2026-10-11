@@ -57,9 +57,7 @@ ginux_linux_probe:
 
     mov edi, 0x400000
     mov eax, 63
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     movabs rax, 0x0a212145424f5250
     mov qword ptr [rsp - 16], rax
@@ -74,36 +72,26 @@ ginux_linux_probe:
     mov esi, 0x408ff9
     mov edx, 8
     mov eax, 1
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     xor edi, edi
     xor esi, esi
     xor edx, edx
     mov eax, 7
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edx, 1
     mov eax, 7
-    syscall
-    cmp rax, -38
-    jne failure
+    call syscall_expect_enosys
 
     mov edi, 0x404c80
     mov esi, 5
     xor edx, edx
     mov eax, 7
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov edi, 0x4051fc
     mov esi, 1
     mov eax, 7
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov dword ptr [0x404c80], 0
     mov word ptr [0x404c84], 1
@@ -140,17 +128,13 @@ ginux_linux_probe:
     mov esi, 1
     xor edx, edx
     mov eax, 7
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp word ptr [0x404ca6], 0
     jne failure
     mov word ptr [0x404ca6], 0x7777
     mov edx, 1
     mov eax, 7
-    syscall
-    cmp rax, -38
-    jne failure
+    call syscall_expect_enosys
     cmp word ptr [0x404ca6], 0x7777
     jne failure
 
@@ -160,34 +144,26 @@ ginux_linux_probe:
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 271
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov qword ptr [0x404cc0], 0
     mov qword ptr [0x404cc8], 1000000000
     mov edx, 0x404cc0
     mov eax, 271
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov qword ptr [0x404cc8], 0
     mov edi, 0x404ca0
     mov esi, 1
     mov eax, 271
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp word ptr [0x404ca6], 0
     jne failure
 
     mov qword ptr [0x404cc8], 1
     mov word ptr [0x404ca6], 0x7777
     mov eax, 271
-    syscall
-    cmp rax, -38
-    jne failure
+    call syscall_expect_enosys
     cmp word ptr [0x404ca6], 0x7777
     jne failure
 
@@ -198,9 +174,7 @@ ginux_linux_probe:
     mov r10d, 0x404cd0
     mov r8d, 7
     mov eax, 271
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov r8d, 8
     mov eax, 271
     syscall
@@ -230,9 +204,7 @@ ginux_linux_probe:
     mov esi, 0x406079
     mov edx, 8
     mov eax, 1
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x4845415042524b21
     mov qword ptr [0x406000], rax
     mov edi, 0x407001
@@ -253,9 +225,7 @@ ginux_linux_probe:
     mov r8, -1
     xor r9d, r9d
     mov eax, 9
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     xor edi, edi
     mov esi, 4096
@@ -272,9 +242,7 @@ ginux_linux_probe:
 
     mov edi, 0x40a000
     mov eax, 63
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x40a000], 0x756e6947
     jne failure
 
@@ -292,22 +260,16 @@ ginux_linux_probe:
     mov edi, 0x40a000
     mov esi, 4095
     mov eax, 11
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov esi, 4096
     mov eax, 11
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 1
     mov esi, 0x40a000
     mov edx, 8
     mov eax, 1
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     xor edi, edi
     mov esi, 4096
@@ -327,58 +289,42 @@ ginux_linux_probe:
     mov esi, 4096
     mov edx, 1
     mov eax, 10
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 10
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 0x40a000
     mov eax, 63
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 2
     mov esi, 0x40a000
     xor edx, edx
     mov r10d, 8
     mov eax, 14
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov qword ptr [0x404940], 0
     mov esi, 0x404940
     mov eax, 14
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 0x40a000
     mov esi, 4096
     mov edx, 3
     mov eax, 28
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     cmp qword ptr [0x40a000], 2
     jne failure
     mov edx, 4
     mov eax, 28
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x40a000], 0
     jne failure
 
     mov edi, 0x40a000
     mov esi, 4096
     mov eax, 11
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 4096
@@ -397,44 +343,32 @@ ginux_linux_probe:
     mov esi, 4096
     mov edx, 0x404948
     mov eax, 27
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov edi, 0x40a000
     mov edx, 0x405200
     mov eax, 27
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov byte ptr [0x404948], 0
     mov edx, 0x404948
     mov eax, 27
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp byte ptr [0x404948], 1
     jne failure
 
     mov edi, 0x40a000
     mov eax, 63
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edi, 0x40a000
     mov esi, 4096
     mov eax, 11
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edx, 0x404948
     mov eax, 27
     syscall
     cmp rax, -12
     jne failure
     mov eax, 11
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 8192
@@ -454,9 +388,7 @@ ginux_linux_probe:
     mov qword ptr [0x40b000], -1
     mov edi, 0x40af80
     mov eax, 63
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x40af80], 0x756e6947
     jne failure
     cmp word ptr [0x40b000], 0
@@ -468,9 +400,7 @@ ginux_linux_probe:
     mov esi, 8192
     mov edx, 0x40494a
     mov eax, 27
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp byte ptr [0x40494a], 1
     jne failure
     cmp byte ptr [0x40494b], 1
@@ -480,9 +410,7 @@ ginux_linux_probe:
     mov qword ptr [0x40b000], 2
     mov edx, 4
     mov eax, 28
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x40a000], 0
     jne failure
     cmp qword ptr [0x40b000], 0
@@ -492,53 +420,35 @@ ginux_linux_probe:
     mov esi, 8192
     mov edx, 1
     mov eax, 10
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 10
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov edi, 0x40af80
     mov eax, 63
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov edi, 0x40a000
 
     mov esi, 4096
     mov eax, 11
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov esi, 8192
     mov eax, 11
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edi, 1
     mov esi, 0x40b000
     mov edx, 8
     mov eax, 1
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov eax, 999
-    syscall
-    cmp rax, -38
-    jne failure
+    call syscall_expect_enosys
 
     mov eax, 24
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov eax, 145
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edi, 2
     mov eax, 145
     syscall
@@ -548,51 +458,35 @@ ginux_linux_probe:
     xor edi, edi
     mov esi, 0x405200
     mov eax, 143
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov dword ptr [0x404060], 0x12345678
     mov esi, 0x404060
     mov eax, 143
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x404060], 0
     jne failure
 
     xor edi, edi
     mov eax, 146
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 147
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edi, 1
     mov eax, 146
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     xor edi, edi
     mov esi, 0x405200
     mov eax, 142
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov dword ptr [0x404060], 0
     mov esi, 0x404060
     mov eax, 142
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     xor esi, esi
     mov edx, 0x404060
     mov eax, 144
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov esi, 1
     mov eax, 144
     syscall
@@ -613,16 +507,12 @@ ginux_linux_probe:
     mov edi, 1
     xor esi, esi
     mov eax, 140
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     xor edi, edi
     xor esi, esi
     xor edx, edx
     mov eax, 141
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edx, 1
     mov eax, 141
     syscall
@@ -633,17 +523,13 @@ ginux_linux_probe:
     mov esi, 0x404000
     mov edx, 8
     mov eax, 1
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, 1
     mov esi, 0x404000
     mov edx, 257
     mov eax, 1
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov qword ptr [0x4040c0], 0x40102
     mov edi, 99
@@ -651,18 +537,14 @@ ginux_linux_probe:
     mov edx, 0x4040e0
     mov r10d, 7
     mov eax, 14
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 99
     xor esi, esi
     mov edx, 0x4040e0
     mov r10d, 8
     mov eax, 14
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x4040e0], 0
     jne failure
 
@@ -671,9 +553,7 @@ ginux_linux_probe:
     mov edx, 0x4040e0
     mov r10d, 8
     mov eax, 14
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x4040e0], 0
     jne failure
 
@@ -682,9 +562,7 @@ ginux_linux_probe:
     mov edx, 0x4040e0
     mov r10d, 8
     mov eax, 14
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x4040e0], 2
     jne failure
 
@@ -694,18 +572,14 @@ ginux_linux_probe:
     mov edx, 0x405200
     mov r10d, 8
     mov eax, 14
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 99
     xor esi, esi
     mov edx, 0x4040e0
     mov r10d, 8
     mov eax, 14
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x4040e0], 2
     jne failure
 
@@ -715,18 +589,14 @@ ginux_linux_probe:
     xor edx, edx
     mov r10d, 8
     mov eax, 14
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 99
     xor esi, esi
     mov edx, 0x4040e0
     mov r10d, 8
     mov eax, 14
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x4040e0], 0
     jne failure
 
@@ -735,27 +605,21 @@ ginux_linux_probe:
     xor edx, edx
     mov r10d, 8
     mov eax, 14
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 10
     xor esi, esi
     xor edx, edx
     mov r10d, 7
     mov eax, 13
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     xor edi, edi
     xor esi, esi
     xor edx, edx
     mov r10d, 8
     mov eax, 13
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov qword ptr [0x404100], 1
     mov qword ptr [0x404108], 0x1234
@@ -766,27 +630,21 @@ ginux_linux_probe:
     xor edx, edx
     mov r10d, 8
     mov eax, 13
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 10
     mov esi, 0x405200
     xor edx, edx
     mov r10d, 8
     mov eax, 13
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 10
     mov esi, 0x404100
     mov edx, 0x404120
     mov r10d, 8
     mov eax, 13
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404120], 0
     jne failure
     cmp qword ptr [0x404138], 0
@@ -797,9 +655,7 @@ ginux_linux_probe:
     mov edx, 0x404120
     mov r10d, 8
     mov eax, 13
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404120], 1
     jne failure
     cmp qword ptr [0x404128], 0x1234
@@ -818,18 +674,14 @@ ginux_linux_probe:
     mov edx, 0x405200
     mov r10d, 8
     mov eax, 13
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 10
     xor esi, esi
     mov edx, 0x404120
     mov r10d, 8
     mov eax, 13
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404120], 1
     jne failure
 
@@ -838,16 +690,12 @@ ginux_linux_probe:
     xor edx, edx
     mov r10d, 8
     mov eax, 13
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 0x404158
     mov eax, 131
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404158], 0
     jne failure
     cmp dword ptr [0x404160], 2
@@ -858,9 +706,7 @@ ginux_linux_probe:
     xor edi, edi
     mov esi, 0x405200
     mov eax, 131
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov qword ptr [0x404140], 0x404800
     mov qword ptr [0x404148], 0
@@ -868,18 +714,14 @@ ginux_linux_probe:
     mov edi, 0x404140
     mov esi, 0x404158
     mov eax, 131
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x404160], 2
     jne failure
 
     xor edi, edi
     mov esi, 0x404158
     mov eax, 131
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404158], 0x404800
     jne failure
     cmp dword ptr [0x404160], 0
@@ -893,9 +735,7 @@ ginux_linux_probe:
     mov edi, 0x404140
     xor esi, esi
     mov eax, 131
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov qword ptr [0x404140], 0x404800
     mov qword ptr [0x404148], 0
@@ -913,9 +753,7 @@ ginux_linux_probe:
     mov edi, 0x404140
     xor esi, esi
     mov eax, 131
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 1
     mov esi, 0x404000
@@ -928,9 +766,7 @@ ginux_linux_probe:
     mov edi, 0x1002
     mov esi, 0x404000
     mov eax, 158
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov rbx, qword ptr fs:[0]
     movabs rax, 0x0a212145424f5250
     cmp rbx, rax
@@ -939,23 +775,17 @@ ginux_linux_probe:
     mov edi, 0x1003
     mov esi, 0x405200
     mov eax, 158
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     xor edi, edi
     xor esi, esi
     mov eax, 158
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 0x1003
     mov esi, 0x404008
     mov eax, 158
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404008], 0x404000
     jne failure
 
@@ -968,9 +798,7 @@ ginux_linux_probe:
     mov edi, 0x405200
     mov esi, 2
     mov eax, 79
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov edi, 0x404020
     mov esi, 2
     mov eax, 79
@@ -984,23 +812,17 @@ ginux_linux_probe:
     mov esi, 0x404040
     xor edx, edx
     mov eax, 89
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov edi, 0x409000
     mov esi, 0x404040
     mov edx, 5
     mov eax, 89
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     lea rdi, [rip + proc_self_exe]
     mov esi, 0x405200
     mov edx, 5
     mov eax, 89
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     lea rdi, [rip + proc_self_exe]
     mov esi, 0x404040
     mov edx, 5
@@ -1031,27 +853,21 @@ ginux_linux_probe:
     mov edx, 0x404040
     mov r10d, 5
     mov eax, 267
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, -100
     lea rsi, [rip + proc_self_exe]
     mov edx, 0x404040
     xor r10d, r10d
     mov eax, 267
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, -100
     lea rsi, [rip + proc_self_exe]
     mov edx, 0x405200
     mov r10d, 5
     mov eax, 267
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 0x3f
     mov eax, 95
@@ -1071,33 +887,25 @@ ginux_linux_probe:
 
     mov edi, 0x405200
     mov eax, 63
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 0x404000
     mov eax, 63
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [rdi], 0x756e6947
     jne failure
 
     mov edi, 2
     mov esi, 0x404200
     mov eax, 5
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x4051c0], rax
     mov edi, 1
     mov esi, 0x4051c0
     mov eax, 5
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4051c0], rax
     jne failure
@@ -1105,9 +913,7 @@ ginux_linux_probe:
     mov edi, 1
     mov esi, 0x404200
     mov eax, 5
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404210], 1
     jne failure
     cmp dword ptr [0x404218], 0x2180
@@ -1119,9 +925,7 @@ ginux_linux_probe:
     mov esi, 0x5413
     mov edx, 0x404280
     mov eax, 16
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, 1
     mov esi, 0x5402
@@ -1135,17 +939,13 @@ ginux_linux_probe:
     mov esi, 0x5413
     mov edx, 0x4051fc
     mov eax, 16
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 1
     mov esi, 0x5413
     mov edx, 0x404280
     mov eax, 16
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp word ptr [0x404280], 24
     jne failure
     cmp word ptr [0x404282], 80
@@ -1157,9 +957,7 @@ ginux_linux_probe:
     movabs rsi, 0x1122334455667788
     mov edx, 2
     mov eax, 8
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, 1
     movabs rsi, 0x1122334455667788
@@ -1178,9 +976,7 @@ ginux_linux_probe:
     mov esi, 0x404300
     mov edx, 2
     mov eax, 20
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     lea rax, [rip + readable_payload + 4]
     mov qword ptr [0x404310], rax
@@ -1188,17 +984,13 @@ ginux_linux_probe:
     mov esi, 0x404300
     mov edx, 2
     mov eax, 20
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, 1
     mov esi, 0x404300
     mov edx, 5
     mov eax, 20
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 1
     mov esi, 0x404300
@@ -1211,18 +1003,14 @@ ginux_linux_probe:
     mov edi, 99
     mov esi, 0x404080
     mov eax, 97
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x4051f8], rax
     mov edi, 3
     mov esi, 0x4051f8
     mov eax, 97
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4051f8], rax
     jne failure
@@ -1230,9 +1018,7 @@ ginux_linux_probe:
     mov edi, 3
     mov esi, 0x404080
     mov eax, 97
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404080], 0x1000
     jne failure
     cmp qword ptr [0x404088], 0x1000
@@ -1252,9 +1038,7 @@ ginux_linux_probe:
     xor edx, edx
     mov r10d, 0x404090
     mov eax, 302
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     xor edi, edi
     mov esi, 7
@@ -1272,9 +1056,7 @@ ginux_linux_probe:
     xor edx, edx
     mov r10d, 0x4051f8
     mov eax, 302
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4051f8], rax
     jne failure
@@ -1284,9 +1066,7 @@ ginux_linux_probe:
     xor edx, edx
     mov r10d, 0x404090
     mov eax, 302
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404090], 4
     jne failure
     cmp qword ptr [0x404098], 4
@@ -1304,9 +1084,7 @@ ginux_linux_probe:
     mov esi, 7
     mov edx, 0x4040a0
     mov eax, 204
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x4051fc], rax
@@ -1314,9 +1092,7 @@ ginux_linux_probe:
     mov esi, 8
     mov edx, 0x4051fc
     mov eax, 204
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4051fc], rax
     jne failure
@@ -1332,19 +1108,13 @@ ginux_linux_probe:
     jne failure
 
     mov eax, 203
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov qword ptr [0x4040a0], 0
     mov eax, 203
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov edx, 0x405200
     mov eax, 203
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov qword ptr [0x4040a0], 1
 
     mov dword ptr [0x4040a8], 0x12345678
@@ -1352,9 +1122,7 @@ ginux_linux_probe:
     mov esi, 0x405200
     mov edx, 0xdeadbeef
     mov eax, 309
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     cmp dword ptr [0x4040a8], 0x12345678
     jne failure
 
@@ -1362,9 +1130,7 @@ ginux_linux_probe:
     mov esi, 0x4040ac
     mov edx, 0xdeadbeef
     mov eax, 309
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x4040a8], 0
     jne failure
     cmp dword ptr [0x4040ac], 0
@@ -1374,9 +1140,7 @@ ginux_linux_probe:
     mov esi, 0x405200
     mov edx, 0x80002
     mov eax, 257
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     movabs rax, 0x6c756e2f7665642f
     mov qword ptr [0x404340], rax
@@ -1409,9 +1173,7 @@ ginux_linux_probe:
 
     mov edi, 3
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 7
     mov eax, 284
@@ -1428,9 +1190,7 @@ ginux_linux_probe:
     cmp qword ptr [0x404d90], 7
     jne failure
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 2
     mov esi, 0x801
@@ -1454,35 +1214,25 @@ ginux_linux_probe:
     cmp qword ptr [0x404d90], 1
     jne failure
     xor eax, eax
-    syscall
-    cmp rax, -11
-    jne failure
+    call syscall_expect_eagain
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 2
     mov esi, 0x405200
     mov edx, 8
     xor eax, eax
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 1
     syscall
     cmp rax, 8
     jne failure
 
     mov eax, 8
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov esi, 0x404350
     mov eax, 5
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x404368], 0x2180
     jne failure
 
@@ -1499,35 +1249,25 @@ ginux_linux_probe:
     jne failure
     mov edi, 3
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, -100
     mov esi, 0x405200
     mov edx, 0x404350
     xor r10d, r10d
     mov eax, 262
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov esi, 0x404340
     mov edx, 0x405200
     mov eax, 262
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov edx, 0x404350
     mov r10d, 1
     mov eax, 262
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     xor r10d, r10d
     mov eax, 262
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x404368], 0x2180
     jne failure
 
@@ -1535,9 +1275,7 @@ ginux_linux_probe:
     mov esi, 0x404340
     mov edx, 6
     mov eax, 269
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edx, 1
     mov eax, 269
     syscall
@@ -1546,43 +1284,29 @@ ginux_linux_probe:
     mov esi, 0x405200
     xor edx, edx
     mov eax, 269
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov esi, 0x404340
     mov edx, 8
     mov eax, 269
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     xor edx, edx
     mov r10d, 1
     mov eax, 439
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     xor r10d, r10d
     mov eax, 439
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 2
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 3
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, 1
     mov eax, 291
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 0x80000
     mov eax, 291
@@ -1606,9 +1330,7 @@ ginux_linux_probe:
     xor edi, edi
     mov esi, 2
     mov eax, 290
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov esi, 0x80800
     mov eax, 290
@@ -1640,17 +1362,13 @@ ginux_linux_probe:
     mov edx, 3
     mov r10d, 0x404d00
     mov eax, 233
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov esi, 0x404d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov qword ptr [0x404d80], 5
     mov edi, 3
@@ -1679,9 +1397,7 @@ ginux_linux_probe:
     mov esi, 0x4051fc
     mov edx, 8
     xor eax, eax
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov esi, 0x404d90
     xor eax, eax
@@ -1696,30 +1412,22 @@ ginux_linux_probe:
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 3
     mov esi, 0x404d90
     mov edx, 8
     xor eax, eax
-    syscall
-    cmp rax, -11
-    jne failure
+    call syscall_expect_eagain
 
     mov qword ptr [0x404d80], -1
     mov esi, 0x404d80
     mov edx, 7
     mov eax, 1
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov edx, 8
     mov eax, 1
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov qword ptr [0x404d80], -2
     mov eax, 1
@@ -1734,9 +1442,7 @@ ginux_linux_probe:
     mov esi, 1
     xor edx, edx
     mov eax, 7
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp word ptr [0x404da6], 0
     jne failure
 
@@ -1745,9 +1451,7 @@ ginux_linux_probe:
     mov esi, 0x404d80
     mov edx, 8
     mov eax, 1
-    syscall
-    cmp rax, -11
-    jne failure
+    call syscall_expect_eagain
 
     mov esi, 0x404d90
     xor eax, eax
@@ -1762,44 +1466,32 @@ ginux_linux_probe:
     mov edx, 3
     xor r10d, r10d
     mov eax, 233
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 3
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 2
     mov esi, 1
     mov edx, 2
     mov r10d, 0x404d00
     mov eax, 233
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edx, 99
     mov eax, 233
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov esi, 99
     mov edx, 1
     mov eax, 233
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov dword ptr [0x404d00], 0x80000000
     mov esi, 1
     mov eax, 233
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov dword ptr [0x404d00], 4
     movabs rax, 0x1122334455667788
@@ -1809,15 +1501,11 @@ ginux_linux_probe:
     mov edx, 1
     mov r10d, 0x4051fc
     mov eax, 233
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov r10d, 0x404d00
     mov eax, 233
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 233
     syscall
     cmp rax, -17
@@ -1828,9 +1516,7 @@ ginux_linux_probe:
     xor edx, edx
     xor r10d, r10d
     mov eax, 232
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov qword ptr [0x404d40], 0
     mov edi, 2
@@ -1840,16 +1526,12 @@ ginux_linux_probe:
     mov r8d, 0x404d40
     mov r9d, 7
     mov eax, 281
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov r8d, 0x405200
     mov r9d, 8
     mov eax, 281
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov r8d, 0x404d40
     mov eax, 281
@@ -1871,9 +1553,7 @@ ginux_linux_probe:
     mov r8d, 0x404d40
     mov r9d, 8
     mov eax, 441
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov qword ptr [0x404d68], 0
     mov eax, 441
@@ -1883,18 +1563,14 @@ ginux_linux_probe:
 
     mov r10d, 0x4051fc
     mov eax, 441
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 2
     mov esi, 0x4051fc
     mov edx, 1
     mov r10d, -1
     mov eax, 232
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov esi, 0x404d20
     mov eax, 232
@@ -1915,26 +1591,20 @@ ginux_linux_probe:
     mov edx, 1
     mov r10d, 0x404d00
     mov eax, 233
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov esi, 0x404d20
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 2
     mov esi, 2
     mov edx, 1
     mov r10d, 0x405200
     mov eax, 233
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov esi, 3
     mov r10d, 0x404d00
@@ -1948,20 +1618,14 @@ ginux_linux_probe:
     mov edx, 1
     xor r10d, r10d
     mov eax, 232
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov r10d, 1
     mov eax, 232
-    syscall
-    cmp rax, -38
-    jne failure
+    call syscall_expect_enosys
 
     mov edi, 2
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     movabs rax, 0x72657a2f7665642f
     mov qword ptr [0x404340], rax
@@ -1984,22 +1648,16 @@ ginux_linux_probe:
     cmp qword ptr [0x404380], 0
     jne failure
     mov eax, 1
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
     mov edi, -100
     mov esi, 0x404340
     mov edx, 0x404350
     xor r10d, r10d
     mov eax, 262
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov edi, 2
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     movabs rax, 0x6e6f632f7665642f
     mov qword ptr [0x404340], rax
@@ -2025,9 +1683,7 @@ ginux_linux_probe:
     mov esi, 0x5413
     mov edx, 0x404390
     mov eax, 16
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp word ptr [0x404390], 24
     jne failure
     cmp word ptr [0x404392], 80
@@ -2037,9 +1693,7 @@ ginux_linux_probe:
     cmp rax, -29
     jne failure
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     movabs rax, 0x7974742f7665642f
     mov qword ptr [0x404340], rax
@@ -2055,13 +1709,9 @@ ginux_linux_probe:
     mov esi, 0x405200
     mov edx, 8
     xor eax, eax
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, -100
     mov esi, 0x404340
@@ -2069,14 +1719,10 @@ ginux_linux_probe:
     mov r10d, 0x7ff
     mov r8d, 0x405200
     mov eax, 332
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov r8d, 0x404400
     mov eax, 332
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x404400], 0x7ff
     jne failure
     cmp word ptr [0x40441c], 0x2180
@@ -2085,9 +1731,7 @@ ginux_linux_probe:
     jne failure
     mov r10d, 0x80000000
     mov eax, 332
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     movabs rax, 0x72657a2f7665642f
     mov qword ptr [0x404340], rax
@@ -2109,9 +1753,7 @@ ginux_linux_probe:
     mov esi, 0x404500
     mov edx, 2
     mov eax, 19
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     cmp qword ptr [0x404540], -1
     jne failure
     mov qword ptr [0x404510], 0x404550
@@ -2125,9 +1767,7 @@ ginux_linux_probe:
     jne failure
     mov edi, 2
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     movabs rax, 0x6c756e2f7665642f
     mov qword ptr [0x404340], rax
@@ -2150,9 +1790,7 @@ ginux_linux_probe:
     jne failure
     mov edi, 2
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov dword ptr [0x404340], 0x7665642f
     mov byte ptr [0x404344], 0
@@ -2166,23 +1804,17 @@ ginux_linux_probe:
     mov edi, 2
     mov esi, 0x404700
     mov eax, 5
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x404718], 0x416d
     jne failure
     mov esi, 0x404800
     mov edx, 151
     mov eax, 217
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov esi, 0x405200
     mov edx, 152
     mov eax, 217
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     mov esi, 0x404800
     mov eax, 217
     syscall
@@ -2193,15 +1825,11 @@ ginux_linux_probe:
     cmp byte ptr [0x404843], 'n'
     jne failure
     mov eax, 217
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     xor esi, esi
     xor edx, edx
     mov eax, 8
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov esi, 0x404800
     mov edx, 152
     mov eax, 217
@@ -2209,22 +1837,16 @@ ginux_linux_probe:
     cmp rax, 152
     jne failure
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 0x405200
     mov eax, 80
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov word ptr [0x4040b0], 0x2f
     mov edi, 0x4040b0
     mov eax, 80
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     movabs rax, 0x676e697373696d2f
     mov qword ptr [0x4040b0], rax
@@ -2238,9 +1860,7 @@ ginux_linux_probe:
     mov edi, 16
     mov esi, 0x4040d0
     mov eax, 157
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x4040d0], 0x74696e69
     jne failure
     cmp dword ptr [0x4040d4], 0
@@ -2249,9 +1869,7 @@ ginux_linux_probe:
     mov edi, 15
     mov esi, 0x405200
     mov eax, 157
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     movabs rax, 0x72702d78756e6967
     mov qword ptr [0x4040c0], rax
@@ -2259,23 +1877,17 @@ ginux_linux_probe:
     mov edi, 15
     mov esi, 0x4040c0
     mov eax, 157
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 16
     mov esi, 0x405200
     mov eax, 157
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 16
     mov esi, 0x4040d0
     mov eax, 157
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     movabs rax, 0x72702d78756e6967
     cmp qword ptr [0x4040d0], rax
     jne failure
@@ -2286,18 +1898,14 @@ ginux_linux_probe:
 
     mov edi, 99
     mov eax, 157
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov dword ptr [0x4040c0], 0x74696e69
     mov byte ptr [0x4040c4], 0
     mov edi, 15
     mov esi, 0x4040c0
     mov eax, 157
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 39
     xor esi, esi
@@ -2305,9 +1913,7 @@ ginux_linux_probe:
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 157
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 38
     xor esi, esi
@@ -2315,9 +1921,7 @@ ginux_linux_probe:
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 157
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 38
     mov esi, 1
@@ -2325,9 +1929,7 @@ ginux_linux_probe:
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 157
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 38
     mov esi, 1
@@ -2335,9 +1937,7 @@ ginux_linux_probe:
     mov r10d, 1
     xor r8d, r8d
     mov eax, 157
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 39
     xor esi, esi
@@ -2345,9 +1945,7 @@ ginux_linux_probe:
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 157
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 38
     mov esi, 1
@@ -2355,9 +1953,7 @@ ginux_linux_probe:
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 157
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 39
     xor esi, esi
@@ -2375,9 +1971,7 @@ ginux_linux_probe:
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 157
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 39
     mov esi, 1
@@ -2385,82 +1979,56 @@ ginux_linux_probe:
     xor r10d, r10d
     xor r8d, r8d
     mov eax, 157
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 1
     mov esi, 0x405200
     mov rdx, -1
     xor eax, eax
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     xor edi, edi
     mov esi, 0x405200
     mov rdx, -1
     xor eax, eax
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 2
     mov eax, 3
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     xor edi, edi
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov eax, 3
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     xor edi, edi
     mov esi, 0x404200
     mov eax, 5
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     xor edi, edi
     mov esi, 0x5413
     mov edx, 0x404280
     mov eax, 16
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov eax, 102
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 104
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 107
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, 108
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov rdi, -1
     xor esi, esi
     mov eax, 115
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     xor edi, edi
     mov esi, 0x405200
@@ -2473,9 +2041,7 @@ ginux_linux_probe:
     mov edi, 1
     mov esi, 0x405200
     mov eax, 115
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     cmp dword ptr [0x404060], 0x12345678
     jne failure
 
@@ -2490,21 +2056,15 @@ ginux_linux_probe:
 
     mov edi, -1
     mov eax, 135
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov eax, 135
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 0x40000
     mov eax, 135
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov dword ptr [0x404060], 0x20080522
     mov dword ptr [0x404064], 0
@@ -2512,18 +2072,14 @@ ginux_linux_probe:
     mov edi, 0x404060
     mov esi, 0x405200
     mov eax, 125
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     cmp dword ptr [0x404068], 0x12345678
     jne failure
 
     mov edi, 0x404060
     mov esi, 0x404068
     mov eax, 125
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov eax, dword ptr [0x404068]
     or eax, dword ptr [0x40406c]
     or eax, dword ptr [0x404070]
@@ -2536,9 +2092,7 @@ ginux_linux_probe:
     mov edi, 0x404060
     xor esi, esi
     mov eax, 125
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     cmp dword ptr [0x404060], 0x20080522
     jne failure
 
@@ -2552,9 +2106,7 @@ ginux_linux_probe:
     mov edi, 0x404060
     mov esi, 0x404068
     mov eax, 126
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov dword ptr [0x404068], 1
     mov eax, 126
     syscall
@@ -2575,9 +2127,7 @@ ginux_linux_probe:
     mov esi, 0x404064
     mov edx, 0x405200
     mov eax, 118
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     cmp dword ptr [0x404060], 0x12345678
     jne failure
     cmp dword ptr [0x404064], 0x12345678
@@ -2587,9 +2137,7 @@ ginux_linux_probe:
     mov esi, 0x404064
     mov edx, 0x404068
     mov eax, 118
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x404060], 0
     jne failure
     cmp dword ptr [0x404064], 0
@@ -2604,9 +2152,7 @@ ginux_linux_probe:
     mov esi, 0x404064
     mov edx, 0x404068
     mov eax, 120
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp dword ptr [0x404060], 0
     jne failure
     cmp dword ptr [0x404064], 0
@@ -2620,9 +2166,7 @@ ginux_linux_probe:
     jne failure
 
     mov eax, 110
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov eax, 111
     syscall
@@ -2654,23 +2198,17 @@ ginux_linux_probe:
     mov edi, 0x4041b0
     mov esi, 23
     mov eax, 273
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 0x4051f0
     mov esi, 24
     mov eax, 273
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 0x4041b0
     mov esi, 24
     mov eax, 273
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 2
     mov esi, 0x4041c8
@@ -2686,9 +2224,7 @@ ginux_linux_probe:
     mov esi, 0x4041c8
     mov edx, 0x4051fc
     mov eax, 274
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4041c8], rax
     jne failure
@@ -2697,9 +2233,7 @@ ginux_linux_probe:
     mov esi, 0x4041c8
     mov edx, 0x4041d0
     mov eax, 274
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x4041c8], 0x4041b0
     jne failure
     cmp qword ptr [0x4041d0], 24
@@ -2709,17 +2243,13 @@ ginux_linux_probe:
     mov esi, 4096
     mov edx, 1
     mov eax, 10
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 0x405000
     mov esi, 4096
     mov edx, 4
     mov eax, 10
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     movabs rax, 0x0a212145424f5250
     mov qword ptr [0x405000], rax
@@ -2727,23 +2257,17 @@ ginux_linux_probe:
     mov esi, 4096
     mov edx, 1
     mov eax, 10
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 0x405000
     mov esi, 4096
     mov edx, 1
     mov eax, 10
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 0x405000
     mov eax, 63
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 1
     mov esi, 0x405000
@@ -2760,9 +2284,7 @@ ginux_linux_probe:
     mov esi, 0x5401
     mov edx, 0x404280
     mov eax, 16
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404280], 0
     jne failure
     cmp qword ptr [0x404298], 0
@@ -2770,41 +2292,31 @@ ginux_linux_probe:
 
     mov edi, 2
     mov eax, 32
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, 2
     xor esi, esi
     xor edx, edx
     mov eax, 72
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, 1
     xor esi, esi
     mov edx, 2
     mov eax, 72
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 1
     xor esi, esi
     xor edx, edx
     mov eax, 72
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 2
     mov edx, 1
     mov eax, 72
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 1
@@ -2817,16 +2329,12 @@ ginux_linux_probe:
     mov esi, 2
     mov edx, 2
     mov eax, 72
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 1
     mov eax, 72
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 1
     xor esi, esi
@@ -2838,17 +2346,13 @@ ginux_linux_probe:
 
     xor edi, edi
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 1
     mov esi, 1030
     xor edx, edx
     mov eax, 72
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 1
@@ -2859,22 +2363,16 @@ ginux_linux_probe:
 
     xor edi, edi
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 1
     mov eax, 32
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 1
     mov eax, 72
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 1
     mov eax, 32
@@ -2893,9 +2391,7 @@ ginux_linux_probe:
     xor edi, edi
     xor esi, esi
     mov eax, 33
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov esi, 1
@@ -2907,16 +2403,12 @@ ginux_linux_probe:
     xor edi, edi
     mov esi, 2
     mov eax, 33
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     mov edi, 2
     mov esi, 1
     mov eax, 33
-    syscall
-    cmp rax, -9
-    jne failure
+    call syscall_expect_ebadf
 
     xor edi, edi
     mov esi, 3
@@ -2928,30 +2420,22 @@ ginux_linux_probe:
     mov edi, 1
     mov esi, 1
     mov eax, 72
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     mov edi, 1
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     xor edi, edi
     mov eax, 3
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x404ff8], rax
     mov edi, 1
     mov esi, 0x404ff8
     mov eax, 228
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x404ff8], rax
     jne failure
@@ -2959,16 +2443,12 @@ ginux_linux_probe:
     xor edi, edi
     mov esi, 0x404900
     mov eax, 228
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 1
     mov esi, 0x404900
     mov eax, 228
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404900], 0
     jl failure
     cmp qword ptr [0x404908], 1000000000
@@ -2977,9 +2457,7 @@ ginux_linux_probe:
     mov edi, 1
     mov esi, 0x404910
     mov eax, 228
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov rax, qword ptr [0x404910]
     cmp rax, qword ptr [0x404900]
     jb failure
@@ -2994,51 +2472,39 @@ clock_advanced:
     mov edi, 4
     mov esi, 0x404920
     mov eax, 228
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404928], 1000000000
     jae failure
 
     mov edi, 2
     mov esi, 0x404950
     mov eax, 228
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404958], 1000000000
     jae failure
     mov edi, 3
     mov esi, 0x404960
     mov eax, 228
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404968], 1000000000
     jae failure
 
     xor edi, edi
     xor esi, esi
     mov eax, 229
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 1
     xor esi, esi
     mov eax, 229
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x404ff8], rax
     mov edi, 4
     mov esi, 0x404ff8
     mov eax, 229
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x404ff8], rax
     jne failure
@@ -3046,9 +2512,7 @@ clock_advanced:
     mov edi, 1
     mov esi, 0x404930
     mov eax, 229
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404930], 0
     je resolution_subsecond
     cmp qword ptr [0x404930], 1
@@ -3067,9 +2531,7 @@ resolution_valid:
     mov qword ptr [0x404ff0], rax
     mov edi, 0x404ff0
     mov eax, 100
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x404ff0], rax
     jne failure
@@ -3097,9 +2559,7 @@ resolution_valid:
     xor edi, edi
     mov esi, 0x404ff0
     mov eax, 36
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x404ff0], rax
     jne failure
@@ -3107,16 +2567,12 @@ resolution_valid:
     mov edi, 3
     mov esi, 0x404bc0
     mov eax, 36
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     xor edi, edi
     mov esi, 0x404bc0
     mov eax, 36
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404bc0], 0
     jne failure
     cmp qword ptr [0x404bd8], 0
@@ -3132,9 +2588,7 @@ resolution_valid:
     mov esi, 0x404be0
     mov edx, 0x404c00
     mov eax, 38
-    syscall
-    cmp rax, -38
-    jne failure
+    call syscall_expect_enosys
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x404c00], rax
     jne failure
@@ -3144,9 +2598,7 @@ resolution_valid:
     mov esi, 0x404be0
     mov edx, 0x404c00
     mov eax, 38
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404c00], 0
     jne failure
     cmp qword ptr [0x404c18], 0
@@ -3156,61 +2608,43 @@ resolution_valid:
     mov esi, 0x405200
     xor edx, edx
     mov eax, 38
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov dword ptr [0x404c40], 42
     mov edi, 0x404c40
     mov esi, 2
     mov edx, 42
     mov eax, 202
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
 
     mov edi, 0x404c41
     xor esi, esi
     mov eax, 202
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     mov edi, 0x405200
     mov eax, 202
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov edi, 0x404c40
     mov edx, 41
     mov eax, 202
-    syscall
-    cmp rax, -11
-    jne failure
+    call syscall_expect_eagain
     mov esi, 128
     mov eax, 202
-    syscall
-    cmp rax, -11
-    jne failure
+    call syscall_expect_eagain
 
     xor esi, esi
     mov edx, 42
     mov eax, 202
-    syscall
-    cmp rax, -38
-    jne failure
+    call syscall_expect_enosys
 
     mov esi, 1
     mov edx, 1
     mov eax, 202
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     mov esi, 129
     mov eax, 202
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x404ff0], rax
@@ -3218,9 +2652,7 @@ resolution_valid:
     xor edi, edi
     mov esi, 0x404ff0
     mov eax, 98
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x404ff0], rax
     jne failure
@@ -3230,14 +2662,10 @@ resolution_valid:
     mov edi, 2
     mov esi, 0x404a00
     mov eax, 98
-    syscall
-    cmp rax, -22
-    jne failure
+    call syscall_expect_einval
     xor edi, edi
     mov eax, 98
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404a08], 1000000
     jae failure
     cmp qword ptr [0x404a10], 0
@@ -3248,18 +2676,14 @@ resolution_valid:
     mov edi, 1
     mov esi, 0x404a90
     mov eax, 98
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404a98], 1000000
     jae failure
 
     mov edi, -1
     mov esi, 0x404b20
     mov eax, 98
-    syscall
-    test rax, rax
-    jne failure
+    call syscall_expect_zero
     cmp qword ptr [0x404b20], 0
     jne failure
     cmp qword ptr [0x404ba8], 0
@@ -3267,9 +2691,7 @@ resolution_valid:
 
     mov edi, 0x405200
     mov eax, 218
-    syscall
-    cmp rax, -14
-    jne failure
+    call syscall_expect_efault
 
     mov dword ptr [0x404190], 0x12345678
     mov edi, 0x404190
@@ -3298,6 +2720,42 @@ resolution_valid:
     syscall
 failure:
     ud2
+
+syscall_expect_zero:
+    syscall
+    test rax, rax
+    jne failure
+    ret
+
+syscall_expect_efault:
+    syscall
+    cmp rax, -14
+    jne failure
+    ret
+
+syscall_expect_einval:
+    syscall
+    cmp rax, -22
+    jne failure
+    ret
+
+syscall_expect_ebadf:
+    syscall
+    cmp rax, -9
+    jne failure
+    ret
+
+syscall_expect_enosys:
+    syscall
+    cmp rax, -38
+    jne failure
+    ret
+
+syscall_expect_eagain:
+    syscall
+    cmp rax, -11
+    jne failure
+    ret
 
 nested_getpid:
     mov eax, 39
