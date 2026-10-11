@@ -169,6 +169,30 @@ ginux_linux_probe:
     jne failure
 
     xor edi, edi
+    mov esi, 0x403200
+    mov eax, 142
+    syscall
+    cmp rax, -14
+    jne failure
+    mov dword ptr [0x402060], 0
+    mov esi, 0x402060
+    mov eax, 142
+    syscall
+    test rax, rax
+    jne failure
+    xor esi, esi
+    mov edx, 0x402060
+    mov eax, 144
+    syscall
+    test rax, rax
+    jne failure
+    mov esi, 1
+    mov eax, 144
+    syscall
+    cmp rax, -1
+    jne failure
+
+    xor edi, edi
     xor esi, esi
     mov eax, 140
     syscall

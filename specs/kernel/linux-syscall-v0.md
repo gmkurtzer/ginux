@@ -114,7 +114,9 @@ process has exactly one runnable thread. `sched_getscheduler` reports
 only after validating the complete output. `sched_get_priority_min` and
 `sched_get_priority_max` both report zero for `SCHED_OTHER`. Unknown PIDs
 return `-ESRCH`, an invalid output returns `-EFAULT`, and unsupported policies
-return `-EINVAL`; scheduling policy mutation remains unsupported. `rax = 140`
+return `-EINVAL`. `sched_setparam` and `sched_setscheduler` accept only an
+idempotent priority-zero `SCHED_OTHER` request; invalid pointers return
+`-EFAULT`, and other policies return `-EPERM`. `rax = 140`
 (`__NR_getpriority`) reports nice value zero for the sole process by returning
 the raw Linux syscall value 20. It accepts only `PRIO_PROCESS` and PID 0 or 1;
 other selectors return `-EINVAL` and an unknown PID returns `-ESRCH`.

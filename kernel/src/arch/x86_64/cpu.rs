@@ -85,7 +85,9 @@ const LINUX_SIGALTSTACK_SYSCALL: u64 = 131;
 const LINUX_PERSONALITY_SYSCALL: u64 = 135;
 const LINUX_GETPRIORITY_SYSCALL: u64 = 140;
 const LINUX_SETPRIORITY_SYSCALL: u64 = 141;
+const LINUX_SCHED_SETPARAM_SYSCALL: u64 = 142;
 const LINUX_SCHED_GETPARAM_SYSCALL: u64 = 143;
+const LINUX_SCHED_SETSCHEDULER_SYSCALL: u64 = 144;
 const LINUX_SCHED_GETSCHEDULER_SYSCALL: u64 = 145;
 const LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL: u64 = 146;
 const LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL: u64 = 147;
@@ -1364,6 +1366,8 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EPERM
             }
         }
+        LINUX_SCHED_SETPARAM_SYSCALL => linux_set_scheduler(first_argument, 0, buffer),
+        LINUX_SCHED_SETSCHEDULER_SYSCALL => linux_set_scheduler(first_argument, buffer, count),
         LINUX_SCHED_GETPARAM_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
@@ -1929,6 +1933,24 @@ fn linux_capset(header_address: u64, data_address: u64) -> u64 {
         LINUX_EPERM
     } else {
         0
+    }
+}
+
+fn linux_set_scheduler(pid: u64, policy: u64, parameter_address: u64) -> u64 {
+    if !matches!(pid, 0 | 1) {
+        return LINUX_ESRCH;
+    }
+    if policy != 0 {
+        return LINUX_EPERM;
+    }
+    let mut priority = [0_u8; 4];
+    if !copy_from_linux_user(parameter_address, &mut priority) {
+        return LINUX_EFAULT;
+    }
+    if priority == [0; 4] {
+        0
+    } else {
+        LINUX_EINVAL
     }
 }
 
