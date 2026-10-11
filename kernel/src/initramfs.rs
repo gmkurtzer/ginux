@@ -9,9 +9,10 @@ const MAX_ARCHIVE_SIZE: usize = 16 * 1024 * 1024;
 const MAX_ENTRIES: usize = 256;
 const MAX_NAME_SIZE: usize = 256;
 const MAX_FILE_SIZE: usize = 8 * 1024 * 1024;
-const MAX_VERIFICATION_IMAGE_SIZE: usize = 4096;
 const PAGE_SIZE: usize = 4096;
 const MAX_INDEXED_ENTRIES: usize = 16;
+const ROOT_FRAME_COUNT: usize = 32;
+const ROOT_CAPACITY: usize = ROOT_FRAME_COUNT * PAGE_SIZE;
 const TYPE_MASK: u32 = 0o170000;
 const DIRECTORY: u32 = 0o040000;
 const REGULAR: u32 = 0o100000;
@@ -212,7 +213,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 7
+    archive.entry_count() == 11
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -226,72 +227,85 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
         && archive
             .find(b"etc/hostname")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"ginux\n")
+        && archive.find(b"linux/init").is_some_and(|entry| {
+            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
+        })
+        && archive.find(b"linux/ld-ginux.so").is_some_and(|entry| {
+            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_interpreter_bytes()
+        })
+        && archive.find(b"linux/libginux.so").is_some_and(|entry| {
+            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_dependency_bytes()
+        })
+        && archive.find(b"linux/libginux-aux.so").is_some_and(|entry| {
+            entry.mode == 0o100555
+                && entry.data == crate::linux_elf::runtime_auxiliary_dependency_bytes()
+        })
         && archive.find(b"missing").is_none()
 }
 
+fn mutation_rejected(
+    candidate: &mut [u8],
+    source: &[u8],
+    offset: usize,
+    replacement: &[u8],
+) -> Option<bool> {
+    let end = offset.checked_add(replacement.len())?;
+    candidate.get_mut(offset..end)?.copy_from_slice(replacement);
+    let rejected = parse(candidate).is_none();
+    candidate
+        .get_mut(offset..end)?
+        .copy_from_slice(source.get(offset..end)?);
+    Some(rejected)
+}
+
 pub(crate) fn verify_rejections(bytes: &[u8]) -> bool {
-    if bytes.is_empty() || bytes.len() > MAX_VERIFICATION_IMAGE_SIZE {
+    if bytes.is_empty() || bytes.len() > ROOT_CAPACITY {
         return false;
     }
-    let mut candidate = [0_u8; MAX_VERIFICATION_IMAGE_SIZE];
-    candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[0] = b'1';
-    if parse(&candidate[..bytes.len()]).is_some() {
-        return false;
-    }
-    candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[6] = b'G';
-    if parse(&candidate[..bytes.len()]).is_some() {
-        return false;
-    }
-    candidate[..bytes.len()].copy_from_slice(bytes);
     let Some(init) = header_offset(bytes, b"init") else {
         return false;
     };
-    candidate[init + 14..init + 22].copy_from_slice(b"00008124");
-    if parse(&candidate[..bytes.len()]).is_some() {
-        return false;
-    }
-    candidate[..bytes.len()].copy_from_slice(bytes);
     let Some(etc) = name_offset(bytes, b"etc") else {
         return false;
     };
-    candidate[etc..etc + 3].copy_from_slice(b"dev");
-    if parse(&candidate[..bytes.len()]).is_some() {
-        return false;
-    }
-    candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[etc..etc + 3].copy_from_slice(b"../");
-    if parse(&candidate[..bytes.len()]).is_some() {
-        return false;
-    }
-    candidate[..bytes.len()].copy_from_slice(bytes);
     let Some(proc_name) = name_offset(bytes, b"proc") else {
         return false;
     };
-    candidate[proc_name + 5] = 1;
-    if parse(&candidate[..bytes.len()]).is_some() {
-        return false;
-    }
-    candidate[..bytes.len()].copy_from_slice(bytes);
-    candidate[init + 54..init + 62].copy_from_slice(b"ffffffff");
-    if parse(&candidate[..bytes.len()]).is_some() {
-        return false;
-    }
-    candidate[..bytes.len()].copy_from_slice(bytes);
     let Some(init_name) = name_offset(bytes, b"init") else {
         return false;
     };
-    candidate[init_name..init_name + 4].copy_from_slice(b"inix");
-    if parse(&candidate[..bytes.len()]).is_some() {
-        return false;
-    }
-    candidate[..bytes.len()].copy_from_slice(bytes);
     let Some(trailer) = header_offset(bytes, TRAILER) else {
         return false;
     };
-    candidate[trailer + HEADER_SIZE] = b'X';
-    parse(&candidate[..bytes.len()]).is_none() && parse(&bytes[..bytes.len() - 1]).is_none()
+    let Some(mut image) = OwnedRoot::materialize(bytes) else {
+        return false;
+    };
+    let rejected = (|| {
+        let candidate = image.bytes_mut()?;
+        if !mutation_rejected(candidate, bytes, 0, b"1")?
+            || !mutation_rejected(candidate, bytes, 6, b"G")?
+        {
+            return Some(false);
+        }
+        for (offset, replacement) in [
+            (init + 14, &b"00008124"[..]),
+            (etc, &b"dev"[..]),
+            (etc, &b"../"[..]),
+            (init + 54, &b"ffffffff"[..]),
+            (init_name, &b"inix"[..]),
+        ] {
+            if !mutation_rejected(candidate, bytes, offset, replacement)? {
+                return Some(false);
+            }
+        }
+        Some(
+            mutation_rejected(candidate, bytes, proc_name + 5, &[1])?
+                && mutation_rejected(candidate, bytes, trailer + HEADER_SIZE, b"X")?
+                && parse(&bytes[..bytes.len() - 1]).is_none(),
+        )
+    })()
+    .unwrap_or(false);
+    rejected && image.release()
 }
 
 fn header_offset(bytes: &[u8], wanted: &[u8]) -> Option<usize> {
@@ -313,63 +327,84 @@ fn name_offset(bytes: &[u8], wanted: &[u8]) -> Option<usize> {
 }
 
 struct OwnedRoot {
-    frame: memory::FrameLease,
+    frames: [memory::FrameLease; ROOT_FRAME_COUNT],
     size: usize,
 }
 
 impl OwnedRoot {
     fn materialize(bytes: &[u8]) -> Option<Self> {
-        if bytes.is_empty() || bytes.len() > PAGE_SIZE || parse(bytes).is_none() {
+        if bytes.is_empty() || bytes.len() > ROOT_CAPACITY || parse(bytes).is_none() {
             return None;
         }
-        let [frame] = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)?;
-        let Some(address) = frame.direct_map_address() else {
-            let _ = memory::release_frames(memory::FrameOwner::KERNEL, [frame]);
+        let frames =
+            memory::allocate_contiguous_frames::<ROOT_FRAME_COUNT>(memory::FrameOwner::KERNEL)?;
+        let Some(address) = frames[0].direct_map_address() else {
+            let _ = memory::release_frames(memory::FrameOwner::KERNEL, frames);
             return None;
         };
+        if frames.iter().enumerate().any(|(index, frame)| {
+            frame.address() != frames[0].address() + index as u64 * PAGE_SIZE as u64
+                || frame.direct_map_address() != Some(address + index * PAGE_SIZE)
+        }) {
+            let _ = memory::release_frames(memory::FrameOwner::KERNEL, frames);
+            return None;
+        }
         // SAFETY: the allocator returned a private zeroed frame owned by the
         // kernel. The source was measured and is disjoint from this new lease.
         unsafe {
             core::ptr::copy_nonoverlapping(bytes.as_ptr(), address as *mut u8, bytes.len());
         }
         Some(Self {
-            frame,
+            frames,
             size: bytes.len(),
         })
     }
 
     fn bytes(&self) -> Option<&[u8]> {
-        let address = self.frame.direct_map_address()?;
-        // SAFETY: this lease remains live and kernel-owned for `self`'s lifetime.
+        let address = self.frames[0].direct_map_address()?;
+        // SAFETY: these contiguous leases remain live and kernel-owned for
+        // `self`'s lifetime, and materialization validated their direct map.
         Some(unsafe { core::slice::from_raw_parts(address as *const u8, self.size) })
     }
 
+    fn bytes_mut(&mut self) -> Option<&mut [u8]> {
+        let address = self.frames[0].direct_map_address()?;
+        // SAFETY: `&mut self` uniquely borrows every live frame in the owned
+        // contiguous allocation.
+        Some(unsafe { core::slice::from_raw_parts_mut(address as *mut u8, self.size) })
+    }
+
     fn tail_is_zero(&self) -> bool {
-        let Some(address) = self.frame.direct_map_address() else {
+        let Some(address) = self.frames[0].direct_map_address() else {
             return false;
         };
-        // SAFETY: the complete live frame is reachable through its direct-map alias.
+        // SAFETY: the complete contiguous allocation is reachable through its
+        // validated direct-map aliases.
         unsafe {
-            core::slice::from_raw_parts((address + self.size) as *const u8, PAGE_SIZE - self.size)
-                .iter()
-                .all(|byte| *byte == 0)
+            core::slice::from_raw_parts(
+                (address + self.size) as *const u8,
+                ROOT_CAPACITY - self.size,
+            )
+            .iter()
+            .all(|byte| *byte == 0)
         }
     }
 
     fn release(self) -> bool {
-        let Some(address) = self.frame.direct_map_address() else {
+        let Some(address) = self.frames[0].direct_map_address() else {
             return false;
         };
-        // SAFETY: the lease is still live and exclusively kernel-owned.
+        // SAFETY: the leases are still live, contiguous, and exclusively
+        // kernel-owned.
         unsafe {
-            core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE);
+            core::ptr::write_bytes(address as *mut u8, 0, ROOT_CAPACITY);
         }
         let scrubbed = unsafe {
-            core::slice::from_raw_parts(address as *const u8, PAGE_SIZE)
+            core::slice::from_raw_parts(address as *const u8, ROOT_CAPACITY)
                 .iter()
                 .all(|byte| *byte == 0)
         };
-        scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, [self.frame])
+        scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, self.frames)
     }
 }
 
@@ -380,7 +415,7 @@ pub(crate) fn verify_owned_materialization(source: &[u8]) -> bool {
     let Some(root) = OwnedRoot::materialize(source) else {
         return false;
     };
-    let Some(address) = root.frame.direct_map_address() else {
+    let Some(address) = root.frames[0].direct_map_address() else {
         let _ = root.release();
         return false;
     };
@@ -390,7 +425,7 @@ pub(crate) fn verify_owned_materialization(source: &[u8]) -> bool {
     let disjoint = source_end.is_some_and(|end| end <= address)
         || destination_end.is_some_and(|end| end <= source_start);
     let exact = root.bytes() == Some(source);
-    let owned = memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root.frame]);
+    let owned = memory::frames_owned_by(memory::FrameOwner::KERNEL, &root.frames);
     let tail_zero = root.tail_is_zero();
     let source_first = source[0];
     // SAFETY: this is a deliberate private-copy mutation before publication.
@@ -417,10 +452,10 @@ pub(crate) fn verify_owned_materialization(source: &[u8]) -> bool {
 
 #[derive(Clone, Copy)]
 struct RootNode {
-    name_offset: u16,
-    name_size: u16,
-    data_offset: u16,
-    data_size: u16,
+    name_offset: u32,
+    name_size: u32,
+    data_offset: u32,
+    data_size: u32,
     mode: u32,
 }
 
@@ -469,10 +504,10 @@ impl ReadOnlyRoot {
             let name_offset = (entry.name.as_ptr() as usize).checked_sub(base)?;
             let data_offset = (entry.data.as_ptr() as usize).checked_sub(base)?;
             nodes[node_count] = RootNode {
-                name_offset: u16::try_from(name_offset).ok()?,
-                name_size: u16::try_from(entry.name.len()).ok()?,
-                data_offset: u16::try_from(data_offset).ok()?,
-                data_size: u16::try_from(entry.data.len()).ok()?,
+                name_offset: u32::try_from(name_offset).ok()?,
+                name_size: u32::try_from(entry.name.len()).ok()?,
+                data_offset: u32::try_from(data_offset).ok()?,
+                data_size: u32::try_from(entry.data.len()).ok()?,
                 mode: entry.mode,
             };
             node_count += 1;
@@ -487,12 +522,12 @@ impl ReadOnlyRoot {
         }
         let bytes = self.image.bytes()?;
         for node in &self.nodes[..self.node_count] {
-            let name_start = usize::from(node.name_offset);
-            let name_end = name_start.checked_add(usize::from(node.name_size))?;
+            let name_start = usize::try_from(node.name_offset).ok()?;
+            let name_end = name_start.checked_add(usize::try_from(node.name_size).ok()?)?;
             let stored_name = bytes.get(name_start..name_end)?;
             if stored_name == name {
-                let data_start = usize::from(node.data_offset);
-                let data_end = data_start.checked_add(usize::from(node.data_size))?;
+                let data_start = usize::try_from(node.data_offset).ok()?;
+                let data_end = data_start.checked_add(usize::try_from(node.data_size).ok()?)?;
                 return Some(Entry {
                     name: stored_name,
                     data: bytes.get(data_start..data_end)?,
@@ -543,7 +578,7 @@ pub(crate) fn published_root_is_live() -> bool {
     published_root().is_some_and(|root| {
         root.node_count != 0
             && root.image.tail_is_zero()
-            && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root.image.frame])
+            && memory::frames_owned_by(memory::FrameOwner::KERNEL, &root.image.frames)
     })
 }
 
@@ -589,8 +624,8 @@ pub(crate) fn published_next_child(
     }
     let bytes = root.image.bytes()?;
     for (index, node) in root.nodes[cursor..root.node_count].iter().enumerate() {
-        let name_start = usize::from(node.name_offset);
-        let name_end = name_start.checked_add(usize::from(node.name_size))?;
+        let name_start = usize::try_from(node.name_offset).ok()?;
+        let name_end = name_start.checked_add(usize::try_from(node.name_size).ok()?)?;
         let name = bytes.get(name_start..name_end)?;
         let child = if directory.is_empty() {
             (!name.contains(&b'/')).then_some(name)
@@ -603,7 +638,7 @@ pub(crate) fn published_next_child(
             return Some(Some(PublishedDirectoryEntry {
                 name: child,
                 mode: node.mode,
-                data_size: usize::from(node.data_size),
+                data_size: usize::try_from(node.data_size).ok()?,
                 next_cursor: cursor + index + 1,
             }));
         }
@@ -621,9 +656,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     let Some(root) = ReadOnlyRoot::build(image) else {
         return false;
     };
-    let base = root.image.frame.direct_map_address();
+    let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 7
+    let valid = root.node_count == 11
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -641,6 +676,19 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
         && root
             .lookup(b"etc/hostname")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"ginux\n")
+        && root.lookup(b"linux/init").is_some_and(|entry| {
+            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
+        })
+        && root.lookup(b"linux/ld-ginux.so").is_some_and(|entry| {
+            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_interpreter_bytes()
+        })
+        && root.lookup(b"linux/libginux.so").is_some_and(|entry| {
+            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_dependency_bytes()
+        })
+        && root.lookup(b"linux/libginux-aux.so").is_some_and(|entry| {
+            entry.mode == 0o100555
+                && entry.data == crate::linux_elf::runtime_auxiliary_dependency_bytes()
+        })
         && root.lookup(b"missing").is_none()
         && root.lookup(b"../init").is_none()
         && root.lookup(b"/init").is_none();

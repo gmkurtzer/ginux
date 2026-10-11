@@ -30,6 +30,16 @@ boot-service frames after low-memory and ceiling clipping. The QEMU gate
 requires that count to be nonzero on its reference firmware. Multi-frame reservations stage allocator
 state and commit only when every requested frame is available. Failed or
 zero-length reservations leave range cursors and accounting unchanged.
+The kernel may also request a fixed-size physically contiguous batch. That
+operation selects one fresh admitted range large enough for the complete batch,
+or first reuses one complete contiguous run already in the recycle pool. It
+does not assemble unrelated recycled fragments. The operation records every
+lease atomically. A
+failed contiguous request leaves all ranges and live accounting unchanged;
+successful reservations retain the ordinary exact-owner and release rules.
+The invariant proof skips an undersized first range, obtains three consecutive
+frames from the next range, then returns to reserve the untouched two-frame
+range.
 Address-space construction reserves its complete five- or seven-frame budget
 before writing any page table.
 

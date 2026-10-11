@@ -5673,12 +5673,10 @@ fn linux_regular_file(state: u8) -> Option<&'static [u8]> {
         return None;
     }
     match state & LINUX_FILE_MASK {
-        LINUX_FILE_INIT => Some(crate::linux_elf::runtime_main_bytes()),
-        LINUX_FILE_INTERPRETER => Some(crate::linux_elf::runtime_interpreter_bytes()),
-        LINUX_FILE_DEPENDENCY => Some(crate::linux_elf::runtime_dependency_bytes()),
-        LINUX_FILE_AUXILIARY_DEPENDENCY => {
-            Some(crate::linux_elf::runtime_auxiliary_dependency_bytes())
-        }
+        LINUX_FILE_INIT => initramfs::published_file(b"linux/init"),
+        LINUX_FILE_INTERPRETER => initramfs::published_file(b"linux/ld-ginux.so"),
+        LINUX_FILE_DEPENDENCY => initramfs::published_file(b"linux/libginux.so"),
+        LINUX_FILE_AUXILIARY_DEPENDENCY => initramfs::published_file(b"linux/libginux-aux.so"),
         LINUX_FILE_ROOT_HOSTNAME => initramfs::published_file(b"etc/hostname"),
         _ => None,
     }

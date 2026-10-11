@@ -554,6 +554,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: reclaimed boot-service frames: ");
     serial_write_u64(memory::reclaimed_boot_service_frame_count().unwrap_or(0));
     serial_write("\r\nginux: atomic frame reservations verified");
+    serial_write("\r\nginux: contiguous frame reservations verified");
     serial_write("\r\nginux: physical frames zeroed before allocation");
     serial_write("\r\nginux: tracked frame release ownership verified");
     serial_write("\r\nginux: stale frame leases rejected");
@@ -605,14 +606,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: measured root image copied into owned memory\r\n");
     serial_write("ginux: owned root image remained source-independent\r\n");
-    serial_write("ginux: owned root frame scrubbed and released\r\n");
+    serial_write("ginux: owned root frames scrubbed and released\r\n");
     if !initramfs::verify_read_only_index(root_image) {
         kernel_fail("ginux: read-only root index failed\r\n");
     }
     serial_write("ginux: bounded read-only root index constructed\r\n");
     serial_write("ginux: root lookups resolved only owned image bytes\r\n");
     serial_write("ginux: invalid root lookup paths denied\r\n");
-    serial_write("ginux: indexed root frame scrubbed and released\r\n");
+    serial_write("ginux: indexed root frames scrubbed and released\r\n");
     if !initramfs::publish_read_only_root(root_image) {
         kernel_fail("ginux: persistent read-only root publication failed\r\n");
     }
@@ -877,6 +878,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux immutable runtime ELF files validated\r\n");
     serial_write("ginux: Linux auxiliary dependency runtime file validated\r\n");
     serial_write("ginux: Linux read-only runtime file mapping validated\r\n");
+    serial_write("ginux: measured-root Linux executable graph validated\r\n");
+    serial_write("ginux: measured-root Linux executable graph executed\r\n");
     serial_write("ginux: measured-root Linux file content validated\r\n");
     serial_write("ginux: measured-root Linux file metadata validated\r\n");
     serial_write("ginux: measured-root Linux file mutation denied\r\n");

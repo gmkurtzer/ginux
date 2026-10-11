@@ -156,6 +156,71 @@ impl FrameAllocator {
         Some(frames)
     }
 
+    pub(crate) fn reserve_contiguous<const N: usize>(
+        &mut self,
+        owner: FrameOwner,
+    ) -> Option<[FrameLease; N]> {
+        if N == 0
+            || self.live_count.checked_add(N)? > MAX_LIVE_FRAMES
+            || (!owner.is_kernel()
+                && self.owner_live_count(owner).checked_add(N)? > DOMAIN_FRAME_LIMIT)
+        {
+            return None;
+        }
+        let recycled_start = (self.recycled_count >= N)
+            .then(|| {
+                (0..=self.recycled_count - N).find(|start| {
+                    self.recycled[*start..*start + N]
+                        .iter()
+                        .enumerate()
+                        .all(|(index, frame)| {
+                            frame.address
+                                == self.recycled[*start].address + index as u64 * PAGE_SIZE
+                        })
+                })
+            })
+            .flatten();
+        if let Some(recycled_start) = recycled_start {
+            let mut staged = *self;
+            let mut frames = [EMPTY_LEASE; N];
+            for (index, frame) in frames.iter_mut().enumerate() {
+                let prior = staged.recycled[recycled_start + index];
+                *frame = FrameLease {
+                    address: prior.address,
+                    generation: prior.generation.checked_add(1)?,
+                };
+                staged.record_live(*frame, owner)?;
+            }
+            staged
+                .recycled
+                .copy_within(recycled_start + N..staged.recycled_count, recycled_start);
+            staged.recycled_count -= N;
+            staged.recycled[staged.recycled_count..self.recycled_count].fill(EMPTY_LEASE);
+            *self = staged;
+            return Some(frames);
+        }
+        let size = (N as u64).checked_mul(PAGE_SIZE)?;
+        let range_index = (self.active_range..self.range_count).find(|index| {
+            self.ranges[*index]
+                .end
+                .checked_sub(self.ranges[*index].next)
+                .is_some_and(|available| available >= size)
+        })?;
+        let mut staged = *self;
+        let start = staged.ranges[range_index].next;
+        staged.ranges[range_index].next = start.checked_add(size)?;
+        let mut frames = [EMPTY_LEASE; N];
+        for (index, frame) in frames.iter_mut().enumerate() {
+            *frame = FrameLease {
+                address: start.checked_add((index as u64).checked_mul(PAGE_SIZE)?)?,
+                generation: 1,
+            };
+            staged.record_live(*frame, owner)?;
+        }
+        *self = staged;
+        Some(frames)
+    }
+
     fn allocate_one(&mut self, owner: FrameOwner) -> Option<FrameLease> {
         if self.live_count == MAX_LIVE_FRAMES
             || (!owner.is_kernel() && self.owner_live_count(owner) >= DOMAIN_FRAME_LIMIT)
@@ -381,6 +446,28 @@ pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[Fram
     }
 }
 
+pub(crate) fn allocate_contiguous_frames<const N: usize>(
+    owner: FrameOwner,
+) -> Option<[FrameLease; N]> {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    // SAFETY: Initialization published a valid allocator. Bootstrap is
+    // single-processor and callers keep interrupts disabled.
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let frames = (*allocator).reserve_contiguous::<N>(owner)?;
+        for frame in &frames {
+            let Some(address) = frame.direct_map_address() else {
+                let _ = (*allocator).release(owner, frames);
+                return None;
+            };
+            core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE as usize);
+        }
+        Some(frames)
+    }
+}
+
 pub(crate) fn release_frames<const N: usize>(owner: FrameOwner, frames: [FrameLease; N]) -> bool {
     if !INITIALIZED.load(Ordering::Acquire) {
         return false;
@@ -527,6 +614,46 @@ pub(crate) fn verify_reservation_invariants() -> bool {
     let bounded_transfer_completed = budgeted.transfer_owner(owner, third_owner) == Some(16)
         && budgeted.owner_live_count(owner) == 0
         && budgeted.owner_live_count(third_owner) == 16;
+    let mut contiguous = FrameAllocator {
+        ranges: [EMPTY_RANGE; MAX_RANGES],
+        range_count: 2,
+        active_range: 0,
+        allocated_frames: 0,
+        reclaimed_boot_service_frames: 0,
+        live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
+        live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
+        live_count: 0,
+        recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
+        recycled_count: 0,
+    };
+    contiguous.ranges[0] = Range {
+        next: 0x50_0000,
+        end: 0x50_2000,
+    };
+    contiguous.ranges[1] = Range {
+        next: 0x60_0000,
+        end: 0x60_4000,
+    };
+    let before_contiguous_failure = contiguous;
+    let contiguous_failure_atomic = contiguous.reserve_contiguous::<5>(owner).is_none()
+        && contiguous.live_count == before_contiguous_failure.live_count
+        && contiguous.ranges[0].next == before_contiguous_failure.ranges[0].next
+        && contiguous.ranges[1].next == before_contiguous_failure.ranges[1].next;
+    let contiguous_three = contiguous.reserve_contiguous::<3>(owner);
+    let contiguous_two = contiguous.reserve_contiguous::<2>(owner);
+    let contiguous_ranges_selected = contiguous_three.map(|frames| frames.map(FrameLease::address))
+        == Some([0x60_0000, 0x60_1000, 0x60_2000])
+        && contiguous_two.map(|frames| frames.map(FrameLease::address))
+            == Some([0x50_0000, 0x50_1000]);
+    let contiguous_released = contiguous_three
+        .is_some_and(|frames| contiguous.release(owner, frames))
+        && contiguous_two.is_some_and(|frames| contiguous.release(owner, frames));
+    let contiguous_reused = contiguous.reserve_contiguous::<3>(other_owner);
+    let contiguous_recycle_preserved = contiguous_reused.is_some_and(|frames| {
+        frames.map(FrameLease::address) == [0x60_0000, 0x60_1000, 0x60_2000]
+            && frames.iter().all(|frame| frame.generation == 2)
+            && contiguous.release(other_owner, frames)
+    });
 
     first.map(FrameLease::address) == [0x10_0000, 0x10_1000]
         && failed
@@ -548,4 +675,8 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         && budget_filled
         && transfer_over_budget_rejected
         && bounded_transfer_completed
+        && contiguous_failure_atomic
+        && contiguous_ranges_selected
+        && contiguous_released
+        && contiguous_recycle_preserved
 }

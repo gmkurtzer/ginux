@@ -77,14 +77,37 @@ const ROUND_CONSTANTS: [u32; 64] = [
 ];
 
 pub(crate) fn sha256(input: &[u8]) -> [u8; 32] {
+    sha256_with_mutation(input, None).unwrap_or([0; 32])
+}
+
+pub(crate) fn sha256_with_byte_xor(input: &[u8], index: usize, mask: u8) -> Option<[u8; 32]> {
+    (index < input.len() && mask != 0).then(|| sha256_with_mutation(input, Some((index, mask))))?
+}
+
+fn sha256_with_mutation(input: &[u8], mutation: Option<(usize, u8)>) -> Option<[u8; 32]> {
+    if mutation.is_some_and(|(index, mask)| index >= input.len() || mask == 0) {
+        return None;
+    }
     let mut state = INITIAL_STATE;
     let (chunks, remainder) = input.as_chunks::<64>();
-    for chunk in chunks {
-        compress(&mut state, chunk);
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        let start = chunk_index * 64;
+        if let Some((index, mask)) =
+            mutation.filter(|(index, _)| (start..start + 64).contains(index))
+        {
+            let mut changed = *chunk;
+            changed[index - start] ^= mask;
+            compress(&mut state, &changed);
+        } else {
+            compress(&mut state, chunk);
+        }
     }
 
     let mut tail = [0_u8; 128];
     tail[..remainder.len()].copy_from_slice(remainder);
+    if let Some((index, mask)) = mutation.filter(|(index, _)| *index >= chunks.len() * 64) {
+        tail[index - chunks.len() * 64] ^= mask;
+    }
     tail[remainder.len()] = 0x80;
     let padded_length = if remainder.len() < 56 { 64 } else { 128 };
     let bit_length = (input.len() as u64).wrapping_mul(8).to_be_bytes();
@@ -97,7 +120,7 @@ pub(crate) fn sha256(input: &[u8]) -> [u8; 32] {
     for (index, word) in state.iter().enumerate() {
         digest[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
     }
-    digest
+    Some(digest)
 }
 
 fn compress(state: &mut [u32; 8], chunk: &[u8]) {
@@ -155,5 +178,9 @@ pub(crate) fn verify_sha256_known_answers() -> bool {
         0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00,
         0x15, 0xad,
     ];
-    sha256(b"") == EMPTY && sha256(b"abc") == ABC
+    sha256(b"") == EMPTY
+        && sha256(b"abc") == ABC
+        && sha256_with_byte_xor(b"abc", 0, 1) == Some(sha256(b"`bc"))
+        && sha256_with_byte_xor(b"abc", 3, 1).is_none()
+        && sha256_with_byte_xor(b"abc", 0, 0).is_none()
 }

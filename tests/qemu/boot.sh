@@ -443,6 +443,11 @@ if ! grep -q '^ginux: atomic frame reservations verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: contiguous frame reservations verified' "$output_file"; then
+    echo "Boot test failed: contiguous physical-frame reservations failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: physical frames zeroed before allocation' "$output_file"; then
     echo "Boot test failed: physical-frame zero-on-allocation failed." >&2
     exit 1
@@ -553,8 +558,8 @@ if ! grep -q '^ginux: owned root image remained source-independent' "$output_fil
     exit 1
 fi
 
-if ! grep -q '^ginux: owned root frame scrubbed and released' "$output_file"; then
-    echo "Boot test failed: the owned root frame was not reclaimed." >&2
+if ! grep -q '^ginux: owned root frames scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the owned root frames were not reclaimed." >&2
     exit 1
 fi
 
@@ -573,8 +578,8 @@ if ! grep -q '^ginux: invalid root lookup paths denied' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: indexed root frame scrubbed and released' "$output_file"; then
-    echo "Boot test failed: the indexed root frame was not reclaimed." >&2
+if ! grep -q '^ginux: indexed root frames scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the indexed root frames were not reclaimed." >&2
     exit 1
 fi
 
@@ -1725,6 +1730,16 @@ fi
 
 if ! grep -q '^ginux: Linux read-only runtime file mapping validated' "$output_file"; then
     echo "Boot test failed: Linux read-only runtime file mapping was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured-root Linux executable graph validated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux executable graph was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured-root Linux executable graph executed' "$output_file"; then
+    echo "Boot test failed: measured-root Linux executable graph was not executed." >&2
     exit 1
 fi
 

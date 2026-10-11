@@ -274,11 +274,11 @@ unknown mode bits or flags return `-EINVAL`, with the same path errors as
 
 The immutable runtime namespace also recognizes `/init`,
 `/lib64/ld-ginux.so`, `/lib64/libginux.so`, `/lib64/libginux-aux.so`, and
-`/etc/hostname`. The first four names expose the exact build-authenticated ELF
-byte slices used by the execution or bounded dependency-graph proofs.
-`/etc/hostname` instead resolves to the exact `ginux\n` bytes in the retained,
-independently measured initramfs index; this is the first Linux-visible file
-backed by the published root rather than a built-in ELF fixture. `openat`
+`/etc/hostname`. All five resolve through the retained, independently measured
+initramfs index. The first four are aliases for internal `linux/*` entries that
+must byte-match the build-authenticated ELF artifacts used by the bounded
+execution plan; they are no longer served directly from the kernel's embedded
+fixture slices. `/etc/hostname` resolves to exact `ginux\n` bytes. `openat`
 accepts only `O_RDONLY` with optional
 `O_CLOEXEC`; writable access returns `-EACCES` and `O_DIRECTORY` returns
 `-ENOTDIR`. Each open has an independent 64-bit cursor. `read` and bounded

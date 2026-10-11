@@ -26,8 +26,10 @@ const DEVELOPMENT_SEED: [u8; 32] = [
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 5 {
-        fail("usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE OUTPUT_RS");
+    if arguments.len() != 6 {
+        fail(
+            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS OUTPUT_RS",
+        );
     }
     let config = fs::read_to_string(&arguments[1]).unwrap_or_else(|error| {
         fail(&format!("cannot read {}: {error}", arguments[1]));
@@ -41,7 +43,7 @@ fn main() {
         fail("control-plane code must contain 1 through 4096 bytes");
     }
     let bundle = wrap_executable(&code, entries);
-    let root_image = build_initramfs();
+    let root_image = build_initramfs(&arguments[4]);
 
     let bundle_digest: [u8; 32] = Sha256::digest(&bundle).into();
     let root_digest: [u8; 32] = Sha256::digest(&root_image).into();
@@ -78,7 +80,7 @@ fn main() {
         &bundle,
         &root_image,
     );
-    let output_path = Path::new(&arguments[4]);
+    let output_path = Path::new(&arguments[5]);
     fs::write(output_path, output).unwrap_or_else(|error| {
         fail(&format!("cannot write {}: {error}", output_path.display()));
     });
@@ -89,7 +91,12 @@ fn main() {
     );
 }
 
-fn build_initramfs() -> Vec<u8> {
+fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
+    let artifacts = Path::new(linux_artifacts);
+    let linux_init = read_root_artifact(&artifacts.join("linux-linked-graph-main.elf"));
+    let linux_interpreter = read_root_artifact(&artifacts.join("ld-ginux.so"));
+    let linux_dependency = read_root_artifact(&artifacts.join("libginux.so"));
+    let linux_auxiliary = read_root_artifact(&artifacts.join("libginux-aux.so"));
     let mut archive = Vec::new();
     for (inode, mode, name, data) in [
         (1, 0o040555, "dev", &b""[..]),
@@ -102,8 +109,25 @@ fn build_initramfs() -> Vec<u8> {
     ] {
         append_newc_entry(&mut archive, inode, mode, name, data);
     }
-    append_newc_entry(&mut archive, 8, 0, "TRAILER!!!", &[]);
+    for (inode, name, data) in [
+        (8, "linux/init", linux_init.as_slice()),
+        (9, "linux/ld-ginux.so", linux_interpreter.as_slice()),
+        (10, "linux/libginux.so", linux_dependency.as_slice()),
+        (11, "linux/libginux-aux.so", linux_auxiliary.as_slice()),
+    ] {
+        append_newc_entry(&mut archive, inode, 0o100555, name, data);
+    }
+    append_newc_entry(&mut archive, 12, 0, "TRAILER!!!", &[]);
     archive
+}
+
+fn read_root_artifact(path: &Path) -> Vec<u8> {
+    fs::read(path).unwrap_or_else(|error| {
+        fail(&format!(
+            "cannot read Linux root artifact {}: {error}",
+            path.display()
+        ));
+    })
 }
 
 fn append_newc_entry(archive: &mut Vec<u8>, inode: u32, mode: u32, name: &str, data: &[u8]) {

@@ -31,23 +31,23 @@ help:
 doctor:
 	@tools/qemu/doctor.sh
 
-manifest:
+manifest: linux-probe
 	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" boot/efi/src/generated_boot.rs
+	@test -s "$(INITRAMFS)"
 
-linux-probe: manifest
+linux-probe:
 	@mkdir -p "$(dir $(LINUX_PROBE))"
 	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-kernel --target $(TARGET) $(CARGO_PROFILE_FLAG)
 	@test -f "$(LINUX_PROBE)"
-	@test -f "$(INITRAMFS)"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-main.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-graph-main.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/libginux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/libginux-aux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/ld-ginux.so"
-	@echo "Built $(LINUX_PROBE), $(LINUX_DYNAMIC_DIR), and $(INITRAMFS)"
+	@echo "Built $(LINUX_PROBE) and $(LINUX_DYNAMIC_DIR)"
 
-build: manifest linux-probe
+build: manifest
 	@echo "Building Ginux for $(TARGET) ($(PROFILE))"
 	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
 	@mkdir -p "$(dir $(EFI_DESTINATION))"

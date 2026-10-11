@@ -6,7 +6,6 @@ const VERSION: u16 = 3;
 const HEADER_SIZE: usize = 112;
 const GRANT_SIZE: usize = 16;
 const MAX_GRANTS: usize = 8;
-const MAX_ROOT_REJECTION_PROOF_SIZE: usize = 4096;
 const ALLOWED_RIGHTS: u64 = 0x0f;
 const DEVELOPMENT_PUBLIC_KEY: [u8; 32] = [
     0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
@@ -122,17 +121,12 @@ impl Manifest {
         size: usize,
         mapped_limit: usize,
     ) -> bool {
-        if !self.root_matches(pointer, size, mapped_limit)
-            || size == 0
-            || size > MAX_ROOT_REJECTION_PROOF_SIZE
-        {
+        if !self.root_matches(pointer, size, mapped_limit) || size == 0 {
             return false;
         }
         let source = unsafe { core::slice::from_raw_parts(pointer, size) };
-        let mut candidate = [0_u8; MAX_ROOT_REJECTION_PROOF_SIZE];
-        candidate[..size].copy_from_slice(source);
-        candidate[0] ^= 1;
-        !self.root_matches(candidate.as_ptr(), size, mapped_limit)
+        crypto::sha256_with_byte_xor(source, 0, 1).is_some_and(|digest| digest != self.root_sha256)
+            && !self.root_matches(pointer, size - 1, mapped_limit)
     }
 }
 

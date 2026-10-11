@@ -6,10 +6,12 @@ The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
 boot manifest. The kernel validates its measurement, normalized metadata, safe relative
 paths, uniqueness, alignment, an executable `init`, and an exact trailer while
-rejecting malformed variants during every QEMU boot. It also copies the current
-one-page archive into allocator-owned memory, verifies source independence and
-a zero tail, and builds a bounded pathname index whose offsets resolve only
-inside the owned image. A final indexed copy remains kernel-owned through
+rejecting malformed variants during every QEMU boot. The generated archive now
+contains the build-produced Linux main, interpreter, and two DSOs and is about
+73 KiB. The kernel copies it into a zeroed, contiguous 32-frame allocation,
+verifies source independence and the complete zero tail, and builds a bounded
+pathname index whose 32-bit offsets resolve only inside the owned image. A
+final indexed copy remains kernel-owned through
 shutdown and is published to the control plane as read-only capability object
 5. Control ABI v3 provides bounded probe, exact-path metadata lookup, file
 reads, and cursor-based direct-child enumeration; the ring-3 proof reads `init`
@@ -23,9 +25,11 @@ and atomic undersized-buffer rejection. The Linux `/` view enumerates every
 direct measured child, while measured `proc`, `sys`, and `tmp` nodes open as
 immutable empty directories; `dev` retains its synthetic device entries. A
 bounded dirfd-relative contract resolves `hostname` below an open `/etc` and
-shares that lookup across open, metadata, and access checks. The current
-embedded
-`init` is a format marker, not PID 1; no archive is mounted or executed yet.
+shares that lookup across open, metadata, and access checks. The current native
+`init` remains a format marker, not PID 1, but the Linux-visible `/init` and
+`/lib64/*` paths map to internal measured-root entries. The complete dynamic
+main/interpreter/two-DSO graph executes from those retained bytes. The archive
+is not yet a general mount or a system-container image.
 
 The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. A separate isolated service probes and configures link, IPv4, default-gateway, and one static-route record through the first manifest-authorized network-device contract in control ABI v2; a monotonic generation makes effective configuration changes observable and rejects stale whole-state applies. Distinct read-only and write-only services prove that observation and mutation authority can be delegated independently, and a faulted network service is retired without losing mediated state or panicking the kernel. Packet I/O and a general route table remain deliberately unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
 

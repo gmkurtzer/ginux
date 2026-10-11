@@ -21,24 +21,31 @@ Only regular files, directories, and nonempty symbolic links are admitted.
 Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
-The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, `init`, and
-`etc/hostname`. The hostname is immutable mode `0555` with exact contents
-`ginux\n`; it is the first archive file exposed through the Linux syscall
-profile.
-After validation, the current one-page proof image is copied into a newly
-allocated, zero-initialized kernel-owned frame. The boot proof requires exact
-bytes, a zero tail, allocator ownership, and no source alias. It deliberately
-mutates and restores the private copy to prove the measured boot source does
-not change, then scrubs the complete frame before releasing its lease.
+The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, the native
+`init` marker, `etc/hostname`, and four build-produced Linux ELF artifacts
+under internal `linux/*` names: the main, interpreter, primary DSO, and
+auxiliary DSO. The hostname is immutable mode `0555` with exact contents
+`ginux\n`. The ELF entries must byte-match the authenticated artifacts compiled
+into the kernel's bounded execution plan.
+
+After validation, the current roughly 73 KiB proof image is copied into a
+fixed 32-frame, 128 KiB physically contiguous kernel-owned allocation. The
+boot proof requires exact bytes, a zero tail across the remaining allocation,
+ownership of every frame, sequential physical and direct-map addresses, and no
+source alias. It deliberately mutates and restores the private copy to prove
+the measured boot source does not change, then scrubs the complete allocation
+before releasing every lease. The parser's general 16 MiB bound remains
+broader than this v0 publication capacity; images above 128 KiB fail closed
+during materialization.
 
 A second lifecycle proof constructs a fixed index of at most 16 nodes. Each
-node stores only checked name and data offsets inside the owned image; no node
+node stores only checked 32-bit name and data offsets inside the owned image; no node
 retains a pointer into the handed boot source. Exact `init` and directory
-lookups resolve into the owned frame, while missing, absolute, and traversal
-paths fail. Destroying the index scrubs and releases its image frame.
+lookups resolve into the owned allocation, while missing, absolute, and
+traversal paths fail. Destroying the index scrubs and releases all image frames.
 
 The runtime publication then materializes a third indexed copy and retains its
-frame under kernel ownership through shutdown. Signed manifest object 5 grants
+32 frames under kernel ownership through shutdown. Signed manifest object 5 grants
 the control plane `READ` authority only. Control ABI v3 operation 17 exposes a
 versioned profile probe, exact-path metadata lookup, reads of at most 64 bytes,
 and cursor-based direct-child enumeration.
@@ -49,7 +56,7 @@ requires denial through the console capability, rejects `../init`, and rejects
 a null output range without mutating the root. Root enumeration returns one
 fully staged metadata-and-name record per call, rejects regular files as
 directories, and reports end of the six-entry proof root without copying. The
-published frame remains allocator-owned after the control-plane domain exits.
+published allocation remains allocator-owned after the control-plane domain exits.
 
 The bounded Linux syscall profile resolves `/etc/hostname` directly from that
 same retained index. Its ring-3 interpreter opens the file read-only, reads and
@@ -66,14 +73,20 @@ retains its synthetic device children while its directory node comes from the
 measured root. An open `/etc` descriptor also resolves the single relative
 component `hostname` for `openat`, `newfstatat`, `faccessat`, `faccessat2`, and
 `statx`; the fixed root working directory resolves `etc/hostname`. A regular
-file descriptor is rejected as a lookup base. The
-existing `/init` Linux name remains a separately authenticated executable
-fixture until executable loading is connected to the measured root.
+file descriptor is rejected as a lookup base.
 
-The `init` data is only a format marker; it is not yet a Linux ELF executable,
-PID 1, a mounted VFS root, or a runnable container image. The bounded root view
-is not a general mount. Mount semantics,
+The Linux-visible `/init` and `/lib64/*` names resolve to the four internal
+`linux/*` entries in the same retained index. ELF parsing still uses the
+compile-time authenticated plans as an independent shape and identity check,
+but every runtime file read and mapping performed by the userspace interpreter
+is sourced from the measured root allocation. The QEMU proof executes the
+complete main/interpreter/two-DSO graph through those entries.
+
+The native `init` entry remains a format marker for the frozen control ABI
+proof; it is not PID 1. The archive-backed Linux graph is a proof workload, not
+a runnable system-container image, and the bounded root view is not a general
+mount. Mount semantics,
 ownership beyond normalized root metadata, hard links, special nodes, extended
 attributes, compression, loading the image separately from the EFI binary,
-multi-page materialization, mounts, mutable nodes, and VFS or service
+mounts, mutable nodes, and VFS or service
 publication are outside v0.
