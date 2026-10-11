@@ -83,6 +83,10 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
         crate::serial_write_bytes(b"\r\nginux: dependency-list main parse failed");
         return false;
     };
+    let Some(primary) = parse(LINKED_DYNAMIC_DEPENDENCY) else {
+        crate::serial_write_bytes(b"\r\nginux: primary dependency parse failed");
+        return false;
+    };
     let Some(auxiliary) = parse(LINKED_DYNAMIC_AUXILIARY) else {
         crate::serial_write_bytes(b"\r\nginux: auxiliary dependency parse failed");
         return false;
@@ -137,6 +141,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
     )
     .is_none();
     main.dynamic_relocations = main_dynamic;
+    let primary_tls = primary.tls;
     let valid = main.needed_libraries == [Some(PRIMARY), Some(AUXILIARY)]
         && main.dynamic_symbol == Some(b"ginux_dependency_symbol")
         && main.secondary_dynamic_symbol == Some(b"ginux_auxiliary_symbol")
@@ -161,7 +166,25 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
                     .secondary_jump_slot_relocation
                     .is_some_and(|relocation| relocation.symbol_index == 2)
         })
+        && primary.program_header_count == 6
+        && primary_tls.is_some_and(|template| {
+            template.bytes == b"DSOTLS!\n"
+                && template.memory_size == 16
+                && template.alignment == 8
+                && plan.dependencies[0].tls.is_some_and(|relocated| {
+                    relocated.bytes == template.bytes
+                        && relocated.file_offset == template.file_offset
+                        && relocated.virtual_address
+                            == template
+                                .virtual_address
+                                .checked_add(dependency_authorities[0].load_bias)
+                                .unwrap_or(0)
+                        && relocated.memory_size == template.memory_size
+                        && relocated.alignment == template.alignment
+                })
+        })
         && auxiliary.soname == Some(AUXILIARY)
+        && auxiliary.tls.is_none()
         && auxiliary.needed_libraries == [None; 2]
         && auxiliary.dynamic_symbol == Some(b"ginux_auxiliary_symbol")
         && auxiliary.dynamic_relocations.is_some_and(|dynamic| {

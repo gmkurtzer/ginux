@@ -370,7 +370,13 @@ TLS frame is zeroed and released; the live-frame count must return to its
 pre-execution value. The later bounded `arch_prctl(ARCH_SET_FS)` proof may
 replace the initial base, but is not the loader's TLS construction mechanism.
 TLS relocations, multiple TLS modules, dynamic TLS, and per-thread allocation
-remain outside this profile.
+remain outside the execution profile. The primary authenticated DSO does carry
+a second bounded `PT_TLS` template with the eight-byte `DSOTLS!\n` value,
+sixteen total bytes, and eight-byte alignment. Parsing binds it to the DSO's
+digest and `DT_SONAME`, and planning relocates its metadata by the canonical
+dependency bias. It is not yet included in the materialized static block; this
+metadata-only step makes that limitation explicit rather than ignoring a DSO
+TLS declaration.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and

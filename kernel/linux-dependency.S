@@ -77,4 +77,18 @@ ginux_dependency_init:
 .section .data,"aw",@progbits
 .Ldependency_initialized:
     .quad 0
+
+.section .tdata,"awT",@progbits
+.balign 8
+.global ginux_dependency_tls_template
+.hidden ginux_dependency_tls_template
+ginux_dependency_tls_template:
+    .ascii "DSOTLS!\n"
+
+.section .tbss,"awT",@nobits
+.balign 8
+.global ginux_dependency_tls_zero
+.hidden ginux_dependency_tls_zero
+ginux_dependency_tls_zero:
+    .space 8
 #endif

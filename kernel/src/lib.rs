@@ -614,6 +614,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded Linux dependency list validated\r\n");
     serial_write("ginux: bounded Linux dependency authority graph validated\r\n");
+    serial_write("ginux: bounded Linux dependency TLS metadata validated\r\n");
     if !linux_elf::verify_tls_template_metadata() {
         kernel_fail("ginux: bounded Linux TLS template metadata invalid\r\n");
     }

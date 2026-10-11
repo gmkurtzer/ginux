@@ -48,7 +48,10 @@ validation; the interpreter writes the initialized `TLS_OK!` value directly
 from FS-relative storage before invoking the preinitializer, while one-byte
 underflow and overflow ranges are rejected internally.
 TLS relocations, multiple modules, and per-thread allocation remain
-unimplemented.
+unimplemented at execution time. The authenticated primary DSO now carries its
+own bounded `PT_TLS` template and planning applies its canonical dependency
+bias, but the initial TLS block deliberately materializes only the main module
+until a combined layout and module-offset contract are implemented.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The
