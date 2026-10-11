@@ -50,7 +50,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
     {
         return None;
     }
-    let entries = root as *const u64;
+    let entries = direct_map_range_address(root, PAGE_SIZE)? as *const u64;
     let kernel_entry = unsafe { core::ptr::addr_of!(PML4.0).cast::<u64>().read() };
     let kernel_direct_entry = unsafe {
         core::ptr::addr_of!(PML4.0)
@@ -83,7 +83,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
     if table_address == 0 || table_address >= INITIAL_IDENTITY_LIMIT as u64 {
         return None;
     }
-    let table = table_address as *const u64;
+    let table = direct_map_range_address(table_address, PAGE_SIZE)? as *const u64;
     let code = unsafe { table.read() };
     let first_guard = unsafe { table.add(1).read() };
     let first_stack = unsafe { table.add(2).read() };
@@ -126,7 +126,7 @@ fn single_user_table_entry(table_address: u64) -> Option<u64> {
     if table_address == 0 || table_address >= INITIAL_IDENTITY_LIMIT as u64 {
         return None;
     }
-    let table = table_address as *const u64;
+    let table = direct_map_range_address(table_address, PAGE_SIZE)? as *const u64;
     let entry = unsafe { table.read() };
     (entry & (PRESENT | WRITABLE | USER) == (PRESENT | WRITABLE | USER)
         && entry & (LARGE_PAGE | NO_EXECUTE) == 0

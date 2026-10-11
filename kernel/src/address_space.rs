@@ -134,7 +134,10 @@ fn user_address_has_permissions(root: u64, address: u64, required: u64) -> bool 
     ];
     let mut table = root;
     for (level, index) in indexes.into_iter().enumerate() {
-        let entry = unsafe { ((table & ADDRESS_MASK) as *const u64).add(index).read() };
+        let Some(entries) = mapped_frame::<u64>(table & ADDRESS_MASK) else {
+            return false;
+        };
+        let entry = unsafe { entries.add(index).read() };
         if entry & (PRESENT | USER | required) != PRESENT | USER | required
             || (level == 1 || level == 2) && entry & LARGE_PAGE != 0
         {
@@ -172,18 +175,18 @@ impl AddressSpace {
         // memory and remains owned until this address space is released.
         unsafe {
             for frame in [root, user_pdpt, user_directory, user_table] {
-                zero_frame(frame);
+                zero_frame(frame)?;
             }
-            let kernel_pml4 = kernel_root as *const u64;
-            let root_entries = root as *mut u64;
+            let kernel_pml4 = mapped_frame::<u64>(kernel_root)?;
+            let root_entries = mapped_frame::<u64>(root)?;
             root_entries.write(kernel_pml4.read());
             root_entries
                 .add(1)
                 .write(user_pdpt | PRESENT | WRITABLE | USER);
             root_entries.add(256).write(kernel_pml4.add(256).read());
-            (user_pdpt as *mut u64).write(user_directory | PRESENT | WRITABLE | USER);
-            (user_directory as *mut u64).write(user_table | PRESENT | WRITABLE | USER);
-            (user_table as *mut u64).write(user_frame | PRESENT | WRITABLE | USER);
+            mapped_frame::<u64>(user_pdpt)?.write(user_directory | PRESENT | WRITABLE | USER);
+            mapped_frame::<u64>(user_directory)?.write(user_table | PRESENT | WRITABLE | USER);
+            mapped_frame::<u64>(user_table)?.write(user_frame | PRESENT | WRITABLE | USER);
         }
         Some(Self {
             root,
@@ -194,10 +197,14 @@ impl AddressSpace {
 
     fn layout_is_isolated(&self, kernel_root: u64) -> bool {
         // SAFETY: Both roots and the page-table frames reachable from this
-        // address space remain allocated and identity mapped.
+        // address space remain allocated and reachable through the direct map.
         unsafe {
-            let root = self.root as *const u64;
-            let kernel = kernel_root as *const u64;
+            let Some(root) = mapped_frame::<u64>(self.root) else {
+                return false;
+            };
+            let Some(kernel) = mapped_frame::<u64>(kernel_root) else {
+                return false;
+            };
             let kernel_entry = kernel.read();
             let direct_entry = kernel.add(256).read();
             if root.read() != kernel_entry
@@ -216,9 +223,15 @@ impl AddressSpace {
                     return false;
                 }
             }
-            let pdpt = (user_root_entry & ADDRESS_MASK) as *const u64;
-            let directory = (pdpt.read() & ADDRESS_MASK) as *const u64;
-            let table = (directory.read() & ADDRESS_MASK) as *const u64;
+            let Some(pdpt) = mapped_frame::<u64>(user_root_entry & ADDRESS_MASK) else {
+                return false;
+            };
+            let Some(directory) = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK) else {
+                return false;
+            };
+            let Some(table) = mapped_frame::<u64>(directory.read() & ADDRESS_MASK) else {
+                return false;
+            };
             table.read() & ADDRESS_MASK == self.user_frame
                 && table.read() & (PRESENT | WRITABLE | USER) == (PRESENT | WRITABLE | USER)
                 && table.add(1).read() == 0
@@ -229,7 +242,9 @@ impl AddressSpace {
         let frames = self.frames;
         unsafe {
             for frame in &frames {
-                zero_frame(frame.address());
+                if zero_frame(frame.address()).is_none() {
+                    return false;
+                }
             }
         }
         memory::release_frames(memory::FrameOwner::KERNEL, frames)
@@ -244,21 +259,25 @@ pub(crate) fn verify_isolated_user_mapping() -> bool {
     if !space.layout_is_isolated(kernel_root) {
         return false;
     }
+    let Some(user_frame) = mapped_frame::<u64>(space.user_frame) else {
+        let _ = space.release();
+        return false;
+    };
 
     // SAFETY: The new root preserves the active supervisor-only kernel entry,
     // and maps the test virtual page to its exclusively owned frame. Interrupts
     // remain disabled. The original root is restored before returning.
     let valid = unsafe {
-        (space.user_frame as *mut u64).write_volatile(0);
+        user_frame.write_volatile(0);
         activate(space.root);
         let activated = current_root() == space.root;
         cpu::with_supervisor_user_access(|| {
             (USER_TEST_ADDRESS as *mut u64).write_volatile(TEST_PATTERN);
         });
-        let aliased = (space.user_frame as *const u64).read_volatile() == TEST_PATTERN;
+        let aliased = user_frame.read_volatile() == TEST_PATTERN;
         activate(kernel_root);
         let restored = current_root() == kernel_root;
-        (space.user_frame as *mut u64).write_volatile(0);
+        user_frame.write_volatile(0);
         activated && aliased && restored
     };
     valid && space.release()
@@ -542,7 +561,10 @@ pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
     }
     unsafe {
         for frame in &frames {
-            zero_frame(frame.address());
+            if zero_frame(frame.address()).is_none() {
+                let _ = domain::bind_auxiliary_address_space(domain_id, root);
+                return false;
+            }
         }
     }
     if !memory::release_frames(owner, frames) {
@@ -1277,17 +1299,16 @@ impl WxAddressSpace {
         }
         unsafe {
             for frame in [root, pdpt, directory, table] {
-                zero_frame(frame);
+                zero_frame(frame)?;
             }
-            let root_entries = root as *mut u64;
-            root_entries.write((kernel_root as *const u64).read());
+            let root_entries = mapped_frame::<u64>(root)?;
+            let kernel_entries = mapped_frame::<u64>(kernel_root)?;
+            root_entries.write(kernel_entries.read());
             root_entries.add(1).write(pdpt | PRESENT | WRITABLE | USER);
-            root_entries
-                .add(256)
-                .write((kernel_root as *const u64).add(256).read());
-            (pdpt as *mut u64).write(directory | PRESENT | WRITABLE | USER);
-            (directory as *mut u64).write(table | PRESENT | WRITABLE | USER);
-            let entries = table as *mut u64;
+            root_entries.add(256).write(kernel_entries.add(256).read());
+            mapped_frame::<u64>(pdpt)?.write(directory | PRESENT | WRITABLE | USER);
+            mapped_frame::<u64>(directory)?.write(table | PRESENT | WRITABLE | USER);
+            let entries = mapped_frame::<u64>(table)?;
             entries.write(code | PRESENT | USER);
             entries.add(1).write(0);
             entries
@@ -1301,9 +1322,9 @@ impl WxAddressSpace {
         Some(Self {
             kernel_root,
             root,
-            code_frame: code as *mut u8,
-            first_stack_frame: first_stack as *mut u8,
-            second_stack_frame: second_stack as *mut u8,
+            code_frame: mapped_frame::<u8>(code)?,
+            first_stack_frame: mapped_frame::<u8>(first_stack)?,
+            second_stack_frame: mapped_frame::<u8>(second_stack)?,
             frames,
             owner,
         })
@@ -1311,17 +1332,28 @@ impl WxAddressSpace {
 
     fn permissions_are_valid(&self, kernel_root: u64) -> bool {
         unsafe {
-            let root = self.root as *const u64;
-            if root.read() != (kernel_root as *const u64).read()
+            let Some(root) = mapped_frame::<u64>(self.root) else {
+                return false;
+            };
+            let Some(kernel) = mapped_frame::<u64>(kernel_root) else {
+                return false;
+            };
+            if root.read() != kernel.read()
                 || root.read() & USER != 0
-                || root.add(256).read() != (kernel_root as *const u64).add(256).read()
+                || root.add(256).read() != kernel.add(256).read()
                 || root.add(256).read() & USER != 0
             {
                 return false;
             }
-            let pdpt = (root.add(1).read() & ADDRESS_MASK) as *const u64;
-            let directory = (pdpt.read() & ADDRESS_MASK) as *const u64;
-            let table = (directory.read() & ADDRESS_MASK) as *const u64;
+            let Some(pdpt) = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK) else {
+                return false;
+            };
+            let Some(directory) = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK) else {
+                return false;
+            };
+            let Some(table) = mapped_frame::<u64>(directory.read() & ADDRESS_MASK) else {
+                return false;
+            };
             let code = table.read();
             let first_guard = table.add(1).read();
             let first_stack = table.add(2).read();
@@ -1335,9 +1367,15 @@ impl WxAddressSpace {
                 && second_guard == 0
                 && second_stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == (PRESENT | WRITABLE | USER | NO_EXECUTE)
-                && code & ADDRESS_MASK == self.code_frame as u64
-                && first_stack & ADDRESS_MASK == self.first_stack_frame as u64
-                && second_stack & ADDRESS_MASK == self.second_stack_frame as u64
+                && code & ADDRESS_MASK == self.frames[4].address()
+                && first_stack & ADDRESS_MASK == self.frames[5].address()
+                && second_stack & ADDRESS_MASK == self.frames[6].address()
+                && paging::direct_map_range_address(self.frames[4].address(), PAGE_SIZE)
+                    == Some(self.code_frame as usize)
+                && paging::direct_map_range_address(self.frames[5].address(), PAGE_SIZE)
+                    == Some(self.first_stack_frame as usize)
+                && paging::direct_map_range_address(self.frames[6].address(), PAGE_SIZE)
+                    == Some(self.second_stack_frame as usize)
         }
     }
 
@@ -1360,7 +1398,9 @@ impl WxAddressSpace {
         let frames = self.frames;
         unsafe {
             for frame in &frames {
-                zero_frame(frame.address());
+                if zero_frame(frame.address()).is_none() {
+                    return false;
+                }
             }
         }
         memory::release_frames(self.owner, frames)
@@ -1379,9 +1419,17 @@ unsafe fn activate(root: u64) {
     asm!("mov cr3, {}", in(reg) root, options(nostack, preserves_flags));
 }
 
-unsafe fn zero_frame(frame: u64) {
-    let entries = frame as *mut u64;
+fn mapped_frame<T>(frame: u64) -> Option<*mut T> {
+    if !frame.is_multiple_of(PAGE_SIZE as u64) {
+        return None;
+    }
+    paging::direct_map_range_address(frame, PAGE_SIZE).map(|address| address as *mut T)
+}
+
+unsafe fn zero_frame(frame: u64) -> Option<()> {
+    let entries = mapped_frame::<u64>(frame)?;
     for index in 0..ENTRY_COUNT {
         entries.add(index).write(0);
     }
+    Some(())
 }

@@ -4,9 +4,17 @@
 
 The kernel allocates a new x86-64 PML4 and subordinate page tables from the
 persistent physical-frame allocator. PML4 entry zero shares the transitional
-kernel identity map and remains supervisor-only. A separate lower-canonical
-PML4 region contains one explicit user, writable 4 KiB mapping; every other
-entry in that region is absent.
+kernel identity map, and entry 256 shares its higher-half direct-map alias;
+both remain supervisor-only. A separate lower-canonical PML4 region contains
+one explicit user, writable 4 KiB mapping; every other entry except the shared
+direct-map entry is absent.
+
+All allocator-owned page-table and payload frames are constructed, walked,
+validated, populated, cleared, and inspected through checked higher-half
+direct-map pointers. Their leases, CR3 values, and page-table entries continue
+to carry physical addresses. The hardware alias proof writes through the user
+virtual mapping while the kernel observes the same physical frame through the
+direct map, so successful QEMU completion proves both translations agree.
 
 The QEMU gate switches CR3 to this root, verifies the user virtual address
 aliases the owned physical frame, restores the kernel root, and confirms the
@@ -96,8 +104,9 @@ userspace.
 Every scheduler-triggered CR3 load first requires the target to equal the
 current scheduler record, fall below the 4 GiB bootstrap ceiling, and have a
 bounded PML4 shape: entry zero must exactly share the kernel's supervisor-only
-identity entry, entry one must be a present writable user hierarchy, and all
-other entries must be absent. Validation follows the user hierarchy and
+identity entry, entry 256 must share its supervisor-only direct-map entry,
+entry one must be a present writable user hierarchy, and all other entries must
+be absent. Validation follows the user hierarchy through the direct map and
 requires exactly one non-large PDPT entry, one non-large directory entry, and
 the fixed code/guard/stack/guard/stack leaf layout with W^X permissions. All
 seven page-table and payload frames must be distinct, nonzero, and below 4 GiB;

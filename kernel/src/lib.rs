@@ -535,6 +535,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: control-plane W^X layout failed\r\n");
     }
     serial_write("\r\nginux: control-plane W^X mappings active");
+    serial_write("\r\nginux: address-space frames use higher-half direct map");
     if !address_space::verify_auxiliary_address_space_lifecycle() {
         kernel_fail("\r\nginux: auxiliary address-space lifecycle failed\r\n");
     }

@@ -448,6 +448,11 @@ if ! grep -q '^ginux: control-plane W\^X mappings active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: address-space frames use higher-half direct map' "$output_file"; then
+    echo "Boot test failed: address-space frame access did not use the direct map." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: auxiliary address-space transaction verified' "$output_file"; then
     echo "Boot test failed: auxiliary address-space transaction failed." >&2
     exit 1
