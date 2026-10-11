@@ -123,6 +123,18 @@ impl Table {
                 .is_some_and(|entry| entry.object == object && entry.rights.contains(rights))
     }
 
+    pub(crate) fn authority_root(&self, handle: Handle) -> Option<Handle> {
+        let mut current = handle;
+        for _ in 0..MAX_CAPABILITIES {
+            let entry = self.entry(current)?;
+            let Some(parent) = entry.parent else {
+                return Some(current);
+            };
+            current = parent;
+        }
+        None
+    }
+
     /// Revokes a capability and every capability derived from it.
     pub(crate) fn revoke(&mut self, root: Handle) -> bool {
         if self.entry(root).is_none() {
@@ -210,8 +222,10 @@ pub(crate) fn verify_authority_invariants() -> bool {
         return false;
     };
     if !table.permits(read_only, OBJECT, Rights::READ)
+        || table.authority_root(read_only) != Some(root)
         || table.permits(read_only, OBJECT, Rights::WRITE)
         || !table.revoke(root)
+        || table.authority_root(read_only).is_some()
         || table.permits(read_only, OBJECT, Rights::READ)
     {
         return false;

@@ -52,11 +52,12 @@ struct Domain {
     remaining_calls: u16,
     active_threads: u16,
     thread_limit: u16,
-    delegated_from: Option<Delegation>,
+    delegated_roots: [Option<DelegatedRoot>; MAX_BOOT_GRANTS],
 }
 
 #[derive(Clone, Copy)]
-struct Delegation {
+struct DelegatedRoot {
+    local: Handle,
     domain: DomainId,
     source: Handle,
 }
@@ -164,7 +165,7 @@ impl Manager {
             remaining_calls: CONTROL_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
-            delegated_from: None,
+            delegated_roots: [None; MAX_BOOT_GRANTS],
         });
         self.control_plane_created = true;
         self.control_plane_id = Some(id);
@@ -199,6 +200,12 @@ impl Manager {
         capabilities.seal_boot_authority();
         let mut boot_roots = [None; MAX_BOOT_GRANTS];
         boot_roots[0] = Some(root);
+        let mut delegated_roots = [None; MAX_BOOT_GRANTS];
+        delegated_roots[0] = Some(DelegatedRoot {
+            local: root,
+            domain: control_id,
+            source,
+        });
         self.generations[slot] = generation;
         self.domains[slot] = Some(Domain {
             id,
@@ -210,39 +217,46 @@ impl Manager {
             remaining_calls: SERVICE_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
-            delegated_from: Some(Delegation {
-                domain: control_id,
-                source,
-            }),
+            delegated_roots,
         });
         self.service_id = Some(id);
         Some(id)
     }
 
     fn permits(&self, id: DomainId, handle: Handle, object: u64, rights: Rights) -> bool {
+        self.permits_at_depth(id, handle, object, rights, 0)
+    }
+
+    fn permits_at_depth(
+        &self,
+        id: DomainId,
+        handle: Handle,
+        object: u64,
+        rights: Rights,
+        depth: usize,
+    ) -> bool {
+        if depth >= MAX_DOMAINS {
+            return false;
+        }
         let Some(domain) = self.domain(id) else {
             return false;
         };
         if !domain.capabilities.permits(handle, object, rights) {
             return false;
         }
-        let mut delegation = domain.delegated_from;
-        for _ in 0..MAX_DOMAINS {
-            let Some(parent) = delegation else {
-                return true;
-            };
-            let Some(parent_domain) = self.domain(parent.domain) else {
-                return false;
-            };
-            if !parent_domain
-                .capabilities
-                .permits(parent.source, object, rights)
-            {
-                return false;
-            }
-            delegation = parent_domain.delegated_from;
+        let Some(root) = domain.capabilities.authority_root(handle) else {
+            return false;
+        };
+        if let Some(parent) = domain
+            .delegated_roots
+            .iter()
+            .flatten()
+            .find(|delegation| delegation.local == root)
+        {
+            return self.permits_at_depth(parent.domain, parent.source, object, rights, depth + 1);
         }
-        false
+        self.control_plane_id == Some(id)
+            && domain.boot_roots[..domain.boot_root_count].contains(&Some(root))
     }
 }
 
@@ -366,7 +380,14 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
     let service_handle = manager.domain(service)?.boot_roots[0]?;
     let parent_handle = manager.domain(control)?.boot_roots[2]?;
     let rights = Rights::READ.union(Rights::WRITE);
-    if !manager.permits(service, service_handle, 3, rights) {
+    let service_read = manager.domains[usize::from(service.slot)]
+        .as_mut()?
+        .capabilities
+        .derive(service_handle, Rights::READ)?;
+    if !manager.permits(service, service_handle, 3, rights)
+        || !manager.permits(service, service_read, 3, Rights::READ)
+        || manager.permits(service, service_read, 3, Rights::WRITE)
+    {
         return Some(false);
     }
     manager.domains[usize::from(control.slot)]
@@ -378,7 +399,8 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
             .domain(service)?
             .capabilities
             .permits(service_handle, 3, rights)
-            && !manager.permits(service, service_handle, 3, rights),
+            && !manager.permits(service, service_handle, 3, rights)
+            && !manager.permits(service, service_read, 3, Rights::READ),
     )
 }
 

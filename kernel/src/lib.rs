@@ -335,6 +335,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: cross-domain revocation invariant failed\r\n");
     }
     serial_write("ginux: cross-domain capability revocation verified\r\n");
+    serial_write("ginux: per-root delegation provenance verified\r\n");
     if !domain::verify_lifecycle_event_invariants() {
         kernel_fail("ginux: lifecycle event queue invariant failed\r\n");
     }
