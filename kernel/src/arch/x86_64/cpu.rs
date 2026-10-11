@@ -573,8 +573,37 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
                 u64::MAX - 2
             }
         }
+        6 => console_write(capability, frame),
         _ => u64::MAX,
     }
+}
+
+fn console_write(capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::control_plane_handle_permits(capability, 2, Rights::WRITE) {
+        return u64::MAX - 2;
+    }
+    let Ok(length) = usize::try_from(frame.second_argument()) else {
+        return u64::MAX - 2;
+    };
+    if !(1..=8).contains(&length) {
+        return u64::MAX - 2;
+    }
+    let bytes = frame.first_argument().to_le_bytes();
+    let message = &bytes[..length];
+    if !message
+        .iter()
+        .all(|byte| matches!(*byte, b'\n' | b'\r' | 0x20..=0x7e))
+    {
+        return u64::MAX - 2;
+    }
+    let Ok(message) = core::str::from_utf8(message) else {
+        return u64::MAX - 2;
+    };
+    serial_write(message);
+    length as u64
 }
 
 fn runtime_result(frame: *mut UserTrapFrame, yielding: bool) -> u64 {

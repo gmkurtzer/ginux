@@ -228,8 +228,18 @@ if ! grep -q '^ginux: malformed executable containers rejected' "$output_file"; 
     exit 1
 fi
 
+if [[ "$(grep -c '^USER_OK' "$output_file")" -ne 2 ]]; then
+    echo "Boot test failed: userspace console writes were not emitted exactly twice." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: opaque capability handles enforced at call gate' "$output_file"; then
     echo "Boot test failed: opaque capability-handle enforcement failed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: userspace console capability enforced' "$output_file"; then
+    echo "Boot test failed: userspace console authority failed." >&2
     exit 1
 fi
 

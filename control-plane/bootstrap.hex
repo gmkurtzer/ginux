@@ -3,14 +3,14 @@
 b801000000
 cd80
 3dfeffffff
-755d
+0f85ab000000
 
 # mov rdi, rbx; allowed host read with host-control handle
 4889df
 b801000000
 cd80
 3d58470000
-754c
+0f8596000000
 
 # reject IPC send through a capability for the wrong object
 4889cf
@@ -18,7 +18,25 @@ cd80
 b804000000
 cd80
 3dfdffffff
-7538
+0f857e000000
+
+# reject console write through the host-control capability
+4889df
+48be555345525f4f4b0a
+ba08000000
+b806000000
+cd80
+3dfdffffff
+0f855a000000
+
+# write "USER_OK\n" through the console capability
+4889cf
+48be555345525f4f4b0a
+ba08000000
+b806000000
+cd80
+83f808
+0f8538000000
 
 # context 2 deliberately raises invalid-opcode for containment proof
 4983f902

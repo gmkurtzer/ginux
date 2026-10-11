@@ -373,7 +373,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: malformed executable containers accepted\r\n");
     }
     serial_write("\r\nginux: bounded executable container accepted");
-    serial_write("\r\nginux: malformed executable containers rejected");
+    serial_write("\r\nginux: malformed executable containers rejected\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }
@@ -394,6 +394,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
+    serial_write("\r\nginux: userspace console capability enforced");
     serial_write("\r\nginux: ring-3 fault survivor resumed and exited");
     serial_write("\r\nginux: user invalid-opcode fault contained");
     serial_write("\r\nginux: isolated scheduler address spaces switched");

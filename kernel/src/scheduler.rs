@@ -2,7 +2,7 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_THREADS: usize = 8;
-const INITIAL_SYSCALL_BUDGET: u16 = 8;
+const INITIAL_SYSCALL_BUDGET: u16 = 10;
 
 static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut RUNTIME: MaybeUninit<Runtime> = MaybeUninit::uninit();
@@ -135,6 +135,10 @@ impl UserFaultFrame {
 impl UserTrapFrame {
     pub(crate) fn first_argument(&self) -> u64 {
         self.rsi
+    }
+
+    pub(crate) fn second_argument(&self) -> u64 {
+        self.rdx
     }
 
     fn selectors_match(&self, code_selector: u16, data_selector: u16) -> bool {
@@ -557,7 +561,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.exits == 1
         && runtime.faults == 1
         && runtime.expected_fault_observed
-        && runtime.syscalls == 10
+        && runtime.syscalls == 14
         && runtime.address_space_switches == 2
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)

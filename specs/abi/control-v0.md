@@ -16,6 +16,9 @@ cooperatively yields and returns zero when the context is scheduled again.
 Operation 4 sends the `RSI` word to IPC object 3 and requires write authority;
 operation 5 receives one word and requires read authority. IPC failure returns
 `UINT64_MAX - 2`.
+Operation 6 writes one through eight packed bytes from `RSI`, with the byte
+count in `RDX`, and requires write authority on console object 2. It returns
+the byte count or `UINT64_MAX - 2` on denial or invalid input.
 Unknown operations terminate the proof program without granting an operation.
 
 At initial entry, `RBX` contains the host-control handle, `RCX` contains the
@@ -23,8 +26,9 @@ console handle, `R8` contains the IPC handle, and `R9` identifies the proof
 context. The QEMU payload first presents the console write-only handle
 and requires denial. It then presents the manifest-derived host-control handle
 and requires success. The kernel accepts the boot only after observing denial,
-authorization, rejection of an IPC call using the wrong object, a FIFO message,
-resumption after its peer's contained fault, and explicit survivor exit.
+authorization, rejection of IPC and console calls using the wrong object, two
+authorized console records, a FIFO message, resumption after its peer's
+contained fault, and explicit survivor exit.
 
 Handles encode a private table slot and generation and are meaningful only in
 the calling domain. Stale generations, out-of-range slots, and nonzero reserved
