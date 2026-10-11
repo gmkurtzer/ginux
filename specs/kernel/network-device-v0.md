@@ -7,7 +7,7 @@ development manifest grants the control plane read/write authority, and the
 kernel delegates that bounded authority to an isolated stop-only service.
 Control ABI v2 operation 16 uses `RSI` as a command and `RDX` as its argument.
 Read-authorized command 0 requires a zero reserved argument and returns a fixed
-descriptor word containing device-contract version 4, MTU 1500, and one queue.
+descriptor word containing device-contract version 5, MTU 1500, and one queue.
 Read-authorized command 1 returns zero for link down or one for link up.
 Write-authorized command 2 accepts only zero or one and changes that link state.
 Write-authorized command 3 stores one packed IPv4 address and prefix: bits 0-31
@@ -21,6 +21,12 @@ it, while a nonzero gateway must be a distinct, usable host address within the
 configured prefix. Read-authorized command 6 requires argument zero and returns
 that value. The proof rejects off-subnet `10.0.3.2`, then installs and reads
 back `10.0.2.2`.
+Read-authorized command 7 requires argument zero and returns a monotonic,
+saturating configuration generation. Effective link, IPv4, and gateway changes
+advance it; rejected writes and accepted writes of an already-current value do
+not. The ring-3 proof makes three effective changes, repeats the link-up write,
+and requires generation three. The current single-CPU call gate serializes
+mutations and observations.
 Unknown commands, nonzero
 reserved arguments, a domain ID, or any other non-capability are rejected
 before device state is observed.

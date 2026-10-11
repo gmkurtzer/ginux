@@ -272,7 +272,7 @@ can exit after exhaustion.
 Operation 16 is the v2 network-device call. It requires `READ` authority on
 network-device object 4. `RSI` is the command and `RDX` its argument. Command 0
 requires argument zero and returns the fixed discovery word
-`0x0000000105dc0004`: descriptor version 4 in bits 0-15, MTU 1500 in bits
+`0x0000000105dc0005`: descriptor version 5 in bits 0-15, MTU 1500 in bits
 16-31, and one queue in bits 32-63. Read-authorized command 1 requires argument
 zero and returns the current link-state bit. Write-authorized command 2 accepts
 only zero or one and updates that bit. Write-authorized command 3 stores a
@@ -281,11 +281,15 @@ most 32, higher bits must be zero, and address zero requires prefix zero.
 Read-authorized command 4 requires argument zero and returns the packed state.
 Write-authorized command 5 stores zero or one on-subnet, non-self, non-network,
 non-broadcast default gateway. Read-authorized command 6 requires argument zero
-and returns it.
+and returns it. Read-authorized command 7 requires argument zero and returns a
+monotonic, saturating configuration generation. Each effective link, IPv4, or
+gateway change advances the generation once; accepted no-op writes and rejected
+writes do not advance it. Calls are serialized by the current single-CPU call
+gate, so equal generations around a series of reads identify one stable state.
 Unknown commands, invalid arguments, and
 denial return `UINT64_MAX - 2`. This is a
-device-authorization skeleton only; it exposes no packets, addresses, routes,
-DMA, interrupts, or mutable network configuration.
+device-authorization skeleton only; it exposes no packets, general route table,
+DMA, interrupts, or hardware-backed configuration.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler
