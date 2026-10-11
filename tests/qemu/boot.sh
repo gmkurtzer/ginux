@@ -818,6 +818,11 @@ if ! grep -q '^ginux: Linux fixed scheduler policy validated' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux fixed process priority validated' "$output_file"; then
+    echo "Boot test failed: Linux fixed process priority was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1
