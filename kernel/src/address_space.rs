@@ -570,75 +570,28 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let Some(auxiliary_tls) = dependency_plan.dependencies[1].tls else {
         return false;
     };
-    let tls_layout = |template: crate::linux_elf::TlsTemplate<'_>| {
-        let memory_size = usize::try_from(template.memory_size).ok()?;
-        let alignment = usize::try_from(template.alignment).ok()?;
-        if memory_size == 0 || alignment == 0 || !alignment.is_power_of_two() {
-            return None;
-        }
-        let block_size = memory_size
-            .checked_add(alignment - 1)
-            .map(|size| size & !(alignment - 1))?;
-        Some((memory_size, alignment, block_size))
-    };
-    let Some((main_tls_memory_size, main_tls_alignment, main_tls_block_size)) =
-        tls_layout(main_tls)
-    else {
-        return false;
-    };
-    let Some((dependency_tls_memory_size, dependency_tls_alignment, dependency_tls_block_size)) =
-        tls_layout(dependency_tls)
-    else {
-        return false;
-    };
-    let Some((auxiliary_tls_memory_size, auxiliary_tls_alignment, auxiliary_tls_block_size)) =
-        tls_layout(auxiliary_tls)
-    else {
-        return false;
-    };
-    let place_tls = |cursor: usize, block_size: usize, alignment: usize| {
-        cursor
-            .checked_sub(block_size)
-            .map(|start| start & !(alignment - 1))
-    };
-    let Some(main_tls_start_offset) = place_tls(
+    let Some(tls_layout) = crate::linux_elf::plan_static_tls_layout(
+        main_tls,
+        [dependency_tls, auxiliary_tls],
         LINUX_TLS_THREAD_POINTER_OFFSET,
-        main_tls_block_size,
-        main_tls_alignment,
+        LINUX_TLS_TCB_SIZE,
+        PAGE_SIZE,
     ) else {
         return false;
     };
-    let Some(dependency_tls_start_offset) = place_tls(
-        main_tls_start_offset,
-        dependency_tls_block_size,
-        dependency_tls_alignment,
-    ) else {
-        return false;
-    };
-    let Some(auxiliary_tls_start_offset) = place_tls(
-        dependency_tls_start_offset,
-        auxiliary_tls_block_size,
-        auxiliary_tls_alignment,
-    ) else {
-        return false;
-    };
-    let tls_start_offset = auxiliary_tls_start_offset;
-    let combined_tls_block_size = LINUX_TLS_THREAD_POINTER_OFFSET - tls_start_offset;
-    let Some(dependency_tls_distance) =
-        LINUX_TLS_THREAD_POINTER_OFFSET.checked_sub(dependency_tls_start_offset)
-    else {
-        return false;
-    };
-    let dependency_tls_offset = 0_u64.wrapping_sub(dependency_tls_distance as u64);
-    let Some(auxiliary_tls_distance) =
-        LINUX_TLS_THREAD_POINTER_OFFSET.checked_sub(auxiliary_tls_start_offset)
-    else {
-        return false;
-    };
-    let auxiliary_tls_offset = 0_u64.wrapping_sub(auxiliary_tls_distance as u64);
-    let Some(tls_extent_size) = combined_tls_block_size.checked_add(LINUX_TLS_TCB_SIZE) else {
-        return false;
-    };
+    let main_tls_memory_size = tls_layout.main.memory_size;
+    let main_tls_alignment = tls_layout.main.alignment;
+    let main_tls_start_offset = tls_layout.main.start_offset;
+    let dependency_tls_memory_size = tls_layout.dependencies[0].memory_size;
+    let dependency_tls_alignment = tls_layout.dependencies[0].alignment;
+    let dependency_tls_start_offset = tls_layout.dependencies[0].start_offset;
+    let dependency_tls_offset = tls_layout.dependencies[0].thread_offset;
+    let auxiliary_tls_memory_size = tls_layout.dependencies[1].memory_size;
+    let auxiliary_tls_alignment = tls_layout.dependencies[1].alignment;
+    let auxiliary_tls_start_offset = tls_layout.dependencies[1].start_offset;
+    let auxiliary_tls_offset = tls_layout.dependencies[1].thread_offset;
+    let tls_start_offset = tls_layout.extent_start;
+    let tls_extent_size = tls_layout.extent_size;
     let interpreter_rx = plan.interpreter.executable;
     let interpreter_rw = plan.interpreter.writable;
     let dependency_rx = dependency_plan.dependencies[0].executable;
@@ -1007,7 +960,6 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     .read_only
                     .is_some_and(|segment| segment.writable || segment.executable)
         })
-        || combined_tls_block_size > LINUX_TLS_THREAD_POINTER_OFFSET
         || main_tls.bytes.len() > main_tls_memory_size
         || dependency_tls.bytes.len() > dependency_tls_memory_size
         || auxiliary_tls.bytes.len() > auxiliary_tls_memory_size

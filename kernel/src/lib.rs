@@ -619,6 +619,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: malformed Linux TLS relocation metadata accepted\r\n");
     }
     serial_write("ginux: bounded Linux TPOFF64 relocation metadata validated\r\n");
+    if !linux_elf::verify_static_tls_layout() {
+        kernel_fail("ginux: bounded Linux static TLS layout invalid\r\n");
+    }
+    serial_write("ginux: bounded Linux static TLS layout plan validated\r\n");
     if !linux_elf::verify_tls_template_metadata() {
         kernel_fail("ginux: bounded Linux TLS template metadata invalid\r\n");
     }

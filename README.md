@@ -60,6 +60,11 @@ loads its value from its GOT before using it as an FS-relative offset. Malformed
 types, symbol indexes, addends, alignments, and targets are rejected. TLS
 modules beyond the bounded graph, dynamic TLS, and per-thread allocation
 remain unimplemented.
+A reusable bounded planner computes each aligned block, signed thread-pointer
+offset, live extent, and TCB fit from the authenticated templates. It rejects
+zero or non-power-of-two alignments, undersized declarations, misaligned thread
+pointers, arithmetic underflow, and page overflow; the execution path consumes
+that plan rather than maintaining separate layout arithmetic.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

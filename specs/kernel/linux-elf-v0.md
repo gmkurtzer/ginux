@@ -393,6 +393,14 @@ rather than encoding them in their instruction streams. TLS modules beyond the
 bounded dependency graph, dynamic TLS, and per-thread allocation remain
 outside the execution profile.
 
+The static-TLS planner consumes the authenticated main template and two ordered
+dependency templates. It computes alignment padding, block starts, two's
+complement thread-pointer offsets, the admitted live extent, and TCB fit within
+one owned page. Zero and non-power-of-two alignments, initialized data larger
+than memory size, a thread pointer misaligned for any module, subtraction
+underflow, and a TCB extending beyond the page are rejected. Both initial
+execution and future thread allocation are required to consume this plan.
+
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
 it may describe at most 23 entries. The interpreter derives the runtime

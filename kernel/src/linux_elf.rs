@@ -366,6 +366,52 @@ pub(crate) fn verify_tls_relocation_metadata() -> bool {
         && rejected(0, 0x4040)
 }
 
+pub(crate) fn verify_static_tls_layout() -> bool {
+    let template = |bytes: &'static [u8], memory_size, alignment| TlsTemplate {
+        bytes,
+        file_offset: 0,
+        virtual_address: 0,
+        memory_size,
+        alignment,
+    };
+    let main = template(b"MAIN", 16, 8);
+    let primary = template(b"PRIMARY", 16, 8);
+    let auxiliary = template(b"AUX", 16, 8);
+    let Some(layout) = plan_static_tls_layout(main, [primary, auxiliary], 4032, 16, 4096) else {
+        return false;
+    };
+    let mixed_main = template(b"M", 9, 16);
+    let mixed_primary = template(b"P", 17, 32);
+    let mixed_auxiliary = template(b"A", 1, 8);
+    let Some(mixed) =
+        plan_static_tls_layout(mixed_main, [mixed_primary, mixed_auxiliary], 4032, 16, 4096)
+    else {
+        return false;
+    };
+    layout.main.start_offset == 4016
+        && layout.main.thread_offset == (-16_i64) as u64
+        && layout.dependencies[0].start_offset == 4000
+        && layout.dependencies[0].thread_offset == (-32_i64) as u64
+        && layout.dependencies[1].start_offset == 3984
+        && layout.dependencies[1].thread_offset == (-48_i64) as u64
+        && layout.extent_start == 3984
+        && layout.extent_size == 64
+        && mixed.main.start_offset == 4016
+        && mixed.dependencies[0].start_offset == 3968
+        && mixed.dependencies[1].start_offset == 3960
+        && mixed.extent_size == 88
+        && plan_static_tls_layout(template(b"XX", 1, 8), [primary, auxiliary], 4032, 16, 4096)
+            .is_none()
+        && plan_static_tls_layout(template(b"M", 16, 3), [primary, auxiliary], 4032, 16, 4096)
+            .is_none()
+        && plan_static_tls_layout(template(b"", 0, 8), [primary, auxiliary], 4032, 16, 4096)
+            .is_none()
+        && plan_static_tls_layout(main, [template(b"P", 4096, 8), auxiliary], 4032, 16, 4096)
+            .is_none()
+        && plan_static_tls_layout(main, [primary, auxiliary], 4031, 16, 4096).is_none()
+        && plan_static_tls_layout(main, [primary, auxiliary], 4032, 65, 4096).is_none()
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
     pub(crate) bytes: &'a [u8],
@@ -382,6 +428,82 @@ pub(crate) struct TlsTemplate<'a> {
     pub(crate) virtual_address: u64,
     pub(crate) memory_size: u64,
     pub(crate) alignment: u64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct StaticTlsBlock {
+    pub(crate) start_offset: usize,
+    pub(crate) memory_size: usize,
+    pub(crate) alignment: usize,
+    pub(crate) thread_offset: u64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct StaticTlsLayout {
+    pub(crate) main: StaticTlsBlock,
+    pub(crate) dependencies: [StaticTlsBlock; 2],
+    pub(crate) extent_start: usize,
+    pub(crate) extent_size: usize,
+}
+
+pub(crate) fn plan_static_tls_layout(
+    main: TlsTemplate<'_>,
+    dependencies: [TlsTemplate<'_>; 2],
+    thread_pointer_offset: usize,
+    tcb_size: usize,
+    page_size: usize,
+) -> Option<StaticTlsLayout> {
+    let describe = |template: TlsTemplate<'_>| {
+        let memory_size = usize::try_from(template.memory_size).ok()?;
+        let alignment = usize::try_from(template.alignment).ok()?;
+        if memory_size == 0
+            || template.bytes.len() > memory_size
+            || alignment == 0
+            || !alignment.is_power_of_two()
+        {
+            return None;
+        }
+        let block_size = memory_size
+            .checked_add(alignment - 1)
+            .map(|size| size & !(alignment - 1))?;
+        Some((memory_size, alignment, block_size))
+    };
+    let main_description = describe(main)?;
+    let dependency_descriptions = [describe(dependencies[0])?, describe(dependencies[1])?];
+    let maximum_alignment = dependency_descriptions
+        .iter()
+        .fold(main_description.1, |maximum, block| maximum.max(block.1));
+    if thread_pointer_offset > page_size
+        || thread_pointer_offset.checked_add(tcb_size)? > page_size
+        || !thread_pointer_offset.is_multiple_of(maximum_alignment)
+    {
+        return None;
+    }
+    let place = |cursor: usize, description: (usize, usize, usize)| {
+        cursor
+            .checked_sub(description.2)
+            .map(|start| start & !(description.1 - 1))
+    };
+    let main_start = place(thread_pointer_offset, main_description)?;
+    let first_start = place(main_start, dependency_descriptions[0])?;
+    let second_start = place(first_start, dependency_descriptions[1])?;
+    let block = |start: usize, description: (usize, usize, usize)| StaticTlsBlock {
+        start_offset: start,
+        memory_size: description.0,
+        alignment: description.1,
+        thread_offset: 0_u64.wrapping_sub((thread_pointer_offset - start) as u64),
+    };
+    Some(StaticTlsLayout {
+        main: block(main_start, main_description),
+        dependencies: [
+            block(first_start, dependency_descriptions[0]),
+            block(second_start, dependency_descriptions[1]),
+        ],
+        extent_start: second_start,
+        extent_size: thread_pointer_offset
+            .checked_sub(second_start)?
+            .checked_add(tcb_size)?,
+    })
 }
 
 pub(crate) struct Image<'a> {
