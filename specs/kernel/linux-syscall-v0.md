@@ -79,8 +79,14 @@ four-byte word inside the declared RW segment and returns TID 1. The bounded
 proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
 registered word;
 because this profile has no second thread or futex support, there is no waiter
-to wake. The probe finally uses `rax = 231` (`__NR_exit_group`) with `rdi = 42`
-(status).
+to wake. `rax = 273` (`__NR_set_robust_list`) registers one writable 24-byte
+robust-list head for that thread. Other lengths return `-EINVAL`, and a head
+crossing the declared writable extent returns `-EFAULT`. `rax = 274`
+(`__NR_get_robust_list`) reports the retained head and length for PID 0 or 1;
+foreign PIDs return `-ESRCH`. Both eight-byte output ranges are validated before
+either is changed. Exit discards the registration, but no robust futex traversal
+or recovery is attempted. The probe finally uses `rax = 231`
+(`__NR_exit_group`) with `rdi = 42` (status).
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;
@@ -114,8 +120,9 @@ threads, general TLS state, or any syscall other than the exact bounded
 `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential queries, the bounded process/session identity queries above,
-`set_tid_address`, `exit`, and `exit_group` calls. There is no thread
-creation, TID allocation, or clear-child-TID futex wake yet. Every other call
+`set_tid_address`, bounded robust-list registration/query, `exit`, and
+`exit_group` calls. There is no thread creation, TID allocation,
+clear-child-TID futex wake, or robust futex recovery yet. Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
 remains disarmed outside the proof. The current copy helpers cover only the one

@@ -42,6 +42,9 @@ Its initial single thread reports PID/TID/process-group/session ID 1 and parent
 PID 0, matching an initial process namespace. A bounded
 `set_tid_address` registration returns TID 1 and clears the registered word as
 part of exit.
+Bounded `set_robust_list` and `get_robust_list` calls retain and report one
+24-byte thread robust-list head, reject foreign process IDs and invalid ranges,
+and discard the registration during exit. Futex recovery is not implemented.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.

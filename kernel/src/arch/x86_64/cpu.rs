@@ -68,6 +68,8 @@ const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
+const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
+const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
@@ -86,6 +88,7 @@ const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
+const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
 
 #[repr(C, packed)]
@@ -171,6 +174,7 @@ static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -747,12 +751,14 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_BRK.store(execution.heap as u64, Ordering::SeqCst);
     ELF_PROBE_BRK_LIMIT.store(heap_limit as u64, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
+    ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
+    let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
     let mut cleared_tid = [0xff_u8; size_of::<u32>()];
     let child_tid_cleared = clear_child_tid == execution.data as u64 + LINUX_CLEAR_CHILD_TID_OFFSET
@@ -773,7 +779,13 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_BRK.store(0, Ordering::SeqCst);
     ELF_PROBE_BRK_LIMIT.store(0, Ordering::SeqCst);
-    inactive && completed && child_tid_cleared && heap_written && umask_restored && msrs_restored
+    inactive
+        && completed
+        && child_tid_cleared
+        && robust_list_cleared
+        && heap_written
+        && umask_restored
+        && msrs_restored
 }
 
 fn configure_linux_syscall() -> Option<[u64; 5]> {
@@ -1087,6 +1099,25 @@ extern "sysv64" fn linux_syscall_handler(
             ELF_PROBE_CLEAR_CHILD_TID.store(first_argument, Ordering::SeqCst);
             1
         }
+        LINUX_SET_ROBUST_LIST_SYSCALL => {
+            if buffer != LINUX_ROBUST_LIST_HEAD_SIZE as u64 {
+                return LINUX_EINVAL;
+            }
+            if !linux_writable_user_range_contains(first_argument, LINUX_ROBUST_LIST_HEAD_SIZE) {
+                return LINUX_EFAULT;
+            }
+            ELF_PROBE_ROBUST_LIST.store(first_argument, Ordering::SeqCst);
+            0
+        }
+        LINUX_GET_ROBUST_LIST_SYSCALL => {
+            if !matches!(first_argument, 0 | 1) {
+                return LINUX_ESRCH;
+            }
+            if !copy_linux_robust_list(buffer, count) {
+                return LINUX_EFAULT;
+            }
+            0
+        }
         LINUX_GETUID_SYSCALL
         | LINUX_GETGID_SYSCALL
         | LINUX_GETEUID_SYSCALL
@@ -1207,12 +1238,25 @@ extern "sysv64" fn linux_syscall_handler(
             if clear_child_tid == 0 || !copy_to_linux_user(clear_child_tid, &0_u32.to_ne_bytes()) {
                 return LINUX_EFAULT;
             }
+            ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
             ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
             LINUX_RETURN_TO_KERNEL
         }
         _ => LINUX_ENOSYS,
     }
+}
+
+fn copy_linux_robust_list(head_address: u64, size_address: u64) -> bool {
+    let word_size = size_of::<u64>();
+    if !linux_writable_user_range_contains(head_address, word_size)
+        || !linux_writable_user_range_contains(size_address, word_size)
+    {
+        return false;
+    }
+    let head = ELF_PROBE_ROBUST_LIST.load(Ordering::SeqCst).to_ne_bytes();
+    let size = (LINUX_ROBUST_LIST_HEAD_SIZE as u64).to_ne_bytes();
+    copy_to_linux_user(head_address, &head) && copy_to_linux_user(size_address, &size)
 }
 
 fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
