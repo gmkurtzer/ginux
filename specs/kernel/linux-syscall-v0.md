@@ -17,7 +17,9 @@ the copy-out, which is subject to the same declared-extent check. The probe
 checks success and the `Ginux` system name.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
-load in ring 3 verifies the original payload. The kernel saves the prior
+load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active
+base to a bounded user pointer. An invalid destination returns `-EFAULT`, and
+an unsupported operation returns `-EINVAL`; both errors are recoverable. The kernel saves the prior
 supervisor FS-base MSR before entry, restores it after exit, and reads it back.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
@@ -53,7 +55,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, output
 streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `uname`, `arch_prctl(ARCH_SET_FS)`, credential queries, `getpid`,
+`write`, `uname`, `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`, credential queries, `getpid`,
 `gettid`, `exit`, and `exit_group` calls. There is no thread creation or TID
 allocation yet. Every other call returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path

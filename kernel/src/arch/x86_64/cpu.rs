@@ -56,6 +56,7 @@ const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
+const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
@@ -1005,6 +1006,16 @@ extern "sysv64" fn linux_syscall_handler(
             unsafe { write_msr(FS_BASE_MSR, buffer) };
             0
         }
+        LINUX_ARCH_PRCTL_SYSCALL if first_argument == LINUX_ARCH_GET_FS => {
+            // SAFETY: FS base is the active thread-local value programmed by
+            // this bounded proof and restored before returning to the kernel.
+            let fs_base = unsafe { read_msr(FS_BASE_MSR) }.to_ne_bytes();
+            if !copy_to_linux_user(buffer, &fs_base) {
+                return LINUX_EFAULT;
+            }
+            0
+        }
+        LINUX_ARCH_PRCTL_SYSCALL => LINUX_EINVAL,
         LINUX_UNAME_SYSCALL => {
             let mut name = [0_u8; LINUX_UTSNAME_SIZE];
             name[..6].copy_from_slice(b"Ginux\0");

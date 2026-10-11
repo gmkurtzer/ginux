@@ -55,6 +55,29 @@ ginux_linux_probe:
     cmp rbx, rax
     jne failure
 
+    mov edi, 0x1003
+    mov esi, 0x401200
+    mov eax, 158
+    syscall
+    cmp rax, -14
+    jne failure
+
+    xor edi, edi
+    xor esi, esi
+    mov eax, 158
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 0x1003
+    mov esi, 0x401008
+    mov eax, 158
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x401008], 0x401000
+    jne failure
+
     mov edi, 0x401200
     mov eax, 63
     syscall

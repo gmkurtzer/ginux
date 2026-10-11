@@ -66,7 +66,10 @@ hand-encoded. The instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
 Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. A
 bounded `arch_prctl(ARCH_SET_FS, 0x401000)` then makes the payload available
-through an FS-relative TLS read. A bounded `uname(0x401000)` subsequently
+through an FS-relative TLS read. `ARCH_GET_FS` copies the active base back to
+the declared data segment; invalid operation and destination tests require
+`-EINVAL` and `-EFAULT` without terminating the task. A bounded
+`uname(0x401000)` subsequently
 copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 512-byte `p_memsz`, rather
