@@ -679,12 +679,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: userspace auxiliary lifecycle descriptor enforced");
     serial_write("\r\nginux: userspace auxiliary service identity enforced");
     serial_write("\r\nginux: auxiliary management authority denied");
+    if !address_space::verify_ring3_network_service() {
+        kernel_fail("\r\nginux: ring-3 network service invariant failed\r\n");
+    }
+    serial_write("\r\nginux: isolated network device probe completed");
+    serial_write("\r\nginux: network device capability revoked on exit");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }
     serial_write("\r\nginux: stop-only auxiliary fault executed and contained");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
-    serial_write("\r\nginux: control call ABI v1 negotiated");
+    serial_write("\r\nginux: control call ABI v2 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
     serial_write("\r\nginux: minimal user interrupt surface enforced");
     serial_write("\r\nginux: bounded userspace read enforced");

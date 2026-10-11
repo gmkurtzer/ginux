@@ -1,4 +1,4 @@
-include!("../../specs/abi/control-v1.rs");
+include!("../../specs/abi/control-v2.rs");
 
 pub(crate) const DISCOVERY_WORD: u64 = ((VERSION as u64) << 16) | FEATURES as u64;
 

@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 #[allow(dead_code)]
 mod control_abi {
-    include!("../../../specs/abi/control-v1.rs");
+    include!("../../../specs/abi/control-v2.rs");
 }
 
 const MAGIC: &[u8; 8] = b"GINXMNF\0";

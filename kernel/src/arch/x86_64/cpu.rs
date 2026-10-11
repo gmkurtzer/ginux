@@ -854,6 +854,18 @@ fn dispatch_charged_call(
         13 => write_ipc_delivery_descriptor(caller_domain, capability, frame),
         14 => write_lifecycle_identity_descriptor(caller_domain, capability, frame),
         15 => create_auxiliary_service(caller_domain, capability, frame),
+        16 => {
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::NETWORK_DEVICE_OBJECT,
+                Rights::READ,
+            ) {
+                control_abi::NETWORK_DEVICE_DESCRIPTOR_WORD
+            } else {
+                u64::MAX - 2
+            }
+        }
         _ => u64::MAX,
     }
 }

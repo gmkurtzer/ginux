@@ -66,4 +66,7 @@ manager invariant first rejects a batch whose second grant exceeds its source
 without creating a partial domain, then gives one test service independent IPC read/write and
 host-object read roots, revokes and reuses only the IPC parent, and requires the
 host-object root to remain valid without lending its provenance to IPC. The
-booted service remains deliberately IPC-only in this revision.
+booted supervised storage service remains deliberately IPC-only. A separate
+stop-only network skeleton receives only read authority on boot object 4,
+executes one device probe from ring 3, and proves its handle no longer resolves
+after normal retirement.

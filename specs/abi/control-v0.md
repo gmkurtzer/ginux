@@ -10,7 +10,7 @@ The measured ring-3 control-plane bundle invokes interrupt vector `0x80` with:
 - `RAX` on return: result value.
 
 Operation 0 requires no capability and returns a discovery word. Bits 16-31
-contain ABI version 1 and bits 0-15 contain its feature bitmap:
+contain ABI version 2 and bits 0-15 contain its feature bitmap:
 
 | Bit | Feature |
 |---:|---|
@@ -33,8 +33,11 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
-be silently changed within version 1; incompatible changes require a new
-version and an overlap period when practical. The scalar discovery word and
+be silently changed within a version; incompatible changes require a new
+version and an overlap period when practical. Version 2 preserves operations
+0 through 15 and adds the mandatory network-device probe at operation 16. The
+pre-release bootstrap switches atomically to v2 rather than carrying a v1
+adapter; `control-v1.rs` remains frozen as drift evidence. The scalar discovery word and
 structured descriptor are encoded from the same kernel constants so their
 version, feature bitmap, and bounded-console limit cannot drift independently.
 Those constants also drive symbolic expansion in the signed ring-3 proof
@@ -55,13 +58,13 @@ operation 5 receives one word and requires read authority. The kernel selects
 the request or reply direction from the caller's domain role, so an endpoint
 cannot receive its own outbound words. Queued words retain an internal exact
 sender-generation tag and a per-direction monotonic sequence number that are
-validated at dequeue, but operation 5 returns only the scalar value in ABI v1.
+validated at dequeue, but operation 5 returns only the scalar value in ABI v2.
 Failed enqueues do not consume sequence numbers, while intentional retirement
 cleanup can create valid gaps. IPC failure returns `UINT64_MAX - 2`.
 After queued replies are drained, operation 5 returns `UINT64_MAX - 4` once
 for each generation-tagged service closure retained by the endpoint. Closure
 records have a separate internal monotonic sequence that operation 5 does not
-expose in ABI v1.
+expose in ABI v2.
 Operation 6 writes one through eight packed bytes from `RSI`, with the byte
 count in `RDX`, and requires write authority on console object 2. It returns
 the byte count or `UINT64_MAX - 2` on denial or invalid input.
@@ -76,7 +79,7 @@ queue retains one sticky overflow notification. After the four concrete events
 are consumed, operation 7 returns event kind 2, the first dropped domain in
 bits 8-55, and a saturating dropped-record count in bits 56-63. Consuming that
 notification clears the overflow state. Concrete and summarized events carry
-an internal monotonic sequence for replay detection, but the packed ABI v1
+an internal monotonic sequence for replay detection, but the packed ABI v2
 result does not expose it.
 For a concrete service fault, the kernel retains vector, error code, fault
 address, and instruction address with the consumed record for supervision
@@ -265,6 +268,13 @@ this proof rather than deferred kernel-only inspection.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
+
+Operation 16 is the v2 network-device probe. It requires `READ` authority on
+network-device object 4 and returns the fixed discovery word
+`0x0000000105dc0001`: descriptor version 1 in bits 0-15, MTU 1500 in bits
+16-31, and one queue in bits 32-63. Denial returns `UINT64_MAX - 2`. This is a
+device-authorization skeleton only; it exposes no packets, addresses, routes,
+DMA, interrupts, or mutable network configuration.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler

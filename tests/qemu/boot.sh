@@ -568,6 +568,16 @@ if ! grep -q '^ginux: auxiliary management authority denied' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated network device probe completed' "$output_file"; then
+    echo "Boot test failed: isolated network device probe did not complete." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: network device capability revoked on exit' "$output_file"; then
+    echo "Boot test failed: network device authority survived service exit." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
     echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
     exit 1
@@ -593,7 +603,7 @@ if ! grep -q '^ginux: stop-only auxiliary fault executed and contained' "$output
     exit 1
 fi
 
-if ! grep -q '^ginux: control call ABI v1 negotiated' "$output_file"; then
+if ! grep -q '^ginux: control call ABI v2 negotiated' "$output_file"; then
     echo "Boot test failed: control call ABI negotiation failed." >&2
     exit 1
 fi
