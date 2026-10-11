@@ -82,6 +82,7 @@ struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
+static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
@@ -725,6 +726,11 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         return u64::MAX;
     }
     if service_fault
+        && (!matches!(action, RuntimeAction::Resume { .. }) || !scrub_service_restart_stack())
+    {
+        return u64::MAX;
+    }
+    if service_fault
         && (!domain::record_service_fault(fault_domain)
             || !ipc::retire_service(fault_domain)
             || !domain::retire_service(fault_domain))
@@ -732,9 +738,6 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         return u64::MAX;
     }
     if service_fault {
-        if !matches!(action, RuntimeAction::Resume { .. }) {
-            return u64::MAX;
-        }
         let Some(replacement_domain) = domain::initialize_boot_service() else {
             return u64::MAX;
         };
@@ -755,6 +758,40 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         }
     }
     resume_action(action)
+}
+
+fn scrub_service_restart_stack() -> bool {
+    const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
+    let Some((root, stack_top)) = scheduler::service_restart_stack_mapping() else {
+        return false;
+    };
+    let active_root: u64;
+    unsafe {
+        asm!("mov {}, cr3", out(reg) active_root, options(nomem, nostack, preserves_flags));
+    }
+    let Some(stack_base) = stack_top.checked_sub(PAGE_SIZE as u64) else {
+        return false;
+    };
+    if active_root & ADDRESS_MASK != root || stack_top % PAGE_SIZE as u64 != 0 || stack_base == 0 {
+        return false;
+    }
+    let stack = stack_base as *mut u8;
+    unsafe {
+        for offset in 0..PAGE_SIZE {
+            stack.add(offset).write_volatile(0);
+        }
+        for offset in 0..PAGE_SIZE / size_of::<u64>() {
+            if stack.cast::<u64>().add(offset).read_volatile() != 0 {
+                return false;
+            }
+        }
+    }
+    SERVICE_STACK_SCRUBBED.store(true, Ordering::Release);
+    true
+}
+
+pub(crate) fn service_restart_stack_was_scrubbed() -> bool {
+    SERVICE_STACK_SCRUBBED.load(Ordering::Acquire)
 }
 
 fn resume_action(action: RuntimeAction) -> u64 {

@@ -49,6 +49,12 @@ same stack virtual address. Scheduler dispatch reloads CR3 on the preemption
 and later cross-context transitions and reads it back before returning to
 userspace.
 
+The one bounded service restart retains the service address space and immutable
+code mapping, but not its writable stack contents. While the failed service CR3
+is still active, the exception path clears and verifies the entire stack page
+before a replacement domain or context is created. General mutable-region
+inventory and fresh-address-space restart remain future work.
+
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate
 manifest-derived grant succeeds.

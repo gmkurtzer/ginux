@@ -609,6 +609,11 @@ pub(crate) fn queue_service_restart(domain: u64, ipc_handle: u64) -> bool {
     true
 }
 
+pub(crate) fn service_restart_stack_mapping() -> Option<(u64, u64)> {
+    let context = runtime_mut()?.service_restart_context;
+    Some((context.address_space_root, context.rsp))
+}
+
 pub(crate) fn current_domain() -> Option<u64> {
     let runtime = runtime_mut()?;
     let current = runtime.scheduler.current?;

@@ -437,6 +437,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     if !domain::domain_is_retired(service_domain)
         || !domain::service_fault_was_delivered(service_domain)
+        || !arch::x86_64::cpu::service_restart_stack_was_scrubbed()
         || !domain::call_budget_proof_complete()
         || !domain::thread_budget_proof_complete()
         || domain::handle_permits(
@@ -478,6 +479,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: service fault event delivered to control plane");
     serial_write("\r\nginux: service fault event generation matched");
     serial_write("\r\nginux: service domain generation reuse verified");
+    serial_write("\r\nginux: failed service stack scrubbed before restart");
     serial_write("\r\nginux: replacement service context executed");
     serial_write("\r\nginux: per-domain syscall budgets enforced");
     serial_write("\r\nginux: per-domain thread budgets enforced");

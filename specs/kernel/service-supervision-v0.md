@@ -35,7 +35,11 @@ bits and the generation-tagged domain ID occupies the next 48 bits.
 After the fault, the kernel creates one replacement domain generation with the
 same IPC-only delegation, explicitly rebinds the service side of the IPC
 endpoint to that generation, and queues a fresh context on the retained
-service address space. Requests left for the failed generation are cleared;
+service address space. Before creating that generation, the fault path verifies
+that the failed service's CR3 is still active, clears every byte of the retained
+user stack page with volatile writes, and reads the full page back as zero.
+Replacement creation fails closed if this scrub cannot be completed. Requests
+left for the failed generation are cleared;
 its already-produced reply remains available to the control client. The kernel
 rearms the APIC one-shot, returns to the client, and then
 preempts that client to run the replacement. The replacement negotiates ABI
