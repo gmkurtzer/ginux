@@ -15,19 +15,23 @@ ginux_linux_probe:
     jz static_relocation_state
     cmp rax, 0x600000
     jne failure
-    cmp qword ptr [0x404100], 0x400100
+    cmp qword ptr [0x405100], 0x400100
     jne failure
-    cmp qword ptr [0x404108], 0x400100
+    cmp qword ptr [0x405108], 0x610100
     jne failure
-    cmp qword ptr [0x404110], 0x400100
+    cmp qword ptr [0x405110], 0x610100
+    jne failure
+    call qword ptr [0x405110]
+    movabs rcx, 0x59434e45444e4947
+    cmp rax, rcx
     jne failure
     jmp valid_interpreter_base
 static_relocation_state:
-    cmp qword ptr [0x404100], 0
+    cmp qword ptr [0x405100], 0
     jne failure
-    cmp qword ptr [0x404108], 0
+    cmp qword ptr [0x405108], 0
     jne failure
-    cmp qword ptr [0x404110], 0
+    cmp qword ptr [0x405110], 0
     jne failure
 valid_interpreter_base:
     cmp qword ptr [rsp + 128], 0

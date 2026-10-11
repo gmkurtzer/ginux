@@ -10,29 +10,34 @@ writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
 `PT_GNU_STACK`, bounded `PT_INTERP`, and one- to three-entry relocation
 `PT_DYNAMIC` declarations. The symbol profile validates a two-entry symbol-table
-prefix, bounded string table, one-bucket/two-chain SysV `DT_HASH`, and one global function symbol used by
-`R_X86_64_GLOB_DAT` and `R_X86_64_JUMP_SLOT`.
+prefix, bounded string table, one-bucket/two-chain SysV `DT_HASH`, and one
+global function symbol used by `R_X86_64_GLOB_DAT` and
+`R_X86_64_JUMP_SLOT`. The interpreted proof admits exactly one `DT_NEEDED`
+name. Its undefined main-image symbol is matched to the same defined symbol in
+one authenticated `ET_DYN` dependency.
 Images whose expanded
 program-header table covers the entry point are rejected. A bounded proof maps
-a resolved `ET_EXEC` main image and relocated `ET_DYN` interpreter into separate
-W^X regions, builds the dynamic startup stack, and enters the interpreter first.
+a resolved `ET_EXEC` main image, relocated `ET_DYN` interpreter, and one
+relocated dependency into separate W^X regions, builds the dynamic startup
+stack, and enters the interpreter first.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
-relocation plus the main image's relative and symbol-based relocations, and then
-transfers control to the main entry. The main workload requires all relocated
-values before the full
+relocation plus the main image's relative and symbol-based relocations. The
+symbol relocations resolve to the authenticated dependency, and the interpreter
+then transfers control to the main entry. The main workload calls through the
+resolved jump slot and requires all relocated values before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
 target. The kernel then restores its root and scrubs every owned frame.
-The build rejects unresolved ELF relocation records in both raw embedded text
-payloads before extracting their bytes.
-Interpreter selection binds the exact `PT_INTERP` path and SHA-256
-digest before parsing or mapping. A production authority source, relocation,
-and general dynamic linking remain unimplemented. Malformed dynamic tables,
+The build rejects unresolved ELF relocation records in all three raw embedded
+text payloads before extracting their bytes.
+Interpreter and dependency selection bind the exact `PT_INTERP` path or
+`DT_NEEDED` name and SHA-256 digest before parsing or mapping. A production
+authority source and general dynamic linking remain unimplemented. Malformed dynamic tables,
 duplicate tags, unsupported relocations, and relocation targets outside writable memory
 are rejected before mapping.
 The static planner also rejects any image carrying dynamic relocation metadata,
 so unresolved code cannot bypass interpreter-first startup.
-The execution-oriented main plan keeps its five-header table in a distinct
+The execution-oriented main plan keeps its six-header table in a distinct
 read-only load so its `0x400100` entry remains intact.
 The profile is validated during boot,
 plans and installs up to two RX/RW pages per segment with independently
@@ -134,13 +139,17 @@ execution planning binds an exact `PT_INTERP` path to a non-overlapping relocate
 interpreter image while preserving distinct initial-entry, `AT_ENTRY`, and
 `AT_BASE` values. The bounded synthetic interpreter-first execution path is
 verified, including rejection of substituted, mutated, and truncated interpreter
-bytes. Synthetic userspace relative relocations are executed for both the
-interpreter and main image. The main image additionally proves direct symbol-index
-resolution through `R_X86_64_GLOB_DAT` and eager `R_X86_64_JUMP_SLOT` writes;
-the userspace interpreter also verifies that the relocation's symbol index is
-the admitted hash bucket result. General multi-bucket lookup, lazy binding,
-dependency graphs, symbol interposition, and a real userspace linker remain
-outside the profile.
+bytes. The dependency is independently authenticated by exact name and digest,
+mapped W^X at a non-overlapping bias, and rejected if it requests another
+dependency. Synthetic userspace relative relocations are executed for the
+interpreter and main image. The main image additionally proves one cross-object
+symbol resolution through `R_X86_64_GLOB_DAT` and eager
+`R_X86_64_JUMP_SLOT`; the jump slot is called in ring 3 and returns a checked
+value from dependency code. The userspace interpreter verifies that the
+relocation's symbol index is the admitted SysV hash bucket result in both
+objects. Multiple dependencies, transitive graphs, search paths, SONAME and
+symbol-version processing, interposition, multi-bucket lookup, lazy binding,
+and a real userspace linker remain outside the profile.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and
@@ -186,6 +195,10 @@ proof-workload ABI constants share the machine-readable
 `specs/abi/control-v2.rs` source, and the manifest builder expands its symbolic
 feature and descriptor words before signing. The checked-in key is an RFC test
 identity and must not be treated as a production trust root.
+
+The interpreter and dependency proof payloads are assembled from
+`kernel/linux-interpreter.S` and `kernel/linux-dependency.S` under separate
+bounded text-size and unresolved-relocation checks.
 
 The result is placed at:
 

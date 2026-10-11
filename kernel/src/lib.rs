@@ -584,8 +584,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded multi-page Linux ELF plan verified\r\n");
     serial_write("ginux: bounded Linux ET_DYN load bias validated\r\n");
+    if !linux_elf::verify_interpreted_plan() {
+        kernel_fail("ginux: authenticated Linux dependency plan invalid\r\n");
+    }
     serial_write("ginux: bounded Linux interpreter resolution plan validated\r\n");
     serial_write("ginux: measured Linux interpreter bytes enforced\r\n");
+    serial_write("ginux: authenticated Linux dependency bytes enforced\r\n");
     if !linux_elf::verify_dynamic_relocation_rejections() {
         kernel_fail("ginux: malformed Linux dynamic relocation metadata accepted\r\n");
     }
@@ -613,12 +617,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
     serial_write("ginux: separate-header interpreted Linux mapping verified\r\n");
+    serial_write("ginux: Linux dependency W^X mapping verified\r\n");
     serial_write("ginux: interpreter-first Linux ring-3 entry verified\r\n");
     serial_write("ginux: userspace Linux interpreter self-relocation applied\r\n");
     serial_write("ginux: userspace Linux relative relocation applied\r\n");
     serial_write("ginux: userspace Linux GLOB_DAT relocation applied\r\n");
     serial_write("ginux: userspace Linux JUMP_SLOT relocation applied\r\n");
     serial_write("ginux: userspace Linux hash bucket resolution applied\r\n");
+    serial_write("ginux: userspace Linux cross-object symbol resolved\r\n");
+    serial_write("ginux: Linux JUMP_SLOT dependency call executed\r\n");
     serial_write("ginux: metadata-driven Linux relative relocations applied\r\n");
     serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
     serial_write("ginux: Linux proof workload assembled from source\r\n");

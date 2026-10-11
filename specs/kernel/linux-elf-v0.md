@@ -113,7 +113,14 @@ the exact `PT_INTERP` path to a SHA-256 digest. The kernel requires both to matc
 the resolved bytes before it parses, plans, maps, or executes the interpreter;
 wrong-path, wrong-digest, mutated, and truncated candidates are rejected. The
 authority record is currently a synthetic proof input rather than a
-production-signed package manifest. The parser also accepts one bounded
+production-signed package manifest. An interpreted main image may additionally
+name exactly one dependency with `DT_NEEDED`. A dependency authority record
+binds that exact string to a SHA-256 digest and fixed page-aligned load bias.
+The kernel authenticates the bytes before parsing or mapping the dependency,
+requires a non-interpreted `ET_DYN` image with no nested `DT_NEEDED`, and rejects
+page-granular overlap among all main, interpreter, and dependency loads. Wrong
+names, wrong digests, truncation, and an overlapping dependency bias are
+rejected. The parser also accepts one bounded
 `PT_DYNAMIC` table containing one, two, or three `DT_RELA` records, its exact
 size and 24-byte entry size, and a terminating `DT_NULL`. The first record must
 be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must
@@ -124,8 +131,11 @@ chain terminators must be zero. The kernel computes the symbol-name ELF hash to
 select that bucket rather than trusting a fixed table offset. The second record
 must be `R_X86_64_GLOB_DAT`, use
 symbol index one, have a zero addend, and reference a global/default-visible
-defined function symbol whose value and size remain inside the executable
-load. A third record must be `R_X86_64_JUMP_SLOT`, reference the same symbol,
+function symbol. A self-contained image must define it with a value and size
+inside the executable load. An interpreted main image with `DT_NEEDED` must
+instead leave it undefined with zero value and size; the authenticated
+dependency must define the same name and may not name another dependency. A
+third record must be `R_X86_64_JUMP_SLOT`, reference the same symbol,
 carry a zero addend, and use a third distinct writable target. This profile
 performs eager binding; it does not install or invoke a lazy resolver. The
 validated symbol-table prefix is exactly two entries for this proof:
@@ -150,8 +160,9 @@ static runtime stack is now populated by a single bounded auxiliary-vector
 encoder using that common contract, and the interpreted proof checks the exact
 word positions of its dynamic values. A bounded execution proof installs the
 main image's read-only/NX header page, four RX pages, and two RW/NX pages plus
-the interpreter's RX and RW/NX pages in three independently cloned 2 MiB leaf
-regions. It also owns bounded heap, stack, and two `mmap` payload frames. The
+the interpreter's and dependency's separate RX and RW/NX pages in three
+independently cloned 2 MiB leaf regions. It also owns bounded heap, stack, and
+two `mmap` payload frames. The
 proof validates permissions, the intact main entry, and image contents through
 the activated user root, constructs the dynamic-process stack with the common
 auxiliary-vector encoder, and enters the relocated interpreter at `0x600100`.
@@ -160,25 +171,25 @@ its page-aligned load bias and scans each bounded dynamic table for the admitted
 relocation, symbol-table, and hash-table tags rather than depending on tag order or embedding
 their values in its instructions. It first writes the load-biased value `0x601234` to its writable
 relocation target `0x603080`, then writes the admitted main-image relative
-relocation value `0x400100` to the writable target `0x404100`. It then reads
-the admitted main symbol and hash-table addresses, requires the encoded
-relocation index to equal the selected SysV hash bucket, and applies
-`R_X86_64_GLOB_DAT` value `0x400100` at `0x404108`
-and eager `R_X86_64_JUMP_SLOT` value `0x400100` at `0x404110` before jumping to
-the main entry at `0x400100`. The main workload requires all three relocated values for a dynamic startup and requires
+relocation value `0x400100` to the RELRO target `0x405100`. It reads the main
+and dependency symbol and hash-table addresses, requires symbol index one to be
+the selected SysV hash bucket in both objects, and resolves the undefined main
+symbol to the dependency entry at `0x610100`. It writes that value through
+`R_X86_64_GLOB_DAT` at `0x405108` and eager `R_X86_64_JUMP_SLOT` at `0x405110`
+before jumping to the main entry at `0x400100`. The main workload calls the
+dependency through the jump slot, checks its return value, requires all three relocated values for a dynamic startup, and requires
 untouched zero targets for each static startup; after it exits, the kernel also
 validates the interpreter's relocated target through the still-active user root.
-Because the build embeds raw `.text` rather than linking these two proof
+Because the build embeds raw `.text` rather than linking these three proof
 payloads, it parses each assembler object and rejects any nonempty `SHT_REL` or
 `SHT_RELA` section targeting `.text` before extracting the bytes.
 The complete ring-3 probe therefore runs with dynamic `AT_BASE`,
 main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
-restores its own root and scrubs and releases all nineteen page-table and
-payload frames. The direct relocation symbol index is already bound by the
-validated metadata; this profile does not yet perform general multi-bucket or
-cross-object name lookup, lazy binding, symbol interposition, versioning,
-process dependency graphs, execute a general-purpose
-dynamic linker, or support glibc.
+restores its own root and scrubs and releases all twenty-one page-table and
+payload frames. This profile performs one exact cross-object name match; it
+does not support multiple dependencies, transitive dependency graphs, search
+paths, `SONAME`, symbol versions, interposition, general multi-bucket lookup,
+lazy binding, a general-purpose dynamic linker, or glibc.
 
 ## Page-image plan
 

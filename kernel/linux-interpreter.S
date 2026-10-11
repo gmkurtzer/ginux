@@ -23,7 +23,7 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], rdx
 
     mov edi, 0x404008
-    mov ecx, 9
+    mov ecx, 10
     xor eax, eax
     xor esi, esi
     xor r8d, r8d
@@ -42,6 +42,24 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     test r8, r8
     jz .Linvalid_dynamic
+
+    mov edi, 0x613008
+    mov ecx, 9
+    xor r9d, r9d
+    xor r10d, r10d
+.Lscan_dependency_dynamic:
+    cmp qword ptr [rdi], 6
+    cmove r9, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 4
+    cmove r10, qword ptr [rdi + 8]
+    add rdi, 16
+    loop .Lscan_dependency_dynamic
+    test r9, r9
+    jz .Linvalid_dynamic
+    test r10, r10
+    jz .Linvalid_dynamic
+    add r9, 0x610000
+    add r10, 0x610000
     mov rcx, qword ptr [rax]
     mov rdx, qword ptr [rax + 16]
     mov qword ptr [rcx], rdx
@@ -51,9 +69,12 @@ ginux_linux_interpreter:
     shr rdx, 32
     cmp edx, dword ptr [r8 + 8]
     jne .Linvalid_dynamic
+    cmp edx, dword ptr [r10 + 8]
+    jne .Linvalid_dynamic
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
-    mov rdx, qword ptr [rsi + rdx + 8]
+    mov rdx, qword ptr [r9 + rdx + 8]
+    add rdx, 0x610000
     add rdx, qword ptr [rax + 40]
     mov qword ptr [rcx], rdx
 
@@ -62,7 +83,8 @@ ginux_linux_interpreter:
     shr rdx, 32
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
-    mov rdx, qword ptr [rsi + rdx + 8]
+    mov rdx, qword ptr [r9 + rdx + 8]
+    add rdx, 0x610000
     add rdx, qword ptr [rax + 64]
     mov qword ptr [rcx], rdx
 

@@ -598,6 +598,11 @@ if ! grep -q '^ginux: measured Linux interpreter bytes enforced' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: authenticated Linux dependency bytes enforced' "$output_file"; then
+    echo "Boot test failed: authenticated Linux dependency bytes were not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux relative relocation metadata validated' "$output_file"; then
     echo "Boot test failed: bounded Linux relative relocation metadata was not validated." >&2
     exit 1
@@ -643,6 +648,11 @@ if ! grep -q '^ginux: separate-header interpreted Linux mapping verified' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux dependency W^X mapping verified' "$output_file"; then
+    echo "Boot test failed: Linux dependency W^X mapping was not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: interpreter-first Linux ring-3 entry verified' "$output_file"; then
     echo "Boot test failed: interpreter-first Linux ring-3 entry was not verified." >&2
     exit 1
@@ -670,6 +680,16 @@ fi
 
 if ! grep -q '^ginux: userspace Linux hash bucket resolution applied' "$output_file"; then
     echo "Boot test failed: userspace Linux hash bucket resolution was not applied." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: userspace Linux cross-object symbol resolved' "$output_file"; then
+    echo "Boot test failed: userspace Linux cross-object resolution was not verified." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux JUMP_SLOT dependency call executed' "$output_file"; then
+    echo "Boot test failed: the resolved Linux dependency call was not executed." >&2
     exit 1
 fi
 

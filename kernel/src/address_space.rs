@@ -535,10 +535,11 @@ pub(crate) fn verify_linux_elf_mapping(
 }
 
 pub(crate) fn verify_interpreted_elf_mapping(
-    plan: &crate::linux_elf::InterpretedLoadPlan<'_, '_>,
+    dependency_plan: &crate::linux_elf::DependencyLoadPlan<'_, '_, '_>,
     protected_start: u64,
     protected_size: usize,
 ) -> bool {
+    let plan = &dependency_plan.process;
     let Some(main_ro) = plan.main.read_only else {
         return false;
     };
@@ -546,10 +547,21 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let main_rw = plan.main.writable;
     let interpreter_rx = plan.interpreter.executable;
     let interpreter_rw = plan.interpreter.writable;
+    let dependency_rx = dependency_plan.dependency.executable;
+    let dependency_rw = dependency_plan.dependency.writable;
     let Some(relro) = plan.main.relro else {
         return false;
     };
     let Some(interpreter_dynamic) = plan.interpreter.dynamic_relocations else {
+        return false;
+    };
+    let Some(main_dynamic) = plan.main.dynamic_relocations else {
+        return false;
+    };
+    let (Some(main_symbol), Some(main_jump_slot)) = (
+        main_dynamic.symbol_relocation,
+        main_dynamic.jump_slot_relocation,
+    ) else {
         return false;
     };
     let Some(interpreter_relocation_value) = plan
@@ -583,6 +595,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let main_rw_indexes = indexes(main_rw.virtual_page);
     let interpreter_indexes = indexes(interpreter_rx.virtual_page);
     let interpreter_rw_indexes = indexes(interpreter_rw.virtual_page);
+    let dependency_indexes = indexes(dependency_rx.virtual_page);
+    let dependency_rw_indexes = indexes(dependency_rw.virtual_page);
     let heap_indexes = indexes(heap_virtual_page);
     let stack_indexes = indexes(stack_virtual_page);
     let mmap_indexes = indexes(mmap_virtual_page);
@@ -606,12 +620,19 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || main_rw.page_count != 2
         || interpreter_rx.page_count != 1
         || interpreter_rw.page_count != 1
+        || dependency_plan.dependency.read_only.is_some()
+        || dependency_rx.page_count != 1
+        || dependency_rw.page_count != 1
         || main_ro_indexes[..2] != main_indexes[..2]
         || main_indexes[..2] != interpreter_indexes[..2]
         || main_ro_indexes[2] == main_indexes[2]
         || main_ro_indexes[2] == interpreter_indexes[2]
         || main_indexes[..3] != main_rw_indexes[..3]
         || interpreter_indexes[..3] != interpreter_rw_indexes[..3]
+        || interpreter_indexes[..3] != dependency_indexes[..3]
+        || dependency_indexes[..3] != dependency_rw_indexes[..3]
+        || interpreter_indexes[3] == dependency_indexes[3]
+        || interpreter_rw_indexes[3] == dependency_rw_indexes[3]
         || main_indexes[2] == interpreter_indexes[2]
         || main_indexes[0] != 0
         || main_indexes[1] != 0
@@ -620,6 +641,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || main_rw_indexes[3] + main_rw.page_count > ENTRY_COUNT
         || interpreter_indexes[3] + interpreter_rx.page_count > ENTRY_COUNT
         || interpreter_rw_indexes[3] + interpreter_rw.page_count > ENTRY_COUNT
+        || dependency_indexes[3] + dependency_rx.page_count > ENTRY_COUNT
+        || dependency_rw_indexes[3] + dependency_rw.page_count > ENTRY_COUNT
         || heap_virtual_page == 0
         || stack_virtual_page == 0
         || mmap_virtual_page == 0
@@ -633,6 +656,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || overlaps_protected(main_rw)
         || overlaps_protected(interpreter_rx)
         || overlaps_protected(interpreter_rw)
+        || overlaps_protected(dependency_rx)
+        || overlaps_protected(dependency_rw)
         || [
             heap_virtual_page,
             stack_virtual_page,
@@ -651,15 +676,19 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || !interpreter_rx.executable
         || !interpreter_rw.writable
         || interpreter_rw.executable
+        || dependency_rx.writable
+        || !dependency_rx.executable
+        || !dependency_rw.writable
+        || dependency_rw.executable
     {
         return false;
     }
 
-    let Some(frames) = memory::allocate_frames::<19>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<21>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, main_ro_page, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page] =
+    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, main_ro_page, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data, dependency_page, dependency_data, heap_page, stack_page, mmap_page, mmap_tail_page] =
         addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
@@ -735,6 +764,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 (main_rw, 1, main_data_tail),
                 (interpreter_rx, 0, interpreter_page),
                 (interpreter_rw, 0, interpreter_data),
+                (dependency_rx, 0, dependency_page),
+                (dependency_rw, 0, dependency_data),
             ];
             for (segment, page, frame) in payloads {
                 let bytes = &mut *(mapped_frame::<u8>(frame)? as *mut [u8; PAGE_SIZE]);
@@ -774,6 +805,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
             interpreter_entries
                 .add(interpreter_rw_indexes[3])
                 .write(interpreter_data | flags(interpreter_rw));
+            interpreter_entries
+                .add(dependency_indexes[3])
+                .write(dependency_page | flags(dependency_rx));
+            interpreter_entries
+                .add(dependency_rw_indexes[3])
+                .write(dependency_data | flags(dependency_rw));
             main_entries
                 .add(heap_indexes[3])
                 .write(heap_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
@@ -836,6 +873,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 && interpreter_entries.add(interpreter_rw_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == PRESENT | USER | WRITABLE | NO_EXECUTE
+                && interpreter_entries.add(dependency_indexes[3]).read()
+                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == PRESENT | USER
+                && interpreter_entries.add(dependency_rw_indexes[3]).read()
+                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == PRESENT | USER | WRITABLE | NO_EXECUTE
                 && main_entries.add(heap_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == PRESENT | USER | WRITABLE | NO_EXECUTE
@@ -861,6 +904,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && (plan.initial_entry as *const u8).read_volatile() == 0x48
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
+                        && (dependency_rx.virtual_address as *const u8).read_volatile() == 0x7f
+                        && (dependency_plan.dependency.entry as *const u8).read_volatile() == 0x48
+                        && (dependency_rw.virtual_address as *const u64).read_volatile()
+                            == u64::from_le_bytes(*b"LIBRARY!")
                 });
             let executed = observed
                 && cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
@@ -883,12 +930,20 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 (interpreter_dynamic.relocation_target as *const u64).read_volatile()
                     == interpreter_relocation_value
             });
+            let main_relocated = cpu::with_supervisor_user_access(|| {
+                (main_dynamic.relocation_target as *const u64).read_volatile() == plan.main.entry
+                    && (main_symbol.target as *const u64).read_volatile()
+                        == dependency_plan.dependency.entry
+                    && (main_jump_slot.target as *const u64).read_volatile()
+                        == dependency_plan.dependency.entry
+            });
             activate(kernel_root_physical);
             Some(
                 permissions_valid
                     && executed
                     && mapping_removed
                     && interpreter_relocated
+                    && main_relocated
                     && current_root() == kernel_root_physical,
             )
         }

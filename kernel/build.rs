@@ -5,11 +5,13 @@ const LINUX_PROBE_ENTRY_OFFSET: usize = 0x100;
 const LINUX_PROBE_EXECUTABLE_PAGES: usize = 4;
 const LINUX_PROBE_MAX_TEXT_SIZE: usize =
     LINUX_PROBE_EXECUTABLE_PAGES * PAGE_SIZE - LINUX_PROBE_ENTRY_OFFSET;
-const LINUX_INTERPRETER_MAX_TEXT_SIZE: usize = 256;
+const LINUX_INTERPRETER_MAX_TEXT_SIZE: usize = 384;
+const LINUX_DEPENDENCY_MAX_TEXT_SIZE: usize = 64;
 
 fn main() {
     println!("cargo:rerun-if-changed=linux-probe.S");
     println!("cargo:rerun-if-changed=linux-interpreter.S");
+    println!("cargo:rerun-if-changed=linux-dependency.S");
     println!("cargo:rerun-if-changed=linux-probe.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
@@ -74,6 +76,41 @@ fn main() {
     );
     fs::write(output.join("linux-interpreter.bin"), interpreter_text)
         .expect("failed to write Linux interpreter bytes");
+
+    let dependency_object = output.join("linux-dependency.o");
+    let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
+    let status = Command::new(clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-c",
+            "linux-dependency.S",
+            "-o",
+        ])
+        .arg(&dependency_object)
+        .status()
+        .expect("failed to run clang for Linux dependency");
+    assert!(
+        status.success(),
+        "clang failed to assemble Linux dependency"
+    );
+    let dependency_elf =
+        fs::read(&dependency_object).expect("failed to read Linux dependency object");
+    let dependency_text = elf_section(&dependency_elf, b".text")
+        .expect("Linux dependency object has no .text section");
+    assert!(
+        !elf_section_has_relocations(&dependency_elf, b".text")
+            .expect("failed to inspect Linux dependency relocations"),
+        "Linux dependency .text contains unresolved relocations"
+    );
+    assert!(
+        dependency_text.len() <= LINUX_DEPENDENCY_MAX_TEXT_SIZE,
+        "Linux dependency .text is {} bytes; the bounded profile permits at most {} bytes",
+        dependency_text.len(),
+        LINUX_DEPENDENCY_MAX_TEXT_SIZE
+    );
+    fs::write(output.join("linux-dependency.bin"), dependency_text)
+        .expect("failed to write Linux dependency bytes");
 
     let linked = output.join("linux-probe.elf");
     let link_script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
