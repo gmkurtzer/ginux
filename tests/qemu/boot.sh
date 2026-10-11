@@ -448,6 +448,11 @@ if ! grep -q '^ginux: auxiliary address-space ownership retained' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary runtime teardown path connected' "$output_file"; then
+    echo "Boot test failed: auxiliary runtime teardown was not connected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded executable container accepted' "$output_file"; then
     echo "Boot test failed: the executable container was not accepted." >&2
     exit 1

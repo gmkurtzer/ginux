@@ -747,10 +747,16 @@ impl Manager {
     }
 
     fn retire_faulted_auxiliary_service(&mut self, id: DomainId, fault: FaultMetadata) -> bool {
-        self.begin_faulted_auxiliary_stop(id, fault) && self.retire_auxiliary_service(id)
+        self.begin_auxiliary_runtime_stop(id, Some(fault), true)
+            && self.retire_auxiliary_service(id)
     }
 
-    fn begin_faulted_auxiliary_stop(&mut self, id: DomainId, fault: FaultMetadata) -> bool {
+    fn begin_auxiliary_runtime_stop(
+        &mut self,
+        id: DomainId,
+        fault: Option<FaultMetadata>,
+        require_quiescent: bool,
+    ) -> bool {
         if !self.auxiliary_service_ids.contains(&Some(id)) {
             return false;
         }
@@ -765,8 +771,7 @@ impl Manager {
         if domain.role != Role::AuxiliaryService
             || domain.failure_policy != Some(ServiceFailurePolicy::StopOnly)
             || domain.state != State::Ready
-            || domain.active_threads != 0
-            || domain.active_operations != 0
+            || require_quiescent && (domain.active_threads != 0 || domain.active_operations != 0)
             || domain.boot_root_count == 0
             || domain.boot_roots[..domain.boot_root_count]
                 .iter()
@@ -781,7 +786,7 @@ impl Manager {
                 return false;
             }
         }
-        domain.terminal_fault = Some(fault);
+        domain.terminal_fault = fault;
         domain.state = State::Stopping;
         true
     }
@@ -798,36 +803,7 @@ impl Manager {
         {
             return false;
         }
-        if !self.auxiliary_service_ids.contains(&Some(id)) {
-            return false;
-        }
-        let Some(domain) = self
-            .domains
-            .get_mut(usize::from(id.slot))
-            .and_then(Option::as_mut)
-            .filter(|domain| domain.id == id)
-        else {
-            return false;
-        };
-        if domain.role != Role::AuxiliaryService || domain.state != State::Ready {
-            return false;
-        }
-        if domain.boot_root_count == 0
-            || domain.boot_roots[..domain.boot_root_count]
-                .iter()
-                .any(|root| {
-                    root.is_none_or(|root| domain.capabilities.authority_root(root) != Some(root))
-                })
-        {
-            return false;
-        }
-        for root in domain.boot_roots[..domain.boot_root_count].iter().flatten() {
-            if !domain.capabilities.revoke(*root) {
-                return false;
-            }
-        }
-        domain.state = State::Stopping;
-        true
+        self.begin_auxiliary_runtime_stop(id, None, false)
     }
 }
 
@@ -1895,6 +1871,34 @@ pub(crate) fn discard_unstarted_auxiliary_service(domain_raw: u64) -> bool {
         return false;
     }
     global_manager_mut().is_some_and(|manager| manager.discard_unstarted_auxiliary_service(id))
+}
+
+pub(crate) fn begin_auxiliary_runtime_exit(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager_mut().is_some_and(|manager| manager.begin_auxiliary_runtime_stop(id, None, true))
+}
+
+pub(crate) fn begin_auxiliary_runtime_fault(domain_raw: u64, fault: FaultMetadata) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager_mut()
+        .is_some_and(|manager| manager.begin_auxiliary_runtime_stop(id, Some(fault), true))
+}
+
+pub(crate) fn retire_stopped_auxiliary_service(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(owner) = crate::memory::FrameOwner::domain(domain_raw) else {
+        return false;
+    };
+    if crate::memory::owner_live_frame_count(owner) != Some(0) {
+        return false;
+    }
+    global_manager_mut().is_some_and(|manager| manager.retire_auxiliary_service(id))
 }
 
 pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> bool {

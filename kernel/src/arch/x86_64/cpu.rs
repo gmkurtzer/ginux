@@ -1034,23 +1034,30 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX;
     };
-    let service_exit = domain::service_failure_policy(caller_domain)
-        == Some(domain::ServiceFailurePolicy::RestartManaged);
-    let action = scheduler::exit_runtime(
-        frame,
-        USER_CODE_SELECTOR,
-        USER_DATA_SELECTOR,
+    let failure_policy = domain::service_failure_policy(caller_domain);
+    let service_exit = failure_policy == Some(domain::ServiceFailurePolicy::RestartManaged);
+    let close_wait = if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly) {
+        None
+    } else {
         Some(scheduler::WaitReason::IpcReceive {
             object: 3,
             service_side: !service_exit,
             peer_domain: caller_domain,
-        }),
-    );
+        })
+    };
+    let action = scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR, close_wait);
     if matches!(action, RuntimeAction::Invalid) || !domain::detach_thread(caller_domain) {
         return u64::MAX;
     }
     if service_exit
         && (!ipc::retire_service(caller_domain) || !domain::retire_service(caller_domain))
+    {
+        return u64::MAX;
+    }
+    if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly)
+        && (!domain::begin_auxiliary_runtime_exit(caller_domain)
+            || !address_space::release_auxiliary_address_space(caller_domain)
+            || !domain::retire_stopped_auxiliary_service(caller_domain))
     {
         return u64::MAX;
     }
@@ -1062,10 +1069,8 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         return u64::MAX;
     };
     let fault_domain = scheduler::current_domain();
-    let service_fault = fault_domain.is_some_and(|domain_id| {
-        domain::service_failure_policy(domain_id)
-            == Some(domain::ServiceFailurePolicy::RestartManaged)
-    });
+    let failure_policy = fault_domain.and_then(domain::service_failure_policy);
+    let service_fault = failure_policy == Some(domain::ServiceFailurePolicy::RestartManaged);
     let fault_address: u64;
     unsafe {
         asm!("mov {}, cr2", out(reg) fault_address, options(nomem, nostack, preserves_flags));
@@ -1076,10 +1081,14 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         fault_address,
         USER_CODE_SELECTOR,
         USER_DATA_SELECTOR,
-        fault_domain.map(|dead_domain| scheduler::WaitReason::IpcReceive {
-            object: 3,
-            service_side: !service_fault,
-            peer_domain: dead_domain,
+        fault_domain.and_then(|dead_domain| {
+            (failure_policy != Some(domain::ServiceFailurePolicy::StopOnly)).then_some(
+                scheduler::WaitReason::IpcReceive {
+                    object: 3,
+                    service_side: !service_fault,
+                    peer_domain: dead_domain,
+                },
+            )
         }),
     );
     let Some(fault_domain) = fault_domain else {
@@ -1104,6 +1113,13 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             ServiceRestartSetup::Unavailable => return resume_action(action),
             ServiceRestartSetup::RollbackFailed => return u64::MAX,
         }
+    }
+    if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly)
+        && (!domain::begin_auxiliary_runtime_fault(fault_domain, fault_metadata)
+            || !address_space::release_auxiliary_address_space(fault_domain)
+            || !domain::retire_stopped_auxiliary_service(fault_domain))
+    {
+        return u64::MAX;
     }
     resume_action(action)
 }

@@ -107,6 +107,12 @@ records the fault, and changes the domain to stopping. Only then does it try to
 publish and remove the record. If lifecycle sequencing is exhausted, the
 faulted record remains stopped with no usable authority rather than returning
 to service or disappearing without an audit event.
+The common ring-3 exit and fault handlers now dispatch on the stored policy.
+A stop-only context closes no primary IPC endpoint and receives no restart.
+After scheduler removal and thread detachment, the handler revokes authority,
+releases the exact registered address space, verifies that no owned frames
+remain, and only then publishes retirement. Auxiliary contexts are still not
+queued, so this path is connected but not yet exercised as a live workload.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

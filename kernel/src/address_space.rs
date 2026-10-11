@@ -368,7 +368,7 @@ fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bo
     true
 }
 
-fn release_auxiliary_address_space(domain_id: u64) -> bool {
+pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(slot) = (0..domain::MAX_AUXILIARY_SERVICES).find(|index| unsafe {
         (*registry)[*index]
