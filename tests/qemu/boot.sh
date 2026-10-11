@@ -618,6 +618,21 @@ if ! grep -q '^ginux: network device capability revoked on exit' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: read-only network observer isolated' "$output_file"; then
+    echo "Boot test failed: read-only network observer was not isolated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: network mutation denied to observer' "$output_file"; then
+    echo "Boot test failed: network observer mutation was not denied." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: observer capability revoked on exit' "$output_file"; then
+    echo "Boot test failed: observer network capability survived exit." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
     echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
     exit 1

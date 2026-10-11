@@ -304,6 +304,8 @@ words are snapshot version, configuration generation, link state, packed IPv4
 configuration, default gateway, packed route destination/prefix, and route
 next-hop. The current single-CPU non-nested call gate serializes the copy with
 all configuration mutations.
+The boot proof also delegates only `READ` authority to a separate observer,
+which can use command 10 but receives `UINT64_MAX - 2` from command 2.
 Unknown commands, invalid arguments, and
 denial return `UINT64_MAX - 2`. This is a
 device-authorization skeleton only; it exposes no packets, general route table,

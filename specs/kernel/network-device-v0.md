@@ -57,6 +57,13 @@ capability table and address-space frames retired. A stale handle cannot probe
 the device after retirement, and the exact lifecycle generation, service
 identity, status, and sequence are consumed before the next workload runs.
 
+A second isolated service receives only object-4 `READ` authority. It copies
+the full snapshot, is denied when it attempts to bring the link down, copies
+the snapshot again, and proves that both link state and generation are
+unchanged. It exits with status 43; its lifecycle record is consumed and its
+read capability is revoked with its domain. This observer has no implicit
+write authority merely because it can inspect kernel-owned network state.
+
 Before exit the service also installs and reads back `10.0.2.15/24`. This is not
 yet a network stack or virtual NIC. Link and IPv4 state are kernel-owned scalar
 values and are not backed by hardware. There is no packet transport, MAC

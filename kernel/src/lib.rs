@@ -692,6 +692,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: bounded static network route retained");
     serial_write("\r\nginux: coherent network state snapshot copied");
     serial_write("\r\nginux: network device capability revoked on exit");
+    if !address_space::verify_ring3_network_observer() {
+        kernel_fail("\r\nginux: ring-3 network observer invariant failed\r\n");
+    }
+    serial_write("\r\nginux: read-only network observer isolated");
+    serial_write("\r\nginux: network mutation denied to observer");
+    serial_write("\r\nginux: observer capability revoked on exit");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }
