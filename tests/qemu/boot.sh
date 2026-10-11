@@ -613,6 +613,11 @@ if ! grep -q '^ginux: Linux two-slot auxiliary descriptor table validated' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded eventfd notification validated' "$output_file"; then
+    echo "Boot test failed: Linux bounded eventfd notification was not validated." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 14 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
     exit 1

@@ -77,6 +77,24 @@ nanoseconds return `-EINVAL`; invalid memory returns `-EFAULT`. A zero timespec
 queries immediately, while a nonzero or null timeout that finds no ready event
 retains the explicit `-ENOSYS` blocking boundary.
 This is a bounded event-notification proof, not a general epoll interest tree.
+`rax = 284` (`__NR_eventfd`) and `rax = 290` (`__NR_eventfd2`) allocate one
+process-local event counter in the lowest free auxiliary descriptor. The
+initial value is truncated to Linux's unsigned 32-bit input. `eventfd2`
+accepts `EFD_CLOEXEC`, `EFD_NONBLOCK`, and `EFD_SEMAPHORE`; other flags return
+`-EINVAL`, a second counter or full table returns `-EMFILE`, and `fcntl`
+exposes its descriptor and nonblocking flags. Reads and writes require exactly
+one eight-byte word and validate the complete user range before changing the
+counter. A normal read returns and clears the complete nonzero counter;
+semaphore mode returns one and decrements it. Writing adds any value except
+`UINT64_MAX`. An empty nonblocking read or addition that would exceed
+`UINT64_MAX - 1` returns `-EAGAIN`; the corresponding blocking operation
+returns `-ENOSYS` until descriptor wait queues exist. Invalid lengths return
+`-EINVAL` and invalid memory returns `-EFAULT` without consuming or adding a
+value. `poll` and epoll report `POLLIN`/`EPOLLIN` while nonzero and
+`POLLOUT`/`EPOLLOUT` while another value can be added. The proof registers the
+counter in the simultaneous epoll descriptor, observes readiness appear after
+a write, preserves readiness across a failed read, drains it, verifies
+full-counter backpressure, and closes both descriptors.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded
