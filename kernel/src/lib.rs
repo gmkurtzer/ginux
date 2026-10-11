@@ -574,7 +574,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !linux_elf::verify_mapped_load_plan(boot_info.image_base as u64, boot_info.image_size) {
         kernel_fail("ginux: Linux ELF64 address-space mapping failed\r\n");
     }
-    serial_write("ginux: Linux getpid resumed through SYSRETQ\r\n");
+    serial_write("ginux: Linux syscall registers preserved across SYSRETQ\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

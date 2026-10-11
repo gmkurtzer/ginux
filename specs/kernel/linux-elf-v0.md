@@ -53,10 +53,11 @@ segment target page if it overlaps the
 loaded kernel PE image. It then activates the root, observes both pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
 entry. The synthetic instruction stream issues Linux `getpid`, verifies PID 1
-after the kernel resumes it through `SYSRETQ`, and then issues Linux `exit(42)`.
-Those calls are accepted only while an atomic probe flag is armed; exit returns
-directly to the saved kernel stack. The proof restores and reads back the kernel
-root, then clears and releases all seven root/table/payload/stack frames.
+after the kernel resumes it through `SYSRETQ`, verifies preserved first and
+fourth argument registers, and then issues Linux `exit(42)`. Those calls are
+accepted only while an atomic probe flag is armed; exit returns directly to the
+saved kernel stack. The proof restores and reads back the kernel root, then
+clears and releases all seven root/table/payload/stack frames.
 
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the

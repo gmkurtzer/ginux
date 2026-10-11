@@ -129,6 +129,8 @@ static mut USER_RETURN_STACK: u64 = 0;
 static mut LINUX_USER_RSP: u64 = 0;
 static mut LINUX_USER_RIP: u64 = 0;
 static mut LINUX_USER_RFLAGS: u64 = 0;
+static mut LINUX_KERNEL_FRAME: u64 = 0;
+static mut LINUX_SYSCALL_RESULT: u64 = 0;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
     reserved0: 0,
@@ -400,15 +402,32 @@ ginux_linux_syscall_entry:
     mov [rip + {linux_user_rsp}], rsp
     mov [rip + {linux_user_rip}], rcx
     mov [rip + {linux_user_rflags}], r11
-    mov rdx, rsp
-    mov r8, r11
-    mov rsi, rdi
-    mov rdi, rax
     mov rsp, [rip + {user_return_stack}]
+    push rdi
+    push rsi
+    push rdx
+    push r8
+    push r9
+    push r10
+    mov [rip + {linux_kernel_frame}], rsp
+    mov rdi, rax
+    mov rsi, [rsp + 40]
+    mov rdx, [rip + {linux_user_rsp}]
+    mov rcx, [rip + {linux_user_rip}]
+    mov r8, [rip + {linux_user_rflags}]
     and rsp, -16
     call {linux_syscall_handler}
     cmp rax, -1
     je ginux_user_return_kernel
+    mov [rip + {linux_syscall_result}], rax
+    mov rsp, [rip + {linux_kernel_frame}]
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rax, [rip + {linux_syscall_result}]
     mov rcx, [rip + {linux_user_rip}]
     mov r11, [rip + {linux_user_rflags}]
     mov rsp, [rip + {linux_user_rsp}]
@@ -432,6 +451,8 @@ ginux_user_return_kernel:
     linux_user_rsp = sym LINUX_USER_RSP,
     linux_user_rip = sym LINUX_USER_RIP,
     linux_user_rflags = sym LINUX_USER_RFLAGS,
+    linux_kernel_frame = sym LINUX_KERNEL_FRAME,
+    linux_syscall_result = sym LINUX_SYSCALL_RESULT,
     user_data = const USER_DATA_SELECTOR as u64,
     user_code = const USER_CODE_SELECTOR as u64,
 );

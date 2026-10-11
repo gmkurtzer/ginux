@@ -518,8 +518,8 @@ if ! grep -q '^ginux: Linux ELF64 page images materialized' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux getpid resumed through SYSRETQ' "$output_file"; then
-    echo "Boot test failed: Linux getpid did not resume through SYSRETQ." >&2
+if ! grep -q '^ginux: Linux syscall registers preserved across SYSRETQ' "$output_file"; then
+    echo "Boot test failed: Linux syscall registers were not preserved." >&2
     exit 1
 fi
 
