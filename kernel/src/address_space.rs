@@ -140,8 +140,10 @@ pub(crate) fn verify_linux_elf_mapping(
                 && first_entry & (WRITABLE | NO_EXECUTE) == 0
                 && second_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
-                && first_bytes[0] == 0xc3
-                && first_bytes[1..].iter().all(|byte| *byte == 0)
+                && first_bytes[..first.bytes.len()] == *first.bytes
+                && first_bytes[first.bytes.len()..]
+                    .iter()
+                    .all(|byte| *byte == 0)
                 && second_bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
                 && second_bytes[8..].iter().all(|byte| *byte == 0);
             if !entries_valid {
@@ -151,13 +153,19 @@ pub(crate) fn verify_linux_elf_mapping(
             activate(root);
             let activated = current_root() == root;
             let observed = cpu::with_supervisor_user_access(|| {
-                (first.virtual_page as *const u8).read_volatile() == 0xc3
+                (first.virtual_page as *const u8).read_volatile() == first.bytes[0]
                     && (second.virtual_page as *const u64).read_volatile()
                         == u64::from_le_bytes([1, 2, 3, 4, 5, 6, 7, 8])
             });
+            let executed = activated
+                && observed
+                && cpu::verify_linux_elf_entry(
+                    plan.entry as usize,
+                    (second.virtual_page + PAGE_SIZE as u64) as usize,
+                );
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
-            Some(activated && observed && restored)
+            Some(executed && restored)
         }
     })()
     .unwrap_or(false);

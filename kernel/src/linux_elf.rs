@@ -11,6 +11,8 @@ const PF_READ: u32 = 4;
 const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
+pub(crate) const PROBE_EXIT_CALL: u32 = 0xffff_fffe;
+const PROBE_CODE: [u8; 9] = [0xb8, 0xfe, 0xff, 0xff, 0xff, 0xcd, 0x80, 0x0f, 0x0b];
 
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
@@ -166,9 +168,9 @@ pub(crate) fn verify_parser() -> bool {
         return false;
     };
     if parsed.entry != 0x40_0000
-        || parsed.segments[0].bytes != [0xc3]
+        || parsed.segments[0].bytes != PROBE_CODE
         || parsed.segments[0].virtual_address != 0x40_0000
-        || parsed.segments[0].memory_size != 1
+        || parsed.segments[0].memory_size != PROBE_CODE.len() as u64
         || parsed.segments[0].flags != PF_READ | PF_EXECUTE
         || parsed.segments[1].bytes != [1, 2, 3, 4, 5, 6, 7, 8]
         || parsed.segments[1].virtual_address != 0x40_1000
@@ -209,8 +211,10 @@ pub(crate) fn verify_load_plan() -> bool {
         && plan.segments[0].virtual_page == 0x40_0000
         && plan.segments[0].executable
         && !plan.segments[0].writable
-        && executable_page[0] == 0xc3
-        && executable_page[1..].iter().all(|byte| *byte == 0)
+        && executable_page[..PROBE_CODE.len()] == PROBE_CODE
+        && executable_page[PROBE_CODE.len()..]
+            .iter()
+            .all(|byte| *byte == 0)
         && plan.segments[1].virtual_page == 0x40_1000
         && plan.segments[1].writable
         && !plan.segments[1].executable
@@ -229,8 +233,8 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
     crate::address_space::verify_linux_elf_mapping(&plan, protected_start, protected_size)
 }
 
-fn fixture() -> [u8; 272] {
-    let mut bytes = [0_u8; 272];
+fn fixture() -> [u8; 280] {
+    let mut bytes = [0_u8; 280];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
     bytes[5] = 1;
@@ -248,21 +252,21 @@ fn fixture() -> [u8; 272] {
         ELF_HEADER_SIZE,
         0x100,
         0x40_0000,
-        1,
-        1,
+        PROBE_CODE.len() as u64,
+        PROBE_CODE.len() as u64,
         PF_READ | PF_EXECUTE,
     );
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
-        0x108,
+        0x110,
         0x40_1000,
         8,
         16,
         PF_READ | PF_WRITE,
     );
-    bytes[0x100] = 0xc3;
-    bytes[0x108..0x110].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(&PROBE_CODE);
+    bytes[0x110..0x118].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
     bytes
 }
 

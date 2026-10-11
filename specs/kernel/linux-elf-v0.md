@@ -1,7 +1,7 @@
 # Linux ELF64 Profile v0
 
-**Status:** Strict static x86-64 parser and activated mapping profile verified
-in QEMU; execution is not yet implemented.
+**Status:** Strict static x86-64 parser, mapping, and one-shot ring-3 entry
+profile verified in QEMU.
 
 The first Linux-compatibility boundary accepts a deliberately bounded ELF64
 profile. Files must be little-endian ELF class 64, current ELF version,
@@ -49,12 +49,18 @@ target leaves; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
 map. Before changing CR3, it rejects either target page if it overlaps the
 loaded kernel PE image. It then activates the root, observes both pages through
-their declared user virtual addresses under SMAP, restores and reads back the
-kernel root, and clears and releases all six root/table/payload frames.
+their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
+entry. The synthetic instruction stream issues one boot-only reserved
+verification call through the existing `INT 0x80` gate. That call is accepted
+only while an atomic probe flag is armed and returns directly to the saved
+kernel stack. The proof restores and reads back the kernel root, then clears
+and releases all six root/table/payload frames.
 
-No ELF instruction is executed. The root retains supervisor-only low identity
-leaves around the ELF pages so the current low-linked kernel can survive the
-proof transition, but a Linux stack/entry contract, scheduler ownership model,
+This proves instruction fetch and controlled return, not a Linux process. The
+root retains supervisor-only low identity leaves around the ELF pages so the
+current low-linked kernel can survive the proof transition. The writable data
+page temporarily supplies the unused initial stack pointer; a Linux initial
+stack/auxiliary vector, scheduler ownership model, supported syscall surface,
 and general collision policy beyond the loaded kernel image are not defined
 yet. The loader does not relocate `ET_EXEC` images to the existing high test
 address, because doing so would violate ELF semantics and hide these remaining

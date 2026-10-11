@@ -112,6 +112,8 @@ struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -600,6 +602,19 @@ pub(crate) fn execute_auxiliary(
     };
 }
 
+pub(crate) fn verify_linux_elf_entry(entry: usize, stack: usize) -> bool {
+    if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
+        || !user_interrupt_surface_is_minimal()
+        || ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst)
+    {
+        return false;
+    }
+    ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
+    unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
+    let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
+    inactive && ELF_PROBE_COMPLETED.load(Ordering::SeqCst)
+}
+
 pub(crate) fn user_interrupt_surface_is_minimal() -> bool {
     let idt = core::ptr::addr_of!(IDT).cast::<IdtEntry>();
     for vector in 0..256 {
@@ -772,6 +787,13 @@ extern "sysv64" fn breakpoint_handler() {
 }
 
 extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    if ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
+        && number == u64::from(crate::linux_elf::PROBE_EXIT_CALL)
+    {
+        ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return u64::MAX;
+    }
     let Some(caller_domain) = scheduler::current_domain() else {
         return u64::MAX;
     };

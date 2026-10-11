@@ -33,10 +33,10 @@ A separate Linux ELF proof builds a private lower-half hierarchy for
 the conventional `0x400000` and `0x401000` segment pages. It clones the
 surrounding supervisor identity leaves, replaces only those pages with owned
 user RX and RW/NX frames, preserves the supervisor-only direct-map entry, and
-rejects target overlap with the loaded kernel image, loads CR3, and observes
-both user pages through their declared virtual addresses before restoring the
-kernel root. ELF instruction execution and general collision policy remain
-separate milestones.
+rejects target overlap with the loaded kernel image, loads CR3, observes both
+user pages through their declared virtual addresses, and performs one bounded
+CPL3 entry/return before restoring the kernel root. General Linux process
+execution and collision policy remain separate milestones.
 
 Completed proof address-space page-table and data frames are cleared and
 returned through the allocator's generation-checked live-ownership ledger.
