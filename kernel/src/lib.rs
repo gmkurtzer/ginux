@@ -426,16 +426,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: faulted service authority remained live\r\n");
     }
-    let Some(replacement_domain) = domain::initialize_boot_service() else {
-        kernel_fail("\r\nginux: replacement service domain construction failed\r\n");
-    };
-    let Some(replacement_ipc_handle) = domain::service_boot_handle() else {
-        kernel_fail("\r\nginux: replacement service capability unavailable\r\n");
+    let Some(replacement_domain) = domain::last_retired_service_domain() else {
+        kernel_fail("\r\nginux: replacement service retirement unavailable\r\n");
     };
     if replacement_domain == service_domain
-        || !domain::handle_permits(replacement_domain, replacement_ipc_handle, 3, ipc_rights)
-        || domain::handle_permits(service_domain, replacement_ipc_handle, 3, ipc_rights)
-        || !domain::retire_service(replacement_domain)
+        || domain::service_boot_handle().is_some()
         || !domain::domain_is_retired(replacement_domain)
     {
         kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
@@ -452,6 +447,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: service domain authority restricted to IPC");
     serial_write("\r\nginux: faulted service domain authority retired");
     serial_write("\r\nginux: service domain generation reuse verified");
+    serial_write("\r\nginux: replacement service context executed");
     serial_write("\r\nginux: per-thread syscall budgets enforced");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");

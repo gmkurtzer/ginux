@@ -88,3 +88,12 @@ cd80
 85c0
 75da
 0f0b
+
+# replacement service: negotiate ABI, then exit cleanly
+b800000000
+cd80
+3d3f000100
+0f85c6ffffff
+b802000000
+cd80
+0f0b

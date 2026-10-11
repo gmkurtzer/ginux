@@ -1,6 +1,6 @@
 # Isolated Service Supervision v0
 
-**Status:** Request/reply completion followed by contained service failure.
+**Status:** Contained service failure followed by one bounded restart.
 
 The hardware proof assigns distinct roles to the two scheduled ring-3
 contexts and native domains. Context 1 is the control client. It sends request
@@ -16,11 +16,12 @@ exit normally. Completion additionally requires an empty IPC queue, rejection
 of the stale service domain/handle pair, one contained service fault, and no
 `GINUX_KERNEL_PANIC` marker.
 
-This proves failure isolation after a completed operation, not transparent
-service restart. The kernel verifies metadata replacement in the same domain
-slot with a new generation and rejects the retired ID, but does not execute the
-replacement. There is no supervisor policy, service identity separate from
-thread identity, request ID, replay protection, cancellation, outstanding-call
-cleanup, restart budget, health protocol, or general object revocation beyond
-retiring the service's local table. Those semantics must be defined before more
-than one request can be in flight.
+After the fault, the kernel creates one replacement domain generation with the
+same IPC-only delegation and queues a fresh context on the retained service
+address space. Once the client exits, the replacement negotiates ABI v1, exits
+cleanly, and has its capability table retired. The single restart is a fixed
+proof action, not a production policy. There is no backoff, configurable
+restart budget, state recovery, service identity separate from thread identity,
+request ID, replay protection, cancellation, outstanding-call cleanup, or
+health protocol. Those semantics must be defined before more than one request
+can be in flight.

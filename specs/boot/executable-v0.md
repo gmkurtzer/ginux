@@ -28,6 +28,11 @@ at the checked offset. Every QEMU run also requires rejection of truncated,
 bad-magic, wrong-version, wrong-header-size, wrong-total-size, invalid-entry,
 zero-code-size, nonzero-flags, and nonzero-reserved variants.
 
+The current fixed proof payload also contains kernel-known service and restart
+offsets within the same authenticated code segment. They are bounds-checked but
+are not described by version 1's header, so this is not a general multi-entry
+loading contract. A future format version must name every permitted entry.
+
 Version 1 is deliberately position-fixed and single-segment. It has no
 relocations, metadata, interpreter, imports, writable data segment, stack
 request, architecture tag, or feature negotiation. Those require a new format

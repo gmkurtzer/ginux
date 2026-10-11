@@ -303,6 +303,11 @@ if ! grep -q '^ginux: service domain generation reuse verified' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: replacement service context executed' "$output_file"; then
+    echo "Boot test failed: replacement service context did not execute." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: per-thread syscall budgets enforced' "$output_file"; then
     echo "Boot test failed: per-thread syscall accounting failed." >&2
     exit 1

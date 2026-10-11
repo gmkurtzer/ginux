@@ -53,6 +53,7 @@ pub(crate) struct Manager {
     control_plane_created: bool,
     control_plane_id: Option<DomainId>,
     service_id: Option<DomainId>,
+    last_retired_service_id: Option<DomainId>,
 }
 
 impl Manager {
@@ -63,6 +64,7 @@ impl Manager {
             control_plane_created: false,
             control_plane_id: None,
             service_id: None,
+            last_retired_service_id: None,
         }
     }
 
@@ -271,6 +273,7 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
     }
     manager.domains[usize::from(id.slot)] = None;
     manager.service_id = None;
+    manager.last_retired_service_id = Some(id);
     true
 }
 
@@ -279,6 +282,10 @@ pub(crate) fn domain_is_retired(domain_raw: u64) -> bool {
         return false;
     };
     global_manager().is_some_and(|manager| manager.domain(id).is_none())
+}
+
+pub(crate) fn last_retired_service_domain() -> Option<u64> {
+    Some(encode_id(global_manager()?.last_retired_service_id?))
 }
 
 fn global_manager() -> Option<&'static Manager> {

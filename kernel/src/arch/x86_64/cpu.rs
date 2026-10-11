@@ -556,9 +556,9 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         }
         2 => {
             SYSCALL_STATE.fetch_or(4, Ordering::SeqCst);
-            runtime_result(frame, false)
+            exit_result(caller_domain, frame)
         }
-        3 => runtime_result(frame, true),
+        3 => runtime_result(frame),
         4 => {
             let Some(frame) = (unsafe { frame.as_ref() }) else {
                 return u64::MAX;
@@ -611,15 +611,23 @@ fn console_write(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -
     length as u64
 }
 
-fn runtime_result(frame: *mut UserTrapFrame, yielding: bool) -> u64 {
+fn runtime_result(frame: *mut UserTrapFrame) -> u64 {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX;
     };
-    let action = if yielding {
-        scheduler::yield_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR)
-    } else {
-        scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR)
+    let action = scheduler::yield_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
+    resume_action(action)
+}
+
+fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return u64::MAX;
     };
+    let service_exit = domain::is_service_domain(caller_domain);
+    let action = scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
+    if service_exit && !domain::retire_service(caller_domain) {
+        return u64::MAX;
+    }
     resume_action(action)
 }
 
@@ -632,6 +640,21 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     let action = scheduler::fault_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
     if service_fault && !fault_domain.is_some_and(domain::retire_service) {
         return u64::MAX;
+    }
+    if service_fault {
+        if !matches!(action, RuntimeAction::Resume { .. }) {
+            return u64::MAX;
+        }
+        let Some(replacement_domain) = domain::initialize_boot_service() else {
+            return u64::MAX;
+        };
+        let Some(replacement_handle) = domain::service_boot_handle() else {
+            return u64::MAX;
+        };
+        if !scheduler::queue_service_restart(replacement_domain, replacement_handle) {
+            let _ = domain::retire_service(replacement_domain);
+            return u64::MAX;
+        }
     }
     resume_action(action)
 }

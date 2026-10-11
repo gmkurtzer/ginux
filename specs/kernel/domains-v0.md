@@ -31,6 +31,6 @@ before resuming the client. The boot gate requires the old domain ID and IPC
 handle pair to stop resolving. The same slot can then host a newly delegated
 service with an incremented domain generation. Even when its local capability
 reuses the prior handle encoding, pairing it with the retired domain ID cannot
-resolve authority. The boot proof validates the replacement and retires it
-again. Executing a restarted service and outstanding-operation cleanup remain
-undefined.
+resolve authority. The boot proof runs the replacement through ABI negotiation
+and clean exit, then retires it again. General restart policy and
+outstanding-operation cleanup remain undefined.

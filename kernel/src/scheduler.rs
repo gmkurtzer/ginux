@@ -227,6 +227,8 @@ struct Runtime {
     faults: u8,
     expected_fault_instruction: u64,
     expected_fault_observed: bool,
+    service_restart_context: UserContext,
+    restarts: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -345,6 +347,7 @@ pub(crate) fn initialize_runtime(
     stacks: [usize; 2],
     handles: [[u64; 3]; 2],
     expected_fault_instruction: usize,
+    service_restart_entry: usize,
 ) -> bool {
     let [first_address_space_root, second_address_space_root] = address_space_roots;
     let [first_domain, second_domain] = domains;
@@ -375,6 +378,11 @@ pub(crate) fn initialize_runtime(
         second_handles[2],
         2,
     );
+    let service_restart_context = UserContext {
+        rip: service_restart_entry as u64,
+        r9: 3,
+        ..second
+    };
     if scheduler.create(first_domain, first).is_none()
         || scheduler.create(second_domain, second).is_none()
         || scheduler.schedule_next().map(|next| next.context) != Some(first)
@@ -394,9 +402,29 @@ pub(crate) fn initialize_runtime(
             faults: 0,
             expected_fault_instruction: expected_fault_instruction as u64,
             expected_fault_observed: false,
+            service_restart_context,
+            restarts: 0,
         }));
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
+    true
+}
+
+pub(crate) fn queue_service_restart(domain: u64, ipc_handle: u64) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    if runtime.restarts != 0 {
+        return false;
+    }
+    let context = UserContext {
+        r8: ipc_handle,
+        ..runtime.service_restart_context
+    };
+    if runtime.scheduler.create(domain, context).is_none() {
+        return false;
+    }
+    runtime.restarts = 1;
     true
 }
 
@@ -567,11 +595,12 @@ pub(crate) fn verify_runtime_complete() -> bool {
         return false;
     };
     runtime.yields == 1
-        && runtime.exits == 1
+        && runtime.exits == 2
         && runtime.faults == 1
+        && runtime.restarts == 1
         && runtime.expected_fault_observed
-        && runtime.syscalls == 13
-        && runtime.address_space_switches == 2
+        && runtime.syscalls == 15
+        && runtime.address_space_switches == 3
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)
 }
