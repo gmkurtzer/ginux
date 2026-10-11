@@ -158,6 +158,11 @@ ginux_linux_interpreter:
     xor r12d, r12d
 #ifdef GINUX_LINKED
     mov qword ptr [rip + .Lsecondary_needed], rax
+    mov qword ptr [rip + .Lmain_relocation_size], rax
+    mov qword ptr [rip + .Lmain_relocation_entry_size], rax
+    mov qword ptr [rip + .Lmain_relative_count], rax
+    mov qword ptr [rip + .Lmain_preinit_array], rax
+    mov qword ptr [rip + .Lmain_preinit_array_size], rax
     mov qword ptr [rip + .Lmain_init_function], rax
     mov qword ptr [rip + .Lmain_init_array], rax
     mov qword ptr [rip + .Lmain_init_array_size], rax
@@ -174,6 +179,31 @@ ginux_linux_interpreter:
     cmp qword ptr [rdi], 23
     cmove rbx, qword ptr [rdi + 8]
 #ifdef GINUX_LINKED
+    cmp qword ptr [rdi], 8
+    jne .Lscan_main_relocation_entry_size
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_relocation_size], rdx
+.Lscan_main_relocation_entry_size:
+    cmp qword ptr [rdi], 9
+    jne .Lscan_main_relative_count
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_relocation_entry_size], rdx
+.Lscan_main_relative_count:
+    cmp qword ptr [rdi], 0x6ffffff9
+    jne .Lscan_main_preinit_array
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_relative_count], rdx
+.Lscan_main_preinit_array:
+    cmp qword ptr [rdi], 32
+    jne .Lscan_main_preinit_array_size
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_preinit_array], rdx
+.Lscan_main_preinit_array_size:
+    cmp qword ptr [rdi], 33
+    jne .Lscan_main_init_function
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_preinit_array_size], rdx
+.Lscan_main_init_function:
     cmp qword ptr [rdi], 12
     jne .Lscan_main_init_array
     mov rdx, qword ptr [rdi + 8]
@@ -224,6 +254,16 @@ ginux_linux_interpreter:
 #ifdef GINUX_LINKED
     cmp qword ptr [rip + .Lsecondary_needed], 0
     je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_relocation_size], 96
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_relocation_entry_size], 24
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_relative_count], 2
+    jne .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_preinit_array], 0
+    je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_preinit_array_size], 8
+    jne .Linvalid_dynamic
     cmp qword ptr [rip + .Lmain_init_function], 0
     je .Linvalid_dynamic
     cmp qword ptr [rip + .Lmain_init_array], 0
@@ -250,6 +290,10 @@ ginux_linux_interpreter:
     push rbx
     mov rcx, qword ptr [rax]
     add rcx, r15
+    mov rdx, qword ptr [rip + .Lmain_preinit_array]
+    add rdx, r15
+    cmp rcx, rdx
+    jne .Linvalid_dynamic
     mov rdx, qword ptr [rax + 16]
     add rdx, r15
     mov qword ptr [rcx], rdx
@@ -959,6 +1003,16 @@ ginux_linux_interpreter:
 .Lauxiliary_dependency_base:
     .zero 8
 .Lsecondary_needed:
+    .zero 8
+.Lmain_relocation_size:
+    .zero 8
+.Lmain_relocation_entry_size:
+    .zero 8
+.Lmain_relative_count:
+    .zero 8
+.Lmain_preinit_array:
+    .zero 8
+.Lmain_preinit_array_size:
     .zero 8
 .Lmain_init_function:
     .zero 8

@@ -838,6 +838,11 @@ if ! grep -q '^ginux: bounded Linux main preinit array validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux main preinit metadata consumed' "$output_file"; then
+    echo "Boot test failed: userspace did not consume the Linux main preinit metadata." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace Linux main preinit executed' "$output_file"; then
     echo "Boot test failed: the userspace Linux main preinitializer was not executed." >&2
     exit 1

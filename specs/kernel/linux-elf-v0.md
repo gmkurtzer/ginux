@@ -349,7 +349,12 @@ its linker-emitted `.dynamic` and relocation target so that the bootstrap
 dynamic-table offset remains invariant.
 
 The main dynamic-table scan captures two ordered `DT_NEEDED` string-table
-offsets, requires both bounded names, and constructs each
+offsets, requires both bounded names, and also derives `DT_RELASZ`,
+`DT_RELAENT`, `DT_RELACOUNT`, `DT_PREINIT_ARRAY`, and
+`DT_PREINIT_ARRAYSZ`. It requires the exact 96-byte main primary table,
+24-byte entries, two leading relative relocations, and one eight-byte preinit
+array. Before writing or calling the first relocation, it requires that target
+to equal the load-biased preinit address. It then constructs each
 `/lib64/<needed-name>` on the mapped user stack. It inspects each derived file
 before reopening it and applies the same program-header walker at selected
 biases `0x618000` and `0x638000`. The primary requests map file offset `0x1000` RX at

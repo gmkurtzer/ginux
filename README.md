@@ -35,7 +35,10 @@ symbol relocations resolve to the authenticated dependencies, and the interprete
 also applies both dependencies' own relative and self-symbol relocations. Each
 DSO and the main expose one authenticated `DT_INIT` function and one eight-byte
 `DT_INIT_ARRAY`. The main additionally exposes one eight-byte
-`DT_PREINIT_ARRAY`. The interpreter relocates and calls that preinitializer
+`DT_PREINIT_ARRAY`. The interpreter independently scans the main's dynamic
+table for the exact relocation size and entry size, two-entry relative count,
+and complete preinit tag pair. It binds that address to the first relative
+relocation target, then relocates and calls the preinitializer
 before loading either dependency, calls each dependency's direct init function
 and constructor in order, resolves the main, and then calls the main's direct
 init function and constructor before transferring control to its entry.
