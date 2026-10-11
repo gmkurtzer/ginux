@@ -295,8 +295,8 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
     crate::address_space::verify_linux_elf_mapping(&plan, protected_start, protected_size)
 }
 
-fn fixture() -> [u8; 648] {
-    let mut bytes = [0_u8; 648];
+fn fixture() -> [u8; 712] {
+    let mut bytes = [0_u8; 712];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
     bytes[5] = 1;
@@ -321,7 +321,7 @@ fn fixture() -> [u8; 648] {
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
-        0x280,
+        0x2c0,
         0x40_1000,
         8,
         512,
@@ -332,7 +332,7 @@ fn fixture() -> [u8; 648] {
     write_u32(&mut bytes, stack_header + 4, PF_READ | PF_WRITE);
     write_u64(&mut bytes, stack_header + 48, 16);
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
-    bytes[0x280..0x288].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    bytes[0x2c0..0x2c8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
     bytes
 }
 
