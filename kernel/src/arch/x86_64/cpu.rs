@@ -107,6 +107,7 @@ const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_DESCRIPTOR_INPUT: u8 = 1;
 const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
+const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_GETFL: u64 = 3;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
@@ -1140,7 +1141,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
-        LINUX_FCNTL_SYSCALL => linux_console_fcntl(first_argument, buffer),
+        LINUX_FCNTL_SYSCALL => linux_console_fcntl(first_argument, buffer, count),
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
             let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
@@ -1429,20 +1430,24 @@ fn linux_console_close(descriptor: u64) -> u64 {
 }
 
 fn linux_console_dup(descriptor: u64) -> u64 {
-    if descriptor >= 2 {
-        return LINUX_EBADF;
+    linux_console_dup_at_least(descriptor, 0)
+}
+
+fn linux_console_dup_at_least(descriptor: u64, minimum: u64) -> u64 {
+    if minimum >= 2 {
+        return LINUX_EINVAL;
     }
     loop {
         let current = ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst);
-        let state = (current >> (descriptor * 2)) & 0b11;
+        let state = if descriptor < 2 {
+            (current >> (descriptor * 2)) & 0b11
+        } else {
+            0
+        };
         if state == 0 {
             return LINUX_EBADF;
         }
-        let target = if current & 0b11 == 0 {
-            0
-        } else if current & 0b1100 == 0 {
-            1
-        } else {
+        let Some(target) = (minimum..2).find(|target| current & (0b11 << (target * 2)) == 0) else {
             return LINUX_EMFILE;
         };
         let shift = target * 2;
@@ -1455,7 +1460,7 @@ fn linux_console_dup(descriptor: u64) -> u64 {
             )
             .is_ok()
         {
-            return target as u64;
+            return target;
         }
     }
 }
@@ -1489,12 +1494,13 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
     }
 }
 
-fn linux_console_fcntl(descriptor: u64, command: u64) -> u64 {
+fn linux_console_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     let state = linux_console_descriptor(descriptor);
     if state == 0 {
         return LINUX_EBADF;
     }
     match command {
+        LINUX_F_DUPFD => linux_console_dup_at_least(descriptor, argument),
         LINUX_F_GETFD => 0,
         LINUX_F_GETFL if state == LINUX_DESCRIPTOR_INPUT => 0,
         LINUX_F_GETFL if state == LINUX_DESCRIPTOR_OUTPUT => 1,

@@ -63,11 +63,14 @@ both slots. There is still no general allocation or inherited table.
 open source's endpoint type. Equal source and target descriptors return the
 target unchanged. A closed source or a descriptor outside the two-slot limit
 returns `-EBADF`.
-`rax = 72` (`__NR_fcntl`) supports read-only `F_GETFD` and `F_GETFL` queries.
+`rax = 72` (`__NR_fcntl`) supports `F_DUPFD` plus read-only `F_GETFD` and
+`F_GETFL` queries. `F_DUPFD` copies an open endpoint into the lowest available
+slot at or above its nonnegative minimum; a minimum outside the two-slot table
+returns `-EINVAL`, and exhaustion returns `-EMFILE`.
 No close-on-exec flag is currently set; `F_GETFL` reports `O_RDONLY` for the
 input endpoint and `O_WRONLY` for output or duplicated-output endpoints. Closed
-or unknown descriptors return `-EBADF`; mutation and duplication commands
-return `-EINVAL`.
+or unknown descriptors return `-EBADF`; other mutation and duplication
+commands return `-EINVAL`.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 2,
