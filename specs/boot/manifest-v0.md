@@ -33,3 +33,8 @@ The pinned key is an RFC test identity, not a deployer trust root. Sequence
 rollback storage, key identifiers and rotation, additional bundle records,
 platform constraints, and independent site policy remain required for a
 production authenticated boot.
+
+Every QEMU boot also invokes the canonical parser directly on malformed copies
+of the authenticated bytes. The negative gate requires rejection of truncation,
+nonzero reserved data, unknown rights, and duplicate object grants, independent
+of the outer digest and signature checks.

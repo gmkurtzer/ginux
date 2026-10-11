@@ -53,58 +53,10 @@ impl Manifest {
         let bytes = unsafe { core::slice::from_raw_parts(pointer, size) };
         if crypto::sha256(bytes) != *expected_digest
             || !verify_development_signature(bytes, signature)
-            || &bytes[..8] != MAGIC
         {
             return None;
         }
-        let version = read_u16(bytes, 8)?;
-        let header_size = usize::from(read_u16(bytes, 10)?);
-        let total_size = usize::try_from(read_u32(bytes, 12)?).ok()?;
-        let sequence = read_u64(bytes, 16)?;
-        let grant_count = usize::from(read_u16(bytes, 24)?);
-        let flags = read_u16(bytes, 26)?;
-        let reserved = read_u32(bytes, 28)?;
-        let bundle_size = usize::try_from(read_u64(bytes, 32)?).ok()?;
-        let bundle_sha256: [u8; 32] = bytes.get(40..72)?.try_into().ok()?;
-        if version != VERSION
-            || header_size != HEADER_SIZE
-            || total_size != size
-            || sequence == 0
-            || grant_count == 0
-            || grant_count > MAX_GRANTS
-            || flags != 0
-            || reserved != 0
-            || bundle_size == 0
-            || HEADER_SIZE.checked_add(grant_count.checked_mul(GRANT_SIZE)?)? != size
-        {
-            return None;
-        }
-
-        let mut grants = [EMPTY_GRANT; MAX_GRANTS];
-        for index in 0..grant_count {
-            let offset = HEADER_SIZE + index * GRANT_SIZE;
-            let grant = Grant {
-                object: read_u64(bytes, offset)?,
-                rights: read_u64(bytes, offset + 8)?,
-            };
-            if grant.object == 0
-                || grant.rights == 0
-                || grant.rights & !ALLOWED_RIGHTS != 0
-                || grants[..index]
-                    .iter()
-                    .any(|existing| existing.object == grant.object)
-            {
-                return None;
-            }
-            grants[index] = grant;
-        }
-        Some(Self {
-            sequence,
-            grants,
-            grant_count,
-            bundle_size,
-            bundle_sha256,
-        })
+        parse_canonical(bytes)
     }
 
     pub(crate) const fn sequence(&self) -> u64 {
@@ -139,6 +91,91 @@ impl Manifest {
         let bytes = unsafe { core::slice::from_raw_parts(pointer, size) };
         crypto::sha256(bytes) == self.bundle_sha256
     }
+}
+
+fn parse_canonical(bytes: &[u8]) -> Option<Manifest> {
+    if !(HEADER_SIZE..=HEADER_SIZE + MAX_GRANTS * GRANT_SIZE).contains(&bytes.len())
+        || &bytes[..8] != MAGIC
+    {
+        return None;
+    }
+    let version = read_u16(bytes, 8)?;
+    let header_size = usize::from(read_u16(bytes, 10)?);
+    let total_size = usize::try_from(read_u32(bytes, 12)?).ok()?;
+    let sequence = read_u64(bytes, 16)?;
+    let grant_count = usize::from(read_u16(bytes, 24)?);
+    let flags = read_u16(bytes, 26)?;
+    let reserved = read_u32(bytes, 28)?;
+    let bundle_size = usize::try_from(read_u64(bytes, 32)?).ok()?;
+    let bundle_sha256: [u8; 32] = bytes.get(40..72)?.try_into().ok()?;
+    if version != VERSION
+        || header_size != HEADER_SIZE
+        || total_size != bytes.len()
+        || sequence == 0
+        || grant_count == 0
+        || grant_count > MAX_GRANTS
+        || flags != 0
+        || reserved != 0
+        || bundle_size == 0
+        || HEADER_SIZE.checked_add(grant_count.checked_mul(GRANT_SIZE)?)? != bytes.len()
+    {
+        return None;
+    }
+
+    let mut grants = [EMPTY_GRANT; MAX_GRANTS];
+    for index in 0..grant_count {
+        let offset = HEADER_SIZE + index * GRANT_SIZE;
+        let grant = Grant {
+            object: read_u64(bytes, offset)?,
+            rights: read_u64(bytes, offset + 8)?,
+        };
+        if grant.object == 0
+            || grant.rights == 0
+            || grant.rights & !ALLOWED_RIGHTS != 0
+            || grants[..index]
+                .iter()
+                .any(|existing| existing.object == grant.object)
+        {
+            return None;
+        }
+        grants[index] = grant;
+    }
+    Some(Manifest {
+        sequence,
+        grants,
+        grant_count,
+        bundle_size,
+        bundle_sha256,
+    })
+}
+
+pub(crate) fn verify_parser_rejections(pointer: *const u8, size: usize) -> bool {
+    const MAX_SIZE: usize = HEADER_SIZE + MAX_GRANTS * GRANT_SIZE;
+    if pointer.is_null() || !(HEADER_SIZE + 2 * GRANT_SIZE..=MAX_SIZE).contains(&size) {
+        return false;
+    }
+    let original = unsafe { core::slice::from_raw_parts(pointer, size) };
+    if parse_canonical(original).is_none() || parse_canonical(&original[..size - 1]).is_some() {
+        return false;
+    }
+
+    let mut candidate = [0_u8; MAX_SIZE];
+    candidate[..size].copy_from_slice(original);
+    candidate[28] = 1;
+    if parse_canonical(&candidate[..size]).is_some() {
+        return false;
+    }
+    candidate[..size].copy_from_slice(original);
+    candidate[HEADER_SIZE + 8] = 0x80;
+    if parse_canonical(&candidate[..size]).is_some() {
+        return false;
+    }
+    candidate[..size].copy_from_slice(original);
+    let mut first_object = [0_u8; 8];
+    first_object.copy_from_slice(&candidate[HEADER_SIZE..HEADER_SIZE + 8]);
+    candidate[HEADER_SIZE + GRANT_SIZE..HEADER_SIZE + GRANT_SIZE + 8]
+        .copy_from_slice(&first_object);
+    parse_canonical(&candidate[..size]).is_none()
 }
 
 pub(crate) fn verify_signature_rejection(

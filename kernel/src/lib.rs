@@ -163,6 +163,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: invalid manifest signature was accepted\r\n");
     }
     serial_write("ginux: manifest signature rejection verified\r\n");
+    if !manifest::verify_parser_rejections(boot_info.manifest, boot_info.manifest_size) {
+        kernel_fail("ginux: malformed manifest parser test failed\r\n");
+    }
+    serial_write("ginux: malformed boot manifests rejected\r\n");
     if !boot_manifest.bundle_matches(
         boot_info.control_plane_bundle,
         boot_info.control_plane_bundle_size,

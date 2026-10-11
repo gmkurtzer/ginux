@@ -78,6 +78,11 @@ if ! grep -q '^ginux: manifest signature rejection verified' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: malformed boot manifests rejected' "$output_file"; then
+    echo "Boot test failed: malformed canonical manifests were not rejected." >&2
+    exit 1
+fi
+
 if ! grep -Eq '^ginux: manifest authority grants: [1-8]' "$output_file"; then
     echo "Boot test failed: the boot manifest did not provide bounded authority grants." >&2
     exit 1
