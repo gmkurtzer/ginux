@@ -18,6 +18,7 @@ check_command() {
 
 check_command cargo
 check_command rustc
+check_command "${CLANG:-clang}"
 check_command qemu-system-x86_64
 
 if ovmf_code="$(find_ovmf_code 2>/dev/null)"; then

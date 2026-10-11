@@ -59,8 +59,10 @@ segment target page if it overlaps the
 loaded kernel PE image. It then activates the root, observes both pages through
 their declared user virtual addresses under SMAP, and enters CPL3 at the ELF
 entry at `0x400100`, while syscall return validation remains bounded to its
-`0x400000` executable page. The synthetic instruction stream first verifies
-that unsupported call
+`0x400000` executable page. The proof instructions live in checked-in x86-64
+assembly; the build uses Clang to produce an ELF relocatable and extracts its
+`.text` section, so branch layout is assembler-validated instead of
+hand-encoded. The instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
 Linux `write(1, 0x401000, 8)` whose kernel copy-in verifies the RW payload. A
 bounded `arch_prctl(ARCH_SET_FS, 0x401000)` then makes the payload available

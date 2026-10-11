@@ -31,6 +31,7 @@ process or syscall environment; see
 Requirements:
 
 - Rust 1.99.0 through `rustup`
+- Clang with the `x86_64-none-elf` assembly target
 - QEMU with x86-64 and OVMF support
 - GNU Make
 
@@ -50,7 +51,11 @@ make build
 digest, and Ed25519 signature from `boot/manifest-v0.conf` and
 `control-plane/bootstrap.hex`; that source declares its authenticated control,
 service, and restart entry labels inline. Run `make manifest` directly when
-working on those inputs. Kernel and proof-workload ABI constants share the machine-readable
+working on those inputs. The kernel build assembles `kernel/linux-probe.S` as
+an x86-64 ELF object and extracts its `.text` section for the Linux
+compatibility image, keeping the proof workload readable on both macOS and
+Linux hosts. Override the assembler with `CLANG=/path/to/clang`. Kernel and
+proof-workload ABI constants share the machine-readable
 `specs/abi/control-v2.rs` source, and the manifest builder expands its symbolic
 feature and descriptor words before signing. The checked-in key is an RFC test
 identity and must not be treated as a production trust root.

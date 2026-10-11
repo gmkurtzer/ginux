@@ -523,6 +523,11 @@ if ! grep -q '^ginux: Linux copy errors and overflow bounds verified' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux proof workload assembled from source' "$output_file"; then
+    echo "Boot test failed: assembled Linux proof workload did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1
