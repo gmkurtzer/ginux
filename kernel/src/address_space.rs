@@ -61,6 +61,7 @@ pub(crate) fn verify_linux_elf_mapping(
         || first.writable == second.writable
         || plan.entry < first.virtual_page
         || plan.entry >= first.virtual_page + PAGE_SIZE as u64
+        || !cpu::verify_linux_copy_bounds(second.virtual_page, second.memory_size)
     {
         return false;
     }

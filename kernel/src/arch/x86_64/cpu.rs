@@ -52,6 +52,9 @@ const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
+const LINUX_EBADF: u64 = u64::MAX - 8;
+const LINUX_EFAULT: u64 = u64::MAX - 13;
+const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 
@@ -966,19 +969,21 @@ extern "sysv64" fn linux_syscall_handler(
         return u64::MAX;
     }
     match number {
-        LINUX_WRITE_SYSCALL
-            if first_argument == 1
-                && buffer == ELF_PROBE_DATA.load(Ordering::SeqCst)
-                && count == 8 =>
-        {
+        LINUX_WRITE_SYSCALL => {
+            if first_argument != 1 {
+                return LINUX_EBADF;
+            }
+            if count != 8 {
+                return LINUX_EINVAL;
+            }
             let mut bytes = [0_u8; 8];
-            let matches =
-                copy_from_linux_user(buffer, &mut bytes) && bytes == [1, 2, 3, 4, 5, 6, 7, 8];
-            if matches {
+            if !copy_from_linux_user(buffer, &mut bytes) {
+                return LINUX_EFAULT;
+            }
+            if bytes == [1, 2, 3, 4, 5, 6, 7, 8] {
                 8
             } else {
-                ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-                u64::MAX
+                LINUX_EFAULT
             }
         }
         LINUX_GETPID_SYSCALL => 1,
@@ -991,7 +996,7 @@ extern "sysv64" fn linux_syscall_handler(
             unsafe { write_msr(FS_BASE_MSR, buffer) };
             0
         }
-        LINUX_UNAME_SYSCALL if first_argument == ELF_PROBE_DATA.load(Ordering::SeqCst) => {
+        LINUX_UNAME_SYSCALL => {
             let mut name = [0_u8; LINUX_UTSNAME_SIZE];
             name[..6].copy_from_slice(b"Ginux\0");
             name[65..71].copy_from_slice(b"ginux\0");
@@ -1000,8 +1005,7 @@ extern "sysv64" fn linux_syscall_handler(
             name[260..267].copy_from_slice(b"x86_64\0");
             name[325..337].copy_from_slice(b"localdomain\0");
             if !copy_to_linux_user(first_argument, &name) {
-                ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-                return u64::MAX;
+                return LINUX_EFAULT;
             }
             0
         }
@@ -1019,11 +1023,34 @@ extern "sysv64" fn linux_syscall_handler(
 fn linux_user_range_contains(address: u64, length: usize) -> bool {
     let base = ELF_PROBE_DATA.load(Ordering::SeqCst);
     let size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
+    linux_range_contains(base, size, address, length)
+}
+
+fn linux_range_contains(base: u64, size: u64, address: u64, length: usize) -> bool {
     length != 0
         && address >= base
         && address
             .checked_add(length as u64)
             .is_some_and(|end| end <= base.saturating_add(size))
+}
+
+pub(crate) fn verify_linux_copy_bounds(base: u64, size: usize) -> bool {
+    size >= LINUX_UTSNAME_SIZE
+        && linux_range_contains(base, size as u64, base, LINUX_UTSNAME_SIZE)
+        && linux_range_contains(
+            base,
+            size as u64,
+            base + (size - LINUX_UTSNAME_SIZE) as u64,
+            LINUX_UTSNAME_SIZE,
+        )
+        && !linux_range_contains(
+            base,
+            size as u64,
+            base + (size - LINUX_UTSNAME_SIZE + 1) as u64,
+            LINUX_UTSNAME_SIZE,
+        )
+        && !linux_range_contains(base, size as u64, base + size as u64, 1)
+        && !linux_range_contains(base, size as u64, u64::MAX - 3, 8)
 }
 
 fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {

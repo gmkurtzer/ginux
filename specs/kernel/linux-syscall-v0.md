@@ -39,8 +39,9 @@ VM while an atomic boot-probe flag is armed. `write` and `getpid` return through
 `r8`, `r9`, and `r10`; it restores them before resumption, leaving only the
 architecturally clobbered `rax`, `rcx`, and `r11` changed. The resumed code
 checks the result plus sentinel values in `rdi` and `r10`, then invokes exit.
-Exit returns directly to the saved kernel context. The verifier restores all
-four MSRs before any later control-plane workload executes.
+Exit returns directly to the saved kernel context. The verifier restores and
+reads back all four syscall MSRs plus FS base before any later control-plane
+workload executes.
 
 This milestone proves the hardware transition and Linux argument registers. It
 does not provide persistent per-thread kernel stacks, `IRETQ` fallback, signal
@@ -52,3 +53,7 @@ calls. Every other call returns `-ENOSYS` without disarming the task, so a
 caller can handle the error and continue. The entire path remains disarmed
 outside the proof. The current copy helpers cover only the one declared RW
 segment; general VM-area lookup and cross-segment copies remain future work.
+Invalid `write` descriptors return `-EBADF`, unsupported bounded lengths return
+`-EINVAL`, and a `write` or `uname` range outside that segment returns
+`-EFAULT`. Boot verification covers the exact lower and upper boundaries, the
+first byte beyond the segment, and address-addition overflow.
