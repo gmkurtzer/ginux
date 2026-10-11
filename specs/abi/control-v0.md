@@ -325,8 +325,8 @@ DMA, interrupts, or hardware-backed configuration.
 
 Operation 17 is the v3 read-only root call and requires `READ` authority on
 root object 5. `RSI` selects the command and `RDX` supplies its argument.
-Command 0 requires argument zero and returns `0x0000004000100001`: profile
-version 1 in bits 0-15, the 16-node index limit in bits 16-31, and the 64-byte
+Command 0 requires argument zero and returns `0x0000004000100002`: profile
+version 2 in bits 0-15, the 16-node index limit in bits 16-31, and the 64-byte
 read limit in bits 32-47.
 
 Command 1 copies a 40-byte little-endian lookup request from `RDX`. It contains
@@ -343,7 +343,20 @@ and stops at end of file; an offset exactly at end of file returns zero without
 touching the output. Kernel staging precedes every copy-out. Unknown commands,
 malformed requests, missing paths, invalid offsets or user ranges, and authority
 denial return `UINT64_MAX - 2`. No operation grants write, create, remove,
-rename, mount, or enumeration authority.
+rename, or mount authority.
+
+Command 3 copies a 48-byte directory request. Its header is followed by `u64`
+directory-path address, path length, cursor, output address, and output
+capacity. Address and length zero name the root; nonempty paths must resolve to
+a directory. Capacity must be 32 through 287 bytes. Cursor zero starts at the
+first indexed node. A matching direct child produces one fully staged record:
+`u32` total size, `u16` ABI version, reserved-zero `u16`, `u64` next cursor,
+`u32` mode, `u32` name size, `u64` data size, and the un-terminated basename.
+The return value is the record size. A cursor at the end of the matching
+children returns zero without touching output; a cursor beyond the index, a
+non-directory path, or insufficient capacity fails without partial output.
+Profile v2 adds this command; the other operation-17 commands retain their
+profile-v1 layouts. Enumeration does not grant mutation or mount authority.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler

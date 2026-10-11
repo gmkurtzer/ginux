@@ -598,6 +598,16 @@ if ! grep -q '^ginux: ring-3 root file read completed' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: ring-3 root directory enumeration completed' "$output_file"; then
+    echo "Boot test failed: ring-3 root enumeration did not complete." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: non-directory enumeration denied' "$output_file"; then
+    echo "Boot test failed: a regular file was enumerated as a directory." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: invalid root userspace requests denied' "$output_file"; then
     echo "Boot test failed: invalid root requests were accepted." >&2
     exit 1

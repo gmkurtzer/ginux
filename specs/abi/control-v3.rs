@@ -52,9 +52,14 @@ pub const ROOT_OBJECT: u64 = 5;
 pub const ROOT_PROBE: u64 = 0;
 pub const ROOT_LOOKUP: u64 = 1;
 pub const ROOT_READ: u64 = 2;
-pub const ROOT_DESCRIPTOR_WORD: u64 = 0x0000_0040_0010_0001;
+pub const ROOT_READ_DIRECTORY: u64 = 3;
+pub const ROOT_DESCRIPTOR_WORD: u64 = 0x0000_0040_0010_0002;
 pub const ROOT_LOOKUP_REQUEST_SIZE: usize = 40;
 pub const ROOT_LOOKUP_DESCRIPTOR_SIZE: usize = 24;
 pub const ROOT_READ_REQUEST_SIZE: usize = 48;
+pub const ROOT_DIRECTORY_REQUEST_SIZE: usize = 48;
+pub const ROOT_DIRECTORY_RECORD_HEADER_SIZE: usize = 32;
+pub const ROOT_MAX_DIRECTORY_RECORD_SIZE: usize =
+    ROOT_DIRECTORY_RECORD_HEADER_SIZE + ROOT_MAX_PATH_SIZE;
 pub const ROOT_MAX_PATH_SIZE: usize = 255;
 pub const ROOT_MAX_READ_SIZE: usize = 64;

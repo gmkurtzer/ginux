@@ -37,17 +37,20 @@ paths fail. Destroying the index scrubs and releases its image frame.
 The runtime publication then materializes a third indexed copy and retains its
 frame under kernel ownership through shutdown. Signed manifest object 5 grants
 the control plane `READ` authority only. Control ABI v3 operation 17 exposes a
-fixed profile probe, exact-path metadata lookup, and reads of at most 64 bytes.
+versioned profile probe, exact-path metadata lookup, reads of at most 64 bytes,
+and cursor-based direct-child enumeration.
 Path inputs are copied into a 255-byte kernel staging buffer; metadata and file
 data are fully staged before bounded copy-out. The ring-3 proof resolves `init`,
 validates mode `0100555` and size 24, and reads its complete contents. It also
 requires denial through the console capability, rejects `../init`, and rejects
-a null output range without mutating the root. The published frame remains
-allocator-owned after the control-plane domain exits.
+a null output range without mutating the root. Root enumeration returns one
+fully staged metadata-and-name record per call, rejects regular files as
+directories, and reports end of the six-entry proof root without copying. The
+published frame remains allocator-owned after the control-plane domain exits.
 
 The `init` data is only a format marker; it is not yet a Linux ELF executable,
 PID 1, a mounted VFS root, or a runnable container image. Mount semantics,
 ownership beyond normalized root metadata, hard links, special nodes, extended
 attributes, compression, loading the image separately from the EFI binary,
-multi-page materialization, directory enumeration APIs,
-mounts, mutable nodes, and VFS or service publication are outside v0.
+multi-page materialization, mounts, mutable nodes, and VFS or service
+publication are outside v0.

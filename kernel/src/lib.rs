@@ -957,6 +957,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: read-only root capability enforced");
     serial_write("\r\nginux: ring-3 root metadata lookup completed");
     serial_write("\r\nginux: ring-3 root file read completed");
+    serial_write("\r\nginux: ring-3 root directory enumeration completed");
+    serial_write("\r\nginux: non-directory enumeration denied");
     serial_write("\r\nginux: invalid root userspace requests denied");
     serial_write("\r\nginux: published root remains kernel-owned");
     let Some(expected_fault_instruction) =

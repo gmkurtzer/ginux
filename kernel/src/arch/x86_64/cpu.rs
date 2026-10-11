@@ -6558,6 +6558,7 @@ fn root_device_call(caller_domain: u64, capability: u64, frame: *const UserTrapF
         control_abi::ROOT_PROBE if argument == 0 => control_abi::ROOT_DESCRIPTOR_WORD,
         control_abi::ROOT_LOOKUP => root_lookup(argument),
         control_abi::ROOT_READ => root_read(argument),
+        control_abi::ROOT_READ_DIRECTORY => root_read_directory(argument),
         _ => u64::MAX - 2,
     }
 }
@@ -6621,6 +6622,70 @@ fn root_read(address: u64) -> u64 {
     };
     if size == 0 || address_space::copy_to_current_user(output_address, &output[..size]) {
         size as u64
+    } else {
+        u64::MAX - 2
+    }
+}
+
+fn root_read_directory(address: u64) -> u64 {
+    let mut request = [0_u8; control_abi::ROOT_DIRECTORY_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(address, &mut request)
+        || !root_request_header(&request, control_abi::ROOT_DIRECTORY_REQUEST_SIZE)
+    {
+        return u64::MAX - 2;
+    }
+    let directory_address = root_request_word(&request, 8);
+    let directory_size = root_request_word(&request, 16);
+    let cursor = root_request_word(&request, 24);
+    let output_address = root_request_word(&request, 32);
+    let output_capacity = root_request_word(&request, 40);
+    let directory = if directory_size == 0 {
+        if directory_address != 0 {
+            return u64::MAX - 2;
+        }
+        None
+    } else {
+        let Some(path) = copy_root_path(directory_address, directory_size) else {
+            return u64::MAX - 2;
+        };
+        Some(path)
+    };
+    let (Ok(cursor), Ok(output_capacity)) =
+        (usize::try_from(cursor), usize::try_from(output_capacity))
+    else {
+        return u64::MAX - 2;
+    };
+    if !(control_abi::ROOT_DIRECTORY_RECORD_HEADER_SIZE
+        ..=control_abi::ROOT_MAX_DIRECTORY_RECORD_SIZE)
+        .contains(&output_capacity)
+    {
+        return u64::MAX - 2;
+    }
+    let directory = directory.as_ref().map_or(&[][..], RootPath::as_slice);
+    let Some(entry) = initramfs::published_next_child(directory, cursor) else {
+        return u64::MAX - 2;
+    };
+    let Some(entry) = entry else {
+        return 0;
+    };
+    let Some(record_size) =
+        control_abi::ROOT_DIRECTORY_RECORD_HEADER_SIZE.checked_add(entry.name.len())
+    else {
+        return u64::MAX - 2;
+    };
+    if record_size > output_capacity {
+        return u64::MAX - 2;
+    }
+    let mut output = [0_u8; control_abi::ROOT_MAX_DIRECTORY_RECORD_SIZE];
+    output[0..4].copy_from_slice(&(record_size as u32).to_le_bytes());
+    output[4..6].copy_from_slice(&control_abi::VERSION.to_le_bytes());
+    output[8..16].copy_from_slice(&(entry.next_cursor as u64).to_le_bytes());
+    output[16..20].copy_from_slice(&entry.mode.to_le_bytes());
+    output[20..24].copy_from_slice(&(entry.name.len() as u32).to_le_bytes());
+    output[24..32].copy_from_slice(&(entry.data_size as u64).to_le_bytes());
+    output[32..record_size].copy_from_slice(entry.name);
+    if address_space::copy_to_current_user(output_address, &output[..record_size]) {
+        record_size as u64
     } else {
         u64::MAX - 2
     }

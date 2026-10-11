@@ -11,8 +11,9 @@ one-page archive into allocator-owned memory, verifies source independence and
 a zero tail, and builds a bounded pathname index whose offsets resolve only
 inside the owned image. A final indexed copy remains kernel-owned through
 shutdown and is published to the control plane as read-only capability object
-5. Control ABI v3 provides bounded probe, exact-path metadata lookup, and file
-reads; the ring-3 proof reads `init` while rejecting the wrong capability,
+5. Control ABI v3 provides bounded probe, exact-path metadata lookup, file
+reads, and cursor-based direct-child enumeration; the ring-3 proof reads `init`
+and enumerates `dev` while rejecting the wrong capability,
 traversal, and an invalid output range. The current embedded
 `init` is a format marker, not PID 1; no archive is mounted or executed yet.
 

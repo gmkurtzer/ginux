@@ -559,6 +559,50 @@ pub(crate) fn published_read(name: &[u8], offset: usize, output: &mut [u8]) -> O
     Some(size)
 }
 
+pub(crate) struct PublishedDirectoryEntry<'a> {
+    pub(crate) name: &'a [u8],
+    pub(crate) mode: u32,
+    pub(crate) data_size: usize,
+    pub(crate) next_cursor: usize,
+}
+
+pub(crate) fn published_next_child(
+    directory: &[u8],
+    cursor: usize,
+) -> Option<Option<PublishedDirectoryEntry<'static>>> {
+    let root = published_root()?;
+    if cursor > root.node_count
+        || (!directory.is_empty()
+            && root
+                .lookup(directory)
+                .is_none_or(|entry| entry.mode & TYPE_MASK != DIRECTORY))
+    {
+        return None;
+    }
+    let bytes = root.image.bytes()?;
+    for (index, node) in root.nodes[cursor..root.node_count].iter().enumerate() {
+        let name_start = usize::from(node.name_offset);
+        let name_end = name_start.checked_add(usize::from(node.name_size))?;
+        let name = bytes.get(name_start..name_end)?;
+        let child = if directory.is_empty() {
+            (!name.contains(&b'/')).then_some(name)
+        } else {
+            name.strip_prefix(directory)
+                .and_then(|suffix| suffix.strip_prefix(core::slice::from_ref(&b'/')))
+                .filter(|suffix| !suffix.is_empty() && !suffix.contains(&b'/'))
+        };
+        if let Some(child) = child {
+            return Some(Some(PublishedDirectoryEntry {
+                name: child,
+                mode: node.mode,
+                data_size: usize::from(node.data_size),
+                next_cursor: cursor + index + 1,
+            }));
+        }
+    }
+    Some(None)
+}
+
 pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
