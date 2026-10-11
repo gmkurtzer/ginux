@@ -8,7 +8,8 @@ M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to six
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
-`PT_GNU_STACK`, and bounded `PT_INTERP` declarations. Images whose expanded
+`PT_GNU_STACK`, bounded `PT_INTERP`, and one-entry relative-relocation
+`PT_DYNAMIC` declarations. Images whose expanded
 program-header table covers the entry point are rejected. A bounded proof maps
 a resolved `ET_EXEC` main image and relocated `ET_DYN` interpreter into separate
 W^X regions, builds the dynamic startup stack, and enters the interpreter first.
@@ -16,7 +17,9 @@ A compact interpreter trampoline transfers control to the main entry; the full
 ring-3 probe then completes before the kernel restores its root and scrubs every
 owned frame. Interpreter selection binds the exact `PT_INTERP` path and SHA-256
 digest before parsing or mapping. A production authority source, relocation,
-and dynamic linking remain unimplemented.
+and dynamic linking remain unimplemented. Malformed dynamic tables, duplicate
+tags, unsupported relocations, and relocation targets outside writable memory
+are rejected before mapping.
 The execution-oriented main plan keeps its five-header table in a distinct
 read-only load so its `0x400100` entry remains intact.
 The profile is validated during boot,

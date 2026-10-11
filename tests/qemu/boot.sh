@@ -598,6 +598,11 @@ if ! grep -q '^ginux: measured Linux interpreter bytes enforced' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux relative relocation metadata validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux relative relocation metadata was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux ELF headers mapped in executable segment' "$output_file"; then
     echo "Boot test failed: Linux ELF headers were not mapped." >&2
     exit 1

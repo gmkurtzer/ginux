@@ -113,8 +113,13 @@ the exact `PT_INTERP` path to a SHA-256 digest. The kernel requires both to matc
 the resolved bytes before it parses, plans, maps, or executes the interpreter;
 wrong-path, wrong-digest, mutated, and truncated candidates are rejected. The
 authority record is currently a synthetic proof input rather than a
-production-signed package manifest. The execution-oriented planning fixture uses a
-five-header main image: a dedicated read-only header load at `0x3ff000`, RX text
+production-signed package manifest. The parser also accepts one bounded
+`PT_DYNAMIC` table containing exactly one `DT_RELA` record, its exact size and
+24-byte entry size, and a terminating `DT_NULL`. Only an `R_X86_64_RELATIVE`
+relocation with no symbol and an eight-byte-aligned target wholly inside the
+writable load is admitted. Duplicate tags, unsupported types or sizes, and
+executable relocation targets are rejected. The execution-oriented planning fixture uses a
+six-header main image: a dedicated read-only header load at `0x3ff000`, RX text
 stored from file offset `0x200` with entry `0x400100`, RW/RELRO data, and
 `PT_INTERP`. Its program-header table therefore remains readable at `0x3ff040`
 without occupying entry bytes. Static and interpreted plans produce the same

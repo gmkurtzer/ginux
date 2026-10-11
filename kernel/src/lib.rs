@@ -586,6 +586,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux ET_DYN load bias validated\r\n");
     serial_write("ginux: bounded Linux interpreter resolution plan validated\r\n");
     serial_write("ginux: measured Linux interpreter bytes enforced\r\n");
+    if !linux_elf::verify_dynamic_relocation_rejections() {
+        kernel_fail("ginux: malformed Linux dynamic relocation metadata accepted\r\n");
+    }
+    serial_write("ginux: bounded Linux relative relocation metadata validated\r\n");
     serial_write("ginux: separate-header Linux interpreter plan validated\r\n");
     serial_write("ginux: Linux dynamic startup metadata validated\r\n");
     serial_write("ginux: Linux auxiliary vector encoding validated\r\n");

@@ -4,6 +4,7 @@ const MIN_LOAD_SEGMENT_COUNT: usize = 2;
 const MAX_LOAD_SEGMENT_COUNT: usize = 3;
 const MAX_PROGRAM_HEADER_COUNT: usize = 6;
 const PT_LOAD: u32 = 1;
+const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
 const PT_PHDR: u32 = 6;
 const PT_GNU_STACK: u32 = 0x6474_e551;
@@ -23,6 +24,14 @@ const MAX_INTERPRETER_PATH_SIZE: usize = 256;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (4 * PAGE_SIZE) as u64;
 const FIXTURE_DATA_OFFSET: usize = 0x4000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
+const INTERPRETED_FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8 + 4 * 16;
+const DYNAMIC_ENTRY_SIZE: usize = 16;
+const RELA_ENTRY_SIZE: usize = 24;
+const DT_NULL: u64 = 0;
+const DT_RELA: u64 = 7;
+const DT_RELASZ: u64 = 8;
+const DT_RELAENT: u64 = 9;
+const R_X86_64_RELATIVE: u64 = 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
 
@@ -45,6 +54,7 @@ pub(crate) struct Image<'a> {
     pub(crate) writable: Segment<'a>,
     pub(crate) relro: Option<Relro>,
     pub(crate) interpreter: Option<&'a [u8]>,
+    pub(crate) dynamic_relocations: Option<DynamicRelocations>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -57,6 +67,22 @@ pub(crate) enum ImageKind {
 pub(crate) struct Relro {
     pub(crate) virtual_address: u64,
     pub(crate) memory_size: u64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct DynamicRelocations {
+    pub(crate) table_address: u64,
+    pub(crate) relocation_address: u64,
+    pub(crate) relocation_count: usize,
+    pub(crate) relocation_target: u64,
+    pub(crate) relocation_addend: u64,
+}
+
+#[derive(Clone, Copy)]
+struct DynamicTable<'a> {
+    bytes: &'a [u8],
+    file_offset: u64,
+    virtual_address: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -78,6 +104,7 @@ pub(crate) struct LoadPlan<'a> {
     pub(crate) read_only: Option<PlannedSegment<'a>>,
     pub(crate) writable: PlannedSegment<'a>,
     pub(crate) relro: Option<Relro>,
+    pub(crate) dynamic_relocations: Option<DynamicRelocations>,
 }
 
 pub(crate) struct InterpretedLoadPlan<'main, 'interpreter> {
@@ -143,6 +170,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     let mut phdr_address = None;
     let mut relro = None;
     let mut interpreter = None;
+    let mut dynamic = None;
     for index in 0..program_header_count {
         let header = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
         match read_u32(bytes, header)? {
@@ -165,6 +193,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
             }
             PT_INTERP if interpreter.is_none() => {
                 interpreter = Some(parse_interpreter(bytes, header)?);
+            }
+            PT_DYNAMIC if dynamic.is_none() => {
+                dynamic = Some(parse_dynamic_table(bytes, header)?);
             }
             _ => return None,
         }
@@ -244,6 +275,10 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     if phdr_address.is_some_and(|address| address != program_headers) {
         return None;
     }
+    let dynamic_relocations = match dynamic {
+        Some(table) => Some(parse_dynamic_relocations(table, writable, loads)?),
+        None => None,
+    };
     let mapped_program_table_end = program_headers
         .checked_add(u64::try_from(program_header_count.checked_mul(PROGRAM_HEADER_SIZE)?).ok()?)?;
     if (program_headers..mapped_program_table_end).contains(&entry) {
@@ -259,6 +294,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         writable,
         relro,
         interpreter,
+        dynamic_relocations,
     })
 }
 
@@ -284,6 +320,7 @@ fn plan_executable<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
         },
         writable: plan_segment(image.writable)?,
         relro: image.relro,
+        dynamic_relocations: image.dynamic_relocations,
     };
     (!plan_has_internal_overlap(&plan)).then_some(plan)
 }
@@ -456,6 +493,16 @@ pub(crate) fn plan_position_independent<'a>(
         }),
         None => None,
     };
+    let dynamic_relocations = match image.dynamic_relocations {
+        Some(dynamic) => Some(DynamicRelocations {
+            table_address: dynamic.table_address.checked_add(load_bias)?,
+            relocation_address: dynamic.relocation_address.checked_add(load_bias)?,
+            relocation_count: dynamic.relocation_count,
+            relocation_target: dynamic.relocation_target.checked_add(load_bias)?,
+            relocation_addend: dynamic.relocation_addend,
+        }),
+        None => None,
+    };
     let plan = LoadPlan {
         entry: image.entry.checked_add(load_bias)?,
         program_headers: image.program_headers.checked_add(load_bias)?,
@@ -467,6 +514,7 @@ pub(crate) fn plan_position_independent<'a>(
         },
         writable: plan_segment(writable)?,
         relro,
+        dynamic_relocations,
     };
     (!plan_has_internal_overlap(&plan)).then_some(plan)
 }
@@ -681,6 +729,107 @@ fn parse_interpreter(bytes: &[u8], header: usize) -> Option<&[u8]> {
         .then_some(&path[..file_size - 1])
 }
 
+fn parse_dynamic_table(bytes: &[u8], header: usize) -> Option<DynamicTable<'_>> {
+    let file_offset = read_u64(bytes, header + 8)?;
+    let virtual_address = read_u64(bytes, header + 16)?;
+    let physical_address = read_u64(bytes, header + 24)?;
+    let file_size = usize::try_from(read_u64(bytes, header + 32)?).ok()?;
+    let memory_size = usize::try_from(read_u64(bytes, header + 40)?).ok()?;
+    let alignment = read_u64(bytes, header + 48)?;
+    if read_u32(bytes, header + 4)? != PF_READ | PF_WRITE
+        || physical_address != 0 && physical_address != virtual_address
+        || file_size != memory_size
+        || !(2..=8).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
+        || !file_size.is_multiple_of(DYNAMIC_ENTRY_SIZE)
+        || alignment != 8
+        || file_offset % alignment != virtual_address % alignment
+    {
+        return None;
+    }
+    let offset = usize::try_from(file_offset).ok()?;
+    Some(DynamicTable {
+        bytes: bytes.get(offset..offset.checked_add(file_size)?)?,
+        file_offset,
+        virtual_address,
+    })
+}
+
+fn parse_dynamic_relocations(
+    table: DynamicTable<'_>,
+    writable: Segment<'_>,
+    loads: &[Option<Segment<'_>>],
+) -> Option<DynamicRelocations> {
+    let table_offset = table
+        .virtual_address
+        .checked_sub(writable.virtual_address)?;
+    if writable.file_offset.checked_add(table_offset)? != table.file_offset
+        || table_offset.checked_add(table.bytes.len() as u64)? > writable.bytes.len() as u64
+    {
+        return None;
+    }
+    let mut rela_address = None;
+    let mut rela_size = None;
+    let mut rela_entry_size = None;
+    let mut terminated = false;
+    let entries = table.bytes.as_chunks::<DYNAMIC_ENTRY_SIZE>().0;
+    for (index, entry) in entries.iter().enumerate() {
+        let tag = read_u64(entry, 0)?;
+        let value = read_u64(entry, 8)?;
+        match tag {
+            DT_NULL if value == 0 && index + 1 == entries.len() => {
+                terminated = true;
+                break;
+            }
+            DT_RELA if rela_address.replace(value).is_none() => {}
+            DT_RELASZ if rela_size.replace(value).is_none() => {}
+            DT_RELAENT if rela_entry_size.replace(value).is_none() => {}
+            _ => return None,
+        }
+    }
+    let (Some(rela_address), Some(rela_size), Some(rela_entry_size)) =
+        (rela_address, rela_size, rela_entry_size)
+    else {
+        return None;
+    };
+    if !terminated
+        || rela_entry_size != RELA_ENTRY_SIZE as u64
+        || rela_size != RELA_ENTRY_SIZE as u64
+    {
+        return None;
+    }
+    let rela = virtual_file_bytes(loads, rela_address, RELA_ENTRY_SIZE)?;
+    let target = read_u64(rela, 0)?;
+    let info = read_u64(rela, 8)?;
+    let addend = read_u64(rela, 16)?;
+    let writable_end = writable.virtual_address.checked_add(writable.memory_size)?;
+    if info != R_X86_64_RELATIVE
+        || !target.is_multiple_of(8)
+        || target < writable.virtual_address
+        || target.checked_add(8)? > writable_end
+    {
+        return None;
+    }
+    Some(DynamicRelocations {
+        table_address: table.virtual_address,
+        relocation_address: rela_address,
+        relocation_count: 1,
+        relocation_target: target,
+        relocation_addend: addend,
+    })
+}
+
+fn virtual_file_bytes<'a>(
+    loads: &[Option<Segment<'a>>],
+    address: u64,
+    size: usize,
+) -> Option<&'a [u8]> {
+    loads.iter().flatten().find_map(|segment| {
+        let offset = address.checked_sub(segment.virtual_address)?;
+        let offset = usize::try_from(offset).ok()?;
+        segment.bytes.get(offset..offset.checked_add(size)?)
+    })
+}
+
 pub(crate) fn verify_parser() -> bool {
     let image = fixture();
     let Some(parsed) = parse(&image) else {
@@ -696,6 +845,7 @@ pub(crate) fn verify_parser() -> bool {
         || parsed.executable.flags != PF_READ | PF_EXECUTE
         || parsed.read_only.is_some()
         || parsed.interpreter.is_some()
+        || parsed.dynamic_relocations.is_some()
         || parsed.writable.bytes != *b"PROBE!!\n"
         || parsed.writable.virtual_address != 0x40_4000
         || parsed.writable.memory_size != (PAGE_SIZE + 512) as u64
@@ -1037,11 +1187,11 @@ fn verify_interpreted_plan() -> bool {
     let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000);
     startup.initial_entry == 0x60_00f0
         && startup.program_headers == 0x3f_f040
-        && startup.program_header_count == 5
+        && startup.program_header_count == 6
         && startup.interpreter_base == 0x60_0000
         && startup.main_entry == 0x40_0100
         && auxiliary[1] == 0x3f_f040
-        && auxiliary[5] == 5
+        && auxiliary[5] == 6
         && auxiliary[9] == 0x60_0000
         && auxiliary[23] == 0x70_1000
         && auxiliary[25] == 0x40_0100
@@ -1051,11 +1201,21 @@ fn verify_interpreted_plan() -> bool {
         && combined.main_entry == 0x40_0100
         && combined.interpreter_base == 0x60_0000
         && combined.main.program_headers == 0x3f_f040
+        && combined.main.program_header_count == 6
+        && combined.main.dynamic_relocations.is_some_and(|dynamic| {
+            dynamic.table_address == 0x40_4008
+                && dynamic.relocation_address
+                    == 0x3f_f000 + (ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE) as u64
+                && dynamic.relocation_count == 1
+                && dynamic.relocation_target == 0x40_4100
+                && dynamic.relocation_addend == 0x40_0100
+        })
         && combined
             .main
             .read_only
             .is_some_and(|segment| segment.virtual_address == 0x3f_f000)
         && combined.interpreter.program_headers == 0x60_0040
+        && combined.interpreter.dynamic_relocations.is_none()
         && combined.interpreter.executable.virtual_page == 0x60_0000
         && combined.interpreter.writable.virtual_page == 0x60_3000
         && verify_interpreter_authentication_rejections(&main, &interpreter_bytes, &authority)
@@ -1092,6 +1252,25 @@ fn verify_interpreter_authentication_rejections(
             0x60_0000,
         )
         .is_none()
+}
+
+pub(crate) fn verify_dynamic_relocation_rejections() -> bool {
+    (0..4).all(dynamic_relocation_rejected)
+}
+
+#[inline(never)]
+fn dynamic_relocation_rejected(case: u8) -> bool {
+    const RELA_OFFSET: usize = ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE;
+    const DYNAMIC_OFFSET: usize = FIXTURE_DATA_OFFSET + 8;
+    let mut image = interpreted_main_fixture();
+    match case {
+        0 => write_u64(&mut image, DYNAMIC_OFFSET + DYNAMIC_ENTRY_SIZE, DT_RELA),
+        1 => write_u64(&mut image, DYNAMIC_OFFSET + 2 * DYNAMIC_ENTRY_SIZE + 8, 16),
+        2 => write_u64(&mut image, RELA_OFFSET + 8, 1),
+        3 => write_u64(&mut image, RELA_OFFSET, 0x40_0100),
+        _ => return false,
+    }
+    parse(&image).is_none()
 }
 
 #[inline(never)]
@@ -1252,11 +1431,13 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
     crate::address_space::verify_interpreted_elf_mapping(&plan, protected_start, protected_size)
 }
 
-fn interpreted_main_fixture() -> [u8; FIXTURE_SIZE] {
+fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
     const PATH: &[u8] = b"/lib64/ld-ginux.so\0";
     const EXECUTABLE_OFFSET: usize = 0x200;
+    const RELA_OFFSET: usize = ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE;
     const PATH_OFFSET: usize = 0x3f80;
-    let mut bytes = [0_u8; FIXTURE_SIZE];
+    const DYNAMIC_OFFSET: usize = FIXTURE_DATA_OFFSET + 8;
+    let mut bytes = [0_u8; INTERPRETED_FIXTURE_SIZE];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
     bytes[5] = 1;
@@ -1268,15 +1449,15 @@ fn interpreted_main_fixture() -> [u8; FIXTURE_SIZE] {
     write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
     write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
     write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
-    write_u16(&mut bytes, 56, 5);
-    let program_table_size = (ELF_HEADER_SIZE + 5 * PROGRAM_HEADER_SIZE) as u64;
+    write_u16(&mut bytes, 56, 6);
+    let header_load_size = (RELA_OFFSET + RELA_ENTRY_SIZE) as u64;
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE,
         0,
         0x3f_f000,
-        program_table_size,
-        program_table_size,
+        header_load_size,
+        header_load_size,
         PF_READ,
     );
     write_segment(
@@ -1293,7 +1474,7 @@ fn interpreted_main_fixture() -> [u8; FIXTURE_SIZE] {
         ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE,
         FIXTURE_DATA_OFFSET as u64,
         0x40_4000,
-        8,
+        (8 + 4 * DYNAMIC_ENTRY_SIZE) as u64,
         (PAGE_SIZE + 512) as u64,
         PF_READ | PF_WRITE,
     );
@@ -1309,8 +1490,34 @@ fn interpreted_main_fixture() -> [u8; FIXTURE_SIZE] {
         PATH_OFFSET,
         PATH,
     );
+    write_dynamic(
+        &mut bytes,
+        ELF_HEADER_SIZE + 5 * PROGRAM_HEADER_SIZE,
+        DYNAMIC_OFFSET,
+        0x40_4008,
+        4 * DYNAMIC_ENTRY_SIZE,
+    );
+    write_u64(&mut bytes, RELA_OFFSET, 0x40_4100);
+    write_u64(&mut bytes, RELA_OFFSET + 8, R_X86_64_RELATIVE);
+    write_u64(&mut bytes, RELA_OFFSET + 16, 0x40_0100);
+    for (index, (tag, value)) in [
+        (DT_RELA, 0x3f_f000 + RELA_OFFSET as u64),
+        (DT_RELASZ, RELA_ENTRY_SIZE as u64),
+        (DT_RELAENT, RELA_ENTRY_SIZE as u64),
+        (DT_NULL, 0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        write_u64(&mut bytes, DYNAMIC_OFFSET + index * DYNAMIC_ENTRY_SIZE, tag);
+        write_u64(
+            &mut bytes,
+            DYNAMIC_OFFSET + index * DYNAMIC_ENTRY_SIZE + 8,
+            value,
+        );
+    }
     bytes[EXECUTABLE_OFFSET..EXECUTABLE_OFFSET + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
-    bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(b"PROBE!!\n");
+    bytes[FIXTURE_DATA_OFFSET..FIXTURE_DATA_OFFSET + 8].copy_from_slice(b"PROBE!!\n");
     bytes
 }
 
@@ -1418,6 +1625,24 @@ fn write_interpreter(bytes: &mut [u8], header: usize, offset: usize, path: &[u8]
     write_u64(bytes, header + 40, path.len() as u64);
     write_u64(bytes, header + 48, 1);
     bytes[offset..offset + path.len()].copy_from_slice(path);
+}
+
+fn write_dynamic(
+    bytes: &mut [u8],
+    header: usize,
+    offset: usize,
+    virtual_address: u64,
+    size: usize,
+) {
+    bytes[header..header + PROGRAM_HEADER_SIZE].fill(0);
+    write_u32(bytes, header, PT_DYNAMIC);
+    write_u32(bytes, header + 4, PF_READ | PF_WRITE);
+    write_u64(bytes, header + 8, offset as u64);
+    write_u64(bytes, header + 16, virtual_address);
+    write_u64(bytes, header + 24, virtual_address);
+    write_u64(bytes, header + 32, size as u64);
+    write_u64(bytes, header + 40, size as u64);
+    write_u64(bytes, header + 48, 8);
 }
 
 fn write_relro(bytes: &mut [u8], header: usize, virtual_address: u64, memory_size: u64) {
