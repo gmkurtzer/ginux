@@ -103,6 +103,7 @@ const LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL: u64 = 147;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
+const LINUX_FUTEX_SYSCALL: u64 = 202;
 const LINUX_SCHED_SETAFFINITY_SYSCALL: u64 = 203;
 const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_GETDENTS64_SYSCALL: u64 = 217;
@@ -131,6 +132,7 @@ const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
+const LINUX_EAGAIN: u64 = u64::MAX - 10;
 const LINUX_EACCES: u64 = u64::MAX - 12;
 const LINUX_ENOTDIR: u64 = u64::MAX - 19;
 const LINUX_EISDIR: u64 = u64::MAX - 20;
@@ -1597,6 +1599,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_GETRUSAGE_SYSCALL => linux_getrusage(first_argument, buffer),
         LINUX_TIMES_SYSCALL => linux_times(first_argument),
+        LINUX_FUTEX_SYSCALL => linux_futex(first_argument, buffer, count),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
@@ -1775,6 +1778,27 @@ fn linux_setitimer(which: u64, input_address: u64, old_output_address: u64) -> u
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_futex(address: u64, operation: u64, value: u64) -> u64 {
+    if !address.is_multiple_of(size_of::<u32>() as u64) {
+        return LINUX_EINVAL;
+    }
+    let mut bytes = [0_u8; size_of::<u32>()];
+    if !copy_from_linux_user(address, &mut bytes) {
+        return LINUX_EFAULT;
+    }
+    match operation {
+        0 | 128 => {
+            if u64::from(u32::from_ne_bytes(bytes)) != value {
+                LINUX_EAGAIN
+            } else {
+                LINUX_ENOSYS
+            }
+        }
+        1 | 129 => 0,
+        _ => LINUX_EINVAL,
+    }
 }
 
 fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, offset: u64) -> u64 {

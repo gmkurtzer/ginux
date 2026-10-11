@@ -53,7 +53,10 @@ PID 0, matching an initial process namespace. A bounded
 part of exit.
 Bounded `set_robust_list` and `get_robust_list` calls retain and report one
 24-byte thread robust-list head, reject foreign process IDs and invalid ranges,
-and discard the registration during exit. Futex recovery is not implemented.
+and discard the registration during exit. Nonblocking futex compare and wake
+semantics are exposed for the sole thread; a wait that would sleep returns
+`ENOSYS` until scheduler wait queues exist. Robust futex recovery is not
+implemented.
 Bounded `mprotect` can irreversibly seal the page named by the parsed
 `PT_GNU_RELRO` range or every page in the active anonymous extent as
 read-only/NX. The page-table permissions and syscall copy direction change

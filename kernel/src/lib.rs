@@ -605,6 +605,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux FS base query validated\r\n");
     serial_write("ginux: Linux clear-child-TID exit action validated\r\n");
     serial_write("ginux: Linux robust-list registration validated\r\n");
+    serial_write("ginux: Linux nonblocking futex boundary validated\r\n");
     serial_write("ginux: Linux read-only memory transition validated\r\n");
     serial_write("ginux: Linux initial process namespace identity validated\r\n");
     serial_write("ginux: Linux bounded process name state validated\r\n");

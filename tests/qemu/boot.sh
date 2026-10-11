@@ -658,6 +658,11 @@ if ! grep -q '^ginux: Linux robust-list registration validated' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux nonblocking futex boundary validated' "$output_file"; then
+    echo "Boot test failed: Linux futex boundary was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux read-only memory transition validated' "$output_file"; then
     echo "Boot test failed: Linux read-only memory transition was not validated." >&2
     exit 1

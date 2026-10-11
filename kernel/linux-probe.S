@@ -2575,6 +2575,58 @@ resolution_valid:
     cmp rax, -14
     jne failure
 
+    mov dword ptr [0x404c40], 42
+    mov edi, 0x404c40
+    mov esi, 2
+    mov edx, 42
+    mov eax, 202
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 0x404c41
+    xor esi, esi
+    mov eax, 202
+    syscall
+    cmp rax, -22
+    jne failure
+    mov edi, 0x405200
+    mov eax, 202
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov edi, 0x404c40
+    mov edx, 41
+    mov eax, 202
+    syscall
+    cmp rax, -11
+    jne failure
+    mov esi, 128
+    mov eax, 202
+    syscall
+    cmp rax, -11
+    jne failure
+
+    xor esi, esi
+    mov edx, 42
+    mov eax, 202
+    syscall
+    cmp rax, -38
+    jne failure
+
+    mov esi, 1
+    mov edx, 1
+    mov eax, 202
+    syscall
+    test rax, rax
+    jne failure
+    mov esi, 129
+    mov eax, 202
+    syscall
+    test rax, rax
+    jne failure
+
     movabs rax, 0x1122334455667788
     mov qword ptr [0x404ff0], rax
     mov qword ptr [0x404ff8], rax

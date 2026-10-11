@@ -326,6 +326,14 @@ foreign PIDs return `-ESRCH`. Both eight-byte output ranges are validated before
 either is changed. Exit discards the registration, but no robust futex traversal
 or recovery is attempted.
 
+`rax = 202` (`__NR_futex`) provides the nonblocking portion of the single-thread
+futex contract. Aligned, readable `FUTEX_WAIT` and `FUTEX_WAIT_PRIVATE` compare
+one 32-bit word and return `-EAGAIN` when it differs from the expected value. A
+matching value returns `-ENOSYS` because honoring it would require a scheduler
+wait queue. `FUTEX_WAKE` and `FUTEX_WAKE_PRIVATE` return zero because this proof
+has no waiters. Invalid operations or alignment return `-EINVAL`, and an invalid
+word returns `-EFAULT`. No call silently pretends to block or wake a thread.
+
 `rax = 10` (`__NR_mprotect`) supports one irreversible transition on either the
 page named by the parsed `PT_GNU_RELRO` range or the complete active anonymous
 extent: one or two exact pages may become read-only/NX. The RELRO seal lasts for
@@ -376,6 +384,7 @@ threads, general TLS state, or any syscall other than the exact bounded
 bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
+nonblocking single-thread `futex`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
 bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
 `getitimer`/`setitimer`,
