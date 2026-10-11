@@ -79,6 +79,7 @@ const LINUX_GETRESGID_SYSCALL: u64 = 120;
 const LINUX_GETPGID_SYSCALL: u64 = 121;
 const LINUX_GETSID_SYSCALL: u64 = 124;
 const LINUX_SIGALTSTACK_SYSCALL: u64 = 131;
+const LINUX_PERSONALITY_SYSCALL: u64 = 135;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
@@ -1323,6 +1324,10 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_PERSONALITY_SYSCALL => match first_argument {
+            0 | 0xffff_ffff => 0,
+            _ => LINUX_EINVAL,
+        },
         LINUX_PRCTL_SYSCALL => match first_argument {
             LINUX_PR_SET_NAME => linux_set_process_name(buffer),
             LINUX_PR_GET_NAME => linux_get_process_name(buffer),

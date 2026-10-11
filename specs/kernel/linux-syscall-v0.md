@@ -161,7 +161,11 @@ reports one immutable supplementary group, container-local GID 0. A zero-sized
 query returns the required count without accessing its pointer, a negative size
 returns `-EINVAL`, and a full four-byte destination is required before copying.
 `rax = 116` (`__NR_setgroups`) always returns `-EPERM`, including for an empty
-list, because this profile's container credentials are immutable. The initial process namespace has
+list, because this profile's container credentials are immutable. `rax = 135`
+(`__NR_personality`) reports `PER_LINUX` for the query value `0xffffffff` and
+accepts an idempotent `PER_LINUX` selection. Every flag and alternate execution
+domain returns `-EINVAL`, so a process cannot weaken the fixed execution policy
+through personality state. The initial process namespace has
 one process and one thread:
 `getpid` and `gettid` return 1, `getppid` returns 0, and `getpgrp`,
 `getpgid(0)`, and `getsid(0)` return 1. `getpgid` and `getsid` return `-ESRCH`
