@@ -64,6 +64,7 @@ struct Domain {
     id: DomainId,
     service: Option<ServiceId>,
     failure_policy: Option<ServiceFailurePolicy>,
+    terminal_fault: Option<FaultMetadata>,
     role: Role,
     state: State,
     capabilities: CapabilityTable,
@@ -262,6 +263,7 @@ impl Manager {
             id,
             service: None,
             failure_policy: None,
+            terminal_fault: None,
             role: Role::ControlPlane,
             state: State::Ready,
             capabilities,
@@ -437,6 +439,7 @@ impl Manager {
             } else {
                 ServiceFailurePolicy::StopOnly
             }),
+            terminal_fault: None,
             role,
             state: State::Ready,
             capabilities,
@@ -707,7 +710,7 @@ impl Manager {
         else {
             return false;
         };
-        let Some(service) = self
+        let Some((service, fault)) = self
             .domain(id)
             .filter(|domain| {
                 domain.role == Role::AuxiliaryService
@@ -716,16 +719,24 @@ impl Manager {
                     && domain.active_threads == 0
                     && domain.active_operations == 0
             })
-            .and_then(|domain| domain.service)
+            .and_then(|domain| {
+                domain
+                    .service
+                    .map(|service| (service, domain.terminal_fault))
+            })
         else {
             return false;
         };
         if !self.lifecycle_events.push(LifecycleEvent {
-            kind: crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED,
+            kind: if fault.is_some() {
+                crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+            } else {
+                crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
+            },
             domain: id,
             service: Some(service),
             detail: 0,
-            fault: None,
+            fault,
             sequence: 0,
         }) {
             return false;
@@ -736,39 +747,42 @@ impl Manager {
     }
 
     fn retire_faulted_auxiliary_service(&mut self, id: DomainId, fault: FaultMetadata) -> bool {
-        let Some(registry_slot) = self
-            .auxiliary_service_ids
-            .iter()
-            .position(|registered| *registered == Some(id))
-        else {
-            return false;
-        };
-        let Some(service) = self
-            .domain(id)
-            .filter(|domain| {
-                domain.role == Role::AuxiliaryService
-                    && domain.failure_policy == Some(ServiceFailurePolicy::StopOnly)
-                    && domain.state == State::Ready
-                    && domain.address_space_root.is_none()
-                    && domain.active_threads == 0
-                    && domain.active_operations == 0
-            })
-            .and_then(|domain| domain.service)
-        else {
-            return false;
-        };
-        if !self.lifecycle_events.push(LifecycleEvent {
-            kind: crate::control_abi::LIFECYCLE_AUXILIARY_FAULT,
-            domain: id,
-            service: Some(service),
-            detail: 0,
-            fault: Some(fault),
-            sequence: 0,
-        }) {
+        self.begin_faulted_auxiliary_stop(id, fault) && self.retire_auxiliary_service(id)
+    }
+
+    fn begin_faulted_auxiliary_stop(&mut self, id: DomainId, fault: FaultMetadata) -> bool {
+        if !self.auxiliary_service_ids.contains(&Some(id)) {
             return false;
         }
-        self.domains[usize::from(id.slot)] = None;
-        self.auxiliary_service_ids[registry_slot] = None;
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if domain.role != Role::AuxiliaryService
+            || domain.failure_policy != Some(ServiceFailurePolicy::StopOnly)
+            || domain.state != State::Ready
+            || domain.active_threads != 0
+            || domain.active_operations != 0
+            || domain.boot_root_count == 0
+            || domain.boot_roots[..domain.boot_root_count]
+                .iter()
+                .any(|root| {
+                    root.is_none_or(|root| domain.capabilities.authority_root(root) != Some(root))
+                })
+        {
+            return false;
+        }
+        for root in domain.boot_roots[..domain.boot_root_count].iter().flatten() {
+            if !domain.capabilities.revoke(*root) {
+                return false;
+            }
+        }
+        domain.terminal_fault = Some(fault);
+        domain.state = State::Stopping;
         true
     }
 
@@ -1351,14 +1365,31 @@ fn verify_auxiliary_fault_policy_invariants_inner() -> Option<bool> {
         return Some(false);
     }
     let event = manager.lifecycle_events.pop()?;
+    if event.kind != crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+        || event.domain != auxiliary
+        || event.service != Some(identity)
+        || event.detail != 0
+        || event.fault != Some(fault)
+        || event.sequence != 1
+        || !manager.lifecycle_events.is_empty()
+    {
+        return Some(false);
+    }
+    let replacement = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
+        source: console_source,
+        object: 2,
+        rights: Rights::WRITE,
+    }])?;
+    let replacement_handle = manager.domain(replacement)?.boot_roots[0]?;
+    manager.lifecycle_events.next_sequence = u64::MAX;
     Some(
-        event.kind == crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
-            && event.domain == auxiliary
-            && event.service == Some(identity)
-            && event.detail == 0
-            && event.fault == Some(fault)
-            && event.sequence == 1
-            && manager.lifecycle_events.is_empty(),
+        !manager.retire_faulted_auxiliary_service(replacement, fault)
+            && manager.domain(replacement)?.state == State::Stopping
+            && manager.domain(replacement)?.terminal_fault == Some(fault)
+            && !manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
+            && manager.auxiliary_service_ids.contains(&Some(replacement))
+            && manager.lifecycle_events.is_empty()
+            && manager.lifecycle_events.next_sequence == u64::MAX,
     )
 }
 

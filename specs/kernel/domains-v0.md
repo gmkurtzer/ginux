@@ -102,7 +102,11 @@ is retired without consuming the primary restart budget. Retirement removes
 all of that generation's capability authority and publishes lifecycle kind 4
 with exact domain identity, stable service identity, and architectural fault
 metadata. The proof rejects retirement while an operation is active and
-rejects a stale repeat.
+rejects a stale repeat. Fault teardown first revokes every delegated root,
+records the fault, and changes the domain to stopping. Only then does it try to
+publish and remove the record. If lifecycle sequencing is exhausted, the
+faulted record remains stopped with no usable authority rather than returning
+to service or disappearing without an audit event.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

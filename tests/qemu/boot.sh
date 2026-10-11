@@ -348,6 +348,11 @@ if ! grep -q '^ginux: stop-only auxiliary faults contained' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary fault authority revoked before publication' "$output_file"; then
+    echo "Boot test failed: auxiliary fault authority was not revoked first." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded service restart policy verified' "$output_file"; then
     echo "Boot test failed: service restart policy validation failed." >&2
     exit 1
