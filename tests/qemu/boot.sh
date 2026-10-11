@@ -528,6 +528,11 @@ if ! grep -q '^ginux: userspace auxiliary lifecycle observation enforced' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace auxiliary lifecycle descriptor enforced' "$output_file"; then
+    echo "Boot test failed: userspace auxiliary lifecycle descriptor validation was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
     echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
     exit 1

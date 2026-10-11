@@ -166,7 +166,8 @@ and all non-staged states are rejected.
 The control-plane proof consumes each requested-stop event in ring 3. It then
 yields to the explicitly started workload, resumes after its normal exit, and
 validates kind 5, the exact generation, and status 42 before exhausting its own
-budget. The kernel requires no auxiliary events to remain queued.
+budget. It also validates the structured descriptor for that event. The kernel
+requires no auxiliary events to remain queued.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

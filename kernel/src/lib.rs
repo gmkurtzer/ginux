@@ -664,6 +664,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: private auxiliary payload initialization enforced");
     serial_write("\r\nginux: explicit auxiliary start authority enforced");
     serial_write("\r\nginux: userspace auxiliary lifecycle observation enforced");
+    serial_write("\r\nginux: userspace auxiliary lifecycle descriptor enforced");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }

@@ -568,6 +568,29 @@ cd80
 7402
 0f0b
 
+# fetch and validate the structured auxiliary-exit descriptor
+4889df
+48be0022000080000000
+ba18000000
+b80c000000
+cd80
+83f818
+7402
+0f0b
+488b06
+48bd180000000100052a
+4839e8
+7402
+0f0b
+488b4608
+4c39e0
+7402
+0f0b
+488b4610
+4883f804
+7402
+0f0b
+
 # the diagnostics consumed the final budgeted call
 b800000000
 cd80

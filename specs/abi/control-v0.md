@@ -225,10 +225,11 @@ absent, ready, running, blocked, or wrong-generation targets fail closed.
 The ring-3 control plane consumes both kind 3 stop records as they are
 published. After action 5 it voluntarily yields, resumes only after the
 workload has exited, consumes the kind 5 record, and validates the exact
-generation and status 42 from the packed result. The kernel verifier requires
-the lifecycle FIFO to be empty afterward; lifecycle observation is therefore a
-userspace control-plane responsibility in this proof rather than deferred
-kernel-only inspection.
+generation and status 42 from the packed result. It then uses operation 12 to
+validate the descriptor version, kind, detail, exact generation, and lifecycle
+sequence four. The kernel verifier requires the lifecycle FIFO to be empty
+afterward; lifecycle observation is therefore a userspace control-plane
+responsibility in this proof rather than deferred kernel-only inspection.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
