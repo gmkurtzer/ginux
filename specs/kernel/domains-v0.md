@@ -15,6 +15,10 @@ state, a generation-tagged lifecycle parent, and a domain-local capability
 table. The control plane has no parent; each bootstrap service is its direct
 child. Ancestry walks are bounded by the fixed domain table and reject missing,
 stale, and self relationships; malformed chains cannot loop indefinitely.
+Domain and logical-service generations never wrap. Allocation scans the bounded
+tables for another empty slot whose next generation is representable; an
+exhausted slot is permanently skipped. If no usable slot remains, construction
+fails before publishing a domain, registry entry, or logical identity.
 
 Service identity is separate from domain identity. The primary logical service
 keeps one generation-tagged service ID across its initial and replacement

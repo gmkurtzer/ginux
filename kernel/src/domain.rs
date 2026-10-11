@@ -235,12 +235,7 @@ impl Manager {
         if self.control_plane_created || grants.is_empty() || grants.len() > MAX_BOOT_GRANTS {
             return None;
         }
-        let slot = self.domains.iter().position(Option::is_none)?;
-        let generation = self.generations[slot].checked_add(1)?;
-        let id = DomainId {
-            slot: slot as u16,
-            generation,
-        };
+        let (slot, id) = self.next_domain_id()?;
         let mut capabilities = CapabilityTable::new();
         let mut boot_roots = [None; MAX_BOOT_GRANTS];
         for (index, grant) in grants.iter().enumerate() {
@@ -248,7 +243,7 @@ impl Manager {
         }
         capabilities.seal_boot_authority();
 
-        self.generations[slot] = generation;
+        self.generations[slot] = id.generation;
         self.domains[slot] = Some(Domain {
             id,
             service: None,
@@ -275,6 +270,21 @@ impl Manager {
             .get(usize::from(id.slot))?
             .as_ref()
             .filter(|domain| domain.id == id)
+    }
+
+    fn next_domain_id(&self) -> Option<(usize, DomainId)> {
+        self.domains.iter().enumerate().find_map(|(slot, domain)| {
+            if domain.is_some() {
+                return None;
+            }
+            Some((
+                slot,
+                DomainId {
+                    slot: u16::try_from(slot).ok()?,
+                    generation: self.generations[slot].checked_add(1)?,
+                },
+            ))
+        })
     }
 
     fn next_service_identity(&self, slot: usize) -> Option<ServiceId> {
@@ -321,12 +331,16 @@ impl Manager {
         &mut self,
         grants: &[DelegationGrant],
     ) -> Option<DomainId> {
-        let registry_slot = self
-            .auxiliary_service_ids
-            .iter()
-            .position(Option::is_none)?;
-        let identity_slot = registry_slot.checked_add(1)?;
-        let identity = self.next_service_identity(identity_slot)?;
+        let (registry_slot, identity) = self.auxiliary_service_ids.iter().enumerate().find_map(
+            |(registry_slot, registered)| {
+                if registered.is_some() {
+                    return None;
+                }
+                let identity_slot = registry_slot.checked_add(1)?;
+                Some((registry_slot, self.next_service_identity(identity_slot)?))
+            },
+        )?;
+        let identity_slot = usize::from(identity.slot);
         let id = self.construct_service_domain(grants, Role::AuxiliaryService, identity)?;
         self.service_generations[identity_slot] = identity.generation;
         self.auxiliary_service_ids[registry_slot] = Some(id);
@@ -356,12 +370,7 @@ impl Manager {
             return None;
         }
 
-        let slot = self.domains.iter().position(Option::is_none)?;
-        let generation = self.generations[slot].checked_add(1)?;
-        let id = DomainId {
-            slot: slot as u16,
-            generation,
-        };
+        let (slot, id) = self.next_domain_id()?;
         let mut capabilities = CapabilityTable::new();
         let mut boot_roots = [None; MAX_BOOT_GRANTS];
         let mut delegated_roots = [None; MAX_BOOT_GRANTS];
@@ -375,7 +384,7 @@ impl Manager {
             });
         }
         capabilities.seal_boot_authority();
-        self.generations[slot] = generation;
+        self.generations[slot] = id.generation;
         self.domains[slot] = Some(Domain {
             id,
             service: Some(identity),
@@ -903,6 +912,65 @@ pub(crate) fn verify_auxiliary_retirement_overflow_invariants() -> bool {
 
 pub(crate) fn verify_auxiliary_stop_revocation_invariants() -> bool {
     verify_auxiliary_stop_revocation_invariants_inner().unwrap_or(false)
+}
+
+pub(crate) fn verify_generation_exhaustion_invariants() -> bool {
+    verify_generation_exhaustion_invariants_inner().unwrap_or(false)
+}
+
+fn verify_generation_exhaustion_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+
+    let mut domains = Manager::new();
+    domains.generations[0] = u32::MAX;
+    let displaced_control = domains.create_control_plane(&grants)?;
+    domains.generations[2] = u32::MAX;
+    domains.generations[3] = u32::MAX;
+    if displaced_control.slot != 1
+        || domains.create_service().is_some()
+        || domains.primary_service_identity.is_some()
+        || domains.service_generations[0] != 0
+        || domains.domains.iter().flatten().count() != 1
+    {
+        return Some(false);
+    }
+
+    let mut primary = Manager::new();
+    primary.create_control_plane(&grants)?;
+    primary.service_generations[0] = u32::MAX;
+    if primary.create_service().is_some()
+        || primary.service_id.is_some()
+        || primary.primary_service_identity.is_some()
+        || primary.domains.iter().flatten().count() != 1
+    {
+        return Some(false);
+    }
+
+    let mut auxiliary = Manager::new();
+    let control = auxiliary.create_control_plane(&grants)?;
+    let console_source = auxiliary.domain(control)?.boot_roots[1]?;
+    let console_grant = DelegationGrant {
+        source: console_source,
+        object: 2,
+        rights: Rights::WRITE,
+    };
+    auxiliary.service_generations[1] = u32::MAX;
+    let service = auxiliary.create_auxiliary_service_with_delegations(&[console_grant])?;
+    let identity = auxiliary.domain(service)?.service?;
+    Some(
+        identity.slot == 2
+            && identity.generation == 1
+            && auxiliary.auxiliary_service_ids == [None, Some(service)]
+            && auxiliary.service_generations == [0, u32::MAX, 1]
+            && auxiliary
+                .create_auxiliary_service_with_delegations(&[console_grant])
+                .is_none()
+            && auxiliary.domains.iter().flatten().count() == 2,
+    )
 }
 
 fn verify_auxiliary_stop_revocation_invariants_inner() -> Option<bool> {

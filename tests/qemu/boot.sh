@@ -283,6 +283,11 @@ if ! grep -q '^ginux: domain lifecycle ancestry verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: exhausted generational slots skipped' "$output_file"; then
+    echo "Boot test failed: exhausted generational slots were not skipped." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded auxiliary service registry verified' "$output_file"; then
     echo "Boot test failed: auxiliary service registry invariant failed." >&2
     exit 1
