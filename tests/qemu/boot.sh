@@ -693,6 +693,11 @@ if ! grep -q '^ginux: Linux process umask state validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux disconnected console input validated' "$output_file"; then
+    echo "Boot test failed: Linux disconnected console input was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux console descriptor metadata validated' "$output_file"; then
     echo "Boot test failed: Linux console descriptor metadata was not validated." >&2
     exit 1

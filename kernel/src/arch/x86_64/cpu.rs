@@ -44,6 +44,7 @@ const FMASK_MSR: u32 = 0xc000_0084;
 const FS_BASE_MSR: u32 = 0xc000_0100;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
+const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_FSTAT_SYSCALL: u64 = 5;
@@ -1099,6 +1100,13 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     match number {
+        LINUX_READ_SYSCALL => {
+            if linux_console_descriptor(first_argument) == LINUX_DESCRIPTOR_INPUT {
+                0
+            } else {
+                LINUX_EBADF
+            }
+        }
         LINUX_WRITE_SYSCALL => linux_console_write(first_argument, buffer, count),
         LINUX_CLOSE_SYSCALL => linux_console_close(first_argument),
         LINUX_FSTAT_SYSCALL => {

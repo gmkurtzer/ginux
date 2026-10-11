@@ -11,6 +11,11 @@ length. The kernel accepts 1 through 256 bytes, validates the descriptor and
 complete readable VMA range, enables supervisor access only around the bounded
 copy-in, emits the exact bytes to the pinned console, and returns the requested
 length. A zero-length request or one above the limit returns `-EINVAL`. Next,
+`rax = 0` (`__NR_read`) exposes descriptor 0 as a currently disconnected
+console-input stream. It returns zero for EOF without reading or validating the
+caller buffer; output, closed, and unknown descriptors return `-EBADF`. This is
+an explicit bootstrap state until an authorized input service and wait path
+exist, not an interactive console implementation.
 `rax = 63`
 (`__NR_uname`) and the exact RW segment base request
 a fixed 390-byte Linux `utsname`. The kernel zero-initializes every byte, fills

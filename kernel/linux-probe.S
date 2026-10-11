@@ -575,6 +575,22 @@ ginux_linux_probe:
     cmp dword ptr [0x4020ac], 0
     jne failure
 
+    mov edi, 1
+    mov esi, 0x403200
+    mov rdx, -1
+    xor eax, eax
+    syscall
+    cmp rax, -9
+    jne failure
+
+    xor edi, edi
+    mov esi, 0x403200
+    mov rdx, -1
+    xor eax, eax
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 2
     mov eax, 3
     syscall
