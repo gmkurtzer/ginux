@@ -1,6 +1,7 @@
 # Initial Physical-Memory Classification v0
 
-**Status:** Experimental reserving/recycling allocator enabled below 4 GiB.
+**Status:** Experimental reserving/recycling allocator enabled below 4 GiB,
+including reclaimable boot-service memory after `ExitBootServices()`.
 
 After `ExitBootServices()`, the kernel walks the final UEFI memory map using the descriptor stride supplied by firmware. It does not assume that the stride equals the size of the descriptor prefix understood by the kernel.
 
@@ -8,8 +9,8 @@ The initial classification is deliberately conservative:
 
 | UEFI memory type | Initial classification |
 |---|---|
-| `EfiConventionalMemory` | Available for a future physical-frame allocator |
-| `EfiBootServicesCode`, `EfiBootServicesData` | Reclaimable, but not allocated yet |
+| `EfiConventionalMemory` | Available to the physical-frame allocator |
+| `EfiBootServicesCode`, `EfiBootServicesData` | Available to the physical-frame allocator after `ExitBootServices()` |
 | `EfiLoaderCode`, `EfiLoaderData` | Reserved because they may contain the unified image, boot information, memory map, or kernel stack |
 | All other types | Reserved until explicitly modeled |
 
@@ -20,9 +21,13 @@ The kernel validates that:
 - The total map length is an exact multiple of the supplied stride.
 - Page totals use saturating arithmetic while parsing untrusted firmware data.
 
-The initial allocator sorts and merges conventional ranges, rejects range
-arithmetic overflow, excludes the first MiB, and limits allocations to the
-currently mapped physical ceiling. Multi-frame reservations stage allocator
+The initial allocator admits conventional and boot-service ranges, sorts and
+merges them, rejects range arithmetic overflow, excludes the first MiB, and
+limits allocations to the currently mapped physical ceiling. Its bounded
+pre-merge inventory accepts at most 128 eligible descriptors and fails closed
+if firmware supplies more. It records the exact number of admitted
+boot-service frames after low-memory and ceiling clipping. The QEMU gate
+requires that count to be nonzero on its reference firmware. Multi-frame reservations stage allocator
 state and commit only when every requested frame is available. Failed or
 zero-length reservations leave range cursors and accounting unchanged.
 Address-space construction reserves its complete five- or seven-frame budget
@@ -47,8 +52,9 @@ forged-release rejection, duplicate-release rejection, stale-generation
 rejection after address reuse, and reuse across discontiguous ranges, then
 reserves two real frames, verifies their complete zero state, dirties both ends
 of both pages, releases and reallocates them, and verifies all bytes are zero
-before the new leases become usable. Boot-service-memory
-reclamation is not yet supported.
+before the new leases become usable. Boot-service frames use this same
+zero-before-allocation boundary, so stale firmware contents are not exposed to
+their first kernel or domain owner.
 
 The allocator initializes exactly once and remains live for the kernel lifetime.
 Reinitialization is rejected so no subsystem can reconstruct the UEFI inventory
@@ -81,4 +87,6 @@ replacement generation. A retired generation therefore cannot pass the proof
 while silently retaining an allocator lease. This is a bounded bootstrap audit,
 not yet a general resource destructor for every future kernel object.
 
-Loader regions containing the unified image, handoff map, page tables, and kernel stacks are never admitted because only `EfiConventionalMemory` ranges enter the allocator.
+Loader regions remain excluded even after boot-service reclamation. They may
+contain the unified image, handoff map, transitional page tables, or kernel
+stacks and require explicit lifetime tracking before they can be reclaimed.

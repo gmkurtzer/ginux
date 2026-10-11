@@ -298,6 +298,11 @@ if ! grep -q '^ginux: physical frame allocator active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -Eq '^ginux: reclaimed boot-service frames: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: boot-service memory was not reclaimed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: atomic frame reservations verified' "$output_file"; then
     echo "Boot test failed: atomic physical-frame reservations failed." >&2
     exit 1

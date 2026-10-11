@@ -456,6 +456,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: physical frame allocation test failed\r\n");
     }
     serial_write("\r\nginux: physical frame allocator active");
+    serial_write("\r\nginux: reclaimed boot-service frames: ");
+    serial_write_u64(memory::reclaimed_boot_service_frame_count().unwrap_or(0));
     serial_write("\r\nginux: atomic frame reservations verified");
     serial_write("\r\nginux: physical frames zeroed before allocation");
     serial_write("\r\nginux: tracked frame release ownership verified");
@@ -660,6 +662,9 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
         return false;
     }
     if !memory::verify_reservation_invariants() {
+        return false;
+    }
+    if memory::reclaimed_boot_service_frame_count().is_none_or(|count| count == 0) {
         return false;
     }
     let Some([first, second]) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL) else {

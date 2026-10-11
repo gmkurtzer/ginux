@@ -1,10 +1,13 @@
-use crate::{BootInfo, UefiMemoryDescriptor, EFI_CONVENTIONAL_MEMORY};
+use crate::{
+    BootInfo, UefiMemoryDescriptor, EFI_BOOT_SERVICES_CODE, EFI_BOOT_SERVICES_DATA,
+    EFI_CONVENTIONAL_MEMORY,
+};
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
-const MAX_RANGES: usize = 64;
+const MAX_RANGES: usize = 128;
 const MAX_RECYCLED_FRAMES: usize = 128;
 const MAX_LIVE_FRAMES: usize = 128;
 const DOMAIN_FRAME_LIMIT: usize = 16;
@@ -62,6 +65,7 @@ pub(crate) struct FrameAllocator {
     range_count: usize,
     active_range: usize,
     allocated_frames: u64,
+    reclaimed_boot_service_frames: u64,
     live_frames: [FrameLease; MAX_LIVE_FRAMES],
     live_owners: [FrameOwner; MAX_LIVE_FRAMES],
     live_count: usize,
@@ -76,6 +80,7 @@ impl FrameAllocator {
             range_count: 0,
             active_range: 0,
             allocated_frames: 0,
+            reclaimed_boot_service_frames: 0,
             live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
             live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
             live_count: 0,
@@ -91,7 +96,11 @@ impl FrameAllocator {
                     .add(index * boot_info.memory_descriptor_size);
                 core::ptr::read_unaligned(address.cast::<UefiMemoryDescriptor>())
             };
-            if descriptor.memory_type != EFI_CONVENTIONAL_MEMORY {
+            let boot_service = matches!(
+                descriptor.memory_type,
+                EFI_BOOT_SERVICES_CODE | EFI_BOOT_SERVICES_DATA
+            );
+            if descriptor.memory_type != EFI_CONVENTIONAL_MEMORY && !boot_service {
                 continue;
             }
             let start = descriptor.physical_start.max(LOW_MEMORY_LIMIT);
@@ -104,6 +113,11 @@ impl FrameAllocator {
             let end = end / PAGE_SIZE * PAGE_SIZE;
             if start < end {
                 allocator.insert_range(Range { next: start, end })?;
+                if boot_service {
+                    allocator.reclaimed_boot_service_frames = allocator
+                        .reclaimed_boot_service_frames
+                        .checked_add((end - start) / PAGE_SIZE)?;
+                }
             }
         }
         allocator.sort_and_merge();
@@ -374,12 +388,23 @@ pub(crate) fn owner_live_frame_count(owner: FrameOwner) -> Option<usize> {
     }
 }
 
+pub(crate) fn reclaimed_boot_service_frame_count() -> Option<u64> {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        Some((*allocator).reclaimed_boot_service_frames)
+    }
+}
+
 pub(crate) fn verify_reservation_invariants() -> bool {
     let mut allocator = FrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
         range_count: 2,
         active_range: 0,
         allocated_frames: 0,
+        reclaimed_boot_service_frames: 0,
         live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
         live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
         live_count: 0,
@@ -434,6 +459,7 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         range_count: 1,
         active_range: 0,
         allocated_frames: 0,
+        reclaimed_boot_service_frames: 0,
         live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
         live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
         live_count: 0,
