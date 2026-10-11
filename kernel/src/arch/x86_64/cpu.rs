@@ -814,7 +814,7 @@ fn dispatch_charged_call(
         6 => console_write(caller_domain, capability, frame),
         7 => {
             if domain::handle_permits(caller_domain, capability, 1, Rights::MANAGE) {
-                domain::take_service_fault().unwrap_or(u64::MAX - 2)
+                domain::take_lifecycle_event().unwrap_or(u64::MAX - 2)
             } else {
                 u64::MAX - 2
             }

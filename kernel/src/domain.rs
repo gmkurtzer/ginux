@@ -184,7 +184,7 @@ pub(crate) struct Manager {
     auxiliary_service_ids: [Option<DomainId>; MAX_AUXILIARY_SERVICES],
     last_retired_service_id: Option<DomainId>,
     lifecycle_events: EventQueue,
-    last_delivered_service_fault: Option<LifecycleEvent>,
+    last_delivered_lifecycle_event: Option<LifecycleEvent>,
     total_calls: u16,
     total_thread_attaches: u16,
     service_started: bool,
@@ -204,7 +204,7 @@ impl Manager {
             auxiliary_service_ids: [None; MAX_AUXILIARY_SERVICES],
             last_retired_service_id: None,
             lifecycle_events: EventQueue::new(),
-            last_delivered_service_fault: None,
+            last_delivered_lifecycle_event: None,
             total_calls: 0,
             total_thread_attaches: 0,
             service_started: false,
@@ -1215,10 +1215,10 @@ pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> boo
     })
 }
 
-pub(crate) fn take_service_fault() -> Option<u64> {
+pub(crate) fn take_lifecycle_event() -> Option<u64> {
     let manager = global_manager_mut()?;
     let event = manager.lifecycle_events.pop()?;
-    manager.last_delivered_service_fault = Some(event);
+    manager.last_delivered_lifecycle_event = Some(event);
     Some((u64::from(event.detail) << 56) | (encode_id(event.domain) << 8) | u64::from(event.kind))
 }
 
@@ -1229,8 +1229,8 @@ pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
     global_manager().is_some_and(|manager| {
         manager.lifecycle_events.is_empty()
             && manager
-                .last_delivered_service_fault
-                .is_some_and(|event| event.domain == id)
+                .last_delivered_lifecycle_event
+                .is_some_and(|event| event.kind == 1 && event.domain == id && event.fault.is_some())
     })
 }
 
@@ -1239,7 +1239,7 @@ pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMe
         return false;
     };
     global_manager().is_some_and(|manager| {
-        manager.last_delivered_service_fault.is_some_and(|event| {
+        manager.last_delivered_lifecycle_event.is_some_and(|event| {
             event.kind == 1
                 && event.domain == id
                 && event.detail == 0
@@ -1250,7 +1250,7 @@ pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMe
 
 pub(crate) fn delivered_service_fault_descriptor(
 ) -> Option<[u8; crate::control_abi::FAULT_DESCRIPTOR_SIZE]> {
-    let event = global_manager()?.last_delivered_service_fault?;
+    let event = global_manager()?.last_delivered_lifecycle_event?;
     if event.kind != 1 || event.detail != 0 {
         return None;
     }
@@ -1265,13 +1265,13 @@ pub(crate) fn delivered_service_fault_descriptor(
 }
 
 pub(crate) fn last_lifecycle_event_audit() -> Option<(u8, u64, u64)> {
-    let event = global_manager()?.last_delivered_service_fault?;
+    let event = global_manager()?.last_delivered_lifecycle_event?;
     Some((event.kind, encode_id(event.domain), event.sequence))
 }
 
 pub(crate) fn delivered_lifecycle_event_descriptor(
 ) -> Option<[u8; crate::control_abi::LIFECYCLE_DESCRIPTOR_SIZE]> {
-    let event = global_manager()?.last_delivered_service_fault?;
+    let event = global_manager()?.last_delivered_lifecycle_event?;
     Some(crate::control_abi::lifecycle_descriptor(
         event.kind,
         event.detail,
