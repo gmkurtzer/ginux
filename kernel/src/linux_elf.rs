@@ -11,8 +11,11 @@ const PF_READ: u32 = 4;
 const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
-const PROBE_CODE: [u8; 128] = [
-    0x48, 0x83, 0x3c, 0x24, 0x00, // cmp qword ptr [rsp], 0 (argc)
+const PROBE_CODE: [u8; 142] = [
+    0x48, 0x83, 0x3c, 0x24, 0x01, // cmp qword ptr [rsp], 1 (argc)
+    0x0f, 0x85, 0x81, 0x00, 0x00, 0x00, // jne fallback UD2
+    0x48, 0x8b, 0x44, 0x24, 0x08, // mov rax, [rsp + 8] (argv[0])
+    0x80, 0x38, 0x2f, // cmp byte ptr [rax], '/'
     0x75, 0x77, // jne fallback UD2
     0xb8, 0xe7, 0x03, 0x00, 0x00, // mov eax, 999 (unsupported syscall)
     0x0f, 0x05, // syscall
@@ -267,8 +270,8 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
     crate::address_space::verify_linux_elf_mapping(&plan, protected_start, protected_size)
 }
 
-fn fixture() -> [u8; 392] {
-    let mut bytes = [0_u8; 392];
+fn fixture() -> [u8; 424] {
+    let mut bytes = [0_u8; 424];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
     bytes[5] = 1;
@@ -293,14 +296,14 @@ fn fixture() -> [u8; 392] {
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
-        0x180,
+        0x1a0,
         0x40_1000,
         8,
         512,
         PF_READ | PF_WRITE,
     );
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(&PROBE_CODE);
-    bytes[0x180..0x188].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    bytes[0x1a0..0x1a8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
     bytes
 }
 

@@ -1,4 +1,4 @@
-use core::arch::asm;
+use core::{arch::asm, mem::size_of};
 
 use crate::{
     arch::x86_64::{
@@ -20,6 +20,7 @@ const USER_TEST_ADDRESS: usize = 1usize << 39;
 const EXPECTED_FAULT_OFFSET: usize = 515;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
+const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
 const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 
@@ -145,14 +146,32 @@ pub(crate) fn verify_linux_elf_mapping(
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - u64::BITS as usize;
+            let stack_offset = PAGE_SIZE - 12 * size_of::<u64>();
+            let argument_offset = PAGE_SIZE - size_of::<u64>();
+            let argument_address = stack_virtual_page + argument_offset as u64;
             let stack_words = stack_bytes.add(stack_offset).cast::<u64>();
-            for (index, value) in [0_u64, 0, 0, 6, PAGE_SIZE as u64, 0, 0, 0]
-                .into_iter()
-                .enumerate()
+            for (index, value) in [
+                1_u64,
+                argument_address,
+                0,
+                0,
+                6,
+                PAGE_SIZE as u64,
+                9,
+                plan.entry,
+                0,
+                0,
+            ]
+            .into_iter()
+            .enumerate()
             {
                 stack_words.add(index).write(value);
             }
+            core::ptr::copy_nonoverlapping(
+                LINUX_INIT_ARGUMENT.as_ptr(),
+                stack_bytes.add(argument_offset),
+                LINUX_INIT_ARGUMENT.len(),
+            );
 
             let first_entry = table_entries.add(first_indexes[3]).read();
             let second_entry = table_entries.add(second_indexes[3]).read();
@@ -175,9 +194,16 @@ pub(crate) fn verify_linux_elf_mapping(
                     .all(|byte| *byte == 0)
                 && second_bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
                 && second_bytes[8..].iter().all(|byte| *byte == 0)
-                && stack_words.read() == 0
-                && stack_words.add(3).read() == 6
-                && stack_words.add(4).read() == PAGE_SIZE as u64;
+                && stack_words.read() == 1
+                && stack_words.add(1).read() == argument_address
+                && stack_words.add(4).read() == 6
+                && stack_words.add(5).read() == PAGE_SIZE as u64
+                && stack_words.add(6).read() == 9
+                && stack_words.add(7).read() == plan.entry
+                && core::slice::from_raw_parts(
+                    stack_bytes.add(argument_offset),
+                    LINUX_INIT_ARGUMENT.len(),
+                ) == LINUX_INIT_ARGUMENT;
             if !entries_valid {
                 return Some(false);
             }

@@ -8,8 +8,9 @@ M4 begins with a strict static x86-64 ELF64 parser profile. It is validated
 during boot, materializes bounded RX/RW page images with zero-filled BSS, and
 installs them at their declared addresses in a collision-checked page-table
 root, activates it, and executes a one-shot verification entry at ring 3. This
-entry receives a distinct RW/NX stack containing a minimal Linux-style initial
-vector and terminates through the architectural x86-64 `SYSCALL` instruction
+entry receives a distinct RW/NX stack containing `argc`, `argv[0]`, and bounded
+Linux `AT_PAGESZ`/`AT_ENTRY` metadata, and validates its argument from ring 3
+before terminating through the architectural x86-64 `SYSCALL` instruction
 after checking that an unsupported call returns `-ENOSYS`, performing bounded
 `write` copy-in and `uname` copy-out operations, and validating a `getpid()`
 result returned through `SYSRETQ`, using Linux register and syscall-number

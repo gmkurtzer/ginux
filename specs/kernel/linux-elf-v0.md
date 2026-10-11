@@ -64,13 +64,15 @@ clears and releases all seven root/table/payload/stack frames.
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the
 current low-linked kernel can survive the proof transition. The initial stack
-pointer is 16-byte aligned and names `argc = 0`, null `argv` and `envp`, an
-`AT_PAGESZ = 4096` pair, and `AT_NULL`; the probe checks `argc` from CPL3 before
-exiting. Argument strings, a complete auxiliary vector, scheduler ownership,
-the supported syscall surface, and general collision policy beyond the loaded
-kernel image are not defined yet. The loader does not relocate `ET_EXEC` images
-to the existing high test address, because doing so would violate ELF semantics
-and hide these remaining prerequisites.
+pointer is 16-byte aligned and names `argc = 1`, an `argv[0]` pointer to the
+NUL-terminated `/init` string, a null `argv` terminator, null `envp`,
+`AT_PAGESZ = 4096`, `AT_ENTRY` equal to the ELF entry, and `AT_NULL`. The probe
+dereferences and validates `argv[0]` from CPL3 before its syscall sequence. An
+environment, the complete Linux auxiliary vector, scheduler ownership, the
+broader syscall surface, and general collision policy beyond the loaded kernel
+image are not defined yet. The loader does not relocate `ET_EXEC` images to the
+existing high test address, because doing so would violate ELF semantics and
+hide these remaining prerequisites.
 
 The syscall transition is specified separately in
 [Linux Syscall Entry v0](linux-syscall-v0.md).
