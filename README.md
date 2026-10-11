@@ -19,6 +19,8 @@ relocation and the main-image relocation, and then transfers control to the
 main entry. The main workload requires its relocated value before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
 target. The kernel then restores its root and scrubs every owned frame.
+The build rejects unresolved ELF relocation records in both raw embedded text
+payloads before extracting their bytes.
 Interpreter selection binds the exact `PT_INTERP` path and SHA-256
 digest before parsing or mapping. A production authority source, relocation,
 and dynamic linking remain unimplemented. Malformed dynamic tables, duplicate

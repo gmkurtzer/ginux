@@ -28,6 +28,11 @@ fn main() {
     let elf = fs::read(&object).expect("failed to read Linux probe object");
     let text = elf_section(&elf, b".text").expect("Linux probe object has no .text section");
     assert!(
+        !elf_section_has_relocations(&elf, b".text")
+            .expect("failed to inspect Linux probe relocations"),
+        "Linux probe .text contains unresolved relocations"
+    );
+    assert!(
         text.len() <= LINUX_PROBE_MAX_TEXT_SIZE,
         "Linux probe .text is {} bytes; the four-page executable profile permits at most {} bytes",
         text.len(),
@@ -56,6 +61,11 @@ fn main() {
         fs::read(&interpreter_object).expect("failed to read Linux interpreter object");
     let interpreter_text = elf_section(&interpreter_elf, b".text")
         .expect("Linux interpreter object has no .text section");
+    assert!(
+        !elf_section_has_relocations(&interpreter_elf, b".text")
+            .expect("failed to inspect Linux interpreter relocations"),
+        "Linux interpreter .text contains unresolved relocations"
+    );
     assert!(
         interpreter_text.len() <= LINUX_INTERPRETER_MAX_TEXT_SIZE,
         "Linux interpreter .text is {} bytes; the bounded profile permits at most {} bytes",
@@ -154,6 +164,42 @@ fn elf_section<'a>(elf: &'a [u8], wanted: &[u8]) -> Option<&'a [u8]> {
         }
     }
     None
+}
+
+fn elf_section_has_relocations(elf: &[u8], wanted: &[u8]) -> Option<bool> {
+    (elf.get(..6)? == b"\x7fELF\x02\x01").then_some(())?;
+    let section_offset = usize::try_from(read_u64(elf, 40)?).ok()?;
+    let entry_size = usize::from(read_u16(elf, 58)?);
+    let count = usize::from(read_u16(elf, 60)?);
+    let names_index = usize::from(read_u16(elf, 62)?);
+    if entry_size < 64 || names_index >= count {
+        return None;
+    }
+    let names_header = section_offset.checked_add(names_index.checked_mul(entry_size)?)?;
+    let names_offset = usize::try_from(read_u64(elf, names_header + 24)?).ok()?;
+    let names_size = usize::try_from(read_u64(elf, names_header + 32)?).ok()?;
+    let names = elf.get(names_offset..names_offset.checked_add(names_size)?)?;
+    let mut target = None;
+    for index in 0..count {
+        let header = section_offset.checked_add(index.checked_mul(entry_size)?)?;
+        let name_offset = usize::try_from(read_u32(elf, header)?).ok()?;
+        let name = names.get(name_offset..)?.split(|byte| *byte == 0).next()?;
+        if name == wanted {
+            target = Some(index);
+            break;
+        }
+    }
+    let target = u32::try_from(target?).ok()?;
+    for index in 0..count {
+        let header = section_offset.checked_add(index.checked_mul(entry_size)?)?;
+        let section_type = read_u32(elf, header + 4)?;
+        let size = read_u64(elf, header + 32)?;
+        let target_index = read_u32(elf, header + 44)?;
+        if matches!(section_type, 4 | 9) && size != 0 && target_index == target {
+            return Some(true);
+        }
+    }
+    Some(false)
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {

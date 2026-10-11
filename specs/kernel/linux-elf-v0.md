@@ -147,6 +147,9 @@ main entry at `0x400100`. The main
 workload requires its relocated value for a dynamic startup and requires an
 untouched zero target for each static startup; after it exits, the kernel also
 validates the interpreter's relocated target through the still-active user root.
+Because the build embeds raw `.text` rather than linking these two proof
+payloads, it parses each assembler object and rejects any nonempty `SHT_REL` or
+`SHT_RELA` section targeting `.text` before extracting the bytes.
 The complete ring-3 probe therefore runs with dynamic `AT_BASE`,
 main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
 restores its own root and scrubs and releases all nineteen page-table and
