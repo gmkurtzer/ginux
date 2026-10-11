@@ -590,6 +590,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux stack copy bounds validated\r\n");
     serial_write("ginux: Linux directional VMA copies validated\r\n");
     serial_write("ginux: Linux root working directory validated\r\n");
+    serial_write("ginux: Linux proc self executable link validated\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

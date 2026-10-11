@@ -37,6 +37,8 @@ ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
 The initial filesystem view exposes only a working-directory identity of `/`;
 bounded `getcwd` returns it, while undersized and invalid buffers fail.
+Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
+`readlink` result is `/init`.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

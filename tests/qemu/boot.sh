@@ -598,6 +598,11 @@ if ! grep -q '^ginux: Linux root working directory validated' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux proc self executable link validated' "$output_file"; then
+    echo "Boot test failed: Linux proc self executable link was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

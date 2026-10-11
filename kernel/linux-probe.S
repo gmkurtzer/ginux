@@ -176,6 +176,39 @@ ginux_linux_probe:
     cmp word ptr [0x401020], 0x002f
     jne failure
 
+    lea rdi, [rip + proc_self_exe]
+    mov esi, 0x401040
+    xor edx, edx
+    mov eax, 89
+    syscall
+    cmp rax, -22
+    jne failure
+    mov edi, 0x405000
+    mov esi, 0x401040
+    mov edx, 5
+    mov eax, 89
+    syscall
+    cmp rax, -14
+    jne failure
+    lea rdi, [rip + proc_self_exe]
+    mov esi, 0x401200
+    mov edx, 5
+    mov eax, 89
+    syscall
+    cmp rax, -14
+    jne failure
+    lea rdi, [rip + proc_self_exe]
+    mov esi, 0x401040
+    mov edx, 5
+    mov eax, 89
+    syscall
+    cmp rax, 5
+    jne failure
+    cmp dword ptr [0x401040], 0x696e692f
+    jne failure
+    cmp byte ptr [0x401044], 't'
+    jne failure
+
     mov edi, 0x401200
     mov eax, 63
     syscall
@@ -277,3 +310,5 @@ failure:
 .balign 8
 readable_payload:
     .byte 1, 2, 3, 4, 5, 6, 7, 8
+proc_self_exe:
+    .asciz "/proc/self/exe"

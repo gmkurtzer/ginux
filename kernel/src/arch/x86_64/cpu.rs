@@ -50,6 +50,7 @@ const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_GETCWD_SYSCALL: u64 = 79;
+const LINUX_READLINK_SYSCALL: u64 = 89;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
@@ -66,10 +67,12 @@ const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 const LINUX_EBADF: u64 = u64::MAX - 8;
+const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
+const LINUX_ENAMETOOLONG: u64 = u64::MAX - 35;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1105,6 +1108,24 @@ extern "sysv64" fn linux_syscall_handler(
             }
             2
         }
+        LINUX_READLINK_SYSCALL => {
+            if count == 0 {
+                return LINUX_EINVAL;
+            }
+            let mut path = [0_u8; 16];
+            let path_length = match copy_linux_c_string(first_argument, &mut path) {
+                Ok(length) => length,
+                Err(error) => return error,
+            };
+            if &path[..path_length] != b"/proc/self/exe" {
+                return LINUX_ENOENT;
+            }
+            let output_length = usize::try_from(count).unwrap_or(usize::MAX).min(5);
+            if !copy_to_linux_user(buffer, &b"/init"[..output_length]) {
+                return LINUX_EFAULT;
+            }
+            output_length as u64
+        }
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {
@@ -1182,6 +1203,21 @@ fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
         });
     }
     true
+}
+
+fn copy_linux_c_string(address: u64, output: &mut [u8]) -> Result<usize, u64> {
+    for index in 0..output.len() {
+        let Some(source) = address.checked_add(index as u64) else {
+            return Err(LINUX_EFAULT);
+        };
+        if !copy_from_linux_user(source, &mut output[index..=index]) {
+            return Err(LINUX_EFAULT);
+        }
+        if output[index] == 0 {
+            return Ok(index);
+        }
+    }
+    Err(LINUX_ENAMETOOLONG)
 }
 
 fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {

@@ -80,7 +80,8 @@ wholly inside the user stack page. Copy-in additionally permits the declared
 RX ELF memory extent; copy-out does not. The proof reads an embedded RX payload
 through `write` and requires `-EFAULT` when `uname` targets that read-only page.
 Ranges crossing a stack guard page are rejected before SMAP access. Bounded
-`getcwd` exposes the initial container working directory as `/`. It next
+`getcwd` exposes the initial container working directory as `/`, and bounded
+`readlink` identifies `/proc/self/exe` as `/init`. It next
 issues process identity queries, verifies PID, TID, process-group, and session
 ID 1 plus parent PID 0 after the kernel resumes it through `SYSRETQ`,
 registers a bounded clear-child-TID word, verifies preserved first and fourth
