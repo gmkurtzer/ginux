@@ -239,6 +239,11 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     if phdr_address.is_some_and(|address| address != program_headers) {
         return None;
     }
+    let mapped_program_table_end = program_headers
+        .checked_add(u64::try_from(program_header_count.checked_mul(PROGRAM_HEADER_SIZE)?).ok()?)?;
+    if (program_headers..mapped_program_table_end).contains(&entry) {
+        return None;
+    }
     Some(Image {
         kind,
         entry,
@@ -706,9 +711,17 @@ pub(crate) fn verify_parser() -> bool {
             ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE + 4,
             PF_READ | PF_WRITE | PF_EXECUTE,
         )
+        && rejects_entry_in_program_headers(&image)
         && rejects_u16(&image, 56, (MAX_PROGRAM_HEADER_COUNT + 1) as u16)
         && parse(&image[..image.len() - 1]).is_none();
     rejections
+}
+
+fn rejects_entry_in_program_headers(image: &[u8; FIXTURE_SIZE]) -> bool {
+    let mut candidate = *image;
+    write_u16(&mut candidate, 56, 4);
+    write_gnu_stack(&mut candidate, ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE);
+    parse(&candidate).is_none()
 }
 
 #[inline(never)]
@@ -792,6 +805,7 @@ fn configure_extended_metadata(bytes: &mut [u8]) {
     let phdr_header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
     let extended_phdr_header = ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE;
     write_u16(bytes, 56, 5);
+    write_u64(bytes, 24, 0x40_0200);
     write_gnu_stack(bytes, phdr_header);
     write_phdr(bytes, extended_phdr_header, 5);
 }
@@ -805,6 +819,7 @@ fn verify_interpreter_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
     let duplicate_header = ELF_HEADER_SIZE + 4 * PROGRAM_HEADER_SIZE;
     let mut candidate = *image;
     write_u16(&mut candidate, 56, 4);
+    write_u64(&mut candidate, 24, 0x40_0120);
     write_interpreter(&mut candidate, header, PATH_OFFSET, PATH);
     let valid = parse(&candidate).is_some_and(|image| {
         image.interpreter == Some(&PATH[..PATH.len() - 1]) && plan(&image).is_none()
@@ -988,6 +1003,7 @@ fn verify_interpreted_plan() -> bool {
     const PATH_OFFSET: usize = 0x3f80;
     let mut main_bytes = fixture();
     write_u16(&mut main_bytes, 56, 4);
+    write_u64(&mut main_bytes, 24, 0x40_0120);
     write_interpreter(
         &mut main_bytes,
         ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE,
@@ -1007,16 +1023,16 @@ fn verify_interpreted_plan() -> bool {
         && startup.program_headers == 0x40_0040
         && startup.program_header_count == 4
         && startup.interpreter_base == 0x60_0000
-        && startup.main_entry == 0x40_0100
+        && startup.main_entry == 0x40_0120
         && auxiliary[1] == 0x40_0040
         && auxiliary[5] == 4
         && auxiliary[9] == 0x60_0000
         && auxiliary[23] == 0x70_1000
-        && auxiliary[25] == 0x40_0100
+        && auxiliary[25] == 0x40_0120
         && auxiliary[29] == 0x70_2000
         && auxiliary[34..] == [0, 0]
         && combined.initial_entry == 0x60_00f0
-        && combined.main_entry == 0x40_0100
+        && combined.main_entry == 0x40_0120
         && combined.interpreter_base == 0x60_0000
         && combined.main.program_headers == 0x40_0040
         && combined.interpreter.program_headers == 0x60_0040
@@ -1170,6 +1186,7 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
     const PATH_WITH_NUL: &[u8] = b"/lib64/ld-ginux.so\0";
     let mut main_bytes = fixture();
     write_u16(&mut main_bytes, 56, 4);
+    write_u64(&mut main_bytes, 24, 0x40_0120);
     write_interpreter(
         &mut main_bytes,
         ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE,

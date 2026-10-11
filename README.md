@@ -8,7 +8,8 @@ M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to six
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
-`PT_GNU_STACK`, and bounded `PT_INTERP` declarations. Interpreter-bearing
+`PT_GNU_STACK`, and bounded `PT_INTERP` declarations. Images whose expanded
+program-header table covers the entry point are rejected. Interpreter-bearing
 images remain non-executable until the interpreter-first entry path is
 implemented. A bounded proof already maps a resolved `ET_EXEC` main image and
 relocated `ET_DYN` interpreter into separate W^X regions, validates both through

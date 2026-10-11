@@ -9,6 +9,10 @@ System-V or Linux ABI, `ET_EXEC` or `ET_DYN`, and machine `EM_X86_64`. The ELF h
 program-header sizes must match the published 64-bit layout. Section-header
 metadata is not consulted by the runtime loader; processor flags and extended
 program-header counts are rejected.
+The entry point may not fall within the mapped program-header table. This is
+checked after deriving the table's runtime address, so adding metadata cannot
+silently overwrite entry instructions while leaving an apparently valid entry
+inside the executable load.
 
 Two or three `PT_LOAD` program headers are accepted. Exactly one must be
 executable and exactly one writable; an optional third load must be read-only.

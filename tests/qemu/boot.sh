@@ -573,6 +573,11 @@ if ! grep -q '^ginux: Linux page-aliasing ELF segments rejected' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux ELF entry metadata overlap rejected' "$output_file"; then
+    echo "Boot test failed: Linux ELF entry overlap with metadata was not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: four-page Linux executable mapping validated' "$output_file"; then
     echo "Boot test failed: four-page Linux executable mapping was not validated." >&2
     exit 1
