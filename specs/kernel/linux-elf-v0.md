@@ -58,7 +58,11 @@ extent, and maps all three loads with role-derived permissions. The checked-in
 linker script fixes the read-only header load at
 `0x3ff000`, the non-page-base text entry at `0x400100`, and the data/BSS load at
 `0x402000`, with the final 512 bytes declared RELRO at `0x403000`; this is the
-stable input contract for linked-image execution work.
+stable input contract for linked-image execution work. Both the assembly build
+and linker reject text larger than 7936 bytes, the exact space from the
+non-page-base entry through the end of its two-page executable mapping. Probe
+growth therefore fails at build time instead of overlapping the writable load
+or silently exceeding the runtime loader profile.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory

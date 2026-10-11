@@ -23,6 +23,7 @@ SECTIONS
         . = MAX(., 0x401000);
         BYTE(0)
     } :text
+    ASSERT(SIZEOF(.text) <= 0x1f00, "Linux probe exceeds two-page executable profile")
 
     . = 0x402000;
     .data : { *(.data) } :data

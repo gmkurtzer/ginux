@@ -1,5 +1,11 @@
 use std::{env, ffi::OsString, fs, path::PathBuf, process::Command};
 
+const PAGE_SIZE: usize = 4096;
+const LINUX_PROBE_ENTRY_OFFSET: usize = 0x100;
+const LINUX_PROBE_EXECUTABLE_PAGES: usize = 2;
+const LINUX_PROBE_MAX_TEXT_SIZE: usize =
+    LINUX_PROBE_EXECUTABLE_PAGES * PAGE_SIZE - LINUX_PROBE_ENTRY_OFFSET;
+
 fn main() {
     println!("cargo:rerun-if-changed=linux-probe.S");
     println!("cargo:rerun-if-changed=linux-probe.ld");
@@ -19,6 +25,12 @@ fn main() {
 
     let elf = fs::read(&object).expect("failed to read Linux probe object");
     let text = elf_section(&elf, b".text").expect("Linux probe object has no .text section");
+    assert!(
+        text.len() <= LINUX_PROBE_MAX_TEXT_SIZE,
+        "Linux probe .text is {} bytes; the two-page executable profile permits at most {} bytes",
+        text.len(),
+        LINUX_PROBE_MAX_TEXT_SIZE
+    );
     fs::write(output.join("linux-probe.bin"), text).expect("failed to write Linux probe bytes");
 
     let linked = output.join("linux-probe.elf");
