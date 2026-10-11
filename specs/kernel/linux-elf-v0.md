@@ -9,18 +9,22 @@ System-V or Linux ABI, `ET_EXEC`, and machine `EM_X86_64`. The ELF header and
 program-header sizes must match the published 64-bit layout. Section headers,
 processor flags, and extended counts are rejected rather than ignored.
 
-Exactly two `PT_LOAD` program headers are required. One `PT_GNU_STACK` header
+Two or three `PT_LOAD` program headers are accepted. Exactly one must be
+executable and exactly one writable; an optional third load must be read-only.
+One `PT_GNU_STACK` header
 is optional and must request read/write, non-executable memory with no file or
 virtual range. One `PT_PHDR` header is also optional; it must be read-only and
 must exactly describe the in-image program-header table at its derived mapped
-address. Up to four recognized headers may appear in any order. The parser
-normalizes the two load segments by executable and writable role before
+address. Up to five recognized headers may appear in any order. The parser
+normalizes load segments by executable, read-only, and writable role before
 planning. Unknown and duplicate metadata headers are rejected. Each load
 segment must be readable, nonempty in the
 file, contained within the supplied image, aligned to a nonzero power of two
 with congruent file and virtual addresses, and mapped wholly inside the lower
 canonical user range beginning at `0x10000`. File size may be smaller than
-memory size to represent zero-filled data. Physical addresses must be zero.
+memory size to represent zero-filled data. Physical addresses may be zero or
+equal to the corresponding virtual address, matching conventional linkers;
+they are otherwise rejected and never used for mapping.
 The segments must not overlap.
 
 The profile requires exactly one executable segment and one writable segment.
@@ -34,6 +38,11 @@ entry point, W+X flags, overflowing file size, overlapping virtual ranges, an
 executable GNU stack, malformed or duplicate metadata, unsupported header
 types, and truncation. Images with neither metadata header, either one, or both
 are accepted when their declarations are valid.
+
+The current page-image planner and runtime mapper deliberately accept only the
+two-load executable/writable form. A parsed third read-only load fails planning
+closed until a later mapping milestone owns, maps, verifies, and tears down its
+frames. Parser acceptance therefore cannot silently omit the read-only load.
 
 The strict profile prevents unsupported features from being silently
 interpreted with weaker semantics. It does not accept position-independent

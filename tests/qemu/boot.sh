@@ -518,6 +518,11 @@ if ! grep -q '^ginux: bounded Linux ELF metadata headers validated' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: three-load Linux ELF planning rejected fail-closed' "$output_file"; then
+    echo "Boot test failed: unsupported three-load Linux ELF planning did not fail closed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded multi-page Linux ELF plan verified' "$output_file"; then
     echo "Boot test failed: bounded multi-page Linux ELF planning was not verified." >&2
     exit 1
