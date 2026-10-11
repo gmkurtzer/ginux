@@ -121,6 +121,14 @@ The probe also performs a valid `write` from unused stack space and requires
 Another valid `write` copies an embedded payload from the declared RX segment,
 while `uname` copy-out to that segment returns `-EFAULT`. Copy direction thus
 respects VMA permissions rather than treating every mapped page as writable.
+`rax = 14` (`__NR_rt_sigprocmask`) maintains one eight-byte x86-64 Linux signal
+mask for the sole thread. It supports `SIG_BLOCK`, `SIG_UNBLOCK`, `SIG_SETMASK`,
+and a null-set query; `SIGKILL` and `SIGSTOP` are always cleared. The kernel
+validates the set size and every complete input/output range before mutation,
+so `-EINVAL` and `-EFAULT` leave the prior mask intact. The proof restores an
+empty mask before exit. This is process state only: signal actions, generation,
+delivery, pending sets, alternate stacks, and interrupted-syscall behavior are
+not implemented yet.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active
@@ -206,7 +214,7 @@ threads, general TLS state, or any syscall other than the exact bounded
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
 bounded read-only `mprotect`,
-`umask`, read-only `getrlimit`/`prlimit64`,
+`rt_sigprocmask`, `umask`, read-only `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential queries, bounded `prctl` process names, the bounded process/session

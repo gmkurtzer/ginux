@@ -51,6 +51,7 @@ const LINUX_FSTAT_SYSCALL: u64 = 5;
 const LINUX_LSEEK_SYSCALL: u64 = 8;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
+const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
 const LINUX_DUP_SYSCALL: u64 = 32;
@@ -125,6 +126,11 @@ const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
 const LINUX_PR_GET_NO_NEW_PRIVS: u64 = 39;
 const LINUX_PROCESS_NAME_SIZE: usize = 16;
 const LINUX_INITIAL_PROCESS_NAME: u64 = 0x7469_6e69;
+const LINUX_SIG_BLOCK: u64 = 0;
+const LINUX_SIG_UNBLOCK: u64 = 1;
+const LINUX_SIG_SETMASK: u64 = 2;
+const LINUX_SIGNAL_SET_SIZE: u64 = 8;
+const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -221,6 +227,7 @@ static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_SIGNAL_MASK: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -807,6 +814,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
+    ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -818,6 +826,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         == LINUX_INITIAL_PROCESS_NAME
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
     let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
+    let signal_mask_restored = ELF_PROBE_SIGNAL_MASK.swap(0, Ordering::SeqCst) == 0;
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
@@ -851,6 +860,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && descriptor_state_valid
         && process_name_restored
         && no_new_privileges_enforced
+        && signal_mask_restored
         && msrs_restored
 }
 
@@ -1206,6 +1216,9 @@ extern "sysv64" fn linux_syscall_handler(
                 current
             }
         }
+        LINUX_RT_SIGPROCMASK_SYSCALL => {
+            linux_rt_sigprocmask(first_argument, buffer, count, register(0))
+        }
         LINUX_GETPID_SYSCALL | LINUX_GETTID_SYSCALL => 1,
         LINUX_GETPPID_SYSCALL => 0,
         LINUX_GETPGRP_SYSCALL => 1,
@@ -1256,14 +1269,14 @@ extern "sysv64" fn linux_syscall_handler(
             LINUX_PR_SET_NAME => linux_set_process_name(buffer),
             LINUX_PR_GET_NAME => linux_get_process_name(buffer),
             LINUX_PR_SET_NO_NEW_PRIVS
-                if buffer == 1 && count == 0 && register(2) == 0 && register(1) == 0 =>
+                if buffer == 1 && count == 0 && register(0) == 0 && register(2) == 0 =>
             {
                 ELF_PROBE_NO_NEW_PRIVS.store(true, Ordering::SeqCst);
                 0
             }
             LINUX_PR_SET_NO_NEW_PRIVS => LINUX_EINVAL,
             LINUX_PR_GET_NO_NEW_PRIVS
-                if buffer == 0 && count == 0 && register(2) == 0 && register(1) == 0 =>
+                if buffer == 0 && count == 0 && register(0) == 0 && register(2) == 0 =>
             {
                 u64::from(ELF_PROBE_NO_NEW_PRIVS.load(Ordering::SeqCst))
             }
@@ -1791,6 +1804,38 @@ fn linux_get_process_name(address: u64) -> u64 {
     } else {
         LINUX_EFAULT
     }
+}
+
+fn linux_rt_sigprocmask(how: u64, set: u64, old_set: u64, set_size: u64) -> u64 {
+    if set_size != LINUX_SIGNAL_SET_SIZE {
+        return LINUX_EINVAL;
+    }
+    if old_set != 0 && !linux_writable_user_range_contains(old_set, LINUX_SIGNAL_SET_SIZE as usize)
+    {
+        return LINUX_EFAULT;
+    }
+    let requested = if set == 0 {
+        None
+    } else {
+        let mut bytes = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+        if !copy_from_linux_user(set, &mut bytes) {
+            return LINUX_EFAULT;
+        }
+        Some(u64::from_ne_bytes(bytes) & !LINUX_UNBLOCKABLE_SIGNALS)
+    };
+    let current = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    let next = match requested {
+        None => current,
+        Some(mask) if how == LINUX_SIG_BLOCK => current | mask,
+        Some(mask) if how == LINUX_SIG_UNBLOCK => current & !mask,
+        Some(mask) if how == LINUX_SIG_SETMASK => mask,
+        Some(_) => return LINUX_EINVAL,
+    };
+    if old_set != 0 && !copy_to_linux_user(old_set, &current.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    ELF_PROBE_SIGNAL_MASK.store(next, Ordering::SeqCst);
+    0
 }
 
 fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {

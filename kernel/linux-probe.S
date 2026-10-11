@@ -138,6 +138,100 @@ ginux_linux_probe:
     cmp rax, -22
     jne failure
 
+    mov qword ptr [0x4020c0], 0x40102
+    mov edi, 99
+    xor esi, esi
+    mov edx, 0x4020e0
+    mov r10d, 7
+    mov eax, 14
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 99
+    xor esi, esi
+    mov edx, 0x4020e0
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x4020e0], 0
+    jne failure
+
+    xor edi, edi
+    mov esi, 0x4020c0
+    mov edx, 0x4020e0
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x4020e0], 0
+    jne failure
+
+    mov edi, 99
+    xor esi, esi
+    mov edx, 0x4020e0
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x4020e0], 2
+    jne failure
+
+    mov qword ptr [0x4020c0], 8
+    xor edi, edi
+    mov esi, 0x4020c0
+    mov edx, 0x403200
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov edi, 99
+    xor esi, esi
+    mov edx, 0x4020e0
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x4020e0], 2
+    jne failure
+
+    mov qword ptr [0x4020c0], 2
+    mov edi, 1
+    mov esi, 0x4020c0
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne failure
+
+    mov edi, 99
+    xor esi, esi
+    mov edx, 0x4020e0
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x4020e0], 0
+    jne failure
+
+    xor edi, edi
+    mov esi, 0x403200
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    cmp rax, -14
+    jne failure
+
     mov edi, 1
     mov esi, 0x402000
     mov edx, 8
@@ -685,6 +779,16 @@ ginux_linux_probe:
     mov esi, 1
     mov edx, 1
     xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 38
+    mov esi, 1
+    xor edx, edx
+    mov r10d, 1
     xor r8d, r8d
     mov eax, 157
     syscall
