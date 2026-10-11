@@ -120,7 +120,8 @@ The kernel authenticates the bytes before parsing or mapping the dependency,
 requires a non-interpreted `ET_DYN` image with no nested `DT_NEEDED`, and rejects
 page-granular overlap among all main, interpreter, and dependency loads. Wrong
 names, wrong digests, truncation, and an overlapping dependency bias are
-rejected. The parser also accepts one bounded
+rejected. An authenticated dependency exporting a different symbol name is
+also rejected. The parser also accepts one bounded
 `PT_DYNAMIC` table containing one, two, or three `DT_RELA` records, its exact
 size and 24-byte entry size, and a terminating `DT_NULL`. The first record must
 be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must
@@ -176,8 +177,10 @@ relocation at `0x613180` and self-resolves its eager `GLOB_DAT` and
 dependency entry value `0x610100`. It writes the admitted main-image relative
 relocation value `0x400100` to the RELRO target `0x405100`, reads the main and
 dependency symbol and hash-table addresses, requires symbol index one to be the
-selected SysV hash bucket in both objects, and resolves the undefined main
-symbol to the dependency entry. It writes that value through
+selected SysV hash bucket in both objects, follows both symbol-name offsets
+through their validated `DT_STRTAB` ranges, and compares the complete
+NUL-terminated names before resolving the undefined main symbol to the
+dependency entry. It writes that value through
 `R_X86_64_GLOB_DAT` at `0x405108` and eager `R_X86_64_JUMP_SLOT` at `0x405110`
 before jumping to the main entry at `0x400100`. The main workload calls the
 dependency through the jump slot; dependency code checks all three of its own

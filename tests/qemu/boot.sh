@@ -683,6 +683,11 @@ if ! grep -q '^ginux: userspace Linux hash bucket resolution applied' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux symbol names matched' "$output_file"; then
+    echo "Boot test failed: userspace Linux symbol names were not matched." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace Linux cross-object symbol resolved' "$output_file"; then
     echo "Boot test failed: userspace Linux cross-object resolution was not verified." >&2
     exit 1

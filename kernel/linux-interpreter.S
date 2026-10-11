@@ -27,6 +27,7 @@ ginux_linux_interpreter:
     xor eax, eax
     xor esi, esi
     xor r8d, r8d
+    xor r13d, r13d
 .Lscan_main_dynamic:
     cmp qword ptr [rdi], 7
     cmove rax, qword ptr [rdi + 8]
@@ -34,6 +35,8 @@ ginux_linux_interpreter:
     cmove rsi, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 4
     cmove r8, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 5
+    cmove r13, qword ptr [rdi + 8]
     add rdi, 16
     loop .Lscan_main_dynamic
     test rax, rax
@@ -42,12 +45,15 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     test r8, r8
     jz .Linvalid_dynamic
+    test r13, r13
+    jz .Linvalid_dynamic
 
     mov edi, 0x613008
     mov ecx, 9
     xor r9d, r9d
     xor r10d, r10d
     xor r11d, r11d
+    xor r14d, r14d
 .Lscan_dependency_dynamic:
     cmp qword ptr [rdi], 6
     cmove r9, qword ptr [rdi + 8]
@@ -55,6 +61,8 @@ ginux_linux_interpreter:
     cmove r10, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 7
     cmove r11, qword ptr [rdi + 8]
+    cmp qword ptr [rdi], 5
+    cmove r14, qword ptr [rdi + 8]
     add rdi, 16
     loop .Lscan_dependency_dynamic
     test r9, r9
@@ -63,9 +71,12 @@ ginux_linux_interpreter:
     jz .Linvalid_dynamic
     test r11, r11
     jz .Linvalid_dynamic
+    test r14, r14
+    jz .Linvalid_dynamic
     add r9, 0x610000
     add r10, 0x610000
     add r11, 0x610000
+    add r14, 0x610000
 
     mov rcx, qword ptr [r11]
     add rcx, 0x610000
@@ -108,6 +119,18 @@ ginux_linux_interpreter:
     jne .Linvalid_dynamic
     lea rdx, [rdx + rdx * 2]
     shl rdx, 3
+    mov edi, dword ptr [rsi + rdx]
+    add rdi, r13
+    mov ebp, dword ptr [r9 + rdx]
+    add rbp, r14
+.Lcompare_symbol_name:
+    mov r15b, byte ptr [rdi]
+    cmp r15b, byte ptr [rbp]
+    jne .Linvalid_dynamic
+    inc rdi
+    inc rbp
+    test r15b, r15b
+    jne .Lcompare_symbol_name
     mov rdx, qword ptr [r9 + rdx + 8]
     add rdx, 0x610000
     add rdx, qword ptr [rax + 40]

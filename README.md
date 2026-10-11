@@ -150,7 +150,9 @@ cross-object symbol resolution through `R_X86_64_GLOB_DAT` and eager
 `R_X86_64_JUMP_SLOT`; the jump slot is called in ring 3 and returns a checked
 value from dependency code. The userspace interpreter verifies that the
 relocation's symbol index is the admitted SysV hash bucket result in both
-objects. Multiple dependencies, transitive graphs, search paths, SONAME and
+objects, follows each validated symbol-name offset into its `DT_STRTAB`, and
+requires the complete NUL-terminated names to match. Multiple dependencies,
+transitive graphs, search paths, SONAME and
 symbol-version processing, interposition, multi-bucket lookup, lazy binding,
 and a real userspace linker remain outside the profile.
 This is not yet a general Linux

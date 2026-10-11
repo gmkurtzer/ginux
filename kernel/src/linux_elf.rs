@@ -1683,6 +1683,22 @@ fn verify_dependency_authentication_rejections(
         sha256: dependency_digest,
         ..*dependency_authority
     };
+    let mut mismatched_symbol_dependency = [0_u8; 1024];
+    if dependency_bytes.len() != mismatched_symbol_dependency.len() {
+        return false;
+    }
+    mismatched_symbol_dependency.copy_from_slice(dependency_bytes);
+    let Some(symbol_name) = mismatched_symbol_dependency
+        .windows(b"ginux_probe".len())
+        .position(|candidate| candidate == b"ginux_probe")
+    else {
+        return false;
+    };
+    mismatched_symbol_dependency[symbol_name] = b'x';
+    let mismatched_symbol_authority = DependencyAuthority {
+        sha256: crate::crypto::sha256(&mismatched_symbol_dependency),
+        ..*dependency_authority
+    };
     plan_authenticated_dependency(
         main,
         &wrong_path,
@@ -1738,6 +1754,24 @@ fn verify_dependency_authentication_rejections(
                 ..*dependency_authority
             },
             dependency_bytes,
+        )
+        .is_none()
+        && plan_authenticated_dependency(
+            main,
+            authority,
+            interpreter_bytes,
+            0x60_0000,
+            dependency_authority,
+            &mismatched_symbol_dependency,
+        )
+        .is_none()
+        && plan_authenticated_dependency(
+            main,
+            authority,
+            interpreter_bytes,
+            0x60_0000,
+            &mismatched_symbol_authority,
+            &mismatched_symbol_dependency,
         )
         .is_none()
 }
