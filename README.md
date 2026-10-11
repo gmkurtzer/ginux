@@ -407,7 +407,8 @@ beneath the current measured directory; empty, `.`, `..`, and empty path
 components are rejected. Paths and outputs remain fixed-size, and no mutable
 VFS is implied.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
-`readlink` result is `/init`.
+`readlink` result is `/init` before replacement and `/bin/exec-target` after
+the bounded exec commit; rejected exec calls retain the old identity.
 An immutable runtime-file view exposes the exact authenticated `/init`,
 `/lib64/ld-ginux.so`, `/lib64/libginux.so`, and `/lib64/libginux-aux.so` bytes
 as read-only regular files. The linked main opens the auxiliary DSO, reads and

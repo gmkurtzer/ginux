@@ -4475,8 +4475,15 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
     if &path[..path_length] != b"/proc/self/exe" {
         return LINUX_ENOENT;
     }
-    let output_length = usize::try_from(output_size).unwrap_or(usize::MAX).min(5);
-    if !copy_to_linux_user(output_address, &b"/init"[..output_length]) {
+    let executable = if ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst) {
+        b"/bin/exec-target" as &[u8]
+    } else {
+        b"/init" as &[u8]
+    };
+    let output_length = usize::try_from(output_size)
+        .unwrap_or(usize::MAX)
+        .min(executable.len());
+    if !copy_to_linux_user(output_address, &executable[..output_length]) {
         return LINUX_EFAULT;
     }
     output_length as u64

@@ -111,6 +111,20 @@ ginux_linux_exec_target:
     cmp dword ptr [rip + .Lprocess_name + 8], 0x00746567
     jne .Lfailure
 
+    lea rdi, [rip + .Lexecutable_link]
+    lea rsi, [rip + .Lexecutable_path]
+    mov edx, 32
+    mov eax, 89
+    syscall
+    cmp rax, 16
+    jne .Lfailure
+    movabs rcx, 0x6578652f6e69622f
+    cmp qword ptr [rip + .Lexecutable_path], rcx
+    jne .Lfailure
+    movabs rcx, 0x7465677261742d63
+    cmp qword ptr [rip + .Lexecutable_path + 8], rcx
+    jne .Lfailure
+
     mov edi, 3
     mov eax, 3
     syscall
@@ -151,6 +165,8 @@ ginux_linux_exec_target:
     .ascii "EXEC_OK\n"
 .Lconsole:
     .asciz "/dev/console"
+.Lexecutable_link:
+    .asciz "/proc/self/exe"
 .size ginux_linux_exec_target, . - ginux_linux_exec_target
 
 .section .data
@@ -164,5 +180,7 @@ ginux_linux_exec_target:
     .zero 32
 .Lalt_stack:
     .zero 24
+.Lexecutable_path:
+    .zero 32
 
 .section .note.GNU-stack,"",@progbits

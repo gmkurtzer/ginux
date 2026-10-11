@@ -650,6 +650,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux close-on-exec descriptors transitioned\r\n");
     serial_write("ginux: Linux exec signal state transitioned\r\n");
     serial_write("ginux: Linux exec process identity installed\r\n");
+    serial_write("ginux: Linux executable link followed exec identity\r\n");
     if !linux_elf::verify_load_plan() {
         kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
     }

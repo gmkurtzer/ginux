@@ -175,9 +175,11 @@ regular-file descriptor returns `-ENOTDIR`. Closing the descriptor afterward
 does not change the retained working-directory identity. These calls provide
 bounded immutable-root directory state, not a mutable or general VFS.
 `rax = 89` (`__NR_readlink`) recognizes exactly `/proc/self/exe`, copied as a
-bounded NUL-terminated pathname, and returns `/init` without a terminator. A
-zero output size returns `-EINVAL`; invalid pathname or output ranges return
-`-EFAULT`. Other paths return `-ENOENT`. This is not a general procfs.
+bounded NUL-terminated pathname. It returns `/init` without a terminator before
+replacement and `/bin/exec-target` after the bounded `execve` commit. Each
+rejected exec leaves the original identity visible. A zero output size returns
+`-EINVAL`; invalid pathname or output ranges return `-EFAULT`. Other paths
+return `-ENOENT`. This is not a general procfs.
 `rax = 267` (`__NR_readlinkat`) exposes the same exact link when the directory
 descriptor is `AT_FDCWD`. Its pathname, output, length, and errors use the same
 bounded implementation. Other directory descriptors return `-EBADF`; this is

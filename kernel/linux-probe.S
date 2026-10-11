@@ -3373,6 +3373,16 @@ resolution_valid:
     mov eax, 72
     call syscall_expect_one
 
+    lea rdi, [rip + proc_self_exe]
+    lea rsi, [rsp + 144]
+    mov edx, 32
+    mov eax, 89
+    call syscall_expect_five
+    cmp dword ptr [rsp + 144], 0x696e692f
+    jne failure
+    cmp byte ptr [rsp + 148], 't'
+    jne failure
+
     lea rdi, [rip + exec_path]
     mov rsi, rsp
     lea rdx, [rsp + 24]
