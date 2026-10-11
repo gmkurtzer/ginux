@@ -203,6 +203,11 @@ its present, user, NX, or writable state. The proof discards a sealed
 read-only mapping, observes zeroes from ring 3, and still unmaps it normally.
 Other advice, ranges, or inactive mappings return `-EINVAL` without changing
 the contents. There is no paging policy, reclamation queue, or lazy refill.
+`rax = 27` (`__NR_mincore`) accepts that exact page and length while active,
+atomically writes the single resident bit to a validated one-byte vector, and
+returns `-ENOMEM` after unmap. Misaligned or different ranges return `-EINVAL`;
+an invalid vector returns `-EFAULT`. It exposes only the fixed slot, not
+arbitrary page-table state or reclaim information.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x405000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x406000` follows Linux syscall
@@ -342,7 +347,7 @@ threads, general TLS state, or any syscall other than the exact bounded
 `read`, `write`, `writev`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
-bounded anonymous `mmap`/`munmap`/`madvise`, bounded read-only `mprotect`,
+bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,

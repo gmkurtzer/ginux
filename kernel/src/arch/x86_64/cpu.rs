@@ -59,6 +59,7 @@ const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_READV_SYSCALL: u64 = 19;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
+const LINUX_MINCORE_SYSCALL: u64 = 27;
 const LINUX_MADVISE_SYSCALL: u64 = 28;
 const LINUX_DUP_SYSCALL: u64 = 32;
 const LINUX_DUP2_SYSCALL: u64 = 33;
@@ -1351,6 +1352,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_READV_SYSCALL => linux_descriptor_readv(first_argument, buffer, count),
         LINUX_WRITEV_SYSCALL => linux_descriptor_writev(first_argument, buffer, count),
+        LINUX_MINCORE_SYSCALL => linux_mincore(first_argument, buffer, count),
         LINUX_MADVISE_SYSCALL => linux_madvise(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
@@ -1716,6 +1718,20 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
         || !address_space::zero_current_linux_page(mapping, frame)
     {
         return LINUX_EINVAL;
+    }
+    0
+}
+
+fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {
+    let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+    if address != mapping || length != PAGE_SIZE as u64 {
+        return LINUX_EINVAL;
+    }
+    if !ELF_PROBE_MMAP_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_ENOMEM;
+    }
+    if !copy_to_linux_user(vector, &[1]) {
+        return LINUX_EFAULT;
     }
     0
 }

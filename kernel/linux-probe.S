@@ -263,6 +263,29 @@ ginux_linux_probe:
     jne failure
     cmp qword ptr [0x409000], 0
     jne failure
+
+    mov edi, 0x409001
+    mov esi, 4096
+    mov edx, 0x403948
+    mov eax, 27
+    syscall
+    cmp rax, -22
+    jne failure
+    mov edi, 0x409000
+    mov edx, 0x404200
+    mov eax, 27
+    syscall
+    cmp rax, -14
+    jne failure
+    mov byte ptr [0x403948], 0
+    mov edx, 0x403948
+    mov eax, 27
+    syscall
+    test rax, rax
+    jne failure
+    cmp byte ptr [0x403948], 1
+    jne failure
+
     mov edi, 0x409000
     mov eax, 63
     syscall
@@ -273,6 +296,11 @@ ginux_linux_probe:
     mov eax, 11
     syscall
     test rax, rax
+    jne failure
+    mov edx, 0x403948
+    mov eax, 27
+    syscall
+    cmp rax, -12
     jne failure
     mov eax, 11
     syscall

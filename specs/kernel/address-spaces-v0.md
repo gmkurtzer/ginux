@@ -47,6 +47,8 @@ While active, its writable leaf can be irreversibly sealed read-only; copy
 permissions change with the hardware leaf, and unmap accepts either state.
 Bounded discard validates the same owned leaf and zeros its frame in place,
 preserving whichever writable state the mapping currently has.
+The matching residency query reports one present page only while this modeled
+leaf is active and does not walk or disclose any caller-selected address.
 The gate observes the leaf absent after ring-3 exit. This is a single-core,
 single-slot lifecycle, not a general VMA allocator or TLB-shootdown protocol.
 

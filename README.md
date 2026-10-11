@@ -64,7 +64,8 @@ confirms that an out-of-range request leaves the current break unchanged.
 A separate one-page anonymous `mmap` slot is installed RW/NX on demand,
 removed from the hardware page table by `munmap`, scrubbed, and proven zero on
 reuse. Bounded `MADV_DONTNEED` also zeros it in place without widening a sealed
-read-only page. General mapping placement and file-backed mappings are not implemented.
+read-only page, while `mincore` reports the slot resident only while active.
+General mapping placement and file-backed mappings are not implemented.
 The initial filesystem view exposes only a working-directory identity of `/`;
 bounded `getcwd` returns it, while undersized and invalid buffers fail.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded

@@ -703,6 +703,11 @@ if ! grep -q '^ginux: Linux anonymous mapping discard validated' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux anonymous mapping residency validated' "$output_file"; then
+    echo "Boot test failed: Linux anonymous mapping residency was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux heap copy bounds validated' "$output_file"; then
     echo "Boot test failed: Linux heap copy bounds were not validated." >&2
     exit 1
