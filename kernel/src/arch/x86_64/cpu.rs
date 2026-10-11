@@ -59,6 +59,7 @@ const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_READV_SYSCALL: u64 = 19;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
+const LINUX_MADVISE_SYSCALL: u64 = 28;
 const LINUX_DUP_SYSCALL: u64 = 32;
 const LINUX_DUP2_SYSCALL: u64 = 33;
 const LINUX_GETPID_SYSCALL: u64 = 39;
@@ -142,6 +143,7 @@ const LINUX_PROT_READ: u64 = 1;
 const LINUX_PROT_WRITE: u64 = 2;
 const LINUX_MAP_PRIVATE: u64 = 2;
 const LINUX_MAP_ANONYMOUS: u64 = 0x20;
+const LINUX_MADV_DONTNEED: u64 = 4;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
@@ -1349,6 +1351,7 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_READV_SYSCALL => linux_descriptor_readv(first_argument, buffer, count),
         LINUX_WRITEV_SYSCALL => linux_descriptor_writev(first_argument, buffer, count),
+        LINUX_MADVISE_SYSCALL => linux_madvise(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
         LINUX_FCNTL_SYSCALL => linux_descriptor_fcntl(first_argument, buffer, count),
@@ -1700,6 +1703,20 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
     }
     ELF_PROBE_MMAP_ACTIVE.store(false, Ordering::SeqCst);
     ELF_PROBE_MMAP_WRITABLE.store(false, Ordering::SeqCst);
+    0
+}
+
+fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
+    let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+    if address != mapping || length != PAGE_SIZE as u64 || advice != LINUX_MADV_DONTNEED {
+        return LINUX_EINVAL;
+    }
+    let frame = ELF_PROBE_MMAP_FRAME.load(Ordering::SeqCst);
+    if !ELF_PROBE_MMAP_ACTIVE.load(Ordering::SeqCst)
+        || !address_space::zero_current_linux_page(mapping, frame)
+    {
+        return LINUX_EINVAL;
+    }
     0
 }
 

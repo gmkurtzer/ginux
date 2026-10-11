@@ -229,6 +229,23 @@ ginux_linux_probe:
 
     mov edi, 0x409000
     mov esi, 4096
+    mov edx, 3
+    mov eax, 28
+    syscall
+    cmp rax, -22
+    jne failure
+    cmp qword ptr [0x409000], 2
+    jne failure
+    mov edx, 4
+    mov eax, 28
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x409000], 0
+    jne failure
+
+    mov edi, 0x409000
+    mov esi, 4096
     mov eax, 11
     syscall
     test rax, rax

@@ -196,6 +196,13 @@ uses it for syscall copy-out, proves copy-in rejects it after unmap, remaps it
 to observe zeroes, and exits with the leaf absent. This is not a general VMA
 allocator: hints, fixed mappings, files, sharing, partial ranges, multiple
 mappings, executable memory, and mapping growth are unsupported.
+`rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for that exact active
+page. It validates that the leaf still maps the allocator-owned frame, then
+zeros the complete frame through the supervisor direct map without changing
+its present, user, NX, or writable state. The proof discards a sealed
+read-only mapping, observes zeroes from ring 3, and still unmaps it normally.
+Other advice, ranges, or inactive mappings return `-EINVAL` without changing
+the contents. There is no paging policy, reclamation queue, or lazy refill.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x405000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x406000` follows Linux syscall
@@ -335,7 +342,7 @@ threads, general TLS state, or any syscall other than the exact bounded
 `read`, `write`, `writev`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
-bounded anonymous `mmap`/`munmap`, bounded read-only `mprotect`,
+bounded anonymous `mmap`/`munmap`/`madvise`, bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,

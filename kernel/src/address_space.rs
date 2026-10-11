@@ -684,6 +684,26 @@ pub(crate) fn unmap_current_linux_page(address: u64, frame: u64) -> bool {
     }
 }
 
+pub(crate) fn zero_current_linux_page(address: u64, frame: u64) -> bool {
+    if address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || !frame.is_multiple_of(PAGE_SIZE as u64)
+        || !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return false;
+    }
+    let Some(entry) = current_linux_leaf(address) else {
+        return false;
+    };
+    let value = unsafe { entry.read() };
+    if value & ADDRESS_MASK != frame
+        || value & (PRESENT | USER | NO_EXECUTE) != PRESENT | USER | NO_EXECUTE
+    {
+        return false;
+    }
+    unsafe { zero_frame(frame).is_some() }
+}
+
 fn current_linux_leaf(address: u64) -> Option<*mut u64> {
     let indexes = [
         ((address >> 39) & 0x1ff) as usize,
