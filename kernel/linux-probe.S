@@ -25,9 +25,18 @@ ginux_linux_probe:
     jne failure
     cmp qword ptr [rsp + 256], 100
     jne failure
-    cmp qword ptr [rsp + 264], 0
+    cmp qword ptr [rsp + 264], 15
     jne failure
-    cmp qword ptr [rsp + 272], 0
+    mov rax, qword ptr [rsp + 272]
+    cmp dword ptr [rax], 0x5f363878
+    jne failure
+    cmp word ptr [rax + 4], 0x3436
+    jne failure
+    cmp byte ptr [rax + 6], 0
+    jne failure
+    cmp qword ptr [rsp + 280], 0
+    jne failure
+    cmp qword ptr [rsp + 288], 0
     jne failure
 
     mov edi, 1

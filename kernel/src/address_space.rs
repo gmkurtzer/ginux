@@ -22,6 +22,7 @@ const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
+const LINUX_PLATFORM: [u8; 7] = [b'x', b'8', b'6', b'_', b'6', b'4', 0];
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
 const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 
@@ -276,9 +277,11 @@ pub(crate) fn verify_linux_elf_mapping(
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - 38 * size_of::<u64>();
-            let environment_offset = PAGE_SIZE - 3 * size_of::<u64>();
-            let argument_offset = PAGE_SIZE - size_of::<u64>();
+            let stack_offset = PAGE_SIZE - 44 * size_of::<u64>();
+            let platform_offset = PAGE_SIZE - 6 * size_of::<u64>();
+            let environment_offset = PAGE_SIZE - 4 * size_of::<u64>();
+            let argument_offset = PAGE_SIZE - 2 * size_of::<u64>();
+            let platform_address = stack_virtual_page + platform_offset as u64;
             let environment_address = stack_virtual_page + environment_offset as u64;
             let argument_address = stack_virtual_page + argument_offset as u64;
             let stack_words = stack_bytes.add(stack_offset).cast::<u64>();
@@ -316,6 +319,8 @@ pub(crate) fn verify_linux_elf_mapping(
                 plan.entry,
                 17,
                 100,
+                15,
+                platform_address,
                 0,
                 0,
             ]
@@ -324,6 +329,11 @@ pub(crate) fn verify_linux_elf_mapping(
             {
                 stack_words.add(index).write(value);
             }
+            core::ptr::copy_nonoverlapping(
+                LINUX_PLATFORM.as_ptr(),
+                stack_bytes.add(platform_offset),
+                LINUX_PLATFORM.len(),
+            );
             core::ptr::copy_nonoverlapping(
                 LINUX_INIT_ENVIRONMENT.as_ptr(),
                 stack_bytes.add(environment_offset),
@@ -429,8 +439,14 @@ pub(crate) fn verify_linux_elf_mapping(
                 && stack_words.add(30).read() == plan.entry
                 && stack_words.add(31).read() == 17
                 && stack_words.add(32).read() == 100
-                && stack_words.add(33).read() == 0
-                && stack_words.add(34).read() == 0
+                && stack_words.add(33).read() == 15
+                && stack_words.add(34).read() == platform_address
+                && stack_words.add(35).read() == 0
+                && stack_words.add(36).read() == 0
+                && core::slice::from_raw_parts(
+                    stack_bytes.add(platform_offset),
+                    LINUX_PLATFORM.len(),
+                ) == LINUX_PLATFORM
                 && core::slice::from_raw_parts(
                     stack_bytes.add(environment_offset),
                     LINUX_INIT_ENVIRONMENT.len(),
