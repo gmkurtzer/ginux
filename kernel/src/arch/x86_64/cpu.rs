@@ -3,7 +3,7 @@ use core::arch::{
     x86_64::{__cpuid, __cpuid_count},
 };
 use core::mem::size_of;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 use super::{paging, timer};
 
@@ -76,6 +76,7 @@ const LINUX_GETRESUID_SYSCALL: u64 = 118;
 const LINUX_GETRESGID_SYSCALL: u64 = 120;
 const LINUX_GETPGID_SYSCALL: u64 = 121;
 const LINUX_GETSID_SYSCALL: u64 = 124;
+const LINUX_SIGALTSTACK_SYSCALL: u64 = 131;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
@@ -96,6 +97,7 @@ const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
+const LINUX_ENOMEM: u64 = u64::MAX - 11;
 const LINUX_ESPIPE: u64 = u64::MAX - 28;
 const LINUX_EMFILE: u64 = u64::MAX - 23;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
@@ -133,6 +135,9 @@ const LINUX_SIG_SETMASK: u64 = 2;
 const LINUX_SIGNAL_SET_SIZE: u64 = 8;
 const LINUX_SIGNAL_ACTION_SIZE: usize = 32;
 const LINUX_SIGNAL_COUNT: usize = 64;
+const LINUX_ALT_STACK_SIZE: usize = 24;
+const LINUX_MIN_ALT_STACK_SIZE: u64 = 2048;
+const LINUX_SS_DISABLE: u32 = 2;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
@@ -239,6 +244,9 @@ static ELF_PROBE_SIGNAL_RESTORERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
     [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
 static ELF_PROBE_SIGNAL_ACTION_MASKS: [AtomicU64; LINUX_SIGNAL_COUNT] =
     [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_ALT_STACK_POINTER: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_ALT_STACK_SIZE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_ALT_STACK_FLAGS: AtomicU32 = AtomicU32::new(LINUX_SS_DISABLE);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -832,6 +840,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         ELF_PROBE_SIGNAL_RESTORERS[signal].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_ACTION_MASKS[signal].store(0, Ordering::SeqCst);
     }
+    ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -850,6 +861,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
             && ELF_PROBE_SIGNAL_RESTORERS[signal].swap(0, Ordering::SeqCst) == 0
             && ELF_PROBE_SIGNAL_ACTION_MASKS[signal].swap(0, Ordering::SeqCst) == 0
     });
+    let alt_stack_disabled = ELF_PROBE_ALT_STACK_POINTER.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_ALT_STACK_SIZE.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_ALT_STACK_FLAGS.swap(LINUX_SS_DISABLE, Ordering::SeqCst) == LINUX_SS_DISABLE;
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
@@ -885,6 +899,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && no_new_privileges_enforced
         && signal_mask_restored
         && signal_actions_restored
+        && alt_stack_disabled
         && msrs_restored
 }
 
@@ -1256,6 +1271,7 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_ESRCH
             }
         }
+        LINUX_SIGALTSTACK_SYSCALL => linux_sigaltstack(first_argument, buffer),
         LINUX_SET_TID_ADDRESS_SYSCALL => {
             if !linux_writable_user_range_contains(first_argument, size_of::<u32>()) {
                 return LINUX_EFAULT;
@@ -1884,6 +1900,70 @@ fn linux_rt_sigaction(signal: u64, action: u64, old_action: u64, set_size: u64) 
         ELF_PROBE_SIGNAL_FLAGS[index].store(flags, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_RESTORERS[index].store(restorer, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_ACTION_MASKS[index].store(mask, Ordering::SeqCst);
+    }
+    0
+}
+
+fn linux_sigaltstack(new_stack: u64, old_stack: u64) -> u64 {
+    if old_stack != 0 && !linux_writable_user_range_contains(old_stack, LINUX_ALT_STACK_SIZE) {
+        return LINUX_EFAULT;
+    }
+    let replacement = if new_stack == 0 {
+        None
+    } else {
+        let mut bytes = [0_u8; LINUX_ALT_STACK_SIZE];
+        if !copy_from_linux_user(new_stack, &mut bytes) {
+            return LINUX_EFAULT;
+        }
+        let mut pointer_bytes = [0_u8; 8];
+        let mut flags_bytes = [0_u8; 4];
+        let mut size_bytes = [0_u8; 8];
+        pointer_bytes.copy_from_slice(&bytes[..8]);
+        flags_bytes.copy_from_slice(&bytes[8..12]);
+        size_bytes.copy_from_slice(&bytes[16..24]);
+        let pointer = u64::from_ne_bytes(pointer_bytes);
+        let flags = u32::from_ne_bytes(flags_bytes);
+        let size = u64::from_ne_bytes(size_bytes);
+        match flags {
+            LINUX_SS_DISABLE => Some((0, LINUX_SS_DISABLE, 0)),
+            0 if size < LINUX_MIN_ALT_STACK_SIZE => return LINUX_ENOMEM,
+            0 => {
+                let Ok(length) = usize::try_from(size) else {
+                    return LINUX_EFAULT;
+                };
+                if !linux_writable_user_range_contains(pointer, length) {
+                    return LINUX_EFAULT;
+                }
+                Some((pointer, 0, size))
+            }
+            _ => return LINUX_EINVAL,
+        }
+    };
+    if old_stack != 0 {
+        let mut bytes = [0_u8; LINUX_ALT_STACK_SIZE];
+        bytes[..8].copy_from_slice(
+            &ELF_PROBE_ALT_STACK_POINTER
+                .load(Ordering::SeqCst)
+                .to_ne_bytes(),
+        );
+        bytes[8..12].copy_from_slice(
+            &ELF_PROBE_ALT_STACK_FLAGS
+                .load(Ordering::SeqCst)
+                .to_ne_bytes(),
+        );
+        bytes[16..24].copy_from_slice(
+            &ELF_PROBE_ALT_STACK_SIZE
+                .load(Ordering::SeqCst)
+                .to_ne_bytes(),
+        );
+        if !copy_to_linux_user(old_stack, &bytes) {
+            return LINUX_EFAULT;
+        }
+    }
+    if let Some((pointer, flags, size)) = replacement {
+        ELF_PROBE_ALT_STACK_POINTER.store(pointer, Ordering::SeqCst);
+        ELF_PROBE_ALT_STACK_FLAGS.store(flags, Ordering::SeqCst);
+        ELF_PROBE_ALT_STACK_SIZE.store(size, Ordering::SeqCst);
     }
     0
 }

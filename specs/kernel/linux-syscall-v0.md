@@ -136,6 +136,14 @@ are validated before state changes; action masks also clear `SIGKILL` and
 `-EINVAL`. Handler, flags, and restorer values are retained as opaque ABI state
 until delivery is implemented. The proof exercises default queries, normalized
 registration, fault atomicity, and restoration of every action before exit.
+`rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
+alternate-stack record. It accepts `SS_DISABLE` or a zero-flag stack of at least
+2048 bytes wholly contained in one currently writable probe VMA. Invalid
+records return `-EINVAL`, undersized stacks return `-ENOMEM`, and inaccessible
+records or stack ranges return `-EFAULT` before state changes. The proof enables,
+queries, rejects invalid replacements, and disables the stack before exit.
+`SS_ONSTACK`, automatic disarming, and actual signal-stack entry remain
+undefined until signal delivery exists.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active
@@ -221,7 +229,8 @@ threads, general TLS state, or any syscall other than the exact bounded
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
 bounded read-only `mprotect`,
-`rt_sigaction`, `rt_sigprocmask`, `umask`, read-only `getrlimit`/`prlimit64`,
+`rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
+`getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential queries, bounded `prctl` process names, the bounded process/session

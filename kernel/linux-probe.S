@@ -335,6 +335,81 @@ ginux_linux_probe:
     test rax, rax
     jne failure
 
+    xor edi, edi
+    mov esi, 0x402158
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x402158], 0
+    jne failure
+    cmp dword ptr [0x402160], 2
+    jne failure
+    cmp qword ptr [0x402168], 0
+    jne failure
+
+    xor edi, edi
+    mov esi, 0x403200
+    mov eax, 131
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov qword ptr [0x402140], 0x402800
+    mov qword ptr [0x402148], 0
+    mov qword ptr [0x402150], 2048
+    mov edi, 0x402140
+    mov esi, 0x402158
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne failure
+    cmp dword ptr [0x402160], 2
+    jne failure
+
+    xor edi, edi
+    mov esi, 0x402158
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x402158], 0x402800
+    jne failure
+    cmp dword ptr [0x402160], 0
+    jne failure
+    cmp qword ptr [0x402168], 2048
+    jne failure
+
+    mov qword ptr [0x402140], 0x403000
+    mov qword ptr [0x402148], 0
+    mov qword ptr [0x402150], 2048
+    mov edi, 0x402140
+    xor esi, esi
+    mov eax, 131
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov qword ptr [0x402140], 0x402800
+    mov qword ptr [0x402148], 0
+    mov qword ptr [0x402150], 1024
+    mov edi, 0x402140
+    xor esi, esi
+    mov eax, 131
+    syscall
+    cmp rax, -12
+    jne failure
+
+    mov qword ptr [0x402140], 0
+    mov qword ptr [0x402148], 2
+    mov qword ptr [0x402150], 0
+    mov edi, 0x402140
+    xor esi, esi
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 1
     mov esi, 0x402000
     mov edx, 8
