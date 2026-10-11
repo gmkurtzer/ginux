@@ -56,9 +56,11 @@ An exhausted budget rejects replacement construction without changing the
 manager, while fault teardown remains valid and the scheduler may resume a
 surviving peer.
 An unstarted replacement can also be discarded transactionally while its
-thread count is zero. Unlike retirement, discard does not overwrite the last
-genuinely retired service identity; the consumed restart attempt remains
-consumed.
+thread count and allocator-owned frame count are both zero. Unlike retirement,
+discard does not overwrite the last genuinely retired service identity; the
+consumed restart attempt remains consumed. Restart admission likewise
+revalidates that the quarantined generation still owns exactly seven frames
+before creating a replacement.
 General restart policy and
 outstanding-operation cleanup remain undefined. The fault path also publishes a
 capability-gated service-fault event to a four-record FIFO before reusing the

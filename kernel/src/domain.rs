@@ -447,7 +447,11 @@ pub(crate) fn initialize_boot_service() -> Option<u64> {
 
 pub(crate) fn initialize_boot_service_restart() -> Option<u64> {
     let manager = global_manager_mut()?;
-    manager.quarantined_frame_owner?;
+    let quarantined = manager.quarantined_frame_owner?;
+    let owner = crate::memory::FrameOwner::domain(encode_id(quarantined))?;
+    if crate::memory::owner_live_frame_count(owner) != Some(7) {
+        return None;
+    }
     let id = manager.restart_service()?;
     validate_boot_service(manager, id)
 }
@@ -801,6 +805,12 @@ pub(crate) fn discard_unstarted_service(domain_raw: u64) -> bool {
     let Some(id) = decode_id(domain_raw) else {
         return false;
     };
+    let Some(owner) = crate::memory::FrameOwner::domain(domain_raw) else {
+        return false;
+    };
+    if crate::memory::owner_live_frame_count(owner) != Some(0) {
+        return false;
+    }
     let Some(manager) = global_manager_mut() else {
         return false;
     };
