@@ -6,13 +6,19 @@ The bootstrap scheduler owns eight fixed thread slots. A thread identifier
 contains a slot and generation, and each thread belongs to one native domain.
 The current lifecycle is:
 
-`absent -> Ready -> Running -> (Ready | Blocked) ... -> absent`
+`absent -> (Staged | Ready) -> Running -> (Ready | Blocked) ... -> absent`
 
 Only the scheduler selects a `Ready` thread as `Running`. A yield is accepted
 only from the current running identity, returns it to `Ready`, and selects the
 next ready slot round-robin. Exit is likewise restricted to the current thread,
 removes it, and selects another ready thread. Slot reuse increments generation,
 so stale identifiers cannot observe or control a replacement.
+An auxiliary submitted by a running control-plane context begins `Staged`.
+Involuntary timer preemption leaves staged work ineligible; a voluntary yield,
+block, or exit promotes staged contexts to `Ready` before selection. This gives
+the control plane a deterministic interval in which it can cancel a submitted
+workload. Cancellation removes only an exact `Staged` or `Ready` domain,
+reverses its thread charge, and cannot remove a running or blocked context.
 
 A blocking IPC receive atomically saves the current context, marks it
 `Blocked`, and selects another ready thread. If none exists, the transition is
@@ -61,23 +67,26 @@ service generation on the retained service address space, rearms the timer, and
 switches back to context 1. The survivor consumes the reply and fault event,
 then the second preemption dispatches the replacement. It negotiates the ABI
 and blocks on an empty inbound IPC direction, resuming the control context.
-The control context directly wakes it with a message, verifies budget
-exhaustion, and exits. The awakened replacement observes the message and exits
-cleanly. The boot succeeds only after exactly two preemptions, no cooperative
-yields, one contained fault, two normal exits, one restart, one block/wake
-pair, and five cross-root dispatches.
+The control context directly wakes it with a message, stages and cancels one
+auxiliary, stages a distinct auxiliary, verifies budget exhaustion, and exits.
+The awakened replacement and admitted auxiliary both exit cleanly. The boot
+succeeds only after exactly two preemptions, no cooperative yields, one
+contained primary-service fault, three normal exits, one restart, one
+block/wake pair, and five or six cross-root dispatches depending on the valid
+timer interleaving.
 Before the replacement becomes runnable, restart setup may remove its exact
 ready context as a rollback operation. This also reverses the domain thread
 charge and restores the retained address-space owner recorded by the scheduler;
 it cannot remove a running, blocked, ambiguous, or wrong-domain context.
 
 Call budgets belong to domains rather than threads. The control domain receives
-11 charged calls and each service generation receives three. Every call-gate
+34 charged calls and each service generation receives three. Every call-gate
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 24 charged calls, deliberately exhausts the control domain, and requires
-its next discovery call to be rejected before it exits.
+exactly 39 charged calls across all generations, deliberately exhausts the
+control domain, and requires its next discovery call to be rejected before it
+exits.
 
 This revision uses one guarded TSS privilege stack because execution is
 single-CPU and syscalls cannot nest. It stores no priority, CPU-time budget,
