@@ -483,6 +483,11 @@ if ! grep -q '^ginux: malformed executable containers rejected' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux ELF64 profile validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux ELF64 profile was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

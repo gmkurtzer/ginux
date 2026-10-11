@@ -8,6 +8,7 @@ mod crypto;
 mod domain;
 mod executable;
 mod ipc;
+mod linux_elf;
 mod manifest;
 mod memory;
 mod network;
@@ -548,6 +549,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: bounded executable container accepted");
     serial_write("\r\nginux: authenticated executable entry points accepted");
     serial_write("\r\nginux: malformed executable containers rejected\r\n");
+    if !linux_elf::verify_parser() {
+        kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
+    }
+    serial_write("ginux: bounded Linux ELF64 profile validated\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }
