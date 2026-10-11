@@ -48,6 +48,7 @@ const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_FSTAT_SYSCALL: u64 = 5;
+const LINUX_POLL_SYSCALL: u64 = 7;
 const LINUX_LSEEK_SYSCALL: u64 = 8;
 const LINUX_MMAP_SYSCALL: u64 = 9;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
@@ -158,6 +159,11 @@ const LINUX_STATX_BASIC_STATS: u32 = 0x7ff;
 const LINUX_STATX_RESERVED: u32 = 0x8000_0000;
 const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_IOV_LIMIT: usize = 4;
+const LINUX_POLLFD_LIMIT: usize = 4;
+const LINUX_POLLIN: u16 = 1;
+const LINUX_POLLOUT: u16 = 4;
+const LINUX_POLLHUP: u16 = 0x10;
+const LINUX_POLLNVAL: u16 = 0x20;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
@@ -1270,6 +1276,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_WRITE_SYSCALL => linux_descriptor_write(first_argument, buffer, count),
         LINUX_SCHED_YIELD_SYSCALL => 0,
         LINUX_CLOSE_SYSCALL => linux_descriptor_close(first_argument),
+        LINUX_POLL_SYSCALL => linux_poll(first_argument, buffer, count),
         LINUX_FSTAT_SYSCALL => {
             let Some(stat) = linux_descriptor_stat(first_argument) else {
                 return LINUX_EBADF;
@@ -2098,6 +2105,62 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     } else {
         LINUX_EBADF
     }
+}
+
+fn linux_poll(address: u64, count: u64, timeout: u64) -> u64 {
+    let Ok(descriptor_count) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if descriptor_count > LINUX_POLLFD_LIMIT {
+        return LINUX_EINVAL;
+    }
+    if descriptor_count == 0 {
+        return if timeout as u32 == 0 { 0 } else { LINUX_ENOSYS };
+    }
+    let mut pollfds = [0_u8; LINUX_POLLFD_LIMIT * 8];
+    let active = &mut pollfds[..descriptor_count * 8];
+    if !copy_from_linux_user(address, active) {
+        return LINUX_EFAULT;
+    }
+    let mut ready = 0_u64;
+    for pollfd in active.as_chunks_mut::<8>().0 {
+        let descriptor = i32::from_ne_bytes(pollfd[..4].try_into().unwrap());
+        let events = u16::from_ne_bytes(pollfd[4..6].try_into().unwrap());
+        let returned = linux_descriptor_poll_events(descriptor, events);
+        pollfd[6..8].copy_from_slice(&returned.to_ne_bytes());
+        ready += u64::from(returned != 0);
+    }
+    if ready == 0 && timeout as u32 != 0 {
+        return LINUX_ENOSYS;
+    }
+    if !copy_to_linux_user(address, active) {
+        return LINUX_EFAULT;
+    }
+    ready
+}
+
+fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
+    let Ok(descriptor) = u64::try_from(descriptor) else {
+        return 0;
+    };
+    match linux_console_descriptor(descriptor) {
+        LINUX_DESCRIPTOR_INPUT => return LINUX_POLLHUP,
+        LINUX_DESCRIPTOR_OUTPUT => return requested & LINUX_POLLOUT,
+        _ => {}
+    }
+    let device = linux_device_descriptor(descriptor);
+    if device == 0 {
+        return LINUX_POLLNVAL;
+    }
+    let access = device & 3;
+    let mut returned = 0;
+    if matches!(access, LINUX_DESCRIPTOR_INPUT | 3) {
+        returned |= requested & LINUX_POLLIN;
+    }
+    if matches!(access, LINUX_DESCRIPTOR_OUTPUT | 3) {
+        returned |= requested & LINUX_POLLOUT;
+    }
+    returned
 }
 
 fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {

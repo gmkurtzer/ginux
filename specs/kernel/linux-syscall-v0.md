@@ -29,6 +29,17 @@ bounded staging buffer before emitting anything, so an invalid later vector
 returns `-EFAULT` without exposing an earlier prefix. Invalid descriptors return
 `-EBADF`; zero-length vectors, excessive vector counts, and excessive aggregate
 lengths return `-EINVAL`.
+`rax = 7` (`__NR_poll`) accepts zero through four x86-64 `pollfd` records and
+atomically replaces every `revents` field after validating the complete table.
+The disconnected input console reports `POLLHUP`, writable console or device
+endpoints report requested `POLLOUT`, readable devices report requested
+`POLLIN`, unknown nonnegative descriptors report `POLLNVAL`, and negative
+descriptors are ignored. An invalid table returns `-EFAULT`, and more than four
+records returns `-EINVAL`. A zero timeout performs an immediate query; any
+ready descriptor also returns immediately regardless of timeout. A query with
+no ready descriptors and a nonzero or infinite timeout returns `-ENOSYS`
+without changing the table because scheduler-backed descriptor wait queues do
+not exist yet.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded
@@ -378,7 +389,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`read`, `write`, `writev`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
+`read`, `write`, `writev`, bounded `poll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
 bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprotect`,

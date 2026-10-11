@@ -79,6 +79,82 @@ ginux_linux_probe:
     jne failure
 
     xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    mov eax, 7
+    syscall
+    test rax, rax
+    jne failure
+    mov edx, 1
+    mov eax, 7
+    syscall
+    cmp rax, -38
+    jne failure
+
+    mov edi, 0x404c80
+    mov esi, 5
+    xor edx, edx
+    mov eax, 7
+    syscall
+    cmp rax, -22
+    jne failure
+    mov edi, 0x4051fc
+    mov esi, 1
+    mov eax, 7
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov dword ptr [0x404c80], 0
+    mov word ptr [0x404c84], 1
+    mov word ptr [0x404c86], -1
+    mov dword ptr [0x404c88], 1
+    mov word ptr [0x404c8c], 4
+    mov word ptr [0x404c8e], -1
+    mov dword ptr [0x404c90], 99
+    mov word ptr [0x404c94], 0
+    mov word ptr [0x404c96], -1
+    mov dword ptr [0x404c98], -1
+    mov word ptr [0x404c9c], -1
+    mov word ptr [0x404c9e], -1
+    mov edi, 0x404c80
+    mov esi, 4
+    mov edx, -1
+    mov eax, 7
+    syscall
+    cmp rax, 3
+    jne failure
+    cmp word ptr [0x404c86], 0x10
+    jne failure
+    cmp word ptr [0x404c8e], 4
+    jne failure
+    cmp word ptr [0x404c96], 0x20
+    jne failure
+    cmp word ptr [0x404c9e], 0
+    jne failure
+
+    mov dword ptr [0x404ca0], 1
+    mov word ptr [0x404ca4], 0
+    mov word ptr [0x404ca6], 0x7777
+    mov edi, 0x404ca0
+    mov esi, 1
+    xor edx, edx
+    mov eax, 7
+    syscall
+    test rax, rax
+    jne failure
+    cmp word ptr [0x404ca6], 0
+    jne failure
+    mov word ptr [0x404ca6], 0x7777
+    mov edx, 1
+    mov eax, 7
+    syscall
+    cmp rax, -38
+    jne failure
+    cmp word ptr [0x404ca6], 0x7777
+    jne failure
+
+    xor edi, edi
     mov eax, 12
     syscall
     cmp rax, 0x406000
