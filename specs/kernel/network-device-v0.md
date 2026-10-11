@@ -96,6 +96,13 @@ generation state remain intact after the crash. This proves containment and
 state survival, not automatic driver restart or hardware recovery; those need
 a later supervised service wired to an actual device backend.
 
+The proof then starts a fresh read-only network service with a new domain
+generation and capability table. It copies the snapshot, requires retained
+generation 9 and the exact static route, exits with status 45, and loses its
+fresh handle on retirement. Recovery therefore does not reuse the crashed
+domain or its authority. This is a manually sequenced replacement proof; policy
+for automatic restart cadence and backoff remains a control-plane concern.
+
 Before exit the service also installs and reads back `10.0.2.15/24`. This is not
 yet a network stack or virtual NIC. Link and IPv4 state are kernel-owned scalar
 values and are not backed by hardware. There is no packet transport, MAC

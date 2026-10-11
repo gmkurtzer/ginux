@@ -678,6 +678,16 @@ if ! grep -q '^ginux: network state survived service fault' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: replacement network service observed retained state' "$output_file"; then
+    echo "Boot test failed: replacement network service did not recover retained state." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: replacement network capability lifecycle isolated' "$output_file"; then
+    echo "Boot test failed: replacement network capability lifecycle was not isolated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
     echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
     exit 1

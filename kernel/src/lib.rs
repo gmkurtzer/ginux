@@ -714,6 +714,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: faulted network service contained");
     serial_write("\r\nginux: faulted network authority revoked");
     serial_write("\r\nginux: network state survived service fault");
+    if !address_space::verify_ring3_network_recovery() {
+        kernel_fail("\r\nginux: replacement network service invariant failed\r\n");
+    }
+    serial_write("\r\nginux: replacement network service observed retained state");
+    serial_write("\r\nginux: replacement network capability lifecycle isolated");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }
