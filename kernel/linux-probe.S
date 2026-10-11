@@ -22,6 +22,20 @@ ginux_linux_probe:
     cmp qword ptr [rsp + 240], 0x400100
     jne failure
 
+    mov edi, 1
+    lea rsi, [rip + readable_payload]
+    mov edx, 8
+    mov eax, 1
+    syscall
+    cmp rax, 8
+    jne failure
+
+    mov edi, 0x400000
+    mov eax, 63
+    syscall
+    cmp rax, -14
+    jne failure
+
     movabs rax, 0x0807060504030201
     mov qword ptr [rsp - 16], rax
     mov edi, 1
@@ -238,3 +252,7 @@ ginux_linux_probe:
     syscall
 failure:
     ud2
+
+.balign 8
+readable_payload:
+    .byte 1, 2, 3, 4, 5, 6, 7, 8

@@ -588,6 +588,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux bounded brk heap validated\r\n");
     serial_write("ginux: Linux heap copy bounds validated\r\n");
     serial_write("ginux: Linux stack copy bounds validated\r\n");
+    serial_write("ginux: Linux directional VMA copies validated\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

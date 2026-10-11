@@ -25,6 +25,9 @@ eight-byte write crossing the current break returns `-EFAULT`, proving syscall
 copy ranges do not expand to the whole mapped page.
 The probe also performs a valid `write` from unused stack space and requires
 `-EFAULT` for an eight-byte range crossing the stack's upper guard boundary.
+Another valid `write` copies an embedded payload from the declared RX segment,
+while `uname` copy-out to that segment returns `-EFAULT`. Copy direction thus
+respects VMA permissions rather than treating every mapped page as writable.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active

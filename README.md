@@ -24,6 +24,7 @@ segment's declared ELF memory extent or allocated heap bytes below the current
 break, plus the mapped user stack. They cannot cross the stack's guard-page
 boundaries. Invalid ranges and write arguments return Linux `-EFAULT`,
 `-EBADF`, or `-EINVAL`.
+Copy-in may also read the declared RX ELF extent, while copy-out rejects it.
 The ring-3 workload verifies each error and continues into valid calls.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.

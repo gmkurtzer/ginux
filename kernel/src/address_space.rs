@@ -295,6 +295,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 && cpu::verify_linux_elf_entry(
                     plan.entry as usize,
                     (stack_virtual_page + stack_offset as u64) as usize,
+                    first.memory_size,
                     second.virtual_page as usize,
                     second.memory_size,
                     heap_virtual_page as usize,

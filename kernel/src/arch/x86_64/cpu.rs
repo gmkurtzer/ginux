@@ -148,6 +148,7 @@ static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ENTRY: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
@@ -695,6 +696,7 @@ pub(crate) fn execute_auxiliary(
 pub(crate) fn verify_linux_elf_entry(
     entry: usize,
     stack: usize,
+    code_size: usize,
     data: usize,
     data_size: usize,
     heap: usize,
@@ -713,6 +715,7 @@ pub(crate) fn verify_linux_elf_entry(
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     ELF_PROBE_STACK.store(stack as u64, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store((entry & !(PAGE_SIZE - 1)) as u64, Ordering::SeqCst);
+    ELF_PROBE_CODE_SIZE.store(code_size as u64, Ordering::SeqCst);
     ELF_PROBE_DATA.store(data as u64, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(data_size as u64, Ordering::SeqCst);
     ELF_PROBE_BRK.store(heap as u64, Ordering::SeqCst);
@@ -736,6 +739,7 @@ pub(crate) fn verify_linux_elf_entry(
     };
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     ELF_PROBE_ENTRY.store(0, Ordering::SeqCst);
+    ELF_PROBE_CODE_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA.store(0, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_BRK.store(0, Ordering::SeqCst);
@@ -1048,7 +1052,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_SET_TID_ADDRESS_SYSCALL => {
-            if !linux_user_range_contains(first_argument, size_of::<u32>()) {
+            if !linux_writable_user_range_contains(first_argument, size_of::<u32>()) {
                 return LINUX_EFAULT;
             }
             ELF_PROBE_CLEAR_CHILD_TID.store(first_argument, Ordering::SeqCst);
@@ -1105,7 +1109,7 @@ extern "sysv64" fn linux_syscall_handler(
     }
 }
 
-fn linux_user_range_contains(address: u64, length: usize) -> bool {
+fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {
     let base = ELF_PROBE_DATA.load(Ordering::SeqCst);
     let size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
     if linux_range_contains(base, size, address, length) {
@@ -1150,11 +1154,15 @@ pub(crate) fn verify_linux_copy_bounds(base: u64, size: usize) -> bool {
 }
 
 fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
-    if !linux_user_range_contains(address, output.len()) {
+    let code_base = ELF_PROBE_ENTRY.load(Ordering::SeqCst);
+    let code_size = ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst);
+    if !linux_range_contains(code_base, code_size, address, output.len())
+        && !linux_writable_user_range_contains(address, output.len())
+    {
         return false;
     }
-    // SAFETY: the range is contained by the active probe's declared RW ELF
-    // segment, which remains mapped in the current root for the whole call.
+    // SAFETY: the readable range is contained by one active probe VMA, which
+    // remains mapped in the current root for the whole call.
     unsafe {
         with_supervisor_user_access(|| {
             for (offset, byte) in output.iter_mut().enumerate() {
@@ -1166,10 +1174,10 @@ fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
 }
 
 fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {
-    if !linux_user_range_contains(address, input.len()) {
+    if !linux_writable_user_range_contains(address, input.len()) {
         return false;
     }
-    // SAFETY: see copy_from_linux_user; this probe segment is writable.
+    // SAFETY: the range is contained by one writable active probe VMA.
     unsafe {
         with_supervisor_user_access(|| {
             for (offset, byte) in input.iter().enumerate() {

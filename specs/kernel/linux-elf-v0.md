@@ -76,8 +76,10 @@ the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 512-byte `p_memsz`, rather
 than the rest of its mapped 4096-byte page. Copy helpers also accept heap bytes
 strictly below the current break, not the entire mapped heap page, and ranges
-wholly inside the user stack page. They reject a range crossing a stack guard
-page before enabling SMAP access. It next
+wholly inside the user stack page. Copy-in additionally permits the declared
+RX ELF memory extent; copy-out does not. The proof reads an embedded RX payload
+through `write` and requires `-EFAULT` when `uname` targets that read-only page.
+Ranges crossing a stack guard page are rejected before SMAP access. It next
 issues process identity queries, verifies PID, TID, process-group, and session
 ID 1 plus parent PID 0 after the kernel resumes it through `SYSRETQ`,
 registers a bounded clear-child-TID word, verifies preserved first and fourth
