@@ -157,6 +157,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: breakpoint exception test failed\r\n");
     }
 
+    let Some(local_apic) = arch::x86_64::apic::discover() else {
+        kernel_fail("ginux: enabled local APIC not found\r\n");
+    };
+    serial_write("ginux: local APIC discovered\r\nginux: local APIC ID: ");
+    serial_write_u64(u64::from(local_apic.id));
+    serial_write("\r\nginux: local APIC mode: ");
+    match local_apic.mode {
+        arch::x86_64::apic::Mode::XApic => serial_write("xAPIC"),
+        arch::x86_64::apic::Mode::X2Apic => serial_write("x2APIC"),
+    }
+    serial_write("\r\nginux: local APIC physical base: ");
+    serial_write_u64(local_apic.physical_base);
+    serial_write("\r\n");
+
     let summary = summarize_memory(boot_info);
     serial_write("ginux: memory descriptors: ");
     serial_write_usize(summary.descriptors);

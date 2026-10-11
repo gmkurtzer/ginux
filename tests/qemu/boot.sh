@@ -83,6 +83,21 @@ if ! grep -q '^ginux: breakpoint exception handled' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: local APIC discovered' "$output_file"; then
+    echo "Boot test failed: the local APIC was not discovered." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: local APIC mode: x2?APIC' "$output_file"; then
+    echo "Boot test failed: the local APIC mode is invalid." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: local APIC physical base: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the local APIC base was not reported." >&2
+    exit 1
+fi
+
 if ! grep -Eq '^ginux: usable memory MiB: [1-9][0-9]*' "$output_file"; then
     echo "Boot test failed: the kernel did not inventory usable physical memory." >&2
     exit 1
