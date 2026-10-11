@@ -175,9 +175,10 @@ rejected rather than aliasing a reused slot.
 The management flags query separately exposes the initialization latch without
 changing the lifecycle state enumeration, allowing the control plane to prove
 that private initialization completed before requesting admission.
-It also starts a separate initialized generation, observes it as ready, and
-stops it before dispatch. Teardown removes its scheduler context and address
-space without executing its first instruction.
+It also starts a separate initialized generation and dispatches it. That
+workload executes one cooperative yield; the control plane resumes, observes
+the exact generation as quiescent and ready, and stops it before it can execute
+another instruction. Teardown removes its scheduler context and address space.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

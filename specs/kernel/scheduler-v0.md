@@ -77,7 +77,7 @@ control context resumes, consumes the auxiliary's exit record, verifies budget
 exhaustion, and exits.
 The awakened replacement exits cleanly; the admitted auxiliary validates its
 private payload and exits with status 42. The boot
-succeeds only after exactly two preemptions, one cooperative yield, one
+succeeds only after exactly two preemptions, three cooperative yields, one
 contained primary-service fault, three normal exits, one restart, one
 block/wake pair, and five or six cross-root dispatches depending on the valid
 timer interleaving.
@@ -87,11 +87,11 @@ charge and restores the retained address-space owner recorded by the scheduler;
 it cannot remove a running, blocked, ambiguous, or wrong-domain context.
 
 Call budgets belong to domains rather than threads. The control domain receives
-57 charged calls and each service generation receives three. Every call-gate
+59 charged calls and each service generation receives three. Every call-gate
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 62 charged calls across all generations, deliberately exhausts the
+exactly 65 charged calls across all generations, deliberately exhausts the
 control domain, and requires its next discovery call to be rejected before it
 exits.
 

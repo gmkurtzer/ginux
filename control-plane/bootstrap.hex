@@ -470,6 +470,15 @@ c645380b
 48b84155585f4f4b210a
 49894500
 
+# write a second workload that yields once and must never resume
+49bec021000080000000
+48b8b803000000cd80be
+498906
+48b863000000b8020000
+49894608
+48b800cd800f0b000000
+49894610
+
 # load the program and stage the same exact generation
 48896e10
 48c7461839000000
@@ -535,8 +544,8 @@ cd80
 # load and initialize that generation
 66c746060300
 4c896608
-48896e10
-48c7461839000000
+4c897610
+48c7461815000000
 4889df
 ba20000000
 b80f000000
@@ -556,7 +565,7 @@ cd80
 7402
 0f0b
 
-# start, observe ready, then cancel before dispatch
+# start, observe ready, execute one yield, then cancel before resume
 66c746060500
 48c7461000000000
 48c7461800000000
@@ -575,6 +584,24 @@ cd80
 4883f803
 7402
 0f0b
+
+# dispatch the workload and resume only after its cooperative yield
+b803000000
+cd80
+85c0
+7402
+0f0b
+
+# require that the yielded workload is quiescent and ready to stop
+66c746060600
+4889df
+ba20000000
+b80f000000
+cd80
+4883f803
+7402
+0f0b
+
 66c746060200
 4889df
 ba20000000
@@ -584,7 +611,7 @@ cd80
 7402
 0f0b
 
-# consume and validate the ready-cancellation lifecycle event
+# consume and validate the yielded-cancellation lifecycle event
 4889df
 b807000000
 cd80

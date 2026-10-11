@@ -193,9 +193,11 @@ or ready:
 the scheduler removes it before execution, drains its thread accounting,
 releases its complete W^X hierarchy, revokes every delegated root, and emits
 kind 3. A running target is still rejected. The ring-3 proof stops one
-unstarted generation and one queued generation, verifies both sequenced
-retirements in the kernel, then creates a distinct generation for live
-execution.
+unstarted generation and one staged generation. It also dispatches an
+initialized auxiliary through action 5, allows it to execute one cooperative
+yield, observes the exact generation as ready again, and then stops it before
+it can resume. After validating all three sequenced retirements, the proof
+creates a distinct generation for normal live execution.
 Action 3 loads and queues an unstarted auxiliary. The source field is its exact
 domain generation, the object field is a readable caller address, and the
 rights field is a byte length from 1 through 4096. The kernel allocates a fresh
