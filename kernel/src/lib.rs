@@ -136,6 +136,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: kernel page tables active\r\n");
 
+    arch::x86_64::cpu::install();
+    serial_write("ginux: GDT/TSS/IDT active\r\n");
+    if !arch::x86_64::cpu::verify_breakpoint() {
+        kernel_fail("ginux: breakpoint exception test failed\r\n");
+    }
+
     let summary = summarize_memory(boot_info);
     serial_write("ginux: memory descriptors: ");
     serial_write_usize(summary.descriptors);

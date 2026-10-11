@@ -63,6 +63,16 @@ if ! grep -q '^ginux: kernel page tables active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: GDT/TSS/IDT active' "$output_file"; then
+    echo "Boot test failed: kernel CPU protection tables are not active." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: breakpoint exception handled' "$output_file"; then
+    echo "Boot test failed: the recoverable exception test did not return." >&2
+    exit 1
+fi
+
 if ! grep -Eq '^ginux: usable memory MiB: [1-9][0-9]*' "$output_file"; then
     echo "Boot test failed: the kernel did not inventory usable physical memory." >&2
     exit 1
