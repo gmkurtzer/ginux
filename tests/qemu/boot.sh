@@ -603,6 +603,11 @@ if ! grep -q '^ginux: network gateway invalidated on address change' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded static network route retained' "$output_file"; then
+    echo "Boot test failed: bounded static network route was not retained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: network device capability revoked on exit' "$output_file"; then
     echo "Boot test failed: network device authority survived service exit." >&2
     exit 1

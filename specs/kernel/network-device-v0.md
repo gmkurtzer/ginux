@@ -7,7 +7,7 @@ development manifest grants the control plane read/write authority, and the
 kernel delegates that bounded authority to an isolated stop-only service.
 Control ABI v2 operation 16 uses `RSI` as a command and `RDX` as its argument.
 Read-authorized command 0 requires a zero reserved argument and returns a fixed
-descriptor word containing device-contract version 6, MTU 1500, and one queue.
+descriptor word containing device-contract version 7, MTU 1500, and one queue.
 Read-authorized command 1 returns zero for link down or one for link up.
 Write-authorized command 2 accepts only zero or one and changes that link state.
 Write-authorized command 3 stores one packed IPv4 address and prefix: bits 0-31
@@ -30,6 +30,14 @@ advance it; rejected writes and accepted writes of an already-current value do
 not. The ring-3 proof makes three effective changes, repeats the link-up write,
 and requires generation three. The current single-CPU call gate serializes
 mutations and observations.
+Write-authorized command 8 copies a 16-byte static-route record from the caller:
+a little-endian destination, one prefix byte, three zero reserved bytes, a
+little-endian next-hop, and four more zero reserved bytes. A nonempty record
+must have a canonical destination with prefix 1 through 32 and a distinct,
+usable on-link next-hop; an all-zero record clears it. Read-authorized command 9
+copies the record to caller-owned writable memory and returns 16. The proof
+rejects noncanonical `192.168.50.1/24`, installs `192.168.50.0/24` via
+`10.0.4.2`, reads it back, and observes exactly one generation advance.
 Unknown commands, nonzero
 reserved arguments, a domain ID, or any other non-capability are rejected
 before device state is observed.
@@ -46,6 +54,6 @@ identity, status, and sequence are consumed before the next workload runs.
 Before exit the service also installs and reads back `10.0.2.15/24`. This is not
 yet a network stack or virtual NIC. Link and IPv4 state are kernel-owned scalar
 values and are not backed by hardware. There is no packet transport, MAC
-address, route table, shared ring, interrupt, DMA grant, driver, or hardware
+address, general route table, shared ring, interrupt, DMA grant, driver, or hardware
 enumeration. Those require separately versioned contracts and must preserve
 capability revocation and failure containment.

@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
 const CONTROL_CALL_BUDGET: u16 = 70;
-const SERVICE_CALL_BUDGET: u16 = 18;
+const SERVICE_CALL_BUDGET: u16 = 22;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
 const SERVICE_RESTART_BUDGET: u16 = 1;
