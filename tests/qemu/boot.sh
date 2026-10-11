@@ -188,6 +188,11 @@ if ! grep -q '^ginux: capability derivation and revocation verified' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded lifecycle event queue verified' "$output_file"; then
+    echo "Boot test failed: lifecycle event queue invariants failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: persistent control-plane domain sealed' "$output_file"; then
     echo "Boot test failed: persistent control-plane domain state was not sealed." >&2
     exit 1

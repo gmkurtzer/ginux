@@ -331,6 +331,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: capability authority invariant failed\r\n");
     }
     serial_write("ginux: capability derivation and revocation verified\r\n");
+    if !domain::verify_lifecycle_event_invariants() {
+        kernel_fail("ginux: lifecycle event queue invariant failed\r\n");
+    }
+    serial_write("ginux: bounded lifecycle event queue verified\r\n");
 
     let Some(control_plane) = domain::initialize_control_plane(&boot_manifest) else {
         kernel_fail("ginux: control-plane domain construction failed\r\n");

@@ -44,7 +44,8 @@ authority on host-control object 1. On a contained service fault it returns a
 packed word with event kind 1 in bits 0-7 and the 48-bit generation-tagged
 faulted domain ID in bits 8-55; bits 56-63 are zero. It returns
 `UINT64_MAX - 2` on denial or when no event is pending. This bootstrap revision
-holds at most one such event.
+holds four events in FIFO order and refuses to overwrite an undelivered event
+when full.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes

@@ -8,6 +8,7 @@ const MAX_BOOT_GRANTS: usize = 8;
 const CONTROL_CALL_BUDGET: u16 = 11;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
+const EVENT_CAPACITY: usize = 4;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_MANAGER: MaybeUninit<Manager> = MaybeUninit::uninit();
@@ -53,6 +54,52 @@ struct Domain {
     thread_limit: u16,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LifecycleEvent {
+    kind: u8,
+    domain: DomainId,
+}
+
+struct EventQueue {
+    events: [Option<LifecycleEvent>; EVENT_CAPACITY],
+    head: usize,
+    len: usize,
+}
+
+impl EventQueue {
+    const fn new() -> Self {
+        Self {
+            events: [None; EVENT_CAPACITY],
+            head: 0,
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, event: LifecycleEvent) -> bool {
+        if self.len == EVENT_CAPACITY {
+            return false;
+        }
+        let tail = (self.head + self.len) % EVENT_CAPACITY;
+        self.events[tail] = Some(event);
+        self.len += 1;
+        true
+    }
+
+    fn pop(&mut self) -> Option<LifecycleEvent> {
+        if self.len == 0 {
+            return None;
+        }
+        let event = self.events[self.head].take()?;
+        self.head = (self.head + 1) % EVENT_CAPACITY;
+        self.len -= 1;
+        Some(event)
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
 pub(crate) struct Manager {
     domains: [Option<Domain>; MAX_DOMAINS],
     generations: [u32; MAX_DOMAINS],
@@ -60,7 +107,7 @@ pub(crate) struct Manager {
     control_plane_id: Option<DomainId>,
     service_id: Option<DomainId>,
     last_retired_service_id: Option<DomainId>,
-    pending_service_fault: Option<DomainId>,
+    lifecycle_events: EventQueue,
     last_delivered_service_fault: Option<DomainId>,
     total_calls: u16,
     total_thread_attaches: u16,
@@ -75,7 +122,7 @@ impl Manager {
             control_plane_id: None,
             service_id: None,
             last_retired_service_id: None,
-            pending_service_fault: None,
+            lifecycle_events: EventQueue::new(),
             last_delivered_service_fault: None,
             total_calls: 0,
             total_thread_attaches: 0,
@@ -401,22 +448,23 @@ pub(crate) fn record_service_fault(domain_raw: u64) -> bool {
         return false;
     };
     if manager.service_id != Some(id)
-        || manager.pending_service_fault.is_some()
         || manager
             .domain(id)
             .is_none_or(|domain| domain.role != Role::Service)
     {
         return false;
     }
-    manager.pending_service_fault = Some(id);
-    true
+    manager.lifecycle_events.push(LifecycleEvent {
+        kind: 1,
+        domain: id,
+    })
 }
 
 pub(crate) fn take_service_fault() -> Option<u64> {
     let manager = global_manager_mut()?;
-    let id = manager.pending_service_fault.take()?;
-    manager.last_delivered_service_fault = Some(id);
-    Some((encode_id(id) << 8) | 1)
+    let event = manager.lifecycle_events.pop()?;
+    manager.last_delivered_service_fault = Some(event.domain);
+    Some((encode_id(event.domain) << 8) | u64::from(event.kind))
 }
 
 pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
@@ -424,8 +472,49 @@ pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
         return false;
     };
     global_manager().is_some_and(|manager| {
-        manager.pending_service_fault.is_none() && manager.last_delivered_service_fault == Some(id)
+        manager.lifecycle_events.is_empty() && manager.last_delivered_service_fault == Some(id)
     })
+}
+
+pub(crate) fn verify_lifecycle_event_invariants() -> bool {
+    let first = LifecycleEvent {
+        kind: 1,
+        domain: DomainId {
+            slot: 1,
+            generation: 7,
+        },
+    };
+    let mut queue = EventQueue::new();
+    queue.pop().is_none()
+        && queue.push(first)
+        && queue.push(LifecycleEvent {
+            kind: 2,
+            domain: first.domain,
+        })
+        && queue.push(LifecycleEvent {
+            kind: 3,
+            domain: first.domain,
+        })
+        && queue.push(LifecycleEvent {
+            kind: 4,
+            domain: first.domain,
+        })
+        && !queue.push(LifecycleEvent {
+            kind: 5,
+            domain: first.domain,
+        })
+        && queue.pop() == Some(first)
+        && queue.push(LifecycleEvent {
+            kind: 5,
+            domain: first.domain,
+        })
+        && queue.pop().is_some_and(|event| event.kind == 2)
+        && queue.pop().is_some_and(|event| event.kind == 3)
+        && queue.pop().is_some_and(|event| event.kind == 4)
+        && queue.pop().is_some_and(|event| event.kind == 5)
+        && queue.pop().is_none()
+        && queue.is_empty()
+        && queue.events.iter().all(Option::is_none)
 }
 
 pub(crate) fn domain_is_retired(domain_raw: u64) -> bool {
