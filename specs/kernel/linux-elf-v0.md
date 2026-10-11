@@ -105,9 +105,9 @@ page-table entries before returning an error.
 
 This is deliberately one authenticated replacement image, not a general ELF
 lookup or loader. The profile admits only `/bin/exec-target`, one live thread,
-exactly two argument strings, and one environment string. It does not yet
-support an interpreter, dependencies, shebangs, arbitrary argument vectors, or
-dynamic exec targets.
+up to eight bounded argument strings, up to eight bounded environment strings,
+and a 512-byte replacement stack image. It does not yet support an interpreter,
+dependencies, shebangs, unbounded vectors, or dynamic exec targets.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory

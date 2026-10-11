@@ -248,6 +248,9 @@ const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
 const LINUX_EXEC_MAPPING_COUNT: usize = 3;
 const LINUX_EXEC_CLEAR_COUNT: usize = 5;
+const LINUX_EXEC_VECTOR_LIMIT: usize = 8;
+const LINUX_EXEC_STRING_LIMIT: usize = 64;
+const LINUX_EXEC_STACK_SIZE: usize = 512;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_SETFD: u64 = 2;
@@ -4614,6 +4617,31 @@ fn linux_fchdir(descriptor: u64) -> u64 {
     0
 }
 
+fn linux_exec_vector(address: u64, require_nonempty: bool) -> Result<([u64; 8], usize), u64> {
+    let mut pointers = [0_u64; LINUX_EXEC_VECTOR_LIMIT];
+    for index in 0..=LINUX_EXEC_VECTOR_LIMIT {
+        let Some(pointer_address) = address.checked_add((index * size_of::<u64>()) as u64) else {
+            return Err(LINUX_EFAULT);
+        };
+        let mut bytes = [0_u8; size_of::<u64>()];
+        if !copy_from_linux_user(pointer_address, &mut bytes) {
+            return Err(LINUX_EFAULT);
+        }
+        let pointer = u64::from_ne_bytes(bytes);
+        if pointer == 0 {
+            if require_nonempty && index == 0 {
+                return Err(LINUX_E2BIG);
+            }
+            return Ok((pointers, index));
+        }
+        if index == LINUX_EXEC_VECTOR_LIMIT {
+            return Err(LINUX_E2BIG);
+        }
+        pointers[index] = pointer;
+    }
+    Err(LINUX_E2BIG)
+}
+
 fn linux_execve(path_address: u64, arguments_address: u64, environment_address: u64) -> u64 {
     if current_linux_tid() != Some(1)
         || LINUX_THREAD_STATES
@@ -4633,52 +4661,15 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
     if &path[..path_length] != b"/bin/exec-target" {
         return LINUX_ENOENT;
     }
-    let mut argument_bytes = [0_u8; 24];
-    let mut environment_bytes = [0_u8; 16];
-    if !copy_from_linux_user(arguments_address, &mut argument_bytes)
-        || !copy_from_linux_user(environment_address, &mut environment_bytes)
-    {
-        return LINUX_EFAULT;
-    }
-    let pointer = |bytes: &[u8], offset: usize| {
-        bytes
-            .get(offset..offset + 8)
-            .and_then(|value| value.try_into().ok())
-            .map(u64::from_ne_bytes)
-            .unwrap_or(0)
-    };
-    let argument_path = pointer(&argument_bytes, 0);
-    let argument_mode = pointer(&argument_bytes, 8);
-    let environment = pointer(&environment_bytes, 0);
-    if argument_path == 0
-        || argument_mode == 0
-        || environment == 0
-        || pointer(&argument_bytes, 16) != 0
-        || pointer(&environment_bytes, 8) != 0
-    {
-        return LINUX_E2BIG;
-    }
-    let mut argument_path_bytes = [0_u8; 32];
-    let mut argument_mode_bytes = [0_u8; 16];
-    let mut environment_value = [0_u8; 16];
-    let argument_path_length = match copy_linux_c_string(argument_path, &mut argument_path_bytes) {
-        Ok(length) => length,
+    let (argument_pointers, argument_count) = match linux_exec_vector(arguments_address, true) {
+        Ok(vector) => vector,
         Err(error) => return error,
     };
-    let argument_mode_length = match copy_linux_c_string(argument_mode, &mut argument_mode_bytes) {
-        Ok(length) => length,
-        Err(error) => return error,
-    };
-    let environment_length = match copy_linux_c_string(environment, &mut environment_value) {
-        Ok(length) => length,
-        Err(error) => return error,
-    };
-    if &argument_path_bytes[..argument_path_length] != b"/bin/exec-target"
-        || &argument_mode_bytes[..argument_mode_length] != b"exec-target"
-        || &environment_value[..environment_length] != b"GINUX_EXEC=1"
-    {
-        return LINUX_E2BIG;
-    }
+    let (environment_pointers, environment_count) =
+        match linux_exec_vector(environment_address, false) {
+            Ok(vector) => vector,
+            Err(error) => return error,
+        };
     let close_on_exec = ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst);
     if close_on_exec >> LINUX_AUX_DESCRIPTOR_LIMIT != 0
         || (0..LINUX_AUX_DESCRIPTOR_LIMIT).any(|descriptor| {
@@ -4707,30 +4698,54 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
         return LINUX_ENOENT;
     }
     let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
-    let new_stack = stack_base + PAGE_SIZE as u64 - 128;
-    let mut stack_image = [0_u8; 128];
-    let argument_path_target = new_stack + 64;
-    let argument_mode_target = argument_path_target + 17;
-    let environment_target = argument_mode_target + 12;
-    for (index, value) in [
-        2,
-        argument_path_target,
-        argument_mode_target,
-        0,
-        environment_target,
-        0,
-        0,
-        0,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        stack_image[index * 8..index * 8 + 8].copy_from_slice(&value.to_ne_bytes());
+    let new_stack = stack_base + PAGE_SIZE as u64 - LINUX_EXEC_STACK_SIZE as u64;
+    let mut stack_image = [0_u8; LINUX_EXEC_STACK_SIZE];
+    let table_words = 1 + argument_count + 1 + environment_count + 1 + 2;
+    let mut string_offset = table_words * size_of::<u64>();
+    stack_image[..8].copy_from_slice(&(argument_count as u64).to_ne_bytes());
+    let mut string = [0_u8; LINUX_EXEC_STRING_LIMIT];
+    for (index, pointer) in argument_pointers[..argument_count].iter().enumerate() {
+        string.fill(0);
+        let length = match copy_linux_c_string(*pointer, &mut string) {
+            Ok(length) => length + 1,
+            Err(LINUX_ENAMETOOLONG) => return LINUX_E2BIG,
+            Err(error) => return error,
+        };
+        let Some(end) = string_offset.checked_add(length) else {
+            return LINUX_E2BIG;
+        };
+        let Some(output) = stack_image.get_mut(string_offset..end) else {
+            return LINUX_E2BIG;
+        };
+        output.copy_from_slice(&string[..length]);
+        let word = 1 + index;
+        stack_image[word * 8..word * 8 + 8]
+            .copy_from_slice(&(new_stack + string_offset as u64).to_ne_bytes());
+        string_offset = end;
     }
-    stack_image[64..81].copy_from_slice(b"/bin/exec-target\0");
-    stack_image[81..93].copy_from_slice(b"exec-target\0");
-    stack_image[93..106].copy_from_slice(b"GINUX_EXEC=1\0");
-    let mut previous_stack = [0_u8; 128];
+    let environment_word = 1 + argument_count + 1;
+    for (index, pointer) in environment_pointers[..environment_count].iter().enumerate() {
+        string.fill(0);
+        let length = match copy_linux_c_string(*pointer, &mut string) {
+            Ok(length) => length + 1,
+            Err(LINUX_ENAMETOOLONG) => return LINUX_E2BIG,
+            Err(error) => return error,
+        };
+        let Some(end) = string_offset.checked_add(length) else {
+            return LINUX_E2BIG;
+        };
+        let Some(output) = stack_image.get_mut(string_offset..end) else {
+            return LINUX_E2BIG;
+        };
+        output.copy_from_slice(&string[..length]);
+        let word = environment_word + index;
+        stack_image[word * 8..word * 8 + 8]
+            .copy_from_slice(&(new_stack + string_offset as u64).to_ne_bytes());
+        string_offset = end;
+    }
+    let auxiliary_word = environment_word + environment_count + 1;
+    stack_image[auxiliary_word * 8..auxiliary_word * 8 + 16].fill(0);
+    let mut previous_stack = [0_u8; LINUX_EXEC_STACK_SIZE];
     if !copy_from_linux_user(new_stack, &mut previous_stack)
         || !copy_to_linux_user(new_stack, &stack_image)
     {

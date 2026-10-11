@@ -645,6 +645,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: five-page Linux executable mapping validated\r\n");
     serial_write("ginux: bounded Linux exec rejection preserved live image\r\n");
     serial_write("ginux: Linux exec argv and environment delivered\r\n");
+    serial_write("ginux: bounded Linux exec vectors validated\r\n");
     serial_write("ginux: old Linux image pages removed after exec\r\n");
     serial_write("ginux: replaced Linux image retired cleanly\r\n");
     serial_write("ginux: Linux close-on-exec descriptors transitioned\r\n");

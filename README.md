@@ -38,8 +38,8 @@ The publication index now admits 64 nodes and is exercised beyond its original
 `/lib64/*`, and `/bin/exec-target` paths map to internal measured-root entries. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
 single-threaded `execve` proof atomically replaces the static workload with the
-measured `/bin/exec-target`, delivers an exact two-entry argument vector and
-one-entry environment, removes the old image pages, applies close-on-exec and
+measured `/bin/exec-target`, rebuilds bounded argument and environment vectors
+on a fresh 512-byte initial stack, removes the old image pages, applies close-on-exec and
 signal/alternate-stack transition rules, installs the replacement process
 name, and exits without reviving the old program. The archive
 is not yet a general mount or a system-container image.
@@ -421,8 +421,9 @@ loading. The kernel
 authenticates and plans the fixed four-image graph; the interpreter installs
 the authenticated main and both dependency segments admitted by that exact plan.
 The separate static proof admits `execve` only for the exact measured
-`/bin/exec-target`, with fixed bounded `argv` and `envp` contents and one live
-thread. Rejected path, pointer, and vector cases leave the original image
+`/bin/exec-target`, with up to eight 63-byte `argv` strings, eight equivalent
+`envp` strings, and one live thread. Rejected path, pointer, count, string, and
+aggregate-stack cases leave the original image
 running; success installs exact W^X target frames and unmaps the old image.
 The proof also closes only `FD_CLOEXEC` descriptors, preserves an ordinary
 descriptor, resets caught signals while retaining an ignored disposition,

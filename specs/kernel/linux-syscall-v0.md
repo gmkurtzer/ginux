@@ -351,10 +351,14 @@ contract below.
 
 `rax = 59` (`__NR_execve`) provides one bounded replacement transition for the
 single-threaded static proof process. The pathname must be
-`/bin/exec-target`; `argv` must be exactly
-`["/bin/exec-target", "exec-target", NULL]`, and `envp` exactly
-`["GINUX_EXEC=1", NULL]`. Unknown paths return `-ENOENT`, inaccessible input
-returns `-EFAULT`, and any other vector shape or contents return `-E2BIG`
+`/bin/exec-target`. `argv` admits one through eight pointers and `envp` zero
+through eight, each terminated by a null pointer. Each string is limited to 63
+bytes plus its terminator, and the complete rebuilt initial stack is limited to
+512 bytes. The proof supplies
+`["/bin/exec-target", "exec-target", NULL]` and
+`["GINUX_EXEC=1", NULL]`, while also rejecting an empty argument vector and a
+ninth argument. Unknown paths return `-ENOENT`, inaccessible input returns
+`-EFAULT`, and count, string, or aggregate-stack overflow returns `-E2BIG`
 without changing the running image. A multithreaded caller returns `-EAGAIN`.
 On success the kernel clears the clear-child-TID and robust-list registrations,
 constructs a fresh bounded initial stack, atomically replaces the authenticated

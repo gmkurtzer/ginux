@@ -3367,6 +3367,47 @@ resolution_valid:
     mov eax, 59
     call syscall_expect_e2big
 
+    lea rax, [rip + exec_mode]
+    mov qword ptr [rsp + 64], rax
+    mov qword ptr [rsp + 72], rax
+    mov qword ptr [rsp + 80], rax
+    mov qword ptr [rsp + 88], rax
+    mov qword ptr [rsp + 96], rax
+    mov qword ptr [rsp + 104], rax
+    mov qword ptr [rsp + 112], rax
+    mov qword ptr [rsp + 120], rax
+    mov qword ptr [rsp + 128], rax
+    lea rdi, [rip + exec_path]
+    lea rsi, [rsp + 64]
+    lea rdx, [rsp + 24]
+    mov eax, 59
+    call syscall_expect_e2big
+
+    lea rax, [rip + long_exec_value]
+    mov qword ptr [0x405c80], rax
+    mov qword ptr [0x405c88], rax
+    mov qword ptr [0x405c90], rax
+    mov qword ptr [0x405c98], rax
+    mov qword ptr [0x405ca0], rax
+    mov qword ptr [0x405ca8], rax
+    mov qword ptr [0x405cb0], rax
+    mov qword ptr [0x405cb8], rax
+    mov qword ptr [0x405cc0], 0
+    mov qword ptr [0x405cd0], rax
+    mov qword ptr [0x405cd8], rax
+    mov qword ptr [0x405ce0], rax
+    mov qword ptr [0x405ce8], rax
+    mov qword ptr [0x405cf0], rax
+    mov qword ptr [0x405cf8], rax
+    mov qword ptr [0x405d00], rax
+    mov qword ptr [0x405d08], rax
+    mov qword ptr [0x405d10], 0
+    lea rdi, [rip + exec_path]
+    mov esi, 0x405c80
+    mov edx, 0x405cd0
+    mov eax, 59
+    call syscall_expect_e2big
+
     mov edi, 2
     mov esi, 1
     xor edx, edx
@@ -3530,6 +3571,9 @@ exec_null_path:
     .asciz "/dev/null"
 pre_exec_name:
     .asciz "pre-exec"
+long_exec_value:
+    .ascii "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    .byte 0
 #endif
 
 #ifdef GINUX_LINKED

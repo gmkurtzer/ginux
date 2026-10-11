@@ -676,6 +676,7 @@ fi
 for marker in \
     'bounded Linux exec rejection preserved live image' \
     'Linux exec argv and environment delivered' \
+    'bounded Linux exec vectors validated' \
     'old Linux image pages removed after exec' \
     'replaced Linux image retired cleanly' \
     'Linux close-on-exec descriptors transitioned' \
