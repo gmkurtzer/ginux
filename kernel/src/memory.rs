@@ -1,8 +1,13 @@
 use crate::{BootInfo, UefiMemoryDescriptor, EFI_CONVENTIONAL_MEMORY};
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 64;
+
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+static mut GLOBAL_ALLOCATOR: MaybeUninit<FrameAllocator> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy)]
 struct Range {
@@ -88,5 +93,34 @@ impl FrameAllocator {
             }
         }
         self.range_count = output;
+    }
+}
+
+pub(crate) fn initialize(boot_info: &BootInfo, ceiling: u64) -> bool {
+    if INITIALIZED.load(Ordering::Acquire) {
+        return false;
+    }
+    let Some(allocator) = FrameAllocator::from_uefi_map(boot_info, ceiling) else {
+        return false;
+    };
+    // SAFETY: Bootstrap initialization is single-processor and interrupts do
+    // not access the allocator. Publication follows the complete write.
+    unsafe {
+        core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).write(MaybeUninit::new(allocator));
+    }
+    INITIALIZED.store(true, Ordering::Release);
+    true
+}
+
+pub(crate) fn allocate_frame() -> Option<u64> {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    // SAFETY: Initialization published a valid allocator. Bootstrap is
+    // single-processor and callers keep interrupts disabled, so access is
+    // serialized until an SMP-safe allocator replaces this path.
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        (*allocator).allocate()
     }
 }

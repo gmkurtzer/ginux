@@ -22,4 +22,10 @@ The kernel validates that:
 
 The initial allocator sorts and merges conventional ranges, rejects range arithmetic overflow, excludes the first MiB, and limits allocations to the currently mapped physical ceiling. Allocation is monotonic and returns distinct 4 KiB frames; deallocation and boot-service-memory reclamation are not yet supported. The QEMU gate allocates two frames, verifies independent volatile access, and clears both frames.
 
+The allocator initializes exactly once and remains live for the kernel lifetime.
+Reinitialization is rejected so no subsystem can reconstruct the UEFI inventory
+and allocate frames that already have owners. Access is serialized only by the
+single-processor, interrupts-disabled bootstrap state; locking or per-CPU
+allocation is required before SMP startup.
+
 Loader regions containing the unified image, handoff map, page tables, and kernel stacks are never admitted because only `EfiConventionalMemory` ranges enter the allocator.

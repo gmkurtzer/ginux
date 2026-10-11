@@ -347,13 +347,13 @@ unsafe fn checksum(bytes: *const u8, length: usize) -> u8 {
 }
 
 fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
-    let Some(mut allocator) = memory::FrameAllocator::from_uefi_map(
+    if !memory::initialize(
         boot_info,
         arch::x86_64::paging::INITIAL_IDENTITY_LIMIT as u64,
-    ) else {
+    ) {
         return false;
-    };
-    let (Some(first), Some(second)) = (allocator.allocate(), allocator.allocate()) else {
+    }
+    let (Some(first), Some(second)) = (memory::allocate_frame(), memory::allocate_frame()) else {
         return false;
     };
     if first == second || first % 4096 != 0 || second % 4096 != 0 {
@@ -373,6 +373,10 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
         first_word.write_volatile(0);
         second_word.write_volatile(0);
         valid
+            && !memory::initialize(
+                boot_info,
+                arch::x86_64::paging::INITIAL_IDENTITY_LIMIT as u64,
+            )
     }
 }
 
