@@ -556,6 +556,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !arch::x86_64::cpu::execute_disable_enabled()
         || !arch::x86_64::cpu::supervisor_execution_prevention_enabled()
         || !arch::x86_64::cpu::supervisor_access_prevention_enabled()
+        || !arch::x86_64::cpu::user_interrupt_surface_is_minimal()
         || !arch::x86_64::cpu::user_mode_instruction_prevention_enabled()
         || !arch::x86_64::cpu::service_restart_stack_was_scrubbed()
         || !arch::x86_64::cpu::service_address_space_frames_were_transferred()
@@ -588,6 +589,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v1 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
+    serial_write("\r\nginux: minimal user interrupt surface enforced");
     serial_write("\r\nginux: bounded userspace read enforced");
     serial_write("\r\nginux: structured userspace ABI result verified");
     serial_write("\r\nginux: ring-3 fault survivor resumed and exited");

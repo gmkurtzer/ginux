@@ -85,6 +85,20 @@ impl IdtEntry {
             reserved: 0,
         }
     }
+
+    fn is_missing(self) -> bool {
+        self.offset_low == 0
+            && self.selector == 0
+            && self.ist == 0
+            && self.attributes == 0
+            && self.offset_middle == 0
+            && self.offset_high == 0
+            && self.reserved == 0
+    }
+
+    fn has_handler(self) -> bool {
+        self.offset_low != 0 || self.offset_middle != 0 || self.offset_high != 0
+    }
 }
 
 #[repr(C, packed)]
@@ -536,7 +550,9 @@ pub(crate) fn verify_user_syscall(
     ipc_handle: u64,
     service_domain: u64,
 ) -> bool {
-    if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize) {
+    if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
+        || !user_interrupt_surface_is_minimal()
+    {
         return false;
     }
     SYSCALL_STATE.store(0, Ordering::SeqCst);
@@ -555,6 +571,31 @@ pub(crate) fn verify_user_syscall(
         )
     };
     SYSCALL_STATE.load(Ordering::SeqCst) == 31
+}
+
+pub(crate) fn user_interrupt_surface_is_minimal() -> bool {
+    let idt = core::ptr::addr_of!(IDT).cast::<IdtEntry>();
+    for vector in 0..256 {
+        let entry = unsafe { idt.add(vector).read() };
+        let expected = if vector <= 32 || vector == 255 {
+            Some(0x8e)
+        } else if vector == usize::from(SYSCALL_VECTOR) {
+            Some(0xee)
+        } else {
+            None
+        };
+        match expected {
+            Some(attributes)
+                if entry.selector == KERNEL_CODE_SELECTOR
+                    && entry.attributes == attributes
+                    && entry.ist == if vector == 8 { DOUBLE_FAULT_IST } else { 0 }
+                    && entry.reserved == 0
+                    && entry.has_handler() => {}
+            None if entry.is_missing() => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 pub(crate) fn verify_breakpoint() -> bool {

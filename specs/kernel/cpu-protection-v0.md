@@ -37,6 +37,12 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
   and the loaded TSS places its I/O-map base beyond the descriptor limit so no
   user port is authorized. The kernel reads back TR, the busy TSS descriptor,
   its base and limit, and the live I/O-map offset before entering userspace.
+- Exactly one IDT entry is software-callable from ring 3: the experimental
+  call gate at vector `0x80`. All 32 exception entries, the APIC timer, and the
+  spurious vector are present at DPL0; every other vector is absent. The kernel
+  scans the complete 256-entry IDT before ring-3 entry and again after the
+  workload, including selector, DPL/type attributes, IST, reserved bits, and
+  handler presence.
 
 Interrupts remain disabled while kernel bootstrap code runs. The kernel triggers
 `INT3` during every QEMU boot test; the assembly entry stub preserves

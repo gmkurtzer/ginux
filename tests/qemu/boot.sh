@@ -378,6 +378,11 @@ if ! grep -q '^ginux: userspace console capability enforced' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: minimal user interrupt surface enforced' "$output_file"; then
+    echo "Boot test failed: unexpected interrupt gates are callable from userspace." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded userspace read enforced' "$output_file"; then
     echo "Boot test failed: bounded userspace copying failed." >&2
     exit 1
