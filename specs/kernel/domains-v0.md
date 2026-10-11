@@ -86,7 +86,9 @@ policy for service faults.
 Auxiliary registration is not yet exposed to userspace, assigned address
 spaces for execution, or integrated with an auxiliary restart policy. The boot
 proof does stage and fully roll back an unstarted auxiliary domain with a real
-allocator-owned W^X address space; no thread can attach during that transaction.
+allocator-owned W^X address space. A validated exact-generation resource bind
+temporarily permits one accounted thread reservation, but no scheduler context
+is queued during this transaction.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

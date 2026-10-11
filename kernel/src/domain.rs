@@ -67,6 +67,7 @@ struct Domain {
     thread_limit: u16,
     active_operations: u16,
     operation_limit: u16,
+    address_space_root: Option<u64>,
     parent: Option<DomainId>,
     delegated_roots: [Option<DelegatedRoot>; MAX_BOOT_GRANTS],
 }
@@ -263,6 +264,7 @@ impl Manager {
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
             active_operations: 0,
             operation_limit: BOOTSTRAP_OPERATION_LIMIT,
+            address_space_root: None,
             parent: None,
             delegated_roots: [None; MAX_BOOT_GRANTS],
         });
@@ -436,6 +438,7 @@ impl Manager {
             },
             active_operations: 0,
             operation_limit: BOOTSTRAP_OPERATION_LIMIT,
+            address_space_root: None,
             parent: Some(control_id),
             delegated_roots,
         });
@@ -584,6 +587,52 @@ impl Manager {
         true
     }
 
+    fn bind_auxiliary_address_space(&mut self, id: DomainId, root: u64) -> bool {
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if root == 0
+            || domain.role != Role::AuxiliaryService
+            || domain.state != State::Ready
+            || domain.address_space_root.is_some()
+            || domain.thread_limit != 0
+            || domain.active_threads != 0
+            || domain.active_operations != 0
+        {
+            return false;
+        }
+        domain.address_space_root = Some(root);
+        domain.thread_limit = BOOTSTRAP_THREAD_LIMIT;
+        true
+    }
+
+    fn unbind_auxiliary_address_space(&mut self, id: DomainId, root: u64) -> bool {
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if domain.role != Role::AuxiliaryService
+            || domain.address_space_root != Some(root)
+            || domain.thread_limit != BOOTSTRAP_THREAD_LIMIT
+            || domain.active_threads != 0
+            || domain.active_operations != 0
+        {
+            return false;
+        }
+        domain.thread_limit = 0;
+        domain.address_space_root = None;
+        true
+    }
+
     fn retire_service(&mut self, id: DomainId) -> bool {
         if self.service_id != Some(id)
             || self.domain(id).is_none_or(|domain| {
@@ -626,6 +675,7 @@ impl Manager {
         if self.domain(id).is_none_or(|domain| {
             domain.role != Role::AuxiliaryService
                 || domain.state != State::Ready
+                || domain.address_space_root.is_some()
                 || domain.active_threads != 0
                 || domain.active_operations != 0
         }) {
@@ -649,6 +699,7 @@ impl Manager {
             .filter(|domain| {
                 domain.role == Role::AuxiliaryService
                     && domain.state == State::Stopping
+                    && domain.address_space_root.is_none()
                     && domain.active_threads == 0
                     && domain.active_operations == 0
             })
@@ -1477,6 +1528,37 @@ pub(crate) fn detach_thread(domain_raw: u64) -> bool {
     global_manager_mut().is_some_and(|manager| manager.detach_thread(id))
 }
 
+pub(crate) fn bind_auxiliary_address_space(domain_raw: u64, root: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    if !address_space_root_is_owned(domain_raw, root) {
+        return false;
+    }
+    global_manager_mut().is_some_and(|manager| manager.bind_auxiliary_address_space(id, root))
+}
+
+pub(crate) fn unbind_auxiliary_address_space(domain_raw: u64, root: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    if !address_space_root_is_owned(domain_raw, root) {
+        return false;
+    }
+    global_manager_mut().is_some_and(|manager| manager.unbind_auxiliary_address_space(id, root))
+}
+
+fn address_space_root_is_owned(domain_raw: u64, root: u64) -> bool {
+    let Some(owner) = crate::memory::FrameOwner::domain(domain_raw) else {
+        return false;
+    };
+    let Some(frames) = crate::arch::x86_64::paging::validated_user_root_frames(root) else {
+        return false;
+    };
+    frames.len() == crate::address_space::USER_ADDRESS_SPACE_FRAMES
+        && crate::memory::frame_addresses_owned_by(owner, &frames)
+}
+
 pub(crate) fn thread_budget_proof_complete() -> bool {
     let Some(manager) = global_manager() else {
         return false;
@@ -1486,7 +1568,7 @@ pub(crate) fn thread_budget_proof_complete() -> bool {
     };
     control.active_threads == 0
         && control.thread_limit == BOOTSTRAP_THREAD_LIMIT
-        && manager.total_thread_attaches == 3
+        && manager.total_thread_attaches == 4
 }
 
 pub(crate) fn service_restart_budget_proof_complete() -> bool {

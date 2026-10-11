@@ -423,6 +423,11 @@ if ! grep -q '^ginux: auxiliary address-space transaction verified' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary scheduler admission resource-gated' "$output_file"; then
+    echo "Boot test failed: auxiliary scheduler admission was not resource-gated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded executable container accepted' "$output_file"; then
     echo "Boot test failed: the executable container was not accepted." >&2
     exit 1

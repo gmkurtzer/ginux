@@ -25,11 +25,15 @@ Completed proof address-space page-table and data frames are cleared and
 returned through the allocator's generation-checked live-ownership ledger.
 The boot gate also constructs a real zero-thread auxiliary domain, assigns it a
 seven-frame W^X address space under that exact domain generation, and proves
-that domain discard is rejected while any frame remains live. It then clears
-and releases all frames, discards the unstarted domain without emitting a
-lifecycle event, and rejects its stale domain/capability pair. This is the
-transactional setup/rollback path needed before auxiliary scheduling, not an
-executable auxiliary workload.
+that domain discard is rejected while any frame remains live. Thread admission
+remains zero until the validated root and every reachable frame match that
+generation in the allocator ledger. Binding raises the stored thread limit to
+one; the proof reserves exactly one thread, rejects a second, and refuses to
+unbind until that reservation is released. It then unbinds, clears and releases
+all frames, discards the unstarted domain without emitting a lifecycle event,
+and rejects its stale domain/capability pair. No scheduler context is queued,
+so this is the transactional admission path rather than an executable
+auxiliary workload.
 There is no
 address-space identifier or TLB shootdown protocol, and the kernel mapping
 remains transitional.

@@ -310,7 +310,13 @@ pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
     let valid = space.permissions_are_valid(kernel_root)
         && memory::owner_live_frame_count(owner) == Some(USER_ADDRESS_SPACE_FRAMES)
         && domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
-        && !domain::discard_unstarted_auxiliary_service(auxiliary);
+        && !domain::discard_unstarted_auxiliary_service(auxiliary)
+        && domain::bind_auxiliary_address_space(auxiliary, space.root)
+        && domain::attach_thread(auxiliary)
+        && !domain::attach_thread(auxiliary)
+        && !domain::unbind_auxiliary_address_space(auxiliary, space.root)
+        && domain::detach_thread(auxiliary)
+        && domain::unbind_auxiliary_address_space(auxiliary, space.root);
     if !space.release()
         || memory::owner_live_frame_count(owner) != Some(0)
         || !domain::discard_unstarted_auxiliary_service(auxiliary)
