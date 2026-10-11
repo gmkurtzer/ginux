@@ -1,11 +1,44 @@
 #![no_std]
 
-use core::arch::asm;
+use core::arch::{asm, global_asm};
 use core::ffi::c_void;
+use core::mem::size_of;
 
 const COM1: u16 = 0x3f8;
 const EFI_RESET_SHUTDOWN: u32 = 2;
 const EFI_SUCCESS: usize = 0;
+const EFI_LOADER_CODE: u32 = 1;
+const EFI_LOADER_DATA: u32 = 2;
+const EFI_BOOT_SERVICES_CODE: u32 = 3;
+const EFI_BOOT_SERVICES_DATA: u32 = 4;
+const EFI_CONVENTIONAL_MEMORY: u32 = 7;
+const UEFI_PAGES_PER_MIB: u64 = 256;
+const KERNEL_STACK_SIZE: usize = 64 * 1024;
+
+#[repr(C, align(16))]
+struct KernelStack([u8; KERNEL_STACK_SIZE]);
+
+static mut KERNEL_STACK: KernelStack = KernelStack([0; KERNEL_STACK_SIZE]);
+
+global_asm!(
+    r#"
+    .text
+    .global ginux_kernel_stack_entry
+ginux_kernel_stack_entry:
+    lea rsp, [rip + {stack}]
+    add rsp, {stack_size}
+    and rsp, -16
+    call {kernel_main}
+    ud2
+"#,
+    stack = sym KERNEL_STACK,
+    stack_size = const KERNEL_STACK_SIZE,
+    kernel_main = sym kernel_main,
+);
+
+extern "sysv64" {
+    fn ginux_kernel_stack_entry(boot_info: *const BootInfo) -> !;
+}
 
 pub type ResetSystem = unsafe extern "efiapi" fn(u32, usize, usize, *const c_void);
 
@@ -22,6 +55,23 @@ pub struct BootInfo {
     pub reset_system: ResetSystem,
 }
 
+#[repr(C)]
+struct UefiMemoryDescriptor {
+    memory_type: u32,
+    padding: u32,
+    physical_start: u64,
+    virtual_start: u64,
+    page_count: u64,
+    attributes: u64,
+}
+
+struct MemorySummary {
+    descriptors: usize,
+    conventional_pages: u64,
+    boot_service_pages: u64,
+    loader_pages: u64,
+}
+
 /// Takes control after UEFI boot services have ended.
 ///
 /// # Safety
@@ -29,8 +79,17 @@ pub struct BootInfo {
 /// `boot_info` must identify a valid, immutable `BootInfo`. Its memory-map
 /// buffer must remain allocated for the lifetime of the kernel.
 pub unsafe extern "sysv64" fn kernel_entry(boot_info: *const BootInfo) -> ! {
+    ginux_kernel_stack_entry(boot_info)
+}
+
+unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_init();
     serial_write("ginux: kernel entered after ExitBootServices\r\n");
+
+    if !kernel_stack_is_active() {
+        kernel_fail("ginux: kernel stack transition failed\r\n");
+    }
+    serial_write("ginux: kernel stack active\r\n");
 
     if boot_info.is_null() {
         kernel_fail("ginux: missing boot information\r\n");
@@ -39,7 +98,7 @@ pub unsafe extern "sysv64" fn kernel_entry(boot_info: *const BootInfo) -> ! {
     let boot_info = &*boot_info;
     if boot_info.memory_map.is_null()
         || boot_info.memory_map_size == 0
-        || boot_info.memory_descriptor_size == 0
+        || boot_info.memory_descriptor_size < size_of::<UefiMemoryDescriptor>()
         || !boot_info
             .memory_map_size
             .is_multiple_of(boot_info.memory_descriptor_size)
@@ -47,13 +106,75 @@ pub unsafe extern "sysv64" fn kernel_entry(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: invalid UEFI memory map\r\n");
     }
 
-    let descriptor_count = boot_info.memory_map_size / boot_info.memory_descriptor_size;
+    let summary = summarize_memory(boot_info);
     serial_write("ginux: memory descriptors: ");
-    serial_write_usize(descriptor_count);
+    serial_write_usize(summary.descriptors);
+    serial_write("\r\nginux: usable memory MiB: ");
+    serial_write_u64(summary.conventional_pages / UEFI_PAGES_PER_MIB);
+    serial_write("\r\nginux: reclaimable boot-service pages: ");
+    serial_write_u64(summary.boot_service_pages);
+    serial_write("\r\nginux: reserved loader pages: ");
+    serial_write_u64(summary.loader_pages);
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
     kernel_fail("ginux: firmware shutdown returned unexpectedly\r\n");
+}
+
+fn kernel_stack_is_active() -> bool {
+    let stack_pointer: usize;
+    // SAFETY: Reading RSP does not alter machine or memory state.
+    unsafe {
+        asm!(
+            "mov {}, rsp",
+            out(reg) stack_pointer,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+
+    let stack_start = core::ptr::addr_of!(KERNEL_STACK) as usize;
+    let stack_end = stack_start + KERNEL_STACK_SIZE;
+    (stack_start..stack_end).contains(&stack_pointer)
+}
+
+fn summarize_memory(boot_info: &BootInfo) -> MemorySummary {
+    let descriptors = boot_info.memory_map_size / boot_info.memory_descriptor_size;
+    let mut summary = MemorySummary {
+        descriptors,
+        conventional_pages: 0,
+        boot_service_pages: 0,
+        loader_pages: 0,
+    };
+
+    for index in 0..descriptors {
+        // SAFETY: BootInfo validation established a non-null map, a descriptor
+        // stride large enough for the required prefix, and an integral count.
+        let descriptor = unsafe {
+            let address = boot_info
+                .memory_map
+                .add(index * boot_info.memory_descriptor_size);
+            core::ptr::read_unaligned(address.cast::<UefiMemoryDescriptor>())
+        };
+
+        match descriptor.memory_type {
+            EFI_CONVENTIONAL_MEMORY => {
+                summary.conventional_pages = summary
+                    .conventional_pages
+                    .saturating_add(descriptor.page_count);
+            }
+            EFI_BOOT_SERVICES_CODE | EFI_BOOT_SERVICES_DATA => {
+                summary.boot_service_pages = summary
+                    .boot_service_pages
+                    .saturating_add(descriptor.page_count);
+            }
+            EFI_LOADER_CODE | EFI_LOADER_DATA => {
+                summary.loader_pages = summary.loader_pages.saturating_add(descriptor.page_count);
+            }
+            _ => {}
+        }
+    }
+
+    summary
 }
 
 fn kernel_fail(message: &str) -> ! {
@@ -88,7 +209,11 @@ fn serial_write(message: &str) {
     }
 }
 
-fn serial_write_usize(mut value: usize) {
+fn serial_write_usize(value: usize) {
+    serial_write_u64(value as u64);
+}
+
+fn serial_write_u64(mut value: u64) {
     let mut digits = [0_u8; 20];
     let mut cursor = digits.len();
 

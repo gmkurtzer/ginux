@@ -2,7 +2,7 @@
 
 Ginux is an immutable, capability-secure, container-native operating system for AI infrastructure. The native host is intentionally small: an immutable kernel boots one constrained control-plane domain, which creates isolated services and containers through stable interfaces.
 
-The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component captures the UEFI memory map, exits firmware boot services, and transfers control to a separate `no_std` kernel crate through an explicit boot-information contract. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
+The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component captures the UEFI memory map, exits firmware boot services, and transfers control to a separate `no_std` kernel crate through an explicit boot-information contract. The kernel switches to its own stack and inventories usable physical memory before reporting success. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
 
 ## Quick start
 

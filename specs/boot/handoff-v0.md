@@ -45,9 +45,9 @@ The memory-map buffer is aligned, owned by the unified image, and remains alloca
 
 ## Current limitations
 
-- The kernel initially inherits firmware page tables and the firmware-provided stack.
+- The kernel switches to an image-owned 64 KiB stack but still inherits firmware page tables.
 - The map uses a fixed 128 KiB handoff buffer.
 - No framebuffer, ACPI root pointer, command line, manifest digest, or native system bundle metadata is passed yet.
 - `ResetSystem` is retained only to make early automated runs terminate cleanly.
 
-The next contract revision must address an owned kernel stack, page-table transition, physical-memory region classification, and versioned extensibility.
+The next contract revision must address a page-table transition, versioned extensibility, and the additional platform information required to leave all remaining firmware execution assumptions behind.
