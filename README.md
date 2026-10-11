@@ -39,6 +39,8 @@ The initial filesystem view exposes only a working-directory identity of `/`;
 bounded `getcwd` returns it, while undersized and invalid buffers fail.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 `readlink` result is `/init`.
+Per-process `umask` state starts at `022`, returns its prior value, and masks
+updates to the nine permission bits.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

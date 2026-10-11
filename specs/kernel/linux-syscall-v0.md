@@ -23,6 +23,9 @@ identity for the initial root view, not a general VFS or directory state.
 bounded NUL-terminated pathname, and returns `/init` without a terminator. A
 zero output size returns `-EINVAL`; invalid pathname or output ranges return
 `-EFAULT`. Other paths return `-ENOENT`. This is not a general procfs.
+`rax = 95` (`__NR_umask`) atomically replaces the single process's permission
+mask, returns the previous value, and ignores bits outside `0777`. The initial
+value is `022`; the proof changes it twice and restores it before exit.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x402000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x403000` follows Linux syscall
@@ -85,7 +88,7 @@ or credential-based permissions, a general file-descriptor table, output
 streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
 `write`, `brk`, `uname`, `getcwd`, bounded `readlink`,
-`arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
+`umask`, `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential queries, the bounded process/session identity queries above,
 `set_tid_address`, `exit`, and `exit_group` calls. There is no thread
 creation, TID allocation, or clear-child-TID futex wake yet. Every other call

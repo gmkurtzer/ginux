@@ -81,7 +81,8 @@ RX ELF memory extent; copy-out does not. The proof reads an embedded RX payload
 through `write` and requires `-EFAULT` when `uname` targets that read-only page.
 Ranges crossing a stack guard page are rejected before SMAP access. Bounded
 `getcwd` exposes the initial container working directory as `/`, and bounded
-`readlink` identifies `/proc/self/exe` as `/init`. It next
+`readlink` identifies `/proc/self/exe` as `/init`. Per-process `umask` starts at
+`022` and masks updates to nine bits. It next
 issues process identity queries, verifies PID, TID, process-group, and session
 ID 1 plus parent PID 0 after the kernel resumes it through `SYSRETQ`,
 registers a bounded clear-child-TID word, verifies preserved first and fourth

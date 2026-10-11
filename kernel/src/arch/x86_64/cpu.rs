@@ -51,6 +51,7 @@ const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_GETCWD_SYSCALL: u64 = 79;
 const LINUX_READLINK_SYSCALL: u64 = 89;
+const LINUX_UMASK_SYSCALL: u64 = 95;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
@@ -159,6 +160,7 @@ static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -726,10 +728,12 @@ pub(crate) fn verify_linux_elf_entry(
     ELF_PROBE_BRK.store(heap as u64, Ordering::SeqCst);
     ELF_PROBE_BRK_LIMIT.store(heap_limit as u64, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
+    ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
     unsafe { ginux_user_enter(entry, stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
+    let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
     let mut cleared_tid = [0xff_u8; size_of::<u32>()];
     let child_tid_cleared = clear_child_tid == data as u64 + LINUX_CLEAR_CHILD_TID_OFFSET
@@ -749,7 +753,7 @@ pub(crate) fn verify_linux_elf_entry(
     ELF_PROBE_DATA_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_BRK.store(0, Ordering::SeqCst);
     ELF_PROBE_BRK_LIMIT.store(0, Ordering::SeqCst);
-    inactive && completed && child_tid_cleared && heap_written && msrs_restored
+    inactive && completed && child_tid_cleared && heap_written && umask_restored && msrs_restored
 }
 
 fn configure_linux_syscall() -> Option<[u64; 5]> {
@@ -1126,6 +1130,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             output_length as u64
         }
+        LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {

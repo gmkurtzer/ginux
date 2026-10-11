@@ -209,6 +209,22 @@ ginux_linux_probe:
     cmp byte ptr [0x401044], 't'
     jne failure
 
+    mov edi, 0x3f
+    mov eax, 95
+    syscall
+    cmp rax, 0x12
+    jne failure
+    mov edi, 0x29c
+    mov eax, 95
+    syscall
+    cmp rax, 0x3f
+    jne failure
+    mov edi, 0x12
+    mov eax, 95
+    syscall
+    cmp rax, 0x9c
+    jne failure
+
     mov edi, 0x401200
     mov eax, 63
     syscall
