@@ -19,7 +19,8 @@ full syscall workload before tearing every frame down. The synthetic two-load
 proof also activates the collision-checked page-table root and
 executes a non-page-base verification entry at ring 3. This
 entry receives a distinct RW/NX stack containing `argc`, `argv[0]`, `envp[0]`,
-and bounded Linux `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_PAGESZ`, static-loader,
+and bounded Linux `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_PAGESZ`/`AT_CLKTCK`,
+static-loader,
 credential, `AT_SECURE`, `AT_EXECFN`, and `AT_ENTRY` metadata. It validates its
 argument, environment, executable-name, secure-mode, and entry metadata from
 ring 3 before terminating through the architectural x86-64 `SYSCALL` instruction

@@ -592,6 +592,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux single-thread process identity verified\r\n");
     serial_write("ginux: Linux initial environment vector validated\r\n");
     serial_write("ginux: Linux credential auxiliary vector validated\r\n");
+    serial_write("ginux: Linux clock-tick auxiliary vector validated\r\n");
     serial_write("ginux: Linux FS base query validated\r\n");
     serial_write("ginux: Linux clear-child-TID exit action validated\r\n");
     serial_write("ginux: Linux robust-list registration validated\r\n");

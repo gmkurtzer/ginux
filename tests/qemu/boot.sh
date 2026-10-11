@@ -598,6 +598,11 @@ if ! grep -q '^ginux: Linux credential auxiliary vector validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux clock-tick auxiliary vector validated' "$output_file"; then
+    echo "Boot test failed: Linux clock-tick auxiliary vector was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux FS base query validated' "$output_file"; then
     echo "Boot test failed: Linux FS base query was not validated." >&2
     exit 1

@@ -152,7 +152,8 @@ to `GINUX=1`, a null `envp` terminator,
 `AT_PHNUM` matching the parsed header count, `AT_PAGESZ = 4096`, `AT_BASE = 0`
 for the static image, `AT_FLAGS = 0`, `AT_UID = 0`, `AT_EUID = 0`, `AT_GID = 0`,
 `AT_EGID = 0`, `AT_SECURE = 0`, `AT_EXECFN` pointing to `/init`, `AT_ENTRY`
-equal to the ELF entry, and `AT_NULL`. These credentials are container-local
+equal to the ELF entry, `AT_CLKTCK = 100`, and `AT_NULL`. These credentials are
+container-local
 and do not grant native kernel capabilities. The probe dereferences and validates
 `argv[0]`, `envp[0]`, `AT_BASE`, `AT_FLAGS`, `AT_SECURE`, `AT_EXECFN`, and
 `AT_ENTRY` from CPL3 before its syscall sequence. Credential queries include

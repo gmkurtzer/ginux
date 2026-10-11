@@ -276,7 +276,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - 36 * size_of::<u64>();
+            let stack_offset = PAGE_SIZE - 38 * size_of::<u64>();
             let environment_offset = PAGE_SIZE - 3 * size_of::<u64>();
             let argument_offset = PAGE_SIZE - size_of::<u64>();
             let environment_address = stack_virtual_page + environment_offset as u64;
@@ -314,6 +314,8 @@ pub(crate) fn verify_linux_elf_mapping(
                 argument_address,
                 9,
                 plan.entry,
+                17,
+                100,
                 0,
                 0,
             ]
@@ -425,6 +427,10 @@ pub(crate) fn verify_linux_elf_mapping(
                 && stack_words.add(28).read() == argument_address
                 && stack_words.add(29).read() == 9
                 && stack_words.add(30).read() == plan.entry
+                && stack_words.add(31).read() == 17
+                && stack_words.add(32).read() == 100
+                && stack_words.add(33).read() == 0
+                && stack_words.add(34).read() == 0
                 && core::slice::from_raw_parts(
                     stack_bytes.add(environment_offset),
                     LINUX_INIT_ENVIRONMENT.len(),

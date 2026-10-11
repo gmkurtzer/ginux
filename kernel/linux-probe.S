@@ -21,6 +21,14 @@ ginux_linux_probe:
     jne failure
     cmp qword ptr [rsp + 240], 0x400100
     jne failure
+    cmp qword ptr [rsp + 248], 17
+    jne failure
+    cmp qword ptr [rsp + 256], 100
+    jne failure
+    cmp qword ptr [rsp + 264], 0
+    jne failure
+    cmp qword ptr [rsp + 272], 0
+    jne failure
 
     mov edi, 1
     lea rsi, [rip + readable_payload]
