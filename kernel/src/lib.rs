@@ -400,6 +400,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: ring-3 fault survivor resumed and exited");
     serial_write("\r\nginux: user invalid-opcode fault contained");
     serial_write("\r\nginux: isolated scheduler address spaces switched");
+    serial_write("\r\nginux: completed address-space frames reclaimed");
     serial_write("\r\nginux: capability-gated bounded IPC verified");
     serial_write("\r\nginux: isolated service request-reply completed");
     serial_write("\r\nginux: per-thread syscall budgets enforced");
@@ -493,6 +494,7 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
         first_word.write_volatile(0);
         second_word.write_volatile(0);
         valid
+            && memory::release_frames([first, second])
             && !memory::initialize(
                 boot_info,
                 arch::x86_64::paging::INITIAL_IDENTITY_LIMIT as u64,

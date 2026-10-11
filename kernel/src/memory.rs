@@ -5,6 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 64;
+const MAX_RECYCLED_FRAMES: usize = 128;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_ALLOCATOR: MaybeUninit<FrameAllocator> = MaybeUninit::uninit();
@@ -23,6 +24,8 @@ pub(crate) struct FrameAllocator {
     range_count: usize,
     active_range: usize,
     allocated_frames: u64,
+    recycled: [u64; MAX_RECYCLED_FRAMES],
+    recycled_count: usize,
 }
 
 impl FrameAllocator {
@@ -32,6 +35,8 @@ impl FrameAllocator {
             range_count: 0,
             active_range: 0,
             allocated_frames: 0,
+            recycled: [0; MAX_RECYCLED_FRAMES],
+            recycled_count: 0,
         };
         let count = boot_info.memory_map_size / boot_info.memory_descriptor_size;
 
@@ -75,6 +80,13 @@ impl FrameAllocator {
     }
 
     fn allocate_one(&mut self) -> Option<u64> {
+        if self.recycled_count != 0 {
+            self.recycled_count -= 1;
+            let frame = self.recycled[self.recycled_count];
+            self.recycled[self.recycled_count] = 0;
+            self.allocated_frames = self.allocated_frames.checked_add(1)?;
+            return Some(frame);
+        }
         while self.active_range < self.range_count {
             let range = &mut self.ranges[self.active_range];
             if range.next < range.end {
@@ -86,6 +98,35 @@ impl FrameAllocator {
             self.active_range += 1;
         }
         None
+    }
+
+    pub(crate) fn release<const N: usize>(&mut self, frames: [u64; N]) -> bool {
+        if N == 0
+            || self
+                .recycled_count
+                .checked_add(N)
+                .is_none_or(|count| count > MAX_RECYCLED_FRAMES)
+            || self.allocated_frames < N as u64
+        {
+            return false;
+        }
+        for (index, frame) in frames.iter().enumerate() {
+            if *frame < LOW_MEMORY_LIMIT
+                || *frame % PAGE_SIZE != 0
+                || frames[..index].contains(frame)
+                || self.recycled[..self.recycled_count].contains(frame)
+            {
+                return false;
+            }
+        }
+        let mut staged = *self;
+        for frame in frames {
+            staged.recycled[staged.recycled_count] = frame;
+            staged.recycled_count += 1;
+        }
+        staged.allocated_frames -= N as u64;
+        *self = staged;
+        true
     }
 
     fn available_frames(&self) -> u64 {
@@ -149,12 +190,24 @@ pub(crate) fn allocate_frames<const N: usize>() -> Option<[u64; N]> {
     }
 }
 
+pub(crate) fn release_frames<const N: usize>(frames: [u64; N]) -> bool {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return false;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        (*allocator).release(frames)
+    }
+}
+
 pub(crate) fn verify_reservation_invariants() -> bool {
     let mut allocator = FrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
         range_count: 2,
         active_range: 0,
         allocated_frames: 0,
+        recycled: [0; MAX_RECYCLED_FRAMES],
+        recycled_count: 0,
     };
     allocator.ranges[0] = Range {
         next: 0x10_0000,
@@ -168,14 +221,25 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         return false;
     };
     let before_failure = allocator;
-    first == [0x10_0000, 0x10_1000]
-        && allocator.reserve::<2>().is_none()
-        && allocator.active_range == before_failure.active_range
+    let failed = allocator.reserve::<2>().is_none();
+    let failure_was_atomic = allocator.active_range == before_failure.active_range
         && allocator.ranges[0].next == before_failure.ranges[0].next
         && allocator.ranges[1].next == before_failure.ranges[1].next
-        && allocator.allocated_frames == before_failure.allocated_frames
-        && allocator.available_frames() == 1
-        && allocator.reserve::<1>() == Some([0x20_0000])
+        && allocator.allocated_frames == before_failure.allocated_frames;
+    let Some(last) = allocator.reserve::<1>() else {
+        return false;
+    };
+    let released = allocator.release(first);
+    let duplicate_rejected = !allocator.release(first);
+    let reused = allocator.reserve::<2>();
+    first == [0x10_0000, 0x10_1000]
+        && failed
+        && failure_was_atomic
+        && last == [0x20_0000]
+        && released
+        && duplicate_rejected
+        && reused == Some([0x10_1000, 0x10_0000])
+        && allocator.allocated_frames == 3
         && allocator.available_frames() == 0
         && allocator.reserve::<0>().is_none()
 }

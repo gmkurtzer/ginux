@@ -1,6 +1,6 @@
 # Initial Physical-Memory Classification v0
 
-**Status:** Experimental monotonic allocator enabled below 4 GiB.
+**Status:** Experimental reserving/recycling allocator enabled below 4 GiB.
 
 After `ExitBootServices()`, the kernel walks the final UEFI memory map using the descriptor stride supplied by firmware. It does not assume that the stride equals the size of the descriptor prefix understood by the kernel.
 
@@ -20,12 +20,27 @@ The kernel validates that:
 - The total map length is an exact multiple of the supplied stride.
 - Page totals use saturating arithmetic while parsing untrusted firmware data.
 
-The initial allocator sorts and merges conventional ranges, rejects range arithmetic overflow, excludes the first MiB, and limits allocations to the currently mapped physical ceiling. Allocation is monotonic and returns distinct 4 KiB frames; deallocation and boot-service-memory reclamation are not yet supported. Multi-frame reservations stage allocator state and commit only when every requested frame is available. Failed or zero-length reservations leave range cursors and allocation accounting unchanged. Address-space construction reserves its complete five- or seven-frame budget before writing any page table. The QEMU gate verifies rollback across discontiguous ranges, then reserves two real frames, verifies independent volatile access, and clears both frames.
+The initial allocator sorts and merges conventional ranges, rejects range
+arithmetic overflow, excludes the first MiB, and limits allocations to the
+currently mapped physical ceiling. Multi-frame reservations stage allocator
+state and commit only when every requested frame is available. Failed or
+zero-length reservations leave range cursors and accounting unchanged.
+Address-space construction reserves its complete five- or seven-frame budget
+before writing any page table.
+
+Atomic release rejects zero-length, misaligned, duplicate, already-free, or
+over-capacity batches and places accepted frames in a bounded 128-frame reuse
+pool. Completed proof address spaces are zeroed and released only after the
+kernel CR3 is active again. The QEMU gate verifies rollback and reuse across
+discontiguous ranges, then reserves, writes, clears, and releases two real
+frames. Boot-service-memory reclamation is not yet supported.
 
 The allocator initializes exactly once and remains live for the kernel lifetime.
 Reinitialization is rejected so no subsystem can reconstruct the UEFI inventory
 and allocate frames that already have owners. Access is serialized only by the
 single-processor, interrupts-disabled bootstrap state; locking or per-CPU
 allocation is required before SMP startup.
+Release relies on unique kernel ownership rather than generation-tagged frame
+leases; internal callers must consume an owner exactly once.
 
 Loader regions containing the unified image, handoff map, page tables, and kernel stacks are never admitted because only `EfiConventionalMemory` ranges enter the allocator.

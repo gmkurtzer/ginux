@@ -21,6 +21,7 @@ const EFER_NXE: u64 = 1 << 11;
 struct AddressSpace {
     root: u64,
     user_frame: u64,
+    frames: [u64; 5],
 }
 
 impl AddressSpace {
@@ -53,7 +54,11 @@ impl AddressSpace {
             (user_directory as *mut u64).write(user_table | PRESENT | WRITABLE | USER);
             (user_table as *mut u64).write(user_frame | PRESENT | WRITABLE | USER);
         }
-        Some(Self { root, user_frame })
+        Some(Self {
+            root,
+            user_frame,
+            frames,
+        })
     }
 
     fn layout_is_isolated(&self, kernel_root: u64) -> bool {
@@ -83,6 +88,16 @@ impl AddressSpace {
                 && table.add(1).read() == 0
         }
     }
+
+    fn release(self) -> bool {
+        let frames = self.frames;
+        unsafe {
+            for frame in &frames {
+                zero_frame(*frame);
+            }
+        }
+        memory::release_frames(frames)
+    }
 }
 
 pub(crate) fn verify_isolated_user_mapping() -> bool {
@@ -97,7 +112,7 @@ pub(crate) fn verify_isolated_user_mapping() -> bool {
     // SAFETY: The new root preserves the active supervisor-only kernel entry,
     // and maps the test virtual page to its exclusively owned frame. Interrupts
     // remain disabled. The original root is restored before returning.
-    unsafe {
+    let valid = unsafe {
         (space.user_frame as *mut u64).write_volatile(0);
         activate(space.root);
         let activated = current_root() == space.root;
@@ -107,7 +122,8 @@ pub(crate) fn verify_isolated_user_mapping() -> bool {
         let restored = current_root() == kernel_root;
         (space.user_frame as *mut u64).write_volatile(0);
         activated && aliased && restored
-    }
+    };
+    valid && space.release()
 }
 
 pub(crate) fn verify_control_plane_wx_layout() -> bool {
@@ -124,7 +140,7 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
     // SAFETY: Both mapped pages and all page tables have unique lifetime-long
     // ownership. The kernel mapping is preserved and interrupts are disabled.
-    unsafe {
+    let valid = unsafe {
         space.code_frame.cast::<u8>().write_volatile(0x90);
         space.first_stack_frame.cast::<u64>().write_volatile(0);
         space.second_stack_frame.cast::<u64>().write_volatile(0);
@@ -142,7 +158,8 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
         space.first_stack_frame.cast::<u64>().write_volatile(0);
         space.second_stack_frame.cast::<u64>().write_volatile(0);
         code_visible && stacks_writable && restored
-    }
+    };
+    valid && space.release()
 }
 
 pub(crate) fn verify_ring3_control_plane(
@@ -230,10 +247,11 @@ pub(crate) fn verify_ring3_control_plane(
             ipc_handle,
         );
         activate(kernel_root);
-        handled
+        let valid = handled
             && scheduler::verify_runtime_complete()
             && ipc::is_empty()
-            && current_root() == kernel_root
+            && current_root() == kernel_root;
+        valid && first_space.release() && second_space.release()
     }
 }
 
@@ -242,6 +260,7 @@ struct WxAddressSpace {
     code_frame: *mut u8,
     first_stack_frame: *mut u8,
     second_stack_frame: *mut u8,
+    frames: [u64; 7],
 }
 
 impl WxAddressSpace {
@@ -287,6 +306,7 @@ impl WxAddressSpace {
             code_frame: code as *mut u8,
             first_stack_frame: first_stack as *mut u8,
             second_stack_frame: second_stack as *mut u8,
+            frames,
         })
     }
 
@@ -323,6 +343,16 @@ impl WxAddressSpace {
             && self.code_frame != other.code_frame
             && self.first_stack_frame != other.first_stack_frame
             && self.second_stack_frame != other.second_stack_frame
+    }
+
+    fn release(self) -> bool {
+        let frames = self.frames;
+        unsafe {
+            for frame in &frames {
+                zero_frame(*frame);
+            }
+        }
+        memory::release_frames(frames)
     }
 }
 
