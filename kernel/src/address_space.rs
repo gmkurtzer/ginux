@@ -546,6 +546,21 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let main_rw = plan.main.writable;
     let interpreter_rx = plan.interpreter.executable;
     let interpreter_rw = plan.interpreter.writable;
+    let Some(relro) = plan.main.relro else {
+        return false;
+    };
+    let startup = crate::linux_elf::interpreted_startup(plan);
+    let heap_virtual_page = main_rw
+        .virtual_page
+        .checked_add(main_rw.page_count as u64 * PAGE_SIZE as u64)
+        .unwrap_or(0);
+    let stack_virtual_page = heap_virtual_page
+        .checked_add(2 * PAGE_SIZE as u64)
+        .unwrap_or(0);
+    let mmap_virtual_page = stack_virtual_page
+        .checked_add(2 * PAGE_SIZE as u64)
+        .unwrap_or(0);
+    let mmap_tail_virtual_page = mmap_virtual_page.checked_add(PAGE_SIZE as u64).unwrap_or(0);
     let indexes = |address: u64| {
         [
             ((address >> 39) & 0x1ff) as usize,
@@ -559,6 +574,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let main_rw_indexes = indexes(main_rw.virtual_page);
     let interpreter_indexes = indexes(interpreter_rx.virtual_page);
     let interpreter_rw_indexes = indexes(interpreter_rw.virtual_page);
+    let heap_indexes = indexes(heap_virtual_page);
+    let stack_indexes = indexes(stack_virtual_page);
+    let mmap_indexes = indexes(mmap_virtual_page);
+    let mmap_tail_indexes = indexes(mmap_tail_virtual_page);
     let Some(protected_end) = protected_start.checked_add(protected_size as u64) else {
         return false;
     };
@@ -592,11 +611,27 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || main_rw_indexes[3] + main_rw.page_count > ENTRY_COUNT
         || interpreter_indexes[3] + interpreter_rx.page_count > ENTRY_COUNT
         || interpreter_rw_indexes[3] + interpreter_rw.page_count > ENTRY_COUNT
+        || heap_virtual_page == 0
+        || stack_virtual_page == 0
+        || mmap_virtual_page == 0
+        || mmap_tail_virtual_page == 0
+        || heap_indexes[..3] != main_indexes[..3]
+        || stack_indexes[..3] != main_indexes[..3]
+        || mmap_indexes[..3] != main_indexes[..3]
+        || mmap_tail_indexes[..3] != main_indexes[..3]
         || overlaps_protected(main_ro)
         || overlaps_protected(main_rx)
         || overlaps_protected(main_rw)
         || overlaps_protected(interpreter_rx)
         || overlaps_protected(interpreter_rw)
+        || [
+            heap_virtual_page,
+            stack_virtual_page,
+            mmap_virtual_page,
+            mmap_tail_virtual_page,
+        ]
+        .into_iter()
+        .any(|page| page < protected_end && protected_start < page.saturating_add(PAGE_SIZE as u64))
         || main_ro.writable
         || main_ro.executable
         || main_rx.writable
@@ -611,11 +646,11 @@ pub(crate) fn verify_interpreted_elf_mapping(
         return false;
     }
 
-    let Some(frames) = memory::allocate_frames::<15>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<19>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, main_ro_page, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data] =
+    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, main_ro_page, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data, heap_page, stack_page, mmap_page, mmap_tail_page] =
         addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
@@ -698,6 +733,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     return None;
                 }
             }
+            zero_frame(heap_page)?;
+            zero_frame(stack_page)?;
+            zero_frame(mmap_page)?;
+            zero_frame(mmap_tail_page)?;
             let flags = |segment: crate::linux_elf::PlannedSegment<'_>| {
                 PRESENT
                     | USER
@@ -726,6 +765,52 @@ pub(crate) fn verify_interpreted_elf_mapping(
             interpreter_entries
                 .add(interpreter_rw_indexes[3])
                 .write(interpreter_data | flags(interpreter_rw));
+            main_entries
+                .add(heap_indexes[3])
+                .write(heap_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
+            main_entries
+                .add(stack_indexes[3])
+                .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
+            main_entries.add(mmap_indexes[3]).write(0);
+            main_entries.add(mmap_tail_indexes[3]).write(0);
+
+            let stack_bytes = mapped_frame::<u8>(stack_page)?;
+            let stack_offset = PAGE_SIZE - 48 * size_of::<u64>();
+            let platform_offset = PAGE_SIZE - 6 * size_of::<u64>();
+            let environment_offset = PAGE_SIZE - 4 * size_of::<u64>();
+            let argument_offset = PAGE_SIZE - 2 * size_of::<u64>();
+            let platform_address = stack_virtual_page + platform_offset as u64;
+            let environment_address = stack_virtual_page + environment_offset as u64;
+            let argument_address = stack_virtual_page + argument_offset as u64;
+            let stack_words = stack_bytes.add(stack_offset).cast::<u64>();
+            for (index, value) in [1_u64, argument_address, 0, environment_address, 0]
+                .into_iter()
+                .enumerate()
+            {
+                stack_words.add(index).write(value);
+            }
+            for (index, value) in
+                crate::linux_elf::auxiliary_vector(startup, argument_address, platform_address)
+                    .into_iter()
+                    .enumerate()
+            {
+                stack_words.add(5 + index).write(value);
+            }
+            core::ptr::copy_nonoverlapping(
+                LINUX_PLATFORM.as_ptr(),
+                stack_bytes.add(platform_offset),
+                LINUX_PLATFORM.len(),
+            );
+            core::ptr::copy_nonoverlapping(
+                LINUX_INIT_ENVIRONMENT.as_ptr(),
+                stack_bytes.add(environment_offset),
+                LINUX_INIT_ENVIRONMENT.len(),
+            );
+            core::ptr::copy_nonoverlapping(
+                LINUX_INIT_ARGUMENT.as_ptr(),
+                stack_bytes.add(argument_offset),
+                LINUX_INIT_ARGUMENT.len(),
+            );
 
             let permissions_valid = main_ro_entries.add(main_ro_indexes[3]).read()
                 & (PRESENT | USER | WRITABLE | NO_EXECUTE)
@@ -741,7 +826,19 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     == PRESENT | USER
                 && interpreter_entries.add(interpreter_rw_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == PRESENT | USER | WRITABLE | NO_EXECUTE;
+                    == PRESENT | USER | WRITABLE | NO_EXECUTE
+                && main_entries.add(heap_indexes[3]).read()
+                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == PRESENT | USER | WRITABLE | NO_EXECUTE
+                && main_entries.add(stack_indexes[3]).read()
+                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == PRESENT | USER | WRITABLE | NO_EXECUTE
+                && main_entries.add(mmap_indexes[3]).read() == 0
+                && main_entries.add(mmap_tail_indexes[3]).read() == 0
+                && stack_words.add(6).read() == startup.program_headers
+                && stack_words.add(10).read() == u64::from(startup.program_header_count)
+                && stack_words.add(14).read() == startup.interpreter_base
+                && stack_words.add(30).read() == startup.main_entry;
             activate(root);
             let observed = current_root() == root
                 && cpu::with_supervisor_user_access(|| {
@@ -752,12 +849,34 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && (main_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"PROBE!!\n")
                         && (interpreter_rx.virtual_address as *const u8).read_volatile() == 0x7f
-                        && (plan.initial_entry as *const u8).read_volatile() == 0xc3
+                        && (plan.initial_entry as *const u8).read_volatile() == 0xe9
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
                 });
+            let executed = observed
+                && cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
+                    entry: startup.initial_entry as usize,
+                    stack: (stack_virtual_page + stack_offset as u64) as usize,
+                    code: main_rx.virtual_address as usize,
+                    code_size: main_rx.memory_size,
+                    data: main_rw.virtual_page as usize,
+                    data_size: main_rw.memory_size,
+                    relro: relro.virtual_address as usize,
+                    relro_size: relro.memory_size as usize,
+                    heap: heap_virtual_page as usize,
+                    heap_size: PAGE_SIZE,
+                    mmap: mmap_virtual_page as usize,
+                    mmap_frames: [mmap_page, mmap_tail_page],
+                });
+            let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
+                && main_entries.add(mmap_tail_indexes[3]).read() == 0;
             activate(kernel_root_physical);
-            Some(permissions_valid && observed && current_root() == kernel_root_physical)
+            Some(
+                permissions_valid
+                    && executed
+                    && mapping_removed
+                    && current_root() == kernel_root_physical,
+            )
         }
     })()
     .unwrap_or(false);

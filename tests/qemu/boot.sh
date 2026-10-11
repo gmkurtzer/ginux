@@ -613,6 +613,11 @@ if ! grep -q '^ginux: separate-header interpreted Linux mapping verified' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: interpreter-first Linux ring-3 entry verified' "$output_file"; then
+    echo "Boot test failed: interpreter-first Linux ring-3 entry was not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux copy errors and overflow bounds verified' "$output_file"; then
     echo "Boot test failed: Linux copy errors or overflow bounds were not verified." >&2
     exit 1
@@ -708,7 +713,7 @@ if ! grep -q '^ginux: Linux callable syscall assertion helpers validated' "$outp
     exit 1
 fi
 
-if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 14 ]]; then
+if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 21 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
     exit 1
 fi

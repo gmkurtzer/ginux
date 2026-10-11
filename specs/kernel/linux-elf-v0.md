@@ -118,15 +118,19 @@ startup-metadata type, so initial RIP and the `AT_PHDR`, `AT_PHNUM`, `AT_BASE`,
 and `AT_ENTRY` values cannot silently fall back to static defaults. The existing
 static runtime stack is now populated by a single bounded auxiliary-vector
 encoder using that common contract, and the interpreted proof checks the exact
-word positions of its dynamic values. A bounded mapping proof installs the main
-image's read-only/NX header page, four RX pages, and two RW/NX pages plus the
-interpreter's RX and RW/NX pages in three independently cloned 2 MiB leaf
-regions. It validates permissions, the intact main entry, and image contents
-through the activated user root, restores the kernel root, then scrubs and
-releases all fifteen page-table and payload frames. This proof does not yet
-construct a dynamic-process stack or transfer control to the interpreter. The
-profile does not apply dynamic relocations, execute the interpreter, or support
-glibc.
+word positions of its dynamic values. A bounded execution proof installs the
+main image's read-only/NX header page, four RX pages, and two RW/NX pages plus
+the interpreter's RX and RW/NX pages in three independently cloned 2 MiB leaf
+regions. It also owns bounded heap, stack, and two `mmap` payload frames. The
+proof validates permissions, the intact main entry, and image contents through
+the activated user root, constructs the dynamic-process stack with the common
+auxiliary-vector encoder, and enters the relocated interpreter at `0x6000f0`.
+That synthetic interpreter is a fixed trampoline to the main entry at
+`0x400100`; the complete ring-3 probe therefore runs with dynamic `AT_BASE`,
+main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
+restores its own root and scrubs and releases all nineteen page-table and
+payload frames. The profile does not apply interpreter relocations, resolve
+dynamic symbols, execute a real dynamic linker, or support glibc.
 
 ## Page-image plan
 

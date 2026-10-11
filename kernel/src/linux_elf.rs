@@ -1321,7 +1321,7 @@ fn compact_position_independent_fixture() -> [u8; 512] {
         0x100,
         PF_READ | PF_WRITE,
     );
-    bytes[0xf0] = 0xc3;
+    bytes[0xf0..0xf5].copy_from_slice(&[0xe9, 0x0b, 0x00, 0xe0, 0xff]);
     bytes[0x100..0x108].copy_from_slice(b"DYNAMIC!");
     bytes
 }

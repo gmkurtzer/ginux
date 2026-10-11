@@ -10,8 +10,12 @@ ginux_linux_probe:
     mov rax, qword ptr [rsp + 24]
     cmp byte ptr [rax], 'G'
     jne failure
-    cmp qword ptr [rsp + 112], 0
+    mov rax, qword ptr [rsp + 112]
+    test rax, rax
+    jz valid_interpreter_base
+    cmp rax, 0x600000
     jne failure
+valid_interpreter_base:
     cmp qword ptr [rsp + 128], 0
     jne failure
     cmp qword ptr [rsp + 208], 0

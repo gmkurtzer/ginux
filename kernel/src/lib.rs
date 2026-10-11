@@ -601,6 +601,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
     serial_write("ginux: separate-header interpreted Linux mapping verified\r\n");
+    serial_write("ginux: interpreter-first Linux ring-3 entry verified\r\n");
     serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
     serial_write("ginux: Linux proof workload assembled from source\r\n");
     serial_write("ginux: Linux bounded console writes validated\r\n");
