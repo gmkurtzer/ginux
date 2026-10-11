@@ -21,10 +21,9 @@ const EXPECTED_FAULT_OFFSET: usize = 515;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
-const MAX_AUXILIARY_ADDRESS_SPACES: usize = 2;
 
 static mut AUXILIARY_ADDRESS_SPACES: [Option<RegisteredAuxiliaryAddressSpace>;
-    MAX_AUXILIARY_ADDRESS_SPACES] = [const { None }; MAX_AUXILIARY_ADDRESS_SPACES];
+    domain::MAX_AUXILIARY_SERVICES] = [const { None }; domain::MAX_AUXILIARY_SERVICES];
 
 struct RegisteredAuxiliaryAddressSpace {
     domain: u64,
@@ -347,7 +346,7 @@ fn registered_auxiliary_address_space_count() -> usize {
 fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(slot) =
-        (0..MAX_AUXILIARY_ADDRESS_SPACES).find(|index| unsafe { (*registry)[*index].is_none() })
+        (0..domain::MAX_AUXILIARY_SERVICES).find(|index| unsafe { (*registry)[*index].is_none() })
     else {
         return false;
     };
@@ -371,7 +370,7 @@ fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bo
 
 fn release_auxiliary_address_space(domain_id: u64) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
-    let Some(slot) = (0..MAX_AUXILIARY_ADDRESS_SPACES).find(|index| unsafe {
+    let Some(slot) = (0..domain::MAX_AUXILIARY_SERVICES).find(|index| unsafe {
         (*registry)[*index]
             .as_ref()
             .is_some_and(|registered| registered.domain == domain_id)

@@ -35,7 +35,9 @@ and rejects its stale domain/capability pair. No scheduler context is queued,
 so this is the transactional admission path rather than an executable
 auxiliary workload.
 The kernel retains the complete frame leases in a fixed-capacity registry keyed
-by the exact auxiliary domain generation after a successful bind. Teardown
+by the exact auxiliary domain generation after a successful bind. Its capacity
+is the domain subsystem's shared maximum auxiliary-service count, so identity
+admission and address-space retention cannot diverge. Teardown
 looks up that registry entry, refuses release while a thread remains attached,
 then unbinds, zeroes, and returns all seven frames before removing the entry.
 The proof requires the entry to remain present after a rejected early release

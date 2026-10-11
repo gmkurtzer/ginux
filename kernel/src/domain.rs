@@ -11,7 +11,7 @@ const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
 const SERVICE_RESTART_BUDGET: u16 = 1;
 const EVENT_CAPACITY: usize = 4;
-const MAX_AUXILIARY_SERVICES: usize = MAX_DOMAINS - 2;
+pub(crate) const MAX_AUXILIARY_SERVICES: usize = MAX_DOMAINS - 2;
 const MAX_SERVICE_IDENTITIES: usize = 1 + MAX_AUXILIARY_SERVICES;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
