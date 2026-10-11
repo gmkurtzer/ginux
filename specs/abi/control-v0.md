@@ -52,6 +52,10 @@ peer is runnable, it blocks the caller; a peer send wakes the caller and makes
 the sent word the operation's eventual return value only when the object and
 inbound endpoint direction match the saved wait key. If blocking would leave
 no runnable thread, it returns `UINT64_MAX - 2` without changing scheduler state.
+If the opposite endpoint's domain exits or faults while the caller is blocked,
+the kernel makes the caller ready and operation 8 returns
+`UINT64_MAX - 4`. Cleanup matches both object and endpoint direction; unrelated
+waiters are not released.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

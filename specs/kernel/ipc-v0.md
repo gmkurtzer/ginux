@@ -31,9 +31,18 @@ service, blocks it, resumes control, wakes the service with value 3, and later
 observes 3 as the receive result. There is at most one bootstrap waiter, and a
 failed block rolls back atomically.
 
+Domain exit and contained-fault paths cancel matching blocked receives before
+removing the dying context. The saved receive returns the distinct
+`UINT64_MAX - 4` peer-closed result and becomes ready, allowing it to be
+selected immediately even when it was the last surviving context. The
+scheduler invariant proves that object/direction mismatches stay blocked and
+that an unrelated ready context remains unchanged.
+
 This revision transfers only an immediate word and has no capability transfer,
-cancellation, timeout, peer-close notification, or cleanup of queued words
-after domain failure. It has one fixed control/service endpoint pair rather
+cancellation request, timeout, persistent close state, or cleanup of queued
+words after domain failure. Peer-close currently wakes only receivers already
+blocked at teardown; a later receive cannot yet observe the prior closure. It
+has one fixed control/service endpoint pair rather
 than allocatable endpoint objects. The global queue is safe only
 for the current single-CPU model. The timer handler does not access IPC, and
 call-gate entries execute with interrupts disabled; locking is still required

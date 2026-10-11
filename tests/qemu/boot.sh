@@ -328,6 +328,11 @@ if ! grep -q '^ginux: IPC wait-key matching enforced' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: blocked IPC peer-close cleanup verified' "$output_file"; then
+    echo "Boot test failed: blocked IPC peer-close cleanup failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated service request-reply completed' "$output_file"; then
     echo "Boot test failed: isolated service request/reply did not complete." >&2
     exit 1

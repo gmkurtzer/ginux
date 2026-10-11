@@ -4,6 +4,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::domain;
 
 const MAX_THREADS: usize = 8;
+pub(crate) const IPC_PEER_CLOSED: u64 = u64::MAX - 4;
 
 static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut RUNTIME: MaybeUninit<Runtime> = MaybeUninit::uninit();
@@ -460,6 +461,22 @@ impl Scheduler {
         true
     }
 
+    fn cancel_blocked_peers(&mut self, dead_domain: u64, reason: WaitReason, result: u64) -> usize {
+        let mut cancelled = 0;
+        for thread in self.threads.iter_mut().flatten() {
+            if thread.state == State::Blocked
+                && thread.domain != dead_domain
+                && thread.wait == Some(reason)
+            {
+                thread.context.rax = result;
+                thread.state = State::Ready;
+                thread.wait = None;
+                cancelled += 1;
+            }
+        }
+        cancelled
+    }
+
     fn exit_current(&mut self, id: ThreadId) -> Option<Scheduled> {
         if self.current != Some(id) || self.thread(id)?.state != State::Running {
             return None;
@@ -602,6 +619,7 @@ pub(crate) fn fault_runtime(
     frame: &mut UserFaultFrame,
     code_selector: u16,
     data_selector: u16,
+    peer_close: Option<WaitReason>,
 ) -> RuntimeAction {
     if !frame.selectors_match(code_selector, data_selector) {
         return RuntimeAction::Invalid;
@@ -619,6 +637,18 @@ pub(crate) fn fault_runtime(
     else {
         return RuntimeAction::Invalid;
     };
+    if let Some(reason) = peer_close {
+        let Some(dead_domain) = runtime
+            .scheduler
+            .thread(current)
+            .map(|thread| thread.domain)
+        else {
+            return RuntimeAction::Invalid;
+        };
+        runtime
+            .scheduler
+            .cancel_blocked_peers(dead_domain, reason, IPC_PEER_CLOSED);
+    }
     let expected = frame.vector == 6
         && frame.error == 0
         && frame.rip == runtime.expected_fault_instruction
@@ -803,6 +833,7 @@ pub(crate) fn exit_runtime(
     frame: &mut UserTrapFrame,
     code_selector: u16,
     data_selector: u16,
+    peer_close: Option<WaitReason>,
 ) -> RuntimeAction {
     if !frame.selectors_match(code_selector, data_selector) {
         return RuntimeAction::Invalid;
@@ -820,6 +851,18 @@ pub(crate) fn exit_runtime(
     else {
         return RuntimeAction::Invalid;
     };
+    if let Some(reason) = peer_close {
+        let Some(dead_domain) = runtime
+            .scheduler
+            .thread(current)
+            .map(|thread| thread.domain)
+        else {
+            return RuntimeAction::Invalid;
+        };
+        runtime
+            .scheduler
+            .cancel_blocked_peers(dead_domain, reason, IPC_PEER_CLOSED);
+    }
     let next = runtime.scheduler.exit_current(current);
     let Some(exits) = runtime.exits.checked_add(1) else {
         return RuntimeAction::Invalid;
@@ -980,6 +1023,35 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         || blocking.thread(blocked)?.state != State::Ready
         || blocking.thread(blocked)?.wait.is_some()
         || blocking.exit_current(peer)?.context.rax != 77
+    {
+        return Some(false);
+    }
+
+    let mut closing = Scheduler::new();
+    let waiting_client = closing.create(1, first_context)?;
+    let unrelated = closing.create(3, first_context)?;
+    let dying_service = closing.create(2, second_context)?;
+    if closing.schedule_next()?.id != waiting_client
+        || closing
+            .block_current(waiting_client, first_context, wait)?
+            .id
+            != unrelated
+        || closing.yield_current(unrelated, first_context)?.id != dying_service
+        || closing.cancel_blocked_peers(
+            2,
+            WaitReason::IpcReceive {
+                object: 4,
+                service_side: false,
+            },
+            IPC_PEER_CLOSED,
+        ) != 0
+        || closing.thread(waiting_client)?.state != State::Blocked
+        || closing.cancel_blocked_peers(2, wait, IPC_PEER_CLOSED) != 1
+        || closing.thread(waiting_client)?.state != State::Ready
+        || closing.thread(waiting_client)?.wait.is_some()
+        || closing.thread(waiting_client)?.context.rax != IPC_PEER_CLOSED
+        || closing.thread(unrelated)?.state != State::Ready
+        || closing.exit_current(dying_service)?.id != waiting_client
     {
         return Some(false);
     }

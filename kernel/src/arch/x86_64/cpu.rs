@@ -678,7 +678,15 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         return u64::MAX;
     };
     let service_exit = domain::is_service_domain(caller_domain);
-    let action = scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
+    let action = scheduler::exit_runtime(
+        frame,
+        USER_CODE_SELECTOR,
+        USER_DATA_SELECTOR,
+        Some(scheduler::WaitReason::IpcReceive {
+            object: 3,
+            service_side: !service_exit,
+        }),
+    );
     if matches!(action, RuntimeAction::Invalid) || !domain::detach_thread(caller_domain) {
         return u64::MAX;
     }
@@ -694,7 +702,15 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     };
     let fault_domain = scheduler::current_domain();
     let service_fault = fault_domain.is_some_and(domain::is_service_domain);
-    let action = scheduler::fault_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
+    let action = scheduler::fault_runtime(
+        frame,
+        USER_CODE_SELECTOR,
+        USER_DATA_SELECTOR,
+        fault_domain.map(|_| scheduler::WaitReason::IpcReceive {
+            object: 3,
+            service_side: !service_fault,
+        }),
+    );
     let Some(fault_domain) = fault_domain else {
         return u64::MAX;
     };
