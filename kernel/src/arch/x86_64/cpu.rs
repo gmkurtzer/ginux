@@ -854,20 +854,26 @@ fn dispatch_charged_call(
         13 => write_ipc_delivery_descriptor(caller_domain, capability, frame),
         14 => write_lifecycle_identity_descriptor(caller_domain, capability, frame),
         15 => create_auxiliary_service(caller_domain, capability, frame),
-        16 => {
-            if domain::handle_permits(
-                caller_domain,
-                capability,
-                control_abi::NETWORK_DEVICE_OBJECT,
-                Rights::READ,
-            ) {
-                control_abi::NETWORK_DEVICE_DESCRIPTOR_WORD
-            } else {
-                u64::MAX - 2
-            }
-        }
+        16 => network_device_call(caller_domain, capability, frame),
         _ => u64::MAX,
     }
+}
+
+fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(
+        caller_domain,
+        capability,
+        control_abi::NETWORK_DEVICE_OBJECT,
+        Rights::READ,
+    ) || frame.first_argument() != 0
+        || frame.second_argument() != 0
+    {
+        return u64::MAX - 2;
+    }
+    control_abi::NETWORK_DEVICE_DESCRIPTOR_WORD
 }
 
 fn create_auxiliary_service(

@@ -5,13 +5,16 @@
 Boot object 4 names the first network-device mediation boundary. The signed
 development manifest grants the control plane read authority, and the kernel
 may delegate only that authority to an isolated stop-only service. Control ABI
-v2 operation 16 returns a fixed descriptor word containing device-contract
-version 1, MTU 1500, and one queue. A domain ID or any other non-capability is
-rejected before device state is observed.
+v2 operation 16 uses `RSI` as a command and `RDX` as its argument. Command 0
+requires a zero reserved argument and returns a fixed descriptor word containing
+device-contract version 1, MTU 1500, and one queue. Unknown commands, nonzero
+reserved arguments, a domain ID, or any other non-capability are rejected
+before device state is observed.
 
 The QEMU proof creates an independent W^X service domain with only delegated
-object-4 read authority. Its ring-3 program first proves denial with an invalid
-handle, then probes the device contract, exits with status 42, and has its
+object-4 read authority. Its ring-3 program proves denial with an invalid
+handle, unknown command, and nonzero reserved argument, then probes the device
+contract, exits with status 42, and has its
 capability table and address-space frames retired. A stale handle cannot probe
 the device after retirement, and the exact lifecycle generation, service
 identity, status, and sequence are consumed before the next workload runs.
