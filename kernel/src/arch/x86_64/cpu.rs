@@ -866,12 +866,27 @@ fn create_auxiliary_service(
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         return u64::MAX - 2;
     };
+    if !domain::handle_permits(caller_domain, capability, 1, Rights::MANAGE)
+        || frame.second_argument() != control_abi::MANAGEMENT_REQUEST_SIZE as u64
+    {
+        return u64::MAX - 2;
+    }
+    let mut bytes = [0_u8; control_abi::MANAGEMENT_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(frame.first_argument(), &mut bytes) {
+        return u64::MAX - 2;
+    }
+    let Some(request) = control_abi::parse_management_request(&bytes) else {
+        return u64::MAX - 2;
+    };
+    if request.action != control_abi::MANAGEMENT_CREATE_AUXILIARY {
+        return u64::MAX - 2;
+    }
     domain::create_auxiliary_service(
         caller_domain,
         capability,
-        frame.first_argument(),
-        frame.second_argument(),
-        frame.third_argument(),
+        request.source,
+        request.object,
+        request.rights,
     )
     .unwrap_or(u64::MAX - 2)
 }

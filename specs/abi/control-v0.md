@@ -158,17 +158,21 @@ registration receives a new service generation. `RDX` must equal 32, bounded
 writable-range validation applies, and denial returns `UINT64_MAX - 2` without
 altering the retained event. The proof rejects console authority and validates
 the original faulted domain, sequence one, and logical service ID.
-Operation 15 creates an unstarted stop-only auxiliary domain. `RDI` must carry
-host-control `MANAGE` authority, `RSI` names a control-plane capability to
-delegate, `RDX` names its nonzero object, and `R8` contains a nonempty subset
-of the four defined rights bits. The kernel revalidates the delegated source
-against that exact object and rights request, seals the child capability table,
-and returns its generation-tagged domain ID. Denial or registry exhaustion
+Operation 15 submits a versioned management request and requires host-control
+`MANAGE` authority in `RDI`. `RSI` points to a 32-byte read-only request and
+`RDX` must equal 32. The request contains `u32` size, `u16` ABI version, `u16`
+action, then `u64` source capability, object, and rights fields. Action 1 creates
+an unstarted stop-only auxiliary domain. The kernel copies through the bounded
+owned-mapping path, requires the exact size/version/action tuple, revalidates
+the delegated source against the requested nonzero object and nonempty rights
+subset, seals the child capability table, and returns its generation-tagged
+domain ID. Invalid memory, malformed fields, denial, or registry exhaustion
 returns `UINT64_MAX - 2` without creating a partial record. The ring-3 proof
-requires denial through a non-managing authority, creates one attenuated
-host-read
-auxiliary through host-management authority, and the hardware scheduler proof
-then executes and retires that exact generation.
+requires denial through a non-managing authority, rejects an unknown action
+through valid authority, creates one attenuated host-read auxiliary through host-management authority, and the hardware
+scheduler proof then executes and retires that exact generation. New lifecycle
+actions must receive new action values and explicitly versioned layouts rather
+than repurposing existing fields.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

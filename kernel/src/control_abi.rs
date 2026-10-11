@@ -2,6 +2,33 @@ include!("../../specs/abi/control-v1.rs");
 
 pub(crate) const DISCOVERY_WORD: u64 = ((VERSION as u64) << 16) | FEATURES as u64;
 
+pub(crate) struct ManagementRequest {
+    pub(crate) action: u16,
+    pub(crate) source: u64,
+    pub(crate) object: u64,
+    pub(crate) rights: u64,
+}
+
+pub(crate) fn parse_management_request(
+    bytes: &[u8; MANAGEMENT_REQUEST_SIZE],
+) -> Option<ManagementRequest> {
+    let size = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
+    let version = u16::from_le_bytes(bytes[4..6].try_into().ok()?);
+    let action = u16::from_le_bytes(bytes[6..8].try_into().ok()?);
+    if size as usize != MANAGEMENT_REQUEST_SIZE
+        || version != VERSION
+        || action != MANAGEMENT_CREATE_AUXILIARY
+    {
+        return None;
+    }
+    Some(ManagementRequest {
+        action,
+        source: u64::from_le_bytes(bytes[8..16].try_into().ok()?),
+        object: u64::from_le_bytes(bytes[16..24].try_into().ok()?),
+        rights: u64::from_le_bytes(bytes[24..32].try_into().ok()?),
+    })
+}
+
 pub(crate) fn descriptor() -> [u8; DESCRIPTOR_SIZE] {
     let mut bytes = [0_u8; DESCRIPTOR_SIZE];
     bytes[0..4].copy_from_slice(&(DESCRIPTOR_SIZE as u32).to_le_bytes());

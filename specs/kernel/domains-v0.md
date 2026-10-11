@@ -127,8 +127,10 @@ record a zero fault-address field instead of leaking stale page-fault state.
 Control ABI operation 15 exposes bounded auxiliary registration. Creation
 requires the persistent control-plane generation, host-management authority,
 and a valid delegated source capability for the exact requested object and
-rights. It creates only an unstarted domain: address-space construction and
-scheduler admission remain separate kernel transactions. The ring-3 proof
+rights. Its fixed-size, versioned management request is copied only from the
+caller's validated mapping and leaves action values available for compatible
+lifecycle growth. It creates only an unstarted domain: address-space construction
+and scheduler admission remain separate kernel transactions. The ring-3 proof
 denies creation through a non-managing capability, then delegates attenuated
 host-read authority into the clean-exit workload through the authorized path.
 
