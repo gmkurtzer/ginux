@@ -803,6 +803,11 @@ if ! grep -q '^ginux: Linux single-CPU topology queries validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux single-thread scheduling yield validated' "$output_file"; then
+    echo "Boot test failed: Linux single-thread scheduling yield was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: monotonic sequence exhaustion contained' "$output_file"; then
     echo "Boot test failed: monotonic sequence exhaustion was not contained." >&2
     exit 1

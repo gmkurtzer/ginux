@@ -108,9 +108,11 @@ invalid output range returns `-EFAULT` without a partial write. `rax = 309`
 four-byte pointers. Both destinations are validated before either is written;
 the obsolete cache pointer is ignored as on Linux. These results describe the
 single-bootstrap-processor profile and do not claim SMP scheduling support.
-The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x403000`,
+`rax = 24` (`__NR_sched_yield`) succeeds as a no-op because this bounded
+process has exactly one runnable thread.
+The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x404000`,
 grow within one separately owned zero-filled RW/NX page, write through that
-mapping, and shrink the break. A request beyond `0x404000` follows Linux syscall
+mapping, and shrink the break. A request beyond `0x405000` follows Linux syscall
 semantics by returning the unchanged current break rather than a negative
 error. The page remains mapped for the lifetime of this bounded process and is
 scrubbed during teardown. A valid `write` copies from the grown heap. A second
@@ -240,9 +242,9 @@ threads, general TLS state, or any syscall other than the exact bounded
 bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
-`sched_getaffinity`, `getcpu`,
+`sched_yield`, `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
-credential and supplementary-group queries, bounded `prctl` process names, the bounded process/session
+credential and supplementary-group queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,
 `set_tid_address`, bounded robust-list registration/query, `exit`, and
 `exit_group` calls. There is no thread creation, TID allocation,

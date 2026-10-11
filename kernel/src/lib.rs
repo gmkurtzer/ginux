@@ -633,6 +633,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux fixed execution personality validated\r\n");
     serial_write("ginux: Linux immutable resource limits validated\r\n");
     serial_write("ginux: Linux single-CPU topology queries validated\r\n");
+    serial_write("ginux: Linux single-thread scheduling yield validated\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

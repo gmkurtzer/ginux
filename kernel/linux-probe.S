@@ -122,6 +122,11 @@ ginux_linux_probe:
     cmp rax, -38
     jne failure
 
+    mov eax, 24
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 2
     mov esi, 0x402000
     mov edx, 8

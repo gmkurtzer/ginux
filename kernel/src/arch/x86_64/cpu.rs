@@ -55,6 +55,7 @@ const LINUX_RT_SIGACTION_SYSCALL: u64 = 13;
 const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
+const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_DUP_SYSCALL: u64 = 32;
 const LINUX_DUP2_SYSCALL: u64 = 33;
 const LINUX_GETPID_SYSCALL: u64 = 39;
@@ -1180,6 +1181,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
         }
         LINUX_WRITE_SYSCALL => linux_console_write(first_argument, buffer, count),
+        LINUX_SCHED_YIELD_SYSCALL => 0,
         LINUX_CLOSE_SYSCALL => linux_console_close(first_argument),
         LINUX_FSTAT_SYSCALL => {
             if !linux_console_descriptor_open(first_argument) {
