@@ -45,6 +45,11 @@ with mode `S_IFCHR | 0600`, one link, and a 4096-byte preferred block size. The
 destination range is validated. Unknown descriptors return `-EBADF`; an invalid
 range returns `-EFAULT` without changing its valid prefix. This is descriptor
 metadata for the bounded console profile, not a general inode or VFS query.
+`rax = 16` (`__NR_ioctl`) accepts only `TIOCGWINSZ` on descriptors 0 and 1. It
+copies an eight-byte Linux `winsize` reporting 24 rows and 80 columns, with
+pixel dimensions zero. Unknown descriptors return `-EBADF`, unsupported
+requests return `-ENOTTY`, and invalid destinations return `-EFAULT`. This is a
+fixed early-console contract, not terminal state or a general ioctl mechanism.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 2,
@@ -146,8 +151,8 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `writev`, `fstat`, `brk`, `uname`, `getcwd`, bounded
-`readlink`/`readlinkat`,
+`write`, `writev`, `fstat`, bounded console `ioctl`, `brk`, `uname`, `getcwd`,
+bounded `readlink`/`readlinkat`,
 bounded read-only `mprotect`,
 `umask`, read-only `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,

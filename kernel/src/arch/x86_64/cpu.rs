@@ -48,6 +48,7 @@ const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_FSTAT_SYSCALL: u64 = 5;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
+const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
@@ -86,6 +87,7 @@ const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
+const LINUX_ENOTTY: u64 = u64::MAX - 24;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
 const LINUX_ENAMETOOLONG: u64 = u64::MAX - 35;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
@@ -97,6 +99,7 @@ const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_WRITE_LIMIT: usize = 256;
 const LINUX_IOV_LIMIT: usize = 4;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
+const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1105,6 +1108,21 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_EINVAL;
             }
             ELF_PROBE_READ_ONLY_DATA_PAGE.store(first_argument, Ordering::SeqCst);
+            0
+        }
+        LINUX_IOCTL_SYSCALL => {
+            if !matches!(first_argument, 0 | 1) {
+                return LINUX_EBADF;
+            }
+            if buffer != LINUX_TIOCGWINSZ {
+                return LINUX_ENOTTY;
+            }
+            let mut window = [0_u8; 8];
+            window[..2].copy_from_slice(&24_u16.to_ne_bytes());
+            window[2..4].copy_from_slice(&80_u16.to_ne_bytes());
+            if !copy_to_linux_user(count, &window) {
+                return LINUX_EFAULT;
+            }
             0
         }
         LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
