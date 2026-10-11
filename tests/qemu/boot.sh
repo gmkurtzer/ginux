@@ -118,6 +118,11 @@ if ! grep -q '^ginux: supervisor access prevention active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: user-mode instruction prevention active' "$output_file"; then
+    echo "Boot test failed: user-mode instruction prevention is inactive." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: null and bidirectional stack guard pages active' "$output_file"; then
     echo "Boot test failed: hardened null/bidirectional stack mappings are not active." >&2
     exit 1

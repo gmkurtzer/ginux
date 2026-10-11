@@ -30,6 +30,8 @@ const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
 const CPUID_STRUCTURED_FEATURES: u32 = 7;
 const CPUID_SMEP: u32 = 1 << 7;
 const CPUID_SMAP: u32 = 1 << 20;
+const CPUID_UMIP: u32 = 1 << 2;
+const CR4_UMIP: u64 = 1 << 11;
 const CR4_SMEP: u64 = 1 << 20;
 const CR4_SMAP: u64 = 1 << 21;
 
@@ -450,6 +452,29 @@ pub(crate) fn supervisor_access_prevention_enabled() -> bool {
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
     }
     cr4 & CR4_SMAP != 0
+}
+
+pub(crate) fn enable_user_mode_instruction_prevention() -> bool {
+    if __cpuid(0).eax < CPUID_STRUCTURED_FEATURES
+        || __cpuid_count(CPUID_STRUCTURED_FEATURES, 0).ecx & CPUID_UMIP == 0
+    {
+        return false;
+    }
+    let mut cr4: u64;
+    unsafe {
+        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+        cr4 |= CR4_UMIP;
+        asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack, preserves_flags));
+    }
+    user_mode_instruction_prevention_enabled()
+}
+
+pub(crate) fn user_mode_instruction_prevention_enabled() -> bool {
+    let cr4: u64;
+    unsafe {
+        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+    }
+    cr4 & CR4_UMIP != 0
 }
 
 pub(crate) unsafe fn with_supervisor_user_access<T>(operation: impl FnOnce() -> T) -> T {

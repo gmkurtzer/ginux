@@ -23,6 +23,9 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
   rechecked on the same schedule. Assembly entries clear AC before entering
   Rust; the few intentional bootstrap reads and writes of user mappings use a
   bounded `STAC`/`CLAC` scope while interrupts remain disabled.
+- User-mode instruction prevention (`CR4.UMIP`) required, enabled, and
+  rechecked so ring 3 cannot inspect global/local descriptor tables, the task
+  register, or the interrupt descriptor table with the affected instructions.
 
 Interrupts remain disabled while kernel bootstrap code runs. The kernel triggers
 `INT3` during every QEMU boot test; the assembly entry stub preserves
@@ -55,8 +58,8 @@ on a reset or timeout.
 All assembly-to-Rust callbacks use the explicit `sysv64` ABI. The UEFI target's
 default C ABI is Microsoft x64 and must not be assumed by handwritten stubs.
 
-The checked-in QEMU runner requests `qemu64,+smep,+smap`; a virtual CPU that
-does not advertise both features fails boot rather than silently weakening the
-boundary. The current access scope serves fixed bootstrap mappings only; a
-general user-copy API must additionally validate ranges and recover from copy
-faults before arbitrary userspace buffers are accepted.
+The checked-in QEMU runner requests `qemu64,+smep,+smap,+umip`; a virtual CPU
+that does not advertise all three features fails boot rather than silently
+weakening the boundary. The current access scope serves fixed bootstrap
+mappings only; a general user-copy API must additionally validate ranges and
+recover from copy faults before arbitrary userspace buffers are accepted.
