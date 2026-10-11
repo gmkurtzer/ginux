@@ -513,6 +513,11 @@ if ! grep -q '^ginux: non-executable Linux GNU stack enforced' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux ELF metadata headers validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux ELF metadata headers were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded multi-page Linux ELF plan verified' "$output_file"; then
     echo "Boot test failed: bounded multi-page Linux ELF planning was not verified." >&2
     exit 1

@@ -1,8 +1,9 @@
 const ELF_HEADER_SIZE: usize = 64;
 pub(crate) const PROGRAM_HEADER_SIZE: usize = 56;
 const LOAD_SEGMENT_COUNT: usize = 2;
-const MAX_PROGRAM_HEADER_COUNT: usize = 3;
+const MAX_PROGRAM_HEADER_COUNT: usize = 4;
 const PT_LOAD: u32 = 1;
+const PT_PHDR: u32 = 6;
 const PT_GNU_STACK: u32 = 0x6474_e551;
 const ET_EXEC: u16 = 2;
 const EM_X86_64: u16 = 62;
@@ -83,19 +84,39 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
         return None;
     }
     let entry = read_u64(bytes, 24)?;
-    let first = parse_segment(bytes, ELF_HEADER_SIZE)?;
-    let second = parse_segment(bytes, ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE)?;
-    if program_header_count == MAX_PROGRAM_HEADER_COUNT
-        && !valid_gnu_stack(bytes, ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE)
-    {
-        return None;
+    let mut loads = [None; LOAD_SEGMENT_COUNT];
+    let mut load_count = 0;
+    let mut gnu_stack_seen = false;
+    let mut phdr_address = None;
+    for index in 0..program_header_count {
+        let header = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
+        match read_u32(bytes, header)? {
+            PT_LOAD if load_count < LOAD_SEGMENT_COUNT => {
+                loads[load_count] = Some(parse_segment(bytes, header)?);
+                load_count += 1;
+            }
+            PT_GNU_STACK if !gnu_stack_seen && valid_gnu_stack(bytes, header) => {
+                gnu_stack_seen = true;
+            }
+            PT_PHDR if phdr_address.is_none() => {
+                phdr_address = Some(parse_phdr(bytes, header, program_header_count)?);
+            }
+            _ => return None,
+        }
     }
+    let loads = [loads[0]?, loads[1]?];
+    let executable = *loads
+        .iter()
+        .find(|segment| segment.flags & PF_EXECUTE != 0)?;
+    let writable = *loads.iter().find(|segment| segment.flags & PF_WRITE != 0)?;
+    let segments = [executable, writable];
+    let first = segments[0];
+    let second = segments[1];
     let first_end = first.virtual_address.checked_add(first.memory_size)?;
     let second_end = second.virtual_address.checked_add(second.memory_size)?;
     if first.virtual_address < second_end && second.virtual_address < first_end {
         return None;
     }
-    let segments = [first, second];
     let executable_count = segments
         .iter()
         .filter(|segment| segment.flags & PF_EXECUTE != 0)
@@ -128,6 +149,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
                     .checked_add(table_offset - segment.file_offset)
             })?
     })?;
+    if phdr_address.is_some_and(|address| address != program_headers) {
+        return None;
+    }
     Some(Image {
         entry,
         program_headers,
@@ -234,10 +258,38 @@ fn valid_gnu_stack(bytes: &[u8], header: usize) -> bool {
         && read_u64(bytes, header + 48) == Some(16)
 }
 
+fn parse_phdr(bytes: &[u8], header: usize, program_header_count: usize) -> Option<u64> {
+    let table_size = PROGRAM_HEADER_SIZE.checked_mul(program_header_count)? as u64;
+    (read_u32(bytes, header + 4)? == PF_READ
+        && read_u64(bytes, header + 8)? == ELF_HEADER_SIZE as u64
+        && read_u64(bytes, header + 24)? == 0
+        && read_u64(bytes, header + 32)? == table_size
+        && read_u64(bytes, header + 40)? == table_size
+        && read_u64(bytes, header + 48)? == 8)
+        .then(|| read_u64(bytes, header + 16))?
+}
+
 pub(crate) fn verify_parser() -> bool {
     let image = fixture();
     let mut without_stack = image;
     write_u16(&mut without_stack, 56, LOAD_SEGMENT_COUNT as u16);
+    let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
+    let phdr_header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
+    let mut with_phdr = image;
+    write_phdr(&mut with_phdr, stack_header, 3);
+    let mut with_phdr_and_stack = image;
+    write_u16(&mut with_phdr_and_stack, 56, 4);
+    write_phdr(&mut with_phdr_and_stack, phdr_header, 4);
+    let mut reordered = with_phdr_and_stack;
+    swap_program_headers(&mut reordered, ELF_HEADER_SIZE, phdr_header);
+    let mut duplicate_stack = with_phdr_and_stack;
+    write_gnu_stack(&mut duplicate_stack, phdr_header);
+    let mut duplicate_phdr = with_phdr_and_stack;
+    write_phdr(&mut duplicate_phdr, stack_header, 4);
+    let mut bad_phdr_address = with_phdr;
+    write_u64(&mut bad_phdr_address, stack_header + 16, 0x40_0048);
+    let mut bad_phdr_size = with_phdr;
+    write_u64(&mut bad_phdr_size, stack_header + 32, 1);
     let Some(parsed) = parse(&image) else {
         return false;
     };
@@ -256,6 +308,16 @@ pub(crate) fn verify_parser() -> bool {
         return false;
     }
     parse(&without_stack).is_some()
+        && parse(&with_phdr).is_some_and(|image| image.program_headers == 0x40_0040)
+        && parse(&with_phdr_and_stack).is_some()
+        && parse(&reordered).is_some_and(|image| {
+            image.segments[0].flags == PF_READ | PF_EXECUTE
+                && image.segments[1].flags == PF_READ | PF_WRITE
+        })
+        && parse(&duplicate_stack).is_none()
+        && parse(&duplicate_phdr).is_none()
+        && parse(&bad_phdr_address).is_none()
+        && parse(&bad_phdr_size).is_none()
         && rejects(&image, 0, b'X')
         && rejects(&image, 4, 1)
         && rejects_u16(&image, 16, 3)
@@ -351,7 +413,7 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
     write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
     write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
     write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
-    write_u16(&mut bytes, 56, MAX_PROGRAM_HEADER_COUNT as u16);
+    write_u16(&mut bytes, 56, (LOAD_SEGMENT_COUNT + 1) as u16);
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE,
@@ -371,12 +433,36 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
         PF_READ | PF_WRITE,
     );
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
-    write_u32(&mut bytes, stack_header, PT_GNU_STACK);
-    write_u32(&mut bytes, stack_header + 4, PF_READ | PF_WRITE);
-    write_u64(&mut bytes, stack_header + 48, 16);
+    write_gnu_stack(&mut bytes, stack_header);
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
     bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
     bytes
+}
+
+fn write_gnu_stack(bytes: &mut [u8], header: usize) {
+    bytes[header..header + PROGRAM_HEADER_SIZE].fill(0);
+    write_u32(bytes, header, PT_GNU_STACK);
+    write_u32(bytes, header + 4, PF_READ | PF_WRITE);
+    write_u64(bytes, header + 48, 16);
+}
+
+fn write_phdr(bytes: &mut [u8], header: usize, program_header_count: usize) {
+    bytes[header..header + PROGRAM_HEADER_SIZE].fill(0);
+    write_u32(bytes, header, PT_PHDR);
+    write_u32(bytes, header + 4, PF_READ);
+    write_u64(bytes, header + 8, ELF_HEADER_SIZE as u64);
+    write_u64(bytes, header + 16, 0x40_0040);
+    let table_size = (program_header_count * PROGRAM_HEADER_SIZE) as u64;
+    write_u64(bytes, header + 32, table_size);
+    write_u64(bytes, header + 40, table_size);
+    write_u64(bytes, header + 48, 8);
+}
+
+fn swap_program_headers(bytes: &mut [u8], first: usize, second: usize) {
+    let mut saved = [0_u8; PROGRAM_HEADER_SIZE];
+    saved.copy_from_slice(&bytes[first..first + PROGRAM_HEADER_SIZE]);
+    bytes.copy_within(second..second + PROGRAM_HEADER_SIZE, first);
+    bytes[second..second + PROGRAM_HEADER_SIZE].copy_from_slice(&saved);
 }
 
 fn write_segment(

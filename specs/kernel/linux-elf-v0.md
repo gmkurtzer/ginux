@@ -9,9 +9,14 @@ System-V or Linux ABI, `ET_EXEC`, and machine `EM_X86_64`. The ELF header and
 program-header sizes must match the published 64-bit layout. Section headers,
 processor flags, and extended counts are rejected rather than ignored.
 
-Exactly two `PT_LOAD` program headers are required. A third `PT_GNU_STACK`
-header is optional and must request read/write, non-executable memory with no
-file or virtual range. Each load segment must be readable, nonempty in the
+Exactly two `PT_LOAD` program headers are required. One `PT_GNU_STACK` header
+is optional and must request read/write, non-executable memory with no file or
+virtual range. One `PT_PHDR` header is also optional; it must be read-only and
+must exactly describe the in-image program-header table at its derived mapped
+address. Up to four recognized headers may appear in any order. The parser
+normalizes the two load segments by executable and writable role before
+planning. Unknown and duplicate metadata headers are rejected. Each load
+segment must be readable, nonempty in the
 file, contained within the supplied image, aligned to a nonzero power of two
 with congruent file and virtual addresses, and mapped wholly inside the lower
 canonical user range beginning at `0x10000`. File size may be smaller than
@@ -26,12 +31,13 @@ code, and uses a non-page-base entry. Its RW segment has eight file bytes and a
 4608-byte memory extent spanning two pages. The verifier then rejects
 bad magic, wrong class, non-executable file type, wrong machine, an out-of-range
 entry point, W+X flags, overflowing file size, overlapping virtual ranges, an
-executable GNU stack, a non-load segment header, and truncation. The same image
-without the optional GNU stack header is also accepted.
+executable GNU stack, malformed or duplicate metadata, unsupported header
+types, and truncation. Images with neither metadata header, either one, or both
+are accepted when their declarations are valid.
 
 The strict profile prevents unsupported features from being silently
 interpreted with weaker semantics. It does not accept position-independent
-`ET_DYN`, load `PT_INTERP`, allow general program-header ordering, perform
+`ET_DYN`, load `PT_INTERP`, accept arbitrary program-header types, perform
 relocations, or support glibc.
 
 ## Page-image plan
