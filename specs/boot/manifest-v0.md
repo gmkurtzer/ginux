@@ -22,7 +22,8 @@ The parser permits one through eight grants, requires the total size to equal
 the header plus all records, rejects zero objects/rights, unknown right bits,
 duplicate objects, trailing data, and nonzero reserved fields. The current
 manifest authorizes host-control object 1 with read/write/manage and console
-object 2 with write. These parsed grants—not parallel hard-coded roots—seed the
+object 2 with write. Object 3 grants read/write access to the bounded bootstrap
+IPC channel. These parsed grants—not parallel hard-coded roots—seed the
 control-plane capability table before its authority insertion path is sealed.
 The bundle range in handoff v2 must exactly match the recorded size and digest;
 only those verified bytes are copied into the ring-3 executable mapping.

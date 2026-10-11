@@ -5,6 +5,7 @@ mod arch;
 mod capability;
 mod crypto;
 mod domain;
+mod ipc;
 mod manifest;
 mod memory;
 mod scheduler;
@@ -364,18 +365,27 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.control_plane_bundle,
         boot_info.control_plane_bundle_size,
     );
-    let (Some(host_handle), Some(console_handle)) = (
+    if !ipc::verify_channel_invariants() {
+        kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
+    }
+    let (Some(host_handle), Some(console_handle), Some(ipc_handle)) = (
         domain::control_plane_boot_handle(0),
         domain::control_plane_boot_handle(1),
+        domain::control_plane_boot_handle(2),
     ) else {
         kernel_fail("\r\nginux: control-plane bootstrap handles unavailable\r\n");
     };
-    if !address_space::verify_ring3_control_plane(control_plane_bundle, host_handle, console_handle)
-    {
+    if !address_space::verify_ring3_control_plane(
+        control_plane_bundle,
+        host_handle,
+        console_handle,
+        ipc_handle,
+    ) {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: two ring-3 contexts yielded and exited");
+    serial_write("\r\nginux: capability-gated bounded IPC verified");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }

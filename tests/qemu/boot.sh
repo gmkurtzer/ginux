@@ -228,6 +228,11 @@ if ! grep -q '^ginux: two ring-3 contexts yielded and exited' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: capability-gated bounded IPC verified' "$output_file"; then
+    echo "Boot test failed: bounded IPC authority or FIFO behavior failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: scheduler context lifecycle verified' "$output_file"; then
     echo "Boot test failed: scheduler context lifecycle invariants failed." >&2
     exit 1

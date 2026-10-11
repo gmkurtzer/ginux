@@ -75,6 +75,10 @@ pub(crate) struct UserTrapFrame {
 }
 
 impl UserTrapFrame {
+    pub(crate) fn first_argument(&self) -> u64 {
+        self.rsi
+    }
+
     fn selectors_match(&self, code_selector: u16, data_selector: u16) -> bool {
         self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
     }
@@ -270,6 +274,7 @@ pub(crate) fn initialize_runtime(
     second_stack: usize,
     host_handle: u64,
     console_handle: u64,
+    ipc_handle: u64,
 ) -> bool {
     if RUNTIME_INITIALIZED.load(Ordering::Acquire) {
         return false;
@@ -281,6 +286,8 @@ pub(crate) fn initialize_runtime(
         first_stack,
         host_handle,
         console_handle,
+        ipc_handle,
+        1,
     );
     let second = initial_context(
         address_space_root,
@@ -288,6 +295,8 @@ pub(crate) fn initialize_runtime(
         second_stack,
         host_handle,
         console_handle,
+        ipc_handle,
+        2,
     );
     if scheduler.create(1, first).is_none()
         || scheduler.create(1, second).is_none()
@@ -396,6 +405,8 @@ fn initial_context(
     stack: usize,
     host_handle: u64,
     console_handle: u64,
+    ipc_handle: u64,
+    identity: u64,
 ) -> UserContext {
     UserContext {
         rax: 0,
@@ -405,8 +416,8 @@ fn initial_context(
         rsi: 0,
         rdi: 0,
         rbp: 0,
-        r8: 0,
-        r9: 0,
+        r8: ipc_handle,
+        r9: identity,
         r10: 0,
         r11: 0,
         r12: 0,

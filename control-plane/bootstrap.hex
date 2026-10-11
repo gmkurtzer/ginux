@@ -3,19 +3,42 @@
 b801000000
 cd80
 3dfeffffff
-7523
+7557
 
 # mov rdi, rbx; allowed host read with host-control handle
 4889df
 b801000000
 cd80
 3d58470000
-7512
+7546
+
+# reject IPC send through a capability for the wrong object
+4889cf
+4c89ce
+b804000000
+cd80
+3dfdffffff
+7532
+
+# enqueue this context's identity through the IPC capability
+4c89c7
+4c89ce
+b804000000
+cd80
+85c0
+7521
 
 # cooperatively yield once, then require a zero resume result
 b803000000
 cd80
 85c0
+7516
+
+# dequeue and require this context's FIFO message
+4c89c7
+b805000000
+cd80
+4c39c8
 7507
 
 # exit; ud2 if exit unexpectedly returns or a check fails

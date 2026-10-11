@@ -1,6 +1,6 @@
 use core::arch::{asm, x86_64::__cpuid};
 
-use crate::{arch::x86_64::cpu, memory, scheduler};
+use crate::{arch::x86_64::cpu, ipc, memory, scheduler};
 
 const PAGE_SIZE: usize = 4096;
 const ENTRY_COUNT: usize = 512;
@@ -151,6 +151,7 @@ pub(crate) fn verify_ring3_control_plane(
     program: &[u8],
     host_handle: u64,
     console_handle: u64,
+    ipc_handle: u64,
 ) -> bool {
     if !enable_execute_disable() {
         return false;
@@ -169,14 +170,17 @@ pub(crate) fn verify_ring3_control_plane(
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
         }
-        if !scheduler::initialize_runtime(
-            space.root,
-            USER_TEST_ADDRESS,
-            USER_TEST_ADDRESS + 3 * PAGE_SIZE,
-            USER_TEST_ADDRESS + 5 * PAGE_SIZE,
-            host_handle,
-            console_handle,
-        ) {
+        if !ipc::initialize_control_channel()
+            || !scheduler::initialize_runtime(
+                space.root,
+                USER_TEST_ADDRESS,
+                USER_TEST_ADDRESS + 3 * PAGE_SIZE,
+                USER_TEST_ADDRESS + 5 * PAGE_SIZE,
+                host_handle,
+                console_handle,
+                ipc_handle,
+            )
+        {
             return false;
         }
         activate(space.root);
@@ -185,9 +189,13 @@ pub(crate) fn verify_ring3_control_plane(
             USER_TEST_ADDRESS + 3 * PAGE_SIZE,
             host_handle,
             console_handle,
+            ipc_handle,
         );
         activate(kernel_root);
-        handled && scheduler::verify_runtime_complete() && current_root() == kernel_root
+        handled
+            && scheduler::verify_runtime_complete()
+            && ipc::is_empty()
+            && current_root() == kernel_root
     }
 }
 
