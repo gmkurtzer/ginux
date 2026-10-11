@@ -85,7 +85,18 @@ crossing the declared writable extent returns `-EFAULT`. `rax = 274`
 (`__NR_get_robust_list`) reports the retained head and length for PID 0 or 1;
 foreign PIDs return `-ESRCH`. Both eight-byte output ranges are validated before
 either is changed. Exit discards the registration, but no robust futex traversal
-or recovery is attempted. The probe finally uses `rax = 231`
+or recovery is attempted.
+
+`rax = 10` (`__NR_mprotect`) supports one irreversible transition: the second
+page of the declared RW segment may become read-only/NX for the rest of the
+process lifetime. The address and 4096-byte length must be page-aligned and
+exact, and the only accepted protection is `PROT_READ`; all other requests
+return `-EINVAL`. The kernel clears the hardware leaf's writable bit, invalidates
+that translation, and records the VMA change before resuming userspace. The
+probe confirms that a subsequent `write` can still copy from the page while
+`uname` copy-out returns `-EFAULT`. Repeating the transition is rejected. This
+is the first mechanism needed to enforce a future `PT_GNU_RELRO` declaration,
+not a general memory-management API. The probe finally uses `rax = 231`
 (`__NR_exit_group`) with `rdi = 42` (status).
 Immediately before entry, the kernel:
 
@@ -116,6 +127,7 @@ or credential-based permissions, a general file-descriptor table, output
 streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
 `write`, `brk`, `uname`, `getcwd`, bounded `readlink`,
+bounded read-only `mprotect`,
 `umask`, read-only `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,

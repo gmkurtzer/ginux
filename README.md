@@ -45,6 +45,9 @@ part of exit.
 Bounded `set_robust_list` and `get_robust_list` calls retain and report one
 24-byte thread robust-list head, reject foreign process IDs and invalid ranges,
 and discard the registration during exit. Futex recovery is not implemented.
+Bounded `mprotect` can irreversibly seal the writable segment's second page as
+read-only/NX. The page-table permission and syscall copy direction change
+together: reads continue, writes fail, and executable permissions are rejected.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.

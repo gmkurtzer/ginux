@@ -45,6 +45,7 @@ const FS_BASE_MSR: u32 = 0xc000_0100;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
 const LINUX_WRITE_SYSCALL: u64 = 1;
+const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
@@ -87,6 +88,7 @@ const LINUX_ENAMETOOLONG: u64 = u64::MAX - 35;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
+const LINUX_PROT_READ: u64 = 1;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -175,6 +177,7 @@ static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -752,6 +755,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_BRK_LIMIT.store(heap_limit as u64, Ordering::SeqCst);
     ELF_PROBE_CLEAR_CHILD_TID.store(0, Ordering::SeqCst);
     ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
+    ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
@@ -759,6 +763,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
+    let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
     let mut cleared_tid = [0xff_u8; size_of::<u32>()];
     let child_tid_cleared = clear_child_tid == execution.data as u64 + LINUX_CLEAR_CHILD_TID_OFFSET
@@ -783,6 +788,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && completed
         && child_tid_cleared
         && robust_list_cleared
+        && protected_page == execution.data as u64 + PAGE_SIZE as u64
         && heap_written
         && umask_restored
         && msrs_restored
@@ -1070,6 +1076,22 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EFAULT
             }
         }
+        LINUX_MPROTECT_SYSCALL => {
+            let data_tail = ELF_PROBE_DATA
+                .load(Ordering::SeqCst)
+                .saturating_add(PAGE_SIZE as u64);
+            if first_argument != data_tail || buffer != PAGE_SIZE as u64 || count != LINUX_PROT_READ
+            {
+                return LINUX_EINVAL;
+            }
+            if ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst) != 0
+                || !crate::address_space::protect_current_user_page_read_only(first_argument)
+            {
+                return LINUX_EINVAL;
+            }
+            ELF_PROBE_READ_ONLY_DATA_PAGE.store(first_argument, Ordering::SeqCst);
+            0
+        }
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
             let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
@@ -1285,7 +1307,11 @@ fn copy_linux_cpu_location(cpu_address: u64, node_address: u64) -> bool {
 fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {
     let base = ELF_PROBE_DATA.load(Ordering::SeqCst);
     let size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
-    if linux_range_contains(base, size, address, length) {
+    let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst);
+    if linux_range_contains(base, size, address, length)
+        && (protected_page == 0
+            || !linux_ranges_overlap(address, length, protected_page, PAGE_SIZE))
+    {
         return true;
     }
     let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
@@ -1297,6 +1323,21 @@ fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {
         .load(Ordering::SeqCst)
         .saturating_sub(PAGE_SIZE as u64);
     linux_range_contains(heap_base, brk.saturating_sub(heap_base), address, length)
+}
+
+fn linux_ranges_overlap(
+    first: u64,
+    first_length: usize,
+    second: u64,
+    second_length: usize,
+) -> bool {
+    let Some(first_end) = first.checked_add(first_length as u64) else {
+        return true;
+    };
+    let Some(second_end) = second.checked_add(second_length as u64) else {
+        return true;
+    };
+    first < second_end && second < first_end
 }
 
 fn linux_range_contains(base: u64, size: u64, address: u64, length: usize) -> bool {
@@ -1329,7 +1370,10 @@ pub(crate) fn verify_linux_copy_bounds(base: u64, size: usize) -> bool {
 fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
     let code_base = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
     let code_size = ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst);
+    let data_base = ELF_PROBE_DATA.load(Ordering::SeqCst);
+    let data_size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
     if !linux_range_contains(code_base, code_size, address, output.len())
+        && !linux_range_contains(data_base, data_size, address, output.len())
         && !linux_writable_user_range_contains(address, output.len())
     {
         return false;

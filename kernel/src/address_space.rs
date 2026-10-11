@@ -531,6 +531,42 @@ pub(crate) fn copy_to_current_user(address: u64, input: &[u8]) -> bool {
     true
 }
 
+pub(crate) fn protect_current_user_page_read_only(address: u64) -> bool {
+    if address >= 1 << 47 || !address.is_multiple_of(PAGE_SIZE as u64) {
+        return false;
+    }
+    let indexes = [
+        ((address >> 39) & 0x1ff) as usize,
+        ((address >> 30) & 0x1ff) as usize,
+        ((address >> 21) & 0x1ff) as usize,
+        ((address >> 12) & 0x1ff) as usize,
+    ];
+    let mut table = current_root();
+    for (level, index) in indexes.into_iter().enumerate() {
+        let Some(entries) = mapped_frame::<u64>(table & ADDRESS_MASK) else {
+            return false;
+        };
+        let entry = unsafe { entries.add(index).read() };
+        if entry & (PRESENT | WRITABLE | USER) != PRESENT | WRITABLE | USER
+            || (level == 1 || level == 2) && entry & LARGE_PAGE != 0
+        {
+            return false;
+        }
+        if level == 3 {
+            if entry & NO_EXECUTE == 0 {
+                return false;
+            }
+            unsafe {
+                entries.add(index).write(entry & !WRITABLE);
+                asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+            }
+            return unsafe { entries.add(index).read() & WRITABLE == 0 };
+        }
+        table = entry & ADDRESS_MASK;
+    }
+    false
+}
+
 fn current_user_root_is_owned(root: u64) -> bool {
     if scheduler::current_address_space_root() != Some(root) {
         return false;
