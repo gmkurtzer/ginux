@@ -654,6 +654,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux TLS execution context switched and restored\r\n");
     serial_write("ginux: bounded Linux TID lifecycle validated\r\n");
     serial_write("ginux: stale Linux thread handles rejected\r\n");
+    serial_write("ginux: Linux per-thread exit state isolated\r\n");
+    serial_write("ginux: Linux thread exit registrations cleared\r\n");
     serial_write("ginux: Linux thread table reclaimed on exit\r\n");
     serial_write("ginux: sibling Linux TLS frame scrubbed and released\r\n");
     serial_write("ginux: Linux TLS frame scrubbed and released\r\n");

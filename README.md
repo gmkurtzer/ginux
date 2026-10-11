@@ -100,6 +100,14 @@ current table entry rather than embedding TID 1. Process exit retires the
 initial entry and teardown requires the complete table to be empty before
 resetting the process-local TID sequence. There is still no userspace `clone`,
 second Linux stack, or concurrently schedulable Linux thread.
+Each thread slot also owns its clear-child-TID pointer and robust-list head.
+The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
+switches between them, and proves neither becomes visible through the other.
+Retiring TID 2 clears both values before its slot is reused, and the replacement
+starts empty. The real TID 1 syscall registrations are resolved through that
+slot; exit zeroes the exact registered child-TID word, records and clears the
+exact robust-list head, then retires the thread. Post-exit verification requires
+both per-thread fields to be zero in every slot.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The

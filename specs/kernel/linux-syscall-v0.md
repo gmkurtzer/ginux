@@ -554,16 +554,18 @@ Next, `rax = 218` (`__NR_set_tid_address`) registers a
 four-byte word inside the declared RW segment and returns the current table
 entry's TID 1. The bounded
 proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
-registered word;
+registered word and clears the pointer from that thread's slot;
 because this profile has no second thread or futex support, there is no waiter
 to wake. `rax = 273` (`__NR_set_robust_list`) registers one writable 24-byte
-robust-list head for that thread. Other lengths return `-EINVAL`, and a head
+robust-list head in the current generation-tagged thread slot. Other lengths return `-EINVAL`, and a head
 crossing the declared writable extent returns `-EFAULT`. `rax = 274`
 (`__NR_get_robust_list`) reports the retained head and length for PID 0 or the
 current table entry's TID;
 foreign PIDs return `-ESRCH`. Both eight-byte output ranges are validated before
 either is changed. Exit discards the registration, but no robust futex traversal
-or recovery is attempted.
+or recovery is attempted. Internal TID lifecycle testing assigns distinct
+clear-child-TID and robust-list sentinels to two slots, proves they follow the
+current-thread selection, and proves retirement clears them before slot reuse.
 
 `rax = 202` (`__NR_futex`) provides the nonblocking portion of the single-thread
 futex contract. Aligned, readable `FUTEX_WAIT` and `FUTEX_WAIT_PRIVATE` compare

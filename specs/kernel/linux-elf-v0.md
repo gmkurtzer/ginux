@@ -447,6 +447,17 @@ monotonic across these proofs. This table supplies bounded identity and
 lifecycle state only; it does not allocate a second stack, create a child
 register context, or make a second Linux thread runnable.
 
+Clear-child-TID and robust-list registrations belong to the generation-tagged
+thread slot rather than process-global state. The lifecycle proof assigns
+different nonzero sentinel values to TIDs 1 and 2, switches between them, and
+requires each current-thread lookup to return only its own pair. Retiring TID 2
+clears both fields; its TID 3 replacement must begin with both fields zero.
+Before retiring the real initial thread, the exit path clears its registered
+four-byte child-TID word, clears both slot registrations, and publishes the
+exact consumed addresses as teardown evidence. Final verification matches
+those addresses to the workload's authenticated writable segment and requires
+all table slots to contain zero registration state.
+
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
 it may describe at most 23 entries. The interpreter derives the runtime

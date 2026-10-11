@@ -693,6 +693,16 @@ if ! grep -q '^ginux: stale Linux thread handles rejected' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux per-thread exit state isolated' "$output_file"; then
+    echo "Boot test failed: Linux per-thread exit state was not isolated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux thread exit registrations cleared' "$output_file"; then
+    echo "Boot test failed: Linux thread exit registrations were not cleared." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux thread table reclaimed on exit' "$output_file"; then
     echo "Boot test failed: Linux thread table was not reclaimed on exit." >&2
     exit 1
