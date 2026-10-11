@@ -87,9 +87,9 @@ creating an unsequenced teardown. A full event FIFO still permits retirement
 because its sticky overflow record preserves the first dropped auxiliary
 generation, sequence, and count; this matches the existing mandatory-teardown
 policy for service faults.
-Auxiliary registration is exposed to userspace, while address-space loading
-and scheduler admission remain kernel-only and auxiliaries deliberately have
-no restart policy. The boot proof stages and fully rolls back an unstarted auxiliary domain with a real
+Auxiliary registration and bounded one-page loading/admission are exposed to
+userspace, while auxiliaries deliberately have no restart policy. The boot
+proof stages and fully rolls back an unstarted auxiliary domain with a real
 allocator-owned W^X address space. A validated exact-generation resource bind
 temporarily permits one accounted thread reservation, but no scheduler context
 is queued during this transaction.
@@ -118,8 +118,8 @@ active or unrelated hierarchy. The QEMU hardware gate now queues one minimal
 exit-only auxiliary context after the primary workload. It requires ring-3
 execution, clean stop-only retirement, exact lifecycle domain/service identity,
 stale capability rejection, an empty address-space registry, and zero remaining
-owned frames. General userspace loading and scheduler admission are not yet
-exposed. A second hardware-gated auxiliary context deliberately raises
+owned frames. Multi-page executable images and general admission policy are not
+yet exposed. A second hardware-gated auxiliary context deliberately raises
 `#UD`; the proof requires lifecycle kind 4, exact domain and stable service
 identity, vector/error/instruction metadata, zero remaining authority and
 frames, and no restart. Only page faults report `CR2`; other exception kinds
@@ -130,13 +130,19 @@ and a valid delegated source capability for the exact requested object and
 rights. Its fixed-size, versioned management request is copied only from the
 caller's validated mapping and leaves action values available for compatible
 lifecycle growth. It creates only an unstarted domain: address-space construction
-and scheduler admission remain separate kernel transactions. The ring-3 proof
+and scheduler admission remain a separate action 3 transaction. The ring-3 proof
 denies creation through a non-managing capability, then delegates attenuated
 host-read authority into the clean-exit workload through the authorized path.
 Management action 2 accepts only an unstarted, resource-free exact generation with zero unused fields,
 reuses the existing two-phase stop transition, and publishes normal auxiliary
 retirement. The proof creates and stops one unstarted generation before creating
 the separate generation admitted to hardware execution.
+Management action 3 performs bounded loading and scheduler admission. It
+accepts an exact ready generation plus a caller-owned source range of at most
+one page, constructs and retains the target's W^X hierarchy, then queues one
+accounted context. The control-plane proof writes a seven-byte exit program,
+loads it through this action, and exits; ordinary scheduler handoff dispatches
+the auxiliary before returning to the kernel verifier.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

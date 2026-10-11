@@ -19,7 +19,7 @@ pub(crate) fn parse_management_request(
         || version != VERSION
         || !matches!(
             action,
-            MANAGEMENT_CREATE_AUXILIARY | MANAGEMENT_STOP_AUXILIARY
+            MANAGEMENT_CREATE_AUXILIARY | MANAGEMENT_STOP_AUXILIARY | MANAGEMENT_LOAD_AUXILIARY
         )
     {
         return None;

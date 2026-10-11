@@ -508,6 +508,11 @@ if ! grep -q '^ginux: userspace auxiliary stop sequenced and retired' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace auxiliary load and admission enforced' "$output_file"; then
+    echo "Boot test failed: userspace auxiliary load and admission were not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: stop-only auxiliary fault executed and contained' "$output_file"; then
     echo "Boot test failed: stop-only auxiliary fault was not contained." >&2
     exit 1

@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
 const MAX_BOOT_GRANTS: usize = 8;
-const CONTROL_CALL_BUDGET: u16 = 29;
+const CONTROL_CALL_BUDGET: u16 = 30;
 const SERVICE_CALL_BUDGET: u16 = 3;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
@@ -970,26 +970,6 @@ pub(crate) fn domain_service_identity(domain_raw: u64) -> Option<u64> {
     Some(encode_service_id(global_manager()?.domain(id)?.service?))
 }
 
-pub(crate) fn first_ready_auxiliary_service() -> Option<u64> {
-    let manager = global_manager()?;
-    manager
-        .auxiliary_service_ids
-        .iter()
-        .flatten()
-        .find_map(|id| {
-            manager
-                .domain(*id)
-                .filter(|domain| {
-                    domain.role == Role::AuxiliaryService
-                        && domain.state == State::Ready
-                        && domain.address_space_root.is_none()
-                        && domain.active_threads == 0
-                        && domain.active_operations == 0
-                })
-                .map(|domain| encode_id(domain.id))
-        })
-}
-
 pub(crate) fn create_auxiliary_service(
     supervisor_raw: u64,
     host_capability_raw: u64,
@@ -1696,7 +1676,7 @@ pub(crate) fn call_budget_proof_complete() -> bool {
     let Some(control) = manager.control_plane_id.and_then(|id| manager.domain(id)) else {
         return false;
     };
-    control.remaining_calls == 0 && manager.total_calls == 34
+    control.remaining_calls == 0 && manager.total_calls == 35
 }
 
 pub(crate) fn attach_thread(domain_raw: u64) -> bool {
@@ -1753,7 +1733,7 @@ pub(crate) fn thread_budget_proof_complete() -> bool {
     };
     control.active_threads == 0
         && control.thread_limit == BOOTSTRAP_THREAD_LIMIT
-        && manager.total_thread_attaches == 4
+        && manager.total_thread_attaches == 5
 }
 
 pub(crate) fn service_restart_budget_proof_complete() -> bool {

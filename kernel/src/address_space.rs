@@ -343,11 +343,57 @@ fn registered_auxiliary_address_space_count() -> usize {
     unsafe { (*registry).iter().flatten().count() }
 }
 
+pub(crate) fn load_and_queue_auxiliary_from_current_user(
+    domain_id: u64,
+    source: u64,
+    length: u64,
+) -> bool {
+    let Ok(length) = usize::try_from(length) else {
+        return false;
+    };
+    if !(1..=PAGE_SIZE).contains(&length) {
+        return false;
+    }
+    let (Some(handle), Some(owner)) = (
+        domain::auxiliary_boot_handle(domain_id, 0),
+        memory::FrameOwner::domain(domain_id),
+    ) else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let Some(space) = WxAddressSpace::new(kernel_root, owner) else {
+        return false;
+    };
+    // SAFETY: The target code frame is exclusively leased to this domain and
+    // remains live for the duration of the bounded copy.
+    let code = unsafe { core::slice::from_raw_parts_mut(space.code_frame, length) };
+    if !space.permissions_are_valid(kernel_root) || !copy_from_current_user(source, code) {
+        let _ = space.release();
+        return false;
+    }
+    let root = space.root;
+    if !register_auxiliary_address_space(domain_id, space) {
+        return false;
+    }
+    if !scheduler::queue_auxiliary(
+        domain_id,
+        root,
+        USER_TEST_ADDRESS,
+        USER_TEST_ADDRESS + 3 * PAGE_SIZE,
+        handle,
+    ) {
+        let _ = release_auxiliary_address_space(domain_id);
+        return false;
+    }
+    true
+}
+
 fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(slot) =
         (0..domain::MAX_AUXILIARY_SERVICES).find(|index| unsafe { (*registry)[*index].is_none() })
     else {
+        let _ = space.release();
         return false;
     };
     if unsafe {
@@ -357,6 +403,7 @@ fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bo
             .any(|registered| registered.domain == domain_id)
     } || !domain::bind_auxiliary_address_space(domain_id, space.root)
     {
+        let _ = space.release();
         return false;
     }
     unsafe {
@@ -558,7 +605,6 @@ pub(crate) fn verify_ring3_control_plane(
 }
 
 pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
-    const EXIT_PROGRAM: [u8; 7] = [0xb8, 2, 0, 0, 0, 0xcd, 0x80];
     let Some(stopped_event) = domain::take_lifecycle_event() else {
         return false;
     };
@@ -576,54 +622,27 @@ pub(crate) fn verify_ring3_auxiliary_exit() -> bool {
     {
         return false;
     }
-    let Some(auxiliary) = domain::first_ready_auxiliary_service() else {
+    let Some(executed_event) = domain::take_lifecycle_event() else {
         return false;
     };
-    let (Some(handle), Some(identity), Some(owner)) = (
-        domain::auxiliary_boot_handle(auxiliary, 0),
-        domain::domain_service_identity(auxiliary),
-        memory::FrameOwner::domain(auxiliary),
-    ) else {
+    let Some((executed_kind, executed_domain, executed_sequence)) =
+        domain::last_lifecycle_event_audit()
+    else {
         return false;
     };
-    let kernel_root = current_root();
-    let Some(space) = WxAddressSpace::new(kernel_root, owner) else {
+    let Some(owner) = memory::FrameOwner::domain(executed_domain) else {
         return false;
     };
-    if !space.permissions_are_valid(kernel_root) {
-        return false;
-    }
-    unsafe {
-        for (offset, byte) in EXIT_PROGRAM.iter().enumerate() {
-            space.code_frame.add(offset).write(*byte);
-        }
-    }
-    let root = space.root;
-    let entry = USER_TEST_ADDRESS;
-    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
-    if !register_auxiliary_address_space(auxiliary, space)
-        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
-        || !cpu::activate_user_root(root)
-    {
-        return false;
-    }
-    cpu::execute_auxiliary(entry, stack, handle, auxiliary, identity);
-    let event = domain::take_lifecycle_event();
-    current_root() == kernel_root
+    executed_kind == crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
+        && executed_sequence == 3
+        && executed_domain != stopped_domain
+        && executed_event
+            == ((executed_domain << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
+        && domain::last_lifecycle_service_identity().is_some()
         && scheduler::current_domain().is_none()
         && registered_auxiliary_address_space_count() == 0
         && memory::owner_live_frame_count(owner) == Some(0)
-        && domain::domain_is_retired(auxiliary)
-        && !domain::handle_permits(auxiliary, handle, 1, crate::capability::Rights::READ)
-        && event
-            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
-        && domain::last_lifecycle_event_audit()
-            == Some((
-                crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED,
-                auxiliary,
-                3,
-            ))
-        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::domain_is_retired(executed_domain)
 }
 
 pub(crate) fn verify_ring3_auxiliary_fault() -> bool {

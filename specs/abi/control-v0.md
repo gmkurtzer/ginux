@@ -180,6 +180,15 @@ kind 3. Runtime stop is rejected until scheduler cancellation and resource
 drain are integrated with this action. The ring-3 proof stops its first created generation, verifies the
 sequenced retirement in the kernel, then creates a distinct generation for the
 live execution proof.
+Action 3 loads and queues an unstarted auxiliary. The source field is its exact
+domain generation, the object field is a readable caller address, and the
+rights field is a byte length from 1 through 4096. The kernel allocates a fresh
+seven-frame W^X hierarchy, copies only that bounded range through the caller's
+validated mapping into the target's initially zeroed RX code frame, binds the
+resource record, and accounts one ready thread. Any failed stage releases what
+it acquired and returns `UINT64_MAX - 2`. The normal scheduler dispatches the
+target when the control context yields or exits; action 3 does not jump directly
+between domains.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.

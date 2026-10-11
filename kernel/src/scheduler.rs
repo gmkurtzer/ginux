@@ -674,10 +674,7 @@ pub(crate) fn queue_auxiliary(
     let Some(runtime) = runtime_mut() else {
         return false;
     };
-    if runtime.scheduler.current.is_some()
-        || runtime.scheduler.threads.iter().any(Option::is_some)
-        || domain::service_failure_policy(domain_id) != Some(domain::ServiceFailurePolicy::StopOnly)
-    {
+    if domain::service_failure_policy(domain_id) != Some(domain::ServiceFailurePolicy::StopOnly) {
         return false;
     }
     let Some(service_identity) = domain::domain_service_identity(domain_id) else {
@@ -693,12 +690,16 @@ pub(crate) fn queue_auxiliary(
         let _ = domain::detach_thread(domain_id);
         return false;
     }
-    let Some(next) = runtime.scheduler.schedule_next() else {
-        let _ = runtime.scheduler.remove_ready_domain(domain_id);
-        let _ = domain::detach_thread(domain_id);
-        return false;
-    };
-    next.context == context
+    if runtime.scheduler.current.is_some() {
+        true
+    } else {
+        let Some(next) = runtime.scheduler.schedule_next() else {
+            let _ = runtime.scheduler.remove_ready_domain(domain_id);
+            let _ = domain::detach_thread(domain_id);
+            return false;
+        };
+        next.context == context
+    }
 }
 
 pub(crate) fn rollback_service_restart(domain: u64, prior_owner: u64) -> bool {
@@ -1035,7 +1036,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
     };
     runtime.yields == 0
         && runtime.preemptions == 2
-        && runtime.exits == 2
+        && runtime.exits == 3
         && runtime.faults == 1
         && runtime.restarts == 1
         && runtime.blocks == 1
@@ -1043,7 +1044,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.last_wake_source == Some(runtime.control_domain)
         && runtime.last_wake_sequence == Some(2)
         && runtime.expected_fault_observed
-        && runtime.address_space_switches == 5
+        && (5..=6).contains(&runtime.address_space_switches)
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)
 }

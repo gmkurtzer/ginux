@@ -894,6 +894,15 @@ fn create_auxiliary_service(
         {
             0
         }
+        control_abi::MANAGEMENT_LOAD_AUXILIARY
+            if address_space::load_and_queue_auxiliary_from_current_user(
+                request.source,
+                request.object,
+                request.rights,
+            ) =>
+        {
+            0
+        }
         _ => u64::MAX - 2,
     }
 }
