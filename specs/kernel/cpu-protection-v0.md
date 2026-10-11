@@ -12,6 +12,8 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
   privilege-transition, and double-fault stacks.
 - An IDT with present interrupt gates for all 32 architectural exception
   vectors.
+- Supervisor write protection (`CR0.WP`) read back as active before ring-3
+  execution.
 
 Interrupts remain disabled while kernel bootstrap code runs. The kernel triggers
 `INT3` during every QEMU boot test; the assembly entry stub preserves

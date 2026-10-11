@@ -23,6 +23,12 @@ builder reads back every protected PTE after loading CR3.
 
 Before writing CR3, the kernel verifies that its current code, stack, boot information, UEFI memory map, shutdown runtime-service entry, and page-table objects all fall within the mapped range. The kernel reads CR3 back and verifies that it identifies the expected PML4.
 
+Immediately after activating the kernel root, the kernel sets and reads back
+`CR0.WP`. Supervisor-mode writes must therefore respect read-only PTEs in both
+the kernel root and every domain root derived from it. This is a prerequisite
+for immutable kernel text and prevents privileged code from bypassing the
+read-only user-code mapping through its user virtual address.
+
 Interrupts remain disabled during and after the transition. They cannot be enabled until Ginux installs its own GDT, IDT, exception handlers, and interrupt-controller policy.
 
 ## Security limitations
@@ -31,6 +37,8 @@ This map is intentionally transitional:
 
 - The entire mapped range is writable and executable.
 - Kernel code, read-only data, mutable data, MMIO, and firmware regions are not separated by permissions.
+- The identity-map alias remains writable, so `CR0.WP` alone does not yet make
+  kernel text or user-code physical frames immutable through every alias.
 - Addresses above 4 GiB are unavailable.
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.
 

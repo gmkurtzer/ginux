@@ -9,6 +9,7 @@ const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const LARGE_PAGE: u64 = 1 << 7;
 const ADDRESS_MASK: usize = 0x000f_ffff_ffff_f000;
+const CR0_WRITE_PROTECT: usize = 1 << 16;
 
 pub(crate) const INITIAL_IDENTITY_LIMIT: usize = 1usize << 32;
 
@@ -160,6 +161,27 @@ pub(crate) unsafe fn install_initial_identity_map(
         return Err(PagingError::ActivationFailed);
     }
 
+    let mut cr0: usize;
+    asm!(
+        "mov {}, cr0",
+        out(reg) cr0,
+        options(nomem, nostack, preserves_flags)
+    );
+    cr0 |= CR0_WRITE_PROTECT;
+    asm!(
+        "mov cr0, {}",
+        in(reg) cr0,
+        options(nostack, preserves_flags)
+    );
+    asm!(
+        "mov {}, cr0",
+        out(reg) cr0,
+        options(nomem, nostack, preserves_flags)
+    );
+    if cr0 & CR0_WRITE_PROTECT == 0 {
+        return Err(PagingError::HardeningFailed);
+    }
+
     for (index, region) in fine_regions[..fine_count].iter().enumerate() {
         let entries = core::ptr::addr_of!((*fine_tables.add(index)).0).cast::<u64>();
         for guard in guard_pages {
@@ -173,6 +195,18 @@ pub(crate) unsafe fn install_initial_identity_map(
     }
 
     Ok(())
+}
+
+pub(crate) fn supervisor_write_protect_enabled() -> bool {
+    let cr0: usize;
+    unsafe {
+        asm!(
+            "mov {}, cr0",
+            out(reg) cr0,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+    cr0 & CR0_WRITE_PROTECT != 0
 }
 
 unsafe fn zero_entries(entries: *mut u64) {

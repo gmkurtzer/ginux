@@ -235,6 +235,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: page-table transition failed\r\n");
     }
     serial_write("ginux: kernel page tables active\r\n");
+    if !arch::x86_64::paging::supervisor_write_protect_enabled() {
+        kernel_fail("ginux: supervisor write protection inactive\r\n");
+    }
+    serial_write("ginux: supervisor write protection active\r\n");
     serial_write("ginux: null and bidirectional stack guard pages active\r\n");
 
     let Some(platform) = arch::x86_64::acpi::discover(
