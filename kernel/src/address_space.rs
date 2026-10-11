@@ -17,7 +17,7 @@ const USER: u64 = 1 << 2;
 const LARGE_PAGE: u64 = 1 << 7;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const USER_TEST_ADDRESS: usize = 1usize << 39;
-const EXPECTED_FAULT_OFFSET: usize = 396;
+const EXPECTED_FAULT_OFFSET: usize = 486;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 
@@ -36,7 +36,7 @@ pub(crate) fn copy_from_current_user(address: u64, output: &mut [u8]) -> bool {
         let Some(byte_address) = address.checked_add(offset as u64) else {
             return false;
         };
-        if !user_address_is_readable(root, byte_address) {
+        if !user_address_has_permissions(root, byte_address, 0) {
             return false;
         }
     }
@@ -50,7 +50,36 @@ pub(crate) fn copy_from_current_user(address: u64, output: &mut [u8]) -> bool {
     true
 }
 
-fn user_address_is_readable(root: u64, address: u64) -> bool {
+pub(crate) fn copy_to_current_user(address: u64, input: &[u8]) -> bool {
+    if input.is_empty() {
+        return false;
+    }
+    let Some(end) = address.checked_add(input.len() as u64) else {
+        return false;
+    };
+    if address >= 1 << 47 || end > 1 << 47 {
+        return false;
+    }
+    let root = current_root();
+    for offset in 0..input.len() {
+        let Some(byte_address) = address.checked_add(offset as u64) else {
+            return false;
+        };
+        if !user_address_has_permissions(root, byte_address, WRITABLE) {
+            return false;
+        }
+    }
+    unsafe {
+        cpu::with_supervisor_user_access(|| {
+            for (offset, byte) in input.iter().enumerate() {
+                (address as *mut u8).add(offset).write_volatile(*byte);
+            }
+        });
+    }
+    true
+}
+
+fn user_address_has_permissions(root: u64, address: u64, required: u64) -> bool {
     let indexes = [
         ((address >> 39) & 0x1ff) as usize,
         ((address >> 30) & 0x1ff) as usize,
@@ -60,7 +89,7 @@ fn user_address_is_readable(root: u64, address: u64) -> bool {
     let mut table = root;
     for (level, index) in indexes.into_iter().enumerate() {
         let entry = unsafe { ((table & ADDRESS_MASK) as *const u64).add(index).read() };
-        if entry & (PRESENT | USER) != PRESENT | USER
+        if entry & (PRESENT | USER | required) != PRESENT | USER | required
             || (level == 1 || level == 2) && entry & LARGE_PAGE != 0
         {
             return false;

@@ -24,6 +24,7 @@ contain ABI version 1 and bits 0-15 contain its feature bitmap:
 | 7 | blocking IPC receive |
 | 8 | sticky generation-tagged IPC peer closure |
 | 9 | bounded userspace reads |
+| 10 | structured ABI descriptor and bounded userspace writes |
 
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
@@ -73,6 +74,15 @@ aliases are rejected. With SMAP temporarily opened around only the copy, the
 kernel stages the complete input in a fixed kernel buffer, validates printable
 UTF-8, and emits it only after every check succeeds. It returns the byte count
 or `UINT64_MAX - 2`; invalid ranges produce no partial console output.
+Operation 10 writes a 16-byte little-endian ABI descriptor to the user virtual
+address in `RSI`; `RDX` must equal 16. The descriptor contains a `u32` byte
+size, `u16` ABI version, `u16` feature bitmap, `u32` maximum buffered-console
+length, and a reserved zero `u32`. Copy-out requires present, user, and writable
+permissions at every page-table level, rejects large pages and range overflow,
+and opens SMAP only for the bounded write. It returns 16 or
+`UINT64_MAX - 2`. The ring-3 proof stores it on a writable stack page, checks
+every field, and requires the same operation to reject its read-only code page
+before continuing.
 Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
@@ -83,7 +93,8 @@ console handle, `R8` contains the IPC handle, and `R9` identifies the proof
 context. For the control context, `R10` contains the initial supervised service
 domain ID. The QEMU payload first writes `BUFFER!\n` from its read-only
 executable mapping through operation 9, then requires the same call to reject
-an unmapped null range without output. It then presents the console write-only
+an unmapped null range without output. It also fetches and validates the
+structured ABI descriptor. It then presents the console write-only
 handle to the host-control operation and requires denial before presenting the
 host-control handle and requiring success. The kernel accepts the boot only after observing denial,
 authorization, rejection of IPC, console, and event calls using the wrong
@@ -96,6 +107,6 @@ word before continuing.
 Handles encode a private table slot and generation and are meaningful only in
 the calling domain selected by the scheduler. The call gate never defaults to
 the control-plane namespace. Stale generations, out-of-range slots, and nonzero
-reserved high bits are rejected. A later version must define argument/result structures,
+reserved high bits are rejected. A later version must define general argument/result structures,
 cancellation and restart semantics, copy/validation rules, transfer semantics,
 and a broader negotiation and deprecation policy.

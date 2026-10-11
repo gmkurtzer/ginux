@@ -19,6 +19,33 @@ cd80
 7402
 0f0b
 
+# request and validate the 16-byte structured ABI descriptor on the user stack
+48be0020000080000000
+ba10000000
+b80a000000
+cd80
+83f810
+7402
+0f0b
+488b06
+48bd100000000100ff07
+4839e8
+7402
+0f0b
+488b4608
+4883f840
+7402
+0f0b
+
+# reject structured copy-out into the read-only user code mapping
+48be0000000080000000
+ba10000000
+b80a000000
+cd80
+83f8fd
+7402
+0f0b
+
 # mov rdi, rcx; denied host read with console handle
 4889cf
 b801000000
@@ -62,7 +89,7 @@ cd80
 # negotiate call-gate ABI v1 and its nine bootstrap features
 b800000000
 cd80
-3dff030100
+3dff070100
 0f858d000000
 
 # branch context 2 into the isolated service role
@@ -150,7 +177,7 @@ cd80
 # replacement service: negotiate ABI and block for a direct wakeup
 b800000000
 cd80
-3dff030100
+3dff070100
 0f85c5ffffff
 4c89c7
 b808000000

@@ -21,7 +21,7 @@ const TSS_SELECTOR: u16 = 0x18;
 pub(crate) const USER_DATA_SELECTOR: u16 = 0x2b;
 pub(crate) const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
-const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_03ff;
+const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_07ff;
 const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
@@ -536,7 +536,7 @@ pub(crate) fn verify_user_syscall(
             service_domain,
         )
     };
-    SYSCALL_STATE.load(Ordering::SeqCst) == 15
+    SYSCALL_STATE.load(Ordering::SeqCst) == 31
 }
 
 pub(crate) fn verify_breakpoint() -> bool {
@@ -747,6 +747,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         }
         8 => blocking_receive(caller_domain, capability, frame),
         9 => console_write_buffer(caller_domain, capability, frame),
+        10 => write_abi_descriptor(frame),
         _ => u64::MAX,
     }
 }
@@ -837,6 +838,20 @@ fn console_write_buffer(domain_id: u64, capability: u64, frame: *const UserTrapF
     serial_write(message);
     SYSCALL_STATE.fetch_or(8, Ordering::SeqCst);
     length as u64
+}
+
+fn write_abi_descriptor(frame: *const UserTrapFrame) -> u64 {
+    const DESCRIPTOR: [u8; 16] = [16, 0, 0, 0, 1, 0, 0xff, 0x07, 64, 0, 0, 0, 0, 0, 0, 0];
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if frame.second_argument() != DESCRIPTOR.len() as u64
+        || !address_space::copy_to_current_user(frame.first_argument(), &DESCRIPTOR)
+    {
+        return u64::MAX - 2;
+    }
+    SYSCALL_STATE.fetch_or(16, Ordering::SeqCst);
+    DESCRIPTOR.len() as u64
 }
 
 fn runtime_result(frame: *mut UserTrapFrame) -> u64 {

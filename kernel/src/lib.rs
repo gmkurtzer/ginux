@@ -570,6 +570,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: control call ABI v1 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
     serial_write("\r\nginux: bounded userspace read enforced");
+    serial_write("\r\nginux: structured userspace ABI result verified");
     serial_write("\r\nginux: ring-3 fault survivor resumed and exited");
     serial_write("\r\nginux: user page fault contained");
     serial_write("\r\nginux: isolated scheduler address spaces switched");
