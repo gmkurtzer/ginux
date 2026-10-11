@@ -48,8 +48,12 @@ with a new generation. Primary-supervised and auxiliary services have distinct
 roles. Only the primary role is admitted to the current scheduler and routed
 through IPC peer closure, fault reporting, restart, and frame quarantine;
 auxiliary thread attachment is rejected until those lifecycle contracts are
-defined. Auxiliary registration is not yet exposed to userspace, assigned
-address spaces, or integrated with an auxiliary supervision policy.
+defined. Auxiliary retirement is an explicit two-phase transition: a stop
+request changes a ready service to stopping, prevents admission of new
+operations, and retirement remains blocked until existing operations drain.
+Repeated or stale stop requests fail closed, and a newly reused slot starts in
+the ready state. Auxiliary registration is not yet exposed to userspace,
+assigned address spaces, or integrated with an auxiliary restart policy.
 
 Lifecycle ancestry and authority provenance are separate fields with separate
 checks. Being a child of the control plane permits accounting and cleanup, but

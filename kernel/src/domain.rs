@@ -32,6 +32,7 @@ enum Role {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum State {
     Ready,
+    Stopping,
 }
 
 #[derive(Clone, Copy)]
@@ -434,7 +435,7 @@ impl Manager {
         else {
             return false;
         };
-        if domain.active_operations >= BOOTSTRAP_OPERATION_LIMIT {
+        if domain.state != State::Ready || domain.active_operations >= BOOTSTRAP_OPERATION_LIMIT {
             return false;
         }
         domain.active_operations += 1;
@@ -534,6 +535,7 @@ impl Manager {
         };
         if self.domain(id).is_none_or(|domain| {
             domain.role != Role::AuxiliaryService
+                || domain.state != State::Stopping
                 || domain.active_threads != 0
                 || domain.active_operations != 0
         }) {
@@ -541,6 +543,25 @@ impl Manager {
         }
         self.domains[usize::from(id.slot)] = None;
         self.auxiliary_service_ids[registry_slot] = None;
+        true
+    }
+
+    fn request_auxiliary_stop(&mut self, id: DomainId) -> bool {
+        if !self.auxiliary_service_ids.contains(&Some(id)) {
+            return false;
+        }
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if domain.role != Role::AuxiliaryService || domain.state != State::Ready {
+            return false;
+        }
+        domain.state = State::Stopping;
         true
     }
 }
@@ -819,10 +840,15 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
         || manager.permits(host_service, host_handle, 1, Rights::MANAGE)
         || !manager.begin_operation(console_service)
         || manager.retire_auxiliary_service(console_service)
+        || !manager.request_auxiliary_stop(console_service)
+        || manager.request_auxiliary_stop(console_service)
+        || manager.begin_operation(console_service)
+        || manager.retire_auxiliary_service(console_service)
         || !manager.end_operation(console_service)
         || manager.retire_service(console_service)
         || !manager.retire_auxiliary_service(console_service)
         || manager.domain(console_service).is_some()
+        || manager.request_auxiliary_stop(console_service)
         || manager.is_descendant(control, console_service)
         || manager.service_id != Some(primary)
         || !manager.permits(host_service, host_handle, 1, Rights::READ)
@@ -837,6 +863,9 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
             && manager.auxiliary_service_ids == [Some(replacement), Some(host_service)]
             && manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
             && !manager.permits(console_service, console_handle, 2, Rights::WRITE)
+            && !manager.retire_auxiliary_service(replacement)
+            && manager.request_auxiliary_stop(replacement)
+            && manager.retire_auxiliary_service(replacement)
             && manager.permits(
                 primary,
                 manager.domain(primary)?.boot_roots[0]?,
