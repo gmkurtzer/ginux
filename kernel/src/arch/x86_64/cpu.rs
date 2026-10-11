@@ -121,6 +121,8 @@ const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
 const LINUX_PR_SET_NAME: u64 = 15;
 const LINUX_PR_GET_NAME: u64 = 16;
+const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
+const LINUX_PR_GET_NO_NEW_PRIVS: u64 = 39;
 const LINUX_PROCESS_NAME_SIZE: usize = 16;
 const LINUX_INITIAL_PROCESS_NAME: u64 = 0x7469_6e69;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
@@ -218,6 +220,7 @@ static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -803,6 +806,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
+    ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -813,6 +817,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
         == LINUX_INITIAL_PROCESS_NAME
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
+    let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
@@ -845,6 +850,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && umask_restored
         && descriptor_state_valid
         && process_name_restored
+        && no_new_privileges_enforced
         && msrs_restored
 }
 
@@ -1249,6 +1255,19 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_PRCTL_SYSCALL => match first_argument {
             LINUX_PR_SET_NAME => linux_set_process_name(buffer),
             LINUX_PR_GET_NAME => linux_get_process_name(buffer),
+            LINUX_PR_SET_NO_NEW_PRIVS
+                if buffer == 1 && count == 0 && register(2) == 0 && register(1) == 0 =>
+            {
+                ELF_PROBE_NO_NEW_PRIVS.store(true, Ordering::SeqCst);
+                0
+            }
+            LINUX_PR_SET_NO_NEW_PRIVS => LINUX_EINVAL,
+            LINUX_PR_GET_NO_NEW_PRIVS
+                if buffer == 0 && count == 0 && register(2) == 0 && register(1) == 0 =>
+            {
+                u64::from(ELF_PROBE_NO_NEW_PRIVS.load(Ordering::SeqCst))
+            }
+            LINUX_PR_GET_NO_NEW_PRIVS => LINUX_EINVAL,
             _ => LINUX_EINVAL,
         },
         LINUX_ARCH_PRCTL_SYSCALL

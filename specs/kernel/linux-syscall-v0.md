@@ -143,7 +143,13 @@ copy at most 15 bytes and always retain a trailing NUL, and getters atomically
 copy all 16 bytes. Invalid user pointers return `-EFAULT`, unknown operations
 return `-EINVAL`, and the proof restores `init` before exit so teardown can
 verify process-local state. Other `prctl` policy and security controls are not
-yet implemented. Next, `rax = 218` (`__NR_set_tid_address`) registers a
+yet implemented, except for `PR_SET_NO_NEW_PRIVS` and `PR_GET_NO_NEW_PRIVS`.
+The former accepts only value 1 with every unused argument zero and
+irreversibly sets the process bit; the latter accepts only zero unused
+arguments and reports it. Rejected calls return `-EINVAL` without changing the
+bit. The proof requires it to remain set through exit. Future exec and
+credential-mutation paths must honor this boundary before they are admitted.
+Next, `rax = 218` (`__NR_set_tid_address`) registers a
 four-byte word inside the declared RW segment and returns TID 1. The bounded
 proof rejects an out-of-segment registration with `-EFAULT`. Exit zeroes the
 registered word;

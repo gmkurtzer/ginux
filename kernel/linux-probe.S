@@ -661,6 +661,86 @@ ginux_linux_probe:
     test rax, rax
     jne failure
 
+    mov edi, 39
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    test rax, rax
+    jne failure
+
+    mov edi, 38
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 38
+    mov esi, 1
+    mov edx, 1
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 39
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    test rax, rax
+    jne failure
+
+    mov edi, 38
+    mov esi, 1
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    test rax, rax
+    jne failure
+
+    mov edi, 39
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    cmp rax, 1
+    jne failure
+
+    mov edi, 38
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 39
+    mov esi, 1
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
+    cmp rax, -22
+    jne failure
+
     mov edi, 1
     mov esi, 0x403200
     mov rdx, -1
