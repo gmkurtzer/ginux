@@ -47,6 +47,7 @@ const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
+const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
@@ -988,7 +989,9 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
-        LINUX_EXIT_SYSCALL if first_argument == LINUX_PROBE_EXIT_STATUS => {
+        LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
+            if first_argument == LINUX_PROBE_EXIT_STATUS =>
+        {
             ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
             u64::MAX

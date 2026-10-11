@@ -67,7 +67,7 @@ bounded `uname(0x401000)` then copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. It next
 issues `getpid`, verifies PID 1 after the kernel resumes it through `SYSRETQ`,
 verifies preserved first and fourth argument registers, and issues Linux
-`exit(42)`. Those calls are
+`exit_group(42)`. Those calls are
 accepted only while an atomic probe flag is armed; exit returns directly to the
 saved kernel stack. The proof restores and reads back the kernel root, then
 clears and releases all seven root/table/payload/stack frames.
