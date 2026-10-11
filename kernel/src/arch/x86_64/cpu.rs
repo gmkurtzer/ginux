@@ -45,6 +45,7 @@ const FS_BASE_MSR: u32 = 0xc000_0100;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
 const LINUX_WRITE_SYSCALL: u64 = 1;
+const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_FSTAT_SYSCALL: u64 = 5;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
@@ -192,6 +193,7 @@ static ELF_PROBE_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -774,11 +776,13 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_ROBUST_LIST.store(0, Ordering::SeqCst);
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
+    ELF_PROBE_CONSOLE_DESCRIPTORS.store(0b11, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let umask_restored = ELF_PROBE_UMASK.swap(0, Ordering::SeqCst) == 0o022;
+    let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0b10;
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
@@ -810,6 +814,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && protected_page == execution.relro as u64
         && heap_written
         && umask_restored
+        && descriptor_state_valid
         && msrs_restored
 }
 
@@ -1079,8 +1084,9 @@ extern "sysv64" fn linux_syscall_handler(
     }
     match number {
         LINUX_WRITE_SYSCALL => linux_console_write(first_argument, buffer, count),
+        LINUX_CLOSE_SYSCALL => linux_console_close(first_argument),
         LINUX_FSTAT_SYSCALL => {
-            if !matches!(first_argument, 0 | 1) {
+            if !linux_console_descriptor_open(first_argument) {
                 return LINUX_EBADF;
             }
             let stat = linux_console_stat();
@@ -1111,7 +1117,7 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_IOCTL_SYSCALL => {
-            if !matches!(first_argument, 0 | 1) {
+            if !linux_console_descriptor_open(first_argument) {
                 return LINUX_EBADF;
             }
             if buffer != LINUX_TIOCGWINSZ {
@@ -1324,7 +1330,7 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
 }
 
 fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
-    if descriptor != 1 {
+    if descriptor != 1 || !linux_console_descriptor_open(descriptor) {
         return LINUX_EBADF;
     }
     let Ok(length) = usize::try_from(count) else {
@@ -1342,7 +1348,7 @@ fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
 }
 
 fn linux_console_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
-    if descriptor != 1 {
+    if descriptor != 1 || !linux_console_descriptor_open(descriptor) {
         return LINUX_EBADF;
     }
     let Ok(vector_count) = usize::try_from(count) else {
@@ -1380,6 +1386,22 @@ fn linux_console_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
     }
     crate::serial_write_bytes(&output[..total]);
     total as u64
+}
+
+fn linux_console_descriptor_open(descriptor: u64) -> bool {
+    descriptor < 2
+        && ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst) & (1_u8 << descriptor) != 0
+}
+
+fn linux_console_close(descriptor: u64) -> u64 {
+    if descriptor >= 2 {
+        return LINUX_EBADF;
+    }
+    let bit = 1_u8 << descriptor;
+    if ELF_PROBE_CONSOLE_DESCRIPTORS.fetch_and(!bit, Ordering::SeqCst) & bit == 0 {
+        return LINUX_EBADF;
+    }
+    0
 }
 
 fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {

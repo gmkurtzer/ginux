@@ -50,6 +50,10 @@ copies an eight-byte Linux `winsize` reporting 24 rows and 80 columns, with
 pixel dimensions zero. Unknown descriptors return `-EBADF`, unsupported
 requests return `-ENOTTY`, and invalid destinations return `-EFAULT`. This is a
 fixed early-console contract, not terminal state or a general ioctl mechanism.
+`rax = 3` (`__NR_close`) irreversibly clears descriptor 0 or 1 from the bounded
+process-local console bitmap. Closing an unknown or already closed descriptor
+returns `-EBADF`; subsequent `fstat` and `ioctl` calls observe the closure. No
+descriptor allocation, duplication, inheritance, or general table exists yet.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 2,
@@ -151,7 +155,8 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `writev`, `fstat`, bounded console `ioctl`, `brk`, `uname`, `getcwd`,
+`write`, `writev`, `close`, `fstat`, bounded console `ioctl`, `brk`, `uname`,
+`getcwd`,
 bounded `readlink`/`readlinkat`,
 bounded read-only `mprotect`,
 `umask`, read-only `getrlimit`/`prlimit64`,
