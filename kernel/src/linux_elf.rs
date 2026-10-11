@@ -156,6 +156,7 @@ struct DynamicTable<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct PlannedSegment<'a> {
     pub(crate) bytes: &'a [u8],
+    pub(crate) file_page: u64,
     pub(crate) virtual_address: u64,
     pub(crate) virtual_page: u64,
     pub(crate) memory_size: usize,
@@ -765,6 +766,7 @@ fn plan_segment(segment: Segment<'_>) -> Option<PlannedSegment<'_>> {
     ((1..=maximum_pages).contains(&page_count) && segment.bytes.len() <= memory_size).then_some(
         PlannedSegment {
             bytes: segment.bytes,
+            file_page: segment.file_offset & !(PAGE_SIZE as u64 - 1),
             virtual_address: segment.virtual_address,
             virtual_page,
             memory_size,

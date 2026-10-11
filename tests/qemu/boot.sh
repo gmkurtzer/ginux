@@ -673,6 +673,11 @@ if ! grep -q '^ginux: userspace Linux DT_NEEDED path resolved' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux dependency segments mapped' "$output_file"; then
+    echo "Boot test failed: the userspace Linux interpreter did not map dependency segments." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: toolchain-linked Linux PIE and shared object executed' "$output_file"; then
     echo "Boot test failed: the toolchain-linked Linux PIE/shared-object pair was not executed." >&2
     exit 1

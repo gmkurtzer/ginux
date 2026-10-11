@@ -240,6 +240,49 @@ ginux_linux_interpreter:
 .Lneeded_path_ready:
     lea rsi, [rsp]
     call .Linspect_runtime_file
+
+    mov edi, -100
+    lea rsi, [rsp]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne .Linvalid_dynamic
+
+    mov edi, 0x610000
+    mov esi, 4096
+    mov edx, 5
+    mov r10d, 0x100002
+    mov r8d, 2
+    mov r9d, 0x1000
+    mov eax, 9
+    syscall
+    cmp rax, 0x610000
+    jne .Linvalid_dynamic
+    mov eax, 9
+    syscall
+    cmp rax, -17
+    jne .Linvalid_dynamic
+
+    mov edi, 0x613000
+    mov edx, 7
+    mov r9d, 0x2000
+    mov eax, 9
+    syscall
+    cmp rax, -22
+    jne .Linvalid_dynamic
+    mov edi, 0x613000
+    mov edx, 3
+    mov eax, 9
+    syscall
+    cmp rax, 0x613000
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
     add rsp, 32
     ret
 

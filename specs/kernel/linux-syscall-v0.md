@@ -287,7 +287,9 @@ seeks and reads it again, verifies metadata, rejects writes and writable opens,
 maps the interpreter through the bounded read-only file-mapping profile below,
 and closes the descriptor. There is no `/lib64` directory enumeration,
 pathname traversal, general VFS, or userspace `execve`; the kernel still
-authenticates and installs the three fixed images directly.
+authenticates and plans the three fixed images. The interpreter installs the
+dependency's admitted RX and RW segments through the fixed mapping contract
+below; main and interpreter segment installation remains in the kernel.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 4,
@@ -359,8 +361,9 @@ one of those timers and optionally returns its previous disabled value. Arming
 a timer returns `-ENOSYS` until asynchronous signal delivery exists. Invalid
 selectors return `-EINVAL`; invalid complete input or output ranges return
 `-EFAULT`, and rejected requests do not partially change the old-value output.
-`rax = 9` (`__NR_mmap`) admits one private one- or two-page extent at fixed
-kernel-selected address `0x40a000`. The anonymous form requires a null hint, an
+`rax = 9` (`__NR_mmap`) has a scratch-window profile and one authenticated
+dependency-install profile. The scratch window admits one private one- or
+two-page extent at kernel-selected address `0x40a000`. Its anonymous form requires a null hint, an
 exact 4096- or 8192-byte length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
 MAP_ANONYMOUS`, fd -1, and offset zero, and installs zero-filled RW/NX frames.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
@@ -372,7 +375,18 @@ into allocator-owned read-only/NX frames and zero-fills a partial final page.
 Descriptor cursors are unaffected. Unsupported arguments return `-EINVAL`, a
 non-file descriptor returns `-ENODEV`, an invalid descriptor returns `-EBADF`,
 and a request while the sole extent is occupied returns `-ENOMEM`.
-`rax = 11` (`__NR_munmap`) accepts only the complete active extent, clears its
+The dependency-install profile accepts only the open
+`/lib64/libginux.so` descriptor, one-page `MAP_PRIVATE |
+MAP_FIXED_NOREPLACE` requests, and the two mappings already authenticated by
+the kernel plan: file offset `0x1000` at `0x610000` with `PROT_READ |
+PROT_EXEC`, and file offset `0x2000` at `0x613000` with `PROT_READ |
+PROT_WRITE`. The kernel copies into two pre-reserved owned frames whose leaves
+must still be absent, enforces W^X while installing the leaves, and retains the
+mappings through process exit. A duplicate returns `-EEXIST`; another file,
+address, offset, size, flag, or permission set is rejected. Descriptor cursors
+remain unchanged. This is the first userspace-owned executable mapping, not a
+general executable allocator or authority to map unauthenticated bytes.
+`rax = 11` (`__NR_munmap`) accepts only the complete active scratch extent, clears its
 hardware leaves, invalidates their TLB entries, and scrubs the physical frames
 before reuse. Repeating a supported exact unmap succeeds. The anonymous probe
 crosses the two-page boundary with syscall copy-out, while the file proof maps
@@ -380,7 +394,7 @@ the complete two-page interpreter, observes ELF magic and its entry byte,
 checks the zero-filled tail, proves syscall copy-out is denied, and rejects an
 unaligned file offset. Both paths exit with both leaves absent. This is not a
 general VMA allocator: hints, fixed mappings, writable or shared file
-mappings, partial ranges, multiple extents, executable memory, arbitrary
+mappings outside the two admitted dependency pages, partial ranges, arbitrary
 files, demand paging, and mapping growth are unsupported.
 `rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for the exact active
 anonymous extent. Immutable-file mappings reject advice with `-EINVAL`. For an

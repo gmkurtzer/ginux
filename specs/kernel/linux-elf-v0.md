@@ -175,9 +175,10 @@ static runtime stack is now populated by a single bounded auxiliary-vector
 encoder using that common contract, and the interpreted proof checks the exact
 word positions of its dynamic values. A bounded execution proof installs the
 main image's read-only/NX header page, four RX pages, and two RW/NX pages plus
-the interpreter's and dependency's separate RX and RW/NX pages in three
-independently cloned 2 MiB leaf regions. It also owns bounded heap, stack, and
-two `mmap` payload frames. The
+the interpreter's separate RX and RW/NX pages in three independently cloned
+2 MiB leaf regions. It reserves zeroed dependency RX and RW frames behind
+absent leaves for the userspace interpreter to populate. It also owns bounded
+heap, stack, and two `mmap` payload frames. The
 proof validates permissions, the intact main entry, and image contents through
 the activated user root and constructs the dynamic-process stack with the
 common auxiliary-vector encoder. The compact planning fixture records an entry
@@ -232,12 +233,15 @@ bounded name, and constructs `/lib64/<needed-name>` on the mapped user stack.
 It opens that derived path and maps the first two pages of both files through
 the immutable runtime-file interface, validates ELF magic and the first code
 byte at file offset `0x1100`, then unmaps and closes each descriptor before
-continuing with relocations. The namespace still admits only `libginux.so`, so
-an altered or unterminated name fails closed. Syscall return validation accepts
-only the declared main and interpreter RX extents. This proves metadata-driven
-userspace file discovery, not yet userspace-owned executable mapping: the
-kernel still installs the parsed main and dependency segments before
-interpreter entry.
+reopening the dependency. It maps the dependency file page at offset `0x1000`
+RX at `0x610000` and the page at offset `0x2000` RW/NX at `0x613000` through
+exact `MAP_PRIVATE | MAP_FIXED_NOREPLACE` requests. A repeated RX request
+returns `-EEXIST`; a W+X data request returns `-EINVAL`. Only then does it apply
+dependency and main relocations. The namespace still admits only
+`libginux.so`, so an altered or unterminated name fails closed. Syscall return
+validation accepts only the declared main and interpreter RX extents. The
+kernel authenticates and plans all images and reserves the dependency frames,
+but dependency content and leaf installation are now userspace-driven.
 The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
 those bytes. The executable dynamic interpreter, main, and dependency instead

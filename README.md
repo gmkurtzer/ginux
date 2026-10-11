@@ -47,10 +47,12 @@ from its own RX range and opens `/init`. It captures the main image's sole
 `DT_NEEDED` string, constructs `/lib64/<needed-name>` on its bounded stack, and
 opens that derived dependency path. It maps each file's first two pages
 read-only/NX, validates its ELF magic and first code byte, then unmaps and
-closes it before applying the already installed images' relocations. This
-proves metadata-driven userspace discovery through the runtime namespace; the
-kernel still installs the executable main and dependency mappings for this
-stage.
+closes the inspection windows. It then reopens the selected dependency and
+installs its authenticated file pages itself: RX at `0x610000` and RW/NX at
+`0x613000`, using exact `MAP_FIXED_NOREPLACE` contracts. Duplicate placement
+and W+X are rejected before it applies dependency and main relocations. The
+kernel still installs the main and interpreter mappings for this stage, but no
+longer preinstalls dependency contents or leaves.
 Linker-private metadata remains mapped but outside the probe's bounded
 syscall-copy data extent.
 Interpreter and dependency selection bind the exact `PT_INTERP` path or
@@ -140,8 +142,9 @@ only while active. The same fixed slot can instead expose a one- or two-page
 private read-only/NX window into an immutable runtime ELF file. File offsets
 must be page aligned, partial final pages are zero-filled, syscall copy-out
 cannot modify the mapping, and unmap scrubs both payload frames.
-General mapping placement, writable or shared file mappings, and arbitrary
-filesystem-backed mappings are not implemented.
+General mapping placement, shared file mappings, writable mappings outside the
+exact authenticated dependency data page, and arbitrary filesystem-backed
+mappings are not implemented.
 The root view retains a fixed working-directory identity of `/`; bounded
 `getcwd` returns it, while undersized and invalid buffers fail.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
@@ -151,8 +154,8 @@ An immutable runtime-file view exposes the exact authenticated `/init`,
 Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, private
 read-only `mmap`, metadata, and access checks operate on those files. This is
 not directory traversal, a general VFS, or userspace-driven executable
-loading; the kernel still authenticates, plans, and maps the fixed runtime
-trio directly.
+loading. The kernel still authenticates and plans the fixed runtime trio; the
+interpreter now installs the authenticated dependency's two admitted segments.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
 Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and
