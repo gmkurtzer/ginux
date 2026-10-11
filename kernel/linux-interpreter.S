@@ -689,20 +689,6 @@ ginux_linux_interpreter:
     syscall
     cmp rax, 216
     jne .Linvalid_dynamic
-    cmp byte ptr [rsp + 66], 4
-    jne .Linvalid_dynamic
-    cmp dword ptr [rsp + 67], 0x00766564
-    jne .Linvalid_dynamic
-    cmp byte ptr [rsp + 90], 4
-    jne .Linvalid_dynamic
-    cmp dword ptr [rsp + 91], 0x00637465
-    jne .Linvalid_dynamic
-    cmp byte ptr [rsp + 114], 4
-    jne .Linvalid_dynamic
-    cmp dword ptr [rsp + 115], 0x636f7270
-    jne .Linvalid_dynamic
-    cmp byte ptr [rsp + 119], 0
-    jne .Linvalid_dynamic
     cmp byte ptr [rsp + 186], 4
     jne .Linvalid_dynamic
     cmp dword ptr [rsp + 187], 0x00726176
@@ -747,9 +733,30 @@ ginux_linux_interpreter:
     mov edx, 256
     mov eax, 217
     syscall
-    cmp rax, 48
+    cmp rax, 72
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    lea rsi, [rip + .Llib_relative]
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    cmp rax, 3
     jne .Linvalid_dynamic
     mov edi, 2
+    lea rsi, [rip + .Lparent_lib_relative]
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    cmp rax, -2
+    jne .Linvalid_dynamic
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+
+    mov edi, 3
     mov eax, 3
     syscall
     test rax, rax
@@ -1574,6 +1581,10 @@ ginux_linux_interpreter:
     .asciz "/"
 .Lvar_path:
     .asciz "/var"
+.Llib_relative:
+    .asciz "lib"
+.Lparent_lib_relative:
+    .asciz "../lib"
 .section .data,"aw",@progbits
     .ascii "DYNAMIC!"
 

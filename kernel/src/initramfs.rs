@@ -213,7 +213,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 14
+    archive.entry_count() == 16
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -233,6 +233,12 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
         && archive
             .find(b"etc/motd")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"Welcome to Ginux\n")
+        && archive
+            .find(b"var/lib")
+            .is_some_and(|entry| entry.mode == 0o040555 && entry.data.is_empty())
+        && archive
+            .find(b"var/lib/state")
+            .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"ready\n")
         && archive.find(b"linux/init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
         })
@@ -714,7 +720,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 14
+    let valid = root.node_count == 16
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -738,6 +744,12 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
         && root
             .lookup(b"etc/motd")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"Welcome to Ginux\n")
+        && root
+            .lookup(b"var/lib")
+            .is_some_and(|entry| entry.mode == 0o040555 && entry.data.is_empty())
+        && root
+            .lookup(b"var/lib/state")
+            .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"ready\n")
         && root.lookup(b"linux/init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
         })

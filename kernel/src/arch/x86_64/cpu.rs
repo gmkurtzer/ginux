@@ -4339,13 +4339,30 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
         b"/dev" => Some(LINUX_DEVICE_DIRECTORY),
         _ => {
             let name = path.strip_prefix(b"/")?;
-            if name.contains(&b'/') {
-                return None;
-            }
             let node = initramfs::published_directory_node(name)?;
             Some(LINUX_ROOT_MEASURED_DIRECTORY | (u16::from(node) << LINUX_ROOT_NODE_SHIFT))
         }
     }
+}
+
+fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
+    if path == b"dev" {
+        return Some(LINUX_DEVICE_DIRECTORY);
+    }
+    if let Some(node) = initramfs::published_directory_node(path) {
+        return Some(LINUX_ROOT_MEASURED_DIRECTORY | (u16::from(node) << LINUX_ROOT_NODE_SHIFT));
+    }
+    let mut absolute = [0_u8; 64];
+    absolute[0] = b'/';
+    absolute.get_mut(1..1 + path.len())?.copy_from_slice(path);
+    linux_runtime_file_kind(&absolute[..1 + path.len()])
+}
+
+fn linux_normalized_relative_path(path: &[u8]) -> bool {
+    !path.is_empty()
+        && path
+            .split(|byte| *byte == b'/')
+            .all(|component| !component.is_empty() && component != b"." && component != b"..")
 }
 
 fn linux_root_directory_inode(kind: u16) -> Option<u64> {
@@ -4371,23 +4388,15 @@ fn linux_measured_directory_path(kind: u16) -> Option<&'static [u8]> {
         .flatten()
 }
 
-fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, u64> {
+fn linux_relative_path_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, u64> {
     if path.starts_with(b"/") {
         return Ok(None);
     }
-    if path.is_empty() || path == b"." || path == b".." {
+    if !linux_normalized_relative_path(path) {
         return Err(LINUX_ENOENT);
     }
-    let mut absolute = [0_u8; 64];
-    absolute[0] = b'/';
     if directory as u32 == LINUX_AT_FDCWD {
-        let Some(output) = absolute.get_mut(1..1 + path.len()) else {
-            return Err(LINUX_ENOENT);
-        };
-        output.copy_from_slice(path);
-        return linux_runtime_file_kind(&absolute[..1 + path.len()])
-            .map(Some)
-            .ok_or(LINUX_ENOENT);
+        return linux_measured_path_kind(path).map(Some).ok_or(LINUX_ENOENT);
     }
     let state = linux_device_descriptor(directory);
     if state == 0 {
@@ -4402,21 +4411,22 @@ fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, 
     let Some(parent) = linux_measured_directory_path(state) else {
         return Err(LINUX_ENOENT);
     };
-    let Some(output) = absolute.get_mut(1..1 + parent.len()) else {
+    let mut measured_path = [0_u8; 64];
+    let Some(output) = measured_path.get_mut(..parent.len()) else {
         return Err(LINUX_ENOENT);
     };
     output.copy_from_slice(parent);
-    let mut length = 1 + parent.len();
+    let mut length = parent.len();
     if !parent.is_empty() {
-        absolute[length] = b'/';
+        measured_path[length] = b'/';
         length += 1;
     }
-    let Some(output) = absolute.get_mut(length..length + path.len()) else {
+    let Some(output) = measured_path.get_mut(length..length + path.len()) else {
         return Err(LINUX_ENOENT);
     };
     output.copy_from_slice(path);
     length += path.len();
-    linux_runtime_file_kind(&absolute[..length])
+    linux_measured_path_kind(&measured_path[..length])
         .map(Some)
         .ok_or(LINUX_ENOENT)
 }
@@ -4428,7 +4438,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    let kind = match linux_relative_file_kind(directory, path) {
+    let kind = match linux_relative_path_kind(directory, path) {
         Ok(Some(kind)) => kind,
         Ok(None) => match path {
             b"/dev/null" => 0,
@@ -4482,11 +4492,15 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    let relative_kind = match linux_relative_file_kind(directory, path) {
+    let relative_kind = match linux_relative_path_kind(directory, path) {
         Ok(kind) => kind,
         Err(error) => return error,
     };
     let stat = match (relative_kind, path) {
+        (Some(kind), _) if kind & LINUX_DEVICE_DIRECTORY != 0 => linux_stat(
+            LINUX_STAT_DIRECTORY_MODE,
+            linux_root_directory_inode(kind).unwrap_or(0),
+        ),
         (Some(kind), _) => linux_regular_file_stat(kind),
         (None, b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty") => {
             linux_stat(LINUX_STAT_CHARACTER_DEVICE_MODE, 1)
@@ -4516,7 +4530,7 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    let relative_kind = match linux_relative_file_kind(directory, path) {
+    let relative_kind = match linux_relative_path_kind(directory, path) {
         Ok(kind) => kind,
         Err(error) => return error,
     };
@@ -4551,11 +4565,17 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    let relative_kind = match linux_relative_file_kind(directory, path) {
+    let relative_kind = match linux_relative_path_kind(directory, path) {
         Ok(kind) => kind,
         Err(error) => return error,
     };
     let (inode, minor, mode, size) = match (relative_kind, path) {
+        (Some(kind), _) if kind & LINUX_DEVICE_DIRECTORY != 0 => (
+            linux_root_directory_inode(kind).unwrap_or(0),
+            0,
+            LINUX_STAT_DIRECTORY_MODE,
+            0,
+        ),
         (Some(kind), _) => (
             linux_regular_file_inode(kind).unwrap_or(0),
             0,

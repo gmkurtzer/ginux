@@ -21,12 +21,14 @@ Only regular files, directories, and nonempty symbolic links are admitted.
 Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
-The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, `var`, the native
-`init` marker, `etc/hostname`, `etc/os-release`, `etc/motd`, and four build-produced Linux ELF artifacts
+The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
+`var/lib`, `var/lib/state`, the native `init` marker, `etc/hostname`,
+`etc/os-release`, `etc/motd`, and four build-produced Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and
 auxiliary DSO. The hostname is immutable mode `0555` with exact contents
 `ginux\n`; `os-release` is immutable mode `0555` with exact contents
-`NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`. The ELF entries must byte-match the authenticated artifacts compiled
+`NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`; and the nested
+state file contains `ready\n`. The ELF entries must byte-match the authenticated artifacts compiled
 into the kernel's bounded execution plan.
 
 After validation, the current roughly 73 KiB proof image is copied into a
@@ -39,7 +41,8 @@ before releasing every lease. The parser's general 16 MiB bound remains
 broader than this v0 publication capacity; images above 128 KiB fail closed
 during materialization.
 
-A second lifecycle proof constructs a fixed index of at most 16 nodes. Each
+A second lifecycle proof constructs a fixed index of at most 16 nodes; the
+current proof deliberately occupies all 16 slots. Each
 node stores only checked 32-bit name and data offsets inside the owned image; no node
 retains a pointer into the handed boot source. Exact `init` and directory
 lookups resolve into the owned allocation, while missing, absolute, and
@@ -73,15 +76,17 @@ cursor rewind, and atomic rejection of an undersized output buffer. The
 Linux `/` directory likewise enumerates the seven direct measured children in
 archive order. Measured directory descriptors use their own bounded node
 selectors to recover names from the index. The measured `proc`, `sys`, `tmp`,
-and `var` nodes open as immutable, currently empty directories; the proof
-opens and enumerates the otherwise unlisted `var` node. `dev`
+`proc`, `sys`, and `tmp` nodes are empty. The proof opens and enumerates the
+otherwise unlisted `var` node, then opens its indexed `lib` child relative to
+the live descriptor. `dev`
 retains its synthetic device children while its directory node comes from the
 measured root. An open measured-directory descriptor resolves any direct
 regular child by constructing a bounded path and consulting the retained
 index; the fixed root working directory resolves bounded relative paths the
-same way. The proof obtains `motd` metadata without a kernel filename case.
-Nested relative traversal remains unsupported. A regular file descriptor is
-rejected as a lookup base. The
+same way. Multi-component names are accepted only when every component is
+nonempty and is neither `.` nor `..`; the proof rejects `../lib`. The proof
+obtains `motd` metadata without a kernel filename case. A regular file
+descriptor is rejected as a lookup base. The
 file or directory selector is bounded by the 16-node publication index and is neither a
 persistent inode nor a public ABI.
 

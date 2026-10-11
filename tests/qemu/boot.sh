@@ -1818,6 +1818,16 @@ if ! grep -q '^ginux: unlisted measured-root directory opened' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: nested measured-root dirfd traversal validated' "$output_file"; then
+    echo "Boot test failed: nested measured-root dirfd traversal was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured-root traversal components rejected' "$output_file"; then
+    echo "Boot test failed: measured-root traversal components were not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

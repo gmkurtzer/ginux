@@ -319,15 +319,17 @@ index in archive order. The complete result is staged in a fixed 256-byte
 kernel buffer before copy-out. Measured directory descriptors retain a bounded
 one-based index selector and recover their path from the same immutable index.
 The measured `/proc`, `/sys`, `/tmp`, and `/var` nodes open without individual
-pathname cases and currently enumerate only `.` and `..`; the ring-3 proof
-exercises the otherwise unlisted `/var`. `/dev` remains the separately populated
+pathname cases. The ring-3 proof enumerates the otherwise unlisted `/var`,
+opens its `lib` child relative to that descriptor, and rejects `../lib` before
+lookup. `/dev` remains the separately populated
 synthetic device directory. Directory descriptor metadata and pathname
 metadata use stable profile-local inode numbers. There is no `/lib64` directory
 enumeration. Relative lookup constructs a bounded path from an open measured
-directory and a single child name, then consults the retained index; `AT_FDCWD`
-uses the same lookup for bounded relative paths. `openat`, `newfstatat`,
-`faccessat`, `faccessat2`, and `statx` share the result. Nested dirfd traversal
-remains unsupported. A closed or
+directory and a normalized relative name, then consults the retained index;
+`AT_FDCWD` uses the same lookup. Empty, `.`, and `..` components are rejected.
+`openat`, `newfstatat`, `faccessat`, `faccessat2`, and `statx` share the result.
+There is no symlink traversal, mount crossing, or component-by-component VFS
+walk. A closed or
 unknown base returns `-EBADF`, a regular-file base returns `-ENOTDIR`, and other
 relative names return `-ENOENT`. This is not general component traversal, a
 general VFS, or userspace `execve`; the kernel authenticates

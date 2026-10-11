@@ -25,12 +25,14 @@ validates exact contents and metadata and proves writable access is denied. It
 also opens `/etc`, enumerates all three measured children, and verifies directory
 metadata, EOF, cursor rewind, and atomic undersized-buffer rejection. The Linux `/` view enumerates every
 direct measured child. Measured directory descriptors also carry index
-selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open as
-immutable empty directories without per-directory kernel identities; `dev`
+selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open
+without per-directory kernel identities; `dev`
 retains its synthetic device entries. A
 bounded index-driven contract resolves any direct measured regular child below
 an open measured directory; `motd` proves the syscall layer needs no
-per-filename case. Open, metadata, and access checks share that lookup. The current native
+per-filename case. Normalized multi-component paths are bounded and `lib` is
+opened relative to `/var`, while `../lib` is rejected before index lookup.
+Open, metadata, and access checks share that lookup. The current native
 `init` remains a format marker, not PID 1, but the Linux-visible `/init` and
 `/lib64/*` paths map to internal measured-root entries. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. The archive
