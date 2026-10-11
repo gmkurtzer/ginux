@@ -651,6 +651,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated scheduler address spaces switched");
     serial_write("\r\nginux: scheduler CR3 roots validated");
     serial_write("\r\nginux: bounded user page-table hierarchy validated");
+    serial_write("\r\nginux: address-space resource contract shared");
     serial_write("\r\nginux: scheduler address-space ownership validated");
     serial_write("\r\nginux: scheduler user mappings validated");
     serial_write("\r\nginux: one-shot user preemption completed");

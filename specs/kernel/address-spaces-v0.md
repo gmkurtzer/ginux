@@ -32,7 +32,8 @@ remains transitional.
 The kernel copies only the manifest-measured control-plane bundle into the
 read-only executable page. Its GDT includes user code/data descriptors and TSS
 RSP0 names a dedicated guarded privilege stack. A DPL3 interrupt gate at vector
-`0x80` accepts eight bring-up call numbers. The QEMU program enters CPL3 through
+`0x80` accepts the version-negotiated bring-up operations documented by the
+control ABI. The QEMU program enters CPL3 through
 `IRETQ`, issues a ping call, and verifies the returned value after `IRETQ`
 resumes the same user context. A calibrated APIC one-shot preempts context 1
 and switches to context 2, whose deliberate null-page write fault is contained

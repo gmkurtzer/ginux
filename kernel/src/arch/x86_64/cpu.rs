@@ -1134,7 +1134,9 @@ fn setup_service_restart(fault_domain: u64) -> ServiceRestartSetup {
     ) else {
         return rollback_unstarted_replacement(replacement_domain, true);
     };
-    if memory::transfer_frame_owner(old_owner, replacement_owner) != Some(7) {
+    if memory::transfer_frame_owner(old_owner, replacement_owner)
+        != Some(address_space::USER_ADDRESS_SPACE_FRAMES)
+    {
         return rollback_unstarted_replacement(replacement_domain, true);
     }
     if !domain::adopt_quarantined_service_frames(fault_domain, replacement_domain) {
@@ -1181,7 +1183,8 @@ fn rollback_transferred_replacement(
     queued: bool,
 ) -> ServiceRestartSetup {
     if (!queued || scheduler::rollback_service_restart(replacement_domain, fault_domain))
-        && memory::transfer_frame_owner(replacement_owner, old_owner) == Some(7)
+        && memory::transfer_frame_owner(replacement_owner, old_owner)
+            == Some(address_space::USER_ADDRESS_SPACE_FRAMES)
         && domain::restore_quarantined_service_frames(fault_domain, replacement_domain)
         && ipc::rollback_service_binding(replacement_domain)
         && domain::discard_unstarted_service(replacement_domain)

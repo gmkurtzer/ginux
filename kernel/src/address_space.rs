@@ -20,6 +20,7 @@ const USER_TEST_ADDRESS: usize = 1usize << 39;
 const EXPECTED_FAULT_OFFSET: usize = 515;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
+pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
 
 pub(crate) fn expected_service_fault_instruction(control_entry_offset: usize) -> Option<u64> {
     USER_TEST_ADDRESS
@@ -431,13 +432,13 @@ struct WxAddressSpace {
     code_frame: *mut u8,
     first_stack_frame: *mut u8,
     second_stack_frame: *mut u8,
-    frames: [memory::FrameLease; 7],
+    frames: [memory::FrameLease; USER_ADDRESS_SPACE_FRAMES],
     owner: memory::FrameOwner,
 }
 
 impl WxAddressSpace {
     fn new(kernel_root: u64, owner: memory::FrameOwner) -> Option<Self> {
-        let frames = memory::allocate_frames::<7>(owner)?;
+        let frames = memory::allocate_frames::<USER_ADDRESS_SPACE_FRAMES>(owner)?;
         let addresses = frames.map(memory::FrameLease::address);
         let [root, pdpt, directory, table, code, first_stack, second_stack] = addresses;
         for left in 0..addresses.len() {

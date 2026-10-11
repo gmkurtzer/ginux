@@ -780,7 +780,9 @@ pub(crate) fn initialize_boot_service_restart() -> Option<u64> {
         return None;
     }
     let owner = crate::memory::FrameOwner::domain(encode_id(quarantine.domain))?;
-    if crate::memory::owner_live_frame_count(owner) != Some(7) {
+    if crate::memory::owner_live_frame_count(owner)
+        != Some(crate::address_space::USER_ADDRESS_SPACE_FRAMES)
+    {
         return None;
     }
     let id = manager.restart_service()?;
@@ -1452,7 +1454,9 @@ pub(crate) fn retire_service(domain_raw: u64) -> bool {
     let Some(owner) = crate::memory::FrameOwner::domain(domain_raw) else {
         return false;
     };
-    if crate::memory::owner_live_frame_count(owner) != Some(7) {
+    if crate::memory::owner_live_frame_count(owner)
+        != Some(crate::address_space::USER_ADDRESS_SPACE_FRAMES)
+    {
         return false;
     }
     let Some(manager) = global_manager_mut() else {
@@ -1502,7 +1506,8 @@ pub(crate) fn adopt_quarantined_service_frames(retired_raw: u64, replacement_raw
         })
         || manager.service_id != Some(replacement)
         || crate::memory::owner_live_frame_count(retired_owner) != Some(0)
-        || crate::memory::owner_live_frame_count(replacement_owner) != Some(7)
+        || crate::memory::owner_live_frame_count(replacement_owner)
+            != Some(crate::address_space::USER_ADDRESS_SPACE_FRAMES)
     {
         return false;
     }
@@ -1533,7 +1538,8 @@ pub(crate) fn restore_quarantined_service_frames(retired_raw: u64, replacement_r
     };
     if manager.quarantined_frame_owners[slot].is_some()
         || manager.service_id != Some(replacement)
-        || crate::memory::owner_live_frame_count(retired_owner) != Some(7)
+        || crate::memory::owner_live_frame_count(retired_owner)
+            != Some(crate::address_space::USER_ADDRESS_SPACE_FRAMES)
         || crate::memory::owner_live_frame_count(replacement_owner) != Some(0)
     {
         return false;

@@ -513,6 +513,11 @@ if ! grep -q '^ginux: bounded user page-table hierarchy validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: address-space resource contract shared' "$output_file"; then
+    echo "Boot test failed: address-space resource contract was not shared." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: scheduler address-space ownership validated' "$output_file"; then
     echo "Boot test failed: scheduler address-space ownership validation failed." >&2
     exit 1
