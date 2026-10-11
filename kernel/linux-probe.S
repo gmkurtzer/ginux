@@ -519,6 +519,8 @@ linux_clone_repeat:
     mov ebp, edx
     mov eax, 24
     call syscall_expect_zero
+    mov eax, 24
+    call syscall_expect_zero
     mov rdi, rbp
     xor esi, esi
     inc esi
@@ -3219,6 +3221,8 @@ child_thread_probe:
     mov rax, qword ptr fs:[0]
     cmp rax, r9
     jne failure
+    mov eax, 24
+    call syscall_expect_zero
     mov rdi, rdx
     xor esi, esi
     mov edx, dword ptr [rdi]

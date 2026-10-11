@@ -803,6 +803,11 @@ if ! grep -q '^ginux: live Linux child FS self pointers validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: bidirectional Linux sched_yield switching validated' "$output_file"; then
+    echo "Boot test failed: Linux sched_yield did not switch in both directions." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux clone return values validated' "$output_file"; then
     echo "Boot test failed: Linux clone return values were not validated." >&2
     exit 1
