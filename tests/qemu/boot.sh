@@ -198,6 +198,11 @@ if ! grep -Eq '^ginux: control-plane domain ID: [1-9][0-9]*' "$output_file"; the
     exit 1
 fi
 
+if ! grep -Eq '^ginux: IPC-only service domain ID: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: isolated service domain identity is invalid." >&2
+    exit 1
+fi
+
 if ! grep -Eq '^ginux: usable memory MiB: [1-9][0-9]*' "$output_file"; then
     echo "Boot test failed: the kernel did not inventory usable physical memory." >&2
     exit 1
@@ -233,8 +238,8 @@ if ! grep -q '^ginux: malformed executable containers rejected' "$output_file"; 
     exit 1
 fi
 
-if [[ "$(grep -c '^USER_OK' "$output_file")" -ne 2 ]]; then
-    echo "Boot test failed: userspace console writes were not emitted exactly twice." >&2
+if [[ "$(grep -c '^USER_OK' "$output_file")" -ne 1 ]]; then
+    echo "Boot test failed: the control-plane console record count is invalid." >&2
     exit 1
 fi
 
@@ -280,6 +285,11 @@ fi
 
 if ! grep -q '^ginux: isolated service request-reply completed' "$output_file"; then
     echo "Boot test failed: isolated service request/reply did not complete." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: service domain authority restricted to IPC' "$output_file"; then
+    echo "Boot test failed: service-domain least authority was not enforced." >&2
     exit 1
 fi
 

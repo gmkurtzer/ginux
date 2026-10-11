@@ -540,10 +540,13 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
     if !scheduler::charge_runtime_call() {
         return u64::MAX;
     }
+    let Some(caller_domain) = scheduler::current_domain() else {
+        return u64::MAX;
+    };
     match number {
         0 => CONTROL_ABI_V1_FEATURES,
         1 => {
-            if domain::control_plane_handle_permits(capability, 1, Rights::READ) {
+            if domain::handle_permits(caller_domain, capability, 1, Rights::READ) {
                 SYSCALL_STATE.fetch_or(2, Ordering::SeqCst);
                 0x4758
             } else {
@@ -560,7 +563,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
             let Some(frame) = (unsafe { frame.as_ref() }) else {
                 return u64::MAX;
             };
-            if domain::control_plane_handle_permits(capability, 3, Rights::WRITE)
+            if domain::handle_permits(caller_domain, capability, 3, Rights::WRITE)
                 && ipc::send(frame.first_argument())
             {
                 0
@@ -569,22 +572,22 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
             }
         }
         5 => {
-            if domain::control_plane_handle_permits(capability, 3, Rights::READ) {
+            if domain::handle_permits(caller_domain, capability, 3, Rights::READ) {
                 ipc::receive().unwrap_or(u64::MAX - 2)
             } else {
                 u64::MAX - 2
             }
         }
-        6 => console_write(capability, frame),
+        6 => console_write(caller_domain, capability, frame),
         _ => u64::MAX,
     }
 }
 
-fn console_write(capability: u64, frame: *const UserTrapFrame) -> u64 {
+fn console_write(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         return u64::MAX - 2;
     };
-    if !domain::control_plane_handle_permits(capability, 2, Rights::WRITE) {
+    if !domain::handle_permits(domain_id, capability, 2, Rights::WRITE) {
         return u64::MAX - 2;
     }
     let Ok(length) = usize::try_from(frame.second_argument()) else {

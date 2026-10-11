@@ -91,6 +91,15 @@ impl Table {
         self.boot_authority_sealed = true;
     }
 
+    /// Accepts authority that another domain explicitly delegated after the
+    /// manager validated its source capability.
+    pub(crate) fn accept_delegated(&mut self, object: u64, rights: Rights) -> Option<Handle> {
+        if self.boot_authority_sealed || rights.is_empty() {
+            return None;
+        }
+        self.insert(object, rights, None)
+    }
+
     pub(crate) const fn boot_authority_is_sealed(&self) -> bool {
         self.boot_authority_sealed
     }

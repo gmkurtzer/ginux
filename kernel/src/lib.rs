@@ -340,6 +340,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     );
     serial_write_u64(control_plane);
     serial_write("\r\n");
+    let Some(service_domain) = domain::initialize_boot_service() else {
+        kernel_fail("ginux: isolated service domain construction failed\r\n");
+    };
+    serial_write("ginux: IPC-only service domain ID: ");
+    serial_write_u64(service_domain);
+    serial_write("\r\n");
 
     let summary = summarize_memory(boot_info);
     serial_write("ginux: memory descriptors: ");
@@ -378,19 +384,35 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }
-    let (Some(host_handle), Some(console_handle), Some(ipc_handle)) = (
+    let (Some(host_handle), Some(console_handle), Some(ipc_handle), Some(service_ipc_handle)) = (
         domain::control_plane_boot_handle(0),
         domain::control_plane_boot_handle(1),
         domain::control_plane_boot_handle(2),
+        domain::service_boot_handle(),
     ) else {
         kernel_fail("\r\nginux: control-plane bootstrap handles unavailable\r\n");
     };
+    let ipc_rights = capability::Rights::READ.union(capability::Rights::WRITE);
+    if domain::control_plane_id() != Some(control_plane)
+        || !domain::handle_permits(service_domain, service_ipc_handle, 3, ipc_rights)
+        || domain::handle_permits(
+            control_plane,
+            service_ipc_handle,
+            3,
+            capability::Rights::READ,
+        )
+        || domain::handle_permits(service_domain, ipc_handle, 3, capability::Rights::READ)
+    {
+        kernel_fail("\r\nginux: cross-domain capability isolation failed\r\n");
+    }
     if !address_space::verify_ring3_control_plane(
         control_plane_image.code,
         control_plane_image.entry_offset,
-        host_handle,
-        console_handle,
-        ipc_handle,
+        [control_plane, service_domain],
+        [
+            [host_handle, console_handle, ipc_handle],
+            [0, 0, service_ipc_handle],
+        ],
     ) {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
@@ -403,6 +425,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: completed address-space frames reclaimed");
     serial_write("\r\nginux: capability-gated bounded IPC verified");
     serial_write("\r\nginux: isolated service request-reply completed");
+    serial_write("\r\nginux: service domain authority restricted to IPC");
     serial_write("\r\nginux: per-thread syscall budgets enforced");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");

@@ -339,15 +339,18 @@ impl Scheduler {
 }
 
 pub(crate) fn initialize_runtime(
+    domains: [u64; 2],
     address_space_roots: [u64; 2],
-    entry: usize,
+    entries: [usize; 2],
     stacks: [usize; 2],
-    handles: [u64; 3],
+    handles: [[u64; 3]; 2],
     expected_fault_instruction: usize,
 ) -> bool {
     let [first_address_space_root, second_address_space_root] = address_space_roots;
+    let [first_domain, second_domain] = domains;
+    let [first_entry, second_entry] = entries;
     let [first_stack, second_stack] = stacks;
-    let [host_handle, console_handle, ipc_handle] = handles;
+    let [first_handles, second_handles] = handles;
     if RUNTIME_INITIALIZED.load(Ordering::Acquire)
         || first_address_space_root == second_address_space_root
     {
@@ -356,24 +359,24 @@ pub(crate) fn initialize_runtime(
     let mut scheduler = Scheduler::new();
     let first = initial_context(
         first_address_space_root,
-        entry,
+        first_entry,
         first_stack,
-        host_handle,
-        console_handle,
-        ipc_handle,
+        first_handles[0],
+        first_handles[1],
+        first_handles[2],
         1,
     );
     let second = initial_context(
         second_address_space_root,
-        entry,
+        second_entry,
         second_stack,
-        host_handle,
-        console_handle,
-        ipc_handle,
+        second_handles[0],
+        second_handles[1],
+        second_handles[2],
         2,
     );
-    if scheduler.create(1, first).is_none()
-        || scheduler.create(1, second).is_none()
+    if scheduler.create(first_domain, first).is_none()
+        || scheduler.create(second_domain, second).is_none()
         || scheduler.schedule_next().map(|next| next.context) != Some(first)
     {
         return false;
@@ -395,6 +398,12 @@ pub(crate) fn initialize_runtime(
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
     true
+}
+
+pub(crate) fn current_domain() -> Option<u64> {
+    let runtime = runtime_mut()?;
+    let current = runtime.scheduler.current?;
+    Some(runtime.scheduler.thread(current)?.domain)
 }
 
 pub(crate) fn fault_runtime(
@@ -561,7 +570,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.exits == 1
         && runtime.faults == 1
         && runtime.expected_fault_observed
-        && runtime.syscalls == 18
+        && runtime.syscalls == 13
         && runtime.address_space_switches == 2
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)

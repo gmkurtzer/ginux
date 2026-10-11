@@ -3,10 +3,11 @@
 **Status:** Request/reply completion followed by contained service failure.
 
 The hardware proof assigns distinct roles to the two scheduled ring-3
-contexts. Context 1 is the control client. It sends request value 1 through the
-bounded IPC channel and yields. Context 2 is a minimal isolated service in a
-different address space. It receives the request, sends reply value 2, and then
-executes the measured expected invalid opcode.
+contexts and native domains. Context 1 is the control client. It sends request
+value 1 through the bounded IPC channel and yields. Context 2 is a minimal
+isolated service in a different address space and a domain whose sole delegated
+capability is IPC read/write. It receives the request, sends reply value 2, and
+then executes the measured expected invalid opcode.
 
 The CPL3 exception path removes only the service context, switches back to the
 client's CR3, and restores the client's saved register frame. The client must

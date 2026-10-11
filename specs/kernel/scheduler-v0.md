@@ -25,7 +25,8 @@ single-running-thread state, exit selection, idle behavior, slot reuse, domain
 ownership, stale-ID rejection, invalid-context rejection, and preservation of a
 modified register context across another thread's run and exit.
 
-The measured ring-3 proof creates two contexts in the control-plane domain.
+The measured ring-3 proof creates one control-plane context and one
+IPC-only service-domain context.
 Each owns a distinct page-table root, executable code frame, and writable,
 non-executable stack preceded by an absent guard page. `INT 0x80` saves the
 hardware trap frame into the current scheduler record. Yield selects the other
@@ -41,7 +42,7 @@ cross-root dispatches.
 Each created thread also receives a fixed ten-call bootstrap budget. Every
 call-gate entry is charged before dispatch, including denied operations, yield,
 and exit. Exhaustion rejects further dispatch. The ring-3 proof accounts for
-exactly eighteen calls across its two threads, demonstrating that scheduling
+exactly thirteen calls across its two threads, demonstrating that scheduling
 does not merge their budgets.
 
 This revision uses one guarded TSS privilege stack because execution is

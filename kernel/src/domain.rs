@@ -18,6 +18,7 @@ struct DomainId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Role {
     ControlPlane,
+    Service,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,6 +52,7 @@ pub(crate) struct Manager {
     generations: [u32; MAX_DOMAINS],
     control_plane_created: bool,
     control_plane_id: Option<DomainId>,
+    service_id: Option<DomainId>,
 }
 
 impl Manager {
@@ -60,6 +62,7 @@ impl Manager {
             generations: [0; MAX_DOMAINS],
             control_plane_created: false,
             control_plane_id: None,
+            service_id: None,
         }
     }
 
@@ -99,6 +102,40 @@ impl Manager {
             .get(usize::from(id.slot))?
             .as_ref()
             .filter(|domain| domain.id == id)
+    }
+
+    fn create_service(&mut self) -> Option<DomainId> {
+        const IPC_OBJECT: u64 = 3;
+        let rights = Rights::READ.union(Rights::WRITE);
+        let control_id = self.control_plane_id?;
+        let control = self.domain(control_id)?;
+        let source = control.boot_roots.get(2).copied().flatten()?;
+        if !control.capabilities.permits(source, IPC_OBJECT, rights) || self.service_id.is_some() {
+            return None;
+        }
+
+        let slot = self.domains.iter().position(Option::is_none)?;
+        let generation = self.generations[slot].checked_add(1)?;
+        let id = DomainId {
+            slot: slot as u16,
+            generation,
+        };
+        let mut capabilities = CapabilityTable::new();
+        let root = capabilities.accept_delegated(IPC_OBJECT, rights)?;
+        capabilities.seal_boot_authority();
+        let mut boot_roots = [None; MAX_BOOT_GRANTS];
+        boot_roots[0] = Some(root);
+        self.generations[slot] = generation;
+        self.domains[slot] = Some(Domain {
+            id,
+            role: Role::Service,
+            state: State::Ready,
+            capabilities,
+            boot_roots,
+            boot_root_count: 1,
+        });
+        self.service_id = Some(id);
+        Some(id)
     }
 }
 
@@ -172,17 +209,38 @@ pub(crate) fn control_plane_boot_handle(root_index: usize) -> Option<u64> {
     )
 }
 
-pub(crate) fn control_plane_handle_permits(raw: u64, object: u64, rights: Rights) -> bool {
+pub(crate) fn initialize_boot_service() -> Option<u64> {
+    let manager = global_manager_mut()?;
+    let id = manager.create_service()?;
+    let service = manager.domain(id)?;
+    (service.role == Role::Service
+        && service.state == State::Ready
+        && service.boot_root_count == 1
+        && service.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
+pub(crate) fn service_boot_handle() -> Option<u64> {
+    let manager = global_manager()?;
+    let service = manager.domain(manager.service_id?)?;
+    Some(service.boot_roots[0]?.to_raw())
+}
+
+pub(crate) fn control_plane_id() -> Option<u64> {
+    Some(encode_id(global_manager()?.control_plane_id?))
+}
+
+pub(crate) fn handle_permits(domain_raw: u64, raw: u64, object: u64, rights: Rights) -> bool {
+    let Some(domain_id) = decode_id(domain_raw) else {
+        return false;
+    };
     let Some(handle) = Handle::from_raw(raw) else {
         return false;
     };
     let Some(manager) = global_manager() else {
         return false;
     };
-    let Some(id) = manager.control_plane_id else {
-        return false;
-    };
-    let Some(domain) = manager.domain(id) else {
+    let Some(domain) = manager.domain(domain_id) else {
         return false;
     };
     domain.capabilities.permits(handle, object, rights)
@@ -195,6 +253,27 @@ fn global_manager() -> Option<&'static Manager> {
     unsafe { Some(&*core::ptr::addr_of!(GLOBAL_MANAGER).cast::<Manager>()) }
 }
 
+fn global_manager_mut() -> Option<&'static mut Manager> {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    unsafe { Some(&mut *core::ptr::addr_of_mut!(GLOBAL_MANAGER).cast::<Manager>()) }
+}
+
 const fn encode_id(id: DomainId) -> u64 {
     (id.generation as u64) << 16 | id.slot as u64
+}
+
+const fn decode_id(raw: u64) -> Option<DomainId> {
+    if raw >> 48 != 0 {
+        return None;
+    }
+    let id = DomainId {
+        slot: raw as u16,
+        generation: (raw >> 16) as u32,
+    };
+    if id.generation == 0 || id.slot as usize >= MAX_DOMAINS {
+        return None;
+    }
+    Some(id)
 }

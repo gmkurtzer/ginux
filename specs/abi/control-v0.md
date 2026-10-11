@@ -50,7 +50,8 @@ Both contexts also query operation 0 and require the exact version-1 feature
 word before continuing.
 
 Handles encode a private table slot and generation and are meaningful only in
-the calling domain. Stale generations, out-of-range slots, and nonzero reserved
-high bits are rejected. A later version must define argument/result structures,
+the calling domain selected by the scheduler. The call gate never defaults to
+the control-plane namespace. Stale generations, out-of-range slots, and nonzero
+reserved high bits are rejected. A later version must define argument/result structures,
 cancellation and restart semantics, copy/validation rules, transfer semantics,
 and a broader negotiation and deprecation policy.
