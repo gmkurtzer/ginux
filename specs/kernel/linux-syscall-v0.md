@@ -26,6 +26,12 @@ zero output size returns `-EINVAL`; invalid pathname or output ranges return
 `rax = 95` (`__NR_umask`) atomically replaces the single process's permission
 mask, returns the previous value, and ignores bits outside `0777`. The initial
 value is `022`; the proof changes it twice and restores it before exit.
+`rax = 5` (`__NR_fstat`) reports descriptors 0 and 1 as fixed character devices
+with mode `S_IFCHR | 0600`, one link, and a 4096-byte preferred block size. The
+144-byte x86-64 `stat` result is zero-initialized and copied only after its full
+destination range is validated. Unknown descriptors return `-EBADF`; an invalid
+range returns `-EFAULT` without changing its valid prefix. This is descriptor
+metadata for the bounded console profile, not a general inode or VFS query.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 2,
@@ -127,7 +133,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, output
 streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `brk`, `uname`, `getcwd`, bounded `readlink`,
+`write`, `fstat`, `brk`, `uname`, `getcwd`, bounded `readlink`,
 bounded read-only `mprotect`,
 `umask`, read-only `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,

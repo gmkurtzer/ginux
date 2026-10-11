@@ -58,6 +58,8 @@ Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 `readlink` result is `/init`.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
+Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and
+copies the exact x86-64 stat layout only after validating the complete output.
 Read-only `getrlimit` and `prlimit64` queries expose the bounded stack and file
 descriptor ceilings; unsupported resources, foreign PIDs, mutations, and
 invalid output ranges fail without changing user memory.

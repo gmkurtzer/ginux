@@ -45,6 +45,7 @@ const FS_BASE_MSR: u32 = 0xc000_0100;
 const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
 const LINUX_WRITE_SYSCALL: u64 = 1;
+const LINUX_FSTAT_SYSCALL: u64 = 5;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_GETPID_SYSCALL: u64 = 39;
@@ -89,6 +90,8 @@ const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_PROT_READ: u64 = 1;
+const LINUX_STAT_SIZE: usize = 144;
+const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1084,6 +1087,16 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EFAULT
             }
         }
+        LINUX_FSTAT_SYSCALL => {
+            if !matches!(first_argument, 0 | 1) {
+                return LINUX_EBADF;
+            }
+            let stat = linux_console_stat();
+            if !copy_to_linux_user(buffer, &stat) {
+                return LINUX_EFAULT;
+            }
+            0
+        }
         LINUX_MPROTECT_SYSCALL => {
             let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
             let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
@@ -1304,6 +1317,14 @@ fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
     limit[..8].copy_from_slice(&value.to_ne_bytes());
     limit[8..].copy_from_slice(&value.to_ne_bytes());
     Some(limit)
+}
+
+fn linux_console_stat() -> [u8; LINUX_STAT_SIZE] {
+    let mut stat = [0_u8; LINUX_STAT_SIZE];
+    stat[16..24].copy_from_slice(&1_u64.to_ne_bytes());
+    stat[24..28].copy_from_slice(&LINUX_STAT_CHARACTER_DEVICE_MODE.to_ne_bytes());
+    stat[56..64].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
+    stat
 }
 
 fn copy_linux_cpu_location(cpu_address: u64, node_address: u64) -> bool {
