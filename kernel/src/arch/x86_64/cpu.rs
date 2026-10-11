@@ -60,6 +60,7 @@ const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_FCNTL_SYSCALL: u64 = 72;
 const LINUX_GETCWD_SYSCALL: u64 = 79;
+const LINUX_CHDIR_SYSCALL: u64 = 80;
 const LINUX_READLINK_SYSCALL: u64 = 89;
 const LINUX_UMASK_SYSCALL: u64 = 95;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
@@ -1272,6 +1273,14 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_EFAULT;
             }
             2
+        }
+        LINUX_CHDIR_SYSCALL => {
+            let mut path = [0_u8; 16];
+            match copy_linux_c_string(first_argument, &mut path) {
+                Ok(1) if path[0] == b'/' => 0,
+                Ok(_) => LINUX_ENOENT,
+                Err(error) => error,
+            }
         }
         LINUX_READLINK_SYSCALL => linux_readlink_self(first_argument, buffer, count),
         LINUX_READLINKAT_SYSCALL => {

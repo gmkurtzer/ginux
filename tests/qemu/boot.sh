@@ -678,6 +678,11 @@ if ! grep -q '^ginux: Linux root working directory validated' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux fixed root directory changes validated' "$output_file"; then
+    echo "Boot test failed: Linux fixed root directory changes were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux proc self executable link validated' "$output_file"; then
     echo "Boot test failed: Linux proc self executable link was not validated." >&2
     exit 1

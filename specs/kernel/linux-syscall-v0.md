@@ -33,6 +33,10 @@ lengths return `-EINVAL`.
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded
 identity for the initial root view, not a general VFS or directory state.
+`rax = 80` (`__NR_chdir`) accepts exactly `/`, preserving that fixed root view.
+Other paths return `-ENOENT`, and an invalid or unterminated pathname returns
+the bounded pathname-copy error. No general directory lookup or mutable current
+directory state is implied.
 `rax = 89` (`__NR_readlink`) recognizes exactly `/proc/self/exe`, copied as a
 bounded NUL-terminated pathname, and returns `/init` without a terminator. A
 zero output size returns `-EINVAL`; invalid pathname or output ranges return
