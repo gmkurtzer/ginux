@@ -302,8 +302,18 @@ file derived from the retained measured-root index. A second call returns EOF;
 80-byte result returns `-EINVAL` without advancing that cursor. `fstat`,
 `newfstatat`, and `statx` expose immutable directory mode `0555`; writable
 opens return `-EISDIR`, and `O_DIRECTORY` against `/etc/hostname` returns
-`-ENOTDIR`. There is no root or `/lib64` directory enumeration,
-pathname traversal, general VFS, or userspace `execve`; the kernel authenticates
+`-ENOTDIR`.
+
+Opening `/` with `O_DIRECTORY` exposes `.`, `..`, `dev`, `etc`, `proc`, `sys`,
+`tmp`, and `init`, with the six non-dot entries obtained from the measured-root
+index in archive order. The complete result is staged in a fixed 256-byte
+kernel buffer before copy-out. The measured `/proc`, `/sys`, and `/tmp` nodes
+also open as immutable directories and currently enumerate only `.` and `..`;
+the ring-3 proof exercises `/proc`. `/dev` remains the separately populated
+synthetic device directory. Directory descriptor metadata and pathname
+metadata use stable profile-local inode numbers. There is no `/lib64` directory
+enumeration, relative pathname traversal, general VFS, or userspace `execve`;
+the kernel authenticates
 and plans the fixed interpreter, main, and two-DSO executable graph. The kernel
 installs the interpreter needed to bootstrap ring 3; that interpreter installs
 the main and both dependencies' admitted segments through the fixed mapping

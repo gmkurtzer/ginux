@@ -238,6 +238,12 @@ const LINUX_FILE_DEPENDENCY: u8 = 1 << 7;
 const LINUX_FILE_AUXILIARY_DEPENDENCY: u8 = LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_FILE_ROOT_HOSTNAME: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
 const LINUX_ROOT_ETC_DIRECTORY: u8 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT;
+const LINUX_ROOT_DIRECTORY: u8 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INTERPRETER;
+const LINUX_ROOT_PROC_DIRECTORY: u8 =
+    LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
+const LINUX_ROOT_SYS_DIRECTORY: u8 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_DEPENDENCY;
+const LINUX_ROOT_TMP_DIRECTORY: u8 =
+    LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT | LINUX_FILE_DEPENDENCY;
 const LINUX_FILE_MASK: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
@@ -4314,19 +4320,53 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u8> {
     }
 }
 
+fn linux_root_directory_kind(path: &[u8]) -> Option<u8> {
+    match path {
+        b"/" => Some(LINUX_ROOT_DIRECTORY),
+        b"/dev" => Some(LINUX_DEVICE_DIRECTORY),
+        b"/etc" => Some(LINUX_ROOT_ETC_DIRECTORY),
+        b"/proc" => Some(LINUX_ROOT_PROC_DIRECTORY),
+        b"/sys" => Some(LINUX_ROOT_SYS_DIRECTORY),
+        b"/tmp" => Some(LINUX_ROOT_TMP_DIRECTORY),
+        _ => None,
+    }
+}
+
+fn linux_root_directory_inode(kind: u8) -> Option<u64> {
+    match kind & !3 {
+        LINUX_DEVICE_DIRECTORY => Some(4),
+        LINUX_ROOT_ETC_DIRECTORY => Some(10),
+        LINUX_ROOT_DIRECTORY => Some(11),
+        LINUX_ROOT_PROC_DIRECTORY => Some(12),
+        LINUX_ROOT_SYS_DIRECTORY => Some(13),
+        LINUX_ROOT_TMP_DIRECTORY => Some(14),
+        _ => None,
+    }
+}
+
+fn linux_measured_directory_path(kind: u8) -> Option<&'static [u8]> {
+    match kind & !3 {
+        LINUX_ROOT_DIRECTORY => Some(b""),
+        LINUX_ROOT_ETC_DIRECTORY => Some(b"etc"),
+        LINUX_ROOT_PROC_DIRECTORY => Some(b"proc"),
+        LINUX_ROOT_SYS_DIRECTORY => Some(b"sys"),
+        LINUX_ROOT_TMP_DIRECTORY => Some(b"tmp"),
+        _ => None,
+    }
+}
+
 fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
     let mut path = [0_u8; 32];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
     };
-    let kind = match &path[..path_length] {
+    let path = &path[..path_length];
+    let kind = match path {
         b"/dev/null" => 0,
         b"/dev/zero" => LINUX_DEVICE_ZERO,
         b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
-        b"/dev" => LINUX_DEVICE_DIRECTORY,
-        b"/etc" => LINUX_ROOT_ETC_DIRECTORY,
-        path => match linux_runtime_file_kind(path) {
+        path => match linux_root_directory_kind(path).or_else(|| linux_runtime_file_kind(path)) {
             Some(kind) => kind,
             None => return LINUX_ENOENT,
         },
@@ -4374,8 +4414,10 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
         b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => {
             linux_stat(LINUX_STAT_CHARACTER_DEVICE_MODE, 1)
         }
-        b"/dev" => linux_stat(LINUX_STAT_DIRECTORY_MODE, 2),
-        b"/etc" => linux_stat(LINUX_STAT_DIRECTORY_MODE, 10),
+        path if linux_root_directory_kind(path).is_some() => linux_stat(
+            LINUX_STAT_DIRECTORY_MODE,
+            linux_root_directory_inode(linux_root_directory_kind(path).unwrap_or(0)).unwrap_or(0),
+        ),
         path => match linux_runtime_file_kind(path) {
             Some(kind) => linux_regular_file_stat(kind),
             None => return LINUX_ENOENT,
@@ -4398,7 +4440,7 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
     };
     let directory = match &path[..path_length] {
         b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => false,
-        b"/dev" | b"/etc" => true,
+        path if linux_root_directory_kind(path).is_some() => true,
         path if linux_runtime_file_kind(path).is_some() => {
             if mode & 2 != 0 {
                 return LINUX_EACCES;
@@ -4428,8 +4470,12 @@ fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u
         b"/dev/zero" => (2, 5, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
         b"/dev/console" => (3, 1, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
         b"/dev/tty" => (3, 0, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
-        b"/dev" => (4, 0, LINUX_STAT_DIRECTORY_MODE, 0),
-        b"/etc" => (10, 0, LINUX_STAT_DIRECTORY_MODE, 0),
+        path if linux_root_directory_kind(path).is_some() => (
+            linux_root_directory_inode(linux_root_directory_kind(path).unwrap_or(0)).unwrap_or(0),
+            0,
+            LINUX_STAT_DIRECTORY_MODE,
+            0,
+        ),
         path => match linux_runtime_file_kind(path) {
             Some(kind) => (
                 linux_regular_file_inode(kind).unwrap_or(0),
@@ -5945,10 +5991,19 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     let Ok(capacity) = usize::try_from(count) else {
         return LINUX_EINVAL;
     };
-    let mut entries = [0_u8; 152];
+    let mut entries = [0_u8; 256];
     let mut used = 0_usize;
-    if state & !3 == LINUX_ROOT_ETC_DIRECTORY {
-        for (inode, next, name) in [(10_u64, 1_i64, &b"."[..]), (10, 2, &b".."[..])] {
+    if let Some(directory) = linux_measured_directory_path(state) {
+        let directory_inode = linux_root_directory_inode(state).unwrap_or(0);
+        let parent_inode = if directory.is_empty() {
+            directory_inode
+        } else {
+            11
+        };
+        for (inode, next, name) in [
+            (directory_inode, 1_i64, &b"."[..]),
+            (parent_inode, 2, &b".."[..]),
+        ] {
             if !append_linux_dirent(&mut entries, &mut used, inode, next, 4, name) {
                 return LINUX_EINVAL;
             }
@@ -5957,7 +6012,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
         let mut inode = 9_u64;
         let mut next = 3_i64;
         loop {
-            let Some(child) = initramfs::published_next_child(b"etc", cursor) else {
+            let Some(child) = initramfs::published_next_child(directory, cursor) else {
                 return LINUX_EINVAL;
             };
             let Some(child) = child else {
@@ -5969,7 +6024,17 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 0o120000 => 10,
                 _ => return LINUX_EINVAL,
             };
-            if !append_linux_dirent(&mut entries, &mut used, inode, next, kind, child.name) {
+            let child_inode = match (directory, child.name) {
+                (b"", b"dev") => 4,
+                (b"", b"etc") => 10,
+                (b"", b"proc") => 12,
+                (b"", b"sys") => 13,
+                (b"", b"tmp") => 14,
+                (b"", b"init") => 5,
+                (b"etc", b"hostname") => 9,
+                _ => inode,
+            };
+            if !append_linux_dirent(&mut entries, &mut used, child_inode, next, kind, child.name) {
                 return LINUX_EINVAL;
             }
             cursor = child.next_cursor;
@@ -6056,11 +6121,7 @@ fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
     let device = linux_device_descriptor(descriptor);
     (device != 0).then(|| {
         if device & LINUX_DEVICE_DIRECTORY != 0 {
-            let inode = if device & !3 == LINUX_ROOT_ETC_DIRECTORY {
-                10
-            } else {
-                2
-            };
+            let inode = linux_root_directory_inode(device).unwrap_or(0);
             linux_stat(LINUX_STAT_DIRECTORY_MODE, inode)
         } else if device & LINUX_FILE_MASK != 0 {
             linux_regular_file_stat(device)

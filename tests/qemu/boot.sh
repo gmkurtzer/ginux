@@ -1753,6 +1753,16 @@ if ! grep -q '^ginux: measured-root Linux directory cursor validated' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: measured-root Linux root enumerated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux root was not enumerated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured-root Linux empty directory opened' "$output_file"; then
+    echo "Boot test failed: measured-root Linux empty directory was not opened." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

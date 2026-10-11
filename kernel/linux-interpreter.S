@@ -660,7 +660,8 @@ ginux_linux_interpreter:
 #ifdef GINUX_LINKED
 .section .text.discovery,"ax",@progbits
 .Ldiscover_main_file:
-    call .Linspect_root_directory
+    call .Linspect_measured_root
+    call .Linspect_etc_directory
     call .Linspect_root_hostname
     lea rsi, [rip + .Lmain_path]
     call .Linspect_runtime_file
@@ -672,7 +673,96 @@ ginux_linux_interpreter:
     mov r15, r14
     ret
 
-.Linspect_root_directory:
+.Linspect_measured_root:
+    sub rsp, 256
+    mov edi, -100
+    lea rsi, [rip + .Lroot_path]
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    mov rsi, rsp
+    mov edx, 256
+    mov eax, 217
+    syscall
+    cmp rax, 192
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 66], 4
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 67], 0x00766564
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 90], 4
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 91], 0x00637465
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 114], 4
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 115], 0x636f7270
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 119], 0
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 138], 4
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 139], 0x00737973
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 162], 4
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 163], 0x00706d74
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 186], 8
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 187], 0x74696e69
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 191], 0
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    mov rsi, rsp
+    mov edx, 256
+    mov eax, 217
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    mov edi, 2
+    mov rsi, rsp
+    mov eax, 5
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 24], 0x416d
+    jne .Linvalid_dynamic
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+
+    mov edi, -100
+    lea rsi, [rip + .Lproc_path]
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne .Linvalid_dynamic
+    mov edi, 2
+    mov rsi, rsp
+    mov edx, 256
+    mov eax, 217
+    syscall
+    cmp rax, 48
+    jne .Linvalid_dynamic
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    add rsp, 256
+    ret
+
+.Linspect_etc_directory:
     sub rsp, 160
     mov edi, -100
     lea rsi, [rip + .Letc_path]
@@ -1330,6 +1420,10 @@ ginux_linux_interpreter:
     .asciz "/etc/hostname"
 .Letc_path:
     .asciz "/etc"
+.Lroot_path:
+    .asciz "/"
+.Lproc_path:
+    .asciz "/proc"
 
 .section .data,"aw",@progbits
     .ascii "DYNAMIC!"

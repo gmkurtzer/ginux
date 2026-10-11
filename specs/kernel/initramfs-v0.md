@@ -59,12 +59,17 @@ interpreter also opens `/etc` as an immutable directory and obtains its
 `hostname` child from the retained index through `getdents64`. It verifies the
 `.` and `..` records, file type, exact child name, directory metadata, EOF,
 cursor rewind, and atomic rejection of an undersized output buffer. The
+Linux `/` directory likewise enumerates the six direct measured children in
+archive order. The measured `proc`, `sys`, and `tmp` nodes open as immutable,
+currently empty directories; the proof opens and enumerates `proc`. `dev`
+retains its synthetic device children while its directory node comes from the
+measured root. The
 existing `/init` Linux name remains a separately authenticated executable
 fixture until executable loading is connected to the measured root.
 
 The `init` data is only a format marker; it is not yet a Linux ELF executable,
-PID 1, a mounted VFS root, or a runnable container image. The bounded `/etc`
-view is not a general mount. Mount semantics,
+PID 1, a mounted VFS root, or a runnable container image. The bounded root view
+is not a general mount. Mount semantics,
 ownership beyond normalized root metadata, hard links, special nodes, extended
 attributes, compression, loading the image separately from the EFI binary,
 multi-page materialization, mounts, mutable nodes, and VFS or service
