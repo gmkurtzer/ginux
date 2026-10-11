@@ -341,11 +341,26 @@ There is no symlink traversal, mount crossing, or component-by-component VFS
 walk. A closed or
 unknown base returns `-EBADF`, a regular-file base returns `-ENOTDIR`, and other
 relative names return `-ENOENT`. This is not general component traversal, a
-general VFS, or userspace `execve`; the kernel authenticates
+general VFS, or general userspace executable lookup; the kernel authenticates
 and plans the fixed interpreter, main, and two-DSO executable graph. The kernel
 installs the interpreter needed to bootstrap ring 3; that interpreter installs
 the main and both dependencies' admitted segments through the fixed mapping
 contract below.
+
+`rax = 59` (`__NR_execve`) provides one bounded replacement transition for the
+single-threaded static proof process. The pathname must be
+`/bin/exec-target`; `argv` must be exactly
+`["/bin/exec-target", "exec-target", NULL]`, and `envp` exactly
+`["GINUX_EXEC=1", NULL]`. Unknown paths return `-ENOENT`, inaccessible input
+returns `-EFAULT`, and any other vector shape or contents return `-E2BIG`
+without changing the running image. A multithreaded caller returns `-EAGAIN`.
+On success the kernel clears the clear-child-TID and robust-list registrations,
+constructs a fresh bounded initial stack, atomically replaces the authenticated
+image mappings, and never returns to the old program. The replacement reopens
+`/dev/console`, validates its complete initial stack, emits `EXEC_OK`, closes
+the descriptor, and exits with status 42. General pathname loading, dynamic
+targets, shebangs, and arbitrary argument or environment vectors are outside
+this version.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 4,

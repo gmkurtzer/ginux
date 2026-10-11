@@ -663,6 +663,27 @@ if ! grep -q '^ginux: toolchain-linked static Linux ELF executed' "$output_file"
     exit 1
 fi
 
+if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 2 ]]; then
+    echo "Boot test failed: measured Linux exec replacement did not complete twice." >&2
+    exit 1
+fi
+
+if [[ "$(grep -c '^EXEC_OK' "$output_file")" -ne 2 ]]; then
+    echo "Boot test failed: the replacement Linux image did not execute twice." >&2
+    exit 1
+fi
+
+for marker in \
+    'bounded Linux exec rejection preserved live image' \
+    'Linux exec argv and environment delivered' \
+    'old Linux image pages removed after exec' \
+    'replaced Linux image retired cleanly'; do
+    if ! grep -q "^ginux: $marker" "$output_file"; then
+        echo "Boot test failed: missing exec proof: $marker." >&2
+        exit 1
+    fi
+done
+
 if ! grep -q '^ginux: bounded Linux ET_DYN load bias validated' "$output_file"; then
     echo "Boot test failed: bounded Linux ET_DYN load bias was not validated." >&2
     exit 1

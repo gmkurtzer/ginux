@@ -28,7 +28,7 @@ const MAX_TLS_TEMPLATE_SIZE: u64 = 64;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (5 * PAGE_SIZE) as u64;
 const FIXTURE_DATA_OFFSET: usize = 0x5000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
-const INTERPRETED_DATA_OFFSET: usize = 0x4100;
+const INTERPRETED_DATA_OFFSET: usize = 0x5000;
 const INTERPRETED_FIXTURE_SIZE: usize =
     INTERPRETED_DATA_OFFSET + 8 + 13 * DYNAMIC_ENTRY_SIZE + 2 * SYMBOL_ENTRY_SIZE + 28 + 20;
 const DYNAMIC_ENTRY_SIZE: usize = 16;
@@ -282,16 +282,16 @@ pub(crate) fn runtime_exec_target_bytes() -> &'static [u8] {
 }
 
 pub(crate) fn verify_measured_exec_target(bytes: &[u8]) -> bool {
+    measured_exec_target_plan(bytes).is_some()
+}
+
+pub(crate) fn measured_exec_target_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
     if bytes != LINKED_EXEC_TARGET {
-        return false;
+        return None;
     }
-    let Some(image) = parse(bytes) else {
-        return false;
-    };
-    let Some(plan) = plan(&image) else {
-        return false;
-    };
-    plan.entry == 0x40_0100
+    let image = parse(bytes)?;
+    let plan = plan(&image)?;
+    (plan.entry == 0x40_0100
         && plan.program_headers == 0x3f_f040
         && plan.read_only.is_some_and(|segment| {
             segment.virtual_page == 0x3f_f000
@@ -309,7 +309,8 @@ pub(crate) fn verify_measured_exec_target(bytes: &[u8]) -> bool {
         && !plan.writable.executable
         && plan.relro.is_none()
         && plan.tls.is_none()
-        && plan.dynamic_relocations.is_none()
+        && plan.dynamic_relocations.is_none())
+    .then_some(plan)
 }
 
 pub(crate) fn verify_tls_template_metadata() -> bool {

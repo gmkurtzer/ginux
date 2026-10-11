@@ -95,9 +95,19 @@ A second LLD-produced static image is retained under the measured-root name
 R/NX header page at `0x3ff000`, one RX page entered at `0x400100`, and one
 RW/NX page at `0x401000`. Boot requires the measured bytes to match the
 build-time artifact exactly and validates the complete plan before any Linux
-workload runs. This establishes the authenticated replacement image for the
-bounded `execve` transition; mapping it over the live process remains the next
-step.
+workload runs. The bounded `execve` transition pre-materializes these three
+pages in kernel-owned frames, installs them atomically, retains the existing
+guarded stack, and removes the old image pages at `0x402000..0x406000`. The
+post-exit verifier requires the new R/NX, RX, and RW/NX leaves to name the exact
+planned frames and every removed leaf to be absent. A failed precondition or
+mapping verification restores the original stack, thread registrations, and
+page-table entries before returning an error.
+
+This is deliberately one authenticated replacement image, not a general ELF
+lookup or loader. The profile admits only `/bin/exec-target`, one live thread,
+exactly two argument strings, and one environment string. It does not yet
+support an interpreter, dependencies, shebangs, arbitrary argument vectors, or
+dynamic exec targets.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory

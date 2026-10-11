@@ -36,7 +36,11 @@ The publication index now admits 64 nodes and is exercised beyond its original
 16-node limit. Open, metadata, and access checks share that lookup. The current native
 `init` remains a format marker, not PID 1, but the Linux-visible `/init`,
 `/lib64/*`, and `/bin/exec-target` paths map to internal measured-root entries. The complete dynamic
-main/interpreter/two-DSO graph executes from those retained bytes. The archive
+main/interpreter/two-DSO graph executes from those retained bytes. A bounded
+single-threaded `execve` proof atomically replaces the static workload with the
+measured `/bin/exec-target`, delivers an exact two-entry argument vector and
+one-entry environment, removes the old image pages, and exits without reviving
+the old program. The archive
 is not yet a general mount or a system-container image.
 
 The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. A separate isolated service probes and configures link, IPv4, default-gateway, and one static-route record through the first manifest-authorized network-device contract in control ABI v2; a monotonic generation makes effective configuration changes observable and rejects stale whole-state applies. Distinct read-only and write-only services prove that observation and mutation authority can be delegated independently, and a faulted network service is retired without losing mediated state or panicking the kernel. Packet I/O and a general route table remain deliberately unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
@@ -410,10 +414,14 @@ validates its ELF magic, and closes its independent descriptor. The interpreter
 also derives, inspects, and executable-maps both DSO paths.
 Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, private
 read-only `mmap`, metadata, and access checks operate on those files. This is
-bounded immutable-root traversal, not a general VFS or general `execve`
+bounded immutable-root traversal, not a general VFS or general executable
 loading. The kernel
 authenticates and plans the fixed four-image graph; the interpreter installs
 the authenticated main and both dependency segments admitted by that exact plan.
+The separate static proof admits `execve` only for the exact measured
+`/bin/exec-target`, with fixed bounded `argv` and `envp` contents and one live
+thread. Rejected path, pointer, and vector cases leave the original image
+running; success installs exact W^X target frames and unmaps the old image.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
 Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and

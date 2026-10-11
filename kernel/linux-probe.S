@@ -3291,9 +3291,48 @@ resolution_valid:
     call syscall_expect_efault
 #endif
 
+#ifndef GINUX_LINKED
+    sub rsp, 128
+    lea rax, [rip + exec_path]
+    mov qword ptr [rsp], rax
+    lea rax, [rip + exec_mode]
+    mov qword ptr [rsp + 8], rax
+    mov qword ptr [rsp + 16], 0
+    lea rax, [rip + exec_environment]
+    mov qword ptr [rsp + 24], rax
+    mov qword ptr [rsp + 32], 0
+
+    lea rdi, [rip + missing_exec_path]
+    mov rsi, rsp
+    lea rdx, [rsp + 24]
+    mov eax, 59
+    call syscall_expect_enoent
+
+    mov edi, 0x406200
+    mov rsi, rsp
+    lea rdx, [rsp + 24]
+    mov eax, 59
+    call syscall_expect_efault
+
+    mov qword ptr [rsp + 64], 0
+    mov qword ptr [rsp + 72], 0
+    lea rdi, [rip + exec_path]
+    lea rsi, [rsp + 64]
+    lea rdx, [rsp + 24]
+    mov eax, 59
+    call syscall_expect_e2big
+
+    lea rdi, [rip + exec_path]
+    mov rsi, rsp
+    lea rdx, [rsp + 24]
+    mov eax, 59
+    syscall
+    jmp failure
+#else
     mov edi, 42
     mov eax, 231
     syscall
+#endif
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
 child_thread_probe:
@@ -3354,6 +3393,20 @@ syscall_expect_eagain:
     jne failure
     ret
 
+#ifndef GINUX_LINKED
+syscall_expect_enoent:
+    syscall
+    cmp rax, -2
+    jne failure
+    ret
+
+syscall_expect_e2big:
+    syscall
+    cmp rax, -7
+    jne failure
+    ret
+#endif
+
 syscall_expect_one:
     syscall
     cmp rax, 1
@@ -3400,6 +3453,17 @@ nested_getpid:
     mov eax, 39
     syscall
     ret
+
+#ifndef GINUX_LINKED
+exec_path:
+    .asciz "/bin/exec-target"
+exec_mode:
+    .asciz "exec-target"
+exec_environment:
+    .asciz "GINUX_EXEC=1"
+missing_exec_path:
+    .asciz "/bin/missing"
+#endif
 
 #ifdef GINUX_LINKED
 .section .text.file_mmap,"ax",@progbits
