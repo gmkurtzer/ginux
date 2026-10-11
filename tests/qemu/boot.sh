@@ -358,6 +358,11 @@ if ! grep -q '^ginux: bounded service restart policy verified' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: clean service exit publication atomic' "$output_file"; then
+    echo "Boot test failed: clean service exit publication was not atomic." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded lifecycle event queue verified' "$output_file"; then
     echo "Boot test failed: lifecycle event queue invariants failed." >&2
     exit 1

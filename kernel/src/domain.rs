@@ -1625,6 +1625,49 @@ pub(crate) fn verify_service_restart_budget_invariants() -> bool {
     verify_service_restart_budget_invariants_inner().unwrap_or(false)
 }
 
+pub(crate) fn verify_clean_service_exit_invariants() -> bool {
+    verify_clean_service_exit_invariants_inner().unwrap_or(false)
+}
+
+fn verify_clean_service_exit_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+        BootGrant::new(3, Rights::READ.union(Rights::WRITE)),
+    ];
+    let mut manager = Manager::new();
+    manager.create_control_plane(&grants)?;
+    let service = manager.create_initial_service()?;
+    let identity = manager.domain(service)?.service?;
+    manager.lifecycle_events.next_sequence = u64::MAX;
+    if manager.retire_clean_service(service)
+        || manager.domain(service).is_none()
+        || manager.service_id != Some(service)
+        || !manager.lifecycle_events.is_empty()
+    {
+        return Some(false);
+    }
+    manager.lifecycle_events.next_sequence = 1;
+    if !manager.retire_clean_service(service)
+        || manager.domain(service).is_some()
+        || manager.service_id.is_some()
+        || manager.last_retired_service_id != Some(service)
+    {
+        return Some(false);
+    }
+    let event = manager.lifecycle_events.pop()?;
+    Some(
+        event.kind == crate::control_abi::LIFECYCLE_SERVICE_EXITED
+            && event.domain == service
+            && event.service == Some(identity)
+            && event.detail == 0
+            && event.fault.is_none()
+            && event.sequence == 1
+            && manager.lifecycle_events.is_empty()
+            && !manager.retire_clean_service(service),
+    )
+}
+
 fn verify_service_restart_budget_invariants_inner() -> Option<bool> {
     let grants = [
         BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),

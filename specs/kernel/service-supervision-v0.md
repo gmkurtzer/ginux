@@ -66,7 +66,10 @@ and contained fault without consulting mutable domain state.
 Event kind 7 records a supervised service's normal exit with zero detail. The
 normal exit path publishes it before removing the domain record, while the
 fault path continues to publish only kind 1. The control plane therefore does
-not infer health from an IPC peer closure alone.
+not infer health from an IPC peer closure alone. If lifecycle sequencing is
+exhausted, clean retirement is rejected and the domain record remains live;
+the local invariant then restores sequence capacity and proves one exact event
+is published before removal.
 
 After the fault, the kernel creates one replacement domain generation with the
 same logical service identity and IPC-only delegation, explicitly rebinds the service side of the IPC

@@ -466,6 +466,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: service restart budget invariant failed\r\n");
     }
     serial_write("ginux: bounded service restart policy verified\r\n");
+    if !domain::verify_clean_service_exit_invariants() {
+        kernel_fail("ginux: clean service exit invariant failed\r\n");
+    }
+    serial_write("ginux: clean service exit publication atomic\r\n");
     if !domain::verify_lifecycle_event_invariants() {
         kernel_fail("ginux: lifecycle event queue invariant failed\r\n");
     }
