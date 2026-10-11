@@ -69,7 +69,7 @@ interrupt into a boot failure instead of an indefinite wait.
 ## One-shot scheduler preemption
 
 After both bootstrap domains and contexts exist, the kernel programs an initial
-proof-only scheduler one-shot for approximately 500 microseconds while
+proof-only scheduler one-shot for approximately 1 millisecond while
 interrupts remain disabled. The longer initial deadline lets the control plane
 reach its explicit preemption wait after its bootstrap calls. The replacement
 dispatch reload remains approximately 100 microseconds, keeping TCG from
