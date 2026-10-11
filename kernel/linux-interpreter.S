@@ -682,7 +682,6 @@ ginux_linux_interpreter:
     syscall
     cmp rax, 2
     jne .Linvalid_dynamic
-
     mov edi, 2
     mov rsi, rsp
     mov edx, 256
@@ -777,7 +776,7 @@ ginux_linux_interpreter:
     mov edx, 160
     mov eax, 217
     syscall
-    cmp rax, 80
+    cmp rax, 112
     jne .Linvalid_dynamic
     cmp word ptr [rsp + 16], 24
     jne .Linvalid_dynamic
@@ -804,6 +803,17 @@ ginux_linux_interpreter:
     jne .Linvalid_dynamic
     cmp byte ptr [rsp + 75], 0
     jne .Linvalid_dynamic
+    cmp word ptr [rsp + 96], 32
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 98], 8
+    jne .Linvalid_dynamic
+    movabs rax, 0x61656c65722d736f
+    cmp qword ptr [rsp + 99], rax
+    jne .Linvalid_dynamic
+    cmp word ptr [rsp + 107], 0x6573
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 109], 0
+    jne .Linvalid_dynamic
 
     mov edi, 2
     mov rsi, rsp
@@ -823,7 +833,7 @@ ginux_linux_interpreter:
 
     mov edi, 2
     mov rsi, rsp
-    mov edx, 79
+    mov edx, 111
     mov eax, 217
     syscall
     cmp rax, -22
@@ -833,7 +843,7 @@ ginux_linux_interpreter:
     mov edx, 160
     mov eax, 217
     syscall
-    cmp rax, 80
+    cmp rax, 112
     jne .Linvalid_dynamic
 
     mov edi, 2
@@ -888,7 +898,51 @@ ginux_linux_interpreter:
     syscall
     test rax, rax
     jne .Linvalid_dynamic
+    mov edi, 2
+    lea rsi, [rip + .Los_release_relative]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 3
+    jne .Linvalid_dynamic
+    mov edi, 3
+    mov rsi, rsp
+    mov edx, 20
+    xor eax, eax
+    syscall
+    cmp rax, 20
+    jne .Linvalid_dynamic
+    movabs rax, 0x6e69473d454d414e
+    cmp qword ptr [rsp], rax
+    jne .Linvalid_dynamic
+    movabs rax, 0x69673d44490a7875
+    cmp qword ptr [rsp + 8], rax
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 16], 0x0a78756e
+    jne .Linvalid_dynamic
+    mov edi, 3
+    mov rsi, rsp
+    mov eax, 5
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 24], 0x816d
+    jne .Linvalid_dynamic
+    cmp qword ptr [rsp + 48], 20
+    jne .Linvalid_dynamic
+    mov edi, 3
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
 
+    mov edi, 2
+    lea rsi, [rip + .Los_release_relative]
+    mov edx, 1
+    mov eax, 257
+    syscall
+    cmp rax, -13
+    jne .Linvalid_dynamic
     mov edi, 2
     lea rsi, [rip + .Lhostname_relative]
     mov edx, 4
@@ -949,7 +1003,6 @@ ginux_linux_interpreter:
     syscall
     cmp rax, 2
     jne .Linvalid_dynamic
-
     mov edi, 2
     mov rsi, rsp
     mov edx, 6
@@ -1494,13 +1547,14 @@ ginux_linux_interpreter:
     .asciz "hostname"
 .Lhostname_cwd:
     .asciz "etc/hostname"
+.Los_release_relative:
+    .asciz "os-release"
 .Letc_path:
     .asciz "/etc"
 .Lroot_path:
     .asciz "/"
 .Lproc_path:
     .asciz "/proc"
-
 .section .data,"aw",@progbits
     .ascii "DYNAMIC!"
 

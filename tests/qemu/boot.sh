@@ -1788,6 +1788,16 @@ if ! grep -q '^ginux: measured-root Linux relative metadata validated' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: indexed measured-root file descriptors validated' "$output_file"; then
+    echo "Boot test failed: indexed measured-root file descriptors were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: generic measured-root Linux file validated' "$output_file"; then
+    echo "Boot test failed: the generic measured-root Linux file was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

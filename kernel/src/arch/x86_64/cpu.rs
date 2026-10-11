@@ -3,7 +3,7 @@ use core::arch::{
     x86_64::{__cpuid, __cpuid_count},
 };
 use core::mem::size_of;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 use super::{paging, timer};
 
@@ -227,24 +227,27 @@ const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_FIONREAD: u64 = 0x541b;
-const LINUX_DESCRIPTOR_INPUT: u8 = 1;
-const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
-const LINUX_DEVICE_ZERO: u8 = 1 << 2;
-const LINUX_DEVICE_CONSOLE: u8 = 1 << 3;
-const LINUX_DEVICE_DIRECTORY: u8 = 1 << 4;
-const LINUX_FILE_INIT: u8 = 1 << 5;
-const LINUX_FILE_INTERPRETER: u8 = 1 << 6;
-const LINUX_FILE_DEPENDENCY: u8 = 1 << 7;
-const LINUX_FILE_AUXILIARY_DEPENDENCY: u8 = LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
-const LINUX_FILE_ROOT_HOSTNAME: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
-const LINUX_ROOT_ETC_DIRECTORY: u8 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT;
-const LINUX_ROOT_DIRECTORY: u8 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INTERPRETER;
-const LINUX_ROOT_PROC_DIRECTORY: u8 =
+const LINUX_DESCRIPTOR_INPUT: u16 = 1;
+const LINUX_DESCRIPTOR_OUTPUT: u16 = 2;
+const LINUX_DEVICE_ZERO: u16 = 1 << 2;
+const LINUX_DEVICE_CONSOLE: u16 = 1 << 3;
+const LINUX_DEVICE_DIRECTORY: u16 = 1 << 4;
+const LINUX_FILE_INIT: u16 = 1 << 5;
+const LINUX_FILE_INTERPRETER: u16 = 1 << 6;
+const LINUX_FILE_DEPENDENCY: u16 = 1 << 7;
+const LINUX_FILE_AUXILIARY_DEPENDENCY: u16 = LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
+const LINUX_FILE_ROOT_HOSTNAME: u16 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
+const LINUX_FILE_ROOT_GENERIC: u16 = LINUX_FILE_INIT | LINUX_FILE_DEPENDENCY;
+const LINUX_ROOT_ETC_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT;
+const LINUX_ROOT_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INTERPRETER;
+const LINUX_ROOT_PROC_DIRECTORY: u16 =
     LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
-const LINUX_ROOT_SYS_DIRECTORY: u8 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_DEPENDENCY;
-const LINUX_ROOT_TMP_DIRECTORY: u8 =
+const LINUX_ROOT_SYS_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_DEPENDENCY;
+const LINUX_ROOT_TMP_DIRECTORY: u16 =
     LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT | LINUX_FILE_DEPENDENCY;
-const LINUX_FILE_MASK: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
+const LINUX_FILE_MASK: u16 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
+const LINUX_ROOT_NODE_SHIFT: u32 = 8;
+const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_SETFD: u64 = 2;
@@ -472,7 +475,7 @@ static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU8; 4] = [const { AtomicU8::new(0) }; 4];
+static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU16; 4] = [const { AtomicU16::new(0) }; 4];
 static ELF_PROBE_EPOLL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
 static ELF_PROBE_EPOLL_EVENTS: AtomicU32 = AtomicU32::new(0);
@@ -2157,7 +2160,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
     ELF_PROBE_UMASK.store(0o022, Ordering::SeqCst);
     ELF_PROBE_CONSOLE_DESCRIPTORS.store(
-        LINUX_DESCRIPTOR_INPUT | (LINUX_DESCRIPTOR_OUTPUT << 2),
+        (LINUX_DESCRIPTOR_INPUT | (LINUX_DESCRIPTOR_OUTPUT << 2)) as u8,
         Ordering::SeqCst,
     );
     ELF_PROBE_CONSOLE_CLOEXEC.store(0, Ordering::SeqCst);
@@ -4008,7 +4011,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
     }
     ELF_PROBE_MMAP_PAGES.store(pages, Ordering::SeqCst);
     ELF_PROBE_MMAP_WRITABLE.store(writable, Ordering::SeqCst);
-    ELF_PROBE_MMAP_FILE.store(file_kind, Ordering::SeqCst);
+    ELF_PROBE_MMAP_FILE.store(file_kind as u8, Ordering::SeqCst);
     mapping
 }
 
@@ -4309,18 +4312,24 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
     output_length as u64
 }
 
-fn linux_runtime_file_kind(path: &[u8]) -> Option<u8> {
-    match path {
-        b"/init" => Some(LINUX_FILE_INIT),
-        b"/lib64/ld-ginux.so" => Some(LINUX_FILE_INTERPRETER),
-        b"/lib64/libginux.so" => Some(LINUX_FILE_DEPENDENCY),
-        b"/lib64/libginux-aux.so" => Some(LINUX_FILE_AUXILIARY_DEPENDENCY),
-        b"/etc/hostname" => Some(LINUX_FILE_ROOT_HOSTNAME),
-        _ => None,
-    }
+fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
+    let (kind, root_name) = match path {
+        b"/init" => (LINUX_FILE_INIT, b"linux/init" as &[u8]),
+        b"/lib64/ld-ginux.so" => (LINUX_FILE_INTERPRETER, b"linux/ld-ginux.so" as &[u8]),
+        b"/lib64/libginux.so" => (LINUX_FILE_DEPENDENCY, b"linux/libginux.so" as &[u8]),
+        b"/lib64/libginux-aux.so" => (
+            LINUX_FILE_AUXILIARY_DEPENDENCY,
+            b"linux/libginux-aux.so" as &[u8],
+        ),
+        b"/etc/hostname" => (LINUX_FILE_ROOT_HOSTNAME, b"etc/hostname" as &[u8]),
+        b"/etc/os-release" => (LINUX_FILE_ROOT_GENERIC, b"etc/os-release" as &[u8]),
+        _ => return None,
+    };
+    let node = initramfs::published_regular_file_node(root_name)?;
+    Some(kind | (u16::from(node) << LINUX_ROOT_NODE_SHIFT))
 }
 
-fn linux_root_directory_kind(path: &[u8]) -> Option<u8> {
+fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
     match path {
         b"/" => Some(LINUX_ROOT_DIRECTORY),
         b"/dev" => Some(LINUX_DEVICE_DIRECTORY),
@@ -4332,7 +4341,7 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u8> {
     }
 }
 
-fn linux_root_directory_inode(kind: u8) -> Option<u64> {
+fn linux_root_directory_inode(kind: u16) -> Option<u64> {
     match kind & !3 {
         LINUX_DEVICE_DIRECTORY => Some(4),
         LINUX_ROOT_ETC_DIRECTORY => Some(10),
@@ -4344,7 +4353,7 @@ fn linux_root_directory_inode(kind: u8) -> Option<u64> {
     }
 }
 
-fn linux_measured_directory_path(kind: u8) -> Option<&'static [u8]> {
+fn linux_measured_directory_path(kind: u16) -> Option<&'static [u8]> {
     match kind & !3 {
         LINUX_ROOT_DIRECTORY => Some(b""),
         LINUX_ROOT_ETC_DIRECTORY => Some(b"etc"),
@@ -4355,13 +4364,14 @@ fn linux_measured_directory_path(kind: u8) -> Option<&'static [u8]> {
     }
 }
 
-fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u8>, u64> {
+fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, u64> {
     if path.starts_with(b"/") {
         return Ok(None);
     }
     if directory as u32 == LINUX_AT_FDCWD {
         return match path {
-            b"etc/hostname" => Ok(Some(LINUX_FILE_ROOT_HOSTNAME)),
+            b"etc/hostname" => Ok(linux_runtime_file_kind(b"/etc/hostname")),
+            b"etc/os-release" => Ok(linux_runtime_file_kind(b"/etc/os-release")),
             _ => Err(LINUX_ENOENT),
         };
     }
@@ -4373,7 +4383,10 @@ fn linux_relative_file_kind(directory: u64, path: &[u8]) -> Result<Option<u8>, u
         return Err(LINUX_ENOTDIR);
     }
     match (state & !3, path) {
-        (LINUX_ROOT_ETC_DIRECTORY, b"hostname") => Ok(Some(LINUX_FILE_ROOT_HOSTNAME)),
+        (LINUX_ROOT_ETC_DIRECTORY, b"hostname") => Ok(linux_runtime_file_kind(b"/etc/hostname")),
+        (LINUX_ROOT_ETC_DIRECTORY, b"os-release") => {
+            Ok(linux_runtime_file_kind(b"/etc/os-release"))
+        }
         _ => Err(LINUX_ENOENT),
     }
 }
@@ -4412,7 +4425,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
     if kind & LINUX_FILE_MASK != 0 && access != 0 {
         return LINUX_EACCES;
     }
-    let state = kind | (access + 1) as u8;
+    let state = kind | (access + 1) as u16;
     let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
         .find(|descriptor| linux_aux_descriptor_free(*descriptor))
     else {
@@ -4605,7 +4618,7 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
             return LINUX_EFAULT;
         }
         count
-    } else if linux_console_descriptor(descriptor) == LINUX_DESCRIPTOR_INPUT {
+    } else if u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_INPUT {
         0
     } else {
         LINUX_EBADF
@@ -5411,7 +5424,7 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
     let Ok(descriptor) = u64::try_from(descriptor) else {
         return 0;
     };
-    match linux_console_descriptor(descriptor) {
+    match u16::from(linux_console_descriptor(descriptor)) {
         LINUX_DESCRIPTOR_INPUT => return LINUX_POLLHUP,
         LINUX_DESCRIPTOR_OUTPUT => return requested & LINUX_POLLOUT,
         _ => {}
@@ -5507,7 +5520,7 @@ fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
     let access = device & 3;
     if access != LINUX_DESCRIPTOR_INPUT
         && access != 3
-        && linux_console_descriptor(descriptor) != LINUX_DESCRIPTOR_INPUT
+        && u16::from(linux_console_descriptor(descriptor)) != LINUX_DESCRIPTOR_INPUT
     {
         return LINUX_EBADF;
     }
@@ -5583,7 +5596,7 @@ fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
 }
 
 fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
-    if linux_console_descriptor(descriptor) != LINUX_DESCRIPTOR_OUTPUT {
+    if u16::from(linux_console_descriptor(descriptor)) != LINUX_DESCRIPTOR_OUTPUT {
         return LINUX_EBADF;
     }
     linux_bounded_console_write(address, count)
@@ -5611,7 +5624,7 @@ fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
     let device = linux_device_descriptor(descriptor);
     let access = device & 3;
     let writable_device = device != 0 && (access == LINUX_DESCRIPTOR_OUTPUT || access == 3);
-    let serial = linux_console_descriptor(descriptor) == LINUX_DESCRIPTOR_OUTPUT
+    let serial = u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_OUTPUT
         || writable_device && device & LINUX_DEVICE_CONSOLE != 0;
     let discard = writable_device && device & LINUX_DEVICE_CONSOLE == 0;
     if !serial && !discard {
@@ -5660,7 +5673,7 @@ fn linux_console_descriptor_open(descriptor: u64) -> bool {
     linux_console_descriptor(descriptor) != 0
 }
 
-fn linux_device_descriptor(descriptor: u64) -> u8 {
+fn linux_device_descriptor(descriptor: u64) -> u16 {
     descriptor
         .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
         .and_then(|index| ELF_PROBE_DEVICE_DESCRIPTORS.get(index as usize))
@@ -5668,21 +5681,18 @@ fn linux_device_descriptor(descriptor: u64) -> u8 {
         .unwrap_or(0)
 }
 
-fn linux_regular_file(state: u8) -> Option<&'static [u8]> {
+fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
     if state & LINUX_DEVICE_DIRECTORY != 0 {
         return None;
     }
-    match state & LINUX_FILE_MASK {
-        LINUX_FILE_INIT => initramfs::published_file(b"linux/init"),
-        LINUX_FILE_INTERPRETER => initramfs::published_file(b"linux/ld-ginux.so"),
-        LINUX_FILE_DEPENDENCY => initramfs::published_file(b"linux/libginux.so"),
-        LINUX_FILE_AUXILIARY_DEPENDENCY => initramfs::published_file(b"linux/libginux-aux.so"),
-        LINUX_FILE_ROOT_HOSTNAME => initramfs::published_file(b"etc/hostname"),
-        _ => None,
+    let node = ((state & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT) as u8;
+    if node != 0 {
+        return initramfs::published_file_by_node(node);
     }
+    None
 }
 
-fn linux_regular_file_inode(state: u8) -> Option<u64> {
+fn linux_regular_file_inode(state: u16) -> Option<u64> {
     if state & LINUX_DEVICE_DIRECTORY != 0 {
         return None;
     }
@@ -5692,11 +5702,15 @@ fn linux_regular_file_inode(state: u8) -> Option<u64> {
         LINUX_FILE_DEPENDENCY => Some(7),
         LINUX_FILE_AUXILIARY_DEPENDENCY => Some(8),
         LINUX_FILE_ROOT_HOSTNAME => Some(9),
+        LINUX_FILE_ROOT_GENERIC => {
+            let node = (state & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT;
+            (node != 0).then_some(32 + u64::from(node))
+        }
         _ => None,
     }
 }
 
-fn linux_regular_file_seek(descriptor: u64, state: u8, offset: u64, whence: u64) -> u64 {
+fn linux_regular_file_seek(descriptor: u64, state: u16, offset: u64, whence: u64) -> u64 {
     let base = match whence {
         0 => 0_i128,
         1 => i128::from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst)),
@@ -5892,8 +5906,8 @@ fn linux_console_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
             }
             0
         }
-        LINUX_F_GETFL if state == LINUX_DESCRIPTOR_INPUT => 0,
-        LINUX_F_GETFL if state == LINUX_DESCRIPTOR_OUTPUT => 1,
+        LINUX_F_GETFL if u16::from(state) == LINUX_DESCRIPTOR_INPUT => 0,
+        LINUX_F_GETFL if u16::from(state) == LINUX_DESCRIPTOR_OUTPUT => 1,
         _ => LINUX_EINVAL,
     }
 }
@@ -6191,7 +6205,7 @@ fn linux_stat(mode: u32, inode: u64) -> [u8; LINUX_STAT_SIZE] {
     stat
 }
 
-fn linux_regular_file_stat(state: u8) -> [u8; LINUX_STAT_SIZE] {
+fn linux_regular_file_stat(state: u16) -> [u8; LINUX_STAT_SIZE] {
     let mut stat = linux_stat(
         LINUX_STAT_REGULAR_MODE,
         linux_regular_file_inode(state).unwrap_or(0),

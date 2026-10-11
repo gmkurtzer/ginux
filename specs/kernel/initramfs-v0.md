@@ -22,10 +22,11 @@ Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
 The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, the native
-`init` marker, `etc/hostname`, and four build-produced Linux ELF artifacts
+`init` marker, `etc/hostname`, `etc/os-release`, and four build-produced Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and
 auxiliary DSO. The hostname is immutable mode `0555` with exact contents
-`ginux\n`. The ELF entries must byte-match the authenticated artifacts compiled
+`ginux\n`; `os-release` is immutable mode `0555` with exact contents
+`NAME=Ginux\nID=ginux\n`. The ELF entries must byte-match the authenticated artifacts compiled
 into the kernel's bounded execution plan.
 
 After validation, the current roughly 73 KiB proof image is copied into a
@@ -58,22 +59,27 @@ fully staged metadata-and-name record per call, rejects regular files as
 directories, and reports end of the six-entry proof root without copying. The
 published allocation remains allocator-owned after the control-plane domain exits.
 
-The bounded Linux syscall profile resolves `/etc/hostname` directly from that
-same retained index. Its ring-3 interpreter opens the file read-only, reads and
-validates `ginux\n`, verifies mode and size through `fstat`, seeks to its exact
-end, and requires both descriptor writes and writable opens to fail. The
+The bounded Linux syscall profile resolves `/etc/hostname` and
+`/etc/os-release` directly from that same retained index. Auxiliary Linux
+descriptor state stores a one-based measured-root node selector independently
+of the bounded file role. Runtime reads therefore recover bytes by index rather
+than selecting hard-coded kernel slices. Its ring-3 interpreter opens both
+files read-only, validates their exact contents and metadata, and requires
+writable access to fail. The
 interpreter also opens `/etc` as an immutable directory and obtains its
-`hostname` child from the retained index through `getdents64`. It verifies the
-`.` and `..` records, file type, exact child name, directory metadata, EOF,
+`hostname` and `os-release` children from the retained index through
+`getdents64`. It verifies the `.` and `..` records, file types, exact child names, directory metadata, EOF,
 cursor rewind, and atomic rejection of an undersized output buffer. The
 Linux `/` directory likewise enumerates the six direct measured children in
 archive order. The measured `proc`, `sys`, and `tmp` nodes open as immutable,
 currently empty directories; the proof opens and enumerates `proc`. `dev`
 retains its synthetic device children while its directory node comes from the
 measured root. An open `/etc` descriptor also resolves the single relative
-component `hostname` for `openat`, `newfstatat`, `faccessat`, `faccessat2`, and
-`statx`; the fixed root working directory resolves `etc/hostname`. A regular
-file descriptor is rejected as a lookup base.
+components `hostname` and `os-release` for `openat`, `newfstatat`, `faccessat`,
+`faccessat2`, and `statx`; the fixed root working directory resolves their
+`etc/*` forms. A regular file descriptor is rejected as a lookup base. The
+selector is bounded by the 16-node publication index and is neither a
+persistent inode nor a public ABI.
 
 The Linux-visible `/init` and `/lib64/*` names resolve to the four internal
 `linux/*` entries in the same retained index. ELF parsing still uses the

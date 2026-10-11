@@ -213,7 +213,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 11
+    archive.entry_count() == 12
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -227,6 +227,9 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
         && archive
             .find(b"etc/hostname")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"ginux\n")
+        && archive
+            .find(b"etc/os-release")
+            .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"NAME=Ginux\nID=ginux\n")
         && archive.find(b"linux/init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
         })
@@ -587,9 +590,39 @@ pub(crate) fn published_lookup(name: &[u8]) -> Option<(u32, usize)> {
     Some((entry.mode, entry.data.len()))
 }
 
-pub(crate) fn published_file(name: &[u8]) -> Option<&'static [u8]> {
-    let entry = published_root()?.lookup(name)?;
-    (entry.mode & TYPE_MASK == REGULAR).then_some(entry.data)
+pub(crate) fn published_regular_file_node(name: &[u8]) -> Option<u8> {
+    let root = published_root()?;
+    let entry = root.lookup(name)?;
+    if entry.mode & TYPE_MASK != REGULAR {
+        return None;
+    }
+    root.nodes[..root.node_count]
+        .iter()
+        .position(|node| {
+            let Ok(offset) = usize::try_from(node.name_offset) else {
+                return false;
+            };
+            let Ok(size) = usize::try_from(node.name_size) else {
+                return false;
+            };
+            let Some(end) = offset.checked_add(size) else {
+                return false;
+            };
+            root.image.bytes().and_then(|bytes| bytes.get(offset..end)) == Some(name)
+        })
+        .and_then(|index| u8::try_from(index + 1).ok())
+}
+
+pub(crate) fn published_file_by_node(node: u8) -> Option<&'static [u8]> {
+    let root = published_root()?;
+    let index = usize::from(node.checked_sub(1)?);
+    let node = root.nodes.get(index).filter(|_| index < root.node_count)?;
+    if node.mode & TYPE_MASK != REGULAR {
+        return None;
+    }
+    let start = usize::try_from(node.data_offset).ok()?;
+    let end = start.checked_add(usize::try_from(node.data_size).ok()?)?;
+    root.image.bytes()?.get(start..end)
 }
 
 pub(crate) fn published_read(name: &[u8], offset: usize, output: &mut [u8]) -> Option<usize> {
@@ -658,7 +691,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 11
+    let valid = root.node_count == 12
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -676,6 +709,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
         && root
             .lookup(b"etc/hostname")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"ginux\n")
+        && root
+            .lookup(b"etc/os-release")
+            .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"NAME=Ginux\nID=ginux\n")
         && root.lookup(b"linux/init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
         })
