@@ -781,6 +781,19 @@ pub(crate) fn materialize(segment: PlannedSegment<'_>, page: &mut [u8; PAGE_SIZE
     materialize_page(segment, 0, page)
 }
 
+pub(crate) fn planned_file_page_size(
+    segment: PlannedSegment<'_>,
+    page_index: usize,
+) -> Option<usize> {
+    if page_index >= segment.page_count {
+        return None;
+    }
+    let page_offset = usize::try_from(segment.virtual_address - segment.virtual_page).ok()?;
+    let file_extent = page_offset.checked_add(segment.bytes.len())?;
+    let page_start = page_index.checked_mul(PAGE_SIZE)?;
+    Some(file_extent.saturating_sub(page_start).min(PAGE_SIZE))
+}
+
 pub(crate) fn materialize_page(
     segment: PlannedSegment<'_>,
     page_index: usize,

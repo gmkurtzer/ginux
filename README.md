@@ -43,16 +43,17 @@ program headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and
 load biases, accepts the dependency's intentionally unmapped ELF headers, and
 executes the complete probe through the linker-generated jump slot.
 After relocating itself, the interpreter now invokes the Linux syscall gate
-from its own RX range and opens `/init`. It captures the main image's sole
-`DT_NEEDED` string, constructs `/lib64/<needed-name>` on its bounded stack, and
-opens that derived dependency path. It maps each file's first two pages
-read-only/NX, validates its ELF magic and first code byte, then unmaps and
-closes the inspection windows. It then reopens the selected dependency and
-installs its authenticated file pages itself: RX at `0x610000` and RW/NX at
-`0x613000`, using exact `MAP_FIXED_NOREPLACE` contracts. Duplicate placement
-and W+X are rejected before it applies dependency and main relocations. The
-kernel still installs the main and interpreter mappings for this stage, but no
-longer preinstalls dependency contents or leaves.
+from its own RX range and opens `/init`. After inspecting it through a temporary
+read-only window, the interpreter reopens it and installs its authenticated
+header, four RX, and two RW/NX pages through exact `MAP_FIXED_NOREPLACE`
+contracts. It then captures the main image's sole `DT_NEEDED` string,
+constructs `/lib64/<needed-name>` on its bounded stack, inspects that derived
+dependency path, and installs its RX page at `0x610000` and RW/NX page at
+`0x613000`. Duplicate placement and W+X are rejected before it applies
+dependency and main relocations. The kernel installs only the interpreter for
+this stage; it authenticates and plans the main and dependency and reserves
+their zeroed frames, but both images' content and leaves are installed by
+userspace.
 Linker-private metadata remains mapped but outside the probe's bounded
 syscall-copy data extent.
 Interpreter and dependency selection bind the exact `PT_INTERP` path or
@@ -143,7 +144,7 @@ private read-only/NX window into an immutable runtime ELF file. File offsets
 must be page aligned, partial final pages are zero-filled, syscall copy-out
 cannot modify the mapping, and unmap scrubs both payload frames.
 General mapping placement, shared file mappings, writable mappings outside the
-exact authenticated dependency data page, and arbitrary filesystem-backed
+exact authenticated main/dependency data pages, and arbitrary filesystem-backed
 mappings are not implemented.
 The root view retains a fixed working-directory identity of `/`; bounded
 `getcwd` returns it, while undersized and invalid buffers fail.
@@ -153,9 +154,9 @@ An immutable runtime-file view exposes the exact authenticated `/init`,
 `/lib64/ld-ginux.so`, and `/lib64/libginux.so` bytes as read-only regular files.
 Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, private
 read-only `mmap`, metadata, and access checks operate on those files. This is
-not directory traversal, a general VFS, or userspace-driven executable
-loading. The kernel still authenticates and plans the fixed runtime trio; the
-interpreter now installs the authenticated dependency's two admitted segments.
+not directory traversal, a general VFS, or general `execve` loading. The kernel
+still authenticates and plans the fixed runtime trio; the interpreter installs
+the authenticated main and dependency segments admitted by that exact plan.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
 Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and

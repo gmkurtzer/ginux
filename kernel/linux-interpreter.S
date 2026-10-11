@@ -221,6 +221,87 @@ ginux_linux_interpreter:
 .Ldiscover_main_file:
     lea rsi, [rip + .Lmain_path]
     call .Linspect_runtime_file
+
+    mov edi, -100
+    lea rsi, [rip + .Lmain_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne .Linvalid_dynamic
+
+    mov edi, 0x400000
+    mov esi, 4096
+    mov edx, 7
+    mov r10d, 0x100002
+    mov r8d, 2
+    mov r9d, 0x1000
+    mov eax, 9
+    syscall
+    cmp rax, -22
+    jne .Linvalid_dynamic
+
+    mov edi, 0x400000
+    mov edx, 5
+    mov r9d, 0x2000
+    mov eax, 9
+    syscall
+    cmp rax, -22
+    jne .Linvalid_dynamic
+
+    mov edi, 0x610000
+    mov r9d, 0x1000
+    mov eax, 9
+    syscall
+    cmp rax, -22
+    jne .Linvalid_dynamic
+
+    mov edi, 0x3ff000
+    mov edx, 1
+    xor r9d, r9d
+    call .Lmap_main_page
+    mov eax, 9
+    syscall
+    cmp rax, -17
+    jne .Linvalid_dynamic
+
+    mov edi, 0x400000
+    mov edx, 5
+    mov r9d, 0x1000
+    call .Lmap_main_page
+    mov edi, 0x401000
+    mov r9d, 0x2000
+    call .Lmap_main_page
+    mov edi, 0x402000
+    mov r9d, 0x3000
+    call .Lmap_main_page
+    mov edi, 0x403000
+    mov r9d, 0x4000
+    call .Lmap_main_page
+
+    mov edi, 0x404000
+    mov edx, 3
+    mov r9d, 0x5000
+    call .Lmap_main_page
+    mov edi, 0x405000
+    mov r9d, 0x6000
+    call .Lmap_main_page
+
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    ret
+
+.Lmap_main_page:
+    mov esi, 4096
+    mov r10d, 0x100002
+    mov r8d, 2
+    mov eax, 9
+    syscall
+    cmp rax, rdi
+    jne .Linvalid_dynamic
     ret
 
 .Ldiscover_dependency_file:

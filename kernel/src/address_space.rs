@@ -521,6 +521,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     heap_size: PAGE_SIZE,
                     mmap: mmap_virtual_page as usize,
                     mmap_frames: [mmap_page, mmap_tail_page],
+                    main_mappings: [cpu::LinuxFileMapping::EMPTY; 7],
                     dependency_rx: 0,
                     dependency_rx_frame: 0,
                     dependency_rx_offset: 0,
@@ -789,13 +790,6 @@ pub(crate) fn verify_interpreted_elf_mapping(
             }
 
             let payloads = [
-                (main_ro, 0, main_ro_page),
-                (main_rx, 0, main_page),
-                (main_rx, 1, main_tail),
-                (main_rx, 2, main_third),
-                (main_rx, 3, main_fourth),
-                (main_rw, 0, main_data),
-                (main_rw, 1, main_data_tail),
                 (interpreter_rx, 0, interpreter_page),
                 (interpreter_rw, 0, interpreter_data),
             ];
@@ -811,27 +805,29 @@ pub(crate) fn verify_interpreted_elf_mapping(
             zero_frame(mmap_tail_page)?;
             zero_frame(dependency_page)?;
             zero_frame(dependency_data)?;
+            for frame in [
+                main_ro_page,
+                main_page,
+                main_tail,
+                main_third,
+                main_fourth,
+                main_data,
+                main_data_tail,
+            ] {
+                zero_frame(frame)?;
+            }
             let flags = |segment: crate::linux_elf::PlannedSegment<'_>| {
                 PRESENT
                     | USER
                     | if segment.writable { WRITABLE } else { 0 }
                     | if segment.executable { 0 } else { NO_EXECUTE }
             };
-            main_ro_entries
-                .add(main_ro_indexes[3])
-                .write(main_ro_page | flags(main_ro));
-            for (offset, frame) in [main_page, main_tail, main_third, main_fourth]
-                .into_iter()
-                .enumerate()
-            {
-                main_entries
-                    .add(main_indexes[3] + offset)
-                    .write(frame | flags(main_rx));
+            main_ro_entries.add(main_ro_indexes[3]).write(0);
+            for offset in 0..main_rx.page_count {
+                main_entries.add(main_indexes[3] + offset).write(0);
             }
-            for (offset, frame) in [main_data, main_data_tail].into_iter().enumerate() {
-                main_entries
-                    .add(main_rw_indexes[3] + offset)
-                    .write(frame | flags(main_rw));
+            for offset in 0..main_rw.page_count {
+                main_entries.add(main_rw_indexes[3] + offset).write(0);
             }
             interpreter_entries
                 .add(interpreter_indexes[3])
@@ -888,15 +884,11 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 LINUX_INIT_ARGUMENT.len(),
             );
 
-            let permissions_valid = main_ro_entries.add(main_ro_indexes[3]).read()
-                & (PRESENT | USER | WRITABLE | NO_EXECUTE)
-                == PRESENT | USER | NO_EXECUTE
-                && main_entries.add(main_indexes[3]).read()
-                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == PRESENT | USER
-                && main_entries.add(main_rw_indexes[3]).read()
-                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == PRESENT | USER | WRITABLE | NO_EXECUTE
+            let permissions_valid = main_ro_entries.add(main_ro_indexes[3]).read() == 0
+                && (0..main_rx.page_count)
+                    .all(|offset| main_entries.add(main_indexes[3] + offset).read() == 0)
+                && (0..main_rw.page_count)
+                    .all(|offset| main_entries.add(main_rw_indexes[3] + offset).read() == 0)
                 && interpreter_entries.add(interpreter_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == PRESENT | USER
@@ -920,17 +912,35 @@ pub(crate) fn verify_interpreted_elf_mapping(
             activate(root);
             let observed = current_root() == root
                 && cpu::with_supervisor_user_access(|| {
-                    (main_ro.virtual_address as *const u8).read_volatile() == 0x7f
-                        && (main_rx.virtual_address as *const u8).read_volatile()
-                            == main_rx.bytes[0]
-                        && (plan.main.entry as *const u8).read_volatile() == 0x48
-                        && (main_rw.virtual_address as *const u64).read_volatile()
-                            == u64::from_le_bytes(*b"PROBE!!\n")
-                        && (interpreter_rx.virtual_address as *const u8).read_volatile() == 0x7f
+                    (interpreter_rx.virtual_address as *const u8).read_volatile() == 0x7f
                         && (plan.initial_entry as *const u8).read_volatile() == 0x48
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
                 });
+            let file_mapping = |segment: crate::linux_elf::PlannedSegment<'_>, page, frame| {
+                Some(cpu::LinuxFileMapping {
+                    address: usize::try_from(
+                        segment
+                            .virtual_page
+                            .checked_add((page * PAGE_SIZE) as u64)?,
+                    )
+                    .ok()?,
+                    frame,
+                    offset: segment.file_page.checked_add((page * PAGE_SIZE) as u64)?,
+                    file_size: crate::linux_elf::planned_file_page_size(segment, page)?,
+                    writable: segment.writable,
+                    executable: segment.executable,
+                })
+            };
+            let main_mappings = [
+                file_mapping(main_ro, 0, main_ro_page)?,
+                file_mapping(main_rx, 0, main_page)?,
+                file_mapping(main_rx, 1, main_tail)?,
+                file_mapping(main_rx, 2, main_third)?,
+                file_mapping(main_rx, 3, main_fourth)?,
+                file_mapping(main_rw, 0, main_data)?,
+                file_mapping(main_rw, 1, main_data_tail)?,
+            ];
             let executed = observed
                 && cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
@@ -954,6 +964,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     heap_size: PAGE_SIZE,
                     mmap: mmap_virtual_page as usize,
                     mmap_frames: [mmap_page, mmap_tail_page],
+                    main_mappings,
                     dependency_rx: dependency_rx.virtual_page as usize,
                     dependency_rx_frame: dependency_page,
                     dependency_rx_offset: dependency_rx.file_page,
@@ -963,6 +974,23 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 });
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
+            let main_permissions_valid = main_ro_entries.add(main_ro_indexes[3]).read()
+                & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                == main_ro_page | PRESENT | USER | NO_EXECUTE
+                && [main_page, main_tail, main_third, main_fourth]
+                    .into_iter()
+                    .enumerate()
+                    .all(|(offset, frame)| {
+                        main_entries.add(main_indexes[3] + offset).read()
+                            & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                            == frame | PRESENT | USER
+                    })
+                && main_entries.add(main_rw_indexes[3]).read()
+                    & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == main_data | PRESENT | USER | WRITABLE | NO_EXECUTE
+                && main_entries.add(main_rw_indexes[3] + 1).read()
+                    & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == main_data_tail | PRESENT | USER | NO_EXECUTE;
             let dependency_permissions_valid =
                 interpreter_entries.add(dependency_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
@@ -974,14 +1002,25 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 (interpreter_dynamic.relocation_target as *const u64).read_volatile()
                     == interpreter_relocation_value
             });
-            let (main_relative_value, main_symbol_value, main_jump_value) =
+            let main_image_valid = executed
+                && main_permissions_valid
+                && cpu::with_supervisor_user_access(|| {
+                    (main_ro.virtual_address as *const u8).read_volatile() == 0x7f
+                        && (main_rx.virtual_address as *const u8).read_volatile()
+                            == main_rx.bytes[0]
+                        && (plan.main.entry as *const u8).read_volatile() == 0x48
+                });
+            let (main_relative_value, main_symbol_value, main_jump_value) = if main_image_valid {
                 cpu::with_supervisor_user_access(|| {
                     (
                         (main_dynamic.relocation_target as *const u64).read_volatile(),
                         (main_symbol.target as *const u64).read_volatile(),
                         (main_jump_slot.target as *const u64).read_volatile(),
                     )
-                });
+                })
+            } else {
+                (0, 0, 0)
+            };
             let main_relative_relocated = main_relative_value == plan.main.entry;
             let main_symbol_relocated = main_symbol_value == dependency_plan.dependency.entry;
             let main_jump_relocated = main_jump_value == dependency_plan.dependency.entry;
@@ -1011,6 +1050,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             if !mapping_removed {
                 crate::serial_write_bytes(b"\r\nginux: linked dynamic mmap teardown incomplete");
             }
+            if !main_permissions_valid {
+                crate::serial_write_bytes(b"\r\nginux: userspace main mapping invalid");
+            }
             if !dependency_permissions_valid {
                 crate::serial_write_bytes(b"\r\nginux: userspace dependency mapping invalid");
             }
@@ -1036,6 +1078,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 permissions_valid
                     && executed
                     && mapping_removed
+                    && main_permissions_valid
+                    && main_image_valid
                     && dependency_permissions_valid
                     && interpreter_relocated
                     && main_relocated

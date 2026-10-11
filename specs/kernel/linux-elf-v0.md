@@ -173,15 +173,15 @@ they have no interpreter declaration, preventing unresolved code from entering
 through the static path. The existing
 static runtime stack is now populated by a single bounded auxiliary-vector
 encoder using that common contract, and the interpreted proof checks the exact
-word positions of its dynamic values. A bounded execution proof installs the
-main image's read-only/NX header page, four RX pages, and two RW/NX pages plus
-the interpreter's separate RX and RW/NX pages in three independently cloned
-2 MiB leaf regions. It reserves zeroed dependency RX and RW frames behind
-absent leaves for the userspace interpreter to populate. It also owns bounded
-heap, stack, and two `mmap` payload frames. The
-proof validates permissions, the intact main entry, and image contents through
-the activated user root and constructs the dynamic-process stack with the
-common auxiliary-vector encoder. The compact planning fixture records an entry
+word positions of its dynamic values. A bounded execution proof installs only
+the interpreter's separate RX and RW/NX pages in the initial user root. It
+reserves zeroed frames behind absent leaves for the main image's read-only/NX
+header page, four RX pages, two RW/NX pages, and the dependency's RX and RW
+pages. It also owns bounded heap, stack, and two `mmap` payload frames. The
+proof verifies that the main and dependency leaves begin absent, validates
+their userspace-installed contents and permissions after execution, and
+constructs the dynamic-process stack with the common auxiliary-vector encoder.
+The compact planning fixture records an entry
 at `0x600100`; mapped execution enters the linker-produced runtime interpreter
 at `0x600200`.
 The interpreter is assembled from `linux-interpreter.S`; the runtime path links
@@ -227,21 +227,26 @@ values are rejected. The main's linker metadata tail remains mapped for the
 interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
 After applying its self-relocation, the linked interpreter enters the syscall
-gate from its own admitted RX extent and opens `/init`. Its main dynamic-table
-scan captures the sole `DT_NEEDED` string-table offset, requires a nonzero
-bounded name, and constructs `/lib64/<needed-name>` on the mapped user stack.
-It opens that derived path and maps the first two pages of both files through
-the immutable runtime-file interface, validates ELF magic and the first code
-byte at file offset `0x1100`, then unmaps and closes each descriptor before
-reopening the dependency. It maps the dependency file page at offset `0x1000`
-RX at `0x610000` and the page at offset `0x2000` RW/NX at `0x613000` through
-exact `MAP_PRIVATE | MAP_FIXED_NOREPLACE` requests. A repeated RX request
-returns `-EEXIST`; a W+X data request returns `-EINVAL`. Only then does it apply
-dependency and main relocations. The namespace still admits only
+gate from its own admitted RX extent and opens `/init`. It first inspects a
+temporary read-only window, then reopens the file and installs offset `0` at
+`0x3ff000` read-only/NX, offsets `0x1000..0x4000` at
+`0x400000..0x403000` RX, and offsets `0x5000..0x6000` at
+`0x404000..0x405000` RW/NX through exact one-page `MAP_PRIVATE |
+MAP_FIXED_NOREPLACE` requests. The last writable page is later sealed
+read-only/NX by the admitted GNU RELRO transition. A repeated header request
+returns `-EEXIST`, and a W+X text request returns `-EINVAL`.
+
+The main dynamic-table scan then captures the sole `DT_NEEDED` string-table
+offset, requires a nonzero bounded name, and constructs
+`/lib64/<needed-name>` on the mapped user stack. It inspects that derived file
+before reopening it and maps file offset `0x1000` RX at `0x610000` and offset
+`0x2000` RW/NX at `0x613000` through the same fixed contract. A repeated RX
+request returns `-EEXIST`; a W+X data request returns `-EINVAL`. Only then does
+it apply dependency and main relocations. The namespace still admits only
 `libginux.so`, so an altered or unterminated name fails closed. Syscall return
 validation accepts only the declared main and interpreter RX extents. The
-kernel authenticates and plans all images and reserves the dependency frames,
-but dependency content and leaf installation are now userspace-driven.
+kernel authenticates and plans all images and reserves the main and dependency
+frames, but their content and leaf installation are now userspace-driven.
 The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
 those bytes. The executable dynamic interpreter, main, and dependency instead
