@@ -273,6 +273,11 @@ if ! grep -q '^ginux: exhaustive delegated attenuation verified' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: independent delegation roots verified' "$output_file"; then
+    echo "Boot test failed: independent delegation roots were not preserved." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: domain lifecycle ancestry verified' "$output_file"; then
     echo "Boot test failed: domain lifecycle ancestry failed." >&2
     exit 1

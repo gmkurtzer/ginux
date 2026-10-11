@@ -66,6 +66,13 @@ struct DelegatedRoot {
     source: Handle,
 }
 
+#[derive(Clone, Copy)]
+struct DelegationGrant {
+    source: Handle,
+    object: u64,
+    rights: Rights,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct LifecycleEvent {
     kind: u8,
@@ -252,7 +259,25 @@ impl Manager {
         let control_id = self.control_plane_id?;
         let control = self.domain(control_id)?;
         let source = control.boot_roots.get(2).copied().flatten()?;
-        if !control.capabilities.permits(source, IPC_OBJECT, rights) || self.service_id.is_some() {
+        self.create_service_with_delegations(&[DelegationGrant {
+            source,
+            object: IPC_OBJECT,
+            rights,
+        }])
+    }
+
+    fn create_service_with_delegations(&mut self, grants: &[DelegationGrant]) -> Option<DomainId> {
+        if grants.is_empty() || grants.len() > MAX_BOOT_GRANTS || self.service_id.is_some() {
+            return None;
+        }
+        let control_id = self.control_plane_id?;
+        let control = self.domain(control_id)?;
+        if grants.iter().any(|grant| {
+            grant.object == 0
+                || !control
+                    .capabilities
+                    .permits(grant.source, grant.object, grant.rights)
+        }) {
             return None;
         }
 
@@ -263,16 +288,18 @@ impl Manager {
             generation,
         };
         let mut capabilities = CapabilityTable::new();
-        let root = capabilities.accept_delegated(IPC_OBJECT, rights)?;
-        capabilities.seal_boot_authority();
         let mut boot_roots = [None; MAX_BOOT_GRANTS];
-        boot_roots[0] = Some(root);
         let mut delegated_roots = [None; MAX_BOOT_GRANTS];
-        delegated_roots[0] = Some(DelegatedRoot {
-            local: root,
-            domain: control_id,
-            source,
-        });
+        for (index, grant) in grants.iter().enumerate() {
+            let root = capabilities.accept_delegated(grant.object, grant.rights)?;
+            boot_roots[index] = Some(root);
+            delegated_roots[index] = Some(DelegatedRoot {
+                local: root,
+                domain: control_id,
+                source: grant.source,
+            });
+        }
+        capabilities.seal_boot_authority();
         self.generations[slot] = generation;
         self.domains[slot] = Some(Domain {
             id,
@@ -280,7 +307,7 @@ impl Manager {
             state: State::Ready,
             capabilities,
             boot_roots,
-            boot_root_count: 1,
+            boot_root_count: grants.len(),
             remaining_calls: SERVICE_CALL_BUDGET,
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
@@ -561,10 +588,42 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
     ];
     let mut manager = Manager::new();
     let control = manager.create_control_plane(&grants)?;
-    let service = manager.create_service()?;
-    let service_handle = manager.domain(service)?.boot_roots[0]?;
     let parent_handle = manager.domain(control)?.boot_roots[2]?;
+    let unrelated_source = manager.domain(control)?.boot_roots[0]?;
+    let console_source = manager.domain(control)?.boot_roots[1]?;
     let rights = Rights::READ.union(Rights::WRITE);
+    if manager
+        .create_service_with_delegations(&[
+            DelegationGrant {
+                source: parent_handle,
+                object: 3,
+                rights,
+            },
+            DelegationGrant {
+                source: console_source,
+                object: 2,
+                rights: Rights::READ,
+            },
+        ])
+        .is_some()
+        || manager.service_id.is_some()
+    {
+        return Some(false);
+    }
+    let service = manager.create_service_with_delegations(&[
+        DelegationGrant {
+            source: parent_handle,
+            object: 3,
+            rights,
+        },
+        DelegationGrant {
+            source: unrelated_source,
+            object: 1,
+            rights: Rights::READ,
+        },
+    ])?;
+    let service_handle = manager.domain(service)?.boot_roots[0]?;
+    let auxiliary_handle = manager.domain(service)?.boot_roots[1]?;
     let service_read = manager.domains[usize::from(service.slot)]
         .as_mut()?
         .capabilities
@@ -572,6 +631,8 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
     if !manager.permits(service, service_handle, 3, rights)
         || !manager.permits(service, service_read, 3, Rights::READ)
         || manager.permits(service, service_read, 3, Rights::WRITE)
+        || !manager.permits(service, auxiliary_handle, 1, Rights::READ)
+        || manager.permits(service, auxiliary_handle, 1, Rights::MANAGE)
     {
         return Some(false);
     }
@@ -586,7 +647,6 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
             return Some(false);
         }
     }
-    let unrelated_source = manager.domain(control)?.boot_roots[0]?;
     manager.domains[usize::from(service.slot)]
         .as_mut()?
         .delegated_roots[0]
@@ -616,7 +676,9 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
                 .capabilities
                 .permits(service_handle, 3, rights)
             && !manager.permits(service, service_handle, 3, rights)
-            && !manager.permits(service, service_read, 3, Rights::READ),
+            && !manager.permits(service, service_read, 3, Rights::READ)
+            && manager.permits(service, auxiliary_handle, 1, Rights::READ)
+            && !manager.permits(service, auxiliary_handle, 1, Rights::MANAGE),
     )
 }
 

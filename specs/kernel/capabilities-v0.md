@@ -60,4 +60,10 @@ invalidate both local handles. It exhaustively checks all nonempty requested
 rights against both the delegated read/write root and its read-only child,
 rejects a different-object parent substituted into the delegation record, then
 reuses the revoked parent's table slot and proves the stale parent generation
-still cannot authorize either child.
+still cannot authorize either child. The internal service constructor accepts a
+bounded set of delegation grants transactionally and seals them together. Its
+manager invariant first rejects a batch whose second grant exceeds its source
+without creating a partial domain, then gives one test service independent IPC read/write and
+host-object read roots, revokes and reuses only the IPC parent, and requires the
+host-object root to remain valid without lending its provenance to IPC. The
+booted service remains deliberately IPC-only in this revision.

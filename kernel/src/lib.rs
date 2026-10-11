@@ -425,6 +425,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: cross-domain capability revocation verified\r\n");
     serial_write("ginux: per-root delegation provenance verified\r\n");
     serial_write("ginux: exhaustive delegated attenuation verified\r\n");
+    serial_write("ginux: independent delegation roots verified\r\n");
     if !domain::verify_domain_ancestry_invariants() {
         kernel_fail("ginux: domain ancestry invariant failed\r\n");
     }
