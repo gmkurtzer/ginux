@@ -122,6 +122,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
             dynamic.relocation_count == 5
                 && !dynamic.symbol_defined
                 && !dynamic.secondary_symbol_defined
+                && dynamic.init_array == Some(dynamic.relocation_target)
                 && dynamic
                     .symbol_relocation
                     .is_some_and(|relocation| relocation.symbol_index == 1)
@@ -635,6 +636,7 @@ pub(crate) fn plan_authenticated_pie_dependency_graph<'main, 'interpreter, 'depe
         || main.secondary_dynamic_symbol.is_none()
         || main_dynamic.symbol_defined
         || main_dynamic.secondary_symbol_defined
+        || main_dynamic.init_array != Some(main_dynamic.relocation_target)
         || main.dynamic_symbol != dependency_images[0].dynamic_symbol
         || main.secondary_dynamic_symbol != dependency_images[1].dynamic_symbol
         || main.dynamic_symbol == main.secondary_dynamic_symbol
@@ -1213,7 +1215,7 @@ fn parse_dynamic_table(bytes: &[u8], header: usize) -> Option<DynamicTable<'_>> 
     if read_u32(bytes, header + 4)? != PF_READ | PF_WRITE
         || physical_address != 0 && physical_address != virtual_address
         || file_size != memory_size
-        || !(2..=18).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
+        || !(2..=20).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
         || !file_size.is_multiple_of(DYNAMIC_ENTRY_SIZE)
         || alignment != 8
         || file_offset % alignment != virtual_address % alignment

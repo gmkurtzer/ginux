@@ -212,7 +212,7 @@ executable window. At runtime
 the linked interpreter first validates its mapped ELF magic, requires a
 56-byte program-header entry size, and bounds one through eight headers to its
 first 4096-byte RX page. It accepts exactly one nonempty `PT_DYNAMIC` whose
-equal file/memory size is a multiple of 16 bytes and contains at most 18
+equal file/memory size is a multiple of 16 bytes and contains at most 20
 entries, then derives that table's runtime address with checked addition. The
 compact fixture retains its fixed synthetic table offset to remain within its
 768-byte raw-text bound. Both forms derive their page-aligned load bias and scan each bounded dynamic table for
@@ -232,7 +232,10 @@ through their validated `DT_STRTAB` ranges, and compares the complete
 NUL-terminated names before resolving the undefined main symbol to the
 dependency entry. It writes that value through
 `R_X86_64_GLOB_DAT` at `0x405108` and eager `R_X86_64_JUMP_SLOT` at `0x405110`
-before jumping to the main entry at `0x400100`. In the synthetic fixture, the
+before jumping to the main entry at `0x400100`. The linker-produced graph main
+instead uses its sole relative relocation for an eight-byte init array at
+`0x405100`, whose relocated constructor address is validated independently by
+the kernel. In the synthetic fixture, the
 main workload calls the dependency through the jump slot and dependency code
 checks all three of its own relocation targets before returning the expected value. The main workload also
 requires all three main-image relocated values for a dynamic startup and
@@ -262,10 +265,15 @@ any pairwise overlap among the main, interpreter, and two dependency plans.
 The userspace interpreter preserves that order, derives both runtime paths,
 maps each DSO in its independent authenticated slot, applies each DSO's
 `RELATIVE`, `GLOB_DAT`, and eager `JUMP_SLOT` relocations, then calls each
-relocated one-entry `DT_INIT_ARRAY` before transferring to the main workload.
+relocated one-entry `DT_INIT_ARRAY`. After resolving every main relocation, it
+calls the main's one-entry `DT_INIT_ARRAY` before transferring to the main
+entry.
 Each provider records initialization in private writable data and its exported
 function fails until that state is present, making constructor-before-use order
-observable in ring 3. The main then calls both providers through its
+observable in ring 3. The main constructor calls both providers and records its
+own private initialization state only if both calls succeed; the main entry
+requires that state. This proves dependency constructors run before the main
+constructor, which runs before the main entry. The main then calls both providers through its
 linker-produced PLT, after the interpreter matches both complete names through
 the three-bucket main SysV table and each provider's GNU table. The kernel
 independently checks the main's two `GLOB_DAT` and two `JUMP_SLOT` values, both DSO mapping
@@ -305,7 +313,7 @@ kernel-enforced contracts.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
-it may describe at most 18 entries. The interpreter derives the runtime
+it may describe at most 20 entries. The interpreter derives the runtime
 dynamic-table address by adding the selected bias to `p_vaddr`; the linked main
 and dependency scans no longer embed their dynamic addresses or entry counts.
 The interpreter keeps its bounded startup scratch in the zero-fill tail after

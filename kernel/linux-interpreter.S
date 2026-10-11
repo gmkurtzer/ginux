@@ -44,7 +44,7 @@ ginux_linux_interpreter:
     test al, 15
     jnz .Linvalid_dynamic
     shr rax, 4
-    cmp rax, 18
+    cmp rax, 20
     ja .Linvalid_dynamic
     mov r14, qword ptr [r12 + 16]
     add r14, rbx
@@ -157,6 +157,8 @@ ginux_linux_interpreter:
     xor r12d, r12d
 #ifdef GINUX_LINKED
     mov qword ptr [rip + .Lsecondary_needed], 0
+    mov qword ptr [rip + .Lmain_init_array], 0
+    mov qword ptr [rip + .Lmain_init_array_size], 0
 #endif
 .Lscan_main_dynamic:
     cmp qword ptr [rdi], 7
@@ -169,6 +171,18 @@ ginux_linux_interpreter:
     cmove r13, qword ptr [rdi + 8]
     cmp qword ptr [rdi], 23
     cmove rbx, qword ptr [rdi + 8]
+#ifdef GINUX_LINKED
+    cmp qword ptr [rdi], 25
+    jne .Lscan_main_init_array_size
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_init_array], rdx
+.Lscan_main_init_array_size:
+    cmp qword ptr [rdi], 27
+    jne .Lscan_main_needed
+    mov rdx, qword ptr [rdi + 8]
+    mov qword ptr [rip + .Lmain_init_array_size], rdx
+.Lscan_main_needed:
+#endif
     cmp qword ptr [rdi], 1
     jne .Lnext_main_dynamic
     test r12, r12
@@ -202,6 +216,10 @@ ginux_linux_interpreter:
 #ifdef GINUX_LINKED
     cmp qword ptr [rip + .Lsecondary_needed], 0
     je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_init_array], 0
+    je .Linvalid_dynamic
+    cmp qword ptr [rip + .Lmain_init_array_size], 8
+    jne .Linvalid_dynamic
 #endif
     add rax, r15
     add rsi, r15
@@ -430,6 +448,9 @@ ginux_linux_interpreter:
 #endif
 
 #ifdef GINUX_LINKED
+    mov rcx, qword ptr [rip + .Lmain_init_array]
+    add rcx, r15
+    call qword ptr [rcx]
     mov rax, qword ptr [rip + .Lmain_entry]
 #else
     mov eax, 0x400100
@@ -687,7 +708,7 @@ ginux_linux_interpreter:
     test al, 15
     jnz .Linvalid_dynamic
     shr rax, 4
-    cmp rax, 18
+    cmp rax, 20
     ja .Linvalid_dynamic
     mov rcx, qword ptr [r12 + 16]
     add rcx, r14
@@ -873,6 +894,10 @@ ginux_linux_interpreter:
 .Lauxiliary_dependency_base:
     .zero 8
 .Lsecondary_needed:
+    .zero 8
+.Lmain_init_array:
+    .zero 8
+.Lmain_init_array_size:
     .zero 8
 .Lauxiliary_name:
     .zero 8

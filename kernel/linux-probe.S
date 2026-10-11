@@ -9,6 +9,11 @@
 #endif
 ginux_linux_probe:
 #ifdef GINUX_LINKED
+#ifdef GINUX_GRAPH
+    movabs rax, 0x4e49414d54494e49
+    cmp qword ptr [rip + ginux_main_init_state], rax
+    jne failure
+#endif
     mov rax, qword ptr [rip + ginux_dependency_symbol@GOTPCREL]
     test rax, rax
     jz failure
@@ -3349,6 +3354,25 @@ linked_file_mmap_test:
 .section .text
 #endif
 
+#ifdef GINUX_GRAPH
+.section .text.file_mmap,"ax",@progbits
+.type ginux_linux_initialize,@function
+ginux_linux_initialize:
+    call ginux_dependency_symbol@PLT
+    movabs rcx, 0x59434e45444e4947
+    cmp rax, rcx
+    jne .Lmain_initialize_done
+    call ginux_auxiliary_symbol@PLT
+    movabs rcx, 0x5952414958554147
+    cmp rax, rcx
+    jne .Lmain_initialize_done
+    movabs rax, 0x4e49414d54494e49
+    mov qword ptr [rip + ginux_main_init_state], rax
+.Lmain_initialize_done:
+    ret
+.section .text
+#endif
+
 .balign 8
 readable_payload:
     .ascii "PROBE!!\n"
@@ -3364,11 +3388,33 @@ auxiliary_dependency_path:
 .global ginux_linux_probe_data
 ginux_linux_probe_data:
     .ascii "PROBE!!\n"
+#ifdef GINUX_GRAPH
+.global ginux_main_init_state
+ginux_main_init_state:
+    .quad 0
+#endif
 
 .section .bss
 .balign 8
+#ifdef GINUX_GRAPH
+    .space 4080
+#else
     .space 4088
+#endif
 
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+.section .data.rel.ro.head,"aw",@progbits
+.balign 8
+    .space 256
+
+.section .init_array,"aw",@init_array
+.balign 8
+    .quad ginux_linux_initialize
+
+.section .data.rel.ro.tail,"aw",@progbits
+.balign 8
+    .space 248
+#else
 .section .data.rel.ro,"aw",@progbits
 .balign 8
 #ifdef GINUX_LINKED
@@ -3387,4 +3433,5 @@ ginux_main_glob_dat_slot:
 ginux_main_jump_slot:
     .quad 0
     .space 232
+#endif
 #endif

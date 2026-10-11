@@ -33,9 +33,12 @@ bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations. The
 symbol relocations resolve to the authenticated dependencies, and the interpreter
 also applies both dependencies' own relative and self-symbol relocations. Each
-DSO exposes one authenticated eight-byte `DT_INIT_ARRAY`; the interpreter calls
-both relocated constructors before transferring control to the main entry, and
-each exported function refuses to succeed before its constructor runs. The main workload calls through the
+DSO and the main expose one authenticated eight-byte `DT_INIT_ARRAY`. The
+interpreter calls both relocated dependency constructors, resolves the main,
+and then calls the main constructor before transferring control to its entry.
+Each exported function refuses to succeed before its dependency constructor
+runs; the main constructor calls both exports before recording initialization,
+and the main entry refuses to continue without that record. The main workload calls through the
 resolved jump slots; the loader validates all six dependency relocations and
 both dependency calls return checked values before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated

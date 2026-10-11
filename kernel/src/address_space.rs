@@ -649,6 +649,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let Some(main_dynamic) = plan.main.dynamic_relocations else {
         return false;
     };
+    if main_dynamic.init_array != Some(main_dynamic.relocation_target) {
+        return false;
+    }
     let (Some(main_symbol), Some(main_jump_slot)) = (
         main_dynamic.symbol_relocation,
         main_dynamic.jump_slot_relocation,
@@ -688,6 +691,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let Some(interpreter_relocation_value) = plan
         .interpreter_base
         .checked_add(interpreter_dynamic.relocation_addend)
+    else {
+        return false;
+    };
+    let Some(main_relocation_value) = main_ro
+        .virtual_page
+        .checked_add(main_dynamic.relocation_addend)
     else {
         return false;
     };
@@ -1212,7 +1221,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             } else {
                 (0, 0, 0, 0, 0)
             };
-            let main_relative_relocated = main_relative_value == plan.main.entry;
+            let main_relative_relocated = main_relative_value == main_relocation_value;
             let relocate_dependency_address = |address: u64| {
                 address
                     .checked_sub(dependency_plan.dependency_bases[0])

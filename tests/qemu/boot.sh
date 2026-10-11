@@ -838,6 +838,21 @@ if ! grep -q '^ginux: userspace Linux dependency constructors executed' "$output
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux main init array validated' "$output_file"; then
+    echo "Boot test failed: the bounded Linux main init array was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: userspace Linux main constructor executed' "$output_file"; then
+    echo "Boot test failed: the userspace Linux main constructor was not executed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux dependency-before-main initialization ordered' "$output_file"; then
+    echo "Boot test failed: Linux dependency-before-main initialization was not ordered." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux auxiliary dependency entry executed' "$output_file"; then
     echo "Boot test failed: the auxiliary Linux dependency entry was not executed." >&2
     exit 1
