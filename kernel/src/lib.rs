@@ -622,6 +622,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: generation-bound IPC endpoints verified");
     serial_write("\r\nginux: generation-tagged IPC messages verified");
     serial_write("\r\nginux: blocking IPC direct wake completed");
+    serial_write("\r\nginux: direct IPC wake provenance verified");
     serial_write("\r\nginux: IPC wait-key matching enforced");
     serial_write("\r\nginux: blocked IPC peer-close cleanup verified");
     serial_write("\r\nginux: sticky IPC peer closure delivered");

@@ -493,6 +493,11 @@ if ! grep -q '^ginux: blocking IPC direct wake completed' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: direct IPC wake provenance verified' "$output_file"; then
+    echo "Boot test failed: direct IPC wake provenance was not retained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: IPC wait-key matching enforced' "$output_file"; then
     echo "Boot test failed: IPC wait-key matching was not enforced." >&2
     exit 1

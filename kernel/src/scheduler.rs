@@ -323,6 +323,7 @@ struct Scheduler {
 
 struct Runtime {
     scheduler: Scheduler,
+    control_domain: u64,
     yields: u8,
     preemptions: u8,
     exits: u8,
@@ -335,6 +336,7 @@ struct Runtime {
     restarts: u8,
     blocks: u8,
     wakes: u8,
+    last_wake_source: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -605,6 +607,7 @@ pub(crate) fn initialize_runtime(
     unsafe {
         core::ptr::addr_of_mut!(RUNTIME).write(MaybeUninit::new(Runtime {
             scheduler,
+            control_domain: first_domain,
             yields: 0,
             preemptions: 0,
             exits: 0,
@@ -617,6 +620,7 @@ pub(crate) fn initialize_runtime(
             restarts: 0,
             blocks: 0,
             wakes: 0,
+            last_wake_source: None,
         }));
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
@@ -906,6 +910,7 @@ pub(crate) fn wake_ipc_peer(
         return false;
     }
     runtime.wakes = wakes;
+    runtime.last_wake_source = Some(sender_domain);
     true
 }
 
@@ -978,6 +983,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.restarts == 1
         && runtime.blocks == 1
         && runtime.wakes == 1
+        && runtime.last_wake_source == Some(runtime.control_domain)
         && runtime.expected_fault_observed
         && runtime.address_space_switches == 5
         && runtime.scheduler.current.is_none()

@@ -50,7 +50,9 @@ then bypasses the queue, writes the word into the blocked context's result
 register, and makes it ready only if object 3 and the receiver-side direction
 match the typed scheduler wait key. The QEMU proof preempts into the replacement
 service, blocks it, resumes control, wakes the service with value 3, and later
-observes 3 as the receive result. There is at most one bootstrap waiter, and a
+observes 3 as the receive result. The scheduler retains the exact waking domain
+generation in its audit state, and completion requires it to match the control
+plane rather than merely differ from the receiver. There is at most one bootstrap waiter, and a
 failed block rolls back atomically.
 
 Domain exit and contained-fault paths cancel matching blocked receives before
