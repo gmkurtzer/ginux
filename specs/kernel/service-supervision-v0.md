@@ -30,8 +30,9 @@ traffic cannot erase the most recently delivered fault diagnostic.
 The CPL3 exception path removes only the service context, switches back to the
 client's CR3, releases the service's domain thread reservation, retires the
 faulted service domain and capability table, and
-restores the client's saved register frame. The client must receive reply 2 and
-exit normally. Completion additionally requires an empty IPC queue, rejection
+restores the client's saved register frame. The client must receive reply 2.
+After restart it sends request 3 to the replacement and must receive reply 4
+before exiting normally. Completion additionally requires an empty IPC queue, rejection
 of the stale service domain/handle pair, one contained service fault, and no
 `GINUX_KERNEL_PANIC` marker.
 
@@ -77,9 +78,11 @@ failed generation are cleared;
 its already-produced reply remains available to the control client. The kernel
 rearms the APIC one-shot, returns to the client, and then
 preempts that client to run the replacement. The replacement negotiates ABI
-v1 and blocks on an empty request direction. The client wakes it with a direct
-message, exhausts its call budget, and exits. The replacement then observes the
-message, exits cleanly, and has its capability table retired. The single
+v1 and blocks on an empty request direction. The client wakes it directly with
+request 3, yields, and requires the replacement's transformed reply 4. The
+replacement then exits cleanly and has its capability table retired. This
+proves that restart restores request/reply service, rather than merely creating
+a context that can exit. The single
 restart consumes the persistent control plane's fixed one-attempt bootstrap
 budget. The initial service creation does not consume that budget, and failed
 replacement setup does not refund it. A later service generation therefore
@@ -91,7 +94,7 @@ kernel continuation. Exhaustion is therefore a supervision outcome rather than
 a kernel panic. The local manager invariant exercises rejection after the
 budget is consumed; the current hardware workload exercises the successful
 one-restart path. This is not yet a configurable
-production policy. There is no backoff, state recovery, service identity separate from thread identity,
+production policy. There is no backoff, durable state recovery,
 request ID, replay protection, cancellation, outstanding-call cleanup, or
 health protocol. The four-record FIFO never overwrites queued events. Additional
 records set a sticky overflow notification containing the first dropped domain

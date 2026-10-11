@@ -42,9 +42,9 @@ Exhausting either message sequence rejects both direct and queued sends without
 waking a waiter, changing audit state, or inserting a record.
 The local invariant injects zero and out-of-order envelopes, verifies that a
 full-queue send does not advance the counter, and proves that sequencing
-continues across service replacement. The QEMU proof audits sequence one in
-both directions for the first exchange and request sequence two for the later
-direct delivery to the replacement.
+continues across service replacement. After one exchange with each service
+generation, the QEMU proof audits sequence two in both directions and binds the
+second reply to the replacement generation.
 
 The channel is object 3 in the signed boot authority manifest. Sending requires
 `WRITE`; receiving requires `READ`. The call gate resolves the supplied opaque
@@ -53,7 +53,8 @@ queue. The ring-3 proof requires a send with the console capability to fail,
 then has the control context enqueue request value 1 in the service-inbound
 direction and wait for timer preemption. The service receives 1, sends
 transformed reply 2 in the control-inbound direction, and deliberately faults.
-The resumed client requires reply 2. Direction is selected from the current
+The resumed client requires reply 2. After replacement, it sends request 3 and
+requires reply 4 from the new exact service generation. Direction is selected from the current
 generation-checked domain role after capability validation; callers cannot
 choose it as an argument. The boot gate also requires both queues to be empty
 at completion.

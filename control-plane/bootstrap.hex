@@ -160,7 +160,7 @@ cd80
 85c0
 
 # jump to the appended structured-fault diagnostic before exhausting the budget
-e967000000
+e977000000
 cd80
 4883f8fc
 7507
@@ -197,10 +197,24 @@ cd80
 4883f803
 0f85b1ffffff
 
-# replacement exits after receiving the control message
+# replacement transforms request 3 into reply 4
+48ffc0
+4889c6
+4c89c7
+b804000000
+cd80
+
+# replacement exits after replying
 b802000000
 cd80
 0f0b
+
+# dispatch the awakened replacement and consume its reply
+b803000000
+cd80
+4c89c7
+b805000000
+cd80
 
 # control diagnostic trampoline: fetch retained service-fault details
 4889cf
@@ -287,14 +301,14 @@ cd80
 0f0b
 488b4608
 4c39d0
-7402
+7502
 0f0b
 488b4610
-4883f801
+4883f802
 7402
 0f0b
 488b4618
-4883f802
+4883f804
 7402
 0f0b
 

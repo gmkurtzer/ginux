@@ -853,6 +853,11 @@ if ! grep -q '^ginux: replacement service context executed' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: replacement service request-reply completed' "$output_file"; then
+    echo "Boot test failed: replacement service request-reply did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: per-domain syscall budgets enforced' "$output_file"; then
     echo "Boot test failed: per-domain syscall accounting failed." >&2
     exit 1

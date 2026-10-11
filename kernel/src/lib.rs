@@ -643,7 +643,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
     }
-    if ipc::last_message_audit() != Some(((service_domain, 1), (control_plane, 2))) {
+    if ipc::last_message_audit() != Some(((replacement_domain, 2), (control_plane, 2))) {
         kernel_fail("\r\nginux: IPC message provenance invariant failed\r\n");
     }
     if ipc::receive(control_plane) != ipc::Receive::PeerClosed(service_domain)
@@ -731,6 +731,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: failed service stack scrubbed before restart");
     serial_write("\r\nginux: service frame ownership transferred to replacement");
     serial_write("\r\nginux: replacement service context executed");
+    serial_write("\r\nginux: replacement service request-reply completed");
     serial_write("\r\nginux: per-domain syscall budgets enforced");
     serial_write("\r\nginux: per-domain thread budgets enforced");
     serial_write("\r\nginux: in-flight domain operations drained");
