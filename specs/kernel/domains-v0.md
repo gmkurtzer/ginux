@@ -24,7 +24,9 @@ opaque handle in the current scheduler domain, never in a global or
 control-plane-default namespace. The boot gate rejects using the service handle
 in the control domain and the control IPC handle in the service domain.
 
-The domains own distinct W^X address spaces and scheduler contexts. The service
-domain metadata currently remains after its sole thread faults; domain teardown,
-capability revocation on death, restart, and reusable service-domain creation
-remain undefined.
+The domains own distinct W^X address spaces and scheduler contexts. When the
+service's sole thread faults, the exception path first removes the scheduler
+slot, then retires the service domain record and its entire capability table
+before resuming the client. The boot gate requires the old domain ID and IPC
+handle pair to stop resolving. Restart policy, outstanding-operation cleanup,
+and reusable service-domain creation remain undefined.

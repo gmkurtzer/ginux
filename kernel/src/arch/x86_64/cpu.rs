@@ -627,11 +627,13 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX;
     };
-    resume_action(scheduler::fault_runtime(
-        frame,
-        USER_CODE_SELECTOR,
-        USER_DATA_SELECTOR,
-    ))
+    let fault_domain = scheduler::current_domain();
+    let service_fault = fault_domain.is_some_and(domain::is_service_domain);
+    let action = scheduler::fault_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR);
+    if service_fault && !fault_domain.is_some_and(domain::retire_service) {
+        return u64::MAX;
+    }
+    resume_action(action)
 }
 
 fn resume_action(action: RuntimeAction) -> u64 {

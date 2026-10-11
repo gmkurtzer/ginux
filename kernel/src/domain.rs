@@ -246,6 +246,41 @@ pub(crate) fn handle_permits(domain_raw: u64, raw: u64, object: u64, rights: Rig
     domain.capabilities.permits(handle, object, rights)
 }
 
+pub(crate) fn is_service_domain(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager()
+        .and_then(|manager| manager.domain(id))
+        .is_some_and(|domain| domain.role == Role::Service)
+}
+
+pub(crate) fn retire_service(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    if manager.service_id != Some(id)
+        || manager
+            .domain(id)
+            .is_none_or(|domain| domain.role != Role::Service)
+    {
+        return false;
+    }
+    manager.domains[usize::from(id.slot)] = None;
+    manager.service_id = None;
+    true
+}
+
+pub(crate) fn domain_is_retired(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager().is_some_and(|manager| manager.domain(id).is_none())
+}
+
 fn global_manager() -> Option<&'static Manager> {
     if !INITIALIZED.load(Ordering::Acquire) {
         return None;

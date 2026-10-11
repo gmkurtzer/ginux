@@ -293,6 +293,11 @@ if ! grep -q '^ginux: service domain authority restricted to IPC' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: faulted service domain authority retired' "$output_file"; then
+    echo "Boot test failed: faulted service-domain authority remained live." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: per-thread syscall budgets enforced' "$output_file"; then
     echo "Boot test failed: per-thread syscall accounting failed." >&2
     exit 1

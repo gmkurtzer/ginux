@@ -32,7 +32,9 @@ same object, and every requested right.
 
 The current 64-entry table is deliberately fixed and local. It does not yet
 define general userspace-requested transfer, object lifetime, concurrency,
-resource charging, or synchronization with in-flight operations. The boot test covers rejected
+resource charging, or synchronization with in-flight operations. Retiring the
+faulted bootstrap service removes its complete local table before its client
+resumes. The boot test covers rejected
 equal/expanded derivation, least-rights access, recursive revocation, slot
 reuse, stale-generation rejection, one kernel-mediated IPC delegation, and
 cross-domain handle substitution.

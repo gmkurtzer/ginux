@@ -416,6 +416,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     ) {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
+    if !domain::domain_is_retired(service_domain)
+        || domain::handle_permits(
+            service_domain,
+            service_ipc_handle,
+            3,
+            capability::Rights::READ,
+        )
+    {
+        kernel_fail("\r\nginux: faulted service authority remained live\r\n");
+    }
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v1 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
@@ -426,6 +436,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: capability-gated bounded IPC verified");
     serial_write("\r\nginux: isolated service request-reply completed");
     serial_write("\r\nginux: service domain authority restricted to IPC");
+    serial_write("\r\nginux: faulted service domain authority retired");
     serial_write("\r\nginux: per-thread syscall budgets enforced");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
