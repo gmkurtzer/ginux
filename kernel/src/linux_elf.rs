@@ -88,6 +88,15 @@ pub(crate) struct InterpretedLoadPlan<'main, 'interpreter> {
     pub(crate) interpreter: LoadPlan<'interpreter>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct ProcessStartup {
+    pub(crate) initial_entry: u64,
+    pub(crate) program_headers: u64,
+    pub(crate) program_header_count: u16,
+    pub(crate) interpreter_base: u64,
+    pub(crate) main_entry: u64,
+}
+
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * MIN_LOAD_SEGMENT_COUNT
         || bytes.get(0..4)? != b"\x7fELF"
@@ -287,6 +296,26 @@ pub(crate) fn plan_interpreted<'main, 'interpreter>(
         main,
         interpreter,
     })
+}
+
+pub(crate) fn static_startup(plan: &LoadPlan<'_>) -> ProcessStartup {
+    ProcessStartup {
+        initial_entry: plan.entry,
+        program_headers: plan.program_headers,
+        program_header_count: plan.program_header_count,
+        interpreter_base: 0,
+        main_entry: plan.entry,
+    }
+}
+
+pub(crate) fn interpreted_startup(plan: &InterpretedLoadPlan<'_, '_>) -> ProcessStartup {
+    ProcessStartup {
+        initial_entry: plan.initial_entry,
+        program_headers: plan.main.program_headers,
+        program_header_count: plan.main.program_header_count,
+        interpreter_base: plan.interpreter_base,
+        main_entry: plan.main_entry,
+    }
 }
 
 fn plans_overlap(first: &LoadPlan<'_>, second: &LoadPlan<'_>) -> bool {
@@ -908,7 +937,13 @@ fn verify_interpreted_plan() -> bool {
     let Some(combined) = plan_interpreted(&main, PATH, &interpreter, 0x60_0000) else {
         return false;
     };
-    combined.initial_entry == 0x60_00f0
+    let startup = interpreted_startup(&combined);
+    startup.initial_entry == 0x60_00f0
+        && startup.program_headers == 0x40_0040
+        && startup.program_header_count == 4
+        && startup.interpreter_base == 0x60_0000
+        && startup.main_entry == 0x40_0100
+        && combined.initial_entry == 0x60_00f0
         && combined.main_entry == 0x40_0100
         && combined.interpreter_base == 0x60_0000
         && combined.main.program_headers == 0x40_0040

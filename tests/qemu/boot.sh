@@ -558,6 +558,11 @@ if ! grep -q '^ginux: bounded Linux interpreter resolution plan validated' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux dynamic startup metadata validated' "$output_file"; then
+    echo "Boot test failed: Linux dynamic startup metadata was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: four-page Linux executable mapping validated' "$output_file"; then
     echo "Boot test failed: four-page Linux executable mapping was not validated." >&2
     exit 1

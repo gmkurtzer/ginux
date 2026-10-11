@@ -101,7 +101,11 @@ non-interpreted `ET_DYN` image. It preserves the main entry for `AT_ENTRY`, uses
 the relocated interpreter entry as the initial instruction pointer, records the
 interpreter bias for `AT_BASE`, and rejects page-granular overlap between every
 main and interpreter load before mapping. The resolver still must authenticate
-the selected interpreter bytes. The profile does not yet apply dynamic
+the selected interpreter bytes. Static and interpreted plans produce the same
+startup-metadata type, so initial RIP and the `AT_PHDR`, `AT_PHNUM`, `AT_BASE`,
+and `AT_ENTRY` values cannot silently fall back to static defaults. The existing
+static runtime stack is now populated from that common contract. The profile
+does not yet apply dynamic
 relocations, map the combined plan, execute the interpreter, or support glibc.
 
 ## Page-image plan

@@ -34,6 +34,7 @@ pub(crate) fn verify_linux_elf_mapping(
     protected_start: u64,
     protected_size: usize,
 ) -> bool {
+    let startup = crate::linux_elf::static_startup(plan);
     let first = plan.executable;
     let header = plan.read_only;
     let second = plan.writable;
@@ -330,15 +331,15 @@ pub(crate) fn verify_linux_elf_mapping(
                 environment_address,
                 0,
                 3,
-                plan.program_headers,
+                startup.program_headers,
                 4,
                 crate::linux_elf::PROGRAM_HEADER_SIZE as u64,
                 5,
-                u64::from(plan.program_header_count),
+                u64::from(startup.program_header_count),
                 6,
                 PAGE_SIZE as u64,
                 7,
-                0,
+                startup.interpreter_base,
                 8,
                 0,
                 11,
@@ -354,7 +355,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 31,
                 argument_address,
                 9,
-                plan.entry,
+                startup.main_entry,
                 17,
                 100,
                 15,
@@ -477,15 +478,15 @@ pub(crate) fn verify_linux_elf_mapping(
                 && stack_words.add(1).read() == argument_address
                 && stack_words.add(3).read() == environment_address
                 && stack_words.add(5).read() == 3
-                && stack_words.add(6).read() == plan.program_headers
+                && stack_words.add(6).read() == startup.program_headers
                 && stack_words.add(7).read() == 4
                 && stack_words.add(8).read() == crate::linux_elf::PROGRAM_HEADER_SIZE as u64
                 && stack_words.add(9).read() == 5
-                && stack_words.add(10).read() == u64::from(plan.program_header_count)
+                && stack_words.add(10).read() == u64::from(startup.program_header_count)
                 && stack_words.add(11).read() == 6
                 && stack_words.add(12).read() == PAGE_SIZE as u64
                 && stack_words.add(13).read() == 7
-                && stack_words.add(14).read() == 0
+                && stack_words.add(14).read() == startup.interpreter_base
                 && stack_words.add(15).read() == 8
                 && stack_words.add(16).read() == 0
                 && stack_words.add(17).read() == 11
@@ -501,7 +502,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 && stack_words.add(27).read() == 31
                 && stack_words.add(28).read() == argument_address
                 && stack_words.add(29).read() == 9
-                && stack_words.add(30).read() == plan.entry
+                && stack_words.add(30).read() == startup.main_entry
                 && stack_words.add(31).read() == 17
                 && stack_words.add(32).read() == 100
                 && stack_words.add(33).read() == 15
@@ -541,7 +542,7 @@ pub(crate) fn verify_linux_elf_mapping(
             let executed = activated
                 && observed
                 && cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
-                    entry: plan.entry as usize,
+                    entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     code: first.virtual_address as usize,
                     code_size: first.memory_size,

@@ -585,6 +585,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded multi-page Linux ELF plan verified\r\n");
     serial_write("ginux: bounded Linux ET_DYN load bias validated\r\n");
     serial_write("ginux: bounded Linux interpreter resolution plan validated\r\n");
+    serial_write("ginux: Linux dynamic startup metadata validated\r\n");
     if !linux_elf::verify_mapped_load_plan(boot_info.image_base as u64, boot_info.image_size) {
         kernel_fail("ginux: Linux ELF64 address-space mapping failed\r\n");
     }
