@@ -11,7 +11,8 @@ program headers in the first load page, and installs them at their declared
 addresses in a collision-checked page-table root. It activates the root and
 executes a non-page-base verification entry at ring 3. This
 entry receives a distinct RW/NX stack containing `argc`, `argv[0]`, and bounded
-Linux `AT_PAGESZ`/`AT_ENTRY` metadata, and validates its argument from ring 3
+Linux `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_PAGESZ`/`AT_ENTRY` metadata, and
+validates its argument and entry metadata from ring 3
 before terminating through the architectural x86-64 `SYSCALL` instruction
 after checking that an unsupported call returns `-ENOSYS`, performing bounded
 `write` copy-in and `uname` copy-out operations, and validating a `getpid()`

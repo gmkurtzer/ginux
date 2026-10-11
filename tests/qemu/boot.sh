@@ -518,8 +518,8 @@ if ! grep -q '^ginux: Linux ELF headers mapped in executable segment' "$output_f
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux initial argv and auxv validated' "$output_file"; then
-    echo "Boot test failed: Linux initial process stack was not validated." >&2
+if ! grep -q '^ginux: Linux program-header auxv validated' "$output_file"; then
+    echo "Boot test failed: Linux program-header auxiliary vector was not validated." >&2
     exit 1
 fi
 

@@ -1,5 +1,5 @@
 const ELF_HEADER_SIZE: usize = 64;
-const PROGRAM_HEADER_SIZE: usize = 56;
+pub(crate) const PROGRAM_HEADER_SIZE: usize = 56;
 const LOAD_SEGMENT_COUNT: usize = 2;
 const MAX_PROGRAM_HEADER_COUNT: usize = 3;
 const PT_LOAD: u32 = 1;
@@ -12,11 +12,13 @@ const PF_READ: u32 = 4;
 const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
-const PROBE_CODE: [u8; 142] = [
+const PROBE_CODE: [u8; 157] = [
     0x48, 0x83, 0x3c, 0x24, 0x01, // cmp qword ptr [rsp], 1 (argc)
-    0x0f, 0x85, 0x81, 0x00, 0x00, 0x00, // jne fallback UD2
+    0x0f, 0x85, 0x90, 0x00, 0x00, 0x00, // jne fallback UD2
     0x48, 0x8b, 0x44, 0x24, 0x08, // mov rax, [rsp + 8] (argv[0])
     0x80, 0x38, 0x2f, // cmp byte ptr [rax], '/'
+    0x0f, 0x85, 0x82, 0x00, 0x00, 0x00, // jne fallback UD2
+    0x48, 0x81, 0x7c, 0x24, 0x68, 0x00, 0x01, 0x40, 0x00, // cmp AT_ENTRY, 0x400100
     0x75, 0x77, // jne fallback UD2
     0xb8, 0xe7, 0x03, 0x00, 0x00, // mov eax, 999 (unsupported syscall)
     0x0f, 0x05, // syscall
@@ -55,6 +57,7 @@ const PROBE_CODE: [u8; 142] = [
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
     pub(crate) bytes: &'a [u8],
+    pub(crate) file_offset: u64,
     pub(crate) virtual_address: u64,
     pub(crate) memory_size: u64,
     pub(crate) flags: u32,
@@ -62,6 +65,8 @@ pub(crate) struct Segment<'a> {
 
 pub(crate) struct Image<'a> {
     pub(crate) entry: u64,
+    pub(crate) program_headers: u64,
+    pub(crate) program_header_count: u16,
     pub(crate) segments: [Segment<'a>; LOAD_SEGMENT_COUNT],
 }
 
@@ -76,6 +81,8 @@ pub(crate) struct PlannedSegment<'a> {
 
 pub(crate) struct LoadPlan<'a> {
     pub(crate) entry: u64,
+    pub(crate) program_headers: u64,
+    pub(crate) program_header_count: u16,
     pub(crate) segments: [PlannedSegment<'a>; LOAD_SEGMENT_COUNT],
 }
 
@@ -143,7 +150,26 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     {
         return None;
     }
-    Some(Image { entry, segments })
+    let program_headers = segments.iter().find_map(|segment| {
+        let table_offset = ELF_HEADER_SIZE as u64;
+        let table_end = program_table_end as u64;
+        (segment.file_offset <= table_offset
+            && segment
+                .file_offset
+                .checked_add(segment.bytes.len() as u64)?
+                >= table_end)
+            .then(|| {
+                segment
+                    .virtual_address
+                    .checked_add(table_offset - segment.file_offset)
+            })?
+    })?;
+    Some(Image {
+        entry,
+        program_headers,
+        program_header_count: program_header_count as u16,
+        segments,
+    })
 }
 
 pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
@@ -162,6 +188,8 @@ pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {
     });
     Some(LoadPlan {
         entry: image.entry,
+        program_headers: image.program_headers,
+        program_header_count: image.program_header_count,
         segments: [segments[0]?, segments[1]?],
     })
 }
@@ -206,6 +234,7 @@ fn parse_segment(bytes: &[u8], header: usize) -> Option<Segment<'_>> {
     }
     Some(Segment {
         bytes: bytes.get(offset..file_end)?,
+        file_offset: offset as u64,
         virtual_address,
         memory_size,
         flags,
@@ -229,6 +258,8 @@ pub(crate) fn verify_parser() -> bool {
         return false;
     };
     if parsed.entry != 0x40_0100
+        || parsed.program_headers != 0x40_0040
+        || parsed.program_header_count != 3
         || parsed.segments[0].bytes.get(0x100..) != Some(PROBE_CODE.as_slice())
         || parsed.segments[0].virtual_address != 0x40_0000
         || parsed.segments[0].memory_size != (0x100 + PROBE_CODE.len()) as u64
@@ -276,6 +307,8 @@ pub(crate) fn verify_load_plan() -> bool {
     materialize(plan.segments[0], &mut executable_page)
         && materialize(plan.segments[1], &mut writable_page)
         && plan.entry == 0x40_0100
+        && plan.program_headers == 0x40_0040
+        && plan.program_header_count == 3
         && plan.segments[0].virtual_page == 0x40_0000
         && plan.segments[0].executable
         && !plan.segments[0].writable

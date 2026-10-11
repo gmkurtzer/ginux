@@ -146,7 +146,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
-            let stack_offset = PAGE_SIZE - 12 * size_of::<u64>();
+            let stack_offset = PAGE_SIZE - 18 * size_of::<u64>();
             let argument_offset = PAGE_SIZE - size_of::<u64>();
             let argument_address = stack_virtual_page + argument_offset as u64;
             let stack_words = stack_bytes.add(stack_offset).cast::<u64>();
@@ -155,6 +155,12 @@ pub(crate) fn verify_linux_elf_mapping(
                 argument_address,
                 0,
                 0,
+                3,
+                plan.program_headers,
+                4,
+                crate::linux_elf::PROGRAM_HEADER_SIZE as u64,
+                5,
+                u64::from(plan.program_header_count),
                 6,
                 PAGE_SIZE as u64,
                 9,
@@ -196,10 +202,16 @@ pub(crate) fn verify_linux_elf_mapping(
                 && second_bytes[8..].iter().all(|byte| *byte == 0)
                 && stack_words.read() == 1
                 && stack_words.add(1).read() == argument_address
-                && stack_words.add(4).read() == 6
-                && stack_words.add(5).read() == PAGE_SIZE as u64
-                && stack_words.add(6).read() == 9
-                && stack_words.add(7).read() == plan.entry
+                && stack_words.add(4).read() == 3
+                && stack_words.add(5).read() == plan.program_headers
+                && stack_words.add(6).read() == 4
+                && stack_words.add(7).read() == crate::linux_elf::PROGRAM_HEADER_SIZE as u64
+                && stack_words.add(8).read() == 5
+                && stack_words.add(9).read() == u64::from(plan.program_header_count)
+                && stack_words.add(10).read() == 6
+                && stack_words.add(11).read() == PAGE_SIZE as u64
+                && stack_words.add(12).read() == 9
+                && stack_words.add(13).read() == plan.entry
                 && core::slice::from_raw_parts(
                     stack_bytes.add(argument_offset),
                     LINUX_INIT_ARGUMENT.len(),
