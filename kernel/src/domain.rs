@@ -58,6 +58,7 @@ struct Domain {
     active_threads: u16,
     thread_limit: u16,
     active_operations: u16,
+    operation_limit: u16,
     parent: Option<DomainId>,
     delegated_roots: [Option<DelegatedRoot>; MAX_BOOT_GRANTS],
 }
@@ -243,6 +244,7 @@ impl Manager {
             active_threads: 0,
             thread_limit: BOOTSTRAP_THREAD_LIMIT,
             active_operations: 0,
+            operation_limit: BOOTSTRAP_OPERATION_LIMIT,
             parent: None,
             delegated_roots: [None; MAX_BOOT_GRANTS],
         });
@@ -344,8 +346,13 @@ impl Manager {
             boot_root_count: grants.len(),
             remaining_calls: SERVICE_CALL_BUDGET,
             active_threads: 0,
-            thread_limit: BOOTSTRAP_THREAD_LIMIT,
+            thread_limit: if role == Role::SupervisedService {
+                BOOTSTRAP_THREAD_LIMIT
+            } else {
+                0
+            },
             active_operations: 0,
+            operation_limit: BOOTSTRAP_OPERATION_LIMIT,
             parent: Some(control_id),
             delegated_roots,
         });
@@ -435,7 +442,7 @@ impl Manager {
         else {
             return false;
         };
-        if domain.state != State::Ready || domain.active_operations >= BOOTSTRAP_OPERATION_LIMIT {
+        if domain.state != State::Ready || domain.active_operations >= domain.operation_limit {
             return false;
         }
         domain.active_operations += 1;
@@ -470,7 +477,7 @@ impl Manager {
         else {
             return false;
         };
-        if domain.role == Role::AuxiliaryService || domain.active_threads >= domain.thread_limit {
+        if domain.active_threads >= domain.thread_limit {
             return false;
         }
         domain.active_threads += 1;
@@ -954,8 +961,11 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     let host_handle = manager.domain(host_service)?.boot_roots[0]?;
     if manager.service_id != Some(primary)
         || manager.domain(primary)?.role != Role::SupervisedService
+        || manager.domain(primary)?.thread_limit != BOOTSTRAP_THREAD_LIMIT
         || manager.domain(console_service)?.role != Role::AuxiliaryService
+        || manager.domain(console_service)?.thread_limit != 0
         || manager.domain(host_service)?.role != Role::AuxiliaryService
+        || manager.domain(host_service)?.thread_limit != 0
         || manager.attach_thread(console_service)
         || manager
             .create_auxiliary_service_with_delegations(&[console_grant])

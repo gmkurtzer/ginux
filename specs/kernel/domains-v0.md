@@ -47,8 +47,11 @@ unrelated auxiliary authority, and reuses the freed domain and registry slots
 with a new generation. Primary-supervised and auxiliary services have distinct
 roles. Only the primary role is admitted to the current scheduler and routed
 through IPC peer closure, fault reporting, restart, and frame quarantine;
-auxiliary thread attachment is rejected until those lifecycle contracts are
-defined. Auxiliary retirement is an explicit two-phase transition: a stop
+auxiliary domains receive an explicit zero-thread admission limit until those
+lifecycle contracts are defined. The scheduler applies the stored limit rather
+than granting admission from a role name. In-flight operation admission is
+likewise checked against a per-domain limit. Auxiliary retirement is an
+explicit two-phase transition: a stop
 request changes a ready service to stopping, prevents admission of new
 operations, and retirement remains blocked until existing operations drain.
 The stop transition requires the persistent control-plane generation and its

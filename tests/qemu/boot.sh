@@ -293,6 +293,11 @@ if ! grep -q '^ginux: service lifecycle roles separated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: domain resource admission policies verified' "$output_file"; then
+    echo "Boot test failed: domain resource admission policies were not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: auxiliary service quiescence enforced' "$output_file"; then
     echo "Boot test failed: auxiliary service quiescence was not enforced." >&2
     exit 1
