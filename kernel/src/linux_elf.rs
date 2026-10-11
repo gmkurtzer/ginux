@@ -1200,7 +1200,7 @@ fn verify_interpreted_plan() -> bool {
     };
     let startup = interpreted_startup(&combined);
     let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000);
-    startup.initial_entry == 0x60_00e0
+    startup.initial_entry == 0x60_0100
         && startup.program_headers == 0x3f_f040
         && startup.program_header_count == 6
         && startup.interpreter_base == 0x60_0000
@@ -1212,7 +1212,7 @@ fn verify_interpreted_plan() -> bool {
         && auxiliary[25] == 0x40_0100
         && auxiliary[29] == 0x70_2000
         && auxiliary[34..] == [0, 0]
-        && combined.initial_entry == 0x60_00e0
+        && combined.initial_entry == 0x60_0100
         && combined.main_entry == 0x40_0100
         && combined.interpreter_base == 0x60_0000
         && combined.main.program_headers == 0x3f_f040
@@ -1230,7 +1230,16 @@ fn verify_interpreted_plan() -> bool {
             .read_only
             .is_some_and(|segment| segment.virtual_address == 0x3f_f000)
         && combined.interpreter.program_headers == 0x60_0040
-        && combined.interpreter.dynamic_relocations.is_none()
+        && combined
+            .interpreter
+            .dynamic_relocations
+            .is_some_and(|dynamic| {
+                dynamic.table_address == 0x60_3008
+                    && dynamic.relocation_address == 0x60_3048
+                    && dynamic.relocation_count == 1
+                    && dynamic.relocation_target == 0x60_3080
+                    && dynamic.relocation_addend == 0x1234
+            })
         && combined.interpreter.executable.virtual_page == 0x60_0000
         && combined.interpreter.writable.virtual_page == 0x60_3000
         && verify_interpreter_authentication_rejections(&main, &interpreter_bytes, &authority)
@@ -1575,8 +1584,11 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
     bytes
 }
 
-fn compact_position_independent_fixture() -> [u8; 512] {
-    let mut bytes = [0_u8; 512];
+fn compact_position_independent_fixture() -> [u8; 1024] {
+    const DATA_OFFSET: usize = 0x200;
+    const DYNAMIC_OFFSET: usize = DATA_OFFSET + 8;
+    const RELA_OFFSET: usize = DYNAMIC_OFFSET + 4 * DYNAMIC_ENTRY_SIZE;
+    let mut bytes = [0_u8; 1024];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
     bytes[5] = 1;
@@ -1584,34 +1596,63 @@ fn compact_position_independent_fixture() -> [u8; 512] {
     write_u16(&mut bytes, 16, ET_DYN);
     write_u16(&mut bytes, 18, EM_X86_64);
     write_u32(&mut bytes, 20, 1);
-    write_u64(&mut bytes, 24, 0xe0);
+    write_u64(&mut bytes, 24, 0x100);
     write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
     write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
     write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
-    write_u16(&mut bytes, 56, MIN_LOAD_SEGMENT_COUNT as u16);
+    write_u16(&mut bytes, 56, (MIN_LOAD_SEGMENT_COUNT + 1) as u16);
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE,
         0,
         0,
-        0x100,
-        0x100,
+        0x120,
+        0x120,
         PF_READ | PF_EXECUTE,
     );
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
-        0x100,
+        DATA_OFFSET as u64,
         0x3000,
-        8,
+        (8 + 4 * DYNAMIC_ENTRY_SIZE + RELA_ENTRY_SIZE) as u64,
         0x100,
         PF_READ | PF_WRITE,
     );
-    bytes[0xe0..0xec].copy_from_slice(&[
+    write_dynamic(
+        &mut bytes,
+        ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE,
+        DYNAMIC_OFFSET,
+        0x3008,
+        4 * DYNAMIC_ENTRY_SIZE,
+    );
+    for (index, (tag, value)) in [
+        (DT_RELA, 0x3048),
+        (DT_RELASZ, RELA_ENTRY_SIZE as u64),
+        (DT_RELAENT, RELA_ENTRY_SIZE as u64),
+        (DT_NULL, 0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        write_u64(&mut bytes, DYNAMIC_OFFSET + index * DYNAMIC_ENTRY_SIZE, tag);
+        write_u64(
+            &mut bytes,
+            DYNAMIC_OFFSET + index * DYNAMIC_ENTRY_SIZE + 8,
+            value,
+        );
+    }
+    write_u64(&mut bytes, RELA_OFFSET, 0x3080);
+    write_u64(&mut bytes, RELA_OFFSET + 8, R_X86_64_RELATIVE);
+    write_u64(&mut bytes, RELA_OFFSET + 16, 0x1234);
+    bytes[0x100..0x10c].copy_from_slice(&[
+        0x48, 0xc7, 0x04, 0x25, 0x80, 0x30, 0x60, 0x00, 0x34, 0x12, 0x60, 0x00,
+    ]);
+    bytes[0x10c..0x118].copy_from_slice(&[
         0x48, 0xc7, 0x04, 0x25, 0x00, 0x41, 0x40, 0x00, 0x00, 0x01, 0x40, 0x00,
     ]);
-    bytes[0xec..0xf1].copy_from_slice(&[0xe9, 0x0f, 0x00, 0xe0, 0xff]);
-    bytes[0x100..0x108].copy_from_slice(b"DYNAMIC!");
+    bytes[0x118..0x11d].copy_from_slice(&[0xe9, 0xe3, 0xff, 0xdf, 0xff]);
+    bytes[DATA_OFFSET..DATA_OFFSET + 8].copy_from_slice(b"DYNAMIC!");
     bytes
 }
 

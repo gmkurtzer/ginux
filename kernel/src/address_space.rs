@@ -549,6 +549,15 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let Some(relro) = plan.main.relro else {
         return false;
     };
+    let Some(interpreter_dynamic) = plan.interpreter.dynamic_relocations else {
+        return false;
+    };
+    let Some(interpreter_relocation_value) = plan
+        .interpreter_base
+        .checked_add(interpreter_dynamic.relocation_addend)
+    else {
+        return false;
+    };
     let startup = crate::linux_elf::interpreted_startup(plan);
     let heap_virtual_page = main_rw
         .virtual_page
@@ -870,11 +879,16 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 });
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
+            let interpreter_relocated = cpu::with_supervisor_user_access(|| {
+                (interpreter_dynamic.relocation_target as *const u64).read_volatile()
+                    == interpreter_relocation_value
+            });
             activate(kernel_root_physical);
             Some(
                 permissions_valid
                     && executed
                     && mapping_removed
+                    && interpreter_relocated
                     && current_root() == kernel_root_physical,
             )
         }

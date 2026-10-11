@@ -633,6 +633,11 @@ if ! grep -q '^ginux: interpreter-first Linux ring-3 entry verified' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux interpreter self-relocation applied' "$output_file"; then
+    echo "Boot test failed: userspace Linux interpreter self-relocation was not applied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace Linux relative relocation applied' "$output_file"; then
     echo "Boot test failed: userspace Linux relative relocation was not applied." >&2
     exit 1
