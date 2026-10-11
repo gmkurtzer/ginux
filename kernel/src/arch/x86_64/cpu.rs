@@ -101,10 +101,12 @@ const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_OPENAT_SYSCALL: u64 = 257;
 const LINUX_NEWFSTATAT_SYSCALL: u64 = 262;
 const LINUX_READLINKAT_SYSCALL: u64 = 267;
+const LINUX_FACCESSAT_SYSCALL: u64 = 269;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
+const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
@@ -116,6 +118,7 @@ const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
+const LINUX_EACCES: u64 = u64::MAX - 12;
 const LINUX_ENOMEM: u64 = u64::MAX - 11;
 const LINUX_ESPIPE: u64 = u64::MAX - 28;
 const LINUX_EMFILE: u64 = u64::MAX - 23;
@@ -1473,6 +1476,8 @@ extern "sysv64" fn linux_syscall_handler(
             }
             linux_readlink_self(buffer, count, register(0))
         }
+        LINUX_FACCESSAT_SYSCALL => linux_faccessat(buffer, count, 0),
+        LINUX_FACCESSAT2_SYSCALL => linux_faccessat(buffer, count, register(0)),
         LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
         LINUX_GETRLIMIT_SYSCALL => {
             let Some(limit) = linux_resource_limit(first_argument) else {
@@ -1625,6 +1630,25 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
+    if flags != 0 || mode & !7 != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; 16];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    if &path[..path_length] != b"/dev/null" {
+        return LINUX_ENOENT;
+    }
+    if mode & 1 != 0 {
+        LINUX_EACCES
+    } else {
+        0
+    }
 }
 
 fn linux_descriptor_read(descriptor: u64) -> u64 {

@@ -101,6 +101,10 @@ not directory traversal or a general VFS. `rax = 262` (`__NR_newfstatat`)
 returns the same fixed character-device metadata for `/dev/null` without
 opening it. Only zero flags are accepted; bad path or output memory returns
 `-EFAULT`, unsupported flags return `-EINVAL`, and other paths return `-ENOENT`.
+`faccessat` and `faccessat2` report read/write access for the same fixed node
+and return `-EACCES` for execute access. `faccessat2` accepts only zero flags;
+unknown mode bits or flags return `-EINVAL`, with the same path errors as
+`openat`.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 3,
