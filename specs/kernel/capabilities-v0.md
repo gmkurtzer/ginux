@@ -7,6 +7,11 @@ Handles contain a fixed-table slot and generation. A handle resolves only when
 both fields match a live entry, preventing a revoked handle from becoming valid
 when its slot is reused.
 
+The temporary call-gate encoding places the 16-bit slot in bits 0-15 and the
+32-bit nonzero generation in bits 16-47; bits 48-63 must be zero. Decoding never
+grants authority by itself—the resulting handle is resolved only in the calling
+domain's table.
+
 There are two authority-producing operations:
 
 1. `authorize_boot` introduces a non-empty root capability from the immutable

@@ -159,6 +159,42 @@ pub(crate) fn control_plane_permits(root_index: usize, object: u64, rights: Righ
     }
 }
 
+pub(crate) fn control_plane_boot_handle(root_index: usize) -> Option<u64> {
+    let manager = global_manager()?;
+    let domain = manager.domain(manager.control_plane_id?)?;
+    Some(
+        domain
+            .boot_roots
+            .get(root_index)
+            .copied()
+            .flatten()?
+            .to_raw(),
+    )
+}
+
+pub(crate) fn control_plane_handle_permits(raw: u64, object: u64, rights: Rights) -> bool {
+    let Some(handle) = Handle::from_raw(raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager() else {
+        return false;
+    };
+    let Some(id) = manager.control_plane_id else {
+        return false;
+    };
+    let Some(domain) = manager.domain(id) else {
+        return false;
+    };
+    domain.capabilities.permits(handle, object, rights)
+}
+
+fn global_manager() -> Option<&'static Manager> {
+    if !INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    unsafe { Some(&*core::ptr::addr_of!(GLOBAL_MANAGER).cast::<Manager>()) }
+}
+
 const fn encode_id(id: DomainId) -> u64 {
     (id.generation as u64) << 16 | id.slot as u64
 }

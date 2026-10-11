@@ -244,7 +244,14 @@ ginux_exception_entries:
     .text
     .global ginux_user_enter
 ginux_user_enter:
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
     mov [rip + {user_return_stack}], rsp
+    mov rbx, rdx
     push {user_data}
     push rsi
     push 2
@@ -295,6 +302,12 @@ ginux_syscall_entry:
     iretq
 3:
     mov rsp, [rip + {user_return_stack}]
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
     ret
 "#,
     breakpoint_handler = sym breakpoint_handler,
@@ -311,7 +324,7 @@ extern "C" {
 }
 
 extern "sysv64" {
-    fn ginux_user_enter(entry: usize, stack: usize);
+    fn ginux_user_enter(entry: usize, stack: usize, host_handle: u64, console_handle: u64);
 }
 
 pub(crate) fn install(kernel_stack_top: usize) -> bool {
@@ -324,7 +337,12 @@ pub(crate) fn install(kernel_stack_top: usize) -> bool {
     exception_gates_are_valid()
 }
 
-pub(crate) fn verify_user_syscall(entry: usize, stack: usize) -> bool {
+pub(crate) fn verify_user_syscall(
+    entry: usize,
+    stack: usize,
+    host_handle: u64,
+    console_handle: u64,
+) -> bool {
     if !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize) {
         return false;
     }
@@ -332,7 +350,7 @@ pub(crate) fn verify_user_syscall(entry: usize, stack: usize) -> bool {
     // SAFETY: The caller supplies mapped ring-3 code and stack addresses. The
     // syscall gate abandons the user frame and returns on the saved kernel
     // stack, with interrupts disabled throughout.
-    unsafe { ginux_user_enter(entry, stack) };
+    unsafe { ginux_user_enter(entry, stack, host_handle, console_handle) };
     SYSCALL_STATE.load(Ordering::SeqCst) == 7
 }
 
@@ -465,9 +483,7 @@ extern "sysv64" fn breakpoint_handler() {
 extern "sysv64" fn syscall_handler(number: u64, capability: u64) -> u64 {
     match number {
         1 => {
-            if usize::try_from(capability)
-                .is_ok_and(|root| domain::control_plane_permits(root, 1, Rights::READ))
-            {
+            if domain::control_plane_handle_permits(capability, 1, Rights::READ) {
                 SYSCALL_STATE.fetch_or(2, Ordering::SeqCst);
                 0x4758
             } else {

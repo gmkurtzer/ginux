@@ -218,8 +218,8 @@ if ! grep -q '^ginux: control-plane W\^X mappings active' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: capability-gated syscall denial and grant verified' "$output_file"; then
-    echo "Boot test failed: capability-gated syscall enforcement failed." >&2
+if ! grep -q '^ginux: opaque capability handles enforced at call gate' "$output_file"; then
+    echo "Boot test failed: opaque capability-handle enforcement failed." >&2
     exit 1
 fi
 

@@ -5,7 +5,7 @@
 The measured ring-3 control-plane bundle invokes interrupt vector `0x80` with:
 
 - `RAX`: operation number;
-- `RDI`: domain-local boot-grant index; and
+- `RDI`: opaque domain-local capability handle; and
 - `RAX` on return: result value.
 
 Operation 1 is a ping requiring read authority on host-control object 1. It
@@ -13,11 +13,14 @@ returns `0x4758` when authorized and `UINT64_MAX - 1` when denied. Operation 2
 exits the bring-up thread and does not return. Unknown operations also terminate
 the proof program without granting an operation.
 
-The QEMU payload first presents grant index 1, which names the console write-only
-capability, and requires denial. It then presents grant index 0, which names the
-manifest-derived host-control capability, and requires success. The kernel
-accepts the boot only after observing denial, authorization, and explicit exit.
+At initial entry, `RBX` contains the host-control handle and `RCX` contains the
+console handle. The QEMU payload first presents the console write-only handle
+and requires denial. It then presents the manifest-derived host-control handle
+and requires success. The kernel accepts the boot only after observing denial,
+authorization, and explicit exit.
 
-Grant indices are not the stable capability ABI. A later version must use opaque
-generation-safe handles, define argument/result structures, cancellation and
-restart semantics, copy/validation rules, and version negotiation.
+Handles encode a private table slot and generation and are meaningful only in
+the calling domain. Stale generations, out-of-range slots, and nonzero reserved
+high bits are rejected. A later version must define argument/result structures,
+cancellation and restart semantics, copy/validation rules, transfer semantics,
+and version negotiation.

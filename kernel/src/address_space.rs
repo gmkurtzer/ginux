@@ -142,7 +142,11 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
     }
 }
 
-pub(crate) fn verify_ring3_control_plane(program: &[u8]) -> bool {
+pub(crate) fn verify_ring3_control_plane(
+    program: &[u8],
+    host_handle: u64,
+    console_handle: u64,
+) -> bool {
     if !enable_execute_disable() {
         return false;
     }
@@ -161,8 +165,12 @@ pub(crate) fn verify_ring3_control_plane(program: &[u8]) -> bool {
             space.code_frame.add(offset).write(*byte);
         }
         activate(space.root);
-        let handled =
-            cpu::verify_user_syscall(USER_TEST_ADDRESS, USER_TEST_ADDRESS + 3 * PAGE_SIZE);
+        let handled = cpu::verify_user_syscall(
+            USER_TEST_ADDRESS,
+            USER_TEST_ADDRESS + 3 * PAGE_SIZE,
+            host_handle,
+            console_handle,
+        );
         activate(kernel_root);
         handled && current_root() == kernel_root
     }

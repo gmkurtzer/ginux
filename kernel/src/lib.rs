@@ -356,10 +356,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.control_plane_bundle,
         boot_info.control_plane_bundle_size,
     );
-    if !address_space::verify_ring3_control_plane(control_plane_bundle) {
+    let (Some(host_handle), Some(console_handle)) = (
+        domain::control_plane_boot_handle(0),
+        domain::control_plane_boot_handle(1),
+    ) else {
+        kernel_fail("\r\nginux: control-plane bootstrap handles unavailable\r\n");
+    };
+    if !address_space::verify_ring3_control_plane(control_plane_bundle, host_handle, console_handle)
+    {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
-    serial_write("\r\nginux: capability-gated syscall denial and grant verified");
+    serial_write("\r\nginux: opaque capability handles enforced at call gate");
     if !scheduler::verify_scheduler_invariants() {
         kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
     }

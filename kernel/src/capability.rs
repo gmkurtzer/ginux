@@ -36,6 +36,24 @@ pub(crate) struct Handle {
     generation: u32,
 }
 
+impl Handle {
+    pub(crate) const fn to_raw(self) -> u64 {
+        (self.generation as u64) << 16 | self.slot as u64
+    }
+
+    pub(crate) const fn from_raw(raw: u64) -> Option<Self> {
+        if raw >> 48 != 0 {
+            return None;
+        }
+        let generation = (raw >> 16) as u32;
+        let slot = raw as u16;
+        if generation == 0 || slot as usize >= MAX_CAPABILITIES {
+            return None;
+        }
+        Some(Self { slot, generation })
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Entry {
     object: u64,
@@ -159,6 +177,12 @@ pub(crate) fn verify_authority_invariants() -> bool {
     let Some(root) = table.authorize_boot(OBJECT, root_rights) else {
         return false;
     };
+    let root_raw = root.to_raw();
+    if Handle::from_raw(root_raw) != Some(root)
+        || Handle::from_raw(root_raw | (1_u64 << 63)).is_some()
+    {
+        return false;
+    }
     let Some(second_root) = table.authorize_boot(8, Rights::READ.union(Rights::WRITE)) else {
         return false;
     };
