@@ -1,13 +1,12 @@
 # Initramfs Archive Profile v0
 
-**Status:** Deterministic proof image parsed during QEMU boot.
+**Status:** Independently measured deterministic proof image parsed during QEMU boot.
 
 Ginux uses a bounded ASCII `newc` CPIO profile as the first step toward a
-read-only system-container root. The kernel build generates the proof archive
-deterministically and embeds it in the EFI/kernel image, so it cannot be
-replaced independently after build. Its deployment authentication inherits the
-platform image trust chain; a separately measured root image remains required
-before the first real system container.
+read-only system-container root. The manifest tool generates the proof archive
+deterministically, records its exact size and SHA-256 digest in the signed boot
+manifest, and embeds the bytes in the EFI image. Handoff v4 carries the range;
+the kernel verifies the measurement before parsing any archive metadata.
 
 The v0 parser accepts only `070701` entries with lowercase eight-digit
 hexadecimal fields. Inodes must be nonzero. UID, GID, modification time, device
@@ -26,5 +25,5 @@ The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, and `init`.
 The `init` data is only a format marker; it is not yet a Linux ELF executable,
 PID 1, a mounted VFS root, or a runnable container image. Mount semantics,
 ownership beyond normalized root metadata, hard links, special nodes, extended
-attributes, compression, independent image measurement, and extraction into
-owned pages are outside v0.
+attributes, compression, loading the image separately from the EFI binary, and
+extraction into owned pages are outside v0.

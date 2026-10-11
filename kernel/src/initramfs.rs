@@ -5,12 +5,11 @@ const MAX_ARCHIVE_SIZE: usize = 16 * 1024 * 1024;
 const MAX_ENTRIES: usize = 256;
 const MAX_NAME_SIZE: usize = 256;
 const MAX_FILE_SIZE: usize = 8 * 1024 * 1024;
+const MAX_VERIFICATION_IMAGE_SIZE: usize = 4096;
 const TYPE_MASK: u32 = 0o170000;
 const DIRECTORY: u32 = 0o040000;
 const REGULAR: u32 = 0o100000;
 const SYMLINK: u32 = 0o120000;
-
-const PINNED_INITRAMFS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/initramfs-v0.cpio"));
 
 #[derive(Clone, Copy)]
 pub(crate) struct Entry<'a> {
@@ -200,8 +199,8 @@ fn read_hex_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     Some(value)
 }
 
-pub(crate) fn verify_pinned_image() -> bool {
-    let Some(archive) = parse(PINNED_INITRAMFS) else {
+pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
+    let Some(archive) = parse(bytes) else {
         return false;
     };
     archive.entry_count() == 6
@@ -218,66 +217,69 @@ pub(crate) fn verify_pinned_image() -> bool {
         && archive.find(b"missing").is_none()
 }
 
-pub(crate) fn verify_rejections() -> bool {
-    let mut candidate = [0_u8; PINNED_INITRAMFS.len()];
-    candidate.copy_from_slice(PINNED_INITRAMFS);
+pub(crate) fn verify_rejections(bytes: &[u8]) -> bool {
+    if bytes.is_empty() || bytes.len() > MAX_VERIFICATION_IMAGE_SIZE {
+        return false;
+    }
+    let mut candidate = [0_u8; MAX_VERIFICATION_IMAGE_SIZE];
+    candidate[..bytes.len()].copy_from_slice(bytes);
     candidate[0] = b'1';
-    if parse(&candidate).is_some() {
+    if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
-    candidate.copy_from_slice(PINNED_INITRAMFS);
+    candidate[..bytes.len()].copy_from_slice(bytes);
     candidate[6] = b'G';
-    if parse(&candidate).is_some() {
+    if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
-    candidate.copy_from_slice(PINNED_INITRAMFS);
-    let Some(init) = header_offset(PINNED_INITRAMFS, b"init") else {
+    candidate[..bytes.len()].copy_from_slice(bytes);
+    let Some(init) = header_offset(bytes, b"init") else {
         return false;
     };
     candidate[init + 14..init + 22].copy_from_slice(b"00008124");
-    if parse(&candidate).is_some() {
+    if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
-    candidate.copy_from_slice(PINNED_INITRAMFS);
-    let Some(etc) = name_offset(PINNED_INITRAMFS, b"etc") else {
+    candidate[..bytes.len()].copy_from_slice(bytes);
+    let Some(etc) = name_offset(bytes, b"etc") else {
         return false;
     };
     candidate[etc..etc + 3].copy_from_slice(b"dev");
-    if parse(&candidate).is_some() {
+    if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
-    candidate.copy_from_slice(PINNED_INITRAMFS);
+    candidate[..bytes.len()].copy_from_slice(bytes);
     candidate[etc..etc + 3].copy_from_slice(b"../");
-    if parse(&candidate).is_some() {
+    if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
-    candidate.copy_from_slice(PINNED_INITRAMFS);
-    let Some(proc_name) = name_offset(PINNED_INITRAMFS, b"proc") else {
+    candidate[..bytes.len()].copy_from_slice(bytes);
+    let Some(proc_name) = name_offset(bytes, b"proc") else {
         return false;
     };
     candidate[proc_name + 5] = 1;
-    if parse(&candidate).is_some() {
+    if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
-    candidate.copy_from_slice(PINNED_INITRAMFS);
+    candidate[..bytes.len()].copy_from_slice(bytes);
     candidate[init + 54..init + 62].copy_from_slice(b"ffffffff");
-    if parse(&candidate).is_some() {
+    if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
-    candidate.copy_from_slice(PINNED_INITRAMFS);
-    let Some(init_name) = name_offset(PINNED_INITRAMFS, b"init") else {
+    candidate[..bytes.len()].copy_from_slice(bytes);
+    let Some(init_name) = name_offset(bytes, b"init") else {
         return false;
     };
     candidate[init_name..init_name + 4].copy_from_slice(b"inix");
-    if parse(&candidate).is_some() {
+    if parse(&candidate[..bytes.len()]).is_some() {
         return false;
     }
-    candidate.copy_from_slice(PINNED_INITRAMFS);
-    let Some(trailer) = header_offset(PINNED_INITRAMFS, TRAILER) else {
+    candidate[..bytes.len()].copy_from_slice(bytes);
+    let Some(trailer) = header_offset(bytes, TRAILER) else {
         return false;
     };
     candidate[trailer + HEADER_SIZE] = b'X';
-    parse(&candidate).is_none() && parse(&PINNED_INITRAMFS[..PINNED_INITRAMFS.len() - 1]).is_none()
+    parse(&candidate[..bytes.len()]).is_none() && parse(&bytes[..bytes.len() - 1]).is_none()
 }
 
 fn header_offset(bytes: &[u8], wanted: &[u8]) -> Option<usize> {

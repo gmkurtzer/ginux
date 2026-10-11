@@ -32,11 +32,12 @@ doctor:
 	@tools/qemu/doctor.sh
 
 manifest:
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex boot/efi/src/generated_boot.rs
+	@mkdir -p "$(dir $(INITRAMFS))"
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" boot/efi/src/generated_boot.rs
 
-linux-probe:
+linux-probe: manifest
 	@mkdir -p "$(dir $(LINUX_PROBE))"
-	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" GINUX_INITRAMFS_EXPORT="$(abspath $(INITRAMFS))" cargo build --package ginux-kernel --target $(TARGET) $(CARGO_PROFILE_FLAG)
+	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-kernel --target $(TARGET) $(CARGO_PROFILE_FLAG)
 	@test -f "$(LINUX_PROBE)"
 	@test -f "$(INITRAMFS)"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-linked-main.elf"
@@ -48,7 +49,7 @@ linux-probe:
 
 build: manifest linux-probe
 	@echo "Building Ginux for $(TARGET) ($(PROFILE))"
-	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" GINUX_INITRAMFS_EXPORT="$(abspath $(INITRAMFS))" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
+	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
 	@mkdir -p "$(dir $(EFI_DESTINATION))"
 	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
 	@echo "Built $(EFI_DESTINATION)"

@@ -7,7 +7,7 @@ use core::arch::asm;
 use core::ffi::c_void;
 use core::panic::PanicInfo;
 use generated_boot::{
-    BOOT_MANIFEST, BOOT_MANIFEST_SHA256, BOOT_MANIFEST_SIGNATURE, CONTROL_PLANE_BUNDLE,
+    BOOT_MANIFEST, BOOT_MANIFEST_SHA256, BOOT_MANIFEST_SIGNATURE, CONTROL_PLANE_BUNDLE, ROOT_IMAGE,
 };
 use ginux_kernel::{kernel_entry, BootInfo, ResetSystem, BOOT_INFO_MAGIC, BOOT_INFO_VERSION};
 
@@ -285,6 +285,8 @@ unsafe fn exit_boot_services(
                 manifest_signature: BOOT_MANIFEST_SIGNATURE,
                 control_plane_bundle: CONTROL_PLANE_BUNDLE.as_ptr(),
                 control_plane_bundle_size: CONTROL_PLANE_BUNDLE.len(),
+                root_image: ROOT_IMAGE.as_ptr(),
+                root_image_size: ROOT_IMAGE.len(),
                 reset_system: (*runtime_services).reset_system,
                 image_base,
                 image_size,

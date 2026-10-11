@@ -35,7 +35,7 @@ const KERNEL_STACK_SIZE: usize = 64 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
-pub const BOOT_INFO_VERSION: u32 = 3;
+pub const BOOT_INFO_VERSION: u32 = 4;
 
 #[repr(C, align(4096))]
 struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
@@ -67,7 +67,7 @@ pub type ResetSystem = unsafe extern "efiapi" fn(u32, usize, usize, *const c_voi
 
 /// Information fixed by the boot environment before firmware boot services end.
 ///
-/// This structure is a version-zero internal contract. It uses an explicit C
+/// This structure is a versioned internal contract. It uses an explicit C
 /// layout so the boot/kernel boundary can evolve into a language-neutral ABI.
 #[repr(C)]
 pub struct BootInfo {
@@ -85,6 +85,8 @@ pub struct BootInfo {
     pub manifest_signature: [u8; 64],
     pub control_plane_bundle: *const u8,
     pub control_plane_bundle_size: usize,
+    pub root_image: *const u8,
+    pub root_image_size: usize,
     pub reset_system: ResetSystem,
     pub image_base: *const u8,
     pub image_size: usize,
@@ -206,6 +208,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: control-plane bundle measurement failed\r\n");
     }
     serial_write("ginux: control-plane bundle measurement accepted\r\n");
+    if !boot_manifest.root_matches(
+        boot_info.root_image,
+        boot_info.root_image_size,
+        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+    ) {
+        kernel_fail("ginux: root-image measurement failed\r\n");
+    }
+    serial_write("ginux: root-image measurement accepted\r\n");
+    if !boot_manifest.verify_root_rejection(
+        boot_info.root_image,
+        boot_info.root_image_size,
+        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+    ) {
+        kernel_fail("ginux: modified root-image measurement accepted\r\n");
+    }
+    serial_write("ginux: root-image measurement rejection verified\r\n");
 
     let Some(memory_map_end) = boot_info
         .memory_map_size
@@ -239,6 +257,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.manifest as usize + boot_info.manifest_size - 1,
         boot_info.control_plane_bundle as usize,
         boot_info.control_plane_bundle as usize + boot_info.control_plane_bundle_size - 1,
+        boot_info.root_image as usize,
+        boot_info.root_image as usize + boot_info.root_image_size - 1,
         privilege_stack_guard + PAGE_SIZE,
         arch::x86_64::cpu::privilege_stack_top() - 1,
         double_fault_guard + PAGE_SIZE,
@@ -296,6 +316,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     ) || !arch::x86_64::paging::identity_range_is_read_only_data(
         boot_info.control_plane_bundle as usize,
         boot_info.control_plane_bundle_size,
+    ) || !arch::x86_64::paging::identity_range_is_read_only_data(
+        boot_info.root_image as usize,
+        boot_info.root_image_size,
     ) {
         kernel_fail("ginux: boot policy inputs remain mutable or executable\r\n");
     }
@@ -566,13 +589,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: bounded executable container accepted");
     serial_write("\r\nginux: authenticated executable entry points accepted");
     serial_write("\r\nginux: malformed executable containers rejected\r\n");
-    if !initramfs::verify_pinned_image() {
+    let root_image = core::slice::from_raw_parts(boot_info.root_image, boot_info.root_image_size);
+    if !initramfs::verify_pinned_image(root_image) {
         kernel_fail("ginux: bounded initramfs image invalid\r\n");
     }
     serial_write("ginux: deterministic initramfs image accepted\r\n");
     serial_write("ginux: bounded newc archive paths validated\r\n");
     serial_write("ginux: executable init entry discovered\r\n");
-    if !initramfs::verify_rejections() {
+    if !initramfs::verify_rejections(root_image) {
         kernel_fail("ginux: malformed initramfs parser test failed\r\n");
     }
     serial_write("ginux: malformed initramfs archives rejected\r\n");
@@ -918,6 +942,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !arch::x86_64::paging::identity_range_is_read_only_data(
             boot_info.control_plane_bundle as usize,
             boot_info.control_plane_bundle_size,
+        )
+        || !arch::x86_64::paging::identity_range_is_read_only_data(
+            boot_info.root_image as usize,
+            boot_info.root_image_size,
         )
         || !arch::x86_64::cpu::execute_disable_enabled()
         || !arch::x86_64::cpu::supervisor_execution_prevention_enabled()

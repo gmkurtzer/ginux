@@ -3,7 +3,8 @@
 Ginux is an immutable, capability-secure, container-native operating system for AI infrastructure. The native host is intentionally small: an immutable kernel boots one constrained control-plane domain, which creates isolated services and containers through stable interfaces.
 
 The first system-container storage prerequisite is a deterministic, bounded
-ASCII `newc` initramfs. The kernel validates normalized metadata, safe relative
+ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
+boot manifest. The kernel validates its measurement, normalized metadata, safe relative
 paths, uniqueness, alignment, an executable `init`, and an exact trailer while
 rejecting malformed variants during every QEMU boot. The current embedded
 `init` is a format marker, not PID 1; no archive is mounted or executed yet.
@@ -443,8 +444,8 @@ Build the bootable EFI filesystem:
 make build
 ```
 
-`make build` deterministically regenerates the development manifest, bundle
-digest, and Ed25519 signature from `boot/manifest-v0.conf` and
+`make build` deterministically regenerates the development manifest, measured
+control-plane bundle, measured initramfs, and Ed25519 signature from `boot/manifest-v0.conf` and
 `control-plane/bootstrap.hex`; that source declares its authenticated control,
 service, and restart entry labels inline. Run `make manifest` directly when
 working on those inputs. The kernel build assembles `kernel/linux-probe.S` as
@@ -520,4 +521,4 @@ fail-closed supervisor execution/access and user-mode instruction protection
 requirements. `QEMU_CPU` may select a different model only if it still
 advertises SMEP, SMAP, and UMIP.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v3](specs/boot/handoff-v3.md) for the firmware-to-kernel boundary, [Initramfs Archive Profile v0](specs/kernel/initramfs-v0.md) for the proof root format, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v4](specs/boot/handoff-v4.md) for the firmware-to-kernel boundary, [Initramfs Archive Profile v0](specs/kernel/initramfs-v0.md) for the proof root format, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.

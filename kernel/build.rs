@@ -1,4 +1,4 @@
-use std::{env, ffi::OsString, fmt::Write, fs, path::PathBuf, process::Command};
+use std::{env, ffi::OsString, fs, path::PathBuf, process::Command};
 
 const PAGE_SIZE: usize = 4096;
 const LINUX_PROBE_ENTRY_OFFSET: usize = 0x100;
@@ -12,7 +12,6 @@ const LINUX_INTERPRETER_MAX_TEXT_SIZE: usize =
 const LINUX_DEPENDENCY_MAX_TEXT_SIZE: usize = 64;
 
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=linux-probe.S");
     println!("cargo:rerun-if-changed=linux-interpreter.S");
     println!("cargo:rerun-if-changed=linux-dependency.S");
@@ -26,10 +25,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LLD");
     println!("cargo:rerun-if-env-changed=GINUX_LINUX_PROBE_EXPORT");
     println!("cargo:rerun-if-env-changed=GINUX_LINUX_DYNAMIC_EXPORT_DIR");
-    println!("cargo:rerun-if-env-changed=GINUX_INITRAMFS_EXPORT");
 
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set"));
-    write_initramfs_fixture(&output);
     let object = output.join("linux-probe.o");
     let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
     let status = Command::new(&clang)
@@ -428,60 +425,6 @@ fn main() {
     assert!(status.success(), "LLD failed to link Linux probe");
     if let Some(destination) = env::var_os("GINUX_LINUX_PROBE_EXPORT") {
         fs::copy(&linked, destination).expect("failed to export linked Linux probe");
-    }
-}
-
-fn write_initramfs_fixture(output: &std::path::Path) {
-    let mut archive = Vec::new();
-    for (inode, mode, name, data) in [
-        (1, 0o040555, "dev", &b""[..]),
-        (2, 0o040555, "etc", &b""[..]),
-        (3, 0o040555, "proc", &b""[..]),
-        (4, 0o040555, "sys", &b""[..]),
-        (5, 0o041777, "tmp", &b""[..]),
-        (6, 0o100555, "init", &b"GINUX_INITRAMFS_INIT_V0\n"[..]),
-    ] {
-        append_newc_entry(&mut archive, inode, mode, name, data);
-    }
-    append_newc_entry(&mut archive, 7, 0, "TRAILER!!!", &[]);
-    let generated = output.join("initramfs-v0.cpio");
-    fs::write(&generated, archive).expect("failed to write deterministic initramfs fixture");
-    if let Some(destination) = env::var_os("GINUX_INITRAMFS_EXPORT") {
-        fs::copy(generated, destination).expect("failed to export deterministic initramfs fixture");
-    }
-}
-
-fn append_newc_entry(archive: &mut Vec<u8>, inode: u32, mode: u32, name: &str, data: &[u8]) {
-    archive.extend_from_slice(b"070701");
-    for field in [
-        inode,
-        mode,
-        0,
-        0,
-        1,
-        0,
-        u32::try_from(data.len()).expect("fixture file fits in newc"),
-        0,
-        0,
-        0,
-        0,
-        u32::try_from(name.len() + 1).expect("fixture name fits in newc"),
-        0,
-    ] {
-        let mut encoded = String::new();
-        write!(&mut encoded, "{field:08x}").expect("writing a string cannot fail");
-        archive.extend_from_slice(encoded.as_bytes());
-    }
-    archive.extend_from_slice(name.as_bytes());
-    archive.push(0);
-    pad_newc(archive);
-    archive.extend_from_slice(data);
-    pad_newc(archive);
-}
-
-fn pad_newc(archive: &mut Vec<u8>) {
-    while !archive.len().is_multiple_of(4) {
-        archive.push(0);
     }
 }
 

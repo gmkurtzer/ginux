@@ -108,6 +108,16 @@ if ! grep -q '^ginux: control-plane bundle measurement accepted' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: root-image measurement accepted' "$output_file"; then
+    echo "Boot test failed: the measured root image was not accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: root-image measurement rejection verified' "$output_file"; then
+    echo "Boot test failed: a modified root image was not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: kernel page tables active' "$output_file"; then
     echo "Boot test failed: the kernel did not activate its own page tables." >&2
     exit 1
