@@ -98,10 +98,11 @@ fn build_initramfs() -> Vec<u8> {
         (4, 0o040555, "sys", &b""[..]),
         (5, 0o041777, "tmp", &b""[..]),
         (6, 0o100555, "init", &b"GINUX_INITRAMFS_INIT_V0\n"[..]),
+        (7, 0o100555, "etc/hostname", &b"ginux\n"[..]),
     ] {
         append_newc_entry(&mut archive, inode, mode, name, data);
     }
-    append_newc_entry(&mut archive, 7, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 8, 0, "TRAILER!!!", &[]);
     archive
 }
 

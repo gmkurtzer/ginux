@@ -212,7 +212,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 6
+    archive.entry_count() == 7
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -223,6 +223,9 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
                     .find(name)
                     .is_some_and(|entry| entry.mode & TYPE_MASK == DIRECTORY)
             })
+        && archive
+            .find(b"etc/hostname")
+            .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"ginux\n")
         && archive.find(b"missing").is_none()
 }
 
@@ -549,6 +552,11 @@ pub(crate) fn published_lookup(name: &[u8]) -> Option<(u32, usize)> {
     Some((entry.mode, entry.data.len()))
 }
 
+pub(crate) fn published_file(name: &[u8]) -> Option<&'static [u8]> {
+    let entry = published_root()?.lookup(name)?;
+    (entry.mode & TYPE_MASK == REGULAR).then_some(entry.data)
+}
+
 pub(crate) fn published_read(name: &[u8], offset: usize, output: &mut [u8]) -> Option<usize> {
     let entry = published_root()?.lookup(name)?;
     let available = entry.data.get(offset..)?;
@@ -615,7 +623,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frame.direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 6
+    let valid = root.node_count == 7
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -630,6 +638,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
                 root.lookup(name)
                     .is_some_and(|entry| entry.mode & TYPE_MASK == DIRECTORY)
             })
+        && root
+            .lookup(b"etc/hostname")
+            .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"ginux\n")
         && root.lookup(b"missing").is_none()
         && root.lookup(b"../init").is_none()
         && root.lookup(b"/init").is_none();

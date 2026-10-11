@@ -21,7 +21,10 @@ Only regular files, directories, and nonempty symbolic links are admitted.
 Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
-The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, and `init`.
+The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, `init`, and
+`etc/hostname`. The hostname is immutable mode `0555` with exact contents
+`ginux\n`; it is the first archive file exposed through the Linux syscall
+profile.
 After validation, the current one-page proof image is copied into a newly
 allocated, zero-initialized kernel-owned frame. The boot proof requires exact
 bytes, a zero tail, allocator ownership, and no source alias. It deliberately
@@ -48,8 +51,16 @@ fully staged metadata-and-name record per call, rejects regular files as
 directories, and reports end of the six-entry proof root without copying. The
 published frame remains allocator-owned after the control-plane domain exits.
 
+The bounded Linux syscall profile resolves `/etc/hostname` directly from that
+same retained index. Its ring-3 interpreter opens the file read-only, reads and
+validates `ginux\n`, verifies mode and size through `fstat`, seeks to its exact
+end, and requires both descriptor writes and writable opens to fail. The
+existing `/init` Linux name remains a separately authenticated executable
+fixture until executable loading is connected to the measured root.
+
 The `init` data is only a format marker; it is not yet a Linux ELF executable,
-PID 1, a mounted VFS root, or a runnable container image. Mount semantics,
+PID 1, a mounted VFS root, or a runnable container image. The single Linux
+pathname bridge is not a general mount. Mount semantics,
 ownership beyond normalized root metadata, hard links, special nodes, extended
 attributes, compression, loading the image separately from the EFI binary,
 multi-page materialization, mounts, mutable nodes, and VFS or service

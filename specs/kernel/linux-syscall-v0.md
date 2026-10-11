@@ -273,10 +273,13 @@ unknown mode bits or flags return `-EINVAL`, with the same path errors as
 `openat`.
 
 The immutable runtime namespace also recognizes `/init`,
-`/lib64/ld-ginux.so`, `/lib64/libginux.so`, and `/lib64/libginux-aux.so`.
-These names expose the exact build-authenticated ELF byte slices used by the
-execution or bounded dependency-graph proofs, not
-copies or mutable storage. `openat` accepts only `O_RDONLY` with optional
+`/lib64/ld-ginux.so`, `/lib64/libginux.so`, `/lib64/libginux-aux.so`, and
+`/etc/hostname`. The first four names expose the exact build-authenticated ELF
+byte slices used by the execution or bounded dependency-graph proofs.
+`/etc/hostname` instead resolves to the exact `ginux\n` bytes in the retained,
+independently measured initramfs index; this is the first Linux-visible file
+backed by the published root rather than a built-in ELF fixture. `openat`
+accepts only `O_RDONLY` with optional
 `O_CLOEXEC`; writable access returns `-EACCES` and `O_DIRECTORY` returns
 `-ENOTDIR`. Each open has an independent 64-bit cursor. `read` and bounded
 `readv` advance it, `pread64` leaves it unchanged, and `lseek` implements
@@ -287,7 +290,11 @@ proof reads ELF magic from the main and auxiliary dependency, performs a
 positioned read of the interpreter entry,
 seeks and reads it again, verifies metadata, rejects writes and writable opens,
 maps the interpreter through the bounded read-only file-mapping profile below,
-and closes the descriptor. There is no `/lib64` directory enumeration,
+and closes the descriptor. Before that executable discovery, the interpreter
+opens `/etc/hostname`, validates all six bytes, mode `0555`, size 6, and
+`SEEK_END`, then requires a write to return `-EBADF` and a writable open to
+return `-EACCES`. The measured-root file is not executable or mappable. There
+is no `/etc` or `/lib64` directory enumeration,
 pathname traversal, general VFS, or userspace `execve`; the kernel authenticates
 and plans the fixed interpreter, main, and two-DSO executable graph. The kernel
 installs the interpreter needed to bootstrap ring 3; that interpreter installs

@@ -236,6 +236,7 @@ const LINUX_FILE_INIT: u8 = 1 << 5;
 const LINUX_FILE_INTERPRETER: u8 = 1 << 6;
 const LINUX_FILE_DEPENDENCY: u8 = 1 << 7;
 const LINUX_FILE_AUXILIARY_DEPENDENCY: u8 = LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
+const LINUX_FILE_ROOT_HOSTNAME: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER;
 const LINUX_FILE_MASK: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
@@ -4307,6 +4308,7 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u8> {
         b"/lib64/ld-ginux.so" => Some(LINUX_FILE_INTERPRETER),
         b"/lib64/libginux.so" => Some(LINUX_FILE_DEPENDENCY),
         b"/lib64/libginux-aux.so" => Some(LINUX_FILE_AUXILIARY_DEPENDENCY),
+        b"/etc/hostname" => Some(LINUX_FILE_ROOT_HOSTNAME),
         _ => None,
     }
 }
@@ -5571,6 +5573,7 @@ fn linux_regular_file(state: u8) -> Option<&'static [u8]> {
         LINUX_FILE_AUXILIARY_DEPENDENCY => {
             Some(crate::linux_elf::runtime_auxiliary_dependency_bytes())
         }
+        LINUX_FILE_ROOT_HOSTNAME => initramfs::published_file(b"etc/hostname"),
         _ => None,
     }
 }
@@ -5581,6 +5584,7 @@ fn linux_regular_file_inode(state: u8) -> Option<u64> {
         LINUX_FILE_INTERPRETER => Some(6),
         LINUX_FILE_DEPENDENCY => Some(7),
         LINUX_FILE_AUXILIARY_DEPENDENCY => Some(8),
+        LINUX_FILE_ROOT_HOSTNAME => Some(9),
         _ => None,
     }
 }

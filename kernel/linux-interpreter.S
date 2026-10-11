@@ -660,6 +660,7 @@ ginux_linux_interpreter:
 #ifdef GINUX_LINKED
 .section .text.discovery,"ax",@progbits
 .Ldiscover_main_file:
+    call .Linspect_root_hostname
     lea rsi, [rip + .Lmain_path]
     call .Linspect_runtime_file
     lea rsi, [rip + .Lmain_path]
@@ -668,6 +669,71 @@ ginux_linux_interpreter:
     mov qword ptr [rip + .Lexpected_phnum], rax
     call .Lload_runtime_file
     mov r15, r14
+    ret
+
+.Linspect_root_hostname:
+    sub rsp, 160
+    mov edi, -100
+    lea rsi, [rip + .Lhostname_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    mov rsi, rsp
+    mov edx, 6
+    xor eax, eax
+    syscall
+    cmp rax, 6
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp], 0x756e6967
+    jne .Linvalid_dynamic
+    cmp word ptr [rsp + 4], 0x0a78
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    lea rsi, [rsp + 16]
+    mov eax, 5
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 40], 0x816d
+    jne .Linvalid_dynamic
+    cmp qword ptr [rsp + 64], 6
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    xor esi, esi
+    mov edx, 2
+    mov eax, 8
+    syscall
+    cmp rax, 6
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    mov rsi, rsp
+    mov edx, 1
+    mov eax, 1
+    syscall
+    cmp rax, -9
+    jne .Linvalid_dynamic
+
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Linvalid_dynamic
+
+    mov edi, -100
+    lea rsi, [rip + .Lhostname_path]
+    mov edx, 1
+    mov eax, 257
+    syscall
+    cmp rax, -13
+    jne .Linvalid_dynamic
+    add rsp, 160
     ret
 
 .Ldiscover_dependency_file:
@@ -1153,6 +1219,8 @@ ginux_linux_interpreter:
 .section .rodata.loader,"a",@progbits
 .Lmain_path:
     .asciz "/init"
+.Lhostname_path:
+    .asciz "/etc/hostname"
 
 .section .data,"aw",@progbits
     .ascii "DYNAMIC!"

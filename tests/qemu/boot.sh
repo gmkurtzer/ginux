@@ -1728,6 +1728,21 @@ if ! grep -q '^ginux: Linux read-only runtime file mapping validated' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: measured-root Linux file content validated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux file content was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured-root Linux file metadata validated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux file metadata was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured-root Linux file mutation denied' "$output_file"; then
+    echo "Boot test failed: measured-root Linux file mutation was not denied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1
