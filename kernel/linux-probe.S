@@ -323,6 +323,68 @@ ginux_linux_probe:
     cmp qword ptr [0x401098], 2
     jne failure
 
+    mov edi, 2
+    mov esi, 8
+    mov edx, 0x4010a0
+    mov eax, 204
+    syscall
+    cmp rax, -3
+    jne failure
+
+    xor edi, edi
+    mov esi, 7
+    mov edx, 0x4010a0
+    mov eax, 204
+    syscall
+    cmp rax, -22
+    jne failure
+
+    movabs rax, 0x1122334455667788
+    mov qword ptr [0x4021fc], rax
+    xor edi, edi
+    mov esi, 8
+    mov edx, 0x4021fc
+    mov eax, 204
+    syscall
+    cmp rax, -14
+    jne failure
+    movabs rax, 0x1122334455667788
+    cmp qword ptr [0x4021fc], rax
+    jne failure
+
+    xor edi, edi
+    mov esi, 8
+    mov edx, 0x4010a0
+    mov eax, 204
+    syscall
+    cmp rax, 8
+    jne failure
+    cmp qword ptr [0x4010a0], 1
+    jne failure
+
+    mov dword ptr [0x4010a8], 0x12345678
+    mov edi, 0x4010a8
+    mov esi, 0x402200
+    mov edx, 0xdeadbeef
+    mov eax, 309
+    syscall
+    cmp rax, -14
+    jne failure
+    cmp dword ptr [0x4010a8], 0x12345678
+    jne failure
+
+    mov edi, 0x4010a8
+    mov esi, 0x4010ac
+    mov edx, 0xdeadbeef
+    mov eax, 309
+    syscall
+    test rax, rax
+    jne failure
+    cmp dword ptr [0x4010a8], 0
+    jne failure
+    cmp dword ptr [0x4010ac], 0
+    jne failure
+
     mov eax, 102
     syscall
     test rax, rax

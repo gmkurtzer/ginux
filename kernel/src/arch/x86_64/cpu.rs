@@ -65,9 +65,11 @@ const LINUX_GETPGID_SYSCALL: u64 = 121;
 const LINUX_GETSID_SYSCALL: u64 = 124;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
 const LINUX_GETTID_SYSCALL: u64 = 186;
+const LINUX_SCHED_GETAFFINITY_SYSCALL: u64 = 204;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
+const LINUX_GETCPU_SYSCALL: u64 = 309;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
 const LINUX_ARCH_GET_FS: u64 = 0x1003;
 const LINUX_PROBE_EXIT_STATUS: u64 = 42;
@@ -1171,6 +1173,24 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_SCHED_GETAFFINITY_SYSCALL => {
+            if !matches!(first_argument, 0 | 1) {
+                return LINUX_ESRCH;
+            }
+            if buffer < size_of::<u64>() as u64 {
+                return LINUX_EINVAL;
+            }
+            if !copy_to_linux_user(count, &1_u64.to_ne_bytes()) {
+                return LINUX_EFAULT;
+            }
+            size_of::<u64>() as u64
+        }
+        LINUX_GETCPU_SYSCALL => {
+            if !copy_linux_cpu_location(first_argument, buffer) {
+                return LINUX_EFAULT;
+            }
+            0
+        }
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {
@@ -1196,6 +1216,17 @@ fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
     limit[..8].copy_from_slice(&value.to_ne_bytes());
     limit[8..].copy_from_slice(&value.to_ne_bytes());
     Some(limit)
+}
+
+fn copy_linux_cpu_location(cpu_address: u64, node_address: u64) -> bool {
+    if (cpu_address != 0 && !linux_writable_user_range_contains(cpu_address, size_of::<u32>()))
+        || (node_address != 0
+            && !linux_writable_user_range_contains(node_address, size_of::<u32>()))
+    {
+        return false;
+    }
+    (cpu_address == 0 || copy_to_linux_user(cpu_address, &0_u32.to_ne_bytes()))
+        && (node_address == 0 || copy_to_linux_user(node_address, &0_u32.to_ne_bytes()))
 }
 
 fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {

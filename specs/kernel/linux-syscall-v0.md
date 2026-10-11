@@ -37,6 +37,14 @@ new-limit pointer returns `-EPERM`. Output is copied only after the full
 declared ELF extent returns `-EFAULT` without a partial write. The syscall
 entry uses an internal value outside Linux's `-1..-4095` errno range to return
 to the kernel, keeping Linux `-EPERM` observable in ring 3.
+`rax = 204` (`__NR_sched_getaffinity`) accepts PID 0 or 1, requires an
+eight-byte-or-larger caller mask, writes the one-bit CPU 0 mask, and returns 8.
+An unknown PID returns `-ESRCH`, an undersized mask returns `-EINVAL`, and an
+invalid output range returns `-EFAULT` without a partial write. `rax = 309`
+(`__NR_getcpu`) reports CPU 0 and NUMA node 0 through independently optional
+four-byte pointers. Both destinations are validated before either is written;
+the obsolete cache pointer is ignored as on Linux. These results describe the
+single-bootstrap-processor profile and do not claim SMP scheduling support.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x403000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x404000` follows Linux syscall
@@ -103,6 +111,7 @@ streams, arbitrary user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
 `write`, `brk`, `uname`, `getcwd`, bounded `readlink`,
 `umask`, read-only `getrlimit`/`prlimit64`,
+`sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential queries, the bounded process/session identity queries above,
 `set_tid_address`, `exit`, and `exit_group` calls. There is no thread
