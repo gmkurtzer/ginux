@@ -26,12 +26,13 @@ ownership, stale-ID rejection, invalid-context rejection, and preservation of a
 modified register context across another thread's run and exit.
 
 The measured ring-3 proof creates two contexts in the control-plane domain.
-They share its code and page-table root but have separate writable,
-non-executable stacks, each preceded by an absent guard page. `INT 0x80` saves
-the hardware trap frame into the current scheduler record. Yield selects the
-other context and restores its registers through `IRETQ`; exit destroys the
-current slot and either resumes the remaining context or returns to the
-kernel. The boot succeeds only after exactly two yields and two exits.
+Each owns a distinct page-table root, executable code frame, and writable,
+non-executable stack preceded by an absent guard page. `INT 0x80` saves the
+hardware trap frame into the current scheduler record. Yield selects the other
+context, activates its recorded CR3, and restores its registers through
+`IRETQ`; exit destroys the current slot and either resumes the remaining
+context or returns to the kernel. The boot succeeds only after exactly two
+yields, two exits, and three cross-root dispatches.
 
 Each created thread also receives a fixed eight-call bootstrap budget. Every
 call-gate entry is charged before dispatch, including denied operations, yield,
@@ -43,5 +44,6 @@ This revision uses one guarded TSS privilege stack because execution is
 single-CPU and syscalls cannot nest. It stores no priority, budget, affinity,
 priority, CPU-time budget, affinity, wait reason, or timer deadline and provides
 no preemption. The syscall counter is a bring-up resource bound, not a complete
-resource-accounting policy. Contexts in distinct address spaces are not yet
-switched.
+resource-accounting policy. Address-space switching currently flushes the local
+TLB through CR3 reload; PCID, TLB shootdown, and multi-CPU ownership are not
+defined.

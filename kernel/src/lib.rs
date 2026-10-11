@@ -385,6 +385,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: two ring-3 contexts yielded and exited");
+    serial_write("\r\nginux: isolated scheduler address spaces switched");
     serial_write("\r\nginux: capability-gated bounded IPC verified");
     serial_write("\r\nginux: per-thread syscall budgets enforced");
     if !scheduler::verify_scheduler_invariants() {

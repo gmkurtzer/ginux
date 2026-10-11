@@ -558,9 +558,26 @@ fn runtime_result(frame: *mut UserTrapFrame, yielding: bool) -> u64 {
         scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR)
     };
     match action {
-        RuntimeAction::Resume(result) => result,
+        RuntimeAction::Resume {
+            result,
+            address_space_root,
+        } if activate_user_root(address_space_root) => result,
+        RuntimeAction::Resume { .. } => u64::MAX,
         RuntimeAction::Complete | RuntimeAction::Invalid => u64::MAX,
     }
+}
+
+fn activate_user_root(root: u64) -> bool {
+    const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
+    if root == 0 || root & !ADDRESS_MASK != 0 {
+        return false;
+    }
+    let active: u64;
+    unsafe {
+        asm!("mov cr3, {}", in(reg) root, options(nostack, preserves_flags));
+        asm!("mov {}, cr3", out(reg) active, options(nomem, nostack, preserves_flags));
+    }
+    active & ADDRESS_MASK == root
 }
 
 extern "sysv64" fn fatal_exception_handler(

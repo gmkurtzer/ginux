@@ -163,11 +163,15 @@ struct Runtime {
     yields: u8,
     exits: u8,
     syscalls: u16,
+    address_space_switches: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RuntimeAction {
-    Resume(u64),
+    Resume {
+        result: u64,
+        address_space_root: u64,
+    },
     Complete,
     Invalid,
 }
@@ -272,20 +276,22 @@ impl Scheduler {
 }
 
 pub(crate) fn initialize_runtime(
-    address_space_root: u64,
+    address_space_roots: [u64; 2],
     entry: usize,
-    first_stack: usize,
-    second_stack: usize,
-    host_handle: u64,
-    console_handle: u64,
-    ipc_handle: u64,
+    stacks: [usize; 2],
+    handles: [u64; 3],
 ) -> bool {
-    if RUNTIME_INITIALIZED.load(Ordering::Acquire) {
+    let [first_address_space_root, second_address_space_root] = address_space_roots;
+    let [first_stack, second_stack] = stacks;
+    let [host_handle, console_handle, ipc_handle] = handles;
+    if RUNTIME_INITIALIZED.load(Ordering::Acquire)
+        || first_address_space_root == second_address_space_root
+    {
         return false;
     }
     let mut scheduler = Scheduler::new();
     let first = initial_context(
-        address_space_root,
+        first_address_space_root,
         entry,
         first_stack,
         host_handle,
@@ -294,7 +300,7 @@ pub(crate) fn initialize_runtime(
         1,
     );
     let second = initial_context(
-        address_space_root,
+        second_address_space_root,
         entry,
         second_stack,
         host_handle,
@@ -317,6 +323,7 @@ pub(crate) fn initialize_runtime(
             yields: 0,
             exits: 0,
             syscalls: 0,
+            address_space_switches: 0,
         }));
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
@@ -373,8 +380,17 @@ pub(crate) fn yield_runtime(
         return RuntimeAction::Invalid;
     };
     runtime.yields = yields;
+    if next.context.address_space_root != root {
+        let Some(switches) = runtime.address_space_switches.checked_add(1) else {
+            return RuntimeAction::Invalid;
+        };
+        runtime.address_space_switches = switches;
+    }
     frame.restore(next.context, code_selector, data_selector);
-    RuntimeAction::Resume(next.context.rax)
+    RuntimeAction::Resume {
+        result: next.context.rax,
+        address_space_root: next.context.address_space_root,
+    }
 }
 
 pub(crate) fn exit_runtime(
@@ -391,14 +407,30 @@ pub(crate) fn exit_runtime(
     let Some(current) = runtime.scheduler.current else {
         return RuntimeAction::Invalid;
     };
+    let Some(current_root) = runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.address_space_root)
+    else {
+        return RuntimeAction::Invalid;
+    };
     let next = runtime.scheduler.exit_current(current);
     let Some(exits) = runtime.exits.checked_add(1) else {
         return RuntimeAction::Invalid;
     };
     runtime.exits = exits;
     if let Some(next) = next {
+        if next.context.address_space_root != current_root {
+            let Some(switches) = runtime.address_space_switches.checked_add(1) else {
+                return RuntimeAction::Invalid;
+            };
+            runtime.address_space_switches = switches;
+        }
         frame.restore(next.context, code_selector, data_selector);
-        RuntimeAction::Resume(next.context.rax)
+        RuntimeAction::Resume {
+            result: next.context.rax,
+            address_space_root: next.context.address_space_root,
+        }
     } else if runtime.scheduler.threads.iter().all(Option::is_none) {
         RuntimeAction::Complete
     } else {
@@ -413,6 +445,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
     runtime.yields == 2
         && runtime.exits == 2
         && runtime.syscalls == 14
+        && runtime.address_space_switches == 3
         && runtime.scheduler.current.is_none()
         && runtime.scheduler.threads.iter().all(Option::is_none)
 }

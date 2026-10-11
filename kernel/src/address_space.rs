@@ -157,10 +157,16 @@ pub(crate) fn verify_ring3_control_plane(
         return false;
     }
     let kernel_root = current_root();
-    let Some(space) = WxAddressSpace::new(kernel_root) else {
+    let (Some(first_space), Some(second_space)) = (
+        WxAddressSpace::new(kernel_root),
+        WxAddressSpace::new(kernel_root),
+    ) else {
         return false;
     };
-    if !space.permissions_are_valid(kernel_root) {
+    if !first_space.permissions_are_valid(kernel_root)
+        || !second_space.permissions_are_valid(kernel_root)
+        || !first_space.is_disjoint_from(&second_space)
+    {
         return false;
     }
     if program.is_empty() || program.len() > PAGE_SIZE {
@@ -168,22 +174,47 @@ pub(crate) fn verify_ring3_control_plane(
     }
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
-            space.code_frame.add(offset).write(*byte);
+            first_space.code_frame.add(offset).write(*byte);
+            second_space.code_frame.add(offset).write(*byte);
+        }
+        first_space
+            .first_stack_frame
+            .cast::<u64>()
+            .write_volatile(TEST_PATTERN);
+        second_space
+            .first_stack_frame
+            .cast::<u64>()
+            .write_volatile(!TEST_PATTERN);
+        activate(first_space.root);
+        let first_marker = ((USER_TEST_ADDRESS + 2 * PAGE_SIZE) as *const u64).read_volatile();
+        activate(second_space.root);
+        let second_marker = ((USER_TEST_ADDRESS + 2 * PAGE_SIZE) as *const u64).read_volatile();
+        activate(kernel_root);
+        first_space
+            .first_stack_frame
+            .cast::<u64>()
+            .write_volatile(0);
+        second_space
+            .first_stack_frame
+            .cast::<u64>()
+            .write_volatile(0);
+        if first_marker != TEST_PATTERN || second_marker != !TEST_PATTERN {
+            return false;
         }
         if !ipc::initialize_control_channel()
             || !scheduler::initialize_runtime(
-                space.root,
+                [first_space.root, second_space.root],
                 USER_TEST_ADDRESS,
-                USER_TEST_ADDRESS + 3 * PAGE_SIZE,
-                USER_TEST_ADDRESS + 5 * PAGE_SIZE,
-                host_handle,
-                console_handle,
-                ipc_handle,
+                [
+                    USER_TEST_ADDRESS + 3 * PAGE_SIZE,
+                    USER_TEST_ADDRESS + 3 * PAGE_SIZE,
+                ],
+                [host_handle, console_handle, ipc_handle],
             )
         {
             return false;
         }
-        activate(space.root);
+        activate(first_space.root);
         let handled = cpu::verify_user_syscall(
             USER_TEST_ADDRESS,
             USER_TEST_ADDRESS + 3 * PAGE_SIZE,
@@ -283,6 +314,13 @@ impl WxAddressSpace {
                 && first_stack & ADDRESS_MASK == self.first_stack_frame as u64
                 && second_stack & ADDRESS_MASK == self.second_stack_frame as u64
         }
+    }
+
+    fn is_disjoint_from(&self, other: &Self) -> bool {
+        self.root != other.root
+            && self.code_frame != other.code_frame
+            && self.first_stack_frame != other.first_stack_frame
+            && self.second_stack_frame != other.second_stack_frame
     }
 }
 

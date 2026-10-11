@@ -28,13 +28,19 @@ TLB shootdown protocol, and the kernel mapping remains transitional.
 The kernel copies only the manifest-measured control-plane bundle into the
 read-only executable page. Its GDT includes user code/data descriptors and TSS
 RSP0 names a dedicated guarded privilege stack. A DPL3 interrupt gate at vector
-`0x80` accepts three bring-up call numbers. The QEMU program enters CPL3 through
+`0x80` accepts five bring-up call numbers. The QEMU program enters CPL3 through
 `IRETQ`, issues a ping call, and verifies the returned value after `IRETQ`
 resumes the same user context. Each of two contexts then yields once and resumes
 before issuing an exit call. The final exit deliberately abandons the saved
 user frame and returns on the suspended kernel stack. The kernel restores its
 original CR3. The entry stub preserves every non-result general-purpose
 register.
+
+The two proof contexts use separate PML4 roots and separate physical code and
+stack frames while retaining identical virtual addresses. Before ring-3 entry,
+the kernel activates each root and observes a different marker through the
+same stack virtual address. Scheduler dispatch then reloads CR3 on all three
+cross-context transitions and reads it back before returning to userspace.
 
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate
