@@ -600,6 +600,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: malformed initramfs parser test failed\r\n");
     }
     serial_write("ginux: malformed initramfs archives rejected\r\n");
+    if !initramfs::verify_owned_materialization(root_image) {
+        kernel_fail("ginux: owned root-image materialization failed\r\n");
+    }
+    serial_write("ginux: measured root image copied into owned memory\r\n");
+    serial_write("ginux: owned root image remained source-independent\r\n");
+    serial_write("ginux: owned root frame scrubbed and released\r\n");
     if !linux_elf::verify_parser() {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
     }

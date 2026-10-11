@@ -22,8 +22,15 @@ Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
 The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, and `init`.
+After validation, the current one-page proof image is copied into a newly
+allocated, zero-initialized kernel-owned frame. The boot proof requires exact
+bytes, a zero tail, allocator ownership, and no source alias. It deliberately
+mutates and restores the private copy to prove the measured boot source does
+not change, then scrubs the complete frame before releasing its lease.
+
 The `init` data is only a format marker; it is not yet a Linux ELF executable,
 PID 1, a mounted VFS root, or a runnable container image. Mount semantics,
 ownership beyond normalized root metadata, hard links, special nodes, extended
-attributes, compression, loading the image separately from the EFI binary, and
-extraction into owned pages are outside v0.
+attributes, compression, loading the image separately from the EFI binary,
+multi-page materialization, persistent ownership, and VFS publication are
+outside v0.

@@ -543,6 +543,21 @@ if ! grep -q '^ginux: malformed initramfs archives rejected' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: measured root image copied into owned memory' "$output_file"; then
+    echo "Boot test failed: the measured root image was not materialized." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: owned root image remained source-independent' "$output_file"; then
+    echo "Boot test failed: the owned root image alias contract failed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: owned root frame scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the owned root frame was not reclaimed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: non-executable Linux GNU stack enforced' "$output_file"; then
     echo "Boot test failed: Linux GNU stack policy was not enforced." >&2
     exit 1
