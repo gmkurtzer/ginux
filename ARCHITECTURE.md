@@ -1,6 +1,6 @@
 # Architecture: An Immutable, Container-Native OS for AI Infrastructure
 
-**Status:** Initial design proposal (v0.2)
+**Status:** Initial design proposal (v0.3)
 **Purpose:** Foundational specification for a Git repository and agent-assisted engineering.
 **Scope:** Architecture and requirements, not a claim of implementation or proven feasibility.
 
@@ -8,7 +8,7 @@
 
 Build a new, Rust-first operating system that boots directly via UEFI and acts as a small, immutable, capability-secure container host for AI/HPC servers. The kernel boots one native control-plane domain. That control plane starts isolated native services and Linux-compatible containers; there is no conventional host distribution.
 
-The first Linux environment is a Rocky Linux 10 x86-64 **system container** running systemd, SSH, packages, and applications without rebuilding its userspace. Linux compatibility is a container interface rather than a requirement that the native host itself behave like a complete Linux system.
+The first Linux environment is a small, pinned x86-64 **system-container test image** with a minimal PID 1 and console. It exists to drive the compatibility contract without making a conventional host distribution part of the trusted base. Rocky Linux, systemd, SSH, package management, and application stacks are later container-compatibility profiles. Linux compatibility is a container interface rather than a requirement that the native host itself behave like a complete Linux system.
 
 **North star:** A minimal, verifiable privileged core; one explicitly authorized native control plane; Linux-compatible containers above isolated services; stable language-neutral driver and service interfaces; immutable executable integrity and authority boundaries; and no unnecessary cycles in critical data paths.
 
@@ -16,7 +16,7 @@ The design is intentionally narrower than Linux in hardware support. A binary co
 
 ## 2. Non-negotiable design principles
 
-1. **Container-native Linux compatibility:** Run an unmodified Rocky Linux 10 userspace as a system container and ultimately support systemd, RPM/DNF, SSH, networking, OCI workloads, NVIDIA/CUDA, and AI/HPC applications within defined compatibility profiles.
+1. **Container-native Linux compatibility:** First run a minimal unmodified Linux userspace as a system container, then expand the defined compatibility profiles to systemd distributions such as Rocky Linux, package management, SSH, networking, OCI workloads, NVIDIA/CUDA, and AI/HPC applications.
 2. **Minimal privileged core:** Keep scheduling, address-space protection, capability enforcement, essential interrupt and hardware mediation, and fast IPC in the core. Put everything else in isolated services when feasible.
 3. **One initial authority:** The kernel creates one native control-plane domain from the signed boot manifest. It may delegate or revoke authority, but it cannot create authority beyond the immutable boot envelope.
 4. **Security by construction:** Explicit capabilities, no ambient host authority, hardware-enforced memory and DMA isolation, least privilege, revocation, and defense in depth. Process trees define ownership and lifecycle; capability graphs define authority. Linux namespaces are a compatibility interface, not the native security boundary.
@@ -37,7 +37,7 @@ The design is intentionally narrower than Linux in hardware support. A binary co
 - First development profile: an Apple Silicon Mac running an x86-64 Q35/OVMF guest under QEMU TCG; UTM may be used as an optional interactive frontend.
 - First accelerated profile: the same x86-64 Q35/OVMF guest and device model under QEMU with KVM acceleration on an x86-64 Linux host.
 - First milestone workload: boot the kernel, seal the authority envelope, create one isolated domain, and start a minimal native control-plane process.
-- First Linux compatibility profile, after the native boot/domain path is established: a pinned Rocky Linux 10 x86-64 system-container image.
+- First Linux compatibility profile, after the native boot/domain path is established: a repository-pinned minimal x86-64 system-container test image with PID 1 and a console.
 - Later hardware profile: one explicitly selected server with PCIe, IOMMU, NVMe, high-speed Ethernet/RDMA, and an NVIDIA GPU.
 - Later workloads: SSH, package operations, OCI workloads, CUDA, PyTorch, distributed AI training/inference, and HPC applications.
 
@@ -49,8 +49,8 @@ SELinux enforcement, eBPF, netfilter compatibility, Linux kernel modules, advanc
 
 ```text
 +----------------------------------------------------------------+
-| Rocky Linux 10 system container | later application containers  |
-| systemd | glibc | dnf | SSH | CUDA | PyTorch | HPC              |
+| Minimal Linux system container | later distribution/app containers |
+| PID 1 | console | later systemd, SSH, CUDA, PyTorch, and HPC        |
 +----------------------------------------------------------------+
 | Targeted Linux container compatibility                          |
 | syscalls | procfs/sysfs/devfs | cgroups | namespaces | creds    |
@@ -115,21 +115,21 @@ Administrative observation, lifecycle control, memory debugging, and authority d
 The native host does not require a traditional distribution root filesystem. It needs authenticated boot artifacts, native service binaries, container images, persistent volumes, logs, and crash evidence.
 
 - The first proof of concept may unpack a CPIO/initramfs into memory and use `tmpfs`, avoiding an early persistent-filesystem dependency.
-- The first Rocky system container should use a verified read-only root image plus explicitly writable temporary or persistent paths.
+- The first minimal system container should use a verified read-only root image plus explicitly writable temporary paths. Later distribution images add explicitly authorized persistent paths.
 - A later isolated storage service should expose `virtio-blk` and then selected NVMe hardware through a stable block-device contract.
 - Existing filesystem implementations may be ported or wrapped inside isolated services, including non-Rust implementations where a rewrite would add risk. Kernel memory safety and service isolation must not depend on the filesystem implementation language.
 - Container image layers should be content-addressed and read-only; per-container writable overlays and persistent volumes are separate, explicitly authorized objects.
 - Filesystem-service crashes must not panic the kernel. Recovery guarantees for mounted domains and crash consistency must be specified per filesystem.
 
-### Initial Rocky Linux compatibility profile
+### Initial Linux compatibility profile
 
-The initial goal is a pinned Rocky Linux 10 x86-64 system-container image reaching a systemd-managed console. Required early behavior includes x86-64 ELF loading, glibc dynamic linking, signals, futexes, clocks, process lifecycle, sockets, `tmpfs`, console devices, a bounded `/proc`, `/sys`, and `/dev`, a cgroups v2 subset, and the PID/mount/user/IPC/UTS/network namespace behavior exercised by the image. The exact image digest and machine-readable feature matrix are release inputs. Unsupported interfaces must fail predictably rather than silently provide weaker semantics.
+The initial goal is a repository-pinned minimal x86-64 system-container image reaching a PID-1-managed console. Required early behavior includes x86-64 ELF loading, dynamic linking where the chosen image requires it, signals, futexes, clocks, process lifecycle, `tmpfs`, console devices, and the bounded `/proc`, `/sys`, `/dev`, credential, and namespace behavior exercised by that image. The exact image digest and machine-readable feature matrix are release inputs. A later distribution profile adds systemd, glibc, package management, sockets, cgroups v2, and the broader namespace behavior needed by Rocky Linux or another selected distribution. Unsupported interfaces must fail predictably rather than silently provide weaker semantics.
 
 ## 5. ABI and binary component contracts
 
 ### 5.1 Three distinct interfaces
 
-1. **Linux container ABI:** Syscalls and observable Linux behavior required by the pinned Rocky system-container profile and later supported applications.
+1. **Linux container ABI:** Syscalls and observable Linux behavior required by the pinned minimal system-container profile and later distribution/application profiles.
 2. **Native system ABI:** Stable, language-neutral binary contract between the kernel and native control/service domains. It does not permit arbitrary third-party kernel execution.
 3. **Service/driver ABI:** Stable IPC, capabilities, shared-memory, resource, lifecycle, failure, and device contracts for isolated components.
 
@@ -183,8 +183,8 @@ Build a UEFI PE/COFF executable with a minimal Rust/assembly EFI entry path. Obt
 4. Kernel code and immutable data are sealed read-only and the boot authority envelope becomes fixed.
 5. The kernel creates the initial control-plane domain with exactly the capabilities authorized by the manifest.
 6. The control plane starts approved storage, network, device, logging, and compatibility services.
-7. Storage exposes the pinned Rocky Linux 10 image.
-8. The control plane creates the Rocky system-container domain and starts systemd as PID 1 inside it.
+7. Storage exposes the pinned minimal Linux system-container image.
+8. The control plane creates its system-container domain and starts the image's minimal PID 1.
 9. The administrative API reports health and readiness.
 
 ### 7.3 Configuration lifecycle
@@ -230,8 +230,8 @@ Support deployer-managed public-key verification and optional TPM-backed key pro
 - Avoid repeated copies, unnecessary context switches, global locks, and scheduler jitter.
 - Optimize NUMA locality, CPU/GPU affinity, pinned memory, PCIe topology, NVMe, and RDMA.
 - Keep hardware-specific optimization profiles configurable at **next boot** rather than requiring unique source trees.
-- Treat no regression against Rocky Linux as the north star, not an unmeasurable universal assertion. Define gates per workload and path.
-- Benchmark against Rocky Linux 10 on the identical QEMU/KVM or physical profile. Initial measurements include context-switch and IPC latency, Rocky boot time, container startup, TCP throughput/p99 latency, block throughput/p99 latency, CPU-bound overhead, memory overhead, and later GPU throughput/utilization.
+- Treat no regression against a named Linux baseline as the north star, not an unmeasurable universal assertion. Define gates per workload and path.
+- Benchmark against the selected Linux baseline on the identical QEMU/KVM or physical profile. Initial measurements include context-switch and IPC latency, system-container boot time, container startup, TCP throughput/p99 latency, block throughput/p99 latency, CPU-bound overhead, memory overhead, and later GPU throughput/utilization. Rocky Linux may become a later distribution baseline once that profile is selected.
 
 ## 10. Verification and agent-assisted development
 
@@ -252,7 +252,7 @@ Support deployer-managed public-key verification and optional TPM-backed key pro
 - Architecture/specification agents define contracts and testable acceptance criteria.
 - Implementation agents work on isolated modules against those contracts.
 - Independent verification/adversarial agents generate counterexamples, fuzz, review `unsafe`, and check ABI drift.
-- Integration agents run QEMU, hardware-in-the-loop, Rocky Linux compatibility, and performance suites.
+- Integration agents run QEMU, hardware-in-the-loop, pinned Linux-profile compatibility, and performance suites.
 - Human maintainers approve threat model, interfaces, trust roots, exceptions, and merge decisions.
 
 No agent-authored change merges solely on the author agent's tests or self-reported proof. Keep proofs, test logs, benchmarks, and compatibility evidence as CI artifacts.
@@ -261,13 +261,13 @@ No agent-authored change merges solely on the author agent's tests or self-repor
 
 | Stage | Demonstrable result | Gate |
 |---|---|---|
-| M0: Feasibility/spec | Threat model, domain/capability model, ABI sketches, Rocky compatibility inventory, NVIDIA driver-port study | Fix the authority model, initial service boundary, and QEMU/KVM profile |
+| M0: Feasibility/spec | Threat model, domain/capability model, ABI sketches, minimal Linux compatibility inventory, NVIDIA driver-port study | Fix the authority model, initial service boundary, and QEMU/KVM profile |
 | M1: Immutable boot | Direct UEFI boot under QEMU/KVM; verified manifest and bundle create one control-plane domain | Kernel/integrity sealing and verified authority-envelope transition |
 | M2: Domains and control | Rust scheduling, VM, IPC, capabilities, process trees, resource accounting, interrupts, control API | Isolation/concurrency tests and authority non-escalation property |
 | M3: Native services | Console, in-memory storage, network/device skeletons, service supervision | Service failure cannot panic kernel; capability cleanup/restart tests |
-| M4: Linux baseline | Run unmodified static and dynamic Rocky binaries inside a Linux-compatible domain | Targeted syscall, process, VFS, and credential tests |
-| M5: Rocky system container | Boot pinned Rocky Linux 10 image to a systemd-managed console | Required namespace/cgroup/procfs/devfs and lifecycle matrix passes |
-| M6: Persistence and network | Rocky container uses persistent storage and native virtual networking; SSH works | Crash consistency, restart, throughput, p99 latency, and isolation tests |
+| M4: Linux baseline | Run unmodified static and dynamic Linux binaries inside a Linux-compatible domain | Targeted syscall, process, VFS, and credential tests |
+| M5: Minimal system container | Boot the pinned minimal Linux image to a PID-1-managed console | Required process, mount, credential, procfs/devfs, and lifecycle matrix passes |
+| M6: Persistence and network | The minimal system container uses persistent storage and native virtual networking | Crash consistency, restart, throughput, p99 latency, and isolation tests |
 | M7: OCI workloads | Run selected OCI application containers under native control | Image, overlay, resource, seccomp, and networking tests |
 | M8: GPU | Run selected NVIDIA GPU + CUDA/PyTorch workload through isolated driver domain | Driver failure containment, correctness, and matched throughput benchmark |
 | M9: Hardening | Formal proof portfolio, fuzzing, attestation, ABI stability checks | Security review and reproducible release |
@@ -280,11 +280,11 @@ Stages are conceptual and may overlap. **M0 NVIDIA feasibility begins immediatel
 2. What exact objects, operations, failure semantics, version negotiation, and compatibility guarantees make up the stable native system/driver ABI?
 3. Which control-plane observation and debugging capabilities are enabled in production, particularly access to container memory and secrets?
 4. Can NVIDIA open kernel-module sources be adapted into an isolated driver domain without losing required functionality/performance?
-5. What exact digest and package configuration define the first Rocky Linux 10 image, and which observable interfaces does it exercise?
+5. What exact digest and construction recipe define the first minimal Linux system-container image, and which observable interfaces does it exercise? Which later distribution image becomes the first broad compatibility profile?
 6. Which existing filesystem implementation and on-disk format should back the first persistent storage service?
 7. What bootstrap cryptography is necessary before the separately maintained runtime crypto module is available?
 8. Which configurations and operational environments are in scope for future FIPS validation?
-9. What are the acceptable performance regression limits relative to Rocky Linux for each named workload?
+9. What Linux baseline and acceptable performance regression limits apply to each named workload?
 10. Which failures can be transparently recovered, which require restarting a container/domain, and which require reboot?
 11. What is the governance model and release/support policy?
 
@@ -336,7 +336,7 @@ Stages are conceptual and may overlap. **M0 NVIDIA feasibility begins immediatel
 2. Specify the stable native system/driver ABI, including object lifetimes, version/feature negotiation, cancellation, revocation, cleanup, restart, and failure semantics.
 3. Specify the boot manifest, signed native bundle, independent trust authorities, atomic staging, rollback, immutable integrity state, and initial capability graph.
 4. Build a tiny Rust UEFI proof of concept under the pinned QEMU/KVM profile that seals the boot state and creates one minimal control-plane domain.
-5. Pin a Rocky Linux 10 x86-64 system-container image and build a machine-readable syscall/feature/observable-behavior matrix for reaching systemd console.
+5. Pin a minimal x86-64 system-container test image and build a machine-readable syscall/feature/observable-behavior matrix for reaching its PID-1-managed console.
 6. Specify and test the end-to-end authority non-escalation invariant.
 7. Produce an evidence-backed NVIDIA driver feasibility report distinguishing the Linux interface layer, isolated native port, matched userspace components, and required memory/device primitives.
 8. Choose the initial in-memory and persistent storage paths, including service-crash and consistency behavior.
