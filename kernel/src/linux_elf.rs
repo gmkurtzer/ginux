@@ -1177,16 +1177,7 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
 
 pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_size: usize) -> bool {
     const PATH: &[u8] = b"/lib64/ld-ginux.so";
-    const PATH_WITH_NUL: &[u8] = b"/lib64/ld-ginux.so\0";
-    let mut main_bytes = fixture();
-    write_u16(&mut main_bytes, 56, 4);
-    write_u64(&mut main_bytes, 24, 0x40_0120);
-    write_interpreter(
-        &mut main_bytes,
-        ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE,
-        0x3f80,
-        PATH_WITH_NUL,
-    );
+    let main_bytes = interpreted_main_fixture();
     let interpreter_bytes = compact_position_independent_fixture();
     let (Some(main), Some(interpreter)) = (parse(&main_bytes), parse(&interpreter_bytes)) else {
         return false;

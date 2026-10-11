@@ -608,6 +608,11 @@ if ! grep -q '^ginux: bounded interpreted Linux ELF mapping verified' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: separate-header interpreted Linux mapping verified' "$output_file"; then
+    echo "Boot test failed: separate-header interpreted Linux mapping was not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux copy errors and overflow bounds verified' "$output_file"; then
     echo "Boot test failed: Linux copy errors or overflow bounds were not verified." >&2
     exit 1

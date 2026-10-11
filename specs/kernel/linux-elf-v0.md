@@ -119,10 +119,11 @@ and `AT_ENTRY` values cannot silently fall back to static defaults. The existing
 static runtime stack is now populated by a single bounded auxiliary-vector
 encoder using that common contract, and the interpreted proof checks the exact
 word positions of its dynamic values. A bounded mapping proof installs the main
-image's four RX and two RW/NX pages and the interpreter's RX and RW/NX pages in
-two independently cloned 2 MiB leaf regions. It validates permissions and image
-contents through the activated user root, restores the kernel root, then scrubs
-and releases all thirteen page-table and payload frames. This proof does not yet
+image's read-only/NX header page, four RX pages, and two RW/NX pages plus the
+interpreter's RX and RW/NX pages in three independently cloned 2 MiB leaf
+regions. It validates permissions, the intact main entry, and image contents
+through the activated user root, restores the kernel root, then scrubs and
+releases all fifteen page-table and payload frames. This proof does not yet
 construct a dynamic-process stack or transfer control to the interpreter. The
 profile does not apply dynamic relocations, execute the interpreter, or support
 glibc.

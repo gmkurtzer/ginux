@@ -539,6 +539,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
     protected_start: u64,
     protected_size: usize,
 ) -> bool {
+    let Some(main_ro) = plan.main.read_only else {
+        return false;
+    };
     let main_rx = plan.main.executable;
     let main_rw = plan.main.writable;
     let interpreter_rx = plan.interpreter.executable;
@@ -551,6 +554,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             ((address >> 12) & 0x1ff) as usize,
         ]
     };
+    let main_ro_indexes = indexes(main_ro.virtual_page);
     let main_indexes = indexes(main_rx.virtual_page);
     let main_rw_indexes = indexes(main_rw.virtual_page);
     let interpreter_indexes = indexes(interpreter_rx.virtual_page);
@@ -568,26 +572,33 @@ pub(crate) fn verify_interpreted_elf_mapping(
         })
     };
     if protected_size == 0
-        || plan.main.read_only.is_some()
         || plan.interpreter.read_only.is_some()
+        || main_ro.page_count != 1
         || main_rx.page_count != 4
         || main_rw.page_count != 2
         || interpreter_rx.page_count != 1
         || interpreter_rw.page_count != 1
+        || main_ro_indexes[..2] != main_indexes[..2]
         || main_indexes[..2] != interpreter_indexes[..2]
+        || main_ro_indexes[2] == main_indexes[2]
+        || main_ro_indexes[2] == interpreter_indexes[2]
         || main_indexes[..3] != main_rw_indexes[..3]
         || interpreter_indexes[..3] != interpreter_rw_indexes[..3]
         || main_indexes[2] == interpreter_indexes[2]
         || main_indexes[0] != 0
         || main_indexes[1] != 0
+        || main_ro_indexes[3] + main_ro.page_count > ENTRY_COUNT
         || main_indexes[3] + main_rx.page_count > ENTRY_COUNT
         || main_rw_indexes[3] + main_rw.page_count > ENTRY_COUNT
         || interpreter_indexes[3] + interpreter_rx.page_count > ENTRY_COUNT
         || interpreter_rw_indexes[3] + interpreter_rw.page_count > ENTRY_COUNT
+        || overlaps_protected(main_ro)
         || overlaps_protected(main_rx)
         || overlaps_protected(main_rw)
         || overlaps_protected(interpreter_rx)
         || overlaps_protected(interpreter_rw)
+        || main_ro.writable
+        || main_ro.executable
         || main_rx.writable
         || !main_rx.executable
         || !main_rw.writable
@@ -600,22 +611,30 @@ pub(crate) fn verify_interpreted_elf_mapping(
         return false;
     }
 
-    let Some(frames) = memory::allocate_frames::<13>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<15>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, main_table, interpreter_table, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data] =
+    let [root, pdpt, directory, main_ro_table, main_table, interpreter_table, main_ro_page, main_page, main_tail, main_third, main_fourth, main_data, main_data_tail, interpreter_page, interpreter_data] =
         addresses;
     let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
         unsafe {
-            for frame in [root, pdpt, directory, main_table, interpreter_table] {
+            for frame in [
+                root,
+                pdpt,
+                directory,
+                main_ro_table,
+                main_table,
+                interpreter_table,
+            ] {
                 zero_frame(frame)?;
             }
             let kernel_root = mapped_frame::<u64>(kernel_root_physical)?;
             let root_entries = mapped_frame::<u64>(root)?;
             let pdpt_entries = mapped_frame::<u64>(pdpt)?;
             let directory_entries = mapped_frame::<u64>(directory)?;
+            let main_ro_entries = mapped_frame::<u64>(main_ro_table)?;
             let main_entries = mapped_frame::<u64>(main_table)?;
             let interpreter_entries = mapped_frame::<u64>(interpreter_table)?;
             root_entries.add(256).write(kernel_root.add(256).read());
@@ -631,6 +650,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 .write(directory | PRESENT | WRITABLE | USER);
 
             for (directory_index, table_entries, table_frame) in [
+                (main_ro_indexes[2], main_ro_entries, main_ro_table),
                 (main_indexes[2], main_entries, main_table),
                 (
                     interpreter_indexes[2],
@@ -662,6 +682,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             }
 
             let payloads = [
+                (main_ro, 0, main_ro_page),
                 (main_rx, 0, main_page),
                 (main_rx, 1, main_tail),
                 (main_rx, 2, main_third),
@@ -683,6 +704,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     | if segment.writable { WRITABLE } else { 0 }
                     | if segment.executable { 0 } else { NO_EXECUTE }
             };
+            main_ro_entries
+                .add(main_ro_indexes[3])
+                .write(main_ro_page | flags(main_ro));
             for (offset, frame) in [main_page, main_tail, main_third, main_fourth]
                 .into_iter()
                 .enumerate()
@@ -703,9 +727,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 .add(interpreter_rw_indexes[3])
                 .write(interpreter_data | flags(interpreter_rw));
 
-            let permissions_valid = main_entries.add(main_indexes[3]).read()
+            let permissions_valid = main_ro_entries.add(main_ro_indexes[3]).read()
                 & (PRESENT | USER | WRITABLE | NO_EXECUTE)
-                == PRESENT | USER
+                == PRESENT | USER | NO_EXECUTE
+                && main_entries.add(main_indexes[3]).read()
+                    & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+                    == PRESENT | USER
                 && main_entries.add(main_rw_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == PRESENT | USER | WRITABLE | NO_EXECUTE
@@ -718,7 +745,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
             activate(root);
             let observed = current_root() == root
                 && cpu::with_supervisor_user_access(|| {
-                    (main_rx.virtual_address as *const u8).read_volatile() == 0x7f
+                    (main_ro.virtual_address as *const u8).read_volatile() == 0x7f
+                        && (main_rx.virtual_address as *const u8).read_volatile()
+                            == main_rx.bytes[0]
+                        && (plan.main.entry as *const u8).read_volatile() == 0x48
                         && (main_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"PROBE!!\n")
                         && (interpreter_rx.virtual_address as *const u8).read_volatile() == 0x7f
