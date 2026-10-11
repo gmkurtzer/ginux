@@ -1276,7 +1276,7 @@ extern "sysv64" fn linux_syscall_handler(
             0
         }
         LINUX_READV_SYSCALL => linux_descriptor_readv(first_argument, buffer, count),
-        LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
+        LINUX_WRITEV_SYSCALL => linux_descriptor_writev(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
         LINUX_FCNTL_SYSCALL => linux_descriptor_fcntl(first_argument, buffer, count),
@@ -1822,8 +1822,14 @@ fn linux_bounded_console_write(address: u64, count: u64) -> u64 {
     count
 }
 
-fn linux_console_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
-    if linux_console_descriptor(descriptor) != LINUX_DESCRIPTOR_OUTPUT {
+fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
+    let device = linux_device_descriptor(descriptor);
+    let access = device & 3;
+    let writable_device = device != 0 && (access == LINUX_DESCRIPTOR_OUTPUT || access == 3);
+    let serial = linux_console_descriptor(descriptor) == LINUX_DESCRIPTOR_OUTPUT
+        || writable_device && device & LINUX_DEVICE_CONSOLE != 0;
+    let discard = writable_device && device & LINUX_DEVICE_CONSOLE == 0;
+    if !serial && !discard {
         return LINUX_EBADF;
     }
     let Ok(vector_count) = usize::try_from(count) else {
@@ -1854,12 +1860,14 @@ fn linux_console_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
         if length == 0 || end > LINUX_WRITE_LIMIT {
             return LINUX_EINVAL;
         }
-        if !copy_from_linux_user(address, &mut output[total..end]) {
+        if serial && !copy_from_linux_user(address, &mut output[total..end]) {
             return LINUX_EFAULT;
         }
         total = end;
     }
-    crate::serial_write_bytes(&output[..total]);
+    if serial {
+        crate::serial_write_bytes(&output[..total]);
+    }
     total as u64
 }
 

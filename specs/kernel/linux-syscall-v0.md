@@ -109,6 +109,10 @@ session attachment, and terminal reassignment remain unsupported.
 `/dev/zero`, every destination is validated before any is cleared, so an
 invalid later vector returns `-EFAULT` without partially changing earlier
 buffers; a valid request returns the total zeroed length.
+`writev` applies the same four-vector and 256-byte aggregate limits to the
+fixed devices. Console vectors use the atomic serial-copy path; null and zero
+devices validate the vector table and lengths, then discard the total without
+touching payload memory, matching their scalar-write contract.
 `rax = 332` (`__NR_statx`) returns a zero-initialized 256-byte result for these
 four paths, including `STATX_BASIC_STATS`, character-device mode `0600`, stable
 inode numbers, block size 4096, and conventional device minors. The reserved

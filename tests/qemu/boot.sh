@@ -818,6 +818,11 @@ if ! grep -q '^ginux: Linux atomic zero-device readv validated' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded device writev validated' "$output_file"; then
+    echo "Boot test failed: Linux device writev was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1
