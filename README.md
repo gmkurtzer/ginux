@@ -37,12 +37,13 @@ target. The kernel then restores its root and scrubs every owned frame.
 The build rejects unresolved ELF relocation records in all three raw embedded
 text payloads before extracting their bytes.
 The executable QEMU path now goes beyond the synthetic metadata fixtures: LLD
-produces an `ET_DYN` PIE main and a separate `libginux.so`, including program
-headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and `DT_SONAME`.
-The kernel authenticates both linker outputs, applies a fixed PIE load bias,
-accepts the dependency's intentionally unmapped ELF headers, and executes the
-complete probe through the linker-generated jump slot. Linker-private metadata
-remains mapped but outside the probe's bounded syscall-copy data extent.
+produces an `ET_DYN` interpreter, PIE main, and separate `libginux.so`, including
+program headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and
+`DT_SONAME`. The kernel authenticates all three linker outputs, applies fixed
+load biases, accepts the dependency's intentionally unmapped ELF headers, and
+executes the complete probe through the linker-generated jump slot.
+Linker-private metadata remains mapped but outside the probe's bounded
+syscall-copy data extent.
 Interpreter and dependency selection bind the exact `PT_INTERP` path or
 `DT_NEEDED` name and SHA-256 digest before parsing or mapping. The dependency's
 own `DT_SONAME` must equal both the requested name and the authority record. A
@@ -209,8 +210,9 @@ read-only headers at `0x3ff000`, a four-page RX load with entry at `0x400100`,
 and RW data/BSS at `0x404000`, matching the ring-3 workload's bounded layout.
 This tests ordinary
 linker metadata on both macOS and Linux hosts. `make linux-probe` builds the
-static artifact at `build/linux-probe.elf` and the executable dynamic pair at
-`build/linux-dynamic/linux-linked-main.elf` and
+static artifact at `build/linux-probe.elf` and the executable dynamic trio at
+`build/linux-dynamic/ld-ginux.so`,
+`build/linux-dynamic/linux-linked-main.elf`, and
 `build/linux-dynamic/libginux.so` for inspection without assembling the EFI
 filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and

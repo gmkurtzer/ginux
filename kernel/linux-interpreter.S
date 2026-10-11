@@ -6,13 +6,17 @@ ginux_linux_interpreter:
     and rbx, -4096
 
     lea rdi, [rbx + 0x3008]
-    mov ecx, 4
+    mov ecx, 17
     xor eax, eax
 .Lscan_interpreter_dynamic:
+    test qword ptr [rdi], -1
+    jz .Linterpreter_dynamic_ready
     cmp qword ptr [rdi], 7
     cmove rax, qword ptr [rdi + 8]
     add rdi, 16
     loop .Lscan_interpreter_dynamic
+    jmp .Linvalid_dynamic
+.Linterpreter_dynamic_ready:
     test rax, rax
     jz .Linvalid_dynamic
     add rax, rbx
@@ -187,3 +191,11 @@ ginux_linux_interpreter:
 
 .Linvalid_dynamic:
     ud2
+
+#ifdef GINUX_LINKED
+.section .data,"aw",@progbits
+    .ascii "DYNAMIC!"
+
+.section .data.rel.ro,"aw",@progbits
+    .quad ginux_linux_interpreter
+#endif

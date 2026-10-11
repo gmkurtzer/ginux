@@ -59,6 +59,7 @@ const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-prob
 const LINKED_DYNAMIC_MAIN: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/linux-linked-main.elf"));
 const LINKED_DYNAMIC_DEPENDENCY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libginux.so"));
+const LINKED_DYNAMIC_INTERPRETER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ld-ginux.so"));
 
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
@@ -1113,6 +1114,30 @@ fn parse_dynamic_relocations<'a>(
         (1, (None, None, None, None, None, None, None)) => {
             (None, None, 0, None, None, None, None, None, None, false)
         }
+        (1, (Some(symbols), Some(strings), Some(1), Some(symbol_size), Some(hash), None, None))
+            if symbol_size == SYMBOL_ENTRY_SIZE as u64 && hash_is_gnu =>
+        {
+            let symbol = virtual_file_bytes(loads, symbols, SYMBOL_ENTRY_SIZE)?;
+            let string = virtual_file_bytes(loads, strings, 1)?;
+            if symbol.iter().any(|byte| *byte != 0)
+                || string[0] != 0
+                || !validate_empty_gnu_hash(loads, hash)?
+            {
+                return None;
+            }
+            (
+                Some(symbols),
+                Some(strings),
+                1,
+                Some(hash),
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+        }
         (
             count @ (2 | 3),
             (
@@ -1376,6 +1401,19 @@ fn validate_gnu_hash(
             && bloom & bloom_mask == bloom_mask
             && read_u32(table, 24)? == symbol_index
             && read_u32(table, 28)? == (hash | 1),
+    )
+}
+
+fn validate_empty_gnu_hash(loads: &[Option<Segment<'_>>], address: u64) -> Option<bool> {
+    let table = virtual_file_bytes(loads, address, 28)?;
+    let bloom_shift = read_u32(table, 12)?;
+    Some(
+        read_u32(table, 0)? == 1
+            && read_u32(table, 4)? == 1
+            && read_u32(table, 8)? == 1
+            && bloom_shift < 64
+            && read_u64(table, 16)? == 0
+            && read_u32(table, 24)? == 0,
     )
 }
 
@@ -2041,6 +2079,7 @@ fn verify_dependency_authentication_rejections(
 pub(crate) fn verify_dynamic_relocation_rejections() -> bool {
     (0..32).all(dynamic_relocation_rejected)
         && (0..7).all(gnu_hash_rejected)
+        && (0..6).all(empty_gnu_hash_rejected)
         && verify_optional_dynamic_tag_rejections()
 }
 
@@ -2074,6 +2113,36 @@ fn gnu_hash_rejected(case: u8) -> bool {
         _ => return false,
     }
     parse(&image).is_none()
+}
+
+#[inline(never)]
+fn empty_gnu_hash_rejected(case: u8) -> bool {
+    let mut table = [0_u8; 28];
+    write_u32(&mut table, 0, 1);
+    write_u32(&mut table, 4, 1);
+    write_u32(&mut table, 8, 1);
+    write_u32(&mut table, 12, 26);
+    match case {
+        0 => write_u32(&mut table, 0, 0),
+        1 => write_u32(&mut table, 4, 0),
+        2 => write_u32(&mut table, 8, 0),
+        3 => write_u32(&mut table, 12, 64),
+        4 => write_u64(&mut table, 16, 1),
+        5 => write_u32(&mut table, 24, 1),
+        _ => return false,
+    }
+    let loads = [
+        Some(Segment {
+            bytes: &table,
+            file_offset: 0,
+            virtual_address: 0,
+            memory_size: table.len() as u64,
+            flags: PF_READ,
+        }),
+        None,
+        None,
+    ];
+    validate_empty_gnu_hash(&loads, 0) == Some(false)
 }
 
 #[inline(never)]
@@ -2293,7 +2362,7 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
 pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_size: usize) -> bool {
     const PATH: &[u8] = b"/lib64/ld-ginux.so";
     const DEPENDENCY: &[u8] = b"libginux.so";
-    let interpreter_bytes = compact_position_independent_fixture();
+    let interpreter_bytes = LINKED_DYNAMIC_INTERPRETER;
     let Some(main) = parse(LINKED_DYNAMIC_MAIN) else {
         crate::serial_write_bytes(b"\r\nginux: linked dynamic main parse failed");
         return false;
@@ -2302,9 +2371,13 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         crate::serial_write_bytes(b"\r\nginux: linked dynamic dependency parse failed");
         return false;
     };
+    let Some(interpreter) = parse(interpreter_bytes) else {
+        crate::serial_write_bytes(b"\r\nginux: linked dynamic interpreter parse failed");
+        return false;
+    };
     let authority = InterpreterAuthority {
         path: PATH,
-        sha256: crate::crypto::sha256(&interpreter_bytes),
+        sha256: crate::crypto::sha256(interpreter_bytes),
     };
     let dependency_authority = DependencyAuthority {
         name: DEPENDENCY,
@@ -2322,6 +2395,26 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         crate::serial_write_bytes(b"\r\nginux: linked dynamic identity mismatch");
         return false;
     }
+    if interpreter.entry != 0x200
+        || interpreter.program_header_count != 5
+        || interpreter.interpreter.is_some()
+        || interpreter.needed_library.is_some()
+        || interpreter.soname.is_some()
+        || !interpreter.dynamic_relocations.is_some_and(|dynamic| {
+            dynamic.relocation_count == 1
+                && dynamic.symbol_table_address.is_some()
+                && dynamic.string_table_address.is_some()
+                && dynamic.string_table_size == 1
+                && dynamic.hash_table_address.is_some()
+                && dynamic.hash_is_gnu
+                && dynamic.symbol_relocation.is_none()
+                && dynamic.jump_slot_relocation.is_none()
+                && !dynamic.symbol_defined
+        })
+    {
+        crate::serial_write_bytes(b"\r\nginux: linked dynamic interpreter metadata mismatch");
+        return false;
+    }
     if plan_position_independent_at(&main, 0x3f_f000, true).is_none() {
         crate::serial_write_bytes(b"\r\nginux: linked PIE main planning failed");
         return false;
@@ -2334,7 +2427,7 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         &main,
         0x3f_f000,
         &authority,
-        &interpreter_bytes,
+        interpreter_bytes,
         0x60_0000,
         &dependency_authority,
         LINKED_DYNAMIC_DEPENDENCY,

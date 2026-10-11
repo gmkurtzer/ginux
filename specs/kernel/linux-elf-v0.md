@@ -179,14 +179,22 @@ the interpreter's and dependency's separate RX and RW/NX pages in three
 independently cloned 2 MiB leaf regions. It also owns bounded heap, stack, and
 two `mmap` payload frames. The
 proof validates permissions, the intact main entry, and image contents through
-the activated user root, constructs the dynamic-process stack with the common
-auxiliary-vector encoder, and enters the relocated interpreter at `0x600100`.
-The interpreter is assembled from `linux-interpreter.S`; at runtime it derives
-its page-aligned load bias and scans each bounded dynamic table for the admitted
-primary relocation, split PLT relocation, symbol-table, and hash-table tags
-rather than depending on tag order or embedding their values in its
-instructions. It first writes the load-biased value `0x601234` to its writable
-relocation target `0x603080`. It then applies the dependency's relative
+the activated user root and constructs the dynamic-process stack with the
+common auxiliary-vector encoder. The compact planning fixture records an entry
+at `0x600100`; mapped execution enters the linker-produced runtime interpreter
+at `0x600200`.
+The interpreter is assembled from `linux-interpreter.S`; the runtime path links
+it as a five-header PIE with LLD, while the compact hand-built ELF remains a
+parser and planning fixture. The linked interpreter retains the linker-emitted
+null-only dynamic symbol/string/GNU-hash tables; those tables are validated but
+never used for resolution because its sole relocation is relative. At runtime
+it derives its page-aligned load bias and scans each bounded dynamic table for
+the admitted primary relocation, split PLT relocation, symbol-table, and
+hash-table tags rather than depending on tag order or embedding their values in
+its instructions. The compact fixture first writes the load-biased value
+`0x601234` to its writable relocation target `0x603080`; the linked interpreter
+instead applies LLD's authenticated relative record to its linker-owned data
+slot. The compact fixture then applies the dependency's relative
 relocation at `0x6131c0` and self-resolves its eager `GLOB_DAT` and split-table
 `JUMP_SLOT` targets at `0x6131c8` and `0x6131d0`; all three receive the
 dependency entry value `0x610100`. It writes the admitted main-image relative
@@ -203,9 +211,10 @@ checks all three of its own relocation targets before returning the expected val
 requires all three main-image relocated values for a dynamic startup and
 untouched zero targets for each static startup; after it exits, the kernel also
 validates the interpreter's relocated target through the still-active user root.
-The runtime execution proof now replaces the synthetic main and dependency
-containers with LLD outputs. LLD links an eight-header `ET_DYN` PIE main with
-SysV hashing and a header-unmapped `libginux.so` with GNU hashing. The main is
+The runtime execution proof replaces the synthetic interpreter, main, and
+dependency containers with LLD outputs. LLD links a five-header interpreter,
+an eight-header `ET_DYN` PIE main with SysV hashing, and a header-unmapped
+`libginux.so` with GNU hashing. The main is
 loaded with bias `0x3ff000`; the dependency retains bias `0x610000`. Their
 linker-owned GOT/PLT slots and split relocation tables drive the same userspace
 interpreter and the complete syscall workload. The parser admits the exact
@@ -216,8 +225,8 @@ interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
 The build still extracts raw `.text` for the static and synthetic parser
 fixtures and rejects any nonempty `SHT_REL` or `SHT_RELA` section targeting
-those bytes. The executable dynamic main and dependency instead retain LLD's
-complete ELF metadata.
+those bytes. The executable dynamic interpreter, main, and dependency instead
+retain LLD's complete ELF metadata.
 The complete ring-3 probe therefore runs with dynamic `AT_BASE`,
 main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
 restores its own root and scrubs and releases all twenty-one page-table and
