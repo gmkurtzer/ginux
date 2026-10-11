@@ -103,6 +103,84 @@ pub(crate) struct UserFaultFrame {
     ss: u64,
 }
 
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct UserInterruptFrame {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    r11: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rbp: u64,
+    rdi: u64,
+    rsi: u64,
+    rdx: u64,
+    rcx: u64,
+    rbx: u64,
+    rax: u64,
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+    rsp: u64,
+    ss: u64,
+}
+
+impl UserInterruptFrame {
+    fn selectors_match(&self, code_selector: u16, data_selector: u16) -> bool {
+        self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
+    }
+
+    fn saved_context(&self, address_space_root: u64) -> UserContext {
+        UserContext {
+            rax: self.rax,
+            rbx: self.rbx,
+            rcx: self.rcx,
+            rdx: self.rdx,
+            rsi: self.rsi,
+            rdi: self.rdi,
+            rbp: self.rbp,
+            r8: self.r8,
+            r9: self.r9,
+            r10: self.r10,
+            r11: self.r11,
+            r12: self.r12,
+            r13: self.r13,
+            r14: self.r14,
+            r15: self.r15,
+            rip: self.rip,
+            rsp: self.rsp,
+            rflags: self.rflags,
+            address_space_root,
+        }
+    }
+
+    fn restore(&mut self, context: UserContext, code_selector: u16, data_selector: u16) {
+        self.r15 = context.r15;
+        self.r14 = context.r14;
+        self.r13 = context.r13;
+        self.r12 = context.r12;
+        self.r11 = context.r11;
+        self.r10 = context.r10;
+        self.r9 = context.r9;
+        self.r8 = context.r8;
+        self.rbp = context.rbp;
+        self.rdi = context.rdi;
+        self.rsi = context.rsi;
+        self.rdx = context.rdx;
+        self.rcx = context.rcx;
+        self.rbx = context.rbx;
+        self.rax = context.rax;
+        self.rip = context.rip;
+        self.cs = u64::from(code_selector);
+        self.rflags = context.rflags;
+        self.rsp = context.rsp;
+        self.ss = u64::from(data_selector);
+    }
+}
+
 impl UserFaultFrame {
     fn selectors_match(&self, code_selector: u16, data_selector: u16) -> bool {
         self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
@@ -221,6 +299,7 @@ struct Scheduler {
 struct Runtime {
     scheduler: Scheduler,
     yields: u8,
+    preemptions: u8,
     exits: u8,
     address_space_switches: u8,
     faults: u8,
@@ -407,6 +486,7 @@ pub(crate) fn initialize_runtime(
         core::ptr::addr_of_mut!(RUNTIME).write(MaybeUninit::new(Runtime {
             scheduler,
             yields: 0,
+            preemptions: 0,
             exits: 0,
             address_space_switches: 0,
             faults: 0,
@@ -538,6 +618,48 @@ pub(crate) fn yield_runtime(
     }
 }
 
+pub(crate) fn preempt_runtime(
+    frame: &mut UserInterruptFrame,
+    code_selector: u16,
+    data_selector: u16,
+) -> RuntimeAction {
+    if !frame.selectors_match(code_selector, data_selector) {
+        return RuntimeAction::Invalid;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(current) = runtime.scheduler.current else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(root) = runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.address_space_root)
+    else {
+        return RuntimeAction::Invalid;
+    };
+    let saved = frame.saved_context(root);
+    let Some(next) = runtime.scheduler.yield_current(current, saved) else {
+        return RuntimeAction::Invalid;
+    };
+    let Some(preemptions) = runtime.preemptions.checked_add(1) else {
+        return RuntimeAction::Invalid;
+    };
+    runtime.preemptions = preemptions;
+    if next.context.address_space_root != root {
+        let Some(switches) = runtime.address_space_switches.checked_add(1) else {
+            return RuntimeAction::Invalid;
+        };
+        runtime.address_space_switches = switches;
+    }
+    frame.restore(next.context, code_selector, data_selector);
+    RuntimeAction::Resume {
+        result: next.context.rax,
+        address_space_root: next.context.address_space_root,
+    }
+}
+
 pub(crate) fn exit_runtime(
     frame: &mut UserTrapFrame,
     code_selector: u16,
@@ -587,7 +709,8 @@ pub(crate) fn verify_runtime_complete() -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;
     };
-    runtime.yields == 1
+    runtime.yields == 0
+        && runtime.preemptions == 1
         && runtime.exits == 2
         && runtime.faults == 1
         && runtime.restarts == 1
@@ -633,7 +756,7 @@ fn initial_context(
         r15: 0,
         rip: entry as u64,
         rsp: stack as u64,
-        rflags: 2,
+        rflags: 2 | (1 << 9),
         address_space_root,
     }
 }

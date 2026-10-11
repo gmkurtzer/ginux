@@ -11,7 +11,11 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
 - An IDT with present interrupt gates for all 32 architectural exception
   vectors.
 
-Interrupts remain disabled. The kernel triggers `INT3` during every QEMU boot test; the assembly entry stub preserves general-purpose registers, invokes a Rust handler on the kernel stack, and returns with `IRETQ`. Successful continuation proves that the GDT, IDT, code selector, stack discipline, and basic exception return path work together.
+Interrupts remain disabled while kernel bootstrap code runs. The kernel triggers
+`INT3` during every QEMU boot test; the assembly entry stub preserves
+general-purpose registers, invokes a Rust handler on the kernel stack, and
+returns with `IRETQ`. Successful continuation proves that the GDT, IDT, code
+selector, stack discipline, and basic exception return path work together.
 
 The kernel breakpoint exception remains recoverable. Other exceptions from
 CPL0 enter a common fatal path with a normalized vector and error code. The
@@ -25,8 +29,9 @@ on the interrupted stack.
 TSS RSP0 names a dedicated privilege stack rather than the suspended kernel
 call stack. This prevents repeated user calls from overwriting the kernel
 continuation. Its first page is absent in the active kernel and domain page
-tables. The stack is shared by the single bootstrap CPU and is safe only while
-interrupts remain disabled and calls cannot nest.
+tables. The stack is shared by the single bootstrap CPU. Ring-3 execution
+admits one APIC timer interrupt, whose interrupt gate clears IF; kernel handlers
+never re-enable interrupts, so privilege-stack uses cannot nest in this proof.
 
 The kernel verifies all 32 entries before continuing its boot test. Later
 revisions must capture complete structured fault frames, introduce per-CPU

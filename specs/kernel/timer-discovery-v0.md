@@ -1,6 +1,6 @@
 # x86-64 Timer Discovery v0
 
-**Status:** Read-only capability discovery.
+**Status:** Calibrated one-shot interrupt and ring-3 preemption verified.
 
 The bootstrap processor records the following CPUID timer properties:
 
@@ -39,5 +39,18 @@ interrupt delivery, acknowledges the timer with an APIC EOI, then disables
 interrupts and masks/stops the timer again. A bounded poll turns a missing
 interrupt into a boot failure instead of an indefinite wait.
 
-No periodic tick or scheduler is implied. External interrupt routing remains
-disabled and no other interrupt source is intentionally unmasked.
+## One-shot scheduler preemption
+
+After both bootstrap domains and contexts exist, the kernel programs a second
+one-shot for approximately 1 ms while interrupts remain disabled. The initial
+`IRETQ` enables interrupts only in ring 3. Vector 32 saves every general-purpose
+register plus the hardware return frame, acknowledges the APIC, records the
+interrupted control context, selects the ready service context, reloads CR3,
+and returns directly to that service. The control context later resumes at its
+interrupted instruction and completes normally. The timer is masked again
+before either address space is reclaimed.
+
+This proves one involuntary user-context switch, not a periodic scheduler.
+There is no tick policy, quantum accounting, timer queue, deadline API, or
+preemption while kernel code runs. External interrupt routing remains disabled
+and no other interrupt source is intentionally unmasked.

@@ -5,6 +5,7 @@ use super::{
     apic::{LocalApic, Mode},
     cpu,
 };
+use crate::scheduler::{self, RuntimeAction, UserInterruptFrame};
 
 const CPUID_BASIC_MAX: u32 = 0;
 const CPUID_FEATURES: u32 = 1;
@@ -39,6 +40,8 @@ const SPURIOUS_VECTOR: u8 = 255;
 const INTERRUPT_POLL_LIMIT: usize = 100_000_000;
 
 static TIMER_FIRED: AtomicBool = AtomicBool::new(false);
+static PREEMPTION_ARMED: AtomicBool = AtomicBool::new(false);
+static PREEMPTION_SUCCEEDED: AtomicBool = AtomicBool::new(false);
 static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 
@@ -64,6 +67,7 @@ ginux_apic_timer_entry:
     push r14
     push r15
     mov r12, rsp
+    mov rdi, r12
     and rsp, -16
     call {timer_handler}
     mov rsp, r12
@@ -263,7 +267,39 @@ pub(crate) unsafe fn verify_local_apic_interrupt(
     TIMER_FIRED.load(Ordering::SeqCst)
 }
 
-extern "sysv64" fn timer_interrupt_handler() {
+/// Arms one scheduler interrupt without enabling interrupts in kernel mode.
+/// The next ring-3 IRET restores IF and admits the pending one-shot.
+pub(crate) unsafe fn arm_scheduler_preemption(
+    apic: &LocalApic,
+    calibration: &LocalApicCalibration,
+) -> bool {
+    if calibration.counter_hz == 0
+        || PREEMPTION_ARMED.swap(true, Ordering::SeqCst)
+        || INTERRUPT_APIC_BASE.load(Ordering::SeqCst) != apic.physical_base
+        || INTERRUPT_APIC_MODE.load(Ordering::SeqCst)
+            != if apic.mode == Mode::X2Apic { 1 } else { 0 }
+    {
+        PREEMPTION_ARMED.store(false, Ordering::SeqCst);
+        return false;
+    }
+    PREEMPTION_SUCCEEDED.store(false, Ordering::SeqCst);
+    TIMER_FIRED.store(false, Ordering::SeqCst);
+    apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
+    apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
+    let initial_count = (calibration.counter_hz / 1_000).clamp(1, u64::from(u32::MAX)) as u32;
+    apic.write(APIC_INITIAL_COUNT, initial_count);
+    true
+}
+
+pub(crate) unsafe fn finish_scheduler_preemption(apic: &LocalApic) -> bool {
+    apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
+    apic.write(APIC_INITIAL_COUNT, 0);
+    !PREEMPTION_ARMED.load(Ordering::SeqCst)
+        && TIMER_FIRED.load(Ordering::SeqCst)
+        && PREEMPTION_SUCCEEDED.load(Ordering::SeqCst)
+}
+
+extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     TIMER_FIRED.store(true, Ordering::SeqCst);
     let apic = LocalApic {
         id: 0,
@@ -277,6 +313,23 @@ extern "sysv64" fn timer_interrupt_handler() {
     // SAFETY: The verifier initializes these values before unmasking the timer,
     // and the handler runs with exclusive bootstrap-processor APIC ownership.
     unsafe { apic.write(APIC_EOI, 0) };
+    if !PREEMPTION_ARMED.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return;
+    };
+    let action =
+        scheduler::preempt_runtime(frame, cpu::USER_CODE_SELECTOR, cpu::USER_DATA_SELECTOR);
+    if let RuntimeAction::Resume {
+        address_space_root, ..
+    } = action
+    {
+        PREEMPTION_SUCCEEDED.store(
+            cpu::activate_user_root(address_space_root),
+            Ordering::SeqCst,
+        );
+    }
 }
 
 unsafe fn in_u8(port: u16) -> u8 {

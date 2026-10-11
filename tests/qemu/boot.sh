@@ -278,6 +278,11 @@ if ! grep -q '^ginux: isolated scheduler address spaces switched' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: one-shot user preemption completed' "$output_file"; then
+    echo "Boot test failed: the one-shot user preemption did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: completed address-space frames reclaimed' "$output_file"; then
     echo "Boot test failed: completed address-space frames were not reclaimed." >&2
     exit 1

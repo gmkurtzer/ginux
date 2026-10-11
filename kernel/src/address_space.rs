@@ -1,6 +1,13 @@
 use core::arch::{asm, x86_64::__cpuid};
 
-use crate::{arch::x86_64::cpu, ipc, memory, scheduler};
+use crate::{
+    arch::x86_64::{
+        apic::LocalApic,
+        cpu,
+        timer::{self, LocalApicCalibration},
+    },
+    ipc, memory, scheduler,
+};
 
 const PAGE_SIZE: usize = 4096;
 const ENTRY_COUNT: usize = 512;
@@ -167,6 +174,8 @@ pub(crate) fn verify_ring3_control_plane(
     entry_offsets: [usize; 3],
     domains: [u64; 2],
     handles: [[u64; 3]; 2],
+    local_apic: &LocalApic,
+    apic_timer: &LocalApicCalibration,
 ) -> bool {
     if !enable_execute_disable() {
         return false;
@@ -246,6 +255,9 @@ pub(crate) fn verify_ring3_control_plane(
         {
             return false;
         }
+        if !timer::arm_scheduler_preemption(local_apic, apic_timer) {
+            return false;
+        }
         activate(first_space.root);
         let handled = cpu::verify_user_syscall(
             USER_TEST_ADDRESS + control_entry_offset,
@@ -255,10 +267,12 @@ pub(crate) fn verify_ring3_control_plane(
             handles[0][2],
         );
         activate(kernel_root);
+        let preemption_complete = timer::finish_scheduler_preemption(local_apic);
         let valid = handled
             && scheduler::verify_runtime_complete()
             && ipc::is_empty()
-            && current_root() == kernel_root;
+            && current_root() == kernel_root
+            && preemption_complete;
         valid && first_space.release() && second_space.release()
     }
 }

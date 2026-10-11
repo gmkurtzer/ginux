@@ -4,7 +4,8 @@
 
 The hardware proof assigns distinct roles to the two scheduled ring-3
 contexts and native domains. Context 1 is the control client. It sends request
-value 1 through the bounded IPC channel and yields. Context 2 is a minimal
+value 1 through the bounded IPC channel and waits until a timer interrupt
+preempts it. Context 2 is a minimal
 isolated service in a different address space and a domain whose sole delegated
 capability is IPC read/write. It receives the request, sends reply value 2, and
 then executes the measured expected invalid opcode.

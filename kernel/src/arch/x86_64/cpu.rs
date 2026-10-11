@@ -12,8 +12,8 @@ use crate::{
 const KERNEL_CODE_SELECTOR: u16 = 0x08;
 const KERNEL_DATA_SELECTOR: u16 = 0x10;
 const TSS_SELECTOR: u16 = 0x18;
-const USER_DATA_SELECTOR: u16 = 0x2b;
-const USER_CODE_SELECTOR: u16 = 0x33;
+pub(crate) const USER_DATA_SELECTOR: u16 = 0x2b;
+pub(crate) const USER_CODE_SELECTOR: u16 = 0x33;
 const SYSCALL_VECTOR: u8 = 0x80;
 const CONTROL_ABI_V1_FEATURES: u64 = 0x0001_007f;
 const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
@@ -291,7 +291,7 @@ ginux_user_enter:
     mov rbx, rdx
     push {user_data}
     push rsi
-    push 2
+    push 0x202
     push {user_code}
     push rdi
     iretq
@@ -690,7 +690,7 @@ fn resume_action(action: RuntimeAction) -> u64 {
     }
 }
 
-fn activate_user_root(root: u64) -> bool {
+pub(crate) fn activate_user_root(root: u64) -> bool {
     const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
     if root == 0 || root & !ADDRESS_MASK != 0 {
         return false;

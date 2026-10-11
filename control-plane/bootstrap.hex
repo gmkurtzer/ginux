@@ -56,11 +56,11 @@ cd80
 85c0
 7554
 
-# cooperatively yield once, then require a zero resume result
-b803000000
-cd80
-85c0
-7549
+# wait for the kernel's calibrated one-shot to preempt this context
+b900000001
+f390
+e2fc
+31c0
 
 # dequeue and require the service's transformed reply
 4c89c7

@@ -1,6 +1,6 @@
 # Scheduler State Machine v0
 
-**Status:** Cooperative two-context switching verified in hardware.
+**Status:** Cooperative primitives plus one-shot preemption verified in hardware.
 
 The bootstrap scheduler owns eight fixed thread slots. A thread identifier
 contains a slot and generation, and each thread belongs to one native domain.
@@ -35,28 +35,30 @@ IPC-only service-domain context. Each owns a distinct page-table root, executabl
 non-executable stack preceded by an absent guard page. `INT 0x80` saves the
 hardware trap frame into the current scheduler record. Yield selects the other
 context, activates its recorded CR3, and restores its registers through
-`IRETQ`; exit destroys the current slot and either resumes the remaining
-context or returns to the kernel. In the current proof, context 1 yields to
-context 2, which receives an IPC request, sends its reply, and raises an
+`IRETQ`. The APIC one-shot performs the same transition from a full interrupt
+frame, without cooperation from the running context. Exit destroys the current
+slot and either resumes the remaining context or returns to the kernel. In the
+current proof, a timer preempts context 1 to context 2, which receives an IPC request, sends its reply, and raises an
 expected invalid-opcode fault. The scheduler removes it, queues one replacement
 service generation on the retained service address space, and switches back to
 context 1. The survivor consumes the reply and exits; the replacement then
 negotiates the ABI and exits cleanly. The boot succeeds only after exactly one
-yield, one contained fault, two normal exits, one restart, and three cross-root
-dispatches.
+preemption, no cooperative yields, one contained fault, two normal exits, one
+restart, and three cross-root dispatches.
 
 Call budgets belong to domains rather than threads. The control domain receives
-11 charged calls and each service generation receives three. Every call-gate
+10 charged calls and each service generation receives three. Every call-gate
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 15 charged calls, deliberately exhausts the control domain, and requires
+exactly 14 charged calls, deliberately exhausts the control domain, and requires
 its next discovery call to be rejected before it exits.
 
 This revision uses one guarded TSS privilege stack because execution is
 single-CPU and syscalls cannot nest. It stores no priority, CPU-time budget,
-affinity, wait reason, or timer deadline and provides
-no preemption. The call budget is a bring-up resource bound, not a complete
+affinity, wait reason, timer deadline, periodic tick, or quantum policy. The
+single one-shot is a bring-up proof rather than a complete preemptive scheduler.
+The call budget is a bring-up resource bound, not a complete
 resource-accounting policy. Address-space switching currently flushes the local
 TLB through CR3 reload; PCID, TLB shootdown, and multi-CPU ownership are not
 defined.
