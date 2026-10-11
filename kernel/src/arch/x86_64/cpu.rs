@@ -5,7 +5,7 @@ use core::arch::{
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use super::timer;
+use super::{paging, timer};
 
 use crate::{
     address_space,
@@ -1099,7 +1099,11 @@ fn resume_action(action: RuntimeAction) -> u64 {
 
 pub(crate) fn activate_user_root(root: u64) -> bool {
     const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
-    if root == 0 || root & !ADDRESS_MASK != 0 {
+    if root == 0
+        || root & !ADDRESS_MASK != 0
+        || scheduler::current_address_space_root() != Some(root)
+        || !paging::user_root_has_safe_shape(root)
+    {
         return false;
     }
     let active: u64;

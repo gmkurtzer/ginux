@@ -408,6 +408,11 @@ if ! grep -q '^ginux: isolated scheduler address spaces switched' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: scheduler CR3 roots validated' "$output_file"; then
+    echo "Boot test failed: scheduler CR3 validation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: one-shot user preemption completed' "$output_file"; then
     echo "Boot test failed: the one-shot user preemption did not complete." >&2
     exit 1

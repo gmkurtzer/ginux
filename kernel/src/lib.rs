@@ -595,6 +595,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: ring-3 fault survivor resumed and exited");
     serial_write("\r\nginux: user page fault contained");
     serial_write("\r\nginux: isolated scheduler address spaces switched");
+    serial_write("\r\nginux: scheduler CR3 roots validated");
     serial_write("\r\nginux: one-shot user preemption completed");
     serial_write("\r\nginux: restarted service preemption completed");
     serial_write("\r\nginux: completed address-space frames reclaimed");

@@ -49,6 +49,13 @@ the kernel activates each root and observes a different marker through the
 same stack virtual address. Scheduler dispatch reloads CR3 on the preemption
 and later cross-context transitions and reads it back before returning to
 userspace.
+Every scheduler-triggered CR3 load first requires the target to equal the
+current scheduler record, fall below the 4 GiB bootstrap ceiling, and have a
+bounded PML4 shape: entry zero must exactly share the kernel's supervisor-only
+identity entry, entry one must be a present writable user hierarchy, and all
+other entries must be absent. The hardware readback still has to match after
+the load. This prevents an internally corrupted or stale scheduler root from
+silently widening a domain's top-level mappings.
 
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3

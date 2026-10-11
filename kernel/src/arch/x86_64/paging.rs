@@ -9,12 +9,29 @@ const PAGE_SIZE: usize = 4096;
 const MAX_FINE_TABLES: usize = 8;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
+const USER: u64 = 1 << 2;
 const LARGE_PAGE: u64 = 1 << 7;
 const NO_EXECUTE: u64 = 1 << 63;
 const ADDRESS_MASK: usize = 0x000f_ffff_ffff_f000;
 const CR0_WRITE_PROTECT: usize = 1 << 16;
 
 pub(crate) const INITIAL_IDENTITY_LIMIT: usize = 1usize << 32;
+
+pub(crate) fn user_root_has_safe_shape(root: u64) -> bool {
+    if root == 0 || root >= INITIAL_IDENTITY_LIMIT as u64 || !root.is_multiple_of(PAGE_SIZE as u64)
+    {
+        return false;
+    }
+    let entries = root as *const u64;
+    let kernel_entry = unsafe { core::ptr::addr_of!(PML4.0).cast::<u64>().read() };
+    let shared = unsafe { entries.read() };
+    let user = unsafe { entries.add(1).read() };
+    shared == kernel_entry
+        && shared & PRESENT != 0
+        && shared & USER == 0
+        && user & (PRESENT | WRITABLE | USER) == (PRESENT | WRITABLE | USER)
+        && (2..ENTRY_COUNT).all(|index| unsafe { entries.add(index).read() == 0 })
+}
 
 #[derive(Clone, Copy)]
 #[repr(C, align(4096))]
