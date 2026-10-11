@@ -69,7 +69,10 @@ interrupt into a boot failure instead of an indefinite wait.
 ## One-shot scheduler preemption
 
 After both bootstrap domains and contexts exist, the kernel programs a
-scheduler one-shot for approximately 1 ms while interrupts remain disabled. The initial
+proof-only scheduler one-shot for approximately 100 microseconds while
+interrupts remain disabled. This keeps TCG from completing the bounded control
+workload before the second involuntary dispatch while preserving the rule that
+delivery begins only in user mode. The initial
 `IRETQ` enables interrupts only in ring 3. Vector 32 saves every general-purpose
 register plus the hardware return frame, acknowledges the APIC, records the
 interrupted control context, selects the ready service context, reloads CR3,

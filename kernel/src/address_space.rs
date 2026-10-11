@@ -1749,11 +1749,26 @@ pub(crate) fn verify_ring3_control_plane(
         );
         activate(kernel_root);
         let preemption_complete = timer::finish_scheduler_preemption(local_apic);
-        let valid = handled
-            && scheduler::verify_runtime_complete()
-            && ipc::is_empty()
-            && current_root() == kernel_root
-            && preemption_complete;
+        let runtime_complete = scheduler::verify_runtime_complete();
+        let ipc_empty = ipc::is_empty();
+        let root_restored = current_root() == kernel_root;
+        if !handled {
+            crate::serial_write_bytes(b"\r\nginux: control proof syscall state incomplete");
+        }
+        if !runtime_complete {
+            crate::serial_write_bytes(b"\r\nginux: control proof scheduler state incomplete");
+        }
+        if !ipc_empty {
+            crate::serial_write_bytes(b"\r\nginux: control proof IPC state not drained");
+        }
+        if !root_restored {
+            crate::serial_write_bytes(b"\r\nginux: control proof kernel root not restored");
+        }
+        if !preemption_complete {
+            crate::serial_write_bytes(b"\r\nginux: control proof APIC preemption incomplete");
+        }
+        let valid =
+            handled && runtime_complete && ipc_empty && root_restored && preemption_complete;
         let Some(service_owner_domain) = scheduler::service_address_space_owner() else {
             return false;
         };
