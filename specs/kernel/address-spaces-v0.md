@@ -34,6 +34,12 @@ all frames, discards the unstarted domain without emitting a lifecycle event,
 and rejects its stale domain/capability pair. No scheduler context is queued,
 so this is the transactional admission path rather than an executable
 auxiliary workload.
+The kernel retains the complete frame leases in a fixed-capacity registry keyed
+by the exact auxiliary domain generation after a successful bind. Teardown
+looks up that registry entry, refuses release while a thread remains attached,
+then unbinds, zeroes, and returns all seven frames before removing the entry.
+The proof requires the entry to remain present after a rejected early release
+and requires the registry and allocator ownership count to be empty afterward.
 There is no
 address-space identifier or TLB shootdown protocol, and the kernel mapping
 remains transitional.

@@ -438,6 +438,11 @@ if ! grep -q '^ginux: auxiliary scheduler admission resource-gated' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: auxiliary address-space ownership retained' "$output_file"; then
+    echo "Boot test failed: auxiliary address-space ownership was not retained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded executable container accepted' "$output_file"; then
     echo "Boot test failed: the executable container was not accepted." >&2
     exit 1

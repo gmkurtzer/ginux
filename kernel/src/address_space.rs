@@ -21,6 +21,15 @@ const EXPECTED_FAULT_OFFSET: usize = 515;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const NO_EXECUTE: u64 = 1 << 63;
 pub(crate) const USER_ADDRESS_SPACE_FRAMES: usize = 7;
+const MAX_AUXILIARY_ADDRESS_SPACES: usize = 2;
+
+static mut AUXILIARY_ADDRESS_SPACES: [Option<RegisteredAuxiliaryAddressSpace>;
+    MAX_AUXILIARY_ADDRESS_SPACES] = [const { None }; MAX_AUXILIARY_ADDRESS_SPACES];
+
+struct RegisteredAuxiliaryAddressSpace {
+    domain: u64,
+    space: WxAddressSpace,
+}
 
 pub(crate) fn expected_service_fault_instruction(control_entry_offset: usize) -> Option<u64> {
     USER_TEST_ADDRESS
@@ -311,14 +320,16 @@ pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
         && memory::owner_live_frame_count(owner) == Some(USER_ADDRESS_SPACE_FRAMES)
         && domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
         && !domain::discard_unstarted_auxiliary_service(auxiliary)
-        && domain::bind_auxiliary_address_space(auxiliary, space.root)
+        && register_auxiliary_address_space(auxiliary, space)
+        && registered_auxiliary_address_space_count() == 1
         && domain::attach_thread(auxiliary)
         && !domain::attach_thread(auxiliary)
-        && !domain::unbind_auxiliary_address_space(auxiliary, space.root)
+        && !release_auxiliary_address_space(auxiliary)
+        && registered_auxiliary_address_space_count() == 1
         && domain::detach_thread(auxiliary)
-        && domain::unbind_auxiliary_address_space(auxiliary, space.root);
-    if !space.release()
-        || memory::owner_live_frame_count(owner) != Some(0)
+        && release_auxiliary_address_space(auxiliary)
+        && registered_auxiliary_address_space_count() == 0;
+    if memory::owner_live_frame_count(owner) != Some(0)
         || !domain::discard_unstarted_auxiliary_service(auxiliary)
     {
         return false;
@@ -326,6 +337,71 @@ pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
     valid
         && domain::domain_is_retired(auxiliary)
         && !domain::handle_permits(auxiliary, handle, 2, crate::capability::Rights::WRITE)
+}
+
+fn registered_auxiliary_address_space_count() -> usize {
+    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    unsafe { (*registry).iter().flatten().count() }
+}
+
+fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(slot) =
+        (0..MAX_AUXILIARY_ADDRESS_SPACES).find(|index| unsafe { (*registry)[*index].is_none() })
+    else {
+        return false;
+    };
+    if unsafe {
+        (*registry)
+            .iter()
+            .flatten()
+            .any(|registered| registered.domain == domain_id)
+    } || !domain::bind_auxiliary_address_space(domain_id, space.root)
+    {
+        return false;
+    }
+    unsafe {
+        (*registry)[slot] = Some(RegisteredAuxiliaryAddressSpace {
+            domain: domain_id,
+            space,
+        });
+    }
+    true
+}
+
+fn release_auxiliary_address_space(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(slot) = (0..MAX_AUXILIARY_ADDRESS_SPACES).find(|index| unsafe {
+        (*registry)[*index]
+            .as_ref()
+            .is_some_and(|registered| registered.domain == domain_id)
+    }) else {
+        return false;
+    };
+    let Some(registered) = (unsafe { (*registry)[slot].as_ref() }) else {
+        return false;
+    };
+    let root = registered.space.root;
+    let owner = registered.space.owner;
+    let frames = registered.space.frames;
+    if !memory::frames_owned_by(owner, &frames)
+        || !domain::unbind_auxiliary_address_space(domain_id, root)
+    {
+        return false;
+    }
+    unsafe {
+        for frame in &frames {
+            zero_frame(frame.address());
+        }
+    }
+    if !memory::release_frames(owner, frames) {
+        let _ = domain::bind_auxiliary_address_space(domain_id, root);
+        return false;
+    }
+    unsafe {
+        (*registry)[slot] = None;
+    }
+    true
 }
 
 pub(crate) fn verify_ring3_control_plane(
