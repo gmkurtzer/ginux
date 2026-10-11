@@ -353,6 +353,10 @@ static LINUX_THREAD_TLS_EXTENTS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_TLS_SIZES: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_STACK_BASES: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_STACK_SIZES: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_CLEAR_CHILD_TIDS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_ROBUST_LISTS: [AtomicU64; LINUX_THREAD_LIMIT] =
@@ -1037,6 +1041,7 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) tls_size: usize,
     pub(crate) sibling_fs_base: usize,
     pub(crate) sibling_tls: usize,
+    pub(crate) sibling_stack: usize,
     pub(crate) code: usize,
     pub(crate) code_size: usize,
     pub(crate) loader_code: usize,
@@ -1142,8 +1147,19 @@ pub(crate) fn verify_linux_tls_context_contract() -> bool {
         .is_valid()
 }
 
-fn reserve_linux_thread(context: LinuxTlsContext) -> Option<LinuxThreadHandle> {
-    if !context.is_valid() {
+fn reserve_linux_thread(
+    context: LinuxTlsContext,
+    stack_base: usize,
+    stack_size: usize,
+) -> Option<LinuxThreadHandle> {
+    if !context.is_valid()
+        || stack_base == 0
+        || !stack_base.is_multiple_of(PAGE_SIZE)
+        || stack_size != PAGE_SIZE
+        || stack_base
+            .checked_add(stack_size)
+            .is_none_or(|end| end > 1 << 47)
+    {
         return None;
     }
     let slot = LINUX_THREAD_STATES
@@ -1159,6 +1175,8 @@ fn reserve_linux_thread(context: LinuxTlsContext) -> Option<LinuxThreadHandle> {
     LINUX_THREAD_POINTERS[slot].store(context.thread_pointer as u64, Ordering::SeqCst);
     LINUX_THREAD_TLS_EXTENTS[slot].store(context.extent as u64, Ordering::SeqCst);
     LINUX_THREAD_TLS_SIZES[slot].store(context.extent_size as u64, Ordering::SeqCst);
+    LINUX_THREAD_STACK_BASES[slot].store(stack_base as u64, Ordering::SeqCst);
+    LINUX_THREAD_STACK_SIZES[slot].store(stack_size as u64, Ordering::SeqCst);
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
     LINUX_NEXT_TID.store(next_tid, Ordering::SeqCst);
@@ -1240,6 +1258,8 @@ fn clear_linux_thread_slot(slot: usize) {
     LINUX_THREAD_POINTERS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_TLS_EXTENTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_TLS_SIZES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_STACK_BASES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_STACK_SIZES[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_FREE, Ordering::SeqCst);
@@ -1298,6 +1318,12 @@ fn finish_linux_thread_table() -> bool {
         && LINUX_THREAD_TLS_SIZES
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_STACK_BASES
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_STACK_SIZES
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_CLEAR_CHILD_TIDS
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
@@ -1345,6 +1371,15 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     };
     let tls_contract_valid = initial_tls.is_valid()
         && sibling_tls.is_valid()
+        && (execution.tls_size == 0 && execution.sibling_stack == 0
+            || execution.tls_size != 0
+                && execution.sibling_stack != 0
+                && execution.sibling_stack.is_multiple_of(PAGE_SIZE)
+                && execution
+                    .sibling_stack
+                    .checked_add(PAGE_SIZE)
+                    .is_some_and(|end| end <= 1 << 47)
+                && execution.sibling_stack != (execution.stack & !(PAGE_SIZE - 1)))
         && (execution.tls_size == 0
             || !linux_ranges_overlap(
                 initial_tls.extent as u64,
@@ -1370,17 +1405,24 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     };
     let linux_thread_lifecycle_valid = finish_linux_thread_table()
         && (|| -> Option<bool> {
-            let initial_thread = reserve_linux_thread(initial_tls)?;
+            let initial_stack = execution.stack & !(PAGE_SIZE - 1);
+            let initial_thread = reserve_linux_thread(initial_tls, initial_stack, PAGE_SIZE)?;
             if initial_thread.tid != 1 || !switch_linux_thread(initial_thread) {
                 return Some(false);
             }
             if execution.tls_size == 0 {
                 return Some(true);
             }
-            let sibling_thread = reserve_linux_thread(sibling_tls)?;
-            let capacity_bounded = reserve_linux_thread(sibling_tls).is_none();
+            let sibling_thread =
+                reserve_linux_thread(sibling_tls, execution.sibling_stack, PAGE_SIZE)?;
+            let capacity_bounded =
+                reserve_linux_thread(sibling_tls, execution.sibling_stack, PAGE_SIZE).is_none();
             if sibling_thread.tid != 2
                 || !capacity_bounded
+                || LINUX_THREAD_STACK_BASES[usize::from(sibling_thread.slot)].load(Ordering::SeqCst)
+                    != execution.sibling_stack as u64
+                || LINUX_THREAD_STACK_SIZES[usize::from(sibling_thread.slot)].load(Ordering::SeqCst)
+                    != PAGE_SIZE as u64
                 || !set_current_linux_clear_child_tid(0x1110)
                 || !set_current_linux_robust_list(0x1120)
                 || !switch_linux_thread(sibling_thread)
@@ -1405,7 +1447,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             {
                 return Some(false);
             }
-            let replacement = reserve_linux_thread(sibling_tls)?;
+            let replacement =
+                reserve_linux_thread(sibling_tls, execution.sibling_stack, PAGE_SIZE)?;
             Some(
                 replacement.tid == 3
                     && replacement.slot == sibling_thread.slot
@@ -1416,6 +1459,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                     && LINUX_THREAD_ROBUST_LISTS[usize::from(replacement.slot)]
                         .load(Ordering::SeqCst)
                         == 0
+                    && LINUX_THREAD_STACK_BASES[usize::from(replacement.slot)]
+                        .load(Ordering::SeqCst)
+                        == execution.sibling_stack as u64
                     && !switch_linux_thread(sibling_thread)
                     && retire_linux_thread(replacement),
             )
@@ -1554,6 +1600,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 execution.sibling_tls as u64,
                 execution.tls_size,
             )
+            && !linux_writable_user_range_contains(execution.sibling_stack as u64, PAGE_SIZE)
             && execution
                 .tls
                 .checked_sub(1)

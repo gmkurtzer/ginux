@@ -434,18 +434,27 @@ preemption or expose Linux thread creation.
 
 The execution proof owns a fixed two-slot Linux thread table. Each live entry
 contains a monotonically assigned process-local TID, an internal slot
-generation, and one checked TLS execution context. The initial context reserves
+generation, one checked TLS execution context, and one exact one-page stack
+extent. The initial context reserves
 TID 1 and becomes running. For the interpreted profile, the sibling context
 reserves TID 2; a third simultaneous reservation fails. The kernel switches to
 TID 2 and back to TID 1 through the same FS/copy-context installer, retires TID
 2, and reuses that slot as TID 3 with a new generation. The old handle can
 neither resolve nor switch the replacement. The replacement is retired before
 ring-3 entry. Process exit retires the running initial entry, and post-exit
-verification requires both slots and every stored TID/TLS value to be clear
+verification requires both slots and every stored TID/TLS/stack value to be clear
 before the process-local next-TID counter is reset. Slot generations remain
-monotonic across these proofs. This table supplies bounded identity and
-lifecycle state only; it does not allocate a second stack, create a child
-register context, or make a second Linux thread runnable.
+monotonic across these proofs.
+
+The sibling stack is a separately leased, zeroed RW/NX page between explicit
+unmapped lower and upper guard pages. Its bounds are bound to TID 2 and retained
+when that slot is reused as TID 3. The active initial-thread syscall-copy check
+rejects the complete sibling stack extent. Teardown zeroes the page, verifies
+the physical frame contains only zeroes, and releases it with the other
+execution frames. The mapping is still directly accessible to code sharing the
+same process address space; this proves bounded ownership, guarded layout, and
+cleanup rather than intra-process memory isolation. The table does not yet
+create a child register context or make a second Linux thread runnable.
 
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns

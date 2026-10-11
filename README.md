@@ -98,8 +98,14 @@ the slot as TID 3 with a new generation, and rejects the stale handle. The
 ring-3 `gettid`, `set_tid_address`, and robust-list lookup paths resolve the
 current table entry rather than embedding TID 1. Process exit retires the
 initial entry and teardown requires the complete table to be empty before
-resetting the process-local TID sequence. There is still no userspace `clone`,
-second Linux stack, or concurrently schedulable Linux thread.
+resetting the process-local TID sequence.
+The sibling slot also owns a separate, zeroed, RW/NX page between two unmapped
+guard pages. Its exact bounds follow the slot across TID 2 retirement and TID 3
+reuse. The current-thread syscall-copy contract rejects that whole page, and
+teardown verifies it is scrubbed before releasing its frame. This establishes
+bounded stack ownership and cleanup, not memory isolation within the shared
+process address space. There is still no userspace `clone`, child register
+context, or concurrently schedulable Linux thread.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.

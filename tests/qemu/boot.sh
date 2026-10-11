@@ -683,6 +683,16 @@ if ! grep -q '^ginux: Linux TLS execution context switched and restored' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: guarded Linux sibling stack materialized' "$output_file"; then
+    echo "Boot test failed: a guarded sibling Linux stack was not materialized." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: non-current Linux stack syscall access denied' "$output_file"; then
+    echo "Boot test failed: the sibling Linux stack was admitted to current-thread syscall copies." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux TID lifecycle validated' "$output_file"; then
     echo "Boot test failed: bounded Linux TID lifecycle was not validated." >&2
     exit 1
@@ -710,6 +720,11 @@ fi
 
 if ! grep -q '^ginux: sibling Linux TLS frame scrubbed and released' "$output_file"; then
     echo "Boot test failed: the sibling Linux TLS frame was not scrubbed and released." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux sibling stack scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the sibling Linux stack was not scrubbed and released." >&2
     exit 1
 fi
 

@@ -508,8 +508,12 @@ Loader-provided static TLS uses a separate checked execution context that binds
 the initial FS base to the exact live static-TLS-plus-TCB copy extent. The boot
 proof switches that state to an independently materialized sibling instance,
 requires syscall-copy admission to follow the switch, and restores the initial
-state before entering userspace. This does not yet make syscall state generally
-per-thread or connect Linux TLS switching to scheduler preemption.
+state before entering userspace. The sibling thread-table entry also retains an
+exact guarded stack page, while the active initial-thread syscall-copy state
+rejects that entire page. This is resource ownership and copy-boundary state,
+not protection from direct access within the shared process address space.
+This does not yet make syscall state generally per-thread or connect Linux TLS
+switching to scheduler preemption.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
@@ -640,8 +644,9 @@ credential, supplementary-group, and capability queries, fixed `personality`, bo
 identity queries above,
 `set_tid_address`, bounded robust-list registration/query, `exit`, and
 `exit_group` calls. There is no userspace thread creation, general TID
-allocation, clear-child-TID futex wake, or robust futex recovery yet; the
-two-slot table is exercised only by the bounded kernel lifecycle proof. Every other call
+allocation, child register construction, clear-child-TID futex wake, or robust
+futex recovery yet; the two-slot table and guarded sibling stack are exercised
+only by the bounded kernel lifecycle proof. Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
 remains disarmed outside the proof. The current copy helpers cover only the one
