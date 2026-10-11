@@ -72,6 +72,7 @@ const LINUX_CHDIR_SYSCALL: u64 = 80;
 const LINUX_READLINK_SYSCALL: u64 = 89;
 const LINUX_UMASK_SYSCALL: u64 = 95;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
+const LINUX_TIMES_SYSCALL: u64 = 100;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
@@ -188,8 +189,11 @@ const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
 const LINUX_CLOCK_MONOTONIC: u64 = 1;
+const LINUX_CLOCK_PROCESS_CPUTIME_ID: u64 = 2;
+const LINUX_CLOCK_THREAD_CPUTIME_ID: u64 = 3;
 const LINUX_CLOCK_MONOTONIC_RAW: u64 = 4;
 const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
+const LINUX_CLOCK_TICKS_PER_SECOND: u64 = 100;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -1576,6 +1580,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_TIMES_SYSCALL => linux_times(first_argument),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_ESRCH;
@@ -1648,7 +1653,7 @@ extern "sysv64" fn linux_syscall_handler(
 }
 
 fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
-    if !matches!(clock, LINUX_CLOCK_MONOTONIC | LINUX_CLOCK_MONOTONIC_RAW) {
+    if !linux_clock_supported(clock) {
         return LINUX_EINVAL;
     }
     let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);
@@ -1666,6 +1671,35 @@ fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_clock_supported(clock: u64) -> bool {
+    matches!(
+        clock,
+        LINUX_CLOCK_MONOTONIC
+            | LINUX_CLOCK_PROCESS_CPUTIME_ID
+            | LINUX_CLOCK_THREAD_CPUTIME_ID
+            | LINUX_CLOCK_MONOTONIC_RAW
+    )
+}
+
+fn linux_times(output_address: u64) -> u64 {
+    let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);
+    let epoch = ELF_PROBE_CLOCK_EPOCH.load(Ordering::SeqCst);
+    if frequency == 0 || epoch == 0 {
+        return LINUX_ENOSYS;
+    }
+    let elapsed = timer::timestamp_counter().saturating_sub(epoch);
+    let ticks = elapsed / frequency * LINUX_CLOCK_TICKS_PER_SECOND
+        + elapsed % frequency * LINUX_CLOCK_TICKS_PER_SECOND / frequency;
+    if output_address != 0 {
+        let mut accounting = [0_u8; 32];
+        accounting[..8].copy_from_slice(&ticks.to_ne_bytes());
+        if !copy_to_linux_user(output_address, &accounting) {
+            return LINUX_EFAULT;
+        }
+    }
+    ticks
 }
 
 fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, offset: u64) -> u64 {
@@ -1737,7 +1771,7 @@ fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {
 }
 
 fn linux_clock_getres(clock: u64, output_address: u64) -> u64 {
-    if !matches!(clock, LINUX_CLOCK_MONOTONIC | LINUX_CLOCK_MONOTONIC_RAW) {
+    if !linux_clock_supported(clock) {
         return LINUX_EINVAL;
     }
     let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);

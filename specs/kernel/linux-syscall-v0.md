@@ -183,6 +183,15 @@ adjustment, and a vDSO remain unsupported.
 resolution, rounded up to a normalized `timespec`. A null result pointer is a
 valid support query. Clock selection and copy errors match `clock_gettime`, and
 the complete result is validated before copy-out.
+The same two calls accept `CLOCK_PROCESS_CPUTIME_ID` and
+`CLOCK_THREAD_CPUTIME_ID`. In this proof the process has one thread, never
+deschedules, and owns the processor from its private epoch, so both clocks use
+the same elapsed counter. `rax = 100` (`__NR_times`) converts that interval to
+the advertised 100 ticks per second, returns it, and optionally copies a
+zero-initialized 32-byte x86-64 `tms` with the value in `tms_utime`. System and
+child fields remain zero. An invalid complete output returns `-EFAULT` without
+a partial write. This is bounded single-task accounting, not scheduler CPU
+charging or child aggregation.
 `rax = 9` (`__NR_mmap`) admits one anonymous private 4096-byte RW/NX mapping at
 fixed kernel-selected address `0x409000`. It requires a null hint, exact page
 length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and
@@ -351,7 +360,7 @@ bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprote
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
-bounded `clock_gettime`/`clock_getres`,
+bounded `clock_gettime`/`clock_getres`/`times`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,

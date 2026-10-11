@@ -42,10 +42,14 @@ copy-out. Unsupported clock IDs return `-EINVAL` and invalid destinations
 return `-EFAULT` without a partial write.
 `clock_getres` reports the same source's one-tick duration, rounded up to a
 normalized `timespec`; a null output pointer is accepted as a support query.
+Because the proof has one runnable process and one thread with no descheduling,
+the process and thread CPU clock IDs share this elapsed source. `times` exposes
+the same interval at the initial `AT_CLKTCK = 100` rate while leaving system
+and child counters zero.
 
-This does not provide realtime, boot-time, process/thread CPU clocks, clock
-adjustment, sleeping, vDSO acceleration, cross-CPU synchronization, or a
-stable epoch shared between containers.
+This does not provide realtime, boot-time, scheduler-separated user/system
+accounting, child accounting, clock adjustment, sleeping, vDSO acceleration,
+cross-CPU synchronization, or a stable epoch shared between containers.
 
 ## One-shot interrupt verification
 

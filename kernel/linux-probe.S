@@ -2327,6 +2327,23 @@ clock_advanced:
     cmp qword ptr [0x403928], 1000000000
     jae failure
 
+    mov edi, 2
+    mov esi, 0x403950
+    mov eax, 228
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x403958], 1000000000
+    jae failure
+    mov edi, 3
+    mov esi, 0x403960
+    mov eax, 228
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x403968], 1000000000
+    jae failure
+
     xor edi, edi
     xor esi, esi
     mov eax, 229
@@ -2372,6 +2389,35 @@ resolution_subsecond:
     cmp qword ptr [0x403938], 1000000000
     jae failure
 resolution_valid:
+
+    movabs rax, 0x1122334455667788
+    mov qword ptr [0x403ff0], rax
+    mov edi, 0x403ff0
+    mov eax, 100
+    syscall
+    cmp rax, -14
+    jne failure
+    movabs rax, 0x1122334455667788
+    cmp qword ptr [0x403ff0], rax
+    jne failure
+    xor edi, edi
+    mov eax, 100
+    syscall
+    test rax, rax
+    js failure
+    mov edi, 0x403970
+    mov eax, 100
+    syscall
+    test rax, rax
+    js failure
+    cmp qword ptr [0x403970], rax
+    jne failure
+    cmp qword ptr [0x403978], 0
+    jne failure
+    cmp qword ptr [0x403980], 0
+    jne failure
+    cmp qword ptr [0x403988], 0
+    jne failure
 
     mov edi, 0x404200
     mov eax, 218
