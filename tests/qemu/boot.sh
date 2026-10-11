@@ -198,8 +198,8 @@ if ! grep -q '^ginux: ring-3 syscall round trip and exit handled' "$output_file"
     exit 1
 fi
 
-if ! grep -q '^ginux: scheduler lifecycle verified' "$output_file"; then
-    echo "Boot test failed: scheduler lifecycle invariants failed." >&2
+if ! grep -q '^ginux: scheduler context lifecycle verified' "$output_file"; then
+    echo "Boot test failed: scheduler context lifecycle invariants failed." >&2
     exit 1
 fi
 
