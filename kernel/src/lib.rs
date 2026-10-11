@@ -656,6 +656,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux bounded monotonic clocks validated\r\n");
     serial_write("ginux: Linux bounded clock resolution validated\r\n");
     serial_write("ginux: Linux single-task CPU time validated\r\n");
+    serial_write("ginux: Linux bounded resource usage validated\r\n");
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

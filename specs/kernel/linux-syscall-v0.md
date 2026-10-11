@@ -192,6 +192,13 @@ zero-initialized 32-byte x86-64 `tms` with the value in `tms_utime`. System and
 child fields remain zero. An invalid complete output returns `-EFAULT` without
 a partial write. This is bounded single-task accounting, not scheduler CPU
 charging or child aggregation.
+`rax = 98` (`__NR_getrusage`) accepts `RUSAGE_SELF`, `RUSAGE_THREAD`, and
+`RUSAGE_CHILDREN`. Self and thread queries return a zero-initialized 144-byte
+x86-64 `rusage` with the same elapsed interval in `ru_utime`; system time and
+all resource counters remain zero. The no-child proof returns an all-zero
+structure for `RUSAGE_CHILDREN`. Other selectors return `-EINVAL`, and an
+invalid complete output returns `-EFAULT` without a partial write. This is
+single-task compatibility accounting, not scheduler-derived usage accounting.
 `rax = 9` (`__NR_mmap`) admits one anonymous private 4096-byte RW/NX mapping at
 fixed kernel-selected address `0x40a000`. It requires a null hint, exact page
 length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and
@@ -360,7 +367,7 @@ bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprote
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
-bounded `clock_gettime`/`clock_getres`/`times`,
+bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,

@@ -45,7 +45,9 @@ normalized `timespec`; a null output pointer is accepted as a support query.
 Because the proof has one runnable process and one thread with no descheduling,
 the process and thread CPU clock IDs share this elapsed source. `times` exposes
 the same interval at the initial `AT_CLKTCK = 100` rate while leaving system
-and child counters zero.
+and child counters zero. `getrusage` likewise publishes that interval as
+`ru_utime` for the sole process and thread. Its system-time and resource
+counters remain zero, as does the no-child `RUSAGE_CHILDREN` result.
 
 This does not provide realtime, boot-time, scheduler-separated user/system
 accounting, child accounting, clock adjustment, sleeping, vDSO acceleration,

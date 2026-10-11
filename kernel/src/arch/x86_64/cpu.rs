@@ -72,6 +72,7 @@ const LINUX_CHDIR_SYSCALL: u64 = 80;
 const LINUX_READLINK_SYSCALL: u64 = 89;
 const LINUX_UMASK_SYSCALL: u64 = 95;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
+const LINUX_GETRUSAGE_SYSCALL: u64 = 98;
 const LINUX_TIMES_SYSCALL: u64 = 100;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
@@ -1580,6 +1581,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_GETRUSAGE_SYSCALL => linux_getrusage(first_argument, buffer),
         LINUX_TIMES_SYSCALL => linux_times(first_argument),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
@@ -1656,14 +1658,9 @@ fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
     if !linux_clock_supported(clock) {
         return LINUX_EINVAL;
     }
-    let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);
-    let epoch = ELF_PROBE_CLOCK_EPOCH.load(Ordering::SeqCst);
-    if frequency == 0 || epoch == 0 {
+    let Some((seconds, nanoseconds)) = linux_elapsed_time() else {
         return LINUX_ENOSYS;
-    }
-    let ticks = timer::timestamp_counter().saturating_sub(epoch);
-    let seconds = ticks / frequency;
-    let nanoseconds = ticks % frequency * NANOSECONDS_PER_SECOND / frequency;
+    };
     let mut timespec = [0_u8; 16];
     timespec[..8].copy_from_slice(&seconds.to_ne_bytes());
     timespec[8..].copy_from_slice(&nanoseconds.to_ne_bytes());
@@ -1671,6 +1668,19 @@ fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_elapsed_time() -> Option<(u64, u64)> {
+    let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);
+    let epoch = ELF_PROBE_CLOCK_EPOCH.load(Ordering::SeqCst);
+    if frequency == 0 || epoch == 0 {
+        return None;
+    }
+    let ticks = timer::timestamp_counter().saturating_sub(epoch);
+    Some((
+        ticks / frequency,
+        ticks % frequency * NANOSECONDS_PER_SECOND / frequency,
+    ))
 }
 
 fn linux_clock_supported(clock: u64) -> bool {
@@ -1700,6 +1710,25 @@ fn linux_times(output_address: u64) -> u64 {
         }
     }
     ticks
+}
+
+fn linux_getrusage(who: u64, output_address: u64) -> u64 {
+    let children = who == u32::MAX as u64 || who == u64::MAX;
+    if !matches!(who, 0 | 1) && !children {
+        return LINUX_EINVAL;
+    }
+    let mut usage = [0_u8; 144];
+    if !children {
+        let Some((seconds, nanoseconds)) = linux_elapsed_time() else {
+            return LINUX_ENOSYS;
+        };
+        usage[..8].copy_from_slice(&seconds.to_ne_bytes());
+        usage[8..16].copy_from_slice(&(nanoseconds / 1_000).to_ne_bytes());
+    }
+    if !copy_to_linux_user(output_address, &usage) {
+        return LINUX_EFAULT;
+    }
+    0
 }
 
 fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, offset: u64) -> u64 {
