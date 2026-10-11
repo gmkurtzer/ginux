@@ -648,6 +648,16 @@ if ! grep -q '^ginux: denied network copy-out left memory unchanged' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: stale network configuration apply rejected' "$output_file"; then
+    echo "Boot test failed: stale network configuration apply was not rejected." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: atomic network configuration apply completed' "$output_file"; then
+    echo "Boot test failed: atomic network configuration apply did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: configurator capability revoked on exit' "$output_file"; then
     echo "Boot test failed: configurator network capability survived exit." >&2
     exit 1

@@ -704,6 +704,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: write-only network configurator isolated");
     serial_write("\r\nginux: network observation denied to configurator");
     serial_write("\r\nginux: denied network copy-out left memory unchanged");
+    serial_write("\r\nginux: stale network configuration apply rejected");
+    serial_write("\r\nginux: atomic network configuration apply completed");
     serial_write("\r\nginux: configurator capability revoked on exit");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");

@@ -7,7 +7,7 @@ development manifest grants the control plane read/write authority, and the
 kernel delegates that bounded authority to an isolated stop-only service.
 Control ABI v2 operation 16 uses `RSI` as a command and `RDX` as its argument.
 Read-authorized command 0 requires a zero reserved argument and returns a fixed
-descriptor word containing device-contract version 8, MTU 1500, and one queue.
+descriptor word containing device-contract version 9, MTU 1500, and one queue.
 Read-authorized command 1 returns zero for link down or one for link up.
 Write-authorized command 2 accepts only zero or one and changes that link state.
 Write-authorized command 3 stores one packed IPv4 address and prefix: bits 0-31
@@ -70,6 +70,17 @@ revealing state; a sentinel in its writable stack remains unchanged. It can
 bring the link down and restore it, advancing the generation for both effective
 changes, then exits with status 44 and loses its capability. Read and write
 network authority are therefore independently delegable.
+
+Write-authorized command 11 accepts a version-1 64-byte whole-state apply
+request containing an expected generation followed by link, IPv4, gateway, and
+route state. Reserved data must be zero and the complete candidate state must
+pass the same scalar and on-link validation as individual commands. A stale
+expected generation returns `UINT64_MAX - 4` without mutation. A valid effective
+request updates every field as one serialized transaction, advances generation
+once, and returns the new generation. The write-only ring-3 configurator proves
+stale generation 6 is rejected at generation 7, then applies link-down at 7 and
+link-up at 8, receiving generations 8 and 9. This is optimistic concurrency for
+the current single-CPU call gate, not yet an SMP synchronization primitive.
 
 Before exit the service also installs and reads back `10.0.2.15/24`. This is not
 yet a network stack or virtual NIC. Link and IPv4 state are kernel-owned scalar

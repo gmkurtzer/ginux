@@ -997,8 +997,84 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
         {
             query_network_snapshot(argument)
         }
+        control_abi::NETWORK_DEVICE_APPLY
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::NETWORK_DEVICE_OBJECT,
+                Rights::WRITE,
+            ) =>
+        {
+            apply_network_configuration(argument)
+        }
         _ => u64::MAX - 2,
     }
+}
+
+fn apply_network_configuration(address: u64) -> u64 {
+    let mut request = [0_u8; control_abi::NETWORK_APPLY_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(address, &mut request) {
+        return u64::MAX - 2;
+    }
+    let version = network_request_word(&request, 0);
+    let expected_generation = network_request_word(&request, 8);
+    let link = network_request_word(&request, 16);
+    let ipv4 = network_request_word(&request, 24);
+    let gateway = network_request_word(&request, 32);
+    let route_destination = network_request_word(&request, 40);
+    let route_gateway = network_request_word(&request, 48);
+    let reserved = network_request_word(&request, 56);
+    if version != control_abi::NETWORK_APPLY_VERSION || reserved != 0 {
+        return u64::MAX - 2;
+    }
+    let generation = NETWORK_CONFIGURATION_GENERATION.load(Ordering::Acquire);
+    if expected_generation != generation {
+        return control_abi::NETWORK_RESULT_STALE_GENERATION;
+    }
+    if link > 1
+        || !valid_ipv4_configuration(ipv4)
+        || gateway >> 32 != 0
+        || (gateway != 0 && !valid_ipv4_gateway_for_configuration(gateway as u32, ipv4))
+        || route_destination >> 40 != 0
+        || route_gateway >> 32 != 0
+    {
+        return u64::MAX - 2;
+    }
+    let destination = route_destination as u32;
+    let prefix = (route_destination >> 32) as u8;
+    if !valid_network_route_for_configuration(destination, prefix, route_gateway as u32, ipv4) {
+        return u64::MAX - 2;
+    }
+    let changed = NETWORK_LINK_UP.load(Ordering::Acquire) != (link != 0)
+        || NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire) != ipv4
+        || NETWORK_IPV4_GATEWAY.load(Ordering::Acquire) != gateway
+        || NETWORK_ROUTE_DESTINATION.load(Ordering::Acquire) != route_destination
+        || NETWORK_ROUTE_GATEWAY.load(Ordering::Acquire) != route_gateway;
+    if changed {
+        NETWORK_LINK_UP.store(link != 0, Ordering::Release);
+        NETWORK_IPV4_CONFIGURATION.store(ipv4, Ordering::Release);
+        NETWORK_IPV4_GATEWAY.store(gateway, Ordering::Release);
+        NETWORK_ROUTE_DESTINATION.store(route_destination, Ordering::Release);
+        NETWORK_ROUTE_GATEWAY.store(route_gateway, Ordering::Release);
+        record_network_configuration_change();
+    }
+    NETWORK_CONFIGURATION_GENERATION.load(Ordering::Acquire)
+}
+
+fn network_request_word(
+    request: &[u8; control_abi::NETWORK_APPLY_REQUEST_SIZE],
+    offset: usize,
+) -> u64 {
+    u64::from_le_bytes([
+        request[offset],
+        request[offset + 1],
+        request[offset + 2],
+        request[offset + 3],
+        request[offset + 4],
+        request[offset + 5],
+        request[offset + 6],
+        request[offset + 7],
+    ])
 }
 
 fn set_network_route(address: u64) -> u64 {
@@ -1061,6 +1137,20 @@ fn query_network_snapshot(address: u64) -> u64 {
 }
 
 fn valid_network_route(destination: u32, prefix: u8, gateway: u32) -> bool {
+    valid_network_route_for_configuration(
+        destination,
+        prefix,
+        gateway,
+        NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire),
+    )
+}
+
+fn valid_network_route_for_configuration(
+    destination: u32,
+    prefix: u8,
+    gateway: u32,
+    configuration: u64,
+) -> bool {
     if destination == 0 && prefix == 0 && gateway == 0 {
         return true;
     }
@@ -1069,10 +1159,7 @@ fn valid_network_route(destination: u32, prefix: u8, gateway: u32) -> bool {
     }
     let mask = u32::MAX << (32 - u32::from(prefix));
     destination & mask == destination
-        && valid_ipv4_gateway_for_configuration(
-            gateway,
-            NETWORK_IPV4_CONFIGURATION.load(Ordering::Acquire),
-        )
+        && valid_ipv4_gateway_for_configuration(gateway, configuration)
 }
 
 fn record_network_configuration_change() {
