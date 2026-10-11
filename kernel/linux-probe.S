@@ -185,6 +185,18 @@ ginux_linux_probe:
     syscall
     cmp rax, -22
     jne failure
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    mov eax, 141
+    syscall
+    test rax, rax
+    jne failure
+    mov edx, 1
+    mov eax, 141
+    syscall
+    cmp rax, -1
+    jne failure
 
     mov edi, 2
     mov esi, 0x402000

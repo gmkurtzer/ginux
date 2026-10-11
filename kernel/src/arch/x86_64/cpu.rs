@@ -84,6 +84,7 @@ const LINUX_CAPSET_SYSCALL: u64 = 126;
 const LINUX_SIGALTSTACK_SYSCALL: u64 = 131;
 const LINUX_PERSONALITY_SYSCALL: u64 = 135;
 const LINUX_GETPRIORITY_SYSCALL: u64 = 140;
+const LINUX_SETPRIORITY_SYSCALL: u64 = 141;
 const LINUX_SCHED_GETPARAM_SYSCALL: u64 = 143;
 const LINUX_SCHED_GETSCHEDULER_SYSCALL: u64 = 145;
 const LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL: u64 = 146;
@@ -1349,6 +1350,19 @@ extern "sysv64" fn linux_syscall_handler(
                 return LINUX_ESRCH;
             }
             20
+        }
+        LINUX_SETPRIORITY_SYSCALL => {
+            if first_argument != 0 {
+                return LINUX_EINVAL;
+            }
+            if !matches!(buffer, 0 | 1) {
+                return LINUX_ESRCH;
+            }
+            if count == 0 {
+                0
+            } else {
+                LINUX_EPERM
+            }
         }
         LINUX_SCHED_GETPARAM_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {

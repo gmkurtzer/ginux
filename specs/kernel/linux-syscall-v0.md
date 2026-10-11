@@ -118,6 +118,8 @@ return `-EINVAL`; scheduling policy mutation remains unsupported. `rax = 140`
 (`__NR_getpriority`) reports nice value zero for the sole process by returning
 the raw Linux syscall value 20. It accepts only `PRIO_PROCESS` and PID 0 or 1;
 other selectors return `-EINVAL` and an unknown PID returns `-ESRCH`.
+`setpriority` accepts only an idempotent request for nice value zero; an actual
+priority change returns `-EPERM`.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x404000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x405000` follows Linux syscall
