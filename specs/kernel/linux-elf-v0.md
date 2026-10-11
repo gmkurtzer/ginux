@@ -273,7 +273,12 @@ function fails until that state is present, making constructor-before-use order
 observable in ring 3. The main constructor calls both providers and records its
 own private initialization state only if both calls succeed; the main entry
 requires that state. This proves dependency constructors run before the main
-constructor, which runs before the main entry. The main then calls both providers through its
+constructor, which runs before the main entry. The interpreter retains the
+original stack pointer and invokes all three constructors with `argc`, `argv`,
+and `envp` in the System V argument registers. Each constructor requires
+`argc = 1`, the `/init` argument and null terminator, and the `GINUX=1`
+environment entry and null terminator before publishing initialized state. The
+main then calls both providers through its
 linker-produced PLT, after the interpreter matches both complete names through
 the three-bucket main SysV table and each provider's GNU table. The kernel
 independently checks the main's two `GLOB_DAT` and two `JUMP_SLOT` values, both DSO mapping
@@ -355,7 +360,7 @@ main and dependency leases, and requires the kernel-owned live-frame count to
 return to its pre-execution value. This profile performs two exact cross-object
 name matches and calls both direct dependencies. It does not support transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
-lazy binding, main-image constructors, multi-entry init arrays, fini arrays,
+lazy binding, multi-entry init arrays, fini arrays,
 a general-purpose dynamic linker, or glibc. The main bias and
 entry are startup-metadata-driven. Each dependency selects among 16
 page-aligned candidate biases in its own fixed window and receives frames on

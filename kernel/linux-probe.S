@@ -13,7 +13,7 @@ ginux_linux_probe:
     movabs rax, 0x4e49414d54494e49
     cmp qword ptr [rip + ginux_main_init_state], rax
     jne failure
-#endif
+#else
     mov rax, qword ptr [rip + ginux_dependency_symbol@GOTPCREL]
     test rax, rax
     jz failure
@@ -22,14 +22,6 @@ ginux_linux_probe:
     cmp rax, rcx
     jne failure
 
-#ifdef GINUX_GRAPH
-    mov rax, qword ptr [rip + ginux_auxiliary_symbol@GOTPCREL]
-    test rax, rax
-    jz failure
-    call ginux_auxiliary_symbol@PLT
-    movabs rcx, 0x5952414958554147
-    cmp rax, rcx
-    jne failure
 #endif
 
 #ifndef GINUX_GRAPH
@@ -3342,6 +3334,7 @@ linked_file_mmap_test:
     mov eax, 11
     call syscall_expect_zero
 
+#ifndef GINUX_GRAPH
     xor edi, edi
     mov esi, 4096
     mov edx, 1
@@ -3350,6 +3343,7 @@ linked_file_mmap_test:
     mov r9d, 1
     mov eax, 9
     call syscall_expect_einval
+#endif
     ret
 .section .text
 #endif
@@ -3358,10 +3352,19 @@ linked_file_mmap_test:
 .section .text.file_mmap,"ax",@progbits
 .type ginux_linux_initialize,@function
 ginux_linux_initialize:
+    call .Lvalidate_main_startup
+    test eax, eax
+    jz .Lmain_initialize_done
+    mov rax, qword ptr [rip + ginux_dependency_symbol@GOTPCREL]
+    test rax, rax
+    jz .Lmain_initialize_done
     call ginux_dependency_symbol@PLT
     movabs rcx, 0x59434e45444e4947
     cmp rax, rcx
     jne .Lmain_initialize_done
+    mov rax, qword ptr [rip + ginux_auxiliary_symbol@GOTPCREL]
+    test rax, rax
+    jz .Lmain_initialize_done
     call ginux_auxiliary_symbol@PLT
     movabs rcx, 0x5952414958554147
     cmp rax, rcx
@@ -3371,6 +3374,27 @@ ginux_linux_initialize:
 .Lmain_initialize_done:
     ret
 .section .text
+
+.Lvalidate_main_startup:
+    xor eax, eax
+    cmp edi, 1
+    jne .Lvalidate_main_startup_done
+    cmp qword ptr [rsi + 8], 0
+    jne .Lvalidate_main_startup_done
+    cmp qword ptr [rdx + 8], 0
+    jne .Lvalidate_main_startup_done
+    mov r8, qword ptr [rsi]
+    cmp dword ptr [r8], 0x696e692f
+    jne .Lvalidate_main_startup_done
+    cmp word ptr [r8 + 4], 0x74
+    jne .Lvalidate_main_startup_done
+    mov r8, qword ptr [rdx]
+    movabs r9, 0x00313d58554e4947
+    cmp qword ptr [r8], r9
+    jne .Lvalidate_main_startup_done
+    mov eax, 1
+.Lvalidate_main_startup_done:
+    ret
 #endif
 
 .balign 8

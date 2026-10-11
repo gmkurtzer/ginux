@@ -853,6 +853,11 @@ if ! grep -q '^ginux: Linux dependency-before-main initialization ordered' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux constructor startup context delivered' "$output_file"; then
+    echo "Boot test failed: Linux constructor startup context was not delivered." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux auxiliary dependency entry executed' "$output_file"; then
     echo "Boot test failed: the auxiliary Linux dependency entry was not executed." >&2
     exit 1

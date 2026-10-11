@@ -12,6 +12,7 @@ ginux_linux_interpreter:
     and rbx, -4096
 
 #ifdef GINUX_LINKED
+    mov qword ptr [rip + .Linitial_stack], rsp
     cmp dword ptr [rbx], 0x464c457f
     jne .Linvalid_dynamic
     cmp word ptr [rbx + 54], 56
@@ -348,9 +349,17 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], r12
 
 #ifdef GINUX_LINKED
+    push rax
+    push rsi
     mov rcx, qword ptr [rip + .Lprimary_init_array]
     add rcx, GINUX_DEPENDENCY_BASE
+    mov rax, qword ptr [rip + .Linitial_stack]
+    mov rdi, qword ptr [rax]
+    lea rsi, [rax + 8]
+    lea rdx, [rsi + rdi * 8 + 8]
     call qword ptr [rcx]
+    pop rsi
+    pop rax
 #endif
 
     mov rcx, qword ptr [rax]
@@ -450,6 +459,10 @@ ginux_linux_interpreter:
 #ifdef GINUX_LINKED
     mov rcx, qword ptr [rip + .Lmain_init_array]
     add rcx, r15
+    mov rax, qword ptr [rip + .Linitial_stack]
+    mov rdi, qword ptr [rax]
+    lea rsi, [rax + 8]
+    lea rdx, [rsi + rdi * 8 + 8]
     call qword ptr [rcx]
     mov rax, qword ptr [rip + .Lmain_entry]
 #else
@@ -633,6 +646,10 @@ ginux_linux_interpreter:
 
     mov rcx, qword ptr [rip + .Lauxiliary_init_array]
     add rcx, GINUX_AUXILIARY_BASE
+    mov rax, qword ptr [rip + .Linitial_stack]
+    mov rdi, qword ptr [rax]
+    lea rsi, [rax + 8]
+    lea rdx, [rsi + rdi * 8 + 8]
     call qword ptr [rcx]
 
     mov rax, GINUX_AUXILIARY_BASE
@@ -884,6 +901,8 @@ ginux_linux_interpreter:
 .section .bss.loader,"aw",@nobits
 .balign 8
 .Lmain_phdr:
+    .zero 8
+.Linitial_stack:
     .zero 8
 .Lmain_phnum:
     .zero 8

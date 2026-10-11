@@ -661,6 +661,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux main init array validated\r\n");
     serial_write("ginux: userspace Linux main constructor executed\r\n");
     serial_write("ginux: Linux dependency-before-main initialization ordered\r\n");
+    serial_write("ginux: userspace Linux constructor startup context delivered\r\n");
     serial_write("ginux: Linux auxiliary dependency entry executed\r\n");
     serial_write("ginux: metadata-driven Linux relative relocations applied\r\n");
     serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");

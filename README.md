@@ -38,7 +38,9 @@ interpreter calls both relocated dependency constructors, resolves the main,
 and then calls the main constructor before transferring control to its entry.
 Each exported function refuses to succeed before its dependency constructor
 runs; the main constructor calls both exports before recording initialization,
-and the main entry refuses to continue without that record. The main workload calls through the
+and the main entry refuses to continue without that record. All three
+constructors receive the original `argc`, `argv`, and `envp` context and require
+the bounded `/init` and `GINUX=1` vectors before recording initialization. The main workload calls through the
 resolved jump slots; the loader validates all six dependency relocations and
 both dependency calls return checked values before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
@@ -78,8 +80,9 @@ fixture consumes four entries and exercises every admitted permission class.
 Kernel execution state now provides two isolated dependency slots, each with
 its own base window, selected bias, eight-entry contract table, mapping mask,
 generation leases, and cleanup validation. The running interpreter populates
-both slots, applies all three admitted relocations in each DSO, and directly
-executes both one-entry dependency init arrays before transferring to the main workload.
+both slots, applies all three admitted relocations in each DSO, executes both
+one-entry dependency init arrays, resolves the main, and executes its one-entry
+init array before transferring to the main entry.
 Wrong offsets, duplicate
 placement, a mixed bias, and W+X are rejected before it applies
 dependency and main relocations. Both dynamic-table addresses and entry counts
