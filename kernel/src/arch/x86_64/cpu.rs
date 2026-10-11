@@ -116,6 +116,7 @@ const LINUX_OPENAT_SYSCALL: u64 = 257;
 const LINUX_NEWFSTATAT_SYSCALL: u64 = 262;
 const LINUX_READLINKAT_SYSCALL: u64 = 267;
 const LINUX_FACCESSAT_SYSCALL: u64 = 269;
+const LINUX_PPOLL_SYSCALL: u64 = 271;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
@@ -1592,6 +1593,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             linux_readlink_self(buffer, count, register(0))
         }
+        LINUX_PPOLL_SYSCALL => linux_ppoll(first_argument, buffer, count, register(0), register(2)),
         LINUX_FACCESSAT_SYSCALL => linux_faccessat(buffer, count, 0),
         LINUX_FACCESSAT2_SYSCALL => linux_faccessat(buffer, count, register(0)),
         LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
@@ -2137,6 +2139,39 @@ fn linux_poll(address: u64, count: u64, timeout: u64) -> u64 {
         return LINUX_EFAULT;
     }
     ready
+}
+
+fn linux_ppoll(
+    address: u64,
+    count: u64,
+    timeout_address: u64,
+    signal_mask_address: u64,
+    signal_set_size: u64,
+) -> u64 {
+    let waits = if timeout_address == 0 {
+        true
+    } else {
+        let mut timeout = [0_u8; 16];
+        if !copy_from_linux_user(timeout_address, &mut timeout) {
+            return LINUX_EFAULT;
+        }
+        let seconds = i64::from_ne_bytes(timeout[..8].try_into().unwrap());
+        let nanoseconds = i64::from_ne_bytes(timeout[8..].try_into().unwrap());
+        if seconds < 0 || !(0..NANOSECONDS_PER_SECOND as i64).contains(&nanoseconds) {
+            return LINUX_EINVAL;
+        }
+        seconds != 0 || nanoseconds != 0
+    };
+    if signal_mask_address != 0 {
+        if signal_set_size != LINUX_SIGNAL_SET_SIZE {
+            return LINUX_EINVAL;
+        }
+        let mut signal_mask = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+        if !copy_from_linux_user(signal_mask_address, &mut signal_mask) {
+            return LINUX_EFAULT;
+        }
+    }
+    linux_poll(address, count, u64::from(waits))
 }
 
 fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {

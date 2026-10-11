@@ -155,6 +155,59 @@ ginux_linux_probe:
     jne failure
 
     xor edi, edi
+    xor esi, esi
+    mov edx, 0x405200
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 271
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov qword ptr [0x404cc0], 0
+    mov qword ptr [0x404cc8], 1000000000
+    mov edx, 0x404cc0
+    mov eax, 271
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov qword ptr [0x404cc8], 0
+    mov edi, 0x404ca0
+    mov esi, 1
+    mov eax, 271
+    syscall
+    test rax, rax
+    jne failure
+    cmp word ptr [0x404ca6], 0
+    jne failure
+
+    mov qword ptr [0x404cc8], 1
+    mov word ptr [0x404ca6], 0x7777
+    mov eax, 271
+    syscall
+    cmp rax, -38
+    jne failure
+    cmp word ptr [0x404ca6], 0x7777
+    jne failure
+
+    mov qword ptr [0x404cd0], 0
+    mov edi, 0x404c80
+    mov esi, 4
+    xor edx, edx
+    mov r10d, 0x404cd0
+    mov r8d, 7
+    mov eax, 271
+    syscall
+    cmp rax, -22
+    jne failure
+    mov r8d, 8
+    mov eax, 271
+    syscall
+    cmp rax, 3
+    jne failure
+
+    xor edi, edi
     mov eax, 12
     syscall
     cmp rax, 0x406000

@@ -588,6 +588,11 @@ if ! grep -q '^ginux: Linux bounded descriptor polling validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded ppoll inputs validated' "$output_file"; then
+    echo "Boot test failed: Linux ppoll inputs were not validated." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 14 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
     exit 1

@@ -40,6 +40,15 @@ ready descriptor also returns immediately regardless of timeout. A query with
 no ready descriptors and a nonzero or infinite timeout returns `-ENOSYS`
 without changing the table because scheduler-backed descriptor wait queues do
 not exist yet.
+`rax = 271` (`__NR_ppoll`) uses the same bounded readiness engine. A null
+timeout means an infinite wait request; otherwise the complete 16-byte x86-64
+`timespec` must contain nonnegative seconds and normalized nanoseconds. An
+optional eight-byte signal mask and exact signal-set size are validated before
+the query, but no persistent mask change occurs because this implementation
+never blocks. Zero timeouts and immediately ready descriptors behave like
+`poll`; a call that would wait returns `-ENOSYS`. Invalid timespecs or mask
+sizes return `-EINVAL`, invalid input ranges return `-EFAULT`, and the timeout
+is not rewritten.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded
@@ -389,7 +398,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`read`, `write`, `writev`, bounded `poll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
+`read`, `write`, `writev`, bounded `poll`/`ppoll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
 bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprotect`,
