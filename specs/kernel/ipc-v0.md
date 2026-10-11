@@ -41,7 +41,8 @@ requests for the old service, so gaps are valid and contiguity is not required.
 The local invariant injects zero and out-of-order envelopes, verifies that a
 full-queue send does not advance the counter, and proves that sequencing
 continues across service replacement. The QEMU proof audits sequence one in
-both directions for the first exchange.
+both directions for the first exchange and request sequence two for the later
+direct delivery to the replacement.
 
 The channel is object 3 in the signed boot authority manifest. Sending requires
 `WRITE`; receiving requires `READ`. The call gate resolves the supplied opaque
@@ -64,8 +65,13 @@ peer generation obtained from the bound endpoint; object and direction matches
 from a stale or unrelated generation cannot wake it. The QEMU proof preempts into the replacement
 service, blocks it, resumes control, wakes the service with value 3, and later
 observes 3 as the receive result. The scheduler retains the exact waking domain
-generation in its audit state, and completion requires it to match the control
-plane rather than merely differ from the receiver. There is at most one bootstrap waiter, and a
+generation and message sequence in its audit state. The channel commits that
+sequence only after a matching waiter is woken; when no waiter matches, the
+same number is used by the queued fallback. Direct delivery is attempted only
+when that direction's queue is empty, preserving FIFO order even if scheduler
+state is inconsistent. Completion requires the source to
+match the control plane and the sequence to follow the earlier queued request.
+There is at most one bootstrap waiter, and a
 failed block rolls back atomically.
 
 Domain exit and contained-fault paths cancel matching blocked receives before
@@ -90,8 +96,7 @@ record for a service that never became observable.
 
 The scalar v1 receive result exposes only the immediate word; its source and
 sequence tags are currently kernel-auditable rather than returned to
-userspace. Direct delivery to a blocked receiver is generation-bound but does
-not yet carry a sequence number. This revision has no capability transfer,
+userspace. This revision has no capability transfer,
 cancellation request, timeout, or cleanup of queued replies after domain
 failure. It has one fixed control/service endpoint pair rather
 than allocatable endpoint objects. The global queue is safe only

@@ -27,6 +27,12 @@ struct MessageEnvelope {
     value: u64,
 }
 
+enum SendPath {
+    Failed,
+    Queued,
+    Direct(u64),
+}
+
 const EMPTY_MESSAGE: MessageEnvelope = MessageEnvelope {
     source: 0,
     sequence: 0,
@@ -61,20 +67,41 @@ impl Duplex {
     }
 
     fn send(&mut self, domain: u64, message: u64) -> bool {
+        self.send_with_direct(domain, message, |_, _| false)
+    }
+
+    fn send_with_direct(
+        &mut self,
+        domain: u64,
+        message: u64,
+        direct: impl FnOnce(bool, u64) -> bool,
+    ) -> bool {
         if self.service_side(domain) == Some(true) {
-            Self::send_sequenced(
+            let outcome = Self::send_sequenced(
                 &mut self.replies,
                 &mut self.next_reply_sequence,
                 domain,
                 message,
-            )
+                |sequence| direct(false, sequence),
+            );
+            if let SendPath::Direct(sequence) = outcome {
+                self.last_control_message_source = Some(domain);
+                self.last_control_message_sequence = sequence;
+            }
+            !matches!(outcome, SendPath::Failed)
         } else if self.service_side(domain) == Some(false) && self.service_domain.is_some() {
-            Self::send_sequenced(
+            let outcome = Self::send_sequenced(
                 &mut self.requests,
                 &mut self.next_request_sequence,
                 domain,
                 message,
-            )
+                |sequence| direct(true, sequence),
+            );
+            if let SendPath::Direct(sequence) = outcome {
+                self.last_service_message_source = Some(domain);
+                self.last_service_message_sequence = sequence;
+            }
+            !matches!(outcome, SendPath::Failed)
         } else {
             false
         }
@@ -85,19 +112,25 @@ impl Duplex {
         next_sequence: &mut u64,
         source: u64,
         value: u64,
-    ) -> bool {
+        direct: impl FnOnce(u64) -> bool,
+    ) -> SendPath {
         let Some(next) = next_sequence.checked_add(1) else {
-            return false;
+            return SendPath::Failed;
         };
+        let sequence = *next_sequence;
+        if channel.len == 0 && direct(sequence) {
+            *next_sequence = next;
+            return SendPath::Direct(sequence);
+        }
         if !channel.send(MessageEnvelope {
             source,
-            sequence: *next_sequence,
+            sequence,
             value,
         }) {
-            return false;
+            return SendPath::Failed;
         }
         *next_sequence = next;
-        true
+        SendPath::Queued
     }
 
     fn receive(&mut self, domain: u64) -> Receive {
@@ -250,8 +283,12 @@ pub(crate) fn initialize_control_channel(control_domain: u64, service_domain: u6
     true
 }
 
-pub(crate) fn send(domain: u64, message: u64) -> bool {
-    channel_mut().is_some_and(|channel| channel.send(domain, message))
+pub(crate) fn send_or_wake(
+    domain: u64,
+    message: u64,
+    wake: impl FnOnce(bool, u64) -> bool,
+) -> bool {
+    channel_mut().is_some_and(|channel| channel.send_with_direct(domain, message, wake))
 }
 
 pub(crate) fn receive(domain: u64) -> Receive {
@@ -320,11 +357,26 @@ pub(crate) fn verify_channel_invariants() -> bool {
         sequence: 0,
         value: 10,
     }) && zero_sequence.receive(service) == Receive::Empty;
+    let Some(mut direct) = Duplex::new(control, service) else {
+        return false;
+    };
+    let direct_sequence_shared = direct.send_with_direct(control, 10, |service_side, sequence| {
+        service_side && sequence == 1
+    }) && direct.requests.len == 0
+        && direct.last_service_message_source == Some(control)
+        && direct.last_service_message_sequence == 1
+        && direct.send_with_direct(control, 20, |_, _| false)
+        && direct.send_with_direct(control, 30, |_, _| true)
+        && direct.requests.len == 2
+        && direct.receive(service) == Receive::Message(20)
+        && direct.receive(service) == Receive::Message(30)
+        && direct.last_service_message_sequence == 3;
     let Some(mut channel) = Duplex::new(control, service) else {
         return false;
     };
     out_of_order_rejected
         && zero_sequence_rejected
+        && direct_sequence_shared
         && channel.receive(control) == Receive::Empty
         && channel.receive(service) == Receive::Empty
         && channel.service_side(control) == Some(false)

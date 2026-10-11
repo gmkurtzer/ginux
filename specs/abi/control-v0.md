@@ -71,8 +71,11 @@ peer is runnable, it blocks the caller; a peer send wakes the caller and makes
 the sent word the operation's eventual return value only when the object and
 inbound endpoint direction match the saved wait key. If blocking would leave
 no runnable thread, it returns `UINT64_MAX - 2` without changing scheduler state.
-This direct-delivery path is bound to the exact peer generation but is not yet
-assigned a queued-message sequence number.
+This direct-delivery path is bound to the exact peer generation and consumes
+the next sequence number from the same direction as queued delivery. The
+number is committed only after the matching waiter is woken; otherwise queued
+fallback uses that number. A nonempty direction always queues to preserve FIFO
+order.
 If the opposite endpoint's domain exits or faults while the caller is blocked,
 the kernel makes the caller ready and operation 8 returns
 `UINT64_MAX - 4`. Cleanup matches both object and endpoint direction; unrelated

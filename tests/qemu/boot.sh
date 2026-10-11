@@ -503,6 +503,11 @@ if ! grep -q '^ginux: direct IPC wake provenance verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: sequenced direct IPC delivery verified' "$output_file"; then
+    echo "Boot test failed: direct IPC delivery was not sequenced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: IPC wait-key matching enforced' "$output_file"; then
     echo "Boot test failed: IPC wait-key matching was not enforced." >&2
     exit 1

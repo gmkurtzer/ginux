@@ -790,12 +790,10 @@ fn dispatch_charged_call(
                 return u64::MAX;
             };
             let message = frame.first_argument();
-            let Some(from_service) = ipc::service_side(caller_domain) else {
-                return u64::MAX - 2;
-            };
             if domain::handle_permits(caller_domain, capability, 3, Rights::WRITE)
-                && (scheduler::wake_ipc_peer(caller_domain, 3, !from_service, message)
-                    || ipc::send(caller_domain, message))
+                && ipc::send_or_wake(caller_domain, message, |service_side, sequence| {
+                    scheduler::wake_ipc_peer(caller_domain, 3, service_side, message, sequence)
+                })
             {
                 0
             } else {

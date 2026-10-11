@@ -341,6 +341,7 @@ struct Runtime {
     blocks: u8,
     wakes: u8,
     last_wake_source: Option<u64>,
+    last_wake_sequence: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -625,6 +626,7 @@ pub(crate) fn initialize_runtime(
             blocks: 0,
             wakes: 0,
             last_wake_source: None,
+            last_wake_sequence: None,
         }));
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
@@ -896,7 +898,11 @@ pub(crate) fn wake_ipc_peer(
     object: u64,
     service_side: bool,
     result: u64,
+    sequence: u64,
 ) -> bool {
+    if sequence == 0 {
+        return false;
+    }
     let Some(runtime) = runtime_mut() else {
         return false;
     };
@@ -916,6 +922,7 @@ pub(crate) fn wake_ipc_peer(
     }
     runtime.wakes = wakes;
     runtime.last_wake_source = Some(sender_domain);
+    runtime.last_wake_sequence = Some(sequence);
     true
 }
 
@@ -989,6 +996,7 @@ pub(crate) fn verify_runtime_complete() -> bool {
         && runtime.blocks == 1
         && runtime.wakes == 1
         && runtime.last_wake_source == Some(runtime.control_domain)
+        && runtime.last_wake_sequence == Some(2)
         && runtime.expected_fault_observed
         && runtime.address_space_switches == 5
         && runtime.scheduler.current.is_none()
