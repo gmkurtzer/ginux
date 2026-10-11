@@ -38,11 +38,16 @@ either the kernel or an exact generation-tagged domain owner. Release requires
 both the current lease and current owner; knowing a valid lease from another
 domain is insufficient. Validation and ledger removal are staged atomically
 before accepted frames enter the bounded
-128-frame reuse pool. Completed proof address spaces are zeroed and released
-only after the kernel CR3 is active again. The QEMU gate verifies rollback,
+128-frame reuse pool. The global allocation boundary clears every byte of every
+fresh or recycled frame before returning its lease, independent of caller
+behavior. Completed proof address spaces are additionally zeroed before release
+after the kernel CR3 is active again, reducing how long retired contents remain
+resident. The QEMU gate verifies rollback,
 forged-release rejection, duplicate-release rejection, stale-generation
 rejection after address reuse, and reuse across discontiguous ranges, then
-reserves, writes, clears, and releases two real frames. Boot-service-memory
+reserves two real frames, verifies their complete zero state, dirties both ends
+of both pages, releases and reallocates them, and verifies all bytes are zero
+before the new leases become usable. Boot-service-memory
 reclamation is not yet supported.
 
 The allocator initializes exactly once and remains live for the kernel lifetime.

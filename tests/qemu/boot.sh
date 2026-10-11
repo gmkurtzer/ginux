@@ -303,6 +303,11 @@ if ! grep -q '^ginux: atomic frame reservations verified' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: physical frames zeroed before allocation' "$output_file"; then
+    echo "Boot test failed: physical-frame zero-on-allocation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: tracked frame release ownership verified' "$output_file"; then
     echo "Boot test failed: physical-frame release ownership failed." >&2
     exit 1

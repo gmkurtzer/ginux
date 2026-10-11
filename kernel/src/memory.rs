@@ -326,7 +326,11 @@ pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[Fram
     // serialized until an SMP-safe allocator replaces this path.
     unsafe {
         let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
-        (*allocator).reserve::<N>(owner)
+        let frames = (*allocator).reserve::<N>(owner)?;
+        for frame in &frames {
+            core::ptr::write_bytes(frame.address as *mut u8, 0, PAGE_SIZE as usize);
+        }
+        Some(frames)
     }
 }
 

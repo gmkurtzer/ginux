@@ -457,6 +457,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: physical frame allocator active");
     serial_write("\r\nginux: atomic frame reservations verified");
+    serial_write("\r\nginux: physical frames zeroed before allocation");
     serial_write("\r\nginux: tracked frame release ownership verified");
     serial_write("\r\nginux: stale frame leases rejected");
     serial_write("\r\nginux: per-domain physical frame budgets enforced");
@@ -671,24 +672,41 @@ fn verify_initial_frame_allocation(boot_info: &BootInfo) -> bool {
     }
 
     // SAFETY: Both frames are conventional UEFI memory, distinct, aligned,
-    // and covered by the active identity map. Volatile accesses prove they
-    // are writable without letting the compiler remove the test.
+    // and covered by the active identity map. Volatile accesses prove both
+    // fresh and dirty recycled frames are scrubbed by the allocation boundary.
     unsafe {
         let first_word = first_address as *mut u64;
         let second_word = second_address as *mut u64;
+        if !frame_is_zero(first_address) || !frame_is_zero(second_address) {
+            return false;
+        }
         first_word.write_volatile(0x4749_4e55_5800_0001);
         second_word.write_volatile(0x4749_4e55_5800_0002);
-        let valid = first_word.read_volatile() == 0x4749_4e55_5800_0001
-            && second_word.read_volatile() == 0x4749_4e55_5800_0002;
-        first_word.write_volatile(0);
-        second_word.write_volatile(0);
-        valid
-            && memory::release_frames(memory::FrameOwner::KERNEL, [first, second])
+        first_word
+            .add(PAGE_SIZE / size_of::<u64>() - 1)
+            .write_volatile(0x4749_4e55_5800_0011);
+        second_word
+            .add(PAGE_SIZE / size_of::<u64>() - 1)
+            .write_volatile(0x4749_4e55_5800_0012);
+        if !memory::release_frames(memory::FrameOwner::KERNEL, [first, second]) {
+            return false;
+        }
+        let Some(reused) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL) else {
+            return false;
+        };
+        let scrubbed = reused.iter().all(|frame| frame_is_zero(frame.address()));
+        scrubbed
+            && memory::release_frames(memory::FrameOwner::KERNEL, reused)
             && !memory::initialize(
                 boot_info,
                 arch::x86_64::paging::INITIAL_IDENTITY_LIMIT as u64,
             )
     }
+}
+
+unsafe fn frame_is_zero(address: u64) -> bool {
+    let words = address as *const u64;
+    (0..PAGE_SIZE / size_of::<u64>()).all(|offset| words.add(offset).read_volatile() == 0)
 }
 
 fn kernel_stack_is_active() -> bool {
