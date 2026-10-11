@@ -129,6 +129,13 @@ so `-EINVAL` and `-EFAULT` leave the prior mask intact. The proof restores an
 empty mask before exit. This is process state only: signal actions, generation,
 delivery, pending sets, alternate stacks, and interrupted-syscall behavior are
 not implemented yet.
+`rax = 13` (`__NR_rt_sigaction`) stores and queries one 32-byte x86-64 action
+record for each of signals 1 through 64. Complete action and old-action ranges
+are validated before state changes; action masks also clear `SIGKILL` and
+`SIGSTOP`. Installing handlers for those two uncatchable signals returns
+`-EINVAL`. Handler, flags, and restorer values are retained as opaque ABI state
+until delivery is implemented. The proof exercises default queries, normalized
+registration, fault atomicity, and restoration of every action before exit.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active
@@ -214,7 +221,7 @@ threads, general TLS state, or any syscall other than the exact bounded
 `lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
 bounded read-only `mprotect`,
-`rt_sigprocmask`, `umask`, read-only `getrlimit`/`prlimit64`,
+`rt_sigaction`, `rt_sigprocmask`, `umask`, read-only `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential queries, bounded `prctl` process names, the bounded process/session

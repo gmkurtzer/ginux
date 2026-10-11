@@ -51,6 +51,7 @@ const LINUX_FSTAT_SYSCALL: u64 = 5;
 const LINUX_LSEEK_SYSCALL: u64 = 8;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
+const LINUX_RT_SIGACTION_SYSCALL: u64 = 13;
 const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
@@ -130,6 +131,8 @@ const LINUX_SIG_BLOCK: u64 = 0;
 const LINUX_SIG_UNBLOCK: u64 = 1;
 const LINUX_SIG_SETMASK: u64 = 2;
 const LINUX_SIGNAL_SET_SIZE: u64 = 8;
+const LINUX_SIGNAL_ACTION_SIZE: usize = 32;
+const LINUX_SIGNAL_COUNT: usize = 64;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
@@ -228,6 +231,14 @@ static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_SIGNAL_MASK: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_SIGNAL_HANDLERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_SIGNAL_FLAGS: [AtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_SIGNAL_RESTORERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_SIGNAL_ACTION_MASKS: [AtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -815,6 +826,12 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
+    for signal in 0..LINUX_SIGNAL_COUNT {
+        ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_FLAGS[signal].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_RESTORERS[signal].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_ACTION_MASKS[signal].store(0, Ordering::SeqCst);
+    }
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0) };
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -827,6 +844,12 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == 0;
     let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
     let signal_mask_restored = ELF_PROBE_SIGNAL_MASK.swap(0, Ordering::SeqCst) == 0;
+    let signal_actions_restored = (0..LINUX_SIGNAL_COUNT).all(|signal| {
+        ELF_PROBE_SIGNAL_HANDLERS[signal].swap(0, Ordering::SeqCst) == 0
+            && ELF_PROBE_SIGNAL_FLAGS[signal].swap(0, Ordering::SeqCst) == 0
+            && ELF_PROBE_SIGNAL_RESTORERS[signal].swap(0, Ordering::SeqCst) == 0
+            && ELF_PROBE_SIGNAL_ACTION_MASKS[signal].swap(0, Ordering::SeqCst) == 0
+    });
     let robust_list_cleared = ELF_PROBE_ROBUST_LIST.swap(0, Ordering::SeqCst) == 0;
     let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.swap(0, Ordering::SeqCst);
     let clear_child_tid = ELF_PROBE_CLEAR_CHILD_TID.swap(0, Ordering::SeqCst);
@@ -861,6 +884,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && process_name_restored
         && no_new_privileges_enforced
         && signal_mask_restored
+        && signal_actions_restored
         && msrs_restored
 }
 
@@ -1215,6 +1239,9 @@ extern "sysv64" fn linux_syscall_handler(
             } else {
                 current
             }
+        }
+        LINUX_RT_SIGACTION_SYSCALL => {
+            linux_rt_sigaction(first_argument, buffer, count, register(0))
         }
         LINUX_RT_SIGPROCMASK_SYSCALL => {
             linux_rt_sigprocmask(first_argument, buffer, count, register(0))
@@ -1804,6 +1831,61 @@ fn linux_get_process_name(address: u64) -> u64 {
     } else {
         LINUX_EFAULT
     }
+}
+
+fn linux_rt_sigaction(signal: u64, action: u64, old_action: u64, set_size: u64) -> u64 {
+    if set_size != LINUX_SIGNAL_SET_SIZE || !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) {
+        return LINUX_EINVAL;
+    }
+    if action != 0 && matches!(signal, 9 | 19) {
+        return LINUX_EINVAL;
+    }
+    if old_action != 0 && !linux_writable_user_range_contains(old_action, LINUX_SIGNAL_ACTION_SIZE)
+    {
+        return LINUX_EFAULT;
+    }
+    let parse_word = |bytes: &[u8; LINUX_SIGNAL_ACTION_SIZE], offset: usize| {
+        let mut word = [0_u8; 8];
+        word.copy_from_slice(&bytes[offset..offset + 8]);
+        u64::from_ne_bytes(word)
+    };
+    let new_action = if action == 0 {
+        None
+    } else {
+        let mut bytes = [0_u8; LINUX_SIGNAL_ACTION_SIZE];
+        if !copy_from_linux_user(action, &mut bytes) {
+            return LINUX_EFAULT;
+        }
+        Some([
+            parse_word(&bytes, 0),
+            parse_word(&bytes, 8),
+            parse_word(&bytes, 16),
+            parse_word(&bytes, 24) & !LINUX_UNBLOCKABLE_SIGNALS,
+        ])
+    };
+    let index = signal as usize - 1;
+    let current = [
+        ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst),
+        ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst),
+        ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst),
+        ELF_PROBE_SIGNAL_ACTION_MASKS[index].load(Ordering::SeqCst),
+    ];
+    if old_action != 0 {
+        let mut bytes = [0_u8; LINUX_SIGNAL_ACTION_SIZE];
+        for (offset, word) in current.into_iter().enumerate() {
+            bytes[offset * 8..offset * 8 + 8].copy_from_slice(&word.to_ne_bytes());
+        }
+        if !copy_to_linux_user(old_action, &bytes) {
+            return LINUX_EFAULT;
+        }
+    }
+    if let Some([handler, flags, restorer, mask]) = new_action {
+        ELF_PROBE_SIGNAL_HANDLERS[index].store(handler, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_FLAGS[index].store(flags, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_RESTORERS[index].store(restorer, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_ACTION_MASKS[index].store(mask, Ordering::SeqCst);
+    }
+    0
 }
 
 fn linux_rt_sigprocmask(how: u64, set: u64, old_set: u64, set_size: u64) -> u64 {

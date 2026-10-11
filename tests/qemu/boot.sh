@@ -598,6 +598,11 @@ if ! grep -q '^ginux: Linux single-thread signal mask validated' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux bounded signal actions validated' "$output_file"; then
+    echo "Boot test failed: Linux bounded signal actions were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux single-thread process identity verified' "$output_file"; then
     echo "Boot test failed: Linux single-thread process identity was not verified." >&2
     exit 1

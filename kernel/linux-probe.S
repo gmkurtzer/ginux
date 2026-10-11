@@ -232,6 +232,109 @@ ginux_linux_probe:
     cmp rax, -14
     jne failure
 
+    mov edi, 10
+    xor esi, esi
+    xor edx, edx
+    mov r10d, 7
+    mov eax, 13
+    syscall
+    cmp rax, -22
+    jne failure
+
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov qword ptr [0x402100], 1
+    mov qword ptr [0x402108], 0x1234
+    mov qword ptr [0x402110], 0x400100
+    mov qword ptr [0x402118], 0x40102
+    mov edi, 9
+    mov esi, 0x402100
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 10
+    mov esi, 0x403200
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov edi, 10
+    mov esi, 0x402100
+    mov edx, 0x402120
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x402120], 0
+    jne failure
+    cmp qword ptr [0x402138], 0
+    jne failure
+
+    mov edi, 10
+    xor esi, esi
+    mov edx, 0x402120
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x402120], 1
+    jne failure
+    cmp qword ptr [0x402128], 0x1234
+    jne failure
+    cmp qword ptr [0x402130], 0x400100
+    jne failure
+    cmp qword ptr [0x402138], 2
+    jne failure
+
+    mov qword ptr [0x402100], 0
+    mov qword ptr [0x402108], 0
+    mov qword ptr [0x402110], 0
+    mov qword ptr [0x402118], 0
+    mov edi, 10
+    mov esi, 0x402100
+    mov edx, 0x403200
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    cmp rax, -14
+    jne failure
+
+    mov edi, 10
+    xor esi, esi
+    mov edx, 0x402120
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x402120], 1
+    jne failure
+
+    mov edi, 10
+    mov esi, 0x402100
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 1
     mov esi, 0x402000
     mov edx, 8
