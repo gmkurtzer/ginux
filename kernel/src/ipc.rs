@@ -134,6 +134,16 @@ impl Duplex {
         }
     }
 
+    fn peer_domain(&self, domain: u64) -> Option<u64> {
+        if self.service_domain == Some(domain) {
+            Some(self.control_domain)
+        } else if self.control_domain == domain {
+            self.service_domain
+        } else {
+            None
+        }
+    }
+
     const fn is_empty(&self) -> bool {
         self.requests.len == 0 && self.replies.len == 0
     }
@@ -208,6 +218,10 @@ pub(crate) fn service_side(domain: u64) -> Option<bool> {
     channel_mut()?.service_side(domain)
 }
 
+pub(crate) fn peer_domain(domain: u64) -> Option<u64> {
+    channel_mut()?.peer_domain(domain)
+}
+
 pub(crate) fn retire_service(domain: u64) -> bool {
     channel_mut().is_some_and(|channel| channel.retire_service(domain))
 }
@@ -241,6 +255,8 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && channel.receive(service) == Receive::Empty
         && channel.service_side(control) == Some(false)
         && channel.service_side(service) == Some(true)
+        && channel.peer_domain(control) == Some(service)
+        && channel.peer_domain(service) == Some(control)
         && channel.service_side(replacement).is_none()
         && channel.send(control, 10)
         && channel.send(control, 20)
@@ -263,11 +279,14 @@ pub(crate) fn verify_channel_invariants() -> bool {
         && !channel.retire_service(service)
         && !channel.send(service, 90)
         && channel.service_side(service).is_none()
+        && channel.peer_domain(control).is_none()
         && channel.receive(service) == Receive::Empty
         && !channel.send(control, 90)
         && channel.receive(control) == Receive::Message(80)
         && channel.receive(control) == Receive::PeerClosed(service)
         && channel.bind_service(replacement)
+        && channel.peer_domain(control) == Some(replacement)
+        && channel.peer_domain(replacement) == Some(control)
         && channel.service_side(replacement) == Some(true)
         && !channel.bind_service(service)
         && channel.rollback_service_binding(replacement)

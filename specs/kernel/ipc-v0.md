@@ -48,7 +48,9 @@ Operation 8 adds one blocking receive path. If its inbound queue is empty, the
 current context becomes blocked only when another context can run. A peer send
 then bypasses the queue, writes the word into the blocked context's result
 register, and makes it ready only if object 3 and the receiver-side direction
-match the typed scheduler wait key. The QEMU proof preempts into the replacement
+match the typed scheduler wait key. The wait key also names the exact expected
+peer generation obtained from the bound endpoint; object and direction matches
+from a stale or unrelated generation cannot wake it. The QEMU proof preempts into the replacement
 service, blocks it, resumes control, wakes the service with value 3, and later
 observes 3 as the receive result. The scheduler retains the exact waking domain
 generation in its audit state, and completion requires it to match the control

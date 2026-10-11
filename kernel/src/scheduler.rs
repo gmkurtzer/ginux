@@ -24,7 +24,11 @@ enum State {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum WaitReason {
-    IpcReceive { object: u64, service_side: bool },
+    IpcReceive {
+        object: u64,
+        service_side: bool,
+        peer_domain: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -904,6 +908,7 @@ pub(crate) fn wake_ipc_peer(
         WaitReason::IpcReceive {
             object,
             service_side,
+            peer_domain: sender_domain,
         },
         result,
     ) {
@@ -1103,6 +1108,7 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     let wait = WaitReason::IpcReceive {
         object: 3,
         service_side: false,
+        peer_domain: 2,
     };
     if blocking.schedule_next()?.id != blocked
         || blocking.block_current(blocked, first_context, wait)?.id != peer
@@ -1112,6 +1118,7 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             WaitReason::IpcReceive {
                 object: 4,
                 service_side: false,
+                peer_domain: 2,
             },
             66,
         )
@@ -1120,6 +1127,16 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             WaitReason::IpcReceive {
                 object: 3,
                 service_side: true,
+                peer_domain: 2,
+            },
+            66,
+        )
+        || blocking.wake_blocked_peer(
+            3,
+            WaitReason::IpcReceive {
+                object: 3,
+                service_side: false,
+                peer_domain: 3,
             },
             66,
         )
@@ -1146,6 +1163,7 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             WaitReason::IpcReceive {
                 object: 4,
                 service_side: false,
+                peer_domain: 2,
             },
             IPC_PEER_CLOSED,
         ) != 0

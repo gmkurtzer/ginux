@@ -841,6 +841,9 @@ fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) 
     let Some(service_side) = ipc::service_side(domain_id) else {
         return u64::MAX - 2;
     };
+    let Some(peer_domain) = ipc::peer_domain(domain_id) else {
+        return u64::MAX - 2;
+    };
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX;
     };
@@ -851,6 +854,7 @@ fn blocking_receive(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) 
         scheduler::WaitReason::IpcReceive {
             object: 3,
             service_side,
+            peer_domain,
         },
     );
     if matches!(action, RuntimeAction::Invalid) {
@@ -969,6 +973,7 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         Some(scheduler::WaitReason::IpcReceive {
             object: 3,
             service_side: !service_exit,
+            peer_domain: caller_domain,
         }),
     );
     if matches!(action, RuntimeAction::Invalid) || !domain::detach_thread(caller_domain) {
@@ -998,9 +1003,10 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         fault_address,
         USER_CODE_SELECTOR,
         USER_DATA_SELECTOR,
-        fault_domain.map(|_| scheduler::WaitReason::IpcReceive {
+        fault_domain.map(|dead_domain| scheduler::WaitReason::IpcReceive {
             object: 3,
             service_side: !service_fault,
+            peer_domain: dead_domain,
         }),
     );
     let Some(fault_domain) = fault_domain else {
