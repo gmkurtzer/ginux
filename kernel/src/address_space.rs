@@ -849,7 +849,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && (main_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"PROBE!!\n")
                         && (interpreter_rx.virtual_address as *const u8).read_volatile() == 0x7f
-                        && (plan.initial_entry as *const u8).read_volatile() == 0xe9
+                        && (plan.initial_entry as *const u8).read_volatile() == 0x48
                         && (interpreter_rw.virtual_address as *const u64).read_volatile()
                             == u64::from_le_bytes(*b"DYNAMIC!")
                 });

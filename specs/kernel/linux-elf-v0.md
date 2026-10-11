@@ -133,12 +133,15 @@ the interpreter's RX and RW/NX pages in three independently cloned 2 MiB leaf
 regions. It also owns bounded heap, stack, and two `mmap` payload frames. The
 proof validates permissions, the intact main entry, and image contents through
 the activated user root, constructs the dynamic-process stack with the common
-auxiliary-vector encoder, and enters the relocated interpreter at `0x6000f0`.
-That synthetic interpreter is a fixed trampoline to the main entry at
-`0x400100`; the complete ring-3 probe therefore runs with dynamic `AT_BASE`,
+auxiliary-vector encoder, and enters the relocated interpreter at `0x6000e0`.
+That synthetic userspace interpreter writes the admitted relative relocation
+value `0x400100` to the writable main-image target `0x404100`, then jumps to the
+main entry at `0x400100`. The main workload requires that relocated value for a
+dynamic startup and requires an untouched zero target for each static startup.
+The complete ring-3 probe therefore runs with dynamic `AT_BASE`,
 main-image `AT_ENTRY`, and main-image `AT_PHDR`/`AT_PHNUM` values. The kernel
 restores its own root and scrubs and releases all nineteen page-table and
-payload frames. The profile does not apply interpreter relocations, resolve
+payload frames. The profile does not relocate the interpreter itself, resolve
 dynamic symbols, execute a real dynamic linker, or support glibc.
 
 ## Page-image plan

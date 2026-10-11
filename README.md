@@ -13,9 +13,10 @@ and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
 program-header table covers the entry point are rejected. A bounded proof maps
 a resolved `ET_EXEC` main image and relocated `ET_DYN` interpreter into separate
 W^X regions, builds the dynamic startup stack, and enters the interpreter first.
-A compact interpreter trampoline transfers control to the main entry; the full
-ring-3 probe then completes before the kernel restores its root and scrubs every
-owned frame. Interpreter selection binds the exact `PT_INTERP` path and SHA-256
+A compact userspace interpreter applies the admitted relative relocation and
+then transfers control to the main entry; the main workload requires the
+relocated value before the full ring-3 probe completes. The kernel then restores
+its root and scrubs every owned frame. Interpreter selection binds the exact `PT_INTERP` path and SHA-256
 digest before parsing or mapping. A production authority source, relocation,
 and dynamic linking remain unimplemented. Malformed dynamic tables, duplicate
 tags, unsupported relocations, and relocation targets outside writable memory
@@ -122,8 +123,8 @@ execution planning binds an exact `PT_INTERP` path to a non-overlapping relocate
 interpreter image while preserving distinct initial-entry, `AT_ENTRY`, and
 `AT_BASE` values. The bounded synthetic interpreter-first execution path is
 verified, including rejection of substituted, mutated, and truncated interpreter
-bytes, but dynamic relocation and a real userspace linker remain outside the
-executable profile.
+bytes. One synthetic userspace relative relocation is executed, but symbol
+resolution and a real userspace linker remain outside the executable profile.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

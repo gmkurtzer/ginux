@@ -1185,7 +1185,7 @@ fn verify_interpreted_plan() -> bool {
     };
     let startup = interpreted_startup(&combined);
     let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000);
-    startup.initial_entry == 0x60_00f0
+    startup.initial_entry == 0x60_00e0
         && startup.program_headers == 0x3f_f040
         && startup.program_header_count == 6
         && startup.interpreter_base == 0x60_0000
@@ -1197,7 +1197,7 @@ fn verify_interpreted_plan() -> bool {
         && auxiliary[25] == 0x40_0100
         && auxiliary[29] == 0x70_2000
         && auxiliary[34..] == [0, 0]
-        && combined.initial_entry == 0x60_00f0
+        && combined.initial_entry == 0x60_00e0
         && combined.main_entry == 0x40_0100
         && combined.interpreter_base == 0x60_0000
         && combined.main.program_headers == 0x3f_f040
@@ -1569,7 +1569,7 @@ fn compact_position_independent_fixture() -> [u8; 512] {
     write_u16(&mut bytes, 16, ET_DYN);
     write_u16(&mut bytes, 18, EM_X86_64);
     write_u32(&mut bytes, 20, 1);
-    write_u64(&mut bytes, 24, 0xf0);
+    write_u64(&mut bytes, 24, 0xe0);
     write_u64(&mut bytes, 32, ELF_HEADER_SIZE as u64);
     write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
     write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
@@ -1592,7 +1592,10 @@ fn compact_position_independent_fixture() -> [u8; 512] {
         0x100,
         PF_READ | PF_WRITE,
     );
-    bytes[0xf0..0xf5].copy_from_slice(&[0xe9, 0x0b, 0x00, 0xe0, 0xff]);
+    bytes[0xe0..0xec].copy_from_slice(&[
+        0x48, 0xc7, 0x04, 0x25, 0x00, 0x41, 0x40, 0x00, 0x00, 0x01, 0x40, 0x00,
+    ]);
+    bytes[0xec..0xf1].copy_from_slice(&[0xe9, 0x0f, 0x00, 0xe0, 0xff]);
     bytes[0x100..0x108].copy_from_slice(b"DYNAMIC!");
     bytes
 }

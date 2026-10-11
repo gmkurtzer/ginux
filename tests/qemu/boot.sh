@@ -628,6 +628,11 @@ if ! grep -q '^ginux: interpreter-first Linux ring-3 entry verified' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: userspace Linux relative relocation applied' "$output_file"; then
+    echo "Boot test failed: userspace Linux relative relocation was not applied." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux copy errors and overflow bounds verified' "$output_file"; then
     echo "Boot test failed: Linux copy errors or overflow bounds were not verified." >&2
     exit 1
