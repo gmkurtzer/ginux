@@ -15,8 +15,10 @@ const PF_READ: u32 = 4;
 const MIN_USER_ADDRESS: u64 = 0x1_0000;
 const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
-const MAX_SEGMENT_PAGES: usize = 2;
-const FIXTURE_DATA_OFFSET: usize = 0x2000;
+const MAX_EXECUTABLE_SEGMENT_PAGES: usize = 3;
+const MAX_OTHER_SEGMENT_PAGES: usize = 2;
+const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (2 * PAGE_SIZE + 1) as u64;
+const FIXTURE_DATA_OFFSET: usize = 0x3000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
@@ -227,7 +229,12 @@ fn plan_segment(segment: Segment<'_>) -> Option<PlannedSegment<'_>> {
     let page_offset = usize::try_from(segment.virtual_address - virtual_page).ok()?;
     let mapped_size = page_offset.checked_add(memory_size)?;
     let page_count = mapped_size.checked_add(PAGE_SIZE - 1)? / PAGE_SIZE;
-    ((1..=MAX_SEGMENT_PAGES).contains(&page_count) && segment.bytes.len() <= memory_size).then_some(
+    let maximum_pages = if segment.flags & PF_EXECUTE != 0 {
+        MAX_EXECUTABLE_SEGMENT_PAGES
+    } else {
+        MAX_OTHER_SEGMENT_PAGES
+    };
+    ((1..=maximum_pages).contains(&page_count) && segment.bytes.len() <= memory_size).then_some(
         PlannedSegment {
             bytes: segment.bytes,
             virtual_address: segment.virtual_address,
@@ -406,16 +413,16 @@ pub(crate) fn verify_parser() -> bool {
         || parsed.program_header_count != 3
         || parsed.executable.bytes.get(0x100..) != Some(PROBE_CODE)
         || parsed.executable.virtual_address != 0x40_0000
-        || parsed.executable.memory_size != (0x100 + PROBE_CODE.len()) as u64
+        || parsed.executable.memory_size != FIXTURE_EXECUTABLE_MEMORY_SIZE
         || parsed.executable.flags != PF_READ | PF_EXECUTE
         || parsed.read_only.is_some()
         || parsed.writable.bytes != *b"PROBE!!\n"
-        || parsed.writable.virtual_address != 0x40_2000
+        || parsed.writable.virtual_address != 0x40_3000
         || parsed.writable.memory_size != (PAGE_SIZE + 512) as u64
         || parsed.writable.flags != PF_READ | PF_WRITE
         || parsed
             .relro
-            .is_none_or(|range| range.virtual_address != 0x40_3000 || range.memory_size != 512)
+            .is_none_or(|range| range.virtual_address != 0x40_4000 || range.memory_size != 512)
     {
         return false;
     }
@@ -510,7 +517,7 @@ fn verify_metadata_parser(image: &[u8; FIXTURE_SIZE]) -> bool {
     write_u64(
         &mut candidate,
         ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 24,
-        0x40_2000,
+        0x40_3000,
     );
     write_u64(&mut candidate, extended_phdr_header + 24, 0x40_0040);
     if parse(&candidate).is_none() {
@@ -537,34 +544,34 @@ fn verify_relro_parser() -> bool {
     let phdr_header = ELF_HEADER_SIZE + 3 * PROGRAM_HEADER_SIZE;
     let mut candidate = fixture();
     write_u16(&mut candidate, 56, 3);
-    write_relro(&mut candidate, stack_header, 0x40_3000, 512);
+    write_relro(&mut candidate, stack_header, 0x40_4000, 512);
     let valid = parse(&candidate).is_some_and(|image| {
         image
             .relro
-            .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
+            .is_some_and(|range| range.virtual_address == 0x40_4000 && range.memory_size == 512)
     });
     candidate = fixture();
     write_u16(&mut candidate, 56, 3);
-    write_relro(&mut candidate, stack_header, 0x40_3000, 512);
+    write_relro(&mut candidate, stack_header, 0x40_4000, 512);
     write_u16(&mut candidate, 56, 4);
-    write_relro(&mut candidate, phdr_header, 0x40_3000, 512);
+    write_relro(&mut candidate, phdr_header, 0x40_4000, 512);
     let duplicate_rejected = parse(&candidate).is_none();
     candidate = fixture();
     write_u16(&mut candidate, 56, 3);
-    write_relro(&mut candidate, stack_header, 0x40_3001, 512);
+    write_relro(&mut candidate, stack_header, 0x40_4001, 512);
     let unaligned_rejected = parse(&candidate).is_none();
     candidate = fixture();
     write_u16(&mut candidate, 56, 3);
     write_relro(
         &mut candidate,
         stack_header,
-        0x40_3000,
+        0x40_4000,
         PAGE_SIZE as u64 + 1,
     );
     let oversized_rejected = parse(&candidate).is_none();
     candidate = fixture();
     write_u16(&mut candidate, 56, 3);
-    write_relro(&mut candidate, stack_header, 0x40_2000, 512);
+    write_relro(&mut candidate, stack_header, 0x40_3000, 512);
     valid
         && duplicate_rejected
         && unaligned_rejected
@@ -580,56 +587,61 @@ pub(crate) fn verify_load_plan() -> bool {
     let Some(current_plan) = plan(&parsed) else {
         return false;
     };
-    let mut executable_page = [0xa5_u8; PAGE_SIZE];
-    let mut executable_tail_page = [0xa5_u8; PAGE_SIZE];
-    let mut writable_page = [0xa5_u8; PAGE_SIZE];
-    let multi_page_image = image;
-    let Some(multi_page_plan) = parse(&multi_page_image).and_then(|image| plan(&image)) else {
+    if current_plan.entry != 0x40_0100 {
         return false;
-    };
-    let mut writable_tail_page = [0xa5_u8; PAGE_SIZE];
-    materialize(current_plan.executable, &mut executable_page)
-        && materialize(current_plan.writable, &mut writable_page)
-        && materialize_page(current_plan.executable, 1, &mut executable_tail_page)
-        && materialize_page(multi_page_plan.writable, 1, &mut writable_tail_page)
-        && current_plan.entry == 0x40_0100
-        && current_plan.program_headers == 0x40_0040
-        && current_plan.program_header_count == 3
-        && current_plan.executable.virtual_page == 0x40_0000
-        && current_plan.executable.virtual_address == 0x40_0000
-        && current_plan.executable.page_count == 2
-        && current_plan.executable.executable
-        && !current_plan.executable.writable
-        && current_plan.read_only.is_none()
-        && current_plan
+    }
+    if current_plan.program_headers != 0x40_0040
+        || current_plan.program_header_count != 3
+        || current_plan.executable.virtual_page != 0x40_0000
+        || current_plan.executable.virtual_address != 0x40_0000
+        || current_plan.executable.page_count != 3
+        || !current_plan.executable.executable
+        || current_plan.executable.writable
+        || current_plan.read_only.is_some()
+        || !current_plan
             .relro
-            .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
-        && executable_page[..4] == *b"\x7fELF"
-        && executable_page[0x100..] == PROBE_CODE[..PAGE_SIZE - 0x100]
-        && executable_tail_page[..PROBE_CODE.len() - (PAGE_SIZE - 0x100)]
-            == PROBE_CODE[PAGE_SIZE - 0x100..]
-        && executable_tail_page[PROBE_CODE.len() - (PAGE_SIZE - 0x100)..]
+            .is_some_and(|range| range.virtual_address == 0x40_4000 && range.memory_size == 512)
+        || current_plan.writable.virtual_page != 0x40_3000
+        || current_plan.writable.virtual_address != 0x40_3000
+        || current_plan.writable.page_count != 2
+        || !current_plan.writable.writable
+        || current_plan.writable.executable
+    {
+        return false;
+    }
+
+    let mut page = [0xa5_u8; PAGE_SIZE];
+    if !materialize(current_plan.executable, &mut page)
+        || page[..4] != *b"\x7fELF"
+        || page[0x100..] != PROBE_CODE[..PAGE_SIZE - 0x100]
+        || !materialize_page(current_plan.executable, 1, &mut page)
+        || page[..PROBE_CODE.len() - (PAGE_SIZE - 0x100)] != PROBE_CODE[PAGE_SIZE - 0x100..]
+        || page[PROBE_CODE.len() - (PAGE_SIZE - 0x100)..]
             .iter()
-            .all(|byte| *byte == 0)
-        && current_plan.writable.virtual_page == 0x40_2000
-        && current_plan.writable.virtual_address == 0x40_2000
-        && current_plan.writable.page_count == 2
-        && current_plan.writable.writable
-        && !current_plan.writable.executable
-        && writable_page[..8] == *b"PROBE!!\n"
-        && writable_page[8..].iter().all(|byte| *byte == 0)
-        && multi_page_plan.writable.page_count == 2
-        && writable_tail_page.iter().all(|byte| *byte == 0)
-        && {
-            let mut oversized = multi_page_image;
-            write_u64(
-                &mut oversized,
-                ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 40,
-                (MAX_SEGMENT_PAGES * PAGE_SIZE + 1) as u64,
-            );
-            write_u16(&mut oversized, 56, MIN_LOAD_SEGMENT_COUNT as u16);
-            parse(&oversized).is_some_and(|image| plan(&image).is_none())
-        }
+            .any(|byte| *byte != 0)
+        || !materialize_page(current_plan.executable, 2, &mut page)
+        || page.iter().any(|byte| *byte != 0)
+        || !materialize(current_plan.writable, &mut page)
+        || page[..8] != *b"PROBE!!\n"
+        || page[8..].iter().any(|byte| *byte != 0)
+        || !materialize_page(current_plan.writable, 1, &mut page)
+        || page.iter().any(|byte| *byte != 0)
+    {
+        return false;
+    }
+    verify_oversized_writable_plan_rejected()
+}
+
+#[inline(never)]
+fn verify_oversized_writable_plan_rejected() -> bool {
+    let mut oversized = fixture();
+    write_u64(
+        &mut oversized,
+        ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE + 40,
+        (MAX_OTHER_SEGMENT_PAGES * PAGE_SIZE + 1) as u64,
+    );
+    write_u16(&mut oversized, 56, MIN_LOAD_SEGMENT_COUNT as u16);
+    parse(&oversized).is_some_and(|image| plan(&image).is_none())
 }
 
 pub(crate) fn verify_linked_probe() -> bool {
@@ -644,6 +656,7 @@ pub(crate) fn verify_linked_probe() -> bool {
     };
     let mut page = [0xa5_u8; PAGE_SIZE];
     let mut executable_tail_page = [0xa5_u8; PAGE_SIZE];
+    let mut executable_third_page = [0xa5_u8; PAGE_SIZE];
     let read_only_valid = materialize(read_only, &mut page)
         && page[..4] == *b"\x7fELF"
         && materialized_page_matches(read_only, 0, &page);
@@ -658,6 +671,10 @@ pub(crate) fn verify_linked_probe() -> bool {
             .iter()
             .all(|byte| *byte == 0)
         && materialized_page_matches(plan.executable, 1, &executable_tail_page);
+    let executable_valid = executable_valid
+        && materialize_page(plan.executable, 2, &mut executable_third_page)
+        && executable_third_page.iter().all(|byte| *byte == 0)
+        && materialized_page_matches(plan.executable, 2, &executable_third_page);
     let writable_valid = materialize(plan.writable, &mut page)
         && page[..8] == *b"PROBE!!\n"
         && page[8..].iter().all(|byte| *byte == 0)
@@ -674,20 +691,20 @@ pub(crate) fn verify_linked_probe() -> bool {
         && image
             .read_only
             .is_some_and(|segment| segment.virtual_address == 0x3f_f000)
-        && image.writable.virtual_address == 0x40_2000
+        && image.writable.virtual_address == 0x40_3000
         && image.writable.bytes.len() == 4608
         && image.writable.bytes[..8] == *b"PROBE!!\n"
         && image.writable.bytes[8..].iter().all(|byte| *byte == 0)
         && image.writable.memory_size == 4608
         && image
             .relro
-            .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
+            .is_some_and(|range| range.virtual_address == 0x40_4000 && range.memory_size == 512)
         && plan
             .relro
-            .is_some_and(|range| range.virtual_address == 0x40_3000 && range.memory_size == 512)
+            .is_some_and(|range| range.virtual_address == 0x40_4000 && range.memory_size == 512)
         && plan.executable.virtual_page == 0x40_0000
         && plan.executable.virtual_address == 0x40_0100
-        && plan.executable.page_count == 2
+        && plan.executable.page_count == 3
         && read_only.virtual_page == 0x3f_f000
         && plan.writable.page_count == 2
         && read_only_valid
@@ -727,20 +744,20 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
         0,
         0x40_0000,
         (0x100 + PROBE_CODE.len()) as u64,
-        (0x100 + PROBE_CODE.len()) as u64,
+        FIXTURE_EXECUTABLE_MEMORY_SIZE,
         PF_READ | PF_EXECUTE,
     );
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE,
         FIXTURE_DATA_OFFSET as u64,
-        0x40_2000,
+        0x40_3000,
         8,
         (PAGE_SIZE + 512) as u64,
         PF_READ | PF_WRITE,
     );
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
-    write_relro(&mut bytes, stack_header, 0x40_3000, 512);
+    write_relro(&mut bytes, stack_header, 0x40_4000, 512);
     bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
     bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(b"PROBE!!\n");
     bytes

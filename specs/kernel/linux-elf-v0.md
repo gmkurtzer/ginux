@@ -57,10 +57,10 @@ header-table address/count, exact code and initialized data, 4608-byte data/BSS
 extent, and maps all three loads with role-derived permissions. The checked-in
 linker script fixes the read-only header load at
 `0x3ff000`, the non-page-base text entry at `0x400100`, and the data/BSS load at
-`0x402000`, with the final 512 bytes declared RELRO at `0x403000`; this is the
+`0x403000`, with the final 512 bytes declared RELRO at `0x404000`; this is the
 stable input contract for linked-image execution work. Both the assembly build
-and linker reject text larger than 7936 bytes, the exact space from the
-non-page-base entry through the end of its two-page executable mapping. Probe
+and linker reject text larger than 12032 bytes, the exact space from the
+non-page-base entry through the end of its three-page executable mapping. Probe
 growth therefore fails at build time instead of overlapping the writable load
 or silently exceeding the runtime loader profile.
 
@@ -84,11 +84,12 @@ relocations, or support glibc.
 
 ## Page-image plan
 
-The bounded page-image planner accepts page-aligned segments of at most two
-4096-byte pages. It preserves ELF virtual addresses and derives separate
+The bounded page-image planner accepts executable segments of at most three
+4096-byte pages and all other segments of at most two pages. It preserves ELF virtual addresses and derives separate
 executable/read-only and writable/non-executable metadata. Each page is first
 zeroed and then receives only its intersecting file bytes, so a second BSS-only
-page is entirely zero. A request for a third page is rejected. A load segment
+page is entirely zero. A third non-executable page or a fourth executable page
+is rejected. A load segment
 may begin
 at file offset zero, as real ELF images commonly do, so the first mapped page
 preserves the ELF and program-header tables and places instructions at their
@@ -99,16 +100,16 @@ byte. Runtime address-space installation owns and tears down every planned
 page, including a second BSS-only RW/NX page.
 
 QEMU maps the toolchain-linked read-only header at `0x3ff000` through a
-separately cloned 2 MiB leaf table, validates it beside the two-page RX and
+separately cloned 2 MiB leaf table, validates it beside the three-page RX and
 RW/NX loads, and runs the linked entry. The synthetic proof also installs one
-RX page at `0x400000` and two RW/NX pages at
-`0x402000` and `0x403000` into a newly allocated x86-64 root. It privately clones
+three-page RX load at `0x400000` and two RW/NX pages at
+`0x403000` and `0x404000` into a newly allocated x86-64 root. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
 segment ranges; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
-map. An owned page at `0x404000` supplies one zero-filled RW/NX heap page. The
-page at `0x405000` remains an unmapped lower stack guard, and an owned page at
-`0x406000` supplies a RW/NX stack; `0x407000` remains an upper guard. Before
+map. An owned page at `0x405000` supplies one zero-filled RW/NX heap page. The
+page at `0x406000` remains an unmapped lower stack guard, and an owned page at
+`0x407000` supplies a RW/NX stack; `0x408000` remains an upper guard. Before
 changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.
 It then activates the root, observes the declared ELF mappings through their
@@ -119,12 +120,12 @@ assembly; the build uses Clang to produce an ELF relocatable and extracts its
 `.text` section, so branch layout is assembler-validated instead of
 hand-encoded. The instruction stream first verifies that unsupported call
 999 returns Linux `-ENOSYS` without terminating it. It then issues a bounded
-Linux `write(1, 0x402000, 8)` whose kernel copy-in verifies the RW payload. A
-bounded `arch_prctl(ARCH_SET_FS, 0x402000)` then makes the payload available
+Linux `write(1, 0x403000, 8)` whose kernel copy-in verifies the RW payload. A
+bounded `arch_prctl(ARCH_SET_FS, 0x403000)` then makes the payload available
 through an FS-relative TLS read. `ARCH_GET_FS` copies the active base back to
 the declared data segment; invalid operation and destination tests require
 `-EINVAL` and `-EFAULT` without terminating the task. A bounded
-`uname(0x402000)` subsequently
+`uname(0x403000)` subsequently
 copies a complete zero-initialized `utsname` into
 the declared data segment, where the probe validates the system name. Both
 copy directions are checked against the segment's 4608-byte `p_memsz`, rather

@@ -20,16 +20,15 @@ SECTIONS
     {
         *(.text)
         FILL(0)
-        . = MAX(., 0x401000);
-        BYTE(0)
+        . = MAX(., 0x402001);
     } :text
-    ASSERT(SIZEOF(.text) <= 0x1f00, "Linux probe exceeds two-page executable profile")
+    ASSERT(SIZEOF(.text) <= 0x2f00, "Linux probe exceeds three-page executable profile")
 
-    . = 0x402000;
+    . = 0x403000;
     .data : { *(.data) } :data
     .bss : { *(.bss) } :data
 
-    . = 0x403000;
+    . = 0x404000;
     .data.rel.ro : { *(.data.rel.ro) } :data :relro
 
     /DISCARD/ : { *(.comment) *(.note*) }
