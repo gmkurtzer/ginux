@@ -74,6 +74,11 @@ result does not expose it.
 For a concrete service fault, the kernel retains vector, error code, fault
 address, and instruction address with the consumed record for supervision
 auditing.
+The shared ABI constants define lifecycle kind 1 as a supervised-service fault,
+kind 2 as an overflow summary, and kind 3 as a clean auxiliary-service
+retirement. Kind 3 carries the exact retired generation, zero detail, and no
+fault descriptor. It is currently exercised by the bounded registry proof;
+runtime auxiliary creation is not yet exposed to userspace.
 Operation 8 receives from IPC object 3 and requires read authority. It returns
 an already queued word immediately. When the inbound direction is empty and a
 peer is runnable, it blocks the caller; a peer send wakes the caller and makes

@@ -151,7 +151,7 @@ impl EventQueue {
         let event = if self.len == 0 {
             let overflow = self.overflow.take()?;
             LifecycleEvent {
-                kind: 2,
+                kind: crate::control_abi::LIFECYCLE_OVERFLOW,
                 domain: overflow.first_domain,
                 detail: overflow.dropped,
                 fault: None,
@@ -542,7 +542,7 @@ impl Manager {
             return false;
         }
         if !self.lifecycle_events.push(LifecycleEvent {
-            kind: 3,
+            kind: crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED,
             domain: id,
             detail: 0,
             fault: None,
@@ -862,7 +862,7 @@ fn verify_auxiliary_retirement_overflow_invariants_inner() -> Option<bool> {
     }
     let overflow = manager.lifecycle_events.pop()?;
     Some(
-        overflow.kind == 2
+        overflow.kind == crate::control_abi::LIFECYCLE_OVERFLOW
             && overflow.domain == auxiliary
             && overflow.detail == 1
             && overflow.fault.is_none()
@@ -950,12 +950,12 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     }
     let first_retirement = manager.lifecycle_events.pop()?;
     let second_retirement = manager.lifecycle_events.pop()?;
-    if first_retirement.kind != 3
+    if first_retirement.kind != crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
         || first_retirement.domain != console_service
         || first_retirement.detail != 0
         || first_retirement.fault.is_some()
         || first_retirement.sequence != 1
-        || second_retirement.kind != 3
+        || second_retirement.kind != crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
         || second_retirement.domain != replacement
         || second_retirement.detail != 0
         || second_retirement.fault.is_some()
@@ -1269,7 +1269,7 @@ pub(crate) fn record_service_fault(domain_raw: u64, fault: FaultMetadata) -> boo
         return false;
     }
     manager.lifecycle_events.push(LifecycleEvent {
-        kind: 1,
+        kind: crate::control_abi::LIFECYCLE_SERVICE_FAULT,
         domain: id,
         detail: 0,
         fault: Some(fault),
@@ -1290,9 +1290,11 @@ pub(crate) fn service_fault_was_delivered(domain_raw: u64) -> bool {
     };
     global_manager().is_some_and(|manager| {
         manager.lifecycle_events.is_empty()
-            && manager
-                .last_delivered_lifecycle_event
-                .is_some_and(|event| event.kind == 1 && event.domain == id && event.fault.is_some())
+            && manager.last_delivered_lifecycle_event.is_some_and(|event| {
+                event.kind == crate::control_abi::LIFECYCLE_SERVICE_FAULT
+                    && event.domain == id
+                    && event.fault.is_some()
+            })
     })
 }
 
@@ -1302,7 +1304,7 @@ pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMe
     };
     global_manager().is_some_and(|manager| {
         manager.last_delivered_lifecycle_event.is_some_and(|event| {
-            event.kind == 1
+            event.kind == crate::control_abi::LIFECYCLE_SERVICE_FAULT
                 && event.domain == id
                 && event.detail == 0
                 && event.fault == Some(expected)
@@ -1313,7 +1315,7 @@ pub(crate) fn delivered_service_fault_matches(domain_raw: u64, expected: FaultMe
 pub(crate) fn delivered_service_fault_descriptor(
 ) -> Option<[u8; crate::control_abi::FAULT_DESCRIPTOR_SIZE]> {
     let event = global_manager()?.last_delivered_lifecycle_event?;
-    if event.kind != 1 || event.detail != 0 {
+    if event.kind != crate::control_abi::LIFECYCLE_SERVICE_FAULT || event.detail != 0 {
         return None;
     }
     let fault = event.fault?;

@@ -6,3 +6,6 @@ pub const DESCRIPTOR_SIZE: usize = 16;
 pub const FAULT_DESCRIPTOR_SIZE: usize = 48;
 pub const LIFECYCLE_DESCRIPTOR_SIZE: usize = 24;
 pub const IPC_DELIVERY_DESCRIPTOR_SIZE: usize = 32;
+pub const LIFECYCLE_SERVICE_FAULT: u8 = 1;
+pub const LIFECYCLE_OVERFLOW: u8 = 2;
+pub const LIFECYCLE_AUXILIARY_STOPPED: u8 = 3;
