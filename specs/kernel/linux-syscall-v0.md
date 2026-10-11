@@ -104,6 +104,11 @@ bytes as zeros and discards writes when its selected access mode permits them.
 EOF input, terminal ioctls, and non-seekable behavior as the inherited console.
 `/dev/tty` is a strict alias of that endpoint; controlling-terminal ownership,
 session attachment, and terminal reassignment remain unsupported.
+`rax = 19` (`__NR_readv`) accepts one to four nonempty vectors totaling at most
+256 bytes. It returns EOF for readable console and null endpoints. For
+`/dev/zero`, every destination is validated before any is cleared, so an
+invalid later vector returns `-EFAULT` without partially changing earlier
+buffers; a valid request returns the total zeroed length.
 `rax = 332` (`__NR_statx`) returns a zero-initialized 256-byte result for these
 four paths, including `STATX_BASIC_STATS`, character-device mode `0600`, stable
 inode numbers, block size 4096, and conventional device minors. The reserved

@@ -54,6 +54,7 @@ const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_RT_SIGACTION_SYSCALL: u64 = 13;
 const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
+const LINUX_READV_SYSCALL: u64 = 19;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_DUP_SYSCALL: u64 = 32;
@@ -1274,6 +1275,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_READV_SYSCALL => linux_descriptor_readv(first_argument, buffer, count),
         LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
@@ -1736,6 +1738,66 @@ fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
     } else {
         linux_console_write(descriptor, address, count)
     }
+}
+
+fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
+    let device = linux_device_descriptor(descriptor);
+    let access = device & 3;
+    if access != LINUX_DESCRIPTOR_INPUT
+        && access != 3
+        && linux_console_descriptor(descriptor) != LINUX_DESCRIPTOR_INPUT
+    {
+        return LINUX_EBADF;
+    }
+    let Ok(vector_count) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if !(1..=LINUX_IOV_LIMIT).contains(&vector_count) {
+        return LINUX_EINVAL;
+    }
+    let mut table = [0_u8; LINUX_IOV_LIMIT * 16];
+    if !copy_from_linux_user(vectors, &mut table[..vector_count * 16]) {
+        return LINUX_EFAULT;
+    }
+    let mut ranges = [(0_u64, 0_usize); LINUX_IOV_LIMIT];
+    let mut total = 0_usize;
+    for (index, vector) in table[..vector_count * 16]
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        let address = u64::from_ne_bytes(vector[..8].try_into().unwrap());
+        let length = u64::from_ne_bytes(vector[8..].try_into().unwrap());
+        let Ok(length) = usize::try_from(length) else {
+            return LINUX_EINVAL;
+        };
+        let Some(next_total) = total.checked_add(length) else {
+            return LINUX_EINVAL;
+        };
+        if length == 0
+            || next_total > LINUX_WRITE_LIMIT
+            || !linux_writable_user_range_contains(address, length)
+        {
+            return if length != 0 && next_total <= LINUX_WRITE_LIMIT {
+                LINUX_EFAULT
+            } else {
+                LINUX_EINVAL
+            };
+        }
+        ranges[index] = (address, length);
+        total = next_total;
+    }
+    if device & LINUX_DEVICE_ZERO == 0 {
+        return 0;
+    }
+    let zeros = [0_u8; LINUX_WRITE_LIMIT];
+    for (address, length) in ranges[..vector_count].iter().copied() {
+        if !copy_to_linux_user(address, &zeros[..length]) {
+            return LINUX_EFAULT;
+        }
+    }
+    total as u64
 }
 
 fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {

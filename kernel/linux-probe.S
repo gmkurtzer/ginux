@@ -1226,6 +1226,46 @@ ginux_linux_probe:
     cmp rax, -22
     jne failure
 
+    movabs rax, 0x72657a2f7665642f
+    mov qword ptr [0x403340], rax
+    mov word ptr [0x403348], 0x006f
+    mov edi, -100
+    mov esi, 0x403340
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne failure
+    mov qword ptr [0x403540], -1
+    mov qword ptr [0x403550], -1
+    mov qword ptr [0x403500], 0x403540
+    mov qword ptr [0x403508], 4
+    mov qword ptr [0x403510], 0x404200
+    mov qword ptr [0x403518], 4
+    mov edi, 2
+    mov esi, 0x403500
+    mov edx, 2
+    mov eax, 19
+    syscall
+    cmp rax, -14
+    jne failure
+    cmp qword ptr [0x403540], -1
+    jne failure
+    mov qword ptr [0x403510], 0x403550
+    mov eax, 19
+    syscall
+    cmp rax, 8
+    jne failure
+    cmp dword ptr [0x403540], 0
+    jne failure
+    cmp dword ptr [0x403550], 0
+    jne failure
+    mov edi, 2
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne failure
+
     mov edi, 0x404200
     mov eax, 80
     syscall
