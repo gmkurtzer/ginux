@@ -51,6 +51,8 @@ const DT_FLAGS_1: u64 = 0x6fff_fffb;
 const DT_RELACOUNT: u64 = 0x6fff_fff9;
 const DT_INIT_ARRAY: u64 = 25;
 const DT_INIT_ARRAYSZ: u64 = 27;
+const DT_PREINIT_ARRAY: u64 = 32;
+const DT_PREINIT_ARRAYSZ: u64 = 33;
 const DT_GNU_HASH: u64 = 0x6fff_fef5;
 const DF_1_PIE: u64 = 0x0800_0000;
 const R_X86_64_GLOB_DAT: u32 = 6;
@@ -75,7 +77,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
     const INTERPRETER_PATH: &[u8] = b"/lib64/ld-ginux.so";
     const PRIMARY: &[u8] = b"libginux.so";
     const AUXILIARY: &[u8] = b"libginux-aux.so";
-    let Some(main) = parse(LINKED_DYNAMIC_GRAPH_MAIN) else {
+    let Some(mut main) = parse(LINKED_DYNAMIC_GRAPH_MAIN) else {
         crate::serial_write_bytes(b"\r\nginux: dependency-list main parse failed");
         return false;
     };
@@ -116,14 +118,33 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
     let mut overlapping_authorities = dependency_authorities;
     overlapping_authorities[1].load_bias = dependency_authorities[0].load_bias;
     let reversed_authorities = [dependency_authorities[1], dependency_authorities[0]];
+    let main_dynamic = main.dynamic_relocations;
+    let mut missing_preinit = main_dynamic.unwrap();
+    missing_preinit.preinit_array = None;
+    missing_preinit.preinit_relocation_target = None;
+    missing_preinit.preinit_relocation_addend = None;
+    main.dynamic_relocations = Some(missing_preinit);
+    let missing_preinit_rejected = plan_authenticated_pie_dependency_graph(
+        &main,
+        0x3f_f000,
+        &interpreter_authority,
+        LINKED_DYNAMIC_INTERPRETER,
+        0x60_0000,
+        &dependency_authorities,
+        [LINKED_DYNAMIC_DEPENDENCY, LINKED_DYNAMIC_AUXILIARY],
+    )
+    .is_none();
+    main.dynamic_relocations = main_dynamic;
     let valid = main.needed_libraries == [Some(PRIMARY), Some(AUXILIARY)]
         && main.dynamic_symbol == Some(b"ginux_dependency_symbol")
         && main.secondary_dynamic_symbol == Some(b"ginux_auxiliary_symbol")
         && main.dynamic_relocations.is_some_and(|dynamic| {
-            dynamic.relocation_count == 5
+            dynamic.relocation_count == 6
                 && !dynamic.symbol_defined
                 && !dynamic.secondary_symbol_defined
                 && dynamic.init_function.is_some()
+                && dynamic.preinit_array == dynamic.preinit_relocation_target
+                && dynamic.preinit_relocation_addend.is_some()
                 && dynamic.init_array == Some(dynamic.relocation_target)
                 && dynamic
                     .symbol_relocation
@@ -144,6 +165,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
         && auxiliary.dynamic_relocations.is_some_and(|dynamic| {
             dynamic.symbol_defined
                 && dynamic.init_function.is_some()
+                && dynamic.preinit_array.is_none()
                 && dynamic.symbol_relocation.is_some()
                 && dynamic.jump_slot_relocation.is_some()
                 && dynamic.init_array == Some(dynamic.relocation_target)
@@ -152,6 +174,7 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
         && plan.process.main_entry == 0x40_0100
         && plan.dependencies[0].entry == 0x61_0100
         && plan.dependencies[1].entry == 0x63_0100
+        && missing_preinit_rejected
         && plan_authenticated_pie_dependency_graph(
             &main,
             0x3f_f000,
@@ -252,6 +275,9 @@ pub(crate) struct DynamicRelocations {
     pub(crate) hash_table_address: Option<u64>,
     pub(crate) hash_is_gnu: bool,
     pub(crate) init_function: Option<u64>,
+    pub(crate) preinit_array: Option<u64>,
+    pub(crate) preinit_relocation_target: Option<u64>,
+    pub(crate) preinit_relocation_addend: Option<u64>,
     pub(crate) init_array: Option<u64>,
     pub(crate) symbol_relocation: Option<SymbolRelocation>,
     pub(crate) jump_slot_relocation: Option<SymbolRelocation>,
@@ -557,6 +583,9 @@ pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
         hash_table_address: None,
         hash_is_gnu: false,
         init_function: None,
+        preinit_array: None,
+        preinit_relocation_target: None,
+        preinit_relocation_addend: None,
         init_array: None,
         symbol_relocation: None,
         jump_slot_relocation: None,
@@ -642,6 +671,8 @@ pub(crate) fn plan_authenticated_pie_dependency_graph<'main, 'interpreter, 'depe
         || main_dynamic.symbol_defined
         || main_dynamic.secondary_symbol_defined
         || main_dynamic.init_function.is_none()
+        || main_dynamic.preinit_array != main_dynamic.preinit_relocation_target
+        || main_dynamic.preinit_relocation_addend.is_none()
         || main_dynamic.init_array != Some(main_dynamic.relocation_target)
         || main.dynamic_symbol != dependency_images[0].dynamic_symbol
         || main.secondary_dynamic_symbol != dependency_images[1].dynamic_symbol
@@ -653,9 +684,11 @@ pub(crate) fn plan_authenticated_pie_dependency_graph<'main, 'interpreter, 'depe
         if image.needed_libraries != [None; 2]
             || image.secondary_dynamic_symbol.is_some()
             || image.soname != Some(authority.name)
-            || !image
-                .dynamic_relocations
-                .is_some_and(|dynamic| dynamic.symbol_defined && dynamic.init_function.is_some())
+            || !image.dynamic_relocations.is_some_and(|dynamic| {
+                dynamic.symbol_defined
+                    && dynamic.init_function.is_some()
+                    && dynamic.preinit_array.is_none()
+            })
         {
             return None;
         }
@@ -917,6 +950,15 @@ fn plan_position_independent_at<'a>(
                 Some(address) => Some(address.checked_add(load_bias)?),
                 None => None,
             },
+            preinit_array: match dynamic.preinit_array {
+                Some(address) => Some(address.checked_add(load_bias)?),
+                None => None,
+            },
+            preinit_relocation_target: match dynamic.preinit_relocation_target {
+                Some(address) => Some(address.checked_add(load_bias)?),
+                None => None,
+            },
+            preinit_relocation_addend: dynamic.preinit_relocation_addend,
             init_array: match dynamic.init_array {
                 Some(address) => Some(address.checked_add(load_bias)?),
                 None => None,
@@ -1225,7 +1267,7 @@ fn parse_dynamic_table(bytes: &[u8], header: usize) -> Option<DynamicTable<'_>> 
     if read_u32(bytes, header + 4)? != PF_READ | PF_WRITE
         || physical_address != 0 && physical_address != virtual_address
         || file_size != memory_size
-        || !(2..=21).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
+        || !(2..=23).contains(&(file_size / DYNAMIC_ENTRY_SIZE))
         || !file_size.is_multiple_of(DYNAMIC_ENTRY_SIZE)
         || alignment != 8
         || file_offset % alignment != virtual_address % alignment
@@ -1274,6 +1316,8 @@ fn parse_dynamic_relocations<'a>(
     let mut init_function = None;
     let mut init_array = None;
     let mut init_array_size = None;
+    let mut preinit_array = None;
+    let mut preinit_array_size = None;
     let mut terminated = false;
     let entries = table.bytes.as_chunks::<DYNAMIC_ENTRY_SIZE>().0;
     for (index, entry) in entries.iter().enumerate() {
@@ -1312,6 +1356,8 @@ fn parse_dynamic_relocations<'a>(
             DT_INIT if init_function.replace(value).is_none() => {}
             DT_INIT_ARRAY if init_array.replace(value).is_none() => {}
             DT_INIT_ARRAYSZ if init_array_size.replace(value).is_none() => {}
+            DT_PREINIT_ARRAY if preinit_array.replace(value).is_none() => {}
+            DT_PREINIT_ARRAYSZ if preinit_array_size.replace(value).is_none() => {}
             _ => return None,
         }
     }
@@ -1324,7 +1370,8 @@ fn parse_dynamic_relocations<'a>(
         || rela_entry_size != RELA_ENTRY_SIZE as u64
         || !matches!(rela_size, value if value == RELA_ENTRY_SIZE as u64
             || value == (2 * RELA_ENTRY_SIZE) as u64
-            || value == (3 * RELA_ENTRY_SIZE) as u64)
+            || value == (3 * RELA_ENTRY_SIZE) as u64
+            || value == (4 * RELA_ENTRY_SIZE) as u64)
     {
         return None;
     }
@@ -1370,6 +1417,18 @@ fn parse_dynamic_relocations<'a>(
             }
             Some(virtual_file_bytes(loads, address, 2 * RELA_ENTRY_SIZE)?)
         }
+        (Some(address), Some(size), Some(kind))
+            if primary_relocation_count == 4
+                && size == (2 * RELA_ENTRY_SIZE) as u64
+                && kind == DT_RELA =>
+        {
+            let primary_end = rela_address.checked_add(rela_size)?;
+            let jump_end = address.checked_add(size)?;
+            if rela_address < jump_end && address < primary_end {
+                return None;
+            }
+            Some(virtual_file_bytes(loads, address, 2 * RELA_ENTRY_SIZE)?)
+        }
         _ => return None,
     };
     let jump_relocation_count = jump_rela.map_or(0, |records| records.len() / RELA_ENTRY_SIZE);
@@ -1379,14 +1438,56 @@ fn parse_dynamic_relocations<'a>(
         rela_address,
         primary_relocation_count * RELA_ENTRY_SIZE,
     )?;
-    let target = read_u64(rela, 0)?;
-    let info = read_u64(rela, 8)?;
-    let addend = read_u64(rela, 16)?;
-    if info != R_X86_64_RELATIVE
-        || !target.is_multiple_of(8)
-        || target < writable.virtual_address
-        || target.checked_add(8)? > writable_end
-    {
+    let relative_record = |record: &[u8]| -> Option<(u64, u64)> {
+        let target = read_u64(record, 0)?;
+        let info = read_u64(record, 8)?;
+        let addend = read_u64(record, 16)?;
+        (info == R_X86_64_RELATIVE
+            && target.is_multiple_of(8)
+            && target >= writable.virtual_address
+            && target.checked_add(8)? <= writable_end)
+            .then_some((target, addend))
+    };
+    let first_relative = relative_record(&rela[..RELA_ENTRY_SIZE])?;
+    let second_relative = match (preinit_array, preinit_array_size) {
+        (None, None) => None,
+        (Some(_), Some(8)) if primary_relocation_count == 4 => Some(relative_record(
+            &rela[RELA_ENTRY_SIZE..2 * RELA_ENTRY_SIZE],
+        )?),
+        _ => return None,
+    };
+    let (preinit_array, preinit_relocation_target, preinit_relocation_addend, target, addend) =
+        match (preinit_array, second_relative) {
+            (None, None) => (None, None, None, first_relative.0, first_relative.1),
+            (Some(address), Some(second))
+                if address.is_multiple_of(8)
+                    && address >= writable.virtual_address
+                    && address.checked_add(8)? <= writable_end
+                    && address == first_relative.0 =>
+            {
+                (
+                    Some(address),
+                    Some(first_relative.0),
+                    Some(first_relative.1),
+                    second.0,
+                    second.1,
+                )
+            }
+            _ => return None,
+        };
+    if relative_count.is_some_and(|count| count != if preinit_array.is_some() { 2 } else { 1 }) {
+        return None;
+    }
+    let executable = loads
+        .iter()
+        .flatten()
+        .find(|segment| segment.flags & PF_EXECUTE != 0)?;
+    let executable_end = executable
+        .virtual_address
+        .checked_add(executable.memory_size)?;
+    let executable_addend =
+        |value: u64| value >= executable.virtual_address && value < executable_end;
+    if preinit_relocation_addend.is_some_and(|value| !executable_addend(value)) {
         return None;
     }
     let init_array = match (init_array, init_array_size) {
@@ -1398,14 +1499,7 @@ fn parse_dynamic_relocations<'a>(
                 && address >= writable.virtual_address
                 && address.checked_add(size)? <= writable_end =>
         {
-            let executable = loads
-                .iter()
-                .flatten()
-                .find(|segment| segment.flags & PF_EXECUTE != 0)?;
-            let executable_end = executable
-                .virtual_address
-                .checked_add(executable.memory_size)?;
-            if addend < executable.virtual_address || addend >= executable_end {
+            if !executable_addend(addend) {
                 return None;
             }
             Some(address)
@@ -1414,13 +1508,6 @@ fn parse_dynamic_relocations<'a>(
     };
     let init_function = match init_function {
         Some(address) => {
-            let executable = loads
-                .iter()
-                .flatten()
-                .find(|segment| segment.flags & PF_EXECUTE != 0)?;
-            let executable_end = executable
-                .virtual_address
-                .checked_add(executable.memory_size)?;
             if address == 0 || address < executable.virtual_address || address >= executable_end {
                 return None;
             }
@@ -1646,10 +1733,11 @@ fn parse_dynamic_relocations<'a>(
             )
         }
         (
-            5,
+            count @ (5 | 6),
             (Some(symbols), Some(strings), Some(string_size), Some(symbol_size), Some(hash), None),
         ) if symbol_size == SYMBOL_ENTRY_SIZE as u64
             && !hash_is_gnu
+            && preinit_array.is_some() == (count == 6)
             && (2..=MAX_INTERPRETER_PATH_SIZE as u64).contains(&string_size) =>
         {
             let string_size = usize::try_from(string_size).ok()?;
@@ -1720,13 +1808,14 @@ fn parse_dynamic_relocations<'a>(
                     && relocation_target.checked_add(8)? <= writable_end)
                     .then_some(relocation_target)
             };
+            let symbol_record = if count == 6 { 2 } else { 1 };
             let first_symbol_target = parse_relocation(
-                &rela[RELA_ENTRY_SIZE..2 * RELA_ENTRY_SIZE],
+                &rela[symbol_record * RELA_ENTRY_SIZE..(symbol_record + 1) * RELA_ENTRY_SIZE],
                 R_X86_64_GLOB_DAT,
                 1,
             )?;
             let second_symbol_target = parse_relocation(
-                &rela[2 * RELA_ENTRY_SIZE..3 * RELA_ENTRY_SIZE],
+                &rela[(symbol_record + 1) * RELA_ENTRY_SIZE..(symbol_record + 2) * RELA_ENTRY_SIZE],
                 R_X86_64_GLOB_DAT,
                 2,
             )?;
@@ -1739,6 +1828,7 @@ fn parse_dynamic_relocations<'a>(
             )?;
             let targets = [
                 target,
+                preinit_relocation_target.unwrap_or(0),
                 first_symbol_target,
                 second_symbol_target,
                 first_jump_target,
@@ -1791,6 +1881,9 @@ fn parse_dynamic_relocations<'a>(
             hash_table_address,
             hash_is_gnu,
             init_function,
+            preinit_array,
+            preinit_relocation_target,
+            preinit_relocation_addend,
             init_array,
             symbol_relocation,
             jump_slot_relocation,
@@ -1846,7 +1939,7 @@ fn optional_dynamic_tags_valid(
             || address.checked_add(32).is_none_or(|end| end > writable_end)
     }) && debug.is_none_or(|value| value == 0)
         && flags_1.is_none_or(|value| value == DF_1_PIE)
-        && relative_count.is_none_or(|count| count == 1)
+        && relative_count.is_none_or(|count| matches!(count, 1 | 2))
 }
 
 fn validate_sysv_hash(
@@ -2606,11 +2699,12 @@ fn verify_optional_dynamic_tag_rejections() -> bool {
     let start = 0x5000;
     let end = 0x6400;
     optional_dynamic_tags_valid(Some(0x6300), Some(0), Some(DF_1_PIE), Some(1), start, end)
+        && optional_dynamic_tags_valid(None, None, None, Some(2), start, end)
         && !optional_dynamic_tags_valid(Some(0x6301), None, None, None, start, end)
         && !optional_dynamic_tags_valid(Some(0x63e8), None, None, None, start, end)
         && !optional_dynamic_tags_valid(None, Some(1), None, None, start, end)
         && !optional_dynamic_tags_valid(None, None, Some(0), None, start, end)
-        && !optional_dynamic_tags_valid(None, None, None, Some(2), start, end)
+        && !optional_dynamic_tags_valid(None, None, None, Some(3), start, end)
 }
 
 #[inline(never)]

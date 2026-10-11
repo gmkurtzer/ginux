@@ -3354,12 +3354,12 @@ linked_file_mmap_test:
 .hidden ginux_linux_init
 .type ginux_linux_init,@function
 ginux_linux_init:
-    mov qword ptr [rip + ginux_main_init_state], 0x49
+    inc qword ptr [rip + ginux_main_init_state]
     ret
 
 .type ginux_linux_initialize,@function
 ginux_linux_initialize:
-    cmp qword ptr [rip + ginux_main_init_state], 0x49
+    cmp qword ptr [rip + ginux_main_init_state], 2
     jne .Lmain_initialize_done
     call .Lvalidate_main_startup
     test eax, eax
@@ -3440,13 +3440,17 @@ ginux_main_init_state:
 .balign 8
     .space 256
 
+.section .preinit_array,"aw",@preinit_array
+.balign 8
+    .quad ginux_linux_init
+
 .section .init_array,"aw",@init_array
 .balign 8
     .quad ginux_linux_initialize
 
 .section .data.rel.ro.tail,"aw",@progbits
 .balign 8
-    .space 248
+    .space 240
 #else
 .section .data.rel.ro,"aw",@progbits
 .balign 8

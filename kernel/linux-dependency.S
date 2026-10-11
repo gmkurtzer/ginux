@@ -29,7 +29,10 @@ ginux_dependency_symbol:
 .hidden ginux_dependency_init
 .type ginux_dependency_init,@function
 ginux_dependency_init:
+    cmp qword ptr [0x404008], 1
+    jne .Ldependency_init_done
     mov qword ptr [rip + .Ldependency_initialized], 0x47
+.Ldependency_init_done:
     ret
 
 .Ldependency_anchor:

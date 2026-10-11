@@ -16,7 +16,10 @@ ginux_auxiliary_symbol:
 .hidden ginux_auxiliary_init
 .type ginux_auxiliary_init,@function
 ginux_auxiliary_init:
+    cmp qword ptr [0x404008], 1
+    jne .Lauxiliary_init_done
     mov qword ptr [rip + .Lauxiliary_initialized], 0x47
+.Lauxiliary_init_done:
     ret
 
 .Lauxiliary_initialize:

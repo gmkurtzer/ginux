@@ -45,7 +45,7 @@ ginux_linux_interpreter:
     test al, 15
     jnz .Linvalid_dynamic
     shr rax, 4
-    cmp rax, 21
+    cmp rax, 23
     ja .Linvalid_dynamic
     mov r14, qword ptr [r12 + 16]
     add r14, rbx
@@ -248,6 +248,13 @@ ginux_linux_interpreter:
     push r8
     push r13
     push rbx
+    mov rcx, qword ptr [rax]
+    add rcx, r15
+    mov rdx, qword ptr [rax + 16]
+    add rdx, r15
+    mov qword ptr [rcx], rdx
+    mov rcx, qword ptr [rcx]
+    call .Lcall_initializer
     call .Ldiscover_dependency_file
     mov qword ptr [rip + .Lprimary_dynamic_address], rdi
     mov qword ptr [rip + .Lprimary_dynamic_count], rcx
@@ -379,15 +386,15 @@ ginux_linux_interpreter:
     pop rax
 #endif
 
-    mov rcx, qword ptr [rax]
+    mov rcx, qword ptr [rax + 24]
     add rcx, r15
-    mov rdx, qword ptr [rax + 16]
+    mov rdx, qword ptr [rax + 40]
     add rdx, r15
     mov qword ptr [rcx], rdx
 
-    mov rcx, qword ptr [rax + 24]
+    mov rcx, qword ptr [rax + 48]
     add rcx, r15
-    mov rdx, qword ptr [rax + 32]
+    mov rdx, qword ptr [rax + 56]
     shr rdx, 32
 #ifdef GINUX_LINKED
     cmp edx, dword ptr [r8 + 12]
@@ -413,7 +420,7 @@ ginux_linux_interpreter:
     jne .Lcompare_symbol_name
     mov rdx, qword ptr [r9 + rdx + 8]
     add rdx, GINUX_DEPENDENCY_BASE
-    add rdx, qword ptr [rax + 40]
+    add rdx, qword ptr [rax + 64]
     mov qword ptr [rcx], rdx
 
     mov rcx, qword ptr [rbx]
@@ -428,9 +435,9 @@ ginux_linux_interpreter:
     mov qword ptr [rcx], rdx
 
 #ifdef GINUX_LINKED
-    mov rcx, qword ptr [rax + 48]
+    mov rcx, qword ptr [rax + 72]
     add rcx, r15
-    mov rdx, qword ptr [rax + 56]
+    mov rdx, qword ptr [rax + 80]
     shr rdx, 32
     cmp edx, dword ptr [r8 + 8]
     jne .Linvalid_dynamic
@@ -460,7 +467,7 @@ ginux_linux_interpreter:
     jne .Lcompare_auxiliary_symbol_name
     mov rdx, qword ptr [r9 + rdx + 8]
     add rdx, GINUX_AUXILIARY_BASE
-    add rdx, qword ptr [rax + 64]
+    add rdx, qword ptr [rax + 88]
     mov qword ptr [rcx], rdx
 
     mov rcx, qword ptr [rbx + 24]
@@ -764,7 +771,7 @@ ginux_linux_interpreter:
     test al, 15
     jnz .Linvalid_dynamic
     shr rax, 4
-    cmp rax, 21
+    cmp rax, 23
     ja .Linvalid_dynamic
     mov rcx, qword ptr [r12 + 16]
     add rcx, r14

@@ -8,10 +8,10 @@ M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to eight
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
-`PT_GNU_STACK`, bounded `PT_INTERP`, and one-, two-, three-, or five-entry
+`PT_GNU_STACK`, bounded `PT_INTERP`, and one-, two-, three-, five-, or six-entry
 relocation `PT_DYNAMIC` declarations. Three-relocation images may place the eager
 `R_X86_64_JUMP_SLOT` record in a separate one-entry `DT_JMPREL` table described
-by `DT_PLTRELSZ` and `DT_PLTREL`; the five-relocation runtime main uses two
+by `DT_PLTRELSZ` and `DT_PLTREL`; the six-relocation runtime main uses two
 entries in that split table. The symbol profile validates a two- or three-entry
 symbol-table prefix, bounded string table, bounded SysV `DT_HASH` or
 one-bucket/one-word-bloom `DT_GNU_HASH`, and up to two global function symbols
@@ -34,7 +34,9 @@ relocation plus the main image's relative and symbol-based relocations. The
 symbol relocations resolve to the authenticated dependencies, and the interpreter
 also applies both dependencies' own relative and self-symbol relocations. Each
 DSO and the main expose one authenticated `DT_INIT` function and one eight-byte
-`DT_INIT_ARRAY`. The interpreter calls each dependency's direct init function
+`DT_INIT_ARRAY`. The main additionally exposes one eight-byte
+`DT_PREINIT_ARRAY`. The interpreter relocates and calls that preinitializer
+before loading either dependency, calls each dependency's direct init function
 and constructor in order, resolves the main, and then calls the main's direct
 init function and constructor before transferring control to its entry.
 Each exported function refuses to succeed before its dependency constructor
@@ -82,7 +84,8 @@ fixture consumes four entries and exercises every admitted permission class.
 Kernel execution state now provides two isolated dependency slots, each with
 its own base window, selected bias, eight-entry contract table, mapping mask,
 generation leases, and cleanup validation. The running interpreter populates
-both slots, applies all three admitted relocations in each DSO, executes each
+both slots, executes the main's one-entry preinit array, applies all three
+admitted relocations in each DSO, executes each
 dependency's `DT_INIT` function and one-entry init array, resolves the main, and
 executes its `DT_INIT` function and one-entry init array before transferring to
 the main entry.

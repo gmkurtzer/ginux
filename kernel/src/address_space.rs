@@ -650,10 +650,17 @@ pub(crate) fn verify_interpreted_elf_mapping(
         return false;
     };
     if main_dynamic.init_function.is_none()
+        || main_dynamic.preinit_array != main_dynamic.preinit_relocation_target
         || main_dynamic.init_array != Some(main_dynamic.relocation_target)
     {
         return false;
     }
+    let (Some(main_preinit_target), Some(main_preinit_addend)) = (
+        main_dynamic.preinit_relocation_target,
+        main_dynamic.preinit_relocation_addend,
+    ) else {
+        return false;
+    };
     let (Some(main_symbol), Some(main_jump_slot)) = (
         main_dynamic.symbol_relocation,
         main_dynamic.jump_slot_relocation,
@@ -703,6 +710,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let Some(main_relocation_value) = main_ro
         .virtual_page
         .checked_add(main_dynamic.relocation_addend)
+    else {
+        return false;
+    };
+    let Some(main_preinit_relocation_value) = main_ro.virtual_page.checked_add(main_preinit_addend)
     else {
         return false;
     };
@@ -1209,6 +1220,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && (plan.main.entry as *const u8).read_volatile() == 0x48
                 });
             let (
+                main_preinit_value,
                 main_relative_value,
                 main_symbol_value,
                 main_jump_value,
@@ -1217,6 +1229,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             ) = if main_image_valid {
                 cpu::with_supervisor_user_access(|| {
                     (
+                        (main_preinit_target as *const u64).read_volatile(),
                         (main_dynamic.relocation_target as *const u64).read_volatile(),
                         (main_symbol.target as *const u64).read_volatile(),
                         (main_jump_slot.target as *const u64).read_volatile(),
@@ -1225,9 +1238,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     )
                 })
             } else {
-                (0, 0, 0, 0, 0)
+                (0, 0, 0, 0, 0, 0)
             };
-            let main_relative_relocated = main_relative_value == main_relocation_value;
+            let main_relative_relocated = main_preinit_value == main_preinit_relocation_value
+                && main_relative_value == main_relocation_value;
             let relocate_dependency_address = |address: u64| {
                 address
                     .checked_sub(dependency_plan.dependency_bases[0])

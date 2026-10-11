@@ -828,6 +828,21 @@ if ! grep -q '^ginux: userspace Linux auxiliary dependency self-relocations appl
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux main preinit array validated' "$output_file"; then
+    echo "Boot test failed: the bounded Linux main preinit array was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: userspace Linux main preinit executed' "$output_file"; then
+    echo "Boot test failed: the userspace Linux main preinitializer was not executed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux preinit-before-dependency initialization ordered' "$output_file"; then
+    echo "Boot test failed: Linux preinit-before-dependency ordering was not enforced." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux dependency init arrays validated' "$output_file"; then
     echo "Boot test failed: bounded Linux dependency init arrays were not validated." >&2
     exit 1

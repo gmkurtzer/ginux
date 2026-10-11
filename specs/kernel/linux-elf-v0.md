@@ -129,7 +129,7 @@ page-granular overlap among all main, interpreter, and dependency loads. Wrong
 names, wrong internal SONAMEs, wrong digests, truncation, and an overlapping
 dependency bias are rejected. An authenticated dependency exporting a
 different symbol name is also rejected. The parser also accepts one bounded
-`PT_DYNAMIC` table describing one, two, three, or five relocation records, the exact
+`PT_DYNAMIC` table describing one, two, three, five, or six relocation records, the exact
 primary `DT_RELA` size and 24-byte entry size, and a terminating `DT_NULL`.
 One- and two-record profiles keep every record in the primary table. A
 three-record profile may do the same, or may keep its first two records in the
@@ -137,20 +137,24 @@ primary table and describe one non-overlapping `R_X86_64_JUMP_SLOT` record with
 the all-or-none `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL` triplet. The split
 table must be exactly one 24-byte `DT_RELA` record. The five-record profile
 keeps one relative and two `GLOB_DAT` records in the primary table and exactly
-two `JUMP_SLOT` records in the split table. Partial triplets, another
+two `JUMP_SLOT` records in the split table. The six-record profile adds a
+leading preinit-array relative relocation before that five-record sequence.
+Partial triplets, another
 relocation encoding, wrong sizes, overlap with the primary table, and split
 tables attached to other primary-table sizes are rejected. The first record must
 be an `R_X86_64_RELATIVE` relocation with no symbol. A two- or three-record table must
 also declare `DT_STRTAB`, `DT_STRSZ`, `DT_SYMTAB`, and `DT_SYMENT`, plus exactly
 one of `DT_HASH` or `DT_GNU_HASH`, with a 24-byte symbol-entry size. The
 file-backed single-symbol SysV form is bounded to one or two buckets and two
-chains. The five-record main uses exactly three buckets and three chains,
-requires each of symbols one and two in its computed bucket without collision,
-and requires all chain terminators to be zero. The GNU form is
+chains. The five- and six-record main profiles use exactly three buckets and
+three chains, require each of symbols one and two in its computed bucket
+without collision, and require all chain terminators to be zero. The GNU form is
 bounded to one bucket, symbol offset one, one 64-bit bloom word, bloom shift
 five, and one terminating chain word. Its bloom bits, bucket, and chain must
 match the GNU hash of the admitted symbol name. The kernel computes either
-symbol-name hash rather than trusting a fixed table offset. The second record
+symbol-name hash rather than trusting a fixed table offset. In every symbol
+profile, the `GLOB_DAT` record immediately following the init-array relative
+relocation
 must be `R_X86_64_GLOB_DAT`, use
 symbol index one, have a zero addend, and reference a global/default-visible
 function symbol. A self-contained image must define it with a value and size
@@ -165,7 +169,7 @@ an all-zero null entry followed by the referenced symbol. Its nonempty name must
 2-to-256-byte file-backed string table and terminate within that table. Every
 relocation target must be distinct, eight-byte aligned, and wholly inside the
 writable load. A one-record table may not carry partial symbol metadata.
-The five-record main instead has an exact three-entry prefix: the null symbol
+The five- and six-record main profiles instead have an exact three-entry prefix: the null symbol
 followed by two distinct undefined global/default-visible functions with zero
 value and size. Its two `GLOB_DAT` and two `JUMP_SLOT` records must use symbol
 indexes one and two in order and four distinct writable targets.
@@ -179,6 +183,12 @@ addend must point inside that image's executable segment. Duplicate, partial,
 empty, multi-entry, unaligned, non-writable, or non-executable-target forms are
 rejected. An optional, unique `DT_INIT` value must point directly inside the
 same executable segment; zero, duplicate, and out-of-range values are rejected.
+Only the six-record executable-main profile admits an all-or-none
+`DT_PREINIT_ARRAY` and `DT_PREINIT_ARRAYSZ` pair. It must describe exactly one
+eight-byte entry in writable memory, equal the first of exactly two leading
+relative-relocation targets, and relocate to executable code. Dependencies may
+not declare preinit arrays. Partial, empty, multi-entry, reordered,
+unaligned, non-writable, or non-executable-target forms are rejected.
 The execution-oriented planning fixture uses a
 six-header main image: a dedicated read-only header load at `0x3ff000`, RX text
 stored from file offset `0x200` with entry `0x400100`, RW/RELRO data, and
@@ -235,8 +245,8 @@ NUL-terminated names before resolving the undefined main symbol to the
 dependency entry. It writes that value through
 `R_X86_64_GLOB_DAT` at `0x405108` and eager `R_X86_64_JUMP_SLOT` at `0x405110`
 before jumping to the main entry at `0x400100`. The linker-produced graph main
-instead uses its sole relative relocation for an eight-byte init array at
-`0x405100`, whose relocated constructor address is validated independently by
+instead uses two leading relative relocations for one eight-byte preinit array
+and one eight-byte init array. Their relocated callback addresses are validated independently by
 the kernel. In the synthetic fixture, the
 main workload calls the dependency through the jump slot and dependency code
 checks all three of its own relocation targets before returning the expected value. The main workload also
@@ -253,8 +263,9 @@ biases `0x610000` and `0x630000` and loaded at userspace-selected biases
 linker-owned GOT/PLT slots and split relocation tables drive the same userspace
 interpreter and the complete syscall workload. The parser admits the exact
 linker metadata used here: an in-range 32-byte `DT_PLTGOT`, zero `DT_DEBUG`,
-`DT_RELACOUNT = 1`, and optional `DT_FLAGS_1 = DF_1_PIE`; duplicates or other
-values are rejected. The main's linker metadata tail remains mapped for the
+`DT_RELACOUNT = 1` for the interpreter and dependencies,
+`DT_RELACOUNT = 2` for the preinitialized main, and optional
+`DT_FLAGS_1 = DF_1_PIE`; duplicates or other values are rejected. The main's linker metadata tail remains mapped for the
 interpreter but is intentionally outside the workload's bounded syscall-copy
 extent, preserving the existing `0x404000..0x405200` data contract.
 The executable LLD-produced main carries ordered `DT_NEEDED` entries for
@@ -264,22 +275,25 @@ metadata. Two independent authority records bind the ordered names to exact
 SHA-256 digests and page-aligned canonical biases. Planning authenticates both
 files before parsing, requires both SONAMEs, and rejects digest substitution or
 any pairwise overlap among the main, interpreter, and two dependency plans.
-The userspace interpreter preserves that order, derives both runtime paths,
-maps each DSO in its independent authenticated slot, applies each DSO's
+The userspace interpreter first applies the main's leading relative relocation
+and invokes its one-entry preinit array with the original startup arguments.
+Only then does it preserve dependency order, derive both runtime paths,
+map each DSO in its independent authenticated slot, and apply each DSO's
 `RELATIVE`, `GLOB_DAT`, and eager `JUMP_SLOT` relocations, then calls each
 authenticated `DT_INIT` function followed by its relocated one-entry
 `DT_INIT_ARRAY`. After resolving every main relocation, it calls the main's
 `DT_INIT` function followed by its one-entry `DT_INIT_ARRAY` before transferring
 to the main entry.
-Each provider records initialization in private writable data and its exported
+Each provider's direct init function requires the main preinit phase before it
+can record its own first phase. Each provider records initialization in private writable data and its exported
 function fails until that state is present, making constructor-before-use order
 observable in ring 3. Each direct init function records a first phase that its
 init array requires before recording completion. The main constructor calls both providers and records its
 own private initialization state only if both calls succeed; the main entry
 requires that state. This proves dependency constructors run before the main
 constructor, which runs before the main entry. The interpreter retains the
-original stack pointer and invokes all three constructors with `argc`, `argv`,
-and `envp` in the System V argument registers. Each constructor requires
+original stack pointer and invokes the preinitializer and all three constructors
+with `argc`, `argv`, and `envp` in the System V argument registers. Each constructor requires
 `argc = 1`, the `/init` argument and null terminator, and the `GINUX=1`
 environment entry and null terminator before publishing initialized state. The
 main then calls both providers through its
@@ -322,7 +336,7 @@ kernel-enforced contracts.
 
 For each loaded file, exactly one nonempty `PT_DYNAMIC` must be present, its
 file and memory sizes must match, its size must be a multiple of 16 bytes, and
-it may describe at most 21 entries. The interpreter derives the runtime
+it may describe at most 23 entries. The interpreter derives the runtime
 dynamic-table address by adding the selected bias to `p_vaddr`; the linked main
 and dependency scans no longer embed their dynamic addresses or entry counts.
 The interpreter keeps its bounded startup scratch in the zero-fill tail after
@@ -344,7 +358,9 @@ consumes four entries and proves RX, R/NX, and RW/NX mappings. A repeated first-
 request returns `-EEXIST`; a W+X executable request and an otherwise-valid page
 using another in-window bias return `-EINVAL`. The auxiliary requests map file
 offset `0x1000` RX at `0x638000` and offset `0x2000` RW/NX at `0x63b000`.
-Only then does it apply both dependencies' and the main relocations. The
+The main preinitializer runs before either dependency is discovered. Only after
+that does the interpreter apply both dependencies' remaining relocations and
+the main's remaining relocations. The
 executable namespace admits exactly `libginux.so` and `libginux-aux.so`, so an
 altered, reordered, or unterminated name fails closed. Syscall return
 validation accepts only the declared main and interpreter RX extents. The
@@ -364,7 +380,7 @@ main and dependency leases, and requires the kernel-owned live-frame count to
 return to its pre-execution value. This profile performs two exact cross-object
 name matches and calls both direct dependencies. It does not support transitive dependency graphs, search
 paths, alternate SONAME selection, symbol versions, interposition, general multi-bucket lookup,
-lazy binding, multi-entry init arrays, fini arrays,
+lazy binding, dependency preinit arrays, multi-entry preinit/init arrays, fini arrays,
 a general-purpose dynamic linker, or glibc. The main bias and
 entry are startup-metadata-driven. Each dependency selects among 16
 page-aligned candidate biases in its own fixed window and receives frames on

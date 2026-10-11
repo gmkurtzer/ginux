@@ -35,6 +35,7 @@ SECTIONS
 
     . = 0x6000;
     .data.rel.ro.head : { *(.data.rel.ro.head) } :data :relro
+    .preinit_array : { *(.preinit_array) } :data :relro
     .init_array : { *(.init_array) } :data :relro
     .data.rel.ro.tail : { *(.data.rel.ro.tail) } :data :relro
     .data.rel.ro : { *(.data.rel.ro) } :data :relro
