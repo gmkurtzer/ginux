@@ -298,6 +298,11 @@ if ! grep -q '^ginux: capability-gated bounded IPC verified' "$output_file"; the
     exit 1
 fi
 
+if ! grep -q '^ginux: directional IPC endpoints isolated' "$output_file"; then
+    echo "Boot test failed: directional IPC endpoint isolation failed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated service request-reply completed' "$output_file"; then
     echo "Boot test failed: isolated service request/reply did not complete." >&2
     exit 1

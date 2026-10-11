@@ -451,6 +451,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: restarted service preemption completed");
     serial_write("\r\nginux: completed address-space frames reclaimed");
     serial_write("\r\nginux: capability-gated bounded IPC verified");
+    serial_write("\r\nginux: directional IPC endpoints isolated");
     serial_write("\r\nginux: isolated service request-reply completed");
     serial_write("\r\nginux: service domain authority restricted to IPC");
     serial_write("\r\nginux: faulted service domain authority retired");

@@ -32,8 +32,9 @@ returns `0x4758` when authorized and `UINT64_MAX - 1` when denied. Operation 2
 exits the calling thread and does not return to that context. Operation 3
 cooperatively yields and returns zero when the context is scheduled again.
 Operation 4 sends the `RSI` word to IPC object 3 and requires write authority;
-operation 5 receives one word and requires read authority. IPC failure returns
-`UINT64_MAX - 2`.
+operation 5 receives one word and requires read authority. The kernel selects
+the request or reply direction from the caller's domain role, so an endpoint
+cannot receive its own outbound words. IPC failure returns `UINT64_MAX - 2`.
 Operation 6 writes one through eight packed bytes from `RSI`, with the byte
 count in `RDX`, and requires write authority on console object 2. It returns
 the byte count or `UINT64_MAX - 2` on denial or invalid input.

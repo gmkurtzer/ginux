@@ -568,7 +568,10 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
                 return u64::MAX;
             };
             if domain::handle_permits(caller_domain, capability, 3, Rights::WRITE)
-                && ipc::send(frame.first_argument())
+                && ipc::send(
+                    domain::is_service_domain(caller_domain),
+                    frame.first_argument(),
+                )
             {
                 0
             } else {
@@ -577,7 +580,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
         }
         5 => {
             if domain::handle_permits(caller_domain, capability, 3, Rights::READ) {
-                ipc::receive().unwrap_or(u64::MAX - 2)
+                ipc::receive(domain::is_service_domain(caller_domain)).unwrap_or(u64::MAX - 2)
             } else {
                 u64::MAX - 2
             }
