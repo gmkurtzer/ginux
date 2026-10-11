@@ -73,6 +73,8 @@ pub struct BootInfo {
     pub manifest: *const u8,
     pub manifest_size: usize,
     pub manifest_sha256: [u8; 32],
+    pub control_plane_bundle: *const u8,
+    pub control_plane_bundle_size: usize,
     pub reset_system: ResetSystem,
 }
 
@@ -151,6 +153,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: manifest authority grants: ");
     serial_write_usize(boot_manifest.grant_count());
     serial_write("\r\n");
+    if !boot_manifest.bundle_matches(
+        boot_info.control_plane_bundle,
+        boot_info.control_plane_bundle_size,
+        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+    ) {
+        kernel_fail("ginux: control-plane bundle measurement failed\r\n");
+    }
+    serial_write("ginux: control-plane bundle measurement accepted\r\n");
 
     let Some(memory_map_end) = boot_info
         .memory_map_size
@@ -176,6 +186,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         acpi_rsdp_end,
         boot_info.manifest as usize,
         boot_info.manifest as usize + boot_info.manifest_size - 1,
+        boot_info.control_plane_bundle as usize,
+        boot_info.control_plane_bundle as usize + boot_info.control_plane_bundle_size - 1,
     ];
     let guard_pages = [0, kernel_stack_guard, double_fault_guard];
 
@@ -324,7 +336,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: control-plane W^X layout failed\r\n");
     }
     serial_write("\r\nginux: control-plane W^X mappings active");
-    if !address_space::verify_ring3_control_plane() {
+    let control_plane_bundle = core::slice::from_raw_parts(
+        boot_info.control_plane_bundle,
+        boot_info.control_plane_bundle_size,
+    );
+    if !address_space::verify_ring3_control_plane(control_plane_bundle) {
         kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
     }
     serial_write("\r\nginux: ring-3 syscall round trip and exit handled");

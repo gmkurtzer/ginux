@@ -25,8 +25,9 @@ TLB shootdown protocol, and the kernel mapping remains transitional.
 
 ## Ring-3 entry proof
 
-The kernel's GDT includes user code/data descriptors and TSS RSP0 names the
-bootstrap kernel stack. A DPL3 interrupt gate at vector `0x80` accepts two
+The kernel copies only the manifest-measured control-plane bundle into the
+read-only executable page. Its GDT includes user code/data descriptors and TSS
+RSP0 names the bootstrap kernel stack. A DPL3 interrupt gate at vector `0x80` accepts two
 bring-up call numbers. The QEMU program enters CPL3 through `IRETQ`, issues a
 ping call, and verifies the returned value after `IRETQ` resumes the same user
 context. It then issues an exit call, which deliberately abandons the saved
@@ -37,3 +38,5 @@ This is not yet a stable syscall ABI or scheduler. It has no arguments,
 preemption, signal model, IPC page, or fault-containment policy. The `INT 0x80`
 mechanism is a bring-up gate; the eventual ABI may use `SYSCALL/SYSRET` with a
 safe fallback.
+The current bundle is raw position-fixed machine code; a bounded executable
+container format and relocation policy are still required.

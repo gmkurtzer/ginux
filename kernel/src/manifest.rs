@@ -1,8 +1,8 @@
 use crate::crypto;
 
 const MAGIC: &[u8; 8] = b"GINXMNF\0";
-const VERSION: u16 = 1;
-const HEADER_SIZE: usize = 32;
+const VERSION: u16 = 2;
+const HEADER_SIZE: usize = 72;
 const GRANT_SIZE: usize = 16;
 const MAX_GRANTS: usize = 8;
 const ALLOWED_RIGHTS: u64 = 0x0f;
@@ -22,6 +22,8 @@ pub(crate) struct Manifest {
     sequence: u64,
     grants: [Grant; MAX_GRANTS],
     grant_count: usize,
+    bundle_size: usize,
+    bundle_sha256: [u8; 32],
 }
 
 impl Manifest {
@@ -53,6 +55,8 @@ impl Manifest {
         let grant_count = usize::from(read_u16(bytes, 24)?);
         let flags = read_u16(bytes, 26)?;
         let reserved = read_u32(bytes, 28)?;
+        let bundle_size = usize::try_from(read_u64(bytes, 32)?).ok()?;
+        let bundle_sha256: [u8; 32] = bytes.get(40..72)?.try_into().ok()?;
         if version != VERSION
             || header_size != HEADER_SIZE
             || total_size != size
@@ -61,6 +65,7 @@ impl Manifest {
             || grant_count > MAX_GRANTS
             || flags != 0
             || reserved != 0
+            || bundle_size == 0
             || HEADER_SIZE.checked_add(grant_count.checked_mul(GRANT_SIZE)?)? != size
         {
             return None;
@@ -88,6 +93,8 @@ impl Manifest {
             sequence,
             grants,
             grant_count,
+            bundle_size,
+            bundle_sha256,
         })
     }
 
@@ -101,6 +108,27 @@ impl Manifest {
 
     pub(crate) fn grants(&self) -> &[Grant] {
         &self.grants[..self.grant_count]
+    }
+
+    pub(crate) fn bundle_matches(
+        &self,
+        pointer: *const u8,
+        size: usize,
+        mapped_limit: usize,
+    ) -> bool {
+        if pointer.is_null() || size != self.bundle_size {
+            return false;
+        }
+        let address = pointer as usize;
+        if address >= mapped_limit
+            || address
+                .checked_add(size.saturating_sub(1))
+                .is_none_or(|end| end >= mapped_limit)
+        {
+            return false;
+        }
+        let bytes = unsafe { core::slice::from_raw_parts(pointer, size) };
+        crypto::sha256(bytes) == self.bundle_sha256
     }
 }
 
