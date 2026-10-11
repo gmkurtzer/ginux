@@ -1,7 +1,7 @@
 # Linux ELF64 Profile v0
 
-**Status:** Strict static x86-64 parser and inactive mapping profile verified in
-QEMU; execution is not yet implemented.
+**Status:** Strict static x86-64 parser and activated mapping profile verified
+in QEMU; execution is not yet implemented.
 
 The first Linux-compatibility boundary accepts a deliberately bounded ELF64
 profile. Files must be little-endian ELF class 64, current ELF version,
@@ -42,16 +42,20 @@ segment's file tail through `p_memsz` and all remaining page bytes are zero.
 The QEMU verifier checks the exact RX instruction byte, RW data bytes, W^X
 metadata, and every zero-filled byte in both pages.
 
-The QEMU proof installs the two pages into a newly allocated, inactive x86-64
+The QEMU proof installs the two pages into a newly allocated x86-64
 root at their declared `0x400000` and `0x401000` addresses. It privately clones
 the affected PML4, PDPT, directory, and 2 MiB leaf region; replaces only the two
 target leaves; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
-map. The six root/table/payload frames are cleared and released afterward.
+map. Before changing CR3, it rejects either target page if it overlaps the
+loaded kernel PE image. It then activates the root, observes both pages through
+their declared user virtual addresses under SMAP, restores and reads back the
+kernel root, and clears and releases all six root/table/payload frames.
 
-This address space is deliberately not activated. It retains supervisor-only
-low identity leaves around the ELF pages so the current low-linked kernel could
-eventually handle a transition, but collision checks against every live kernel
-mapping and a Linux stack/entry contract are not defined yet. The loader does
-not relocate `ET_EXEC` images to the existing high test address, because doing
-so would violate ELF semantics and hide these remaining prerequisites.
+No ELF instruction is executed. The root retains supervisor-only low identity
+leaves around the ELF pages so the current low-linked kernel can survive the
+proof transition, but a Linux stack/entry contract, scheduler ownership model,
+and general collision policy beyond the loaded kernel image are not defined
+yet. The loader does not relocate `ET_EXEC` images to the existing high test
+address, because doing so would violate ELF semantics and hide these remaining
+prerequisites.

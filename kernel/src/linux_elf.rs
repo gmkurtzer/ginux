@@ -218,7 +218,7 @@ pub(crate) fn verify_load_plan() -> bool {
         && writable_page[8..].iter().all(|byte| *byte == 0)
 }
 
-pub(crate) fn verify_mapped_load_plan() -> bool {
+pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usize) -> bool {
     let image = fixture();
     let Some(parsed) = parse(&image) else {
         return false;
@@ -226,7 +226,7 @@ pub(crate) fn verify_mapped_load_plan() -> bool {
     let Some(plan) = plan(&parsed) else {
         return false;
     };
-    crate::address_space::verify_linux_elf_mapping(&plan)
+    crate::address_space::verify_linux_elf_mapping(&plan, protected_start, protected_size)
 }
 
 fn fixture() -> [u8; 272] {

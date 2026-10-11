@@ -26,7 +26,11 @@ const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 static mut AUXILIARY_ADDRESS_SPACES: [Option<RegisteredAuxiliaryAddressSpace>;
     domain::MAX_AUXILIARY_SERVICES] = [const { None }; domain::MAX_AUXILIARY_SERVICES];
 
-pub(crate) fn verify_linux_elf_mapping(plan: &crate::linux_elf::LoadPlan<'_>) -> bool {
+pub(crate) fn verify_linux_elf_mapping(
+    plan: &crate::linux_elf::LoadPlan<'_>,
+    protected_start: u64,
+    protected_size: usize,
+) -> bool {
     let [first, second] = plan.segments;
     let indexes = |address: u64| {
         [
@@ -38,7 +42,17 @@ pub(crate) fn verify_linux_elf_mapping(plan: &crate::linux_elf::LoadPlan<'_>) ->
     };
     let first_indexes = indexes(first.virtual_page);
     let second_indexes = indexes(second.virtual_page);
-    if first_indexes[..3] != second_indexes[..3]
+    let Some(protected_end) = protected_start.checked_add(protected_size as u64) else {
+        return false;
+    };
+    let overlaps_protected = |page: u64| {
+        page.checked_add(PAGE_SIZE as u64)
+            .is_none_or(|end| page < protected_end && protected_start < end)
+    };
+    if protected_size == 0
+        || overlaps_protected(first.virtual_page)
+        || overlaps_protected(second.virtual_page)
+        || first_indexes[..3] != second_indexes[..3]
         || first_indexes[0] != 0
         || first_indexes[1] != 0
         || first.writable == first.executable
@@ -54,12 +68,13 @@ pub(crate) fn verify_linux_elf_mapping(plan: &crate::linux_elf::LoadPlan<'_>) ->
     };
     let addresses = frames.map(memory::FrameLease::address);
     let [root, pdpt, directory, table, first_page, second_page] = addresses;
+    let kernel_root_physical = current_root();
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [root, pdpt, directory, table] {
                 zero_frame(frame)?;
             }
-            let kernel_root = mapped_frame::<u64>(current_root())?;
+            let kernel_root = mapped_frame::<u64>(kernel_root_physical)?;
             let root_entries = mapped_frame::<u64>(root)?;
             let pdpt_entries = mapped_frame::<u64>(pdpt)?;
             let directory_entries = mapped_frame::<u64>(directory)?;
@@ -119,18 +134,30 @@ pub(crate) fn verify_linux_elf_mapping(plan: &crate::linux_elf::LoadPlan<'_>) ->
 
             let first_entry = table_entries.add(first_indexes[3]).read();
             let second_entry = table_entries.add(second_indexes[3]).read();
-            Some(
-                root_entries.add(256).read() == kernel_root.add(256).read()
-                    && root_entries.add(256).read() & USER == 0
-                    && first_entry & (PRESENT | USER) == PRESENT | USER
-                    && first_entry & (WRITABLE | NO_EXECUTE) == 0
-                    && second_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
-                        == PRESENT | WRITABLE | USER | NO_EXECUTE
-                    && first_bytes[0] == 0xc3
-                    && first_bytes[1..].iter().all(|byte| *byte == 0)
-                    && second_bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
-                    && second_bytes[8..].iter().all(|byte| *byte == 0),
-            )
+            let entries_valid = root_entries.add(256).read() == kernel_root.add(256).read()
+                && root_entries.add(256).read() & USER == 0
+                && first_entry & (PRESENT | USER) == PRESENT | USER
+                && first_entry & (WRITABLE | NO_EXECUTE) == 0
+                && second_entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                    == PRESENT | WRITABLE | USER | NO_EXECUTE
+                && first_bytes[0] == 0xc3
+                && first_bytes[1..].iter().all(|byte| *byte == 0)
+                && second_bytes[..8] == [1, 2, 3, 4, 5, 6, 7, 8]
+                && second_bytes[8..].iter().all(|byte| *byte == 0);
+            if !entries_valid {
+                return Some(false);
+            }
+
+            activate(root);
+            let activated = current_root() == root;
+            let observed = cpu::with_supervisor_user_access(|| {
+                (first.virtual_page as *const u8).read_volatile() == 0xc3
+                    && (second.virtual_page as *const u64).read_volatile()
+                        == u64::from_le_bytes([1, 2, 3, 4, 5, 6, 7, 8])
+            });
+            activate(kernel_root_physical);
+            let restored = current_root() == kernel_root_physical;
+            Some(activated && observed && restored)
         }
     })()
     .unwrap_or(false);

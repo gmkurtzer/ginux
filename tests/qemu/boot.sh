@@ -518,8 +518,8 @@ if ! grep -q '^ginux: Linux ELF64 page images materialized' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux ELF64 virtual mappings validated' "$output_file"; then
-    echo "Boot test failed: Linux ELF64 virtual mappings were not validated." >&2
+if ! grep -q '^ginux: Linux ELF64 virtual mappings activated' "$output_file"; then
+    echo "Boot test failed: Linux ELF64 virtual mappings were not activated." >&2
     exit 1
 fi
 

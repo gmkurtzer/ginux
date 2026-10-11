@@ -6,8 +6,9 @@ The initial executable milestone is an x86-64 unified EFI image tested under QEM
 
 M4 begins with a strict static x86-64 ELF64 parser profile. It is validated
 during boot, materializes bounded RX/RW page images with zero-filled BSS, and
-installs them at their declared addresses in a verified inactive page-table
-root. It does not yet execute Linux binaries; see
+installs them at their declared addresses in a collision-checked page-table
+root, briefly activates it, and verifies both mappings through hardware. It
+does not yet execute Linux binaries; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md).
 
 ## Quick start
