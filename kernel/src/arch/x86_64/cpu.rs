@@ -357,6 +357,8 @@ static LINUX_CLONE_REUSE_VALIDATED: AtomicBool = AtomicBool::new(false);
 static LINUX_CHILD_GETTID_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_YIELD_SWITCH_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_CLONE_BUSY_REJECTION_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_CLONE_INVALID_REJECTION_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_CLONE_TID_FAULT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_EXPLICIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_EXIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -2058,6 +2060,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     LINUX_CHILD_GETTID_COUNT.store(0, Ordering::SeqCst);
     LINUX_YIELD_SWITCH_COUNT.store(0, Ordering::SeqCst);
     LINUX_CLONE_BUSY_REJECTION_COUNT.store(0, Ordering::SeqCst);
+    LINUX_CLONE_INVALID_REJECTION_COUNT.store(0, Ordering::SeqCst);
+    LINUX_CLONE_TID_FAULT_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_EXPLICIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_EXIT_WAKE_COUNT.store(0, Ordering::SeqCst);
@@ -2319,6 +2323,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let child_gettid_count = LINUX_CHILD_GETTID_COUNT.swap(0, Ordering::SeqCst);
     let yield_switch_count = LINUX_YIELD_SWITCH_COUNT.swap(0, Ordering::SeqCst);
     let clone_busy_rejection_count = LINUX_CLONE_BUSY_REJECTION_COUNT.swap(0, Ordering::SeqCst);
+    let clone_invalid_rejection_count =
+        LINUX_CLONE_INVALID_REJECTION_COUNT.swap(0, Ordering::SeqCst);
+    let clone_tid_fault_count = LINUX_CLONE_TID_FAULT_COUNT.swap(0, Ordering::SeqCst);
     let futex_wait_block_count = LINUX_FUTEX_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let futex_explicit_wake_count = LINUX_FUTEX_EXPLICIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let futex_exit_wake_count = LINUX_FUTEX_EXIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
@@ -2331,6 +2338,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             && child_gettid_count == 2
             && yield_switch_count == 6
             && clone_busy_rejection_count == 2
+            && clone_invalid_rejection_count == 1
+            && clone_tid_fault_count == 1
             && futex_wait_block_count == 4
             && futex_explicit_wake_count == 2
             && futex_exit_wake_count == 2)
@@ -2345,12 +2354,32 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
             child_gettid_count == 2,
             yield_switch_count == 6,
             clone_busy_rejection_count == 2,
+            clone_invalid_rejection_count == 1,
+            clone_tid_fault_count == 1,
             futex_wait_block_count == 4,
             futex_explicit_wake_count == 2,
             futex_exit_wake_count == 2,
         ] {
             serial_write(" ");
             serial_write_u64(u64::from(state));
+        }
+        serial_write("\r\n");
+        serial_write("ginux: Linux thread transition counts:");
+        for count in [
+            child_exit_count,
+            clone_dispatch_count,
+            first_child_tid,
+            child_gettid_count,
+            yield_switch_count,
+            clone_busy_rejection_count,
+            clone_invalid_rejection_count,
+            clone_tid_fault_count,
+            futex_wait_block_count,
+            futex_explicit_wake_count,
+            futex_exit_wake_count,
+        ] {
+            serial_write(" ");
+            serial_write_u64(u64::from(count));
         }
         serial_write("\r\n");
     }
@@ -2605,6 +2634,8 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 && child_gettid_count == 2
                 && yield_switch_count == 6
                 && clone_busy_rejection_count == 2
+                && clone_invalid_rejection_count == 1
+                && clone_tid_fault_count == 1
                 && futex_wait_block_count == 4
                 && futex_explicit_wake_count == 2
                 && futex_exit_wake_count == 2)
@@ -3509,8 +3540,14 @@ fn linux_clone_thread(registers: LinuxSyscallFrame, user_rip: u64, user_rflags: 
         Err(error) => {
             let _ = retire_linux_thread(child);
             return match error {
-                LinuxClonePublishError::InvalidRequest => LINUX_EINVAL,
-                LinuxClonePublishError::TidFault => LINUX_EFAULT,
+                LinuxClonePublishError::InvalidRequest => {
+                    LINUX_CLONE_INVALID_REJECTION_COUNT.fetch_add(1, Ordering::SeqCst);
+                    LINUX_EINVAL
+                }
+                LinuxClonePublishError::TidFault => {
+                    LINUX_CLONE_TID_FAULT_COUNT.fetch_add(1, Ordering::SeqCst);
+                    LINUX_EFAULT
+                }
             };
         }
     };

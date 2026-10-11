@@ -163,9 +163,12 @@ parent, leaves the parent-TID word intact, retires itself, and restores the
 parent's registers, FS base, and copy ownership. Both resumed waits return
 zero. The complete handshake then runs a second time through the reused slot;
 the kernel requires the guarded stack to be fully scrubbed first and the new
-child TID to exceed the first. Malformed requests return `EINVAL`, inaccessible TID writes
-return `EFAULT`, and occupied capacity returns `EAGAIN` without mutating the
-live slot. This remains a fixed
+child TID to exceed the first. Before the first successful creation, a live
+syscall attempt proves that malformed flags return `EINVAL`, retires its
+provisional slot, and permits the valid clone to follow. After both children
+retire and the main RELRO page is sealed, a parent-TID write into that page
+returns `EFAULT`; final teardown proves the failed transaction leaked no slot.
+Occupied capacity returns `EAGAIN` without mutating the live slot. This remains a fixed
 two-slot, two-sequential-child proof without arbitrary allocation, more than
 one live child, preemption, futex timeouts, multiple waiters, requeue
 operations, or a general scheduler.

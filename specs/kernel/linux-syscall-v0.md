@@ -568,6 +568,11 @@ the second reservation requires a scrubbed stack and a larger monotonic TID.
 `exit_group(42)` remains final process teardown. More than two sequential
 children, parallel execution, timer preemption, and general Linux-thread
 scheduling are undefined.
+Before its first successful clone, the live syscall path rejects malformed
+flags with `-EINVAL`, retires the provisional child transaction, and then
+successfully reserves the same slot. After both children retire and the main
+RELRO page is sealed, an inaccessible parent-TID target returns `-EFAULT`;
+final teardown proves that failure also retires its provisional transaction.
 While the first child is ready between its two parent selections, a second
 otherwise-valid syscall 56 request returns `-EAGAIN`. That rejection does not
 change either published TID word or replace the live child context.

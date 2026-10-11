@@ -813,6 +813,11 @@ if ! grep -q '^ginux: occupied Linux clone capacity rejected live' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: live Linux clone failures rolled back transactionally' "$output_file"; then
+    echo "Boot test failed: live Linux clone failures did not roll back transactionally." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux clone return values validated' "$output_file"; then
     echo "Boot test failed: Linux clone return values were not validated." >&2
     exit 1

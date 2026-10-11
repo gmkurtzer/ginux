@@ -500,6 +500,13 @@ valid_interpreter_base:
     call syscall_expect_efault
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+    xor edi, edi
+    mov esi, 0x411000
+    mov edx, 0x405194
+    lea r8d, [edx + 4]
+    mov r9d, 0x40efc0
+    mov eax, 56
+    call syscall_expect_einval
     mov r14d, 2
 linux_clone_repeat:
     mov edi, 0x13d0f00
@@ -3214,6 +3221,16 @@ resolution_valid:
     call nested_getpid
     cmp rax, 1
     jne failure
+
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+    mov edi, 0x13d0f00
+    mov esi, 0x411000
+    mov edx, 0x4061fc
+    mov r8d, 0x405198
+    mov r9d, 0x40efc0
+    mov eax, 56
+    call syscall_expect_efault
+#endif
 
     mov edi, 42
     mov eax, 231

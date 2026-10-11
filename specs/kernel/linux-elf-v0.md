@@ -523,6 +523,12 @@ stack byte to be zero. The entire sequence repeats once through the same slot;
 the second reservation requires the stack to be zero and its TID to exceed the
 first. This proves bounded sequential generation reuse, not arbitrary repeated
 creation, simultaneous execution, timed waits, or general scheduling.
+Before the first successful clone, the ring-3 workload submits one request with
+invalid flags. It must return `EINVAL`, retire the provisional slot, leave the
+TID targets unchanged, and permit the subsequent valid request to succeed.
+After both children retire and the main RELRO page is sealed, a request whose
+parent-TID pointer targets that page must return `EFAULT`; final teardown proves
+that this failed transaction also leaves no reserved slot behind.
 
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns
