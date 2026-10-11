@@ -156,11 +156,13 @@ child-TID word, selecting the child again; its first wait resumes with zero.
 The child calls `exit(42)`, clears only its child-TID word, wakes the matching
 parent, leaves the parent-TID word intact, retires itself, and restores the
 parent's registers, FS base, and copy ownership. Both resumed waits return
-zero. Malformed requests return `EINVAL`, inaccessible TID writes
+zero. The complete handshake then runs a second time through the reused slot;
+the kernel requires the guarded stack to be fully scrubbed first and the new
+child TID to exceed the first. Malformed requests return `EINVAL`, inaccessible TID writes
 return `EFAULT`, and occupied capacity returns `EAGAIN`. This remains a fixed
-two-slot, one-child profile without arbitrary allocation, simultaneous
-execution, preemption, futex timeouts, multiple waiters, requeue operations, or
-a general scheduler.
+two-slot, two-sequential-child proof without arbitrary allocation, more than
+one live child, preemption, futex timeouts, multiple waiters, requeue
+operations, or a general scheduler.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
 switches between them, and proves neither becomes visible through the other.

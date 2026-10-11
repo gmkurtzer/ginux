@@ -512,9 +512,10 @@ wakes the matching parent, leaves the parent-TID word unchanged, retires the
 child slot, scrubs its user stack, and restores the parent's saved registers,
 RIP/RSP/RFLAGS, FS base, and copy extent. The resumed parent wait returns zero
 and verifies both TID words. Teardown requires every waiter address and retired
-stack byte to be zero. This proves one complete explicit-wake and exit-wake
-sequence, not repeated creation, simultaneous execution, timed waits, or
-general scheduling.
+stack byte to be zero. The entire sequence repeats once through the same slot;
+the second reservation requires the stack to be zero and its TID to exceed the
+first. This proves bounded sequential generation reuse, not arbitrary repeated
+creation, simultaneous execution, timed waits, or general scheduling.
 
 Clear-child-TID and robust-list registrations belong to the generation-tagged
 thread slot rather than process-global state. The lifecycle proof assigns

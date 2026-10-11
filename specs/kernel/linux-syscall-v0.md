@@ -559,9 +559,11 @@ child; the parent's matching wait then selects it and resumes the child wait
 with zero. Child `exit(42)` clears only the child-TID word, wakes the matching
 parent, preserves the parent-TID word, retires and scrubs only the child slot,
 and returns the parent through the same live-frame path. The parent wait also
-resumes with zero.
-`exit_group(42)` remains final process teardown. Repeated creation, parallel
-execution, timer preemption, and general Linux-thread scheduling are undefined.
+resumes with zero. The complete sequence repeats once through the same slot;
+the second reservation requires a scrubbed stack and a larger monotonic TID.
+`exit_group(42)` remains final process teardown. More than two sequential
+children, parallel execution, timer preemption, and general Linux-thread
+scheduling are undefined.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
 `getegid`; each returns zero. These are Linux-container credentials only. They
 do not select a native domain, add a capability, or authorize a kernel control
@@ -704,9 +706,10 @@ the fixed sibling stack and TLS resources, and distinct writable aligned parent-
 and child-TID words. It publishes the TID to both words and returns it to the
 parent. Explicit wake first resumes a blocked child; a second matching wait
 runs it again, and child exit clears its word, wakes the blocked parent, and
-resumes that wait with zero. There is no
-general TID allocation, repeated or parallel thread creation, general futex
-queue, or robust futex recovery yet. Every other call
+resumes that wait with zero. This handshake repeats for a second monotonic TID
+through the scrubbed slot. There is no general TID allocation, arbitrary or
+parallel thread creation, general futex queue, or robust futex recovery yet.
+Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
 remains disarmed outside the proof. The current copy helpers cover only the one

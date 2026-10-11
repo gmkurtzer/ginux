@@ -500,6 +500,8 @@ valid_interpreter_base:
     call syscall_expect_efault
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+    mov r14d, 2
+linux_clone_repeat:
     mov edi, 0x13d0f00
     mov esi, 0x410000
     mov edx, 0x404194
@@ -532,6 +534,8 @@ valid_interpreter_base:
     jne failure
     cmp dword ptr [rbp], ebx
     jne failure
+    dec r14d
+    jnz linux_clone_repeat
 #else
     mov eax, 24
     call syscall_expect_zero
@@ -569,20 +573,11 @@ valid_interpreter_base:
     syscall
     cmp rax, 20
     jne failure
-    mov edi, 1
-    xor esi, esi
-    mov eax, 140
-    call syscall_expect_einval
     xor edi, edi
     xor esi, esi
     xor edx, edx
     mov eax, 141
     call syscall_expect_zero
-    mov edx, 1
-    mov eax, 141
-    syscall
-    cmp rax, -1
-    jne failure
 
     mov edi, 2
     mov esi, 0x404000

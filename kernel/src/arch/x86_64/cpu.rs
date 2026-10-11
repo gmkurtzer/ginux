@@ -349,12 +349,14 @@ static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static LINUX_LIVE_RETURN_VALIDATED: AtomicBool = AtomicBool::new(false);
-static LINUX_CHILD_EXECUTED: AtomicBool = AtomicBool::new(false);
+static LINUX_CHILD_EXIT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PARENT_RESUMED: AtomicBool = AtomicBool::new(false);
-static LINUX_CLONE_DISPATCHED: AtomicBool = AtomicBool::new(false);
+static LINUX_CLONE_DISPATCH_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_FIRST_CHILD_TID: AtomicU32 = AtomicU32::new(0);
+static LINUX_CLONE_REUSE_VALIDATED: AtomicBool = AtomicBool::new(false);
 static LINUX_FUTEX_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_FUTEX_EXPLICIT_WAKE: AtomicBool = AtomicBool::new(false);
-static LINUX_FUTEX_EXIT_WAKE: AtomicBool = AtomicBool::new(false);
+static LINUX_FUTEX_EXPLICIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_FUTEX_EXIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
@@ -2045,12 +2047,14 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     }
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     LINUX_LIVE_RETURN_VALIDATED.store(false, Ordering::SeqCst);
-    LINUX_CHILD_EXECUTED.store(false, Ordering::SeqCst);
+    LINUX_CHILD_EXIT_COUNT.store(0, Ordering::SeqCst);
     LINUX_PARENT_RESUMED.store(false, Ordering::SeqCst);
-    LINUX_CLONE_DISPATCHED.store(false, Ordering::SeqCst);
+    LINUX_CLONE_DISPATCH_COUNT.store(0, Ordering::SeqCst);
+    LINUX_FIRST_CHILD_TID.store(0, Ordering::SeqCst);
+    LINUX_CLONE_REUSE_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_FUTEX_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
-    LINUX_FUTEX_EXPLICIT_WAKE.store(false, Ordering::SeqCst);
-    LINUX_FUTEX_EXIT_WAKE.store(false, Ordering::SeqCst);
+    LINUX_FUTEX_EXPLICIT_WAKE_COUNT.store(0, Ordering::SeqCst);
+    LINUX_FUTEX_EXIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -2301,28 +2305,34 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let live_return_validated = LINUX_LIVE_RETURN_VALIDATED.swap(false, Ordering::SeqCst);
-    let child_executed = LINUX_CHILD_EXECUTED.swap(false, Ordering::SeqCst);
+    let child_exit_count = LINUX_CHILD_EXIT_COUNT.swap(0, Ordering::SeqCst);
     let parent_resumed = LINUX_PARENT_RESUMED.swap(false, Ordering::SeqCst);
-    let clone_dispatched = LINUX_CLONE_DISPATCHED.swap(false, Ordering::SeqCst);
+    let clone_dispatch_count = LINUX_CLONE_DISPATCH_COUNT.swap(0, Ordering::SeqCst);
+    let first_child_tid = LINUX_FIRST_CHILD_TID.swap(0, Ordering::SeqCst);
+    let clone_reuse_validated = LINUX_CLONE_REUSE_VALIDATED.swap(false, Ordering::SeqCst);
     let futex_wait_block_count = LINUX_FUTEX_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
-    let futex_explicit_wake = LINUX_FUTEX_EXPLICIT_WAKE.swap(false, Ordering::SeqCst);
-    let futex_exit_wake = LINUX_FUTEX_EXIT_WAKE.swap(false, Ordering::SeqCst);
+    let futex_explicit_wake_count = LINUX_FUTEX_EXPLICIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
+    let futex_exit_wake_count = LINUX_FUTEX_EXIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     if execution.tls_size != 0
-        && !(child_executed
+        && !(child_exit_count == 2
             && parent_resumed
-            && clone_dispatched
-            && futex_wait_block_count == 2
-            && futex_explicit_wake
-            && futex_exit_wake)
+            && clone_dispatch_count == 2
+            && first_child_tid != 0
+            && clone_reuse_validated
+            && futex_wait_block_count == 4
+            && futex_explicit_wake_count == 2
+            && futex_exit_wake_count == 2)
     {
         serial_write("ginux: Linux thread transition state:");
         for state in [
-            child_executed,
+            child_exit_count == 2,
             parent_resumed,
-            clone_dispatched,
-            futex_wait_block_count == 2,
-            futex_explicit_wake,
-            futex_exit_wake,
+            clone_dispatch_count == 2,
+            first_child_tid != 0,
+            clone_reuse_validated,
+            futex_wait_block_count == 4,
+            futex_explicit_wake_count == 2,
+            futex_exit_wake_count == 2,
         ] {
             serial_write(" ");
             serial_write_u64(u64::from(state));
@@ -2572,12 +2582,14 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         && completed
         && live_return_validated
         && (execution.tls_size == 0
-            || child_executed
+            || child_exit_count == 2
                 && parent_resumed
-                && clone_dispatched
-                && futex_wait_block_count == 2
-                && futex_explicit_wake
-                && futex_exit_wake)
+                && clone_dispatch_count == 2
+                && first_child_tid != 0
+                && clone_reuse_validated
+                && futex_wait_block_count == 4
+                && futex_explicit_wake_count == 2
+                && futex_exit_wake_count == 2)
         && child_tid_cleared
         && robust_list_cleared
         && protected_page == execution.relro as u64
@@ -2899,7 +2911,7 @@ extern "sysv64" fn linux_syscall_handler(
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;
     }
-    if current_linux_tid() == Some(1) && LINUX_CHILD_EXECUTED.load(Ordering::SeqCst) {
+    if current_linux_tid() == Some(1) && LINUX_CHILD_EXIT_COUNT.load(Ordering::SeqCst) != 0 {
         LINUX_PARENT_RESUMED.store(true, Ordering::SeqCst);
     }
     match number {
@@ -3434,6 +3446,17 @@ fn linux_clone_thread(registers: LinuxSyscallFrame, user_rip: u64, user_rflags: 
         extent: sibling_tls as usize,
         extent_size: tls_size as usize,
     };
+    let prior_dispatch_count = LINUX_CLONE_DISPATCH_COUNT.load(Ordering::SeqCst);
+    // SAFETY: the authenticated sibling stack remains mapped RW/NX for this
+    // process, and SMAP is relaxed only for the bounded pre-reuse inspection.
+    let reused_stack_scrubbed = prior_dispatch_count == 1
+        && unsafe {
+            with_supervisor_user_access(|| {
+                core::slice::from_raw_parts(sibling_stack as *const u8, PAGE_SIZE)
+                    .iter()
+                    .all(|byte| *byte == 0)
+            })
+        };
     let Some(child) = reserve_linux_thread(sibling_context, sibling_stack as usize, PAGE_SIZE)
     else {
         return LINUX_EAGAIN;
@@ -3461,7 +3484,15 @@ fn linux_clone_thread(registers: LinuxSyscallFrame, user_rip: u64, user_rflags: 
             };
         }
     };
-    LINUX_CLONE_DISPATCHED.store(true, Ordering::SeqCst);
+    let dispatch_index = LINUX_CLONE_DISPATCH_COUNT.fetch_add(1, Ordering::SeqCst);
+    if dispatch_index == 0 {
+        LINUX_FIRST_CHILD_TID.store(child.tid, Ordering::SeqCst);
+    } else if dispatch_index == 1
+        && reused_stack_scrubbed
+        && child.tid > LINUX_FIRST_CHILD_TID.load(Ordering::SeqCst)
+    {
+        LINUX_CLONE_REUSE_VALIDATED.store(true, Ordering::SeqCst);
+    }
     result.parent_rax
 }
 
@@ -3507,9 +3538,9 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
         return LINUX_EINVAL;
     }
     if woken == 1 {
-        LINUX_FUTEX_EXIT_WAKE.store(true, Ordering::SeqCst);
+        LINUX_FUTEX_EXIT_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
     }
-    LINUX_CHILD_EXECUTED.store(true, Ordering::SeqCst);
+    LINUX_CHILD_EXIT_COUNT.fetch_add(1, Ordering::SeqCst);
     context.rax
 }
 
@@ -3800,7 +3831,7 @@ fn linux_futex_live_return(
         1 | 129 => {
             let woken = wake_linux_futex(address, u32::try_from(value).unwrap_or(u32::MAX));
             if woken != 0 {
-                LINUX_FUTEX_EXPLICIT_WAKE.store(true, Ordering::SeqCst);
+                LINUX_FUTEX_EXPLICIT_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
             }
             u64::from(woken)
         }

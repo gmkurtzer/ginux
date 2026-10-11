@@ -778,6 +778,21 @@ if ! grep -q '^ginux: bounded Linux clone syscall dispatched' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: sequential Linux clone slot reuse validated' "$output_file"; then
+    echo "Boot test failed: sequential Linux clone slot reuse was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: reused Linux child stack began scrubbed' "$output_file"; then
+    echo "Boot test failed: a reused Linux child stack was not scrubbed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: monotonic Linux clone TIDs validated' "$output_file"; then
+    echo "Boot test failed: sequential Linux clone TIDs were not monotonic." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux clone return values validated' "$output_file"; then
     echo "Boot test failed: Linux clone return values were not validated." >&2
     exit 1
