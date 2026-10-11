@@ -273,8 +273,9 @@ unknown mode bits or flags return `-EINVAL`, with the same path errors as
 `openat`.
 
 The immutable runtime namespace also recognizes `/init`,
-`/lib64/ld-ginux.so`, and `/lib64/libginux.so`. These names expose the exact
-build-authenticated ELF byte slices already used by the execution proof, not
+`/lib64/ld-ginux.so`, `/lib64/libginux.so`, and `/lib64/libginux-aux.so`.
+These names expose the exact build-authenticated ELF byte slices used by the
+execution or bounded dependency-graph proofs, not
 copies or mutable storage. `openat` accepts only `O_RDONLY` with optional
 `O_CLOEXEC`; writable access returns `-EACCES` and `O_DIRECTORY` returns
 `-ENOTDIR`. Each open has an independent 64-bit cursor. `read` and bounded
@@ -282,12 +283,14 @@ copies or mutable storage. `openat` accepts only `O_RDONLY` with optional
 `SEEK_SET`, `SEEK_CUR`, and `SEEK_END` with checked nonnegative results.
 `fstat`, `newfstatat`, and `statx` report immutable regular mode `0555`, stable
 inodes, and the exact artifact length; access checks deny writes. The ring-3
-proof reads ELF magic, performs a positioned read of the interpreter entry,
+proof reads ELF magic from the main and auxiliary dependency, performs a
+positioned read of the interpreter entry,
 seeks and reads it again, verifies metadata, rejects writes and writable opens,
 maps the interpreter through the bounded read-only file-mapping profile below,
 and closes the descriptor. There is no `/lib64` directory enumeration,
-pathname traversal, general VFS, or userspace `execve`; the kernel still
-authenticates and plans the three fixed images. The kernel installs the
+pathname traversal, general VFS, or userspace `execve`; the kernel authenticates
+and plans the three executable images plus the separately admitted auxiliary
+dependency. The kernel installs the
 interpreter needed to bootstrap ring 3; that interpreter installs the main and
 dependency's admitted segments through the fixed mapping contract below.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
@@ -367,7 +370,8 @@ two-page extent at kernel-selected address `0x40a000`. Its anonymous form requir
 exact 4096- or 8192-byte length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
 MAP_ANONYMOUS`, fd -1, and offset zero, and installs zero-filled RW/NX frames.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
-descriptor for `/init`, `/lib64/ld-ginux.so`, or `/lib64/libginux.so`, and a
+descriptor for `/init`, `/lib64/ld-ginux.so`, `/lib64/libginux.so`, or
+`/lib64/libginux-aux.so`, and a
 page-aligned offset. Its complete one- or two-page window must fit within the
 file length rounded up to a page; offsets at or beyond EOF are rejected rather
 than deferred to a `SIGBUS` path. The kernel copies the authenticated bytes

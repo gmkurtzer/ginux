@@ -728,6 +728,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux bounded device writev validated\r\n");
     serial_write("ginux: Linux immutable device directory validated\r\n");
     serial_write("ginux: Linux immutable runtime ELF files validated\r\n");
+    serial_write("ginux: Linux auxiliary dependency runtime file validated\r\n");
     serial_write("ginux: Linux read-only runtime file mapping validated\r\n");
     serial_write("ginux: Linux saved credential queries validated\r\n");
     serial_write("ginux: Linux supplementary root group validated\r\n");

@@ -13,6 +13,27 @@ ginux_linux_probe:
     movabs rcx, 0x59434e45444e4947
     cmp rax, rcx
     jne failure
+
+    mov edi, -100
+    lea rsi, [rip + auxiliary_dependency_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne failure
+    mov edi, 2
+    lea rsi, [rsp - 32]
+    mov edx, 4
+    xor eax, eax
+    syscall
+    cmp rax, 4
+    jne failure
+    cmp dword ptr [rsp - 32], 0x464c457f
+    jne failure
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne failure
 #endif
     cmp qword ptr [rsp], 1
     jne failure
@@ -3318,6 +3339,10 @@ readable_payload:
     .ascii "PROBE!!\n"
 proc_self_exe:
     .asciz "/proc/self/exe"
+#ifdef GINUX_LINKED
+auxiliary_dependency_path:
+    .asciz "/lib64/libginux-aux.so"
+#endif
 
 .section .data
 .balign 8

@@ -1193,6 +1193,11 @@ if ! grep -q '^ginux: Linux immutable runtime ELF files validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux auxiliary dependency runtime file validated' "$output_file"; then
+    echo "Boot test failed: Linux auxiliary dependency runtime file was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux read-only runtime file mapping validated' "$output_file"; then
     echo "Boot test failed: Linux read-only runtime file mapping was not validated." >&2
     exit 1

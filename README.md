@@ -177,7 +177,10 @@ The root view retains a fixed working-directory identity of `/`; bounded
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 `readlink` result is `/init`.
 An immutable runtime-file view exposes the exact authenticated `/init`,
-`/lib64/ld-ginux.so`, and `/lib64/libginux.so` bytes as read-only regular files.
+`/lib64/ld-ginux.so`, `/lib64/libginux.so`, and `/lib64/libginux-aux.so` bytes
+as read-only regular files. The linked main opens the auxiliary DSO, reads and
+validates its ELF magic, and closes its independent descriptor; executable
+mapping of that fourth file remains outside the current runtime profile.
 Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, private
 read-only `mmap`, metadata, and access checks operate on those files. This is
 not directory traversal, a general VFS, or general `execve` loading. The kernel

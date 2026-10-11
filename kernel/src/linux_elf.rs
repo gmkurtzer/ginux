@@ -161,6 +161,10 @@ pub(crate) fn runtime_dependency_bytes() -> &'static [u8] {
     LINKED_DYNAMIC_DEPENDENCY
 }
 
+pub(crate) fn runtime_auxiliary_dependency_bytes() -> &'static [u8] {
+    LINKED_DYNAMIC_AUXILIARY
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
     pub(crate) bytes: &'a [u8],
