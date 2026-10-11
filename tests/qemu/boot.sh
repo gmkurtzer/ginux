@@ -1588,13 +1588,23 @@ if ! grep -q '^ginux: Linux directional VMA copies validated' "$output_file"; th
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux root working directory validated' "$output_file"; then
-    echo "Boot test failed: Linux root working directory was not validated." >&2
+if ! grep -q '^ginux: indexed Linux working directory validated' "$output_file"; then
+    echo "Boot test failed: indexed Linux working directory was not validated." >&2
     exit 1
 fi
 
-if ! grep -q '^ginux: Linux fixed root directory changes validated' "$output_file"; then
-    echo "Boot test failed: Linux fixed root directory changes were not validated." >&2
+if ! grep -q '^ginux: relative Linux directory changes validated' "$output_file"; then
+    echo "Boot test failed: relative Linux directory changes were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux fchdir descriptor boundary validated' "$output_file"; then
+    echo "Boot test failed: Linux fchdir descriptor boundary was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux working-directory traversal rejected' "$output_file"; then
+    echo "Boot test failed: Linux working-directory traversal was not rejected." >&2
     exit 1
 fi
 

@@ -671,8 +671,11 @@ extents; copy-out does not. The interpreter uses its RX-resident path strings
 for `openat`; the main proof reads an embedded RX payload through `write` and
 requires `-EFAULT` when `uname` targets that read-only page.
 Ranges crossing a stack guard page are rejected before SMAP access. Bounded
-`getcwd` exposes the initial container working directory as `/`, and bounded
-`readlink` identifies `/proc/self/exe` as `/init`. Per-process `umask` starts at
+`getcwd` exposes `/` initially and then the path of the indexed measured
+directory selected by `chdir` or `fchdir`. Relative `chdir` and `AT_FDCWD`
+lookups resolve beneath that retained identity while rejecting empty, `.`,
+`..`, and empty components. Bounded `readlink` identifies `/proc/self/exe` as
+`/init`. Per-process `umask` starts at
 `022` and masks updates to nine bits. It next
 issues process identity queries, verifies PID, TID, process-group, and session
 ID 1 plus parent PID 0 after the kernel resumes it through `SYSRETQ`,

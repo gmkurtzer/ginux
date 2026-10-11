@@ -159,14 +159,21 @@ validates every input range before appending any byte; `readv` validates every
 output range before scattering or consuming data. The proof injects an invalid
 later vector in each direction, then verifies that the complete original FIFO
 sequence remains available to a valid retry.
-`rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
-and its terminator to a writable VMA and returns 2. A one-byte buffer returns
-`-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded
-identity for the initial root view, not a general VFS or directory state.
-`rax = 80` (`__NR_chdir`) accepts exactly `/`, preserving that fixed root view.
-Other paths return `-ENOENT`, and an invalid or unterminated pathname returns
-the bounded pathname-copy error. No general directory lookup or mutable current
-directory state is implied.
+`rax = 79` (`__NR_getcwd`) copies the process's indexed working-directory path
+and terminator to a writable VMA and returns the required byte count. The
+initial directory is `/`; measured directories such as `/var/lib` retain their
+published root-index identity. Output is bounded to 64 bytes. An undersized
+buffer returns `-ERANGE`, and an invalid destination returns `-EFAULT`.
+`rax = 80` (`__NR_chdir`) accepts `/`, `/dev`, or an indexed measured
+directory. Absolute names resolve from the container root; relative names
+resolve beneath the current measured directory. Input is bounded to 31 bytes,
+and empty, `.`, `..`, empty-component, missing, and non-directory paths are
+rejected without changing the working directory.
+`rax = 81` (`__NR_fchdir`) selects the indexed directory held by an open
+bounded descriptor. A closed or unknown descriptor returns `-EBADF`, and a
+regular-file descriptor returns `-ENOTDIR`. Closing the descriptor afterward
+does not change the retained working-directory identity. These calls provide
+bounded immutable-root directory state, not a mutable or general VFS.
 `rax = 89` (`__NR_readlink`) recognizes exactly `/proc/self/exe`, copied as a
 bounded NUL-terminated pathname, and returns `/init` without a terminator. A
 zero output size returns `-EINVAL`; invalid pathname or output ranges return
@@ -744,7 +751,7 @@ general thread allocation, general TLS state, or any syscall other than the exac
 `read`, `pread64`, `write`, `readv`, `writev`, bounded
 `poll`/`ppoll`/`epoll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`,
 bounded device/runtime-file `openat`, `lseek`, console `ioctl`, `brk`, `uname`,
-`getcwd`, `chdir`, bounded
+`getcwd`, `chdir`, `fchdir`, bounded
 `readlink`/`readlinkat`,
 bounded anonymous and immutable-file `mmap`/`munmap` plus bounded
 `madvise`/`mincore`, bounded read-only `mprotect`,

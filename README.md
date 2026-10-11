@@ -395,8 +395,12 @@ cannot modify the mapping, and unmap scrubs both payload frames.
 General mapping placement, shared file mappings, writable mappings outside the
 exact authenticated main/dependency data pages, and arbitrary filesystem-backed
 mappings are not implemented.
-The root view retains a fixed working-directory identity of `/`; bounded
-`getcwd` returns it, while undersized and invalid buffers fail.
+The root view starts with `/` as its working directory. Bounded `chdir` and
+`fchdir` can select an immutable indexed directory such as `/var/lib`, and
+`getcwd` returns that retained path. `AT_FDCWD` and relative `chdir` resolve
+beneath the current measured directory; empty, `.`, `..`, and empty path
+components are rejected. Paths and outputs remain fixed-size, and no mutable
+VFS is implied.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 `readlink` result is `/init`.
 An immutable runtime-file view exposes the exact authenticated `/init`,
@@ -406,7 +410,8 @@ validates its ELF magic, and closes its independent descriptor. The interpreter
 also derives, inspects, and executable-maps both DSO paths.
 Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, private
 read-only `mmap`, metadata, and access checks operate on those files. This is
-not directory traversal, a general VFS, or general `execve` loading. The kernel
+bounded immutable-root traversal, not a general VFS or general `execve`
+loading. The kernel
 authenticates and plans the fixed four-image graph; the interpreter installs
 the authenticated main and both dependency segments admitted by that exact plan.
 Per-process `umask` state starts at `022`, returns its prior value, and masks

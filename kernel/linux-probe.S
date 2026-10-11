@@ -2393,6 +2393,65 @@ linux_clone_repeat:
     mov eax, 80
     call syscall_expect_zero
 
+    mov dword ptr [0x4050b0], 0x7261762f
+    mov byte ptr [0x4050b4], 0
+    mov edi, 0x4050b0
+    mov eax, 80
+    call syscall_expect_zero
+
+    mov dword ptr [0x4050b0], 0x0062696c
+    mov edi, 0x4050b0
+    mov eax, 80
+    call syscall_expect_zero
+
+    mov dword ptr [0x4050b0], 0x7261762f
+    mov byte ptr [0x4050b4], 0
+    mov edi, 0x4050b0
+    mov eax, 80
+    call syscall_expect_zero
+
+    mov dword ptr [0x4050b0], 0x0062696c
+    mov edi, -100
+    mov esi, 0x4050b0
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    cmp rax, 2
+    jne failure
+    mov edi, 2
+    mov eax, 81
+    call syscall_expect_zero
+    mov eax, 3
+    call syscall_expect_zero
+    mov edi, 2
+    mov eax, 81
+    call syscall_expect_ebadf
+
+    mov edi, 0x405020
+    mov esi, 9
+    mov eax, 79
+    syscall
+    cmp rax, 9
+    jne failure
+    movabs rax, 0x62696c2f7261762f
+    cmp qword ptr [0x405020], rax
+    jne failure
+    cmp byte ptr [0x405028], 0
+    jne failure
+
+    movabs rax, 0x000062696c2f2e2e
+    mov qword ptr [0x4050b0], rax
+    mov edi, 0x4050b0
+    mov eax, 80
+    syscall
+    cmp rax, -2
+    jne failure
+
+    mov word ptr [0x4050b0], 0x2f
+    mov edi, 0x4050b0
+    mov eax, 80
+    call syscall_expect_zero
+
     movabs rax, 0x676e697373696d2f
     mov qword ptr [0x4050b0], rax
     mov byte ptr [0x4050b8], 0

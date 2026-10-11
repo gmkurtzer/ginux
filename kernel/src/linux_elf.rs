@@ -2765,6 +2765,26 @@ fn verify_relro_parser() -> bool {
 }
 
 pub(crate) fn verify_load_plan() -> bool {
+    if !verify_static_load_plan() {
+        return false;
+    }
+    if !verify_oversized_writable_plan_rejected() {
+        crate::serial_write_bytes(b"\r\nginux: oversized load rejection invariant failed");
+        return false;
+    }
+    if !verify_page_aliasing_plan_rejected() {
+        crate::serial_write_bytes(b"\r\nginux: aliased load rejection invariant failed");
+        return false;
+    }
+    if !verify_position_independent_plan() {
+        crate::serial_write_bytes(b"\r\nginux: position-independent load invariant failed");
+        return false;
+    }
+    true
+}
+
+#[inline(never)]
+fn verify_static_load_plan() -> bool {
     let image = fixture();
     let Some(parsed) = parse(&image) else {
         crate::serial_write_bytes(b"\r\nginux: static load fixture parse failed");
@@ -2833,18 +2853,6 @@ pub(crate) fn verify_load_plan() -> bool {
         || page.iter().any(|byte| *byte != 0)
     {
         crate::serial_write_bytes(b"\r\nginux: static load materialization invariant failed");
-        return false;
-    }
-    if !verify_oversized_writable_plan_rejected() {
-        crate::serial_write_bytes(b"\r\nginux: oversized load rejection invariant failed");
-        return false;
-    }
-    if !verify_page_aliasing_plan_rejected() {
-        crate::serial_write_bytes(b"\r\nginux: aliased load rejection invariant failed");
-        return false;
-    }
-    if !verify_position_independent_plan() {
-        crate::serial_write_bytes(b"\r\nginux: position-independent load invariant failed");
         return false;
     }
     true

@@ -95,6 +95,7 @@ const LINUX_UNAME_SYSCALL: u64 = 63;
 const LINUX_FCNTL_SYSCALL: u64 = 72;
 const LINUX_GETCWD_SYSCALL: u64 = 79;
 const LINUX_CHDIR_SYSCALL: u64 = 80;
+const LINUX_FCHDIR_SYSCALL: u64 = 81;
 const LINUX_READLINK_SYSCALL: u64 = 89;
 const LINUX_UMASK_SYSCALL: u64 = 95;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
@@ -471,6 +472,7 @@ static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU16; 4] = [const { AtomicU16::new(0) }; 4];
+static ELF_PROBE_CWD: AtomicU16 = AtomicU16::new(LINUX_ROOT_DIRECTORY);
 static ELF_PROBE_EPOLL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
 static ELF_PROBE_EPOLL_EVENTS: AtomicU32 = AtomicU32::new(0);
@@ -2162,6 +2164,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
+    ELF_PROBE_CWD.store(LINUX_ROOT_DIRECTORY, Ordering::SeqCst);
     ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
     ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
@@ -2433,6 +2436,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     }
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
+        && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
         && devices_closed
         && ELF_PROBE_EPOLL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EPOLL_TARGET.swap(u64::MAX, Ordering::SeqCst) == u64::MAX
@@ -3318,23 +3322,9 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
-        LINUX_GETCWD_SYSCALL => {
-            if buffer < 2 {
-                return LINUX_ERANGE;
-            }
-            if !copy_to_linux_user(first_argument, b"/\0") {
-                return LINUX_EFAULT;
-            }
-            2
-        }
-        LINUX_CHDIR_SYSCALL => {
-            let mut path = [0_u8; 16];
-            match copy_linux_c_string(first_argument, &mut path) {
-                Ok(1) if path[0] == b'/' => 0,
-                Ok(_) => LINUX_ENOENT,
-                Err(error) => error,
-            }
-        }
+        LINUX_GETCWD_SYSCALL => linux_getcwd(first_argument, buffer),
+        LINUX_CHDIR_SYSCALL => linux_chdir(first_argument),
+        LINUX_FCHDIR_SYSCALL => linux_fchdir(first_argument),
         LINUX_READLINK_SYSCALL => linux_readlink_self(first_argument, buffer, count),
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count),
         LINUX_NEWFSTATAT_SYSCALL => linux_newfstatat(first_argument, buffer, count, register(0)),
@@ -4365,6 +4355,72 @@ fn linux_normalized_relative_path(path: &[u8]) -> bool {
             .all(|component| !component.is_empty() && component != b"." && component != b"..")
 }
 
+fn linux_getcwd(address: u64, capacity: u64) -> u64 {
+    let state = ELF_PROBE_CWD.load(Ordering::SeqCst);
+    let mut output = [0_u8; 64];
+    output[0] = b'/';
+    let length = if state == LINUX_ROOT_DIRECTORY {
+        1
+    } else if state == LINUX_DEVICE_DIRECTORY {
+        output[1..4].copy_from_slice(b"dev");
+        4
+    } else {
+        let Some(path) = linux_measured_directory_path(state) else {
+            return LINUX_ENOENT;
+        };
+        let Some(destination) = output.get_mut(1..1 + path.len()) else {
+            return LINUX_ERANGE;
+        };
+        destination.copy_from_slice(path);
+        1 + path.len()
+    };
+    let required = length + 1;
+    if capacity < required as u64 {
+        return LINUX_ERANGE;
+    }
+    if !copy_to_linux_user(address, &output[..required]) {
+        return LINUX_EFAULT;
+    }
+    required as u64
+}
+
+fn linux_chdir(path_address: u64) -> u64 {
+    let mut path = [0_u8; 32];
+    let length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let path = &path[..length];
+    let kind = if path.starts_with(b"/") {
+        linux_root_directory_kind(path)
+    } else {
+        match linux_relative_path_kind(u64::from(LINUX_AT_FDCWD), path) {
+            Ok(kind) => kind,
+            Err(error) => return error,
+        }
+    };
+    let Some(kind) = kind else {
+        return LINUX_ENOENT;
+    };
+    if kind & LINUX_DEVICE_DIRECTORY == 0 {
+        return LINUX_ENOTDIR;
+    }
+    ELF_PROBE_CWD.store(kind & !3, Ordering::SeqCst);
+    0
+}
+
+fn linux_fchdir(descriptor: u64) -> u64 {
+    let state = linux_device_descriptor(descriptor);
+    if state == 0 {
+        return LINUX_EBADF;
+    }
+    if state & LINUX_DEVICE_DIRECTORY == 0 {
+        return LINUX_ENOTDIR;
+    }
+    ELF_PROBE_CWD.store(state & !3, Ordering::SeqCst);
+    0
+}
+
 fn linux_root_directory_inode(kind: u16) -> Option<u64> {
     let role = kind & (LINUX_DEVICE_DIRECTORY | LINUX_FILE_MASK);
     if role == LINUX_DEVICE_DIRECTORY {
@@ -4395,18 +4451,17 @@ fn linux_relative_path_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, 
     if !linux_normalized_relative_path(path) {
         return Err(LINUX_ENOENT);
     }
-    if directory as u32 == LINUX_AT_FDCWD {
-        return linux_measured_path_kind(path).map(Some).ok_or(LINUX_ENOENT);
-    }
-    let state = linux_device_descriptor(directory);
-    if state == 0 {
-        return Err(LINUX_EBADF);
-    }
+    let state = if directory as u32 == LINUX_AT_FDCWD {
+        ELF_PROBE_CWD.load(Ordering::SeqCst)
+    } else {
+        let state = linux_device_descriptor(directory);
+        if state == 0 {
+            return Err(LINUX_EBADF);
+        }
+        state
+    };
     if state & LINUX_DEVICE_DIRECTORY == 0 {
         return Err(LINUX_ENOTDIR);
-    }
-    if path.contains(&b'/') {
-        return Err(LINUX_ENOENT);
     }
     let Some(parent) = linux_measured_directory_path(state) else {
         return Err(LINUX_ENOENT);

@@ -83,7 +83,7 @@ the live descriptor. `dev`
 retains its synthetic device children while its directory node comes from the
 measured root. An open measured-directory descriptor resolves any direct
 regular child by constructing a bounded path and consulting the retained
-index; the fixed root working directory resolves bounded relative paths the
+index; the current indexed working directory resolves bounded relative paths the
 same way. Multi-component names are accepted only when every component is
 nonempty and is neither `.` nor `..`; the proof rejects `../lib`. The proof
 obtains `motd` metadata without a kernel filename case. A regular file
