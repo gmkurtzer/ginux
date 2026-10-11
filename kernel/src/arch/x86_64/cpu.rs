@@ -57,6 +57,7 @@ const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_RT_SIGACTION_SYSCALL: u64 = 13;
 const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
+const LINUX_PREAD64_SYSCALL: u64 = 17;
 const LINUX_READV_SYSCALL: u64 = 19;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
 const LINUX_PIPE_SYSCALL: u64 = 22;
@@ -170,6 +171,7 @@ const LINUX_MADV_DONTNEED: u64 = 4;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_STAT_DIRECTORY_MODE: u32 = 0o040555;
+const LINUX_STAT_REGULAR_MODE: u32 = 0o100555;
 const LINUX_STAT_FIFO_MODE: u32 = 0o010600;
 const LINUX_STAT_ANONYMOUS_MODE: u32 = 0o600;
 const LINUX_STATX_BASIC_STATS: u32 = 0x7ff;
@@ -202,6 +204,10 @@ const LINUX_DESCRIPTOR_OUTPUT: u8 = 2;
 const LINUX_DEVICE_ZERO: u8 = 1 << 2;
 const LINUX_DEVICE_CONSOLE: u8 = 1 << 3;
 const LINUX_DEVICE_DIRECTORY: u8 = 1 << 4;
+const LINUX_FILE_INIT: u8 = 1 << 5;
+const LINUX_FILE_INTERPRETER: u8 = 1 << 6;
+const LINUX_FILE_DEPENDENCY: u8 = 1 << 7;
+const LINUX_FILE_MASK: u8 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_SETFD: u64 = 2;
@@ -351,7 +357,7 @@ static ELF_PROBE_PIPE_WRITE_FLAGS: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_LENGTH: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_BUFFER: [AtomicU8; LINUX_PIPE_CAPACITY] =
     [const { AtomicU8::new(0) }; LINUX_PIPE_CAPACITY];
-static ELF_PROBE_DIRECTORY_CURSORS: [AtomicU8; 4] = [const { AtomicU8::new(0) }; 4];
+static ELF_PROBE_DESCRIPTOR_OFFSETS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
@@ -987,7 +993,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     for byte in &ELF_PROBE_PIPE_BUFFER {
         byte.store(0, Ordering::SeqCst);
     }
-    for cursor in &ELF_PROBE_DIRECTORY_CURSORS {
+    for cursor in &ELF_PROBE_DESCRIPTOR_OFFSETS {
         cursor.store(0, Ordering::SeqCst);
     }
     ELF_PROBE_CLOCK_FREQUENCY.store(clock_frequency, Ordering::SeqCst);
@@ -1021,10 +1027,10 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         ELF_PROBE_EPOLL_TARGET.load(Ordering::SeqCst),
         u64::from(ELF_PROBE_EPOLL_EVENTS.load(Ordering::SeqCst)),
         ELF_PROBE_EPOLL_DATA.load(Ordering::SeqCst),
-        u64::from(ELF_PROBE_DIRECTORY_CURSORS[0].load(Ordering::SeqCst)),
-        u64::from(ELF_PROBE_DIRECTORY_CURSORS[1].load(Ordering::SeqCst)),
-        u64::from(ELF_PROBE_DIRECTORY_CURSORS[2].load(Ordering::SeqCst)),
-        u64::from(ELF_PROBE_DIRECTORY_CURSORS[3].load(Ordering::SeqCst)),
+        ELF_PROBE_DESCRIPTOR_OFFSETS[0].load(Ordering::SeqCst),
+        ELF_PROBE_DESCRIPTOR_OFFSETS[1].load(Ordering::SeqCst),
+        ELF_PROBE_DESCRIPTOR_OFFSETS[2].load(Ordering::SeqCst),
+        ELF_PROBE_DESCRIPTOR_OFFSETS[3].load(Ordering::SeqCst),
         u64::from(ELF_PROBE_EVENTFD_DESCRIPTOR.load(Ordering::SeqCst)),
         ELF_PROBE_EVENTFD_COUNTER.load(Ordering::SeqCst),
         u64::from(ELF_PROBE_EVENTFD_FLAGS.load(Ordering::SeqCst)),
@@ -1042,9 +1048,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
         devices_closed &= descriptor.swap(0, Ordering::SeqCst) == 0;
     }
-    let mut cursors_reset = true;
-    for cursor in &ELF_PROBE_DIRECTORY_CURSORS {
-        cursors_reset &= cursor.swap(0, Ordering::SeqCst) == 0;
+    let mut offsets_reset = true;
+    for offset in &ELF_PROBE_DESCRIPTOR_OFFSETS {
+        offsets_reset &= offset.swap(0, Ordering::SeqCst) == 0;
     }
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
@@ -1065,7 +1071,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> bool {
         && ELF_PROBE_PIPE_READ_FLAGS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_PIPE_WRITE_FLAGS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_PIPE_LENGTH.swap(0, Ordering::SeqCst) == 0
-        && cursors_reset;
+        && offsets_reset;
     if !descriptor_state_valid {
         serial_write("ginux: Linux descriptor state leak:");
         for value in descriptor_snapshot {
@@ -1406,6 +1412,9 @@ extern "sysv64" fn linux_syscall_handler(
     }
     match number {
         LINUX_READ_SYSCALL => linux_descriptor_read(first_argument, buffer, count),
+        LINUX_PREAD64_SYSCALL => {
+            linux_regular_file_read_at(first_argument, buffer, count, register(0))
+        }
         LINUX_WRITE_SYSCALL => linux_descriptor_write(first_argument, buffer, count),
         LINUX_SCHED_YIELD_SYSCALL => 0,
         LINUX_CLOSE_SYSCALL => linux_descriptor_close(first_argument),
@@ -1429,9 +1438,11 @@ extern "sysv64" fn linux_syscall_handler(
             let device = linux_device_descriptor(first_argument);
             if device & LINUX_DEVICE_CONSOLE != 0 {
                 LINUX_ESPIPE
+            } else if linux_regular_file(device).is_some() {
+                linux_regular_file_seek(first_argument, device, buffer, count)
             } else if device & LINUX_DEVICE_DIRECTORY != 0 {
                 if buffer == 0 && count == 0 {
-                    linux_directory_cursor(first_argument).store(0, Ordering::SeqCst);
+                    linux_descriptor_offset(first_argument).store(0, Ordering::SeqCst);
                     0
                 } else {
                     LINUX_EINVAL
@@ -2163,8 +2174,17 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
     output_length as u64
 }
 
+fn linux_runtime_file_kind(path: &[u8]) -> Option<u8> {
+    match path {
+        b"/init" => Some(LINUX_FILE_INIT),
+        b"/lib64/ld-ginux.so" => Some(LINUX_FILE_INTERPRETER),
+        b"/lib64/libginux.so" => Some(LINUX_FILE_DEPENDENCY),
+        _ => None,
+    }
+}
+
 fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
-    let mut path = [0_u8; 16];
+    let mut path = [0_u8; 32];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
@@ -2174,7 +2194,10 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
         b"/dev/zero" => LINUX_DEVICE_ZERO,
         b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
         b"/dev" => LINUX_DEVICE_DIRECTORY,
-        _ => return LINUX_ENOENT,
+        path => match linux_runtime_file_kind(path) {
+            Some(kind) => kind,
+            None => return LINUX_ENOENT,
+        },
     };
     let access = flags & 3;
     if access == 3 || flags & !(3 | LINUX_O_CLOEXEC | LINUX_O_DIRECTORY) != 0 {
@@ -2185,6 +2208,9 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
     }
     if kind & LINUX_DEVICE_DIRECTORY == 0 && flags & LINUX_O_DIRECTORY != 0 {
         return LINUX_ENOTDIR;
+    }
+    if kind & LINUX_FILE_MASK != 0 && access != 0 {
+        return LINUX_EACCES;
     }
     let state = kind | (access + 1) as u8;
     let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
@@ -2199,7 +2225,7 @@ fn linux_openat(_directory: u64, path_address: u64, flags: u64) -> u64 {
     } else {
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
     }
-    linux_directory_cursor(descriptor).store(0, Ordering::SeqCst);
+    linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
     descriptor
 }
 
@@ -2207,7 +2233,7 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
     if flags != 0 {
         return LINUX_EINVAL;
     }
-    let mut path = [0_u8; 16];
+    let mut path = [0_u8; 32];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
@@ -2217,7 +2243,10 @@ fn linux_newfstatat(_directory: u64, path_address: u64, stat_address: u64, flags
             linux_stat(LINUX_STAT_CHARACTER_DEVICE_MODE, 1)
         }
         b"/dev" => linux_stat(LINUX_STAT_DIRECTORY_MODE, 2),
-        _ => return LINUX_ENOENT,
+        path => match linux_runtime_file_kind(path) {
+            Some(kind) => linux_regular_file_stat(kind),
+            None => return LINUX_ENOENT,
+        },
     };
     if !copy_to_linux_user(stat_address, &stat) {
         return LINUX_EFAULT;
@@ -2229,7 +2258,7 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
     if flags != 0 || mode & !7 != 0 {
         return LINUX_EINVAL;
     }
-    let mut path = [0_u8; 16];
+    let mut path = [0_u8; 32];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
@@ -2237,6 +2266,12 @@ fn linux_faccessat(path_address: u64, mode: u64, flags: u64) -> u64 {
     let directory = match &path[..path_length] {
         b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => false,
         b"/dev" => true,
+        path if linux_runtime_file_kind(path).is_some() => {
+            if mode & 2 != 0 {
+                return LINUX_EACCES;
+            }
+            return 0;
+        }
         _ => return LINUX_ENOENT,
     };
     if !directory && mode & 1 != 0 || directory && mode & 2 != 0 {
@@ -2250,18 +2285,26 @@ fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u
     if flags != 0 || mask & u64::from(LINUX_STATX_RESERVED) != 0 {
         return LINUX_EINVAL;
     }
-    let mut path = [0_u8; 16];
+    let mut path = [0_u8; 32];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
     };
-    let (inode, minor, mode) = match &path[..path_length] {
-        b"/dev/null" => (1_u64, 3_u32, LINUX_STAT_CHARACTER_DEVICE_MODE),
-        b"/dev/zero" => (2, 5, LINUX_STAT_CHARACTER_DEVICE_MODE),
-        b"/dev/console" => (3, 1, LINUX_STAT_CHARACTER_DEVICE_MODE),
-        b"/dev/tty" => (3, 0, LINUX_STAT_CHARACTER_DEVICE_MODE),
-        b"/dev" => (4, 0, LINUX_STAT_DIRECTORY_MODE),
-        _ => return LINUX_ENOENT,
+    let (inode, minor, mode, size) = match &path[..path_length] {
+        b"/dev/null" => (1_u64, 3_u32, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
+        b"/dev/zero" => (2, 5, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
+        b"/dev/console" => (3, 1, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
+        b"/dev/tty" => (3, 0, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
+        b"/dev" => (4, 0, LINUX_STAT_DIRECTORY_MODE, 0),
+        path => match linux_runtime_file_kind(path) {
+            Some(kind) => (
+                linux_regular_file_inode(kind).unwrap_or(0),
+                0,
+                LINUX_STAT_REGULAR_MODE,
+                linux_regular_file(kind).map_or(0, |file| file.len() as u64),
+            ),
+            None => return LINUX_ENOENT,
+        },
     };
     let mut stat = [0_u8; 256];
     stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
@@ -2269,6 +2312,8 @@ fn linux_statx(path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u
     stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
     stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
     stat[32..40].copy_from_slice(&inode.to_ne_bytes());
+    stat[40..48].copy_from_slice(&size.to_ne_bytes());
+    stat[48..56].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
     if mode == LINUX_STAT_CHARACTER_DEVICE_MODE {
         stat[128..132].copy_from_slice(&1_u32.to_ne_bytes());
         stat[132..136].copy_from_slice(&minor.to_ne_bytes());
@@ -2290,6 +2335,25 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if let Some(file) = linux_regular_file(device) {
+        if device & 3 != LINUX_DESCRIPTOR_INPUT {
+            return LINUX_EBADF;
+        }
+        let offset = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+        let Ok(start) = usize::try_from(offset) else {
+            return 0;
+        };
+        if start >= file.len() || count == 0 {
+            return 0;
+        }
+        let requested = usize::try_from(count).unwrap_or(usize::MAX);
+        let end = start.saturating_add(requested).min(file.len());
+        if !copy_to_linux_user(address, &file[start..end]) {
+            return LINUX_EFAULT;
+        }
+        linux_descriptor_offset(descriptor).store(end as u64, Ordering::SeqCst);
+        return (end - start) as u64;
+    }
     if device & LINUX_DEVICE_DIRECTORY != 0 {
         return LINUX_EISDIR;
     }
@@ -2313,6 +2377,35 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     } else {
         LINUX_EBADF
     }
+}
+
+fn linux_regular_file_read_at(descriptor: u64, address: u64, count: u64, offset: u64) -> u64 {
+    let state = linux_device_descriptor(descriptor);
+    let Some(file) = linux_regular_file(state) else {
+        return if linux_descriptor_open(descriptor) {
+            LINUX_ESPIPE
+        } else {
+            LINUX_EBADF
+        };
+    };
+    if state & 3 != LINUX_DESCRIPTOR_INPUT {
+        return LINUX_EBADF;
+    }
+    if (offset as i64) < 0 {
+        return LINUX_EINVAL;
+    }
+    let Ok(start) = usize::try_from(offset) else {
+        return 0;
+    };
+    if start >= file.len() || count == 0 {
+        return 0;
+    }
+    let requested = usize::try_from(count).unwrap_or(usize::MAX);
+    let end = start.saturating_add(requested).min(file.len());
+    if !copy_to_linux_user(address, &file[start..end]) {
+        return LINUX_EFAULT;
+    }
+    (end - start) as u64
 }
 
 fn linux_poll(address: u64, count: u64, timeout: u64) -> u64 {
@@ -3224,6 +3317,26 @@ fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
         ranges[index] = (address, length);
         total = next_total;
     }
+    if let Some(file) = linux_regular_file(device) {
+        let offset = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+        let Ok(start) = usize::try_from(offset) else {
+            return 0;
+        };
+        let returned = file.len().saturating_sub(start).min(total);
+        let mut copied = 0;
+        for (address, length) in ranges[..vector_count].iter().copied() {
+            let length = length.min(returned - copied);
+            if length == 0 {
+                break;
+            }
+            if !copy_to_linux_user(address, &file[start + copied..start + copied + length]) {
+                return LINUX_EFAULT;
+            }
+            copied += length;
+        }
+        linux_descriptor_offset(descriptor).store((start + returned) as u64, Ordering::SeqCst);
+        return returned as u64;
+    }
     if device & LINUX_DEVICE_ZERO == 0 {
         return 0;
     }
@@ -3322,8 +3435,41 @@ fn linux_device_descriptor(descriptor: u64) -> u8 {
         .unwrap_or(0)
 }
 
-fn linux_directory_cursor(descriptor: u64) -> &'static AtomicU8 {
-    &ELF_PROBE_DIRECTORY_CURSORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+fn linux_regular_file(state: u8) -> Option<&'static [u8]> {
+    match state & LINUX_FILE_MASK {
+        LINUX_FILE_INIT => Some(crate::linux_elf::runtime_main_bytes()),
+        LINUX_FILE_INTERPRETER => Some(crate::linux_elf::runtime_interpreter_bytes()),
+        LINUX_FILE_DEPENDENCY => Some(crate::linux_elf::runtime_dependency_bytes()),
+        _ => None,
+    }
+}
+
+fn linux_regular_file_inode(state: u8) -> Option<u64> {
+    match state & LINUX_FILE_MASK {
+        LINUX_FILE_INIT => Some(5),
+        LINUX_FILE_INTERPRETER => Some(6),
+        LINUX_FILE_DEPENDENCY => Some(7),
+        _ => None,
+    }
+}
+
+fn linux_regular_file_seek(descriptor: u64, state: u8, offset: u64, whence: u64) -> u64 {
+    let base = match whence {
+        0 => 0_i128,
+        1 => i128::from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst)),
+        2 => linux_regular_file(state).map_or(0, |file| file.len() as i128),
+        _ => return LINUX_EINVAL,
+    };
+    let next = base + i128::from(offset as i64);
+    let Ok(next) = u64::try_from(next) else {
+        return LINUX_EINVAL;
+    };
+    linux_descriptor_offset(descriptor).store(next, Ordering::SeqCst);
+    next
+}
+
+fn linux_descriptor_offset(descriptor: u64) -> &'static AtomicU64 {
+    &ELF_PROBE_DESCRIPTOR_OFFSETS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
 }
 
 fn linux_console_descriptor(descriptor: u64) -> u8 {
@@ -3406,7 +3552,7 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
     {
         return LINUX_EBADF;
     }
-    linux_directory_cursor(descriptor).store(0, Ordering::SeqCst);
+    linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
     ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
     0
 }
@@ -3646,7 +3792,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     if linux_device_descriptor(descriptor) & LINUX_DEVICE_DIRECTORY == 0 {
         return LINUX_ENOTDIR;
     }
-    if linux_directory_cursor(descriptor).load(Ordering::SeqCst) != 0 {
+    if linux_descriptor_offset(descriptor).load(Ordering::SeqCst) != 0 {
         return 0;
     }
     let Ok(capacity) = usize::try_from(count) else {
@@ -3672,7 +3818,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     if !copy_to_linux_user(address, &entries[..used]) {
         return LINUX_EFAULT;
     }
-    linux_directory_cursor(descriptor).store(1, Ordering::SeqCst);
+    linux_descriptor_offset(descriptor).store(1, Ordering::SeqCst);
     used as u64
 }
 
@@ -3731,7 +3877,9 @@ fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
     }
     let device = linux_device_descriptor(descriptor);
     (device != 0).then(|| {
-        if device & LINUX_DEVICE_DIRECTORY != 0 {
+        if device & LINUX_FILE_MASK != 0 {
+            linux_regular_file_stat(device)
+        } else if device & LINUX_DEVICE_DIRECTORY != 0 {
             linux_stat(LINUX_STAT_DIRECTORY_MODE, 2)
         } else {
             linux_console_stat()
@@ -3745,6 +3893,17 @@ fn linux_stat(mode: u32, inode: u64) -> [u8; LINUX_STAT_SIZE] {
     stat[16..24].copy_from_slice(&1_u64.to_ne_bytes());
     stat[24..28].copy_from_slice(&mode.to_ne_bytes());
     stat[56..64].copy_from_slice(&(PAGE_SIZE as u64).to_ne_bytes());
+    stat
+}
+
+fn linux_regular_file_stat(state: u8) -> [u8; LINUX_STAT_SIZE] {
+    let mut stat = linux_stat(
+        LINUX_STAT_REGULAR_MODE,
+        linux_regular_file_inode(state).unwrap_or(0),
+    );
+    let size = linux_regular_file(state).map_or(0, |file| file.len() as u64);
+    stat[48..56].copy_from_slice(&size.to_ne_bytes());
+    stat[64..72].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
     stat
 }
 

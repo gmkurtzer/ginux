@@ -255,14 +255,30 @@ four paths, including `STATX_BASIC_STATS`, character-device mode `0600`, stable
 inode numbers, block size 4096, and conventional device minors. The reserved
 mask bit or nonzero flags return `-EINVAL`; unknown paths and invalid memory use
 the same `-ENOENT` and `-EFAULT` boundaries as the older metadata call.
-`rax = 262` (`__NR_newfstatat`)
-returns the same fixed character-device metadata for either device without
-opening it. Only zero flags are accepted; bad path or output memory returns
+`rax = 262` (`__NR_newfstatat`) returns the same fixed metadata for a recognized
+device, directory, or immutable runtime file without opening it. Only zero
+flags are accepted; bad path or output memory returns
 `-EFAULT`, unsupported flags return `-EINVAL`, and other paths return `-ENOENT`.
 `faccessat` and `faccessat2` report read/write access for either fixed node
 and return `-EACCES` for execute access. `faccessat2` accepts only zero flags;
 unknown mode bits or flags return `-EINVAL`, with the same path errors as
 `openat`.
+
+The immutable runtime namespace also recognizes `/init`,
+`/lib64/ld-ginux.so`, and `/lib64/libginux.so`. These names expose the exact
+build-authenticated ELF byte slices already used by the execution proof, not
+copies or mutable storage. `openat` accepts only `O_RDONLY` with optional
+`O_CLOEXEC`; writable access returns `-EACCES` and `O_DIRECTORY` returns
+`-ENOTDIR`. Each open has an independent 64-bit cursor. `read` and bounded
+`readv` advance it, `pread64` leaves it unchanged, and `lseek` implements
+`SEEK_SET`, `SEEK_CUR`, and `SEEK_END` with checked nonnegative results.
+`fstat`, `newfstatat`, and `statx` report immutable regular mode `0555`, stable
+inodes, and the exact artifact length; access checks deny writes. The ring-3
+proof reads ELF magic, performs a positioned read of the interpreter entry,
+seeks and reads it again, verifies metadata, rejects writes and writable opens,
+and closes the descriptor. There is no `/lib64` directory enumeration,
+pathname traversal, general VFS, file-backed mapping, or userspace `execve`;
+the kernel still authenticates and installs the three fixed images directly.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 4,
@@ -509,8 +525,10 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`read`, `write`, `writev`, bounded `poll`/`ppoll`/`epoll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`, bounded `/dev/null` `openat`,
-`lseek`, console `ioctl`, `brk`, `uname`, `getcwd`, `chdir`, bounded
+`read`, `pread64`, `write`, `readv`, `writev`, bounded
+`poll`/`ppoll`/`epoll`, `close`, `dup`, `dup2`, bounded `fcntl`, `fstat`,
+bounded device/runtime-file `openat`, `lseek`, console `ioctl`, `brk`, `uname`,
+`getcwd`, `chdir`, bounded
 `readlink`/`readlinkat`,
 bounded anonymous `mmap`/`munmap`/`madvise`/`mincore`, bounded read-only `mprotect`,
 `rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only

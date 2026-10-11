@@ -24,8 +24,9 @@ const MAX_INTERPRETER_PATH_SIZE: usize = 256;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (4 * PAGE_SIZE) as u64;
 const FIXTURE_DATA_OFFSET: usize = 0x4000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
+const INTERPRETED_DATA_OFFSET: usize = 0x4100;
 const INTERPRETED_FIXTURE_SIZE: usize =
-    FIXTURE_DATA_OFFSET + 8 + 13 * DYNAMIC_ENTRY_SIZE + 2 * SYMBOL_ENTRY_SIZE + 28 + 20;
+    INTERPRETED_DATA_OFFSET + 8 + 13 * DYNAMIC_ENTRY_SIZE + 2 * SYMBOL_ENTRY_SIZE + 28 + 20;
 const DYNAMIC_ENTRY_SIZE: usize = 16;
 const RELA_ENTRY_SIZE: usize = 24;
 const SYMBOL_ENTRY_SIZE: usize = 24;
@@ -60,6 +61,18 @@ const LINKED_DYNAMIC_MAIN: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/linux-linked-main.elf"));
 const LINKED_DYNAMIC_DEPENDENCY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/libginux.so"));
 const LINKED_DYNAMIC_INTERPRETER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ld-ginux.so"));
+
+pub(crate) fn runtime_main_bytes() -> &'static [u8] {
+    LINKED_DYNAMIC_MAIN
+}
+
+pub(crate) fn runtime_interpreter_bytes() -> &'static [u8] {
+    LINKED_DYNAMIC_INTERPRETER
+}
+
+pub(crate) fn runtime_dependency_bytes() -> &'static [u8] {
+    LINKED_DYNAMIC_DEPENDENCY
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct Segment<'a> {
@@ -1775,6 +1788,7 @@ pub(crate) fn verify_interpreted_plan() -> bool {
     let interpreter_bytes = compact_position_independent_fixture();
     let dependency_bytes = compact_dependency_fixture();
     let Some(main) = parse(&main_bytes) else {
+        crate::serial_write_bytes(b"\r\nginux: interpreted main fixture parse failed");
         return false;
     };
     let authority = InterpreterAuthority {
@@ -2148,7 +2162,7 @@ fn empty_gnu_hash_rejected(case: u8) -> bool {
 #[inline(never)]
 fn dynamic_relocation_rejected(case: u8) -> bool {
     const RELA_OFFSET: usize = ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE;
-    const DYNAMIC_OFFSET: usize = FIXTURE_DATA_OFFSET + 8;
+    const DYNAMIC_OFFSET: usize = INTERPRETED_DATA_OFFSET + 8;
     const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 13 * DYNAMIC_ENTRY_SIZE;
     const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     const HASH_OFFSET: usize = (STRTAB_OFFSET + 25 + 3) & !3;
@@ -2462,8 +2476,8 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
     const EXECUTABLE_OFFSET: usize = 0x200;
     const RELA_OFFSET: usize = ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE;
     const STRING_TABLE: &[u8] = b"\0ginux_probe\0libginux.so\0";
-    const PATH_OFFSET: usize = 0x3f80;
-    const DYNAMIC_OFFSET: usize = FIXTURE_DATA_OFFSET + 8;
+    const PATH_OFFSET: usize = 0x1e0;
+    const DYNAMIC_OFFSET: usize = INTERPRETED_DATA_OFFSET + 8;
     const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 13 * DYNAMIC_ENTRY_SIZE;
     const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     const HASH_OFFSET: usize = (STRTAB_OFFSET + STRING_TABLE.len() + 3) & !3;
@@ -2502,9 +2516,9 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE,
-        FIXTURE_DATA_OFFSET as u64,
+        INTERPRETED_DATA_OFFSET as u64,
         0x40_4000,
-        (HASH_OFFSET + 20 - FIXTURE_DATA_OFFSET) as u64,
+        (HASH_OFFSET + 20 - INTERPRETED_DATA_OFFSET) as u64,
         (PAGE_SIZE + 512) as u64,
         PF_READ | PF_WRITE,
     );
@@ -2555,12 +2569,21 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
     for (index, (tag, value)) in [
         (DT_SYMENT, SYMBOL_ENTRY_SIZE as u64),
         (DT_RELA, 0x3f_f000 + RELA_OFFSET as u64),
-        (DT_STRTAB, 0x400000 + STRTAB_OFFSET as u64),
+        (
+            DT_STRTAB,
+            0x40_4000 + (STRTAB_OFFSET - INTERPRETED_DATA_OFFSET) as u64,
+        ),
         (DT_RELAENT, RELA_ENTRY_SIZE as u64),
-        (DT_SYMTAB, 0x400000 + SYMTAB_OFFSET as u64),
+        (
+            DT_SYMTAB,
+            0x40_4000 + (SYMTAB_OFFSET - INTERPRETED_DATA_OFFSET) as u64,
+        ),
         (DT_RELASZ, (2 * RELA_ENTRY_SIZE) as u64),
         (DT_STRSZ, STRING_TABLE.len() as u64),
-        (DT_HASH, 0x400000 + HASH_OFFSET as u64),
+        (
+            DT_HASH,
+            0x40_4000 + (HASH_OFFSET - INTERPRETED_DATA_OFFSET) as u64,
+        ),
         (DT_NEEDED, 13),
         (
             DT_JMPREL,
@@ -2581,7 +2604,7 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
         );
     }
     bytes[EXECUTABLE_OFFSET..EXECUTABLE_OFFSET + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
-    bytes[FIXTURE_DATA_OFFSET..FIXTURE_DATA_OFFSET + 8].copy_from_slice(b"PROBE!!\n");
+    bytes[INTERPRETED_DATA_OFFSET..INTERPRETED_DATA_OFFSET + 8].copy_from_slice(b"PROBE!!\n");
     bytes
 }
 

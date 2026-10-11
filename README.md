@@ -129,10 +129,16 @@ proven zero on reuse. Bounded `MADV_DONTNEED` also zeros it in place without
 widening a sealed read-only extent, while `mincore` reports each page resident
 only while active.
 General mapping placement and file-backed mappings are not implemented.
-The initial filesystem view exposes only a working-directory identity of `/`;
-bounded `getcwd` returns it, while undersized and invalid buffers fail.
+The root view retains a fixed working-directory identity of `/`; bounded
+`getcwd` returns it, while undersized and invalid buffers fail.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 `readlink` result is `/init`.
+An immutable runtime-file view exposes the exact authenticated `/init`,
+`/lib64/ld-ginux.so`, and `/lib64/libginux.so` bytes as read-only regular files.
+Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, metadata, and
+access checks operate on those files. This is not directory traversal, a
+general VFS, file-backed `mmap`, or userspace-driven executable loading; the
+kernel still authenticates, plans, and maps the fixed runtime trio directly.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
 Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and

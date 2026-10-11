@@ -1118,6 +1118,11 @@ if ! grep -q '^ginux: Linux immutable device directory validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux immutable runtime ELF files validated' "$output_file"; then
+    echo "Boot test failed: Linux immutable runtime ELF files were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux saved credential queries validated' "$output_file"; then
     echo "Boot test failed: Linux saved credential queries were not validated." >&2
     exit 1

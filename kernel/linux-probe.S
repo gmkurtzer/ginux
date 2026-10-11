@@ -2251,6 +2251,85 @@ valid_interpreter_base:
     mov eax, 3
     call syscall_expect_zero
 
+    movabs rax, 0x6c2f343662696c2f
+    mov qword ptr [0x404340], rax
+    movabs rax, 0x2e78756e69672d64
+    mov qword ptr [0x404348], rax
+    mov dword ptr [0x404350], 0x00006f73
+    mov edi, -100
+    mov esi, 0x404340
+    xor edx, edx
+    mov eax, 257
+    call syscall_expect_two
+
+    mov edi, 2
+    mov esi, 0x404380
+    mov edx, 4
+    xor eax, eax
+    syscall
+    cmp rax, 4
+    jne failure
+    cmp dword ptr [0x404380], 0x464c457f
+    jne failure
+
+    mov esi, 0x404384
+    mov edx, 1
+    mov r10d, 0x200
+    mov eax, 17
+    call syscall_expect_one
+    cmp byte ptr [0x404384], 0x48
+    jne failure
+
+    mov esi, 0x200
+    xor edx, edx
+    mov eax, 8
+    syscall
+    cmp rax, 0x200
+    jne failure
+    mov esi, 0x404384
+    mov edx, 1
+    xor eax, eax
+    call syscall_expect_one
+    cmp byte ptr [0x404384], 0x48
+    jne failure
+
+    mov esi, 0x404700
+    mov eax, 5
+    call syscall_expect_zero
+    cmp dword ptr [0x404718], 0x816d
+    jne failure
+    cmp qword ptr [0x404730], 0
+    je failure
+
+    mov esi, 0x404380
+    mov edx, 1
+    mov eax, 1
+    call syscall_expect_ebadf
+    mov eax, 3
+    call syscall_expect_zero
+
+    mov edi, -100
+    mov esi, 0x404340
+    mov edx, 1
+    mov eax, 257
+    syscall
+    cmp rax, -13
+    jne failure
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    cmp rax, -20
+    jne failure
+
+    mov edx, 0x404700
+    xor r10d, r10d
+    mov eax, 262
+    call syscall_expect_zero
+    cmp dword ptr [0x404718], 0x816d
+    jne failure
+    cmp qword ptr [0x404730], 0
+    je failure
+
     mov edi, 0x405200
     mov eax, 80
     call syscall_expect_efault
