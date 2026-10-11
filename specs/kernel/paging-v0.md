@@ -29,6 +29,15 @@ the kernel root and every domain root derived from it. This is a prerequisite
 for immutable kernel text and prevents privileged code from bypassing the
 read-only user-code mapping through its user virtual address.
 
+Before activation, every identity-map region containing the statically
+allocated PML4, PDPT, four page directories, or eight fine page tables is split
+into 4 KiB mappings. The kernel clears `WRITABLE` on all fourteen table pages,
+loads CR3, enables `CR0.WP`, and reads every leaf PTE back. It repeats that
+readback after the complete ring-3 scheduling and fault/restart workload. The
+active mapping hierarchy is therefore not writable through its identity alias;
+dynamically allocated domain page tables remain writable while their address
+spaces exist.
+
 Interrupts remain disabled during and after the transition. They cannot be enabled until Ginux installs its own GDT, IDT, exception handlers, and interrupt-controller policy.
 
 ## Security limitations
@@ -37,7 +46,7 @@ This map is intentionally transitional:
 
 - The entire mapped range is writable and executable.
 - Kernel code, read-only data, mutable data, MMIO, and firmware regions are not separated by permissions.
-- The identity-map alias remains writable, so `CR0.WP` alone does not yet make
+- Most identity-map aliases remain writable, so this revision does not yet make
   kernel text or user-code physical frames immutable through every alias.
 - Addresses above 4 GiB are unavailable.
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.

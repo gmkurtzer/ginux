@@ -110,37 +110,52 @@ pub(crate) unsafe fn install_initial_identity_map(
     let mut fine_count = 0;
     for guard in guard_pages {
         let region = *guard / LARGE_PAGE_SIZE as usize;
-        let fine_index = if let Some(index) = fine_regions[..fine_count]
-            .iter()
-            .position(|candidate| *candidate == region)
-        {
-            index
-        } else {
-            if fine_count == MAX_FINE_TABLES {
-                return Err(PagingError::FineTableCapacity);
-            }
-            let index = fine_count;
-            fine_regions[index] = region;
-            fine_count += 1;
-            let table = fine_tables.add(index);
-            let entries = core::ptr::addr_of_mut!((*table).0).cast::<u64>();
-            zero_entries(entries);
-            let region_base = region as u64 * LARGE_PAGE_SIZE;
-            for entry in 0..ENTRY_COUNT {
-                entries
-                    .add(entry)
-                    .write((region_base + entry as u64 * PAGE_SIZE as u64) | PRESENT | WRITABLE);
-            }
-            let directory = directories.add(region / ENTRY_COUNT);
-            let directory_entries = core::ptr::addr_of_mut!((*directory).0).cast::<u64>();
-            directory_entries
-                .add(region % ENTRY_COUNT)
-                .write((table as u64) | PRESENT | WRITABLE);
-            index
-        };
+        let fine_index = ensure_fine_region(
+            region,
+            &mut fine_regions,
+            &mut fine_count,
+            fine_tables,
+            directories,
+        )?;
         let page = (*guard % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
         let entries = core::ptr::addr_of_mut!((*fine_tables.add(fine_index)).0).cast::<u64>();
         entries.add(page).write(0);
+    }
+
+    const TABLE_PAGE_COUNT: usize = 2 + DIRECTORY_COUNT + MAX_FINE_TABLES;
+    let mut table_pages = [0_usize; TABLE_PAGE_COUNT];
+    table_pages[0] = pml4_address;
+    table_pages[1] = pdpt_address;
+    for index in 0..DIRECTORY_COUNT {
+        table_pages[2 + index] = directories_address + index * PAGE_SIZE;
+    }
+    for index in 0..MAX_FINE_TABLES {
+        table_pages[2 + DIRECTORY_COUNT + index] = fine_tables_address + index * PAGE_SIZE;
+    }
+    for address in table_pages {
+        ensure_fine_region(
+            address / LARGE_PAGE_SIZE as usize,
+            &mut fine_regions,
+            &mut fine_count,
+            fine_tables,
+            directories,
+        )?;
+    }
+    for address in table_pages {
+        let region = address / LARGE_PAGE_SIZE as usize;
+        let Some(fine_index) = fine_regions[..fine_count]
+            .iter()
+            .position(|candidate| *candidate == region)
+        else {
+            return Err(PagingError::HardeningFailed);
+        };
+        let page = (address % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
+        let entries = core::ptr::addr_of_mut!((*fine_tables.add(fine_index)).0).cast::<u64>();
+        let value = entries.add(page).read();
+        if value & PRESENT == 0 {
+            return Err(PagingError::HardeningFailed);
+        }
+        entries.add(page).write(value & !WRITABLE);
     }
 
     // Loading CR3 serializes the page-table writes and activates the new root.
@@ -193,8 +208,59 @@ pub(crate) unsafe fn install_initial_identity_map(
             }
         }
     }
+    for address in table_pages {
+        let region = address / LARGE_PAGE_SIZE as usize;
+        let Some(fine_index) = fine_regions[..fine_count]
+            .iter()
+            .position(|candidate| *candidate == region)
+        else {
+            return Err(PagingError::HardeningFailed);
+        };
+        let page = (address % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
+        let entries = core::ptr::addr_of!((*fine_tables.add(fine_index)).0).cast::<u64>();
+        let value = entries.add(page).read();
+        if value & PRESENT == 0 || value & WRITABLE != 0 {
+            return Err(PagingError::HardeningFailed);
+        }
+    }
 
     Ok(())
+}
+
+unsafe fn ensure_fine_region(
+    region: usize,
+    fine_regions: &mut [usize; MAX_FINE_TABLES],
+    fine_count: &mut usize,
+    fine_tables: *mut PageTable,
+    directories: *mut PageTable,
+) -> Result<usize, PagingError> {
+    if let Some(index) = fine_regions[..*fine_count]
+        .iter()
+        .position(|candidate| *candidate == region)
+    {
+        return Ok(index);
+    }
+    if *fine_count == MAX_FINE_TABLES || region >= DIRECTORY_COUNT * ENTRY_COUNT {
+        return Err(PagingError::FineTableCapacity);
+    }
+    let index = *fine_count;
+    fine_regions[index] = region;
+    *fine_count += 1;
+    let table = fine_tables.add(index);
+    let entries = core::ptr::addr_of_mut!((*table).0).cast::<u64>();
+    zero_entries(entries);
+    let region_base = region as u64 * LARGE_PAGE_SIZE;
+    for entry in 0..ENTRY_COUNT {
+        entries
+            .add(entry)
+            .write((region_base + entry as u64 * PAGE_SIZE as u64) | PRESENT | WRITABLE);
+    }
+    let directory = directories.add(region / ENTRY_COUNT);
+    let directory_entries = core::ptr::addr_of_mut!((*directory).0).cast::<u64>();
+    directory_entries
+        .add(region % ENTRY_COUNT)
+        .write((table as u64) | PRESENT | WRITABLE);
+    Ok(index)
 }
 
 pub(crate) fn supervisor_write_protect_enabled() -> bool {
@@ -207,6 +273,36 @@ pub(crate) fn supervisor_write_protect_enabled() -> bool {
         );
     }
     cr0 & CR0_WRITE_PROTECT != 0
+}
+
+pub(crate) fn static_page_tables_are_read_only() -> bool {
+    const TABLE_PAGE_COUNT: usize = 2 + DIRECTORY_COUNT + MAX_FINE_TABLES;
+    let mut table_pages = [0_usize; TABLE_PAGE_COUNT];
+    table_pages[0] = core::ptr::addr_of!(PML4) as usize;
+    table_pages[1] = core::ptr::addr_of!(PDPT) as usize;
+    let directories_address = core::ptr::addr_of!(PAGE_DIRECTORIES) as usize;
+    let fine_tables_address = core::ptr::addr_of!(FINE_PAGE_TABLES) as usize;
+    for index in 0..DIRECTORY_COUNT {
+        table_pages[2 + index] = directories_address + index * PAGE_SIZE;
+    }
+    for index in 0..MAX_FINE_TABLES {
+        table_pages[2 + DIRECTORY_COUNT + index] = fine_tables_address + index * PAGE_SIZE;
+    }
+    table_pages.into_iter().all(|address| unsafe {
+        let region = address / LARGE_PAGE_SIZE as usize;
+        let directory = core::ptr::addr_of!(PAGE_DIRECTORIES)
+            .cast::<PageTable>()
+            .add(region / ENTRY_COUNT);
+        let directory_entries = core::ptr::addr_of!((*directory).0).cast::<u64>();
+        let directory_entry = directory_entries.add(region % ENTRY_COUNT).read();
+        if directory_entry & PRESENT == 0 || directory_entry & LARGE_PAGE != 0 {
+            return false;
+        }
+        let table = (directory_entry as usize & ADDRESS_MASK) as *const u64;
+        let page = (address % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
+        let entry = table.add(page).read();
+        entry & PRESENT != 0 && entry & WRITABLE == 0
+    })
 }
 
 unsafe fn zero_entries(entries: *mut u64) {

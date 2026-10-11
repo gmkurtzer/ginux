@@ -103,6 +103,11 @@ if ! grep -q '^ginux: supervisor write protection active' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: static kernel page tables sealed read-only' "$output_file"; then
+    echo "Boot test failed: static kernel page tables remain writable." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: null and bidirectional stack guard pages active' "$output_file"; then
     echo "Boot test failed: hardened null/bidirectional stack mappings are not active." >&2
     exit 1

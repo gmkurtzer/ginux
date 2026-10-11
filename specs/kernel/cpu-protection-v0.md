@@ -14,6 +14,8 @@ The bootstrap processor installs kernel-owned CPU protection tables after activa
   vectors.
 - Supervisor write protection (`CR0.WP`) read back as active before ring-3
   execution.
+- Fourteen static kernel page-table pages sealed read-only and rechecked after
+  the ring-3 workload.
 
 Interrupts remain disabled while kernel bootstrap code runs. The kernel triggers
 `INT3` during every QEMU boot test; the assembly entry stub preserves
