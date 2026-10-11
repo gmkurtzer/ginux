@@ -178,6 +178,11 @@ if ! grep -q '^ginux: ACPI MADT validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: ACPI tables use higher-half direct map' "$output_file"; then
+    echo "Boot test failed: ACPI table access did not use the direct map." >&2
+    exit 1
+fi
+
 if ! grep -Eq '^ginux: enabled processors: [1-9][0-9]*' "$output_file"; then
     echo "Boot test failed: ACPI reported no enabled processors." >&2
     exit 1
@@ -210,6 +215,11 @@ fi
 
 if ! grep -q '^ginux: local APIC discovered' "$output_file"; then
     echo "Boot test failed: the local APIC was not discovered." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: local APIC uses higher-half direct map' "$output_file"; then
+    echo "Boot test failed: local-APIC MMIO did not use the direct map." >&2
     exit 1
 fi
 

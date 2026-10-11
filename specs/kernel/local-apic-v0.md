@@ -1,6 +1,6 @@
 # x86-64 Local APIC Discovery v0
 
-**Status:** Read-only bootstrap-processor discovery.
+**Status:** Bootstrap discovery and one-shot timer operation verified in QEMU.
 
 The kernel requires an architectural local APIC on x86-64. After installing
 its exception tables, it:
@@ -11,7 +11,14 @@ its exception tables, it:
 - distinguishes active xAPIC and x2APIC modes; and
 - records the physical APIC base address.
 
-This revision does not enable or reconfigure the APIC, access its MMIO page,
-route external interrupts, configure its timer, or execute `STI`. Interrupts
-remain disabled throughout the boot test. Timer setup must first establish a
-clock source and a deterministic calibration contract.
+In xAPIC mode, the complete register window must translate through the checked
+supervisor-only higher-half direct map. Volatile register reads, writes, timer
+calibration, interrupt acknowledgement, and saved timer-state reconstruction
+use that high alias rather than the physical identity address. x2APIC register
+access continues to use MSRs.
+
+The QEMU gate calibrates a masked local-APIC timer against PIT channel 2,
+delivers and acknowledges a one-shot interrupt, and later uses one-shots for
+ring-3 scheduler preemption. This revision does not route external interrupts,
+program an I/O APIC, initialize secondary processors, or define a general timer
+service.

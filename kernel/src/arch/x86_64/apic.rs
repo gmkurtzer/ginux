@@ -1,5 +1,7 @@
 use core::arch::{asm, x86_64::__cpuid};
 
+use super::paging;
+
 const CPUID_FEATURES: u32 = 1;
 const CPUID_APIC: u32 = 1 << 9;
 const CPUID_X2APIC: u32 = 1 << 21;
@@ -18,6 +20,7 @@ pub(crate) struct LocalApic {
     pub(crate) id: u8,
     pub(crate) mode: Mode,
     pub(crate) physical_base: u64,
+    mapped_base: usize,
 }
 
 impl LocalApic {
@@ -25,15 +28,13 @@ impl LocalApic {
     ///
     /// # Safety
     ///
-    /// In xAPIC mode, the APIC MMIO page must be mapped uncached at the
-    /// discovered physical base. The register must be aligned and below
-    /// offset `0x400`.
+    /// In xAPIC mode, the APIC MMIO page must have a checked higher-half
+    /// mapping with the platform's uncached memory type. The register must be
+    /// aligned and below offset `0x400`.
     pub(crate) unsafe fn read(&self, register: u32) -> u32 {
         debug_assert!(register < 0x400 && register.is_multiple_of(16));
         match self.mode {
-            Mode::XApic => {
-                ((self.physical_base as usize + register as usize) as *const u32).read_volatile()
-            }
+            Mode::XApic => ((self.mapped_base + register as usize) as *const u32).read_volatile(),
             Mode::X2Apic => read_msr(0x800 + register / 16) as u32,
         }
     }
@@ -42,10 +43,29 @@ impl LocalApic {
     pub(crate) unsafe fn write(&self, register: u32, value: u32) {
         debug_assert!(register < 0x400 && register.is_multiple_of(16));
         match self.mode {
-            Mode::XApic => ((self.physical_base as usize + register as usize) as *mut u32)
-                .write_volatile(value),
+            Mode::XApic => {
+                ((self.mapped_base + register as usize) as *mut u32).write_volatile(value)
+            }
             Mode::X2Apic => write_msr(0x800 + register / 16, u64::from(value)),
         }
+    }
+
+    pub(crate) fn from_saved(id: u8, mode: Mode, physical_base: u64) -> Option<Self> {
+        let mapped_base = match mode {
+            Mode::XApic => paging::direct_map_range_address(physical_base, 0x400)?,
+            Mode::X2Apic => 0,
+        };
+        Some(Self {
+            id,
+            mode,
+            physical_base,
+            mapped_base,
+        })
+    }
+
+    pub(crate) fn mmio_uses_direct_map(&self) -> bool {
+        self.mode == Mode::X2Apic
+            || paging::direct_map_range_address(self.physical_base, 0x400) == Some(self.mapped_base)
     }
 }
 
@@ -77,11 +97,7 @@ pub(crate) fn discover() -> Option<LocalApic> {
         return None;
     }
 
-    Some(LocalApic {
-        id: (features.ebx >> 24) as u8,
-        mode,
-        physical_base,
-    })
+    LocalApic::from_saved((features.ebx >> 24) as u8, mode, physical_base)
 }
 
 unsafe fn read_msr(msr: u32) -> u64 {

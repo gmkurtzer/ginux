@@ -304,14 +304,14 @@ pub(crate) fn rearm_scheduler_preemption() -> bool {
         PREEMPTION_ARMED.store(false, Ordering::SeqCst);
         return false;
     }
-    let apic = LocalApic {
-        id: 0,
-        mode: if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
-            Mode::X2Apic
-        } else {
-            Mode::XApic
-        },
-        physical_base: INTERRUPT_APIC_BASE.load(Ordering::SeqCst),
+    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    else {
+        return false;
     };
     unsafe {
         apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
@@ -330,14 +330,14 @@ pub(crate) unsafe fn finish_scheduler_preemption(apic: &LocalApic) -> bool {
 
 extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     TIMER_FIRED.store(true, Ordering::SeqCst);
-    let apic = LocalApic {
-        id: 0,
-        mode: if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
-            Mode::X2Apic
-        } else {
-            Mode::XApic
-        },
-        physical_base: INTERRUPT_APIC_BASE.load(Ordering::SeqCst),
+    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    else {
+        return;
     };
     // SAFETY: The verifier initializes these values before unmasking the timer,
     // and the handler runs with exclusive bootstrap-processor APIC ownership.

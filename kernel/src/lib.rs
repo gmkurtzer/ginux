@@ -338,6 +338,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: first I/O APIC GSI base: ");
     serial_write_u64(u64::from(platform.first_io_apic_gsi));
     serial_write("\r\n");
+    serial_write("ginux: ACPI tables use higher-half direct map\r\n");
 
     if !arch::x86_64::cpu::install() {
         kernel_fail("ginux: architectural exception gates invalid\r\n");
@@ -360,6 +361,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("ginux: CPUID/MSR and ACPI disagree on local APIC\r\n");
     }
+    if !local_apic.mmio_uses_direct_map() {
+        kernel_fail("ginux: local APIC direct-map access invalid\r\n");
+    }
     serial_write("ginux: local APIC discovered\r\nginux: local APIC ID: ");
     serial_write_u64(u64::from(local_apic.id));
     serial_write("\r\nginux: local APIC mode: ");
@@ -370,6 +374,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: local APIC physical base: ");
     serial_write_u64(local_apic.physical_base);
     serial_write("\r\n");
+    serial_write("ginux: local APIC uses higher-half direct map\r\n");
 
     let timers = arch::x86_64::timer::discover();
     serial_write("ginux: timer capabilities discovered\r\nginux: invariant TSC: ");
@@ -401,8 +406,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\n");
 
     // SAFETY: The bootstrap processor owns the still-disabled interrupt
-    // environment. The transitional identity map covers the asserted xAPIC
-    // MMIO limit, and no other kernel component uses the PIT or APIC timer.
+    // environment. The checked direct map covers the asserted xAPIC MMIO
+    // limit, and no other kernel component uses the PIT or APIC timer.
     let Some(apic_timer) = (unsafe {
         arch::x86_64::timer::calibrate_local_apic(
             &local_apic,

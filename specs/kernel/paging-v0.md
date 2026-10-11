@@ -94,9 +94,10 @@ This map is intentionally transitional:
 - Most identity-map aliases remain writable, so this revision does not yet make
   kernel text or user-code physical frames immutable through every alias.
 - Addresses above 4 GiB are unavailable.
-- Kernel static paging objects, firmware tables, and xAPIC MMIO still use
-  identity addresses. Allocator-owned frame scrubbing and all dynamic domain
-  page-table and payload-frame operations use the higher-half alias.
+- Kernel static paging objects and the pre-transition boot-validation path still
+  use identity addresses. Post-transition ACPI reads, xAPIC MMIO,
+  allocator-owned frame scrubbing, and all dynamic domain page-table and
+  payload-frame operations use the higher-half alias.
 - The low identity mapping cannot be replaced by conventional Linux lower-half
   mappings until those kernel accesses migrate to the direct map.
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.
