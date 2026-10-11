@@ -19,11 +19,15 @@ ginux_linux_probe:
     jne failure
     cmp qword ptr [0x404108], 0x400100
     jne failure
+    cmp qword ptr [0x404110], 0x400100
+    jne failure
     jmp valid_interpreter_base
 static_relocation_state:
     cmp qword ptr [0x404100], 0
     jne failure
     cmp qword ptr [0x404108], 0
+    jne failure
+    cmp qword ptr [0x404110], 0
     jne failure
 valid_interpreter_base:
     cmp qword ptr [rsp + 128], 0

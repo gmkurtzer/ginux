@@ -8,9 +8,10 @@ M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to six
 program headers in any order, normalizes executable, optional read-only, and
 writable loads,
 and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
-`PT_GNU_STACK`, bounded `PT_INTERP`, and one- or two-entry relocation
-`PT_DYNAMIC` declarations. The two-entry profile validates a two-symbol table,
-bounded string table, and one global function symbol used by `R_X86_64_GLOB_DAT`.
+`PT_GNU_STACK`, bounded `PT_INTERP`, and one- to three-entry relocation
+`PT_DYNAMIC` declarations. The symbol profile validates a two-entry symbol-table
+prefix, bounded string table, and one global function symbol used by
+`R_X86_64_GLOB_DAT` and `R_X86_64_JUMP_SLOT`.
 Images whose expanded
 program-header table covers the entry point are rejected. A bounded proof maps
 a resolved `ET_EXEC` main image and relocated `ET_DYN` interpreter into separate
@@ -18,7 +19,7 @@ W^X regions, builds the dynamic startup stack, and enters the interpreter first.
 A compact userspace interpreter assembled from its own source derives its load
 bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
 relocation plus the main image's relative and symbol-based relocations, and then
-transfers control to the main entry. The main workload requires both relocated
+transfers control to the main entry. The main workload requires all relocated
 values before the full
 ring-3 probe completes, while the kernel verifies the interpreter's relocated
 target. The kernel then restores its root and scrubs every owned frame.
@@ -27,8 +28,7 @@ payloads before extracting their bytes.
 Interpreter selection binds the exact `PT_INTERP` path and SHA-256
 digest before parsing or mapping. A production authority source, relocation,
 and general dynamic linking remain unimplemented. Malformed dynamic tables,
-duplicate
-tags, unsupported relocations, and relocation targets outside writable memory
+duplicate tags, unsupported relocations, and relocation targets outside writable memory
 are rejected before mapping.
 The static planner also rejects any image carrying dynamic relocation metadata,
 so unresolved code cannot bypass interpreter-first startup.
@@ -136,8 +136,9 @@ interpreter image while preserving distinct initial-entry, `AT_ENTRY`, and
 verified, including rejection of substituted, mutated, and truncated interpreter
 bytes. Synthetic userspace relative relocations are executed for both the
 interpreter and main image. The main image additionally proves direct symbol-index
-resolution through one `R_X86_64_GLOB_DAT`; symbol lookup, dependency graphs,
-symbol interposition, and a real userspace linker remain outside the profile.
+resolution through `R_X86_64_GLOB_DAT` and eager `R_X86_64_JUMP_SLOT` writes;
+symbol lookup, lazy binding, dependency graphs, symbol interposition, and a real
+userspace linker remain outside the profile.
 This is not yet a general Linux
 process or syscall environment; see
 [Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and

@@ -50,6 +50,15 @@ ginux_linux_interpreter:
     add rdx, qword ptr [rax + 40]
     mov qword ptr [rcx], rdx
 
+    mov rcx, qword ptr [rax + 48]
+    mov rdx, qword ptr [rax + 56]
+    shr rdx, 32
+    lea rdx, [rdx + rdx * 2]
+    shl rdx, 3
+    mov rdx, qword ptr [rsi + rdx + 8]
+    add rdx, qword ptr [rax + 64]
+    mov qword ptr [rcx], rdx
+
     mov eax, 0x400100
     jmp rax
 

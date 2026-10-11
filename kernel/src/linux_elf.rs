@@ -24,7 +24,8 @@ const MAX_INTERPRETER_PATH_SIZE: usize = 256;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (4 * PAGE_SIZE) as u64;
 const FIXTURE_DATA_OFFSET: usize = 0x4000;
 const FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8;
-const INTERPRETED_FIXTURE_SIZE: usize = FIXTURE_DATA_OFFSET + 8 + 8 * DYNAMIC_ENTRY_SIZE;
+const INTERPRETED_FIXTURE_SIZE: usize =
+    FIXTURE_DATA_OFFSET + 8 + 8 * DYNAMIC_ENTRY_SIZE + 2 * SYMBOL_ENTRY_SIZE + 13;
 const DYNAMIC_ENTRY_SIZE: usize = 16;
 const RELA_ENTRY_SIZE: usize = 24;
 const SYMBOL_ENTRY_SIZE: usize = 24;
@@ -37,6 +38,7 @@ const DT_RELAENT: u64 = 9;
 const DT_STRSZ: u64 = 10;
 const DT_SYMENT: u64 = 11;
 const R_X86_64_GLOB_DAT: u32 = 6;
+const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_RELATIVE: u64 = 8;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const INTERPRETER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-interpreter.bin"));
@@ -87,6 +89,7 @@ pub(crate) struct DynamicRelocations {
     pub(crate) string_table_address: Option<u64>,
     pub(crate) string_table_size: usize,
     pub(crate) symbol_relocation: Option<SymbolRelocation>,
+    pub(crate) jump_slot_relocation: Option<SymbolRelocation>,
 }
 
 #[derive(Clone, Copy)]
@@ -340,6 +343,7 @@ pub(crate) fn verify_unresolved_dynamic_image_rejected() -> bool {
         string_table_address: None,
         string_table_size: 0,
         symbol_relocation: None,
+        jump_slot_relocation: None,
     });
     plan(&image).is_none()
 }
@@ -549,6 +553,14 @@ pub(crate) fn plan_position_independent<'a>(
             },
             string_table_size: dynamic.string_table_size,
             symbol_relocation: match dynamic.symbol_relocation {
+                Some(relocation) => Some(SymbolRelocation {
+                    target: relocation.target.checked_add(load_bias)?,
+                    symbol_value: relocation.symbol_value.checked_add(load_bias)?,
+                    ..relocation
+                }),
+                None => None,
+            },
+            jump_slot_relocation: match dynamic.jump_slot_relocation {
                 Some(relocation) => Some(SymbolRelocation {
                     target: relocation.target.checked_add(load_bias)?,
                     symbol_value: relocation.symbol_value.checked_add(load_bias)?,
@@ -857,7 +869,9 @@ fn parse_dynamic_relocations(
     };
     if !terminated
         || rela_entry_size != RELA_ENTRY_SIZE as u64
-        || !matches!(rela_size, value if value == RELA_ENTRY_SIZE as u64 || value == (2 * RELA_ENTRY_SIZE) as u64)
+        || !matches!(rela_size, value if value == RELA_ENTRY_SIZE as u64
+            || value == (2 * RELA_ENTRY_SIZE) as u64
+            || value == (3 * RELA_ENTRY_SIZE) as u64)
     {
         return None;
     }
@@ -880,81 +894,114 @@ fn parse_dynamic_relocations(
         string_table_size,
         symbol_entry_size,
     );
-    let (symbol_table_address, string_table_address, string_table_size, symbol_relocation) =
-        match (relocation_count, symbol_metadata) {
-            (1, (None, None, None, None)) => (None, None, 0, None),
-            (2, (Some(symbols), Some(strings), Some(string_size), Some(symbol_size)))
-                if symbol_size == SYMBOL_ENTRY_SIZE as u64
-                    && (2..=MAX_INTERPRETER_PATH_SIZE as u64).contains(&string_size) =>
-            {
-                let string_size = usize::try_from(string_size).ok()?;
-                let string_table = virtual_file_bytes(loads, strings, string_size)?;
-                if string_table[0] != 0 {
-                    return None;
-                }
-                let second = &rela[RELA_ENTRY_SIZE..2 * RELA_ENTRY_SIZE];
-                let symbol_target = read_u64(second, 0)?;
-                let symbol_info = read_u64(second, 8)?;
-                let symbol_addend = read_u64(second, 16)?;
-                let relocation_kind = symbol_info as u32;
-                let symbol_index = u32::try_from(symbol_info >> 32).ok()?;
-                if relocation_kind != R_X86_64_GLOB_DAT
-                    || symbol_index != 1
-                    || symbol_addend != 0
-                    || !symbol_target.is_multiple_of(8)
-                    || symbol_target == target
-                    || symbol_target < writable.virtual_address
-                    || symbol_target.checked_add(8)? > writable_end
-                {
-                    return None;
-                }
-                let symbol_bytes = virtual_file_bytes(loads, symbols, 2 * SYMBOL_ENTRY_SIZE)?;
-                if symbol_bytes[..SYMBOL_ENTRY_SIZE]
-                    .iter()
-                    .any(|byte| *byte != 0)
-                {
-                    return None;
-                }
-                let symbol = &symbol_bytes[SYMBOL_ENTRY_SIZE..2 * SYMBOL_ENTRY_SIZE];
-                let name_offset = read_u32(symbol, 0)?;
-                let symbol_value = read_u64(symbol, 8)?;
-                let symbol_size = read_u64(symbol, 16)?;
-                let name_offset_usize = usize::try_from(name_offset).ok()?;
-                let name = string_table.get(name_offset_usize..)?;
-                let name_length = name.iter().position(|byte| *byte == 0)?;
-                let executable = loads
-                    .iter()
-                    .flatten()
-                    .find(|segment| segment.flags & PF_EXECUTE != 0)?;
-                let executable_end = executable
-                    .virtual_address
-                    .checked_add(executable.memory_size)?;
-                if name_offset == 0
-                    || name_length == 0
-                    || symbol[4] != 0x12
-                    || symbol[5] != 0
-                    || read_u16(symbol, 6)? == 0
-                    || symbol_value < executable.virtual_address
-                    || symbol_value >= executable_end
-                    || symbol_size > executable_end.checked_sub(symbol_value)?
-                {
-                    return None;
-                }
-                (
-                    Some(symbols),
-                    Some(strings),
-                    string_size,
-                    Some(SymbolRelocation {
-                        target: symbol_target,
-                        symbol_index,
-                        symbol_value,
-                        symbol_name_offset: name_offset,
-                        addend: symbol_addend,
-                    }),
-                )
+    let (
+        symbol_table_address,
+        string_table_address,
+        string_table_size,
+        symbol_relocation,
+        jump_slot_relocation,
+    ) = match (relocation_count, symbol_metadata) {
+        (1, (None, None, None, None)) => (None, None, 0, None, None),
+        (count @ (2 | 3), (Some(symbols), Some(strings), Some(string_size), Some(symbol_size)))
+            if symbol_size == SYMBOL_ENTRY_SIZE as u64
+                && (2..=MAX_INTERPRETER_PATH_SIZE as u64).contains(&string_size) =>
+        {
+            let string_size = usize::try_from(string_size).ok()?;
+            let string_table = virtual_file_bytes(loads, strings, string_size)?;
+            if string_table[0] != 0 {
+                return None;
             }
-            _ => return None,
-        };
+            let second = &rela[RELA_ENTRY_SIZE..2 * RELA_ENTRY_SIZE];
+            let symbol_target = read_u64(second, 0)?;
+            let symbol_info = read_u64(second, 8)?;
+            let symbol_addend = read_u64(second, 16)?;
+            let relocation_kind = symbol_info as u32;
+            let symbol_index = u32::try_from(symbol_info >> 32).ok()?;
+            if relocation_kind != R_X86_64_GLOB_DAT
+                || symbol_index != 1
+                || symbol_addend != 0
+                || !symbol_target.is_multiple_of(8)
+                || symbol_target == target
+                || symbol_target < writable.virtual_address
+                || symbol_target.checked_add(8)? > writable_end
+            {
+                return None;
+            }
+            let symbol_bytes = virtual_file_bytes(loads, symbols, 2 * SYMBOL_ENTRY_SIZE)?;
+            if symbol_bytes[..SYMBOL_ENTRY_SIZE]
+                .iter()
+                .any(|byte| *byte != 0)
+            {
+                return None;
+            }
+            let symbol = &symbol_bytes[SYMBOL_ENTRY_SIZE..2 * SYMBOL_ENTRY_SIZE];
+            let name_offset = read_u32(symbol, 0)?;
+            let symbol_value = read_u64(symbol, 8)?;
+            let symbol_size = read_u64(symbol, 16)?;
+            let name_offset_usize = usize::try_from(name_offset).ok()?;
+            let name = string_table.get(name_offset_usize..)?;
+            let name_length = name.iter().position(|byte| *byte == 0)?;
+            let executable = loads
+                .iter()
+                .flatten()
+                .find(|segment| segment.flags & PF_EXECUTE != 0)?;
+            let executable_end = executable
+                .virtual_address
+                .checked_add(executable.memory_size)?;
+            if name_offset == 0
+                || name_length == 0
+                || symbol[4] != 0x12
+                || symbol[5] != 0
+                || read_u16(symbol, 6)? == 0
+                || symbol_value < executable.virtual_address
+                || symbol_value >= executable_end
+                || symbol_size > executable_end.checked_sub(symbol_value)?
+            {
+                return None;
+            }
+            let symbol_relocation = SymbolRelocation {
+                target: symbol_target,
+                symbol_index,
+                symbol_value,
+                symbol_name_offset: name_offset,
+                addend: symbol_addend,
+            };
+            let jump_slot_relocation = if count == 3 {
+                let third = &rela[2 * RELA_ENTRY_SIZE..3 * RELA_ENTRY_SIZE];
+                let jump_target = read_u64(third, 0)?;
+                let jump_info = read_u64(third, 8)?;
+                let jump_addend = read_u64(third, 16)?;
+                if jump_info as u32 != R_X86_64_JUMP_SLOT
+                    || u32::try_from(jump_info >> 32).ok()? != symbol_index
+                    || jump_addend != 0
+                    || !jump_target.is_multiple_of(8)
+                    || jump_target == target
+                    || jump_target == symbol_target
+                    || jump_target < writable.virtual_address
+                    || jump_target.checked_add(8)? > writable_end
+                {
+                    return None;
+                }
+                Some(SymbolRelocation {
+                    target: jump_target,
+                    symbol_index,
+                    symbol_value,
+                    symbol_name_offset: name_offset,
+                    addend: jump_addend,
+                })
+            } else {
+                None
+            };
+            (
+                Some(symbols),
+                Some(strings),
+                string_size,
+                Some(symbol_relocation),
+                jump_slot_relocation,
+            )
+        }
+        _ => return None,
+    };
     Some(DynamicRelocations {
         table_address: table.virtual_address,
         relocation_address: rela_address,
@@ -965,6 +1012,7 @@ fn parse_dynamic_relocations(
         string_table_address,
         string_table_size,
         symbol_relocation,
+        jump_slot_relocation,
     })
 }
 
@@ -1356,14 +1404,21 @@ fn verify_interpreted_plan() -> bool {
             dynamic.table_address == 0x40_4008
                 && dynamic.relocation_address
                     == 0x3f_f000 + (ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE) as u64
-                && dynamic.relocation_count == 2
+                && dynamic.relocation_count == 3
                 && dynamic.relocation_target == 0x40_4100
                 && dynamic.relocation_addend == 0x40_0100
-                && dynamic.symbol_table_address == Some(0x3f_f1c0)
-                && dynamic.string_table_address == Some(0x3f_f1f0)
+                && dynamic.symbol_table_address == Some(0x40_4088)
+                && dynamic.string_table_address == Some(0x40_40b8)
                 && dynamic.string_table_size == 13
                 && dynamic.symbol_relocation.is_some_and(|relocation| {
                     relocation.target == 0x40_4108
+                        && relocation.symbol_index == 1
+                        && relocation.symbol_value == 0x40_0100
+                        && relocation.symbol_name_offset == 1
+                        && relocation.addend == 0
+                })
+                && dynamic.jump_slot_relocation.is_some_and(|relocation| {
+                    relocation.target == 0x40_4110
                         && relocation.symbol_index == 1
                         && relocation.symbol_value == 0x40_0100
                         && relocation.symbol_name_offset == 1
@@ -1388,6 +1443,7 @@ fn verify_interpreted_plan() -> bool {
                     && dynamic.string_table_address.is_none()
                     && dynamic.string_table_size == 0
                     && dynamic.symbol_relocation.is_none()
+                    && dynamic.jump_slot_relocation.is_none()
             })
         && combined.interpreter.executable.virtual_page == 0x60_0000
         && combined.interpreter.writable.virtual_page == 0x60_3000
@@ -1428,15 +1484,15 @@ fn verify_interpreter_authentication_rejections(
 }
 
 pub(crate) fn verify_dynamic_relocation_rejections() -> bool {
-    (0..16).all(dynamic_relocation_rejected)
+    (0..20).all(dynamic_relocation_rejected)
 }
 
 #[inline(never)]
 fn dynamic_relocation_rejected(case: u8) -> bool {
     const RELA_OFFSET: usize = ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE;
-    const SYMTAB_OFFSET: usize = RELA_OFFSET + 2 * RELA_ENTRY_SIZE;
-    const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     const DYNAMIC_OFFSET: usize = FIXTURE_DATA_OFFSET + 8;
+    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 8 * DYNAMIC_ENTRY_SIZE;
+    const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     let mut image = interpreted_main_fixture();
     match case {
         0 => write_u64(&mut image, DYNAMIC_OFFSET, DT_RELA),
@@ -1463,6 +1519,18 @@ fn dynamic_relocation_rejected(case: u8) -> bool {
         13 => write_u64(&mut image, SYMTAB_OFFSET + SYMBOL_ENTRY_SIZE + 8, 0x40_4000),
         14 => image[STRTAB_OFFSET + 12] = b'x',
         15 => write_u64(&mut image, RELA_OFFSET + RELA_ENTRY_SIZE + 16, 1),
+        16 => write_u64(
+            &mut image,
+            RELA_OFFSET + 2 * RELA_ENTRY_SIZE + 8,
+            (1_u64 << 32) | 6,
+        ),
+        17 => write_u64(
+            &mut image,
+            RELA_OFFSET + 2 * RELA_ENTRY_SIZE + 8,
+            (2_u64 << 32) | 7,
+        ),
+        18 => write_u64(&mut image, RELA_OFFSET + 2 * RELA_ENTRY_SIZE, 0x40_4108),
+        19 => write_u64(&mut image, RELA_OFFSET + 2 * RELA_ENTRY_SIZE + 16, 1),
         _ => return false,
     }
     parse(&image).is_none()
@@ -1630,11 +1698,11 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
     const PATH: &[u8] = b"/lib64/ld-ginux.so\0";
     const EXECUTABLE_OFFSET: usize = 0x200;
     const RELA_OFFSET: usize = ELF_HEADER_SIZE + 6 * PROGRAM_HEADER_SIZE;
-    const SYMTAB_OFFSET: usize = RELA_OFFSET + 2 * RELA_ENTRY_SIZE;
-    const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     const STRING_TABLE: &[u8] = b"\0ginux_probe\0";
     const PATH_OFFSET: usize = 0x3f80;
     const DYNAMIC_OFFSET: usize = FIXTURE_DATA_OFFSET + 8;
+    const SYMTAB_OFFSET: usize = DYNAMIC_OFFSET + 8 * DYNAMIC_ENTRY_SIZE;
+    const STRTAB_OFFSET: usize = SYMTAB_OFFSET + 2 * SYMBOL_ENTRY_SIZE;
     let mut bytes = [0_u8; INTERPRETED_FIXTURE_SIZE];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
@@ -1648,7 +1716,7 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
     write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
     write_u16(&mut bytes, 54, PROGRAM_HEADER_SIZE as u16);
     write_u16(&mut bytes, 56, 6);
-    let header_load_size = (STRTAB_OFFSET + STRING_TABLE.len()) as u64;
+    let header_load_size = (RELA_OFFSET + 3 * RELA_ENTRY_SIZE) as u64;
     write_segment(
         &mut bytes,
         ELF_HEADER_SIZE,
@@ -1672,7 +1740,7 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
         ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE,
         FIXTURE_DATA_OFFSET as u64,
         0x40_4000,
-        (8 + 8 * DYNAMIC_ENTRY_SIZE) as u64,
+        (STRTAB_OFFSET + STRING_TABLE.len() - FIXTURE_DATA_OFFSET) as u64,
         (PAGE_SIZE + 512) as u64,
         PF_READ | PF_WRITE,
     );
@@ -1705,6 +1773,13 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
         (1_u64 << 32) | u64::from(R_X86_64_GLOB_DAT),
     );
     write_u64(&mut bytes, RELA_OFFSET + RELA_ENTRY_SIZE + 16, 0);
+    write_u64(&mut bytes, RELA_OFFSET + 2 * RELA_ENTRY_SIZE, 0x40_4110);
+    write_u64(
+        &mut bytes,
+        RELA_OFFSET + 2 * RELA_ENTRY_SIZE + 8,
+        (1_u64 << 32) | u64::from(R_X86_64_JUMP_SLOT),
+    );
+    write_u64(&mut bytes, RELA_OFFSET + 2 * RELA_ENTRY_SIZE + 16, 0);
     write_u32(&mut bytes, SYMTAB_OFFSET + SYMBOL_ENTRY_SIZE, 1);
     bytes[SYMTAB_OFFSET + SYMBOL_ENTRY_SIZE + 4] = 0x12;
     write_u16(&mut bytes, SYMTAB_OFFSET + SYMBOL_ENTRY_SIZE + 6, 1);
@@ -1718,10 +1793,10 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
     for (index, (tag, value)) in [
         (DT_SYMENT, SYMBOL_ENTRY_SIZE as u64),
         (DT_RELA, 0x3f_f000 + RELA_OFFSET as u64),
-        (DT_STRTAB, 0x3f_f000 + STRTAB_OFFSET as u64),
+        (DT_STRTAB, 0x400000 + STRTAB_OFFSET as u64),
         (DT_RELAENT, RELA_ENTRY_SIZE as u64),
-        (DT_SYMTAB, 0x3f_f000 + SYMTAB_OFFSET as u64),
-        (DT_RELASZ, (2 * RELA_ENTRY_SIZE) as u64),
+        (DT_SYMTAB, 0x400000 + SYMTAB_OFFSET as u64),
+        (DT_RELASZ, (3 * RELA_ENTRY_SIZE) as u64),
         (DT_STRSZ, STRING_TABLE.len() as u64),
         (DT_NULL, 0),
     ]
