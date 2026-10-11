@@ -26,7 +26,9 @@ ring 3 before terminating through the architectural x86-64 `SYSCALL` instruction
 after checking that an unsupported call returns `-ENOSYS`, performing bounded
 console `write` copy-in and `uname` copy-out operations, and validating a
 `getpid()` result returned through `SYSRETQ`. Console writes accept 1 through
-256 validated bytes on descriptor 1 and preserve exact byte content. It also
+256 validated bytes on descriptor 1 and preserve exact byte content. Bounded
+`writev` atomically validates and assembles up to four vectors under the same
+aggregate limit before emitting any bytes. It also
 configures and queries an FS-relative
 TLS base through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's
 prior FS base afterward. Pointer-bearing calls are constrained to the RW

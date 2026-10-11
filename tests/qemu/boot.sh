@@ -563,6 +563,16 @@ if ! grep -q '^ginux: Linux bounded console writes validated' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux atomic vectored console writes validated' "$output_file"; then
+    echo "Boot test failed: Linux atomic vectored console writes were not validated." >&2
+    exit 1
+fi
+
+if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 12 ]]; then
+    echo "Boot test failed: Linux console output record count is invalid." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux container-local root credentials verified' "$output_file"; then
     echo "Boot test failed: Linux container-local root credentials were not verified." >&2
     exit 1

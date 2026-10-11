@@ -48,6 +48,7 @@ const LINUX_WRITE_SYSCALL: u64 = 1;
 const LINUX_FSTAT_SYSCALL: u64 = 5;
 const LINUX_MPROTECT_SYSCALL: u64 = 10;
 const LINUX_BRK_SYSCALL: u64 = 12;
+const LINUX_WRITEV_SYSCALL: u64 = 20;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_EXIT_SYSCALL: u64 = 60;
 const LINUX_UNAME_SYSCALL: u64 = 63;
@@ -93,6 +94,7 @@ const LINUX_PROT_READ: u64 = 1;
 const LINUX_STAT_SIZE: usize = 144;
 const LINUX_STAT_CHARACTER_DEVICE_MODE: u32 = 0o020600;
 const LINUX_WRITE_LIMIT: usize = 256;
+const LINUX_IOV_LIMIT: usize = 4;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1071,23 +1073,7 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     match number {
-        LINUX_WRITE_SYSCALL => {
-            if first_argument != 1 {
-                return LINUX_EBADF;
-            }
-            let Ok(length) = usize::try_from(count) else {
-                return LINUX_EINVAL;
-            };
-            if !(1..=LINUX_WRITE_LIMIT).contains(&length) {
-                return LINUX_EINVAL;
-            }
-            let mut bytes = [0_u8; LINUX_WRITE_LIMIT];
-            if !copy_from_linux_user(buffer, &mut bytes[..length]) {
-                return LINUX_EFAULT;
-            }
-            crate::serial_write_bytes(&bytes[..length]);
-            count
-        }
+        LINUX_WRITE_SYSCALL => linux_console_write(first_argument, buffer, count),
         LINUX_FSTAT_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
                 return LINUX_EBADF;
@@ -1119,6 +1105,7 @@ extern "sysv64" fn linux_syscall_handler(
             ELF_PROBE_READ_ONLY_DATA_PAGE.store(first_argument, Ordering::SeqCst);
             0
         }
+        LINUX_WRITEV_SYSCALL => linux_console_writev(first_argument, buffer, count),
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
             let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
@@ -1306,6 +1293,65 @@ fn copy_linux_robust_list(head_address: u64, size_address: u64) -> bool {
     let head = ELF_PROBE_ROBUST_LIST.load(Ordering::SeqCst).to_ne_bytes();
     let size = (LINUX_ROBUST_LIST_HEAD_SIZE as u64).to_ne_bytes();
     copy_to_linux_user(head_address, &head) && copy_to_linux_user(size_address, &size)
+}
+
+fn linux_console_write(descriptor: u64, address: u64, count: u64) -> u64 {
+    if descriptor != 1 {
+        return LINUX_EBADF;
+    }
+    let Ok(length) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if !(1..=LINUX_WRITE_LIMIT).contains(&length) {
+        return LINUX_EINVAL;
+    }
+    let mut bytes = [0_u8; LINUX_WRITE_LIMIT];
+    if !copy_from_linux_user(address, &mut bytes[..length]) {
+        return LINUX_EFAULT;
+    }
+    crate::serial_write_bytes(&bytes[..length]);
+    count
+}
+
+fn linux_console_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
+    if descriptor != 1 {
+        return LINUX_EBADF;
+    }
+    let Ok(vector_count) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    if !(1..=LINUX_IOV_LIMIT).contains(&vector_count) {
+        return LINUX_EINVAL;
+    }
+    let mut table = [0_u8; LINUX_IOV_LIMIT * 16];
+    if !copy_from_linux_user(vectors, &mut table[..vector_count * 16]) {
+        return LINUX_EFAULT;
+    }
+    let mut output = [0_u8; LINUX_WRITE_LIMIT];
+    let mut total = 0_usize;
+    for vector in table[..vector_count * 16].as_chunks::<16>().0 {
+        let mut address_bytes = [0_u8; 8];
+        address_bytes.copy_from_slice(&vector[..8]);
+        let address = u64::from_ne_bytes(address_bytes);
+        let mut length_bytes = [0_u8; 8];
+        length_bytes.copy_from_slice(&vector[8..]);
+        let length = u64::from_ne_bytes(length_bytes);
+        let Ok(length) = usize::try_from(length) else {
+            return LINUX_EINVAL;
+        };
+        let Some(end) = total.checked_add(length) else {
+            return LINUX_EINVAL;
+        };
+        if length == 0 || end > LINUX_WRITE_LIMIT {
+            return LINUX_EINVAL;
+        }
+        if !copy_from_linux_user(address, &mut output[total..end]) {
+            return LINUX_EFAULT;
+        }
+        total = end;
+    }
+    crate::serial_write_bytes(&output[..total]);
+    total as u64
 }
 
 fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {

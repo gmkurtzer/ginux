@@ -271,6 +271,45 @@ ginux_linux_probe:
     cmp qword ptr [0x401238], 4096
     jne failure
 
+    lea rax, [rip + readable_payload]
+    mov qword ptr [0x401300], rax
+    mov qword ptr [0x401308], 4
+    mov qword ptr [0x401310], 0x402200
+    mov qword ptr [0x401318], 4
+    mov edi, 1
+    mov esi, 0x401300
+    mov edx, 2
+    mov eax, 20
+    syscall
+    cmp rax, -14
+    jne failure
+
+    lea rax, [rip + readable_payload + 4]
+    mov qword ptr [0x401310], rax
+    mov edi, 2
+    mov esi, 0x401300
+    mov edx, 2
+    mov eax, 20
+    syscall
+    cmp rax, -9
+    jne failure
+
+    mov edi, 1
+    mov esi, 0x401300
+    mov edx, 5
+    mov eax, 20
+    syscall
+    cmp rax, -22
+    jne failure
+
+    mov edi, 1
+    mov esi, 0x401300
+    mov edx, 2
+    mov eax, 20
+    syscall
+    cmp rax, 8
+    jne failure
+
     mov edi, 99
     mov esi, 0x401080
     mov eax, 97

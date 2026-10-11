@@ -10,12 +10,20 @@ instruction with Linux register conventions. It submits unsupported call
 length. The kernel accepts 1 through 256 bytes, validates the descriptor and
 complete readable VMA range, enables supervisor access only around the bounded
 copy-in, emits the exact bytes to the pinned console, and returns the requested
-length. A zero or larger request returns `-EINVAL`. Next, `rax = 63`
+length. A zero-length request or one above the limit returns `-EINVAL`. Next,
+`rax = 63`
 (`__NR_uname`) and the exact RW segment base request
 a fixed 390-byte Linux `utsname`. The kernel zero-initializes every byte, fills
 all six 65-byte fields, and enables supervisor access to user memory only for
 the copy-out, which is subject to the same declared-extent check. The probe
 checks success and the `Ginux` system name.
+`rax = 20` (`__NR_writev`) accepts one through four 16-byte x86-64 iovec
+records for descriptor 1, with a nonzero aggregate of at most 256 bytes. The
+kernel copies the complete vector table and every referenced range into a
+bounded staging buffer before emitting anything, so an invalid later vector
+returns `-EFAULT` without exposing an earlier prefix. Invalid descriptors return
+`-EBADF`; zero-length vectors, excessive vector counts, and excessive aggregate
+lengths return `-EINVAL`.
 `rax = 79` (`__NR_getcwd`) copies the initial container working directory `/`
 and its terminator to a writable VMA and returns 2. A one-byte buffer returns
 `-ERANGE`; an out-of-range destination returns `-EFAULT`. This is a bounded
@@ -134,7 +142,7 @@ interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
 threads, general TLS state, or any syscall other than the exact bounded
-`write`, `fstat`, `brk`, `uname`, `getcwd`, bounded `readlink`,
+`write`, `writev`, `fstat`, `brk`, `uname`, `getcwd`, bounded `readlink`,
 bounded read-only `mprotect`,
 `umask`, read-only `getrlimit`/`prlimit64`,
 `sched_getaffinity`, `getcpu`,
