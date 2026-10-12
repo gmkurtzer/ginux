@@ -528,6 +528,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(u64::from(virtio_block.device));
     serial_write(".");
     serial_write_u64(u64::from(virtio_block.function));
+    if !platform.first_iommu_covers_pci(
+        virtio_block.bus,
+        virtio_block.device,
+        virtio_block.function,
+    ) || !arch::x86_64::acpi::verify_dmar_scope_resolution(
+        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+    ) {
+        kernel_fail("\r\nginux: virtio IOMMU source-scope resolution failed\r\n");
+    }
+    serial_write("\r\nginux: first IOMMU device scopes: ");
+    serial_write_u64(platform.first_iommu_scope_count() as u64);
+    serial_write("\r\nginux: virtio IOMMU endpoint scope resolved exactly");
     serial_write("\r\nginux: virtio common BAR address: ");
     serial_write_u64(virtio_block.common_bar_address);
     serial_write("\r\nginux: virtio common configuration offset: ");

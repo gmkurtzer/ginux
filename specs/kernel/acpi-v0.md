@@ -30,8 +30,11 @@ fixed fields, and at least one segment-zero DMA-remapping hardware unit. Every
 remapping structure has a bounded nonzero length. Each hardware-unit record
 has known flags, a reserved-zero byte, a nonzero page-aligned register base
 inside the 4 GiB direct-map aperture, and bounded device scopes whose PCI paths
-are pairs of bytes. The kernel records the number of units, address width,
-first register base, and whether the first unit uses the include-all flag.
+are validated device/function pairs. Scope types, reserved fields, PCI
+enumeration identifiers, path components, duplicates, and the fixed endpoint
+capacity are checked. The kernel records the number of units, address width,
+first register base, whether the first unit uses the include-all flag, and up to
+64 directly addressed PCI endpoint source IDs from that unit.
 Unknown remapping-structure types are skipped only after their length is
 validated. Synthetic zero-length, truncated, zero-base, unknown-flag, trailing,
 and malformed-scope records must all be rejected during every boot.
@@ -40,6 +43,6 @@ The discovered first-unit register page is mapped and inspected under the
 separate [IOMMU Register Probe v0](iommu-v0.md) contract. This revision does not
 retain ACPI-reclaimable pages, enumerate interrupt-source overrides, initialize
 secondary processors, access an I/O APIC, or execute AML. It also does not
-resolve a device scope, install root/context/second-level tables, enable
+resolve a nested bridge path, install root/context/second-level tables, enable
 translation, invalidate caches, handle faults, or confine DMA. Device DMA
 therefore remains unisolated until later milestones program the validated unit.

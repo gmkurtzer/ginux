@@ -32,11 +32,19 @@ and a zero root-table address. Failure is fatal for this exact development
 profile. The probe performs no MMIO writes, and the automated QEMU test requires
 translation to remain disabled afterward.
 
+After PCI discovery, the kernel resolves the discovered virtio-blk bus, device,
+and function against the first unit's validated DMAR scopes. The Q35 profile
+must contain an exact, single-path PCI endpoint scope for that source ID because
+the unit does not set `INCLUDE_PCI_ALL`. Synthetic checks reject duplicate
+endpoint scopes, nonzero reserved or PCI enumeration fields, unknown scope
+types, and out-of-range device/function components. This proves which remapping
+unit must eventually own the device; it does not turn translation on.
+
 ## Deliberate limits
 
-This contract does not resolve DMAR device scopes, allocate or install root,
-context, or second-level page tables, issue invalidations, enable translation,
-route or handle IOMMU faults, or confine device DMA. Bus-mastering devices can
+This contract does not resolve multi-hop bridge scopes, allocate or install
+root, context, or second-level page tables, issue invalidations, enable
+translation, route or handle IOMMU faults, or confine device DMA. Bus-mastering devices can
 therefore still address guest physical memory outside their software DMA lease.
 The mapping will become writable only when a later contract defines the exact
 register transitions, rollback behavior, and teardown invariants needed to

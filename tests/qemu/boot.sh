@@ -386,6 +386,12 @@ if ! grep -q '^ginux: read-only uncached IOMMU mapping active' "$output_file" ||
     exit 1
 fi
 
+if ! grep -Eq '^ginux: first IOMMU device scopes: [1-9][0-9]*' "$output_file" ||
+    ! grep -q '^ginux: virtio IOMMU endpoint scope resolved exactly' "$output_file"; then
+    echo "Boot test failed: virtio PCI source ID is not covered by the DMAR unit." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: ACPI tables use higher-half direct map' "$output_file"; then
     echo "Boot test failed: ACPI table access did not use the direct map." >&2
     exit 1

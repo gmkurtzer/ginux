@@ -8,10 +8,33 @@ const DMAR_FIXED_SIZE: usize = 48;
 const DMAR_STRUCTURE_HEADER_SIZE: usize = 4;
 const DMAR_DRHD_SIZE: usize = 16;
 const DMAR_DEVICE_SCOPE_MIN_SIZE: usize = 8;
+const MAX_DMAR_ENDPOINT_SCOPES: usize = 64;
 const MAX_TABLE_SIZE: usize = 1024 * 1024;
 const MAX_ROOT_ENTRIES: usize = 4096;
 const MADT_ENABLED: u32 = 1;
 const MADT_ONLINE_CAPABLE: u32 = 1 << 1;
+
+#[derive(Clone, Copy)]
+struct DmarDeviceScopes {
+    endpoint_source_ids: [u16; MAX_DMAR_ENDPOINT_SCOPES],
+    endpoint_count: usize,
+    scope_count: usize,
+}
+
+impl DmarDeviceScopes {
+    const EMPTY: Self = Self {
+        endpoint_source_ids: [0; MAX_DMAR_ENDPOINT_SCOPES],
+        endpoint_count: 0,
+        scope_count: 0,
+    };
+
+    fn contains_endpoint(self, bus: u8, device: u8, function: u8) -> bool {
+        let Some(source_id) = pci_source_id(bus, device, function) else {
+            return false;
+        };
+        self.endpoint_source_ids[..self.endpoint_count].contains(&source_id)
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct PlatformInfo {
@@ -24,6 +47,21 @@ pub(crate) struct PlatformInfo {
     pub(crate) iommu_host_address_width: u8,
     pub(crate) first_iommu_register_base: u64,
     pub(crate) first_iommu_include_all: bool,
+    first_iommu_scopes: DmarDeviceScopes,
+}
+
+impl PlatformInfo {
+    pub(crate) fn first_iommu_scope_count(self) -> usize {
+        self.first_iommu_scopes.scope_count
+    }
+
+    pub(crate) fn first_iommu_covers_pci(self, bus: u8, device: u8, function: u8) -> bool {
+        pci_source_id(bus, device, function).is_some()
+            && (self.first_iommu_include_all
+                || self
+                    .first_iommu_scopes
+                    .contains_endpoint(bus, device, function))
+    }
 }
 
 pub(crate) fn discover(rsdp: *const u8, mapped_limit: usize) -> Option<PlatformInfo> {
@@ -81,6 +119,7 @@ pub(crate) fn discover(rsdp: *const u8, mapped_limit: usize) -> Option<PlatformI
     platform.iommu_host_address_width = iommu.host_address_width;
     platform.first_iommu_register_base = iommu.first_register_base;
     platform.first_iommu_include_all = iommu.first_include_all;
+    platform.first_iommu_scopes = iommu.first_scopes;
     Some(platform)
 }
 
@@ -132,6 +171,7 @@ fn parse_madt(address: usize, mapped_limit: usize) -> Option<PlatformInfo> {
         iommu_host_address_width: 0,
         first_iommu_register_base: 0,
         first_iommu_include_all: false,
+        first_iommu_scopes: DmarDeviceScopes::EMPTY,
     };
 
     let mut offset = MADT_FIXED_SIZE;
@@ -186,6 +226,7 @@ struct IommuInfo {
     host_address_width: u8,
     first_register_base: u64,
     first_include_all: bool,
+    first_scopes: DmarDeviceScopes,
 }
 
 fn parse_dmar(address: usize, mapped_limit: usize) -> Option<IommuInfo> {
@@ -220,6 +261,7 @@ fn parse_dmar_structures(
     let mut units = 0_usize;
     let mut first_register_base = 0_u64;
     let mut first_include_all = false;
+    let mut first_scopes = DmarDeviceScopes::EMPTY;
     while offset < length {
         if length - offset < DMAR_STRUCTURE_HEADER_SIZE {
             return None;
@@ -239,16 +281,16 @@ fn parse_dmar_structures(
             let reserved = unsafe { structure.add(5).read() };
             let segment = unsafe { read_unaligned(structure.add(6).cast::<u16>()) };
             let register_base = unsafe { read_unaligned(structure.add(8).cast::<u64>()) };
+            let scopes = validate_dmar_device_scopes(
+                unsafe { structure.add(DMAR_DRHD_SIZE) },
+                structure_length - DMAR_DRHD_SIZE,
+            )?;
             if flags & !1 != 0
                 || reserved != 0
                 || segment != 0
                 || register_base == 0
                 || !register_base.is_multiple_of(4096)
                 || !range_is_mapped(usize::try_from(register_base).ok()?, 4096, mapped_limit)
-                || !validate_dmar_device_scopes(
-                    unsafe { structure.add(DMAR_DRHD_SIZE) },
-                    structure_length - DMAR_DRHD_SIZE,
-                )
             {
                 return None;
             }
@@ -256,6 +298,7 @@ fn parse_dmar_structures(
             if units == 1 {
                 first_register_base = register_base;
                 first_include_all = flags & 1 != 0;
+                first_scopes = scopes;
             }
         }
         offset += structure_length;
@@ -265,25 +308,61 @@ fn parse_dmar_structures(
         host_address_width,
         first_register_base,
         first_include_all,
+        first_scopes,
     })
 }
 
-fn validate_dmar_device_scopes(bytes: *const u8, length: usize) -> bool {
+fn validate_dmar_device_scopes(bytes: *const u8, length: usize) -> Option<DmarDeviceScopes> {
+    let mut scopes = DmarDeviceScopes::EMPTY;
     let mut offset = 0;
     while offset < length {
         if length - offset < 2 {
-            return false;
+            return None;
         }
+        let scope_type = unsafe { bytes.add(offset).read() };
         let scope_length = usize::from(unsafe { bytes.add(offset + 1).read() });
         if scope_length < DMAR_DEVICE_SCOPE_MIN_SIZE
             || scope_length > length - offset
             || !(scope_length - 6).is_multiple_of(2)
+            || !(1..=5).contains(&scope_type)
+            || unsafe { read_unaligned(bytes.add(offset + 2).cast::<u16>()) } != 0
         {
-            return false;
+            return None;
+        }
+        let enumeration_id = unsafe { bytes.add(offset + 4).read() };
+        let start_bus = unsafe { bytes.add(offset + 5).read() };
+        if matches!(scope_type, 1 | 2) && enumeration_id != 0 {
+            return None;
+        }
+        let path_entries = (scope_length - 6) / 2;
+        for path in 0..path_entries {
+            let device = unsafe { bytes.add(offset + 6 + path * 2).read() };
+            let function = unsafe { bytes.add(offset + 7 + path * 2).read() };
+            if device >= 32 || function >= 8 {
+                return None;
+            }
+        }
+        scopes.scope_count = scopes.scope_count.checked_add(1)?;
+        if scope_type == 1 && path_entries == 1 {
+            let device = unsafe { bytes.add(offset + 6).read() };
+            let function = unsafe { bytes.add(offset + 7).read() };
+            let source_id = pci_source_id(start_bus, device, function)?;
+            if scopes.endpoint_count == MAX_DMAR_ENDPOINT_SCOPES
+                || scopes.endpoint_source_ids[..scopes.endpoint_count].contains(&source_id)
+            {
+                return None;
+            }
+            scopes.endpoint_source_ids[scopes.endpoint_count] = source_id;
+            scopes.endpoint_count += 1;
         }
         offset += scope_length;
     }
-    offset == length
+    (offset == length).then_some(scopes)
+}
+
+fn pci_source_id(bus: u8, device: u8, function: u8) -> Option<u16> {
+    (device < 32 && function < 8)
+        .then_some((u16::from(bus) << 8) | (u16::from(device) << 3) | u16::from(function))
 }
 
 pub(crate) fn verify_malformed_dmar_rejected(mapped_limit: usize) -> bool {
@@ -317,6 +396,56 @@ pub(crate) fn verify_malformed_dmar_rejected(mapped_limit: usize) -> bool {
         unknown_flags.as_slice(),
         trailing.as_slice(),
         bad_scope.as_slice(),
+    ]
+    .into_iter()
+    .all(|bytes| parse_dmar_structures(bytes.as_ptr(), bytes.len(), 48, mapped_limit).is_none());
+    rejected
+}
+
+pub(crate) fn verify_dmar_scope_resolution(mapped_limit: usize) -> bool {
+    let mut endpoint = [0_u8; DMAR_DRHD_SIZE + DMAR_DEVICE_SCOPE_MIN_SIZE];
+    let endpoint_length = endpoint.len() as u16;
+    endpoint[2..4].copy_from_slice(&endpoint_length.to_le_bytes());
+    endpoint[8..16].copy_from_slice(&0xfed9_0000_u64.to_le_bytes());
+    endpoint[DMAR_DRHD_SIZE] = 1;
+    endpoint[DMAR_DRHD_SIZE + 1] = DMAR_DEVICE_SCOPE_MIN_SIZE as u8;
+    endpoint[DMAR_DRHD_SIZE + 5] = 0;
+    endpoint[DMAR_DRHD_SIZE + 6] = 2;
+    endpoint[DMAR_DRHD_SIZE + 7] = 0;
+    let Some(info) = parse_dmar_structures(endpoint.as_ptr(), endpoint.len(), 48, mapped_limit)
+    else {
+        return false;
+    };
+    if info.first_include_all
+        || !info.first_scopes.contains_endpoint(0, 2, 0)
+        || info.first_scopes.contains_endpoint(0, 3, 0)
+        || info.first_scopes.contains_endpoint(0, 2, 1)
+    {
+        return false;
+    }
+
+    let mut duplicate = [0_u8; DMAR_DRHD_SIZE + 2 * DMAR_DEVICE_SCOPE_MIN_SIZE];
+    duplicate[..endpoint.len()].copy_from_slice(&endpoint);
+    let duplicate_length = duplicate.len() as u16;
+    duplicate[2..4].copy_from_slice(&duplicate_length.to_le_bytes());
+    duplicate[endpoint.len()..].copy_from_slice(&endpoint[DMAR_DRHD_SIZE..]);
+    let mut reserved = endpoint;
+    reserved[DMAR_DRHD_SIZE + 2] = 1;
+    let mut enumeration = endpoint;
+    enumeration[DMAR_DRHD_SIZE + 4] = 1;
+    let mut invalid_device = endpoint;
+    invalid_device[DMAR_DRHD_SIZE + 6] = 32;
+    let mut invalid_function = endpoint;
+    invalid_function[DMAR_DRHD_SIZE + 7] = 8;
+    let mut unknown_type = endpoint;
+    unknown_type[DMAR_DRHD_SIZE] = 6;
+    let rejected = [
+        duplicate.as_slice(),
+        reserved.as_slice(),
+        enumeration.as_slice(),
+        invalid_device.as_slice(),
+        invalid_function.as_slice(),
+        unknown_type.as_slice(),
     ]
     .into_iter()
     .all(|bytes| parse_dmar_structures(bytes.as_ptr(), bytes.len(), 48, mapped_limit).is_none());
