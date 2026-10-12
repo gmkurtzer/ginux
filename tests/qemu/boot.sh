@@ -92,6 +92,16 @@ if ! grep -q '^GINUX_KERNEL_OK' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
+    ! grep -q '^ginux: modern virtio-net PCI capabilities validated' "$output_file" ||
+    ! grep -q '^ginux: malformed virtio-net PCI configurations rejected' "$output_file" ||
+    ! grep -q '^ginux: firmware virtio-net DMA authority revoked' "$output_file" ||
+    ! grep -q '^ginux: virtio-net PCI decoding and bus mastering disabled' "$output_file" ||
+    ! grep -q '^ginux: virtio-net IOMMU endpoint scope resolved exactly' "$output_file"; then
+    echo "Boot test failed: the bounded virtio-net discovery boundary was not established." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

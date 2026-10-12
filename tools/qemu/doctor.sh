@@ -30,9 +30,17 @@ fi
 
 if qemu="$(find_qemu 2>/dev/null)" &&
     "$qemu" -device virtio-blk-pci,help 2>&1 | grep -q 'iommu_platform'; then
-    printf 'ok   %-24s %s\n' 'virtio platform DMA' 'available'
+    printf 'ok   %-24s %s\n' 'virtio-blk platform DMA' 'available'
 else
-    printf 'MISS %-24s required\n' 'virtio platform DMA'
+    printf 'MISS %-24s required\n' 'virtio-blk platform DMA'
+    failed=1
+fi
+
+if qemu="$(find_qemu 2>/dev/null)" &&
+    "$qemu" -device virtio-net-pci,help 2>&1 | grep -q 'iommu_platform'; then
+    printf 'ok   %-24s %s\n' 'virtio-net platform DMA' 'available'
+else
+    printf 'MISS %-24s required\n' 'virtio-net platform DMA'
     failed=1
 fi
 

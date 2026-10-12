@@ -247,6 +247,25 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some((virtio_msix_physical, virtio_msix_length)) = virtio_block.msix_mmio_span() else {
         kernel_fail("ginux: invalid virtio MSI-X MMIO span\r\n");
     };
+    let Some(virtio_network) = arch::x86_64::pci::discover_virtio_network() else {
+        kernel_fail("ginux: modern virtio network device discovery failed\r\n");
+    };
+    let virtio_network_parser_valid =
+        arch::x86_64::pci::verify_network_parser_rejections(virtio_network);
+    let virtio_network_firmware_command =
+        arch::x86_64::pci::network_function_command(virtio_network);
+    let virtio_network_revoked =
+        virtio_network_parser_valid && arch::x86_64::pci::revoke_network_function(virtio_network);
+    if !virtio_network_parser_valid || !virtio_network_revoked {
+        serial_write("ginux: virtio network parser/revoked/firmware-command: ");
+        serial_write_u64(u64::from(virtio_network_parser_valid));
+        serial_write("/");
+        serial_write_u64(u64::from(virtio_network_revoked));
+        serial_write("/");
+        serial_write_u64(u64::from(virtio_network_firmware_command));
+        serial_write("\r\n");
+        kernel_fail("ginux: virtio network discovery boundary invalid\r\n");
+    }
 
     let Some(memory_map_end) = boot_info
         .memory_map_size
@@ -550,6 +569,39 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: first IOMMU device scopes: ");
     serial_write_u64(platform.first_iommu_scope_count() as u64);
     serial_write("\r\nginux: virtio IOMMU endpoint scope resolved exactly");
+    serial_write("\r\nginux: modern virtio network function: ");
+    serial_write_u64(u64::from(virtio_network.bus));
+    serial_write(":");
+    serial_write_u64(u64::from(virtio_network.device));
+    serial_write(".");
+    serial_write_u64(u64::from(virtio_network.function));
+    if virtio_network.device == virtio_block.device
+        || !platform.first_iommu_covers_pci(
+            virtio_network.bus,
+            virtio_network.device,
+            virtio_network.function,
+        )
+        || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
+    {
+        kernel_fail("\r\nginux: virtio network discovery invariant failed\r\n");
+    }
+    serial_write("\r\nginux: virtio-net common BAR address: ");
+    serial_write_u64(virtio_network.common_bar_address);
+    serial_write("\r\nginux: virtio-net common configuration offset: ");
+    serial_write_u64(u64::from(virtio_network.common_offset));
+    serial_write("\r\nginux: virtio-net common configuration length: ");
+    serial_write_u64(u64::from(virtio_network.common_length));
+    serial_write("\r\nginux: virtio-net notification multiplier: ");
+    serial_write_u64(u64::from(virtio_network.notify_multiplier));
+    serial_write("\r\nginux: virtio-net PCI capabilities: ");
+    serial_write_u64(u64::from(virtio_network.capability_count));
+    serial_write("\r\nginux: virtio-net MSI-X vectors: ");
+    serial_write_u64(u64::from(virtio_network.msix.vector_count));
+    serial_write("\r\nginux: modern virtio-net PCI capabilities validated");
+    serial_write("\r\nginux: malformed virtio-net PCI configurations rejected");
+    serial_write("\r\nginux: firmware virtio-net DMA authority revoked");
+    serial_write("\r\nginux: virtio-net PCI decoding and bus mastering disabled");
+    serial_write("\r\nginux: virtio-net IOMMU endpoint scope resolved exactly");
     serial_write("\r\nginux: virtio common BAR address: ");
     serial_write_u64(virtio_block.common_bar_address);
     serial_write("\r\nginux: virtio common configuration offset: ");

@@ -29,6 +29,16 @@ queues. Discovery also requires one disabled MSI-X capability, validates its
 vector count and memory-BAR-backed table and pending-bit ranges, and rejects
 malformed interrupt metadata without mapping or programming it. See
 [PCI Virtio Block Discovery v0](specs/kernel/pci-virtio-block-v0.md).
+The authoritative Q35 profile now also exposes one modern virtio-net function
+at `00:03.0`. The kernel validates its copied PCI capability chain and malformed
+variants without mapping a network BAR or touching device MMIO. OVMF leaves
+PCI decoding and bus mastering enabled, so the kernel explicitly clears all
+three command bits before physical-memory initialization and requires them to
+remain clear.
+The DMAR scope must resolve the network endpoint exactly. No feature
+negotiation, queue, interrupt, DMA lease, packet traffic, or service delegation
+is part of this discovery milestone. See
+[PCI Virtio Network Discovery v0](specs/kernel/pci-virtio-network-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table

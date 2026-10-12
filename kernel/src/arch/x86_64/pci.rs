@@ -20,6 +20,7 @@ const CONFIG_ENABLE: u32 = 1 << 31;
 const CONFIG_SIZE: usize = 256;
 const CONFIG_DWORDS: usize = CONFIG_SIZE / 4;
 const VIRTIO_VENDOR: u16 = 0x1af4;
+const VIRTIO_NETWORK_DEVICE: u16 = 0x1041;
 const VIRTIO_BLOCK_DEVICE: u16 = 0x1042;
 const STATUS_CAPABILITIES: u16 = 1 << 4;
 const CAPABILITY_VENDOR_SPECIFIC: u8 = 0x09;
@@ -47,6 +48,7 @@ const VIRTIO_ISR: u8 = 3;
 const VIRTIO_DEVICE: u8 = 4;
 const MAX_CAPABILITIES: usize = 48;
 const PCI_COMMAND: u8 = 0x04;
+const COMMAND_IO_SPACE: u16 = 1 << 0;
 const COMMAND_MEMORY_SPACE: u16 = 1 << 1;
 const COMMAND_BUS_MASTER: u16 = 1 << 2;
 const COMMON_DEVICE_FEATURE_SELECT: usize = 0x00;
@@ -177,6 +179,19 @@ pub(crate) struct VirtioBlockDevice {
     device_bar_address: u64,
     device_offset: u32,
     device_length: u32,
+    pub(crate) notify_multiplier: u32,
+    pub(crate) capability_count: u8,
+    pub(crate) msix: MsixCapability,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct VirtioNetworkDevice {
+    pub(crate) bus: u8,
+    pub(crate) device: u8,
+    pub(crate) function: u8,
+    pub(crate) common_bar_address: u64,
+    pub(crate) common_offset: u32,
+    pub(crate) common_length: u32,
     pub(crate) notify_multiplier: u32,
     pub(crate) capability_count: u8,
     pub(crate) msix: MsixCapability,
@@ -363,92 +378,155 @@ struct Region {
 /// mechanism 1 access is serialized by the single bootstrap processor while
 /// interrupts are disabled.
 pub(crate) fn discover_virtio_block() -> Option<VirtioBlockDevice> {
+    discover_virtio_device(VIRTIO_BLOCK_DEVICE, parse_virtio_block)
+}
+
+/// Finds exactly one modern virtio network function on PCI bus zero without
+/// changing its command register or touching MMIO.
+pub(crate) fn discover_virtio_network() -> Option<VirtioNetworkDevice> {
+    discover_virtio_device(VIRTIO_NETWORK_DEVICE, parse_virtio_network)
+}
+
+fn discover_virtio_device<T: Copy>(
+    expected_device: u16,
+    parse: fn(&ConfigSpace, u8, u8, u8) -> Option<T>,
+) -> Option<T> {
     let mut found = None;
     for device in 0_u8..32 {
         let identity = unsafe { read_config_u32(0, device, 0, 0) };
         if identity as u16 == u16::MAX {
             continue;
         }
-        if identity as u16 != VIRTIO_VENDOR || (identity >> 16) as u16 != VIRTIO_BLOCK_DEVICE {
+        if identity as u16 != VIRTIO_VENDOR || (identity >> 16) as u16 != expected_device {
             continue;
         }
         if found.is_some() {
             return None;
         }
         let config = unsafe { read_config_space(0, device, 0) };
-        found = parse_virtio_block(&config, 0, device, 0);
+        found = parse(&config, 0, device, 0);
         found?;
     }
     found
 }
 
+pub(crate) fn network_function_is_disabled(device: VirtioNetworkDevice) -> bool {
+    let command = network_function_command(device);
+    command & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER) == 0
+}
+
+pub(crate) fn network_function_command(device: VirtioNetworkDevice) -> u16 {
+    unsafe { read_config_u16(device.bus, device.device, device.function, PCI_COMMAND) }
+}
+
+pub(crate) fn revoke_network_function(device: VirtioNetworkDevice) -> bool {
+    let command = network_function_command(device);
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            command & !(COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER),
+        );
+    }
+    network_function_is_disabled(device)
+}
+
 pub(crate) fn verify_parser_rejections(device: VirtioBlockDevice) -> bool {
     let config = unsafe { read_config_space(device.bus, device.device, device.function) };
+    verify_parser_rejections_for(
+        &config,
+        VIRTIO_BLOCK_DEVICE,
+        device.bus,
+        device.device,
+        device.function,
+    )
+}
 
-    let mut wrong_identity = config;
+pub(crate) fn verify_network_parser_rejections(device: VirtioNetworkDevice) -> bool {
+    let config = unsafe { read_config_space(device.bus, device.device, device.function) };
+    verify_parser_rejections_for(
+        &config,
+        VIRTIO_NETWORK_DEVICE,
+        device.bus,
+        device.device,
+        device.function,
+    )
+}
+
+fn verify_parser_rejections_for(
+    config: &ConfigSpace,
+    expected_device: u16,
+    bus: u8,
+    device: u8,
+    function: u8,
+) -> bool {
+    let mut wrong_identity = *config;
     wrong_identity.bytes[2] ^= 1;
 
-    let mut no_capabilities = config;
+    let mut no_capabilities = *config;
     no_capabilities.bytes[6] &= !(STATUS_CAPABILITIES as u8);
 
-    let mut unaligned_head = config;
+    let mut unaligned_head = *config;
     unaligned_head.bytes[0x34] |= 1;
 
     let head = usize::from(config.bytes[0x34]);
     if !(0x40..=0xfc).contains(&head) || head % 4 != 0 {
         return false;
     }
-    let mut cycle = config;
+    let mut cycle = *config;
     cycle.bytes[head + 1] = head as u8;
 
-    let Some(required) = first_required_capability(&config) else {
+    let Some(required) = first_required_capability(config) else {
         return false;
     };
-    let mut invalid_length = config;
+    let mut invalid_length = *config;
     invalid_length.bytes[required + 2] = 0;
 
-    let mut invalid_bar = config;
+    let mut invalid_bar = *config;
     invalid_bar.bytes[required + 4] = 6;
 
-    let Some(msix) = first_capability(&config, CAPABILITY_MSIX) else {
+    let Some(msix) = first_capability(config, CAPABILITY_MSIX) else {
         return false;
     };
-    let mut missing_msix = config;
+    let mut missing_msix = *config;
     missing_msix.bytes[msix] = 0;
 
-    let mut enabled_msix = config;
+    let mut enabled_msix = *config;
     let enabled_control = read_u16(&enabled_msix.bytes, msix + 2) | MSIX_ENABLE;
     enabled_msix.bytes[msix + 2..msix + 4].copy_from_slice(&enabled_control.to_le_bytes());
 
-    let mut invalid_msix_table_bar = config;
+    let mut invalid_msix_table_bar = *config;
     let invalid_table = read_u32(&invalid_msix_table_bar.bytes, msix + 4) | MSIX_BIR_MASK;
     invalid_msix_table_bar.bytes[msix + 4..msix + 8].copy_from_slice(&invalid_table.to_le_bytes());
 
-    let mut invalid_msix_pba_bar = config;
+    let mut invalid_msix_pba_bar = *config;
     let invalid_pba = read_u32(&invalid_msix_pba_bar.bytes, msix + 8) | MSIX_BIR_MASK;
     invalid_msix_pba_bar.bytes[msix + 8..msix + 12].copy_from_slice(&invalid_pba.to_le_bytes());
 
-    parse_virtio_block(&wrong_identity, device.bus, device.device, device.function).is_none()
-        && parse_virtio_block(&no_capabilities, device.bus, device.device, device.function)
-            .is_none()
-        && parse_virtio_block(&unaligned_head, device.bus, device.device, device.function).is_none()
-        && parse_virtio_block(&cycle, device.bus, device.device, device.function).is_none()
-        && parse_virtio_block(&invalid_length, device.bus, device.device, device.function).is_none()
-        && parse_virtio_block(&invalid_bar, device.bus, device.device, device.function).is_none()
-        && parse_virtio_block(&missing_msix, device.bus, device.device, device.function).is_none()
-        && parse_virtio_block(&enabled_msix, device.bus, device.device, device.function).is_none()
-        && parse_virtio_block(
+    parse_virtio_config(&wrong_identity, expected_device, bus, device, function).is_none()
+        && parse_virtio_config(&no_capabilities, expected_device, bus, device, function).is_none()
+        && parse_virtio_config(&unaligned_head, expected_device, bus, device, function).is_none()
+        && parse_virtio_config(&cycle, expected_device, bus, device, function).is_none()
+        && parse_virtio_config(&invalid_length, expected_device, bus, device, function).is_none()
+        && parse_virtio_config(&invalid_bar, expected_device, bus, device, function).is_none()
+        && parse_virtio_config(&missing_msix, expected_device, bus, device, function).is_none()
+        && parse_virtio_config(&enabled_msix, expected_device, bus, device, function).is_none()
+        && parse_virtio_config(
             &invalid_msix_table_bar,
-            device.bus,
-            device.device,
-            device.function,
+            expected_device,
+            bus,
+            device,
+            function,
         )
         .is_none()
-        && parse_virtio_block(
+        && parse_virtio_config(
             &invalid_msix_pba_bar,
-            device.bus,
-            device.device,
-            device.function,
+            expected_device,
+            bus,
+            device,
+            function,
         )
         .is_none()
 }
@@ -1825,8 +1903,38 @@ fn parse_virtio_block(
     device: u8,
     function: u8,
 ) -> Option<VirtioBlockDevice> {
+    parse_virtio_config(config, VIRTIO_BLOCK_DEVICE, bus, device, function)
+}
+
+fn parse_virtio_network(
+    config: &ConfigSpace,
+    bus: u8,
+    device: u8,
+    function: u8,
+) -> Option<VirtioNetworkDevice> {
+    let parsed = parse_virtio_config(config, VIRTIO_NETWORK_DEVICE, bus, device, function)?;
+    Some(VirtioNetworkDevice {
+        bus: parsed.bus,
+        device: parsed.device,
+        function: parsed.function,
+        common_bar_address: parsed.common_bar_address,
+        common_offset: parsed.common_offset,
+        common_length: parsed.common_length,
+        notify_multiplier: parsed.notify_multiplier,
+        capability_count: parsed.capability_count,
+        msix: parsed.msix,
+    })
+}
+
+fn parse_virtio_config(
+    config: &ConfigSpace,
+    expected_device: u16,
+    bus: u8,
+    device: u8,
+    function: u8,
+) -> Option<VirtioBlockDevice> {
     if read_u16(&config.bytes, 0) != VIRTIO_VENDOR
-        || read_u16(&config.bytes, 2) != VIRTIO_BLOCK_DEVICE
+        || read_u16(&config.bytes, 2) != expected_device
         || config.bytes[0x0e] & 0x7f != 0
         || read_u16(&config.bytes, 6) & STATUS_CAPABILITIES == 0
     {
