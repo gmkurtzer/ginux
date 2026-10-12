@@ -66,6 +66,10 @@ page before ring-3 entry. PCI decoding, bus mastering, queues, and MSI-X remain
 disabled, so the service still cannot initiate device access. Clean exit first
 disables and retires the translation hierarchy and then scrubs the DMA page;
 the QEMU gate requires both leases to be gone afterward.
+A faulted generation repeats the malformed-reserved-field rejection after its
+exact VT-d hierarchy is active. Fault teardown disables translation, scrubs all
+six table frames, and releases the DMA page last while PCI authority remains
+disabled.
 
 ## Deliberate limits
 

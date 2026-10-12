@@ -2871,6 +2871,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: native network bus mastering remained disabled");
     serial_write("\r\nginux: native network VT-d retired before DMA release");
     serial_write("\r\nginux: native network translation tables scrubbed cleanly");
+    if !address_space::verify_native_network_dma_fault_teardown(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+    ) {
+        kernel_fail("\r\nginux: faulted native network VT-d teardown failed\r\n");
+    }
+    serial_write("\r\nginux: faulted native network generation retired active VT-d");
+    serial_write("\r\nginux: faulted network translation disabled before DMA scrub");
+    serial_write("\r\nginux: faulted network VT-d tables released cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

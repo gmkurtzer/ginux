@@ -116,6 +116,8 @@ before device activation.
 Another fresh generation receives an exact active VT-d hierarchy for its sole
 DMA page while PCI decoding and bus mastering remain disabled; clean exit
 retires and scrubs the translation tables before releasing DMA.
+A faulted translated generation independently proves the same ordering on
+malformed bootstrap rejection.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

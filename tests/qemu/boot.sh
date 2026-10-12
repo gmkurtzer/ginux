@@ -207,6 +207,13 @@ if ! grep -q '^ginux: native network generation received exact VT-d domain' "$ou
     exit 1
 fi
 
+if ! grep -q '^ginux: faulted native network generation retired active VT-d' "$output_file" ||
+    ! grep -q '^ginux: faulted network translation disabled before DMA scrub' "$output_file" ||
+    ! grep -q '^ginux: faulted network VT-d tables released cleanly' "$output_file"; then
+    echo "Boot test failed: faulted native network VT-d teardown was unsafe." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

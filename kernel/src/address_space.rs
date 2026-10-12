@@ -4944,6 +4944,15 @@ pub(crate) fn initialize_staged_auxiliary_from_current_user(
     )
 }
 
+pub(crate) fn verify_native_network_dma_fault_teardown(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+) -> bool {
+    verify_native_network_bootstrap_run(image, device, initialization, iommu_profile, true, true)
+}
+
 fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bool {
     register_address_space(domain_id, AuxiliaryAddressSpace::Wx(space))
 }

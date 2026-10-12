@@ -61,3 +61,7 @@ activated before ring-3 entry while PCI decoding, bus mastering, and MSI-X stay
 disabled. Clean lifecycle exit disables translation, invalidates the hardware
 caches, scrubs the translation tables, and only then scrubs and releases the
 DMA page. The service still performs no packet I/O in this proof.
+A fourth generation combines the malformed reserved field with an already
+active exact translation. Its contained fault must disable and retire VT-d
+before the address-space release path scrubs DMA, proving that rejection remains
+safe after the translation boundary has been crossed.
