@@ -40,8 +40,11 @@ scheduler-blocked, and resumes only after the kernel-owned MSI-X vector matches
 its domain and request generation. It requires used index one, used ID zero,
 length 513, successful status, and 512 zero bytes from reserved sector two.
 The kernel advances the expected request generation, and the service reuses
-the chain for a second notification and blocked completion, leaving used index
-two and two exact length-513 records. The fault hook first masks and disables MSI-X, validates the active
+the chain for a second notification and blocked completion. It then writes a
+fixed byte pattern to reserved sector three, flushes it, poisons the DMA data
+area, and reads the pattern back. The final layout has used index five: two
+length-513 reads, length-one write and flush completions, and a final
+length-513 read. The fault hook first masks and disables MSI-X, validates the active
 binding, disables PCI bus mastering, and resets the device. It then checks every byte in the now-stable page against
 that exact layout. Any changed address, length, flag, chain index, request
 field, ring index, buffer byte, or status byte prevents teardown from accepting
@@ -60,8 +63,8 @@ zero, while the allocator reports zero frames remaining for the retired owner.
 
 ## Deliberate limits
 
-- This is a bounded two-generation, interrupt-driven, read-only reuse proof,
-  not a general block-I/O service.
+- This is a bounded five-generation interrupt-driven read/write/flush proof,
+  not a general block-I/O service or the two-slot volume algorithm.
 - The physical address is embedded in the bounded bootstrap service and written
   only to the three queue-address registers; no general physical-address ABI is
   exposed.

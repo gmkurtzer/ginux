@@ -80,19 +80,23 @@ and a duplicate wait, then validates used ID zero, length 513, successful status
 and the blank 512-byte sector-two payload. The kernel then advances the exact
 expected request generation, clears only the consumed per-request interrupt
 state, and the same service reuses descriptor head zero for a second
-notify/block/wake cycle. On its deliberate fault, the
+notify/block/wake cycle. It then writes a fixed pattern to reserved sector
+three, completes a negotiated virtio flush, poisons its DMA buffer, and reads
+the sector back through generations three through five. On its deliberate fault, the
 registered device hook masks and disables MSI-X, validates the active binding, disables bus
 mastering, resets the device, retires the temporary interrupt gate, and only then validates every byte of the now-stable
 completed DMA layout before the page is scrubbed and released;
 release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
 owned frames. A calibrated 100 ms APIC one-shot wakes a request whose device
-interrupt never arrives; successful MSI-X delivery cancels it. A general
+interrupt never arrives; successful MSI-X delivery cancels it. This is the
+isolated durability primitive, not yet the two-slot volume transaction. A general
 multi-request ring, concurrent requests, and IOMMU confinement remain
 unimplemented. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
 [Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md), plus
-[Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md).
+[Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md)
+and [Isolated Virtio Durability v0](specs/kernel/isolated-virtio-durability-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed

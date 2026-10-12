@@ -824,6 +824,11 @@ if ! grep -q '^ginux: isolated virtio request generation advanced and reused' "$
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio write flush read-back completed' "$output_file"; then
+    echo "Boot test failed: isolated virtio write/flush/read-back did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: virtio DMA validation followed hardware quiescence' "$output_file"; then
     echo "Boot test failed: virtio DMA state was not validated after hardware quiescence." >&2
     exit 1

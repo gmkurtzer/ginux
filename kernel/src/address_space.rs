@@ -4450,7 +4450,7 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
             domain_id,
             interrupt_request,
         )
-        || !unsafe { dma_page_has_completed_read(dma_physical) }
+        || !unsafe { dma_page_has_completed_transaction(dma_physical) }
     {
         return false;
     }
@@ -5489,7 +5489,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     const NOTIFICATION_PAGE_INDEX: usize = 7;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
     const INTERRUPT_REQUEST: u64 = 1;
-    const SUCCESS_FAULT_OFFSET: u64 = 683;
+    const SUCCESS_FAULT_OFFSET: u64 = 1162;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5646,6 +5646,93 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x80, 0xbe, 0, 0x09, 0, 0, 0, // require successful second status
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x49, 0xba, 0, 0, 0, 0, 0, 0, 0, 0, // preserve notification register in R10
+        0xc7, 0x86, 0, 0x04, 0, 0, 0x01, 0, 0, 0, // write request type
+        0x48, 0xc7, 0x86, 0x08, 0x04, 0, 0, 0x03, 0, 0, 0, // sector three
+        0x66, 0xc7, 0x46, 0x1c, 0x01, 0, // descriptor one NEXT flag
+        0x48, 0x8d, 0xbe, 0, 0x06, 0, 0, // point at sector data
+        0xb9, 0, 0x02, 0, 0, // fill 512 bytes
+        0xb0, 0x5a, // persistent test byte
+        0xf3, 0xaa, // repe stosb
+        0xc6, 0x86, 0, 0x09, 0, 0, 0xff, // reset pending status
+        0x66, 0xc7, 0x86, 0x08, 0x01, 0, 0, 0, 0, // publish ring slot two
+        0x66, 0xc7, 0x86, 0x02, 0x01, 0, 0, 0x03, 0, // publish available index three
+        0x66, 0x41, 0xc7, 0x02, 0, 0, // notify queue zero for write
+        0x49, 0x89, 0xf0, // preserve the DMA mapping across the control call
+        0x4c, 0x89, 0xcf, // restore device capability to RDI
+        0xb8, 0x13, 0, 0, 0, // operation 19: block-device call
+        0xbe, 0x01, 0, 0, 0, // command 1: wait for completion
+        0xba, 0x03, 0, 0, 0, // request generation three
+        0xcd, 0x80, // block for write completion
+        0x4c, 0x89, 0xc6, // restore the DMA mapping
+        0x48, 0x85, 0xc0, // require successful write wake
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0x83, 0xbe, 0x02, 0x02, 0, 0, 0x03, // require used index three
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x83, 0xbe, 0x14, 0x02, 0, 0, 0, // require write used id zero
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x83, 0xbe, 0x18, 0x02, 0, 0, 0x01, // require write used length one
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x80, 0xbe, 0, 0x09, 0, 0, 0, // require successful write status
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0xc7, 0x86, 0, 0x04, 0, 0, 0x04, 0, 0, 0, // flush request type
+        0x48, 0xc7, 0x86, 0x08, 0x04, 0, 0, 0, 0, 0, 0, // sector zero
+        0x66, 0xc7, 0x46, 0x0e, 0x02, 0, // descriptor zero skips data
+        0xc6, 0x86, 0, 0x09, 0, 0, 0xff, // reset pending status
+        0x66, 0xc7, 0x86, 0x0a, 0x01, 0, 0, 0, 0, // publish ring slot three
+        0x66, 0xc7, 0x86, 0x02, 0x01, 0, 0, 0x04, 0, // publish available index four
+        0x66, 0x41, 0xc7, 0x02, 0, 0, // notify queue zero for flush
+        0x49, 0x89, 0xf0, // preserve the DMA mapping across the control call
+        0x4c, 0x89, 0xcf, // restore device capability to RDI
+        0xb8, 0x13, 0, 0, 0, // operation 19: block-device call
+        0xbe, 0x01, 0, 0, 0, // command 1: wait for completion
+        0xba, 0x04, 0, 0, 0, // request generation four
+        0xcd, 0x80, // block for flush completion
+        0x4c, 0x89, 0xc6, // restore the DMA mapping
+        0x48, 0x85, 0xc0, // require successful flush wake
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0x83, 0xbe, 0x02, 0x02, 0, 0, 0x04, // require used index four
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x83, 0xbe, 0x1c, 0x02, 0, 0, 0, // require flush used id zero
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x83, 0xbe, 0x20, 0x02, 0, 0, 0x01, // require flush used length one
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x80, 0xbe, 0, 0x09, 0, 0, 0, // require successful flush status
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0xc7, 0x86, 0, 0x04, 0, 0, 0, 0, 0, 0, // read request type
+        0x48, 0xc7, 0x86, 0x08, 0x04, 0, 0, 0x03, 0, 0, 0, // sector three
+        0x66, 0xc7, 0x46, 0x0e, 0x01, 0, // descriptor zero points at data
+        0x66, 0xc7, 0x46, 0x1c, 0x03, 0, // descriptor one NEXT|WRITE flags
+        0x48, 0x8d, 0xbe, 0, 0x06, 0, 0, // point at sector data
+        0xb9, 0, 0x02, 0, 0, // poison 512 bytes
+        0xb0, 0xa5, // poison byte
+        0xf3, 0xaa, // repe stosb
+        0xc6, 0x86, 0, 0x09, 0, 0, 0xff, // reset pending status
+        0x66, 0xc7, 0x86, 0x0c, 0x01, 0, 0, 0, 0, // publish ring slot four
+        0x66, 0xc7, 0x86, 0x02, 0x01, 0, 0, 0x05, 0, // publish available index five
+        0x66, 0x41, 0xc7, 0x02, 0, 0, // notify queue zero for read-back
+        0x49, 0x89, 0xf0, // preserve the DMA mapping across the control call
+        0x4c, 0x89, 0xcf, // restore device capability to RDI
+        0xb8, 0x13, 0, 0, 0, // operation 19: block-device call
+        0xbe, 0x01, 0, 0, 0, // command 1: wait for completion
+        0xba, 0x05, 0, 0, 0, // request generation five
+        0xcd, 0x80, // block for read-back completion
+        0x4c, 0x89, 0xc6, // restore the DMA mapping
+        0x48, 0x85, 0xc0, // require successful read-back wake
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0x83, 0xbe, 0x02, 0x02, 0, 0, 0x05, // require used index five
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x83, 0xbe, 0x24, 0x02, 0, 0, 0, // require read-back used id zero
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x81, 0xbe, 0x28, 0x02, 0, 0, 0x01, 0x02, 0, 0, // require read length 513
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x80, 0xbe, 0, 0x09, 0, 0, 0, // require successful read-back status
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x48, 0x8d, 0xbe, 0, 0x06, 0, 0, // point at read-back data
+        0xb9, 0, 0x02, 0, 0, // scan 512 bytes
+        0xb0, 0x5a, // require persistent test byte
+        0xf3, 0xae, // repe scasb
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x0f, 0x0b, // success: deliberate service fault
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
@@ -5692,7 +5779,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     };
     if mapped_dma != user_dma
         || memory::owner_live_frame_count(owner) != Some(8)
-        || unsafe { dma_page_has_completed_read(dma_physical) }
+        || unsafe { dma_page_has_completed_transaction(dma_physical) }
     {
         let _ = space.release();
         return None;
@@ -5700,6 +5787,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     program[156..164].copy_from_slice(&dma_physical.to_le_bytes());
     program[429..437].copy_from_slice(&(user_notification as u64).to_le_bytes());
     program[589..597].copy_from_slice(&(user_notification as u64).to_le_bytes());
+    program[685..693].copy_from_slice(&(user_notification as u64).to_le_bytes());
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
@@ -6061,7 +6149,7 @@ unsafe fn frame_is_zero(frame: u64) -> bool {
         .is_some_and(|entries| (0..ENTRY_COUNT).all(|index| entries.add(index).read() == 0))
 }
 
-unsafe fn dma_page_has_completed_read(frame: u64) -> bool {
+unsafe fn dma_page_has_completed_transaction(frame: u64) -> bool {
     let Some(bytes) = mapped_frame::<u8>(frame) else {
         return false;
     };
@@ -6080,13 +6168,18 @@ unsafe fn dma_page_has_completed_read(frame: u64) -> bool {
             32..=39 => descriptor_two[offset - 32],
             40 => 1,
             44 => 2,
-            0x102 => 2,
-            0x202 => 2,
+            0x102 => 5,
+            0x202 => 5,
             0x208 => 1,
             0x209 => 2,
             0x210 => 1,
             0x211 => 2,
-            0x408 => 2,
+            0x218 => 1,
+            0x220 => 1,
+            0x228 => 1,
+            0x229 => 2,
+            0x408 => 3,
+            0x600..=0x7ff => 0x5a,
             _ => 0,
         };
         core::ptr::read_volatile(bytes.add(offset)) == expected

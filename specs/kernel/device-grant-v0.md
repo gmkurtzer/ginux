@@ -60,7 +60,9 @@ with its exact object-7 handle and request generation, blocks in the scheduler,
 and resumes only when kernel-owned MSI-X vector 33 wakes that exact generation.
 It requires used ID zero, length 513, successful status, and a blank 512-byte
 payload, then advances to request generation two and repeats the
-notify/block/wake cycle through the same queue before taking a deliberate
+notify/block/wake cycle through the same queue. Generations three through five
+write reserved sector three, flush it, and read it back after poisoning the
+DMA buffer, before taking a deliberate
 invalid-opcode fault. The fault
 hook independently reads back the
 exact active queue and address-to-lease binding, disables bus mastering, resets
@@ -74,7 +76,7 @@ Only then may the fault path restore the kernel root, destroy the service
 mapping, clear and release all owned frames, retire the domain, and publish the
 fault. Address-space release fails closed if a bound device has not completed
 quiescence. The service owns one DMA frame, writes its exact ring offsets to the
-device, and completes two sequential bounded reads. The lease lifecycle is specified in
+device, and completes five sequential bounded operations. The lease lifecycle is specified in
 [Isolated DMA Lease v0](device-dma-lease-v0.md).
 
 ## Deliberate limits
@@ -93,6 +95,7 @@ device, and completes two sequential bounded reads. The lease lifecycle is speci
   authority is delegated. A calibrated one-shot bounds a lost interrupt, but
   live device-timeout fault injection is not yet in the gate. There is no
   IOMMU domain.
-- The kernel still negotiates virtio and performs all persistent-volume I/O.
+- The kernel still performs the two-slot persistent-volume algorithm; the
+  isolated service now proves the required write/flush/read-back primitive.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.

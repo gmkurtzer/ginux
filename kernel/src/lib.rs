@@ -1706,6 +1706,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: duplicate isolated virtio wait rejected");
     serial_write("\r\nginux: isolated virtio blank-sector read completed in ring 3");
     serial_write("\r\nginux: isolated virtio request generation advanced and reused");
+    serial_write("\r\nginux: isolated virtio write flush read-back completed");
     serial_write("\r\nginux: faulted virtio control service revoked");
     serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
     serial_write("\r\nginux: fault path quiesced device before DMA release");

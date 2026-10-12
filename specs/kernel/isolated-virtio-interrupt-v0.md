@@ -1,6 +1,6 @@
 # Isolated Virtio Interrupt Wait v0
 
-**Status:** Two sequential generation-bound MSI-X waits verified in QEMU.
+**Status:** Five sequential generation-bound MSI-X waits verified in QEMU.
 
 ## Boundary
 
@@ -33,8 +33,10 @@ the blank sector-two payload. The kernel atomically advances the expected
 request from generation one to two and clears the consumed interrupt count and
 completion bit while delivery remains masked. The service reuses descriptor
 head zero, publishes available index two, notifies again, and completes a
-second block/wake cycle. The proof rejects request generation two before the
-first request and rejects a duplicate wait for consumed generation one.
+second block/wake cycle. It then submits write, flush, and read-back requests
+through generations three, four, and five. The proof rejects request generation
+two before the first request and rejects a duplicate wait for consumed
+generation one.
 
 Every accepted wait also arms the previously calibrated local-APIC timer for a
 100 ms one-shot. The device interrupt cancels and masks that timer before the
@@ -54,8 +56,8 @@ release the DMA page, destroy the service mappings, and retire its authority.
 
 ## Deliberate limits
 
-- Two sequential request generations and one outstanding queue-zero read are
-  modeled.
+- Five sequential request generations and one outstanding queue-zero request
+  are modeled, including read, write, and flush descriptor shapes.
 - There is no vector allocator, shared-vector demultiplexing, SMP affinity,
   IOMMU domain, concurrent request ring, or stable general block-service ABI yet.
 - The gate proves timeout delivery independently and cancellation on the live
