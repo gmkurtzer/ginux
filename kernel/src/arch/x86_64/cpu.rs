@@ -178,6 +178,7 @@ const LINUX_CAPABILITY_DATA_SIZE: usize = 24;
 const LINUX_RETURN_TO_KERNEL: u64 = (-4096_i64) as u64;
 const LINUX_RETURN_FROM_SIGNAL: u64 = (-4095_i64) as u64;
 const LINUX_EPERM: u64 = u64::MAX;
+const LINUX_EINTR: u64 = u64::MAX - 3;
 const LINUX_E2BIG: u64 = u64::MAX - 6;
 const LINUX_ENOEXEC: u64 = u64::MAX - 7;
 const LINUX_EBADF: u64 = u64::MAX - 8;
@@ -434,6 +435,7 @@ static LINUX_PPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_PWAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_PWAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_PWAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_MASKED_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -2313,6 +2315,15 @@ fn current_linux_thread_handle() -> Option<LinuxThreadHandle> {
     linux_thread_handle(current_linux_thread_slot()?)
 }
 
+fn linux_thread_handle_by_tid(tid: u64) -> Option<LinuxThreadHandle> {
+    let tid = u32::try_from(tid).ok()?;
+    (0..LINUX_THREAD_LIMIT).find_map(|slot| {
+        (LINUX_THREAD_TIDS[slot].load(Ordering::SeqCst) == tid)
+            .then(|| linux_thread_handle(slot))
+            .flatten()
+    })
+}
+
 fn ready_linux_thread_handle() -> Option<LinuxThreadHandle> {
     (0..LINUX_THREAD_LIMIT).find_map(|slot| {
         (LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_READY)
@@ -3175,6 +3186,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_EPOLL_PWAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_EPOLL_PWAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_EPOLL_PWAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_MASKED_WAIT_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -3544,6 +3556,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let epoll_pwait_block_count = LINUX_EPOLL_PWAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let epoll_pwait_wake_count = LINUX_EPOLL_PWAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let epoll_pwait_timeout_count = LINUX_EPOLL_PWAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
+    let masked_wait_interrupt_count = LINUX_MASKED_WAIT_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
     let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_block_count = LINUX_SIGNAL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
@@ -3551,7 +3564,13 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let signal_wait_timeout_count = LINUX_SIGNAL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
-    let expected_signal_count = if signal_probe_executed { 10 } else { 2 };
+    let expected_signal_count = if signal_probe_executed {
+        10
+    } else if execution.tls_size != 0 {
+        3
+    } else {
+        2
+    };
     let signal_lifecycle_valid = !LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst)
         && signal_delivery_count == expected_signal_count
         && signal_return_count == expected_signal_count
@@ -3563,7 +3582,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && first_child_tid != 0
             && clone_reuse_validated
             && child_gettid_count == 2
-            && yield_switch_count == 10
+            && yield_switch_count == 9
             && clone_busy_rejection_count == 2
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
@@ -3584,11 +3603,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && eventfd_read_block_count == 1
             && eventfd_read_wake_count == 1
             && ppoll_wait_block_count == 2
-            && ppoll_wait_wake_count == 1
+            && ppoll_wait_wake_count == 0
             && ppoll_wait_timeout_count == 1
             && epoll_pwait_block_count == 1
             && epoll_pwait_wake_count == 0
             && epoll_pwait_timeout_count == 1
+            && masked_wait_interrupt_count == 1
             && signal_wait_block_count == 2
             && signal_wait_wake_count == 1
             && signal_wait_timeout_count == 1)
@@ -3601,7 +3621,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             first_child_tid != 0,
             clone_reuse_validated,
             child_gettid_count == 2,
-            yield_switch_count == 10,
+            yield_switch_count == 9,
             clone_busy_rejection_count == 2,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
@@ -3622,11 +3642,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             eventfd_read_block_count == 1,
             eventfd_read_wake_count == 1,
             ppoll_wait_block_count == 2,
-            ppoll_wait_wake_count == 1,
+            ppoll_wait_wake_count == 0,
             ppoll_wait_timeout_count == 1,
             epoll_pwait_block_count == 1,
             epoll_pwait_wake_count == 0,
             epoll_pwait_timeout_count == 1,
+            masked_wait_interrupt_count == 1,
             signal_wait_block_count == 2,
             signal_wait_wake_count == 1,
             signal_wait_timeout_count == 1,
@@ -3667,6 +3688,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             epoll_pwait_block_count,
             epoll_pwait_wake_count,
             epoll_pwait_timeout_count,
+            masked_wait_interrupt_count,
             signal_wait_block_count,
             signal_wait_wake_count,
             signal_wait_timeout_count,
@@ -4286,7 +4308,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && first_child_tid != 0
                 && clone_reuse_validated
                 && child_gettid_count == 2
-                && yield_switch_count == 10
+                && yield_switch_count == 9
                 && clone_busy_rejection_count == 2
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
@@ -4307,11 +4329,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && eventfd_read_block_count == 1
                 && eventfd_read_wake_count == 1
                 && ppoll_wait_block_count == 2
-                && ppoll_wait_wake_count == 1
+                && ppoll_wait_wake_count == 0
                 && ppoll_wait_timeout_count == 1
                 && epoll_pwait_block_count == 1
                 && epoll_pwait_wake_count == 0
                 && epoll_pwait_timeout_count == 1
+                && masked_wait_interrupt_count == 1
                 && signal_wait_block_count == 2
                 && signal_wait_wake_count == 1
                 && signal_wait_timeout_count == 1)
@@ -4923,12 +4946,18 @@ extern "sysv64" fn linux_syscall_handler(
             (user_rip, user_rflags),
         ),
         LINUX_TGKILL_SYSCALL => match linux_tgkill_identity(first_argument, buffer) {
-            Ok(()) => linux_kill(
+            Ok(target) if current_linux_thread_handle() == Some(target) => linux_kill(
                 1,
                 (count, LINUX_SI_TKILL),
                 registers,
                 syscall_return,
                 (user_rip, user_rflags),
+            ),
+            Ok(target) => linux_interrupt_masked_wait(
+                target,
+                (count, LINUX_SI_TKILL),
+                registers,
+                syscall_return,
             ),
             Err(error) => error,
         },
@@ -8287,7 +8316,7 @@ fn linux_poll_wait_live_return(
     let prior_signal_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
     if let Some(mask) = temporary_signal_mask {
         LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(prior_signal_mask, Ordering::SeqCst);
-        store_current_linux_signal_mask(mask);
+        LINUX_THREAD_SIGNAL_MASKS[slot].store(mask, Ordering::SeqCst);
     }
     let mut target_registers = LinuxSyscallFrame::ZERO;
     let mut target_rip = 0;
@@ -9244,7 +9273,7 @@ fn linux_epoll_wait_duration_live_return(
     let prior_signal_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
     if let Some(mask) = temporary_signal_mask {
         LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(prior_signal_mask, Ordering::SeqCst);
-        store_current_linux_signal_mask(mask);
+        LINUX_THREAD_SIGNAL_MASKS[slot].store(mask, Ordering::SeqCst);
     }
     let mut target_registers = LinuxSyscallFrame::ZERO;
     let mut target_rip = 0;
@@ -11334,7 +11363,182 @@ fn linux_kill(
     0
 }
 
-fn linux_tgkill_identity(thread_group: u64, thread: u64) -> Result<(), u64> {
+fn linux_interrupt_masked_wait(
+    target: LinuxThreadHandle,
+    generated: (u64, i32),
+    output: *mut LinuxSyscallFrame,
+    sender_return: LinuxUserContext,
+) -> u64 {
+    let (signal, signal_code) = generated;
+    if signal == 0 {
+        return 0;
+    }
+    if !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) {
+        return LINUX_EINVAL;
+    }
+    if signal > LINUX_STANDARD_SIGNAL_COUNT {
+        return LINUX_ENOSYS;
+    }
+    let Some(sender) = current_linux_thread_handle() else {
+        return LINUX_ESRCH;
+    };
+    let Some(sender_tls) = linux_thread_context(sender) else {
+        return LINUX_ESRCH;
+    };
+    let slot = usize::from(target.slot);
+    let wait_kind = LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst);
+    if sender == target
+        || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
+        || !matches!(
+            wait_kind,
+            LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
+        )
+        || output.is_null()
+        || LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
+    {
+        return LINUX_ENOSYS;
+    }
+    let index = signal as usize - 1;
+    let signal_bit = 1 << (signal - 1);
+    let temporary_mask = LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst);
+    if temporary_mask & signal_bit != 0 {
+        return LINUX_ENOSYS;
+    }
+    let handler = ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
+    if handler == 1 {
+        return 0;
+    }
+    let flags = ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
+    let restorer = ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
+    if handler == 0 || !linux_signal_action_deliverable(handler, flags, restorer) {
+        return LINUX_ENOSYS;
+    }
+    let Some(mut interrupted) = linux_thread_return_context(target) else {
+        return LINUX_ESRCH;
+    };
+    let saved_interrupted = interrupted;
+    interrupted.rax = LINUX_EINTR;
+    let restored_mask = LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].load(Ordering::SeqCst);
+    let old_alt_stack_flags = ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst);
+    let use_alt_stack = flags & LINUX_SA_ONSTACK != 0
+        && old_alt_stack_flags & (LINUX_SS_DISABLE | LINUX_SS_ONSTACK) == 0;
+    let stack_top = if use_alt_stack {
+        let pointer = ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst);
+        let size = ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst);
+        let Some(top) = pointer.checked_add(size) else {
+            return LINUX_EFAULT;
+        };
+        top
+    } else {
+        interrupted.rsp
+    };
+    let Some(signal_stack) = linux_signal_stack(stack_top, use_alt_stack) else {
+        return LINUX_EFAULT;
+    };
+    let target_stack_valid = if use_alt_stack {
+        linux_writable_user_range_contains(signal_stack, LINUX_SIGNAL_FRAME_SIZE)
+    } else {
+        linux_range_contains(
+            LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst),
+            LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst),
+            signal_stack,
+            LINUX_SIGNAL_FRAME_SIZE,
+        )
+    };
+    if !target_stack_valid {
+        return LINUX_EFAULT;
+    }
+    let context = LinuxSignalContext::from_syscall(
+        interrupted,
+        (
+            LINUX_THREAD_RCXS[slot].load(Ordering::SeqCst),
+            LINUX_THREAD_R11S[slot].load(Ordering::SeqCst),
+        ),
+        (signal_stack, restorer),
+        restored_mask,
+        old_alt_stack_flags,
+    );
+    let signal_frame = linux_rt_signal_frame(
+        context,
+        flags,
+        LinuxSignalInformation::generated(signal, signal_code),
+        0,
+        0,
+        0,
+    );
+    let mut handler_registers = interrupted.registers;
+    handler_registers.rdi = signal;
+    handler_registers.rsi = signal_stack + LINUX_SIGNAL_FRAME_INFO_OFFSET;
+    handler_registers.rdx = signal_stack + LINUX_SIGNAL_FRAME_CONTEXT_OFFSET;
+    let handler_context = LinuxUserContext {
+        registers: handler_registers,
+        rip: handler,
+        rsp: signal_stack,
+        rflags: interrupted.rflags & !((1 << 8) | (1 << 10) | (1 << 16)),
+        rax: 0,
+        fs_base: interrupted.fs_base,
+    };
+    if !context.user_context().is_valid() || !handler_context.is_valid() {
+        return LINUX_EINVAL;
+    }
+    let mut replaced = [0_u8; LINUX_SIGNAL_FRAME_SIZE];
+    if !copy_from_linux_user(signal_stack, &mut replaced)
+        || !copy_linux_signal_frame(signal_stack, &signal_frame)
+    {
+        return LINUX_EFAULT;
+    }
+    if !save_linux_thread_return_context(sender, sender_return) {
+        let _ = copy_to_linux_user(signal_stack, &replaced);
+        return LINUX_EINVAL;
+    }
+    if !save_linux_thread_return_context(target, interrupted) {
+        let _ = copy_to_linux_user(signal_stack, &replaced);
+        return LINUX_EINVAL;
+    }
+    if !write_linux_live_return(output, handler_context) {
+        let _ = save_linux_thread_return_context(target, saved_interrupted);
+        let _ = copy_to_linux_user(signal_stack, &replaced);
+        return LINUX_EINVAL;
+    }
+    LINUX_THREAD_SIGNAL_MASKS[slot].store(restored_mask, Ordering::SeqCst);
+    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
+    if !switch_linux_thread(target) {
+        let _ = save_linux_thread_return_context(target, saved_interrupted);
+        LINUX_THREAD_SIGNAL_MASKS[slot].store(temporary_mask, Ordering::SeqCst);
+        LINUX_THREAD_STATES[slot].store(LINUX_THREAD_BLOCKED, Ordering::SeqCst);
+        let _ = install_linux_tls_context(sender_tls);
+        let _ = write_linux_live_return(output, sender_return);
+        let _ = copy_to_linux_user(signal_stack, &replaced);
+        return LINUX_EINVAL;
+    }
+    LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
+    if wait_kind == LINUX_THREAD_WAIT_PPOLL {
+        clear_linux_poll_snapshot(slot);
+    }
+    // SAFETY: the switch above made the target the sole running Linux thread,
+    // and the live return already names its validated handler context.
+    unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(context) };
+    linux_apply_delivered_signal_action(index, signal_bit, restored_mask, flags);
+    if use_alt_stack {
+        if old_alt_stack_flags & LINUX_SS_AUTODISARM != 0 {
+            ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
+            ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
+            ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+        } else {
+            ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_ONSTACK, Ordering::SeqCst);
+        }
+    }
+    LINUX_SIGNAL_ACTIVE.store(true, Ordering::SeqCst);
+    LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
+    LINUX_MASKED_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    0
+}
+
+fn linux_tgkill_identity(thread_group: u64, thread: u64) -> Result<LinuxThreadHandle, u64> {
     if thread_group == 0
         || thread == 0
         || thread_group > i32::MAX as u64
@@ -11342,10 +11546,10 @@ fn linux_tgkill_identity(thread_group: u64, thread: u64) -> Result<(), u64> {
     {
         return Err(LINUX_EINVAL);
     }
-    if thread_group != 1 || current_linux_tid().map(u64::from) != Some(thread) {
+    if thread_group != 1 {
         return Err(LINUX_ESRCH);
     }
-    Ok(())
+    linux_thread_handle_by_tid(thread).ok_or(LINUX_ESRCH)
 }
 
 fn linux_tkill_identity(thread: u64) -> Result<(), u64> {

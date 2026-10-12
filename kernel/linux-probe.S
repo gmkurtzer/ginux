@@ -1,7 +1,7 @@
 .intel_syntax noprefix
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
-#define GINUX_PRIOR_SIGNAL_MASK 0x200
-#define GINUX_BLOCKED_SIGNAL_MASK 0x202
+#define GINUX_PRIOR_SIGNAL_MASK 0x600
+#define GINUX_BLOCKED_SIGNAL_MASK 0x602
 #else
 #define GINUX_PRIOR_SIGNAL_MASK 0
 #define GINUX_BLOCKED_SIGNAL_MASK 2
@@ -1142,13 +1142,27 @@ valid_interpreter_base:
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     # The first child wakes a signal wait; the reused child retains the
     # existing futex exit-wake proof.
-    mov qword ptr [0x4050c0], 0x200
+    mov qword ptr [0x4050c0], GINUX_PRIOR_SIGNAL_MASK
     xor edi, edi
     mov esi, 0x4050c0
     xor edx, edx
     push 8
     pop r10
     push 14
+    pop rax
+    call syscall_expect_zero
+    lea rax, [rip + linux_sigsegv_handler]
+    mov qword ptr [0x405100], rax
+    mov qword ptr [0x405108], 0xc000004
+    lea rax, [rip + linux_signal_restorer]
+    mov qword ptr [0x405110], rax
+    mov qword ptr [0x405118], 0x800
+    push 11
+    pop rdi
+    mov esi, 0x405100
+    xor edx, edx
+    mov r10d, 8
+    push 13
     pop rax
     call syscall_expect_zero
     xor edi, edi
@@ -1275,6 +1289,7 @@ linux_clone_repeat:
     call linux_parent_eventfd_read
     cmp qword ptr [0x405d80], 1
     jne failure
+    mov word ptr [0x405da6], -1
     mov edi, 0x405da0
     push 1
     pop rsi
@@ -1283,11 +1298,13 @@ linux_clone_repeat:
     push 8
     pop r8
     mov eax, 271
-    call syscall_expect_one
-    cmp word ptr [0x405da6], 1
+    syscall
+    cmp rax, -4
     jne failure
-    call linux_parent_eventfd_read
-    dec edi
+    cmp word ptr [0x405da6], -1
+    jne failure
+    push 2
+    pop rdi
     mov esi, 0x405dc0
     push 1
     pop rdx
@@ -1498,6 +1515,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_efault
 
+#if !defined(GINUX_LINKED) || !defined(GINUX_GRAPH)
     lea rax, [rip + linux_sigsegv_handler]
     mov qword ptr [0x405100], rax
     mov qword ptr [0x405108], 0xc000000
@@ -1526,6 +1544,7 @@ linux_child_joined:
     jne failure
     cmp qword ptr [0x405138], 0
     jne failure
+#endif
 
     mov qword ptr [0x405140], 0x405800
     mov qword ptr [0x405148], 0
@@ -4749,6 +4768,10 @@ child_thread_exit:
 linux_sigsegv_handler:
     cmp edi, 11
     jne failure
+    cmp dword ptr [rsi + 8], -6
+    jne .Llinux_sigsegv_full
+    ret
+.Llinux_sigsegv_full:
     cmp rsp, 0x405800
     jb failure
     cmp rsp, 0x406000
@@ -4915,7 +4938,7 @@ linux_child_eventfd_write_and_yield:
     mov esi, 0x405d80
     push 8
     pop rdx
-    push 4
+    push 3
     pop rbx
 .Llinux_child_eventfd_next:
     push 1
@@ -4926,6 +4949,14 @@ linux_child_eventfd_write_and_yield:
     call syscall_expect_zero
     dec ebx
     jnz .Llinux_child_eventfd_next
+    push 1
+    pop rdi
+    push 1
+    pop rsi
+    push 11
+    pop rdx
+    mov eax, 234
+    call syscall_expect_zero
     ret
 #endif
 

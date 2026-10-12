@@ -404,9 +404,15 @@ zero-descriptor sleeps and blocking without a runnable peer return `ENOSYS`.
 nanosecond timespec or an infinite null timeout. Its optional eight-byte signal
 mask is installed only for the blocked interval, with `SIGKILL` and `SIGSTOP`
 removed, and the calling thread's prior mask is restored on readiness, timeout,
-or rollback. The measured two-thread graph proves an eventfd wake, an
-APIC-driven timeout, and restoration of the original per-thread mask. Signal
-interruption and syscall restart remain unsupported. A single bounded epoll
+rollback, or signal interruption. A sibling may target the initial thread with
+`tgkill` while it is blocked with a caught standard signal unblocked by the
+temporary mask. The kernel transactionally saves the sender, cancels the wait,
+restores the waiter's prior mask, switches to that thread's handler, and returns
+`EINTR` through `rt_sigreturn` without modifying the poll output. The measured
+two-thread graph proves that handoff, an APIC-driven timeout, and restoration of
+the original per-thread mask. Cross-thread delivery to other states, queuing a
+signal blocked by the temporary mask, nested delivery, and syscall restart
+remain outside this bounded profile. A single bounded epoll
 instance can register one console or device descriptor, report level-triggered
 readiness, and preserve packed 64-bit user data. With a runnable peer,
 `epoll_wait` blocks for a signed
@@ -418,9 +424,10 @@ one-registration proof; blocking without a runnable peer returns `ENOSYS`.
 `epoll_pwait` and `epoll_pwait2` use the same scheduler path after validating
 their temporary signal mask, and the latter converts a null or checked
 nanosecond timespec. The mask is installed only while blocked and restored on
-readiness, timeout, or rollback. The measured graph proves an `epoll_pwait`
-APIC timeout and restoration; asynchronous signal interruption and restart
-remain unsupported. A bounded eventfd
+readiness, timeout, rollback, or the same targeted signal-interruption path.
+The measured graph proves an `epoll_pwait` APIC timeout and restoration; the
+cross-thread `EINTR` execution proof currently uses `ppoll`, and syscall restart
+remains unsupported. A bounded eventfd
 counter provides a signalable source for that epoll path, including
 nonblocking saturation and semaphore reads. With a runnable peer, a blocking
 read on an empty eventfd now sleeps in its scheduler slot until a write makes

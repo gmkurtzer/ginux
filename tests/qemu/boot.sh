@@ -2161,6 +2161,11 @@ if ! grep -q '^ginux: Linux scheduler-backed epoll masked waits validated' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux signal-interrupted masked waits validated' "$output_file"; then
+    echo "Boot test failed: Linux signal-interrupted masked waits were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux scheduler-backed eventfd reads validated' "$output_file"; then
     echo "Boot test failed: Linux scheduler-backed eventfd reads were not validated." >&2
     exit 1
