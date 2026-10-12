@@ -6051,11 +6051,8 @@ fn linux_execve_at(
     } else {
         None
     };
-    let table_words = if interpreted {
-        5 + crate::linux_elf::AUXILIARY_VECTOR_WORDS
-    } else {
-        1 + argument_count + 1 + environment_count + 1 + 2
-    };
+    let table_words =
+        1 + argument_count + 1 + environment_count + 1 + crate::linux_elf::AUXILIARY_VECTOR_WORDS;
     let mut string_offset = table_words * size_of::<u64>();
     stack_image[..8].copy_from_slice(&(argument_count as u64).to_ne_bytes());
     let mut string = [0_u8; LINUX_EXEC_STRING_LIMIT];
@@ -6103,27 +6100,25 @@ fn linux_execve_at(
         string_offset = end;
     }
     let auxiliary_word = environment_word + environment_count + 1;
+    let platform_offset = string_offset;
+    let Some(platform_end) = platform_offset.checked_add(LINUX_PLATFORM.len()) else {
+        return LINUX_E2BIG;
+    };
+    let Some(output) = stack_image.get_mut(platform_offset..platform_end) else {
+        return LINUX_E2BIG;
+    };
+    output.copy_from_slice(LINUX_PLATFORM);
+    let mut auxiliary = crate::linux_elf::auxiliary_vector(
+        startup,
+        argument_zero_address,
+        new_stack + platform_offset as u64,
+    );
     if interpreted {
-        let platform_offset = string_offset;
-        let Some(platform_end) = platform_offset.checked_add(LINUX_PLATFORM.len()) else {
-            return LINUX_E2BIG;
-        };
-        let Some(output) = stack_image.get_mut(platform_offset..platform_end) else {
-            return LINUX_E2BIG;
-        };
-        output.copy_from_slice(LINUX_PLATFORM);
-        let mut auxiliary = crate::linux_elf::auxiliary_vector(
-            startup,
-            argument_zero_address,
-            new_stack + platform_offset as u64,
-        );
         auxiliary[33] = 1;
-        for (index, value) in auxiliary.into_iter().enumerate() {
-            let word = auxiliary_word + index;
-            stack_image[word * 8..word * 8 + 8].copy_from_slice(&value.to_ne_bytes());
-        }
-    } else {
-        stack_image[auxiliary_word * 8..auxiliary_word * 8 + 16].fill(0);
+    }
+    for (index, value) in auxiliary.into_iter().enumerate() {
+        let word = auxiliary_word + index;
+        stack_image[word * 8..word * 8 + 8].copy_from_slice(&value.to_ne_bytes());
     }
     let mut exec_frames = [None; LINUX_EXEC_MAPPING_LIMIT];
     let segments = [

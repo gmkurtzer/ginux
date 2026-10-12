@@ -45,9 +45,87 @@ ginux_linux_exec_target:
     jne .Lfailure
     cmp qword ptr [rsp + 40], 0
     jne .Lfailure
-    cmp qword ptr [rsp + 48], 0
+    cmp qword ptr [rsp + 48], 3
     jne .Lfailure
     cmp qword ptr [rsp + 56], 0
+    je .Lfailure
+    cmp qword ptr [rsp + 64], 4
+    jne .Lfailure
+    cmp qword ptr [rsp + 72], 56
+    jne .Lfailure
+    cmp qword ptr [rsp + 80], 5
+    jne .Lfailure
+    cmp qword ptr [rsp + 88], 5
+    jne .Lfailure
+    cmp qword ptr [rsp + 96], 6
+    jne .Lfailure
+    cmp qword ptr [rsp + 104], 4096
+    jne .Lfailure
+    cmp qword ptr [rsp + 112], 7
+    jne .Lfailure
+    cmp qword ptr [rsp + 120], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 128], 8
+    jne .Lfailure
+    cmp qword ptr [rsp + 136], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 144], 11
+    jne .Lfailure
+    cmp qword ptr [rsp + 152], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 160], 12
+    jne .Lfailure
+    cmp qword ptr [rsp + 168], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 176], 13
+    jne .Lfailure
+    cmp qword ptr [rsp + 184], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 192], 14
+    jne .Lfailure
+    cmp qword ptr [rsp + 200], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 208], 23
+    jne .Lfailure
+    cmp qword ptr [rsp + 216], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 224], 31
+    jne .Lfailure
+    mov rax, qword ptr [rsp + 232]
+    cmp rax, qword ptr [rsp + 8]
+    jne .Lfailure
+    cmp qword ptr [rsp + 240], 9
+    jne .Lfailure
+#ifdef GINUX_EXEC_SECOND
+    cmp qword ptr [rsp + 248], 0x410100
+#else
+    cmp qword ptr [rsp + 248], 0x400100
+#endif
+    jne .Lfailure
+    cmp qword ptr [rsp + 256], 17
+    jne .Lfailure
+    cmp qword ptr [rsp + 264], 100
+    jne .Lfailure
+    cmp qword ptr [rsp + 272], 15
+    jne .Lfailure
+    mov rax, qword ptr [rsp + 280]
+    cmp dword ptr [rax], 0x5f363878
+    jne .Lfailure
+    cmp word ptr [rax + 4], 0x3436
+    jne .Lfailure
+    cmp byte ptr [rax + 6], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 288], 16
+    jne .Lfailure
+    cmp qword ptr [rsp + 296], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 304], 26
+    jne .Lfailure
+    cmp qword ptr [rsp + 312], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 320], 0
+    jne .Lfailure
+    cmp qword ptr [rsp + 328], 0
     jne .Lfailure
 
     mov edi, 2

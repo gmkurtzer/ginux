@@ -392,7 +392,9 @@ node's bounded basename. The canonical measured-root node is retained as
 process state, so `/proc/self/exe` reports `/bin/exec-target` or
 `/bin/exec-second` independently of the accepted pathname form. Each
 replacement validates these transitions, reopens `/dev/console`, validates its
-complete initial stack, emits its distinct proof marker, closes
+complete initial stack, including target-specific program-header, entry,
+executable-name, platform, credential, clock, and hardware-capability auxiliary
+vector entries, emits its distinct proof marker, closes
 all surviving proof descriptors, and exits with status 42.
 
 The same syscall admits one interpreted target: Linux-visible `/init`, backed

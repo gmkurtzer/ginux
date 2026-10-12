@@ -443,6 +443,13 @@ argument, one environment entry, one live thread, the fixed two-DSO graph, and
 the existing bounded load windows. The internal `linux/init` node is exposed as
 canonical `/init`; the replacement main validates that `/proc/self/exe`
 returns exactly those five bytes before it can complete.
+Static replacement targets consume the same deterministic auxiliary-vector
+contract as initial static entry. Their fresh stack carries target-specific
+`AT_PHDR`, `AT_PHNUM`, `AT_ENTRY`, and `AT_EXECFN` values plus `AT_PHENT`,
+`AT_PAGESZ`, `AT_BASE = 0`, credentials, security state, clock tick, platform,
+conservative hardware masks, and `AT_NULL`. Both independently linked static
+targets validate every pair and dereference `AT_EXECFN` and `AT_PLATFORM` in
+ring 3 before making a syscall.
 Post-exit validation requires the stack leaf to name the fresh lease, rejects
 the retired generation even if its physical address has since been reused, and
 reclaims the replacement stack only after the process page-table root is
