@@ -44,7 +44,7 @@ verifies the APIC vector is idle, and removes the temporary IDT gate. See
 [Virtio MSI-X Interrupt v0](specs/kernel/virtio-msix-interrupt-v0.md).
 The validated configuration regions are now mapped through a bounded,
 uncached, supervisor-only higher-half window. The kernel forces PCI bus mastering off,
-resets the device, accepts only modern virtio plus flush support, confirms one
+resets the device, accepts only modern virtio, platform DMA, and flush support, confirms one
 or more queues, and returns the device to reset without setting `DRIVER_OK` or
 providing DMA memory. See
 [Virtio Block Initialization v0](specs/kernel/virtio-block-init-v0.md).
@@ -66,9 +66,14 @@ capabilities while requiring a clean disabled state. Because QEMU does not mark 
 covering every PCI device, the kernel validates every bounded DMAR device scope
 and requires an exact endpoint scope for the discovered virtio-blk source ID.
 Six owned frames form an exact 48-bit hierarchy that permits only the one DMA
-page. The gate installs it, completes the real storage transaction, observes no
-IOMMU fault, then disables translation and clears the root before scrubbing the
-tables and DMA lease. See
+page, and the QEMU device is required to advertise and negotiate
+`VIRTIO_F_ACCESS_PLATFORM` rather than using its bypass address space. The gate
+first points a read payload descriptor at a separate sentinel-filled page. It
+requires that page to remain unchanged, validates the exact VT-d source ID,
+address, and write-permission fault, clears the record, invalidates caches, and
+then completes the real storage transaction through the permitted page. It
+finally disables translation and clears the root before scrubbing the tables,
+guard, and DMA lease. See
 [IOMMU Register Access v0](specs/kernel/iommu-v0.md),
 [IOMMU Translation Hierarchy v0](specs/kernel/iommu-translation-v0.md),
 [Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md), and
@@ -1127,8 +1132,8 @@ make abi-conformance
 
 ## Virtualization profiles
 
-- **macOS on Apple Silicon:** QEMU x86-64 with TCG and the Q35 Intel IOMMU exposed. UTM is optional for graphical inspection; the checked-in QEMU runner is authoritative.
-- **Linux on x86-64:** QEMU x86-64 with the same Q35 Intel IOMMU profile and KVM when `/dev/kvm` is available, falling back to TCG otherwise.
+- **macOS on Apple Silicon:** QEMU x86-64 with TCG, the Q35 Intel IOMMU exposed, and virtio platform DMA required. UTM is optional for graphical inspection; the checked-in QEMU runner is authoritative.
+- **Linux on x86-64:** QEMU x86-64 with the same Q35 Intel IOMMU and virtio platform-DMA profile and KVM when `/dev/kvm` is available, falling back to TCG otherwise.
 
 Override discovery when necessary:
 

@@ -72,6 +72,7 @@ const STATUS_DEVICE_NEEDS_RESET: u8 = 64;
 const STATUS_FAILED: u8 = 128;
 const FEATURE_FLUSH: u64 = 1 << 9;
 const FEATURE_VERSION_1: u64 = 1 << 32;
+const FEATURE_ACCESS_PLATFORM: u64 = 1 << 33;
 const RESET_POLL_LIMIT: usize = 100_000;
 const QUEUE_POLL_LIMIT: usize = 10_000_000;
 const DMA_PAGE_SIZE: usize = 4096;
@@ -295,6 +296,33 @@ pub(crate) struct VirtioBlockInitialization {
 pub(crate) struct VirtioBlockRead {
     pub(crate) capacity_sectors: u64,
     pub(crate) used_length: u32,
+}
+
+pub(crate) struct UnmappedDmaAttempt {
+    completion_published: bool,
+    used_index: u16,
+    used_id: u32,
+    used_length: u32,
+    request_status: u8,
+    device_status: u8,
+    mapped_payload_unchanged: bool,
+    descriptor_unchanged: bool,
+}
+
+impl UnmappedDmaAttempt {
+    pub(crate) fn transport_outcome_is_bounded(&self, prior_used_index: u16) -> bool {
+        let completion_is_safe = if self.completion_published {
+            self.used_index == prior_used_index.wrapping_add(1)
+                && self.used_id == 0
+                && self.used_length == (DATA_LENGTH + 1) as u32
+                && self.request_status == 0
+                && self.device_status
+                    == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
+        } else {
+            self.used_index == prior_used_index && self.request_status == 0xff
+        };
+        completion_is_safe && self.mapped_payload_unchanged && self.descriptor_unchanged
+    }
 }
 
 pub(crate) struct VirtioBlockBackend {
@@ -979,6 +1007,83 @@ impl VirtioBlockBackend {
         safe
     }
 
+    /// Submits one read whose data descriptor names a page outside the active
+    /// DMA domain. QEMU may publish an ordinary successful virtio completion
+    /// even when VT-d drops the payload write, so this records transport state
+    /// while the caller separately requires an unchanged target and fault log.
+    pub(crate) fn attempt_unmapped_read(
+        &mut self,
+        sector: u64,
+        unmapped_physical: u64,
+    ) -> Option<UnmappedDmaAttempt> {
+        if !self.active
+            || sector >= self.capacity_sectors
+            || !unmapped_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+            || unmapped_physical == self.dma_physical
+            || unmapped_physical.checked_add(DATA_LENGTH as u64).is_none()
+        {
+            return None;
+        }
+        prepare_operation(
+            self.dma_physical,
+            self.dma_virtual,
+            0,
+            sector,
+            DATA_LENGTH,
+            true,
+            None,
+        );
+        write_dma_u64(self.dma_virtual + DESC_OFFSET + 16, unmapped_physical);
+
+        let available_slot = usize::from(self.available_index % self.queue_size);
+        let used_slot = usize::from(self.used_index % self.queue_size);
+        let expected_used_index = self.used_index.wrapping_add(1);
+        if read_dma_u16(self.dma_virtual + USED_OFFSET + 2) != self.used_index {
+            return None;
+        }
+        write_dma_u16(
+            self.dma_virtual + AVAIL_OFFSET + 4 + available_slot * size_of::<u16>(),
+            0,
+        );
+        compiler_fence(Ordering::SeqCst);
+        let expected_available = self.available_index.wrapping_add(1);
+        write_dma_u16(self.dma_virtual + AVAIL_OFFSET + 2, expected_available);
+        self.available_index = expected_available;
+        write_mmio_u16(self.notification, 0);
+
+        let mut completed = false;
+        for _ in 0..QUEUE_POLL_LIMIT {
+            compiler_fence(Ordering::SeqCst);
+            if read_dma_u16(self.dma_virtual + USED_OFFSET + 2) == expected_used_index {
+                completed = true;
+                break;
+            }
+            if read_common_u8(self.common, COMMON_DEVICE_STATUS)
+                & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED)
+                != 0
+            {
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        compiler_fence(Ordering::SeqCst);
+        let used_element = self.dma_virtual + USED_OFFSET + 4 + used_slot * 8;
+        Some(UnmappedDmaAttempt {
+            completion_published: completed,
+            used_index: read_dma_u16(self.dma_virtual + USED_OFFSET + 2),
+            used_id: read_dma_u32(used_element),
+            used_length: read_dma_u32(used_element + 4),
+            request_status: read_dma_u8(self.dma_virtual + STATUS_OFFSET),
+            device_status: read_common_u8(self.common, COMMON_DEVICE_STATUS),
+            mapped_payload_unchanged: read_dma_u8(self.dma_virtual + DATA_OFFSET - 1) == 0x3c
+                && read_dma_u8(self.dma_virtual + DATA_OFFSET + DATA_LENGTH) == 0xc3
+                && (0..DATA_LENGTH)
+                    .all(|offset| read_dma_u8(self.dma_virtual + DATA_OFFSET + offset) == 0xa5),
+            descriptor_unchanged: read_dma_u64(self.dma_virtual + DESC_OFFSET + 16)
+                == unmapped_physical,
+        })
+    }
+
     fn submit(&mut self, operation: BlockOperation<'_>) -> bool {
         if !self.active {
             return false;
@@ -1118,9 +1223,10 @@ fn negotiate(common: usize) -> Option<VirtioBlockInitialization> {
 }
 
 pub(crate) fn verify_feature_rejections(offered: u64, accepted: u64) -> bool {
-    accepted == (FEATURE_VERSION_1 | FEATURE_FLUSH)
+    accepted == (FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_FLUSH)
         && select_features(offered) == Some(accepted)
         && select_features(offered & !FEATURE_VERSION_1).is_none()
+        && select_features(offered & !FEATURE_ACCESS_PLATFORM).is_none()
         && select_features(offered & !FEATURE_FLUSH).is_none()
         && select_features(0).is_none()
 }
@@ -1145,7 +1251,7 @@ pub(crate) fn verify_queue_rejections() -> bool {
 }
 
 fn select_features(offered: u64) -> Option<u64> {
-    let required = FEATURE_VERSION_1 | FEATURE_FLUSH;
+    let required = FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_FLUSH;
     (offered & required == required).then_some(required)
 }
 
@@ -1228,7 +1334,8 @@ pub(crate) fn device_features_are_selected(
     let low = read_common_u32(common, COMMON_DRIVER_FEATURE);
     write_common_u32(common, COMMON_DRIVER_FEATURE_SELECT, 1);
     let high = read_common_u32(common, COMMON_DRIVER_FEATURE);
-    u64::from(low) | (u64::from(high) << 32) == FEATURE_VERSION_1 | FEATURE_FLUSH
+    u64::from(low) | (u64::from(high) << 32)
+        == FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_FLUSH
 }
 
 pub(crate) fn device_active_queue_is_bound(
@@ -1690,6 +1797,10 @@ fn read_dma_u16(address: usize) -> u16 {
 
 fn read_dma_u32(address: usize) -> u32 {
     u32::from_le(unsafe { read_volatile(address as *const u32) })
+}
+
+fn read_dma_u64(address: usize) -> u64 {
+    u64::from_le(unsafe { read_volatile(address as *const u64) })
 }
 
 fn write_dma_u8(address: usize, value: u8) {

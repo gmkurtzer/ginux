@@ -28,6 +28,14 @@ else
     failed=1
 fi
 
+if qemu="$(find_qemu 2>/dev/null)" &&
+    "$qemu" -device virtio-blk-pci,help 2>&1 | grep -q 'iommu_platform'; then
+    printf 'ok   %-24s %s\n' 'virtio platform DMA' 'available'
+else
+    printf 'MISS %-24s required\n' 'virtio platform DMA'
+    failed=1
+fi
+
 if ovmf_code="$(find_ovmf_code 2>/dev/null)"; then
     printf 'ok   %-24s %s\n' 'OVMF code' "$ovmf_code"
 else

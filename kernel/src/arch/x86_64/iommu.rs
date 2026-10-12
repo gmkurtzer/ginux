@@ -15,6 +15,22 @@ const ROOT_TABLE_ADDRESS_OFFSET: u64 = 0x20;
 const GLOBAL_COMMAND_OFFSET: u64 = 0x18;
 const CONTEXT_COMMAND_OFFSET: u64 = 0x28;
 const FAULT_STATUS_OFFSET: u64 = 0x34;
+const CAPABILITY_FAULT_RECORD_OFFSET_SHIFT: u64 = 24;
+const CAPABILITY_FAULT_RECORD_OFFSET_MASK: u64 = 0x3ff;
+const CAPABILITY_FAULT_RECORD_COUNT_SHIFT: u64 = 40;
+const CAPABILITY_FAULT_RECORD_COUNT_MASK: u64 = 0xff;
+const FAULT_RECORD_STRIDE: u64 = 16;
+const FAULT_RECORD_HIGH_DELTA: u64 = 8;
+const PRIMARY_PENDING_FAULT: u32 = 1 << 1;
+const FAULT_RECORD_VALID: u64 = 1 << 63;
+const FAULT_RECORD_TRANSACTION_READ: u64 = 1 << 62;
+const FAULT_RECORD_REASON_SHIFT: u64 = 32;
+const FAULT_RECORD_REASON_MASK: u64 = 0xff;
+const FAULT_RECORD_PASID_SHIFT: u64 = 40;
+const FAULT_RECORD_NO_PASID: u64 = 0xffff;
+const FAULT_RECORD_SOURCE_MASK: u64 = 0xffff;
+const FAULT_INFORMATION_MASK: u64 = !0xfff;
+const WRITE_PERMISSION_FAULT: u64 = 5;
 const TRANSLATION_ENABLE_STATUS: u32 = 1 << 31;
 const SET_ROOT_TABLE_POINTER: u32 = 1 << 30;
 const ROOT_TABLE_POINTER_STATUS: u32 = 1 << 30;
@@ -66,6 +82,7 @@ pub(crate) struct ActiveTranslation {
     mapping: MmioMapping,
     root_table_address: u64,
     iotlb_register: u64,
+    fault_record_register: u64,
 }
 
 impl InactiveTranslation {
@@ -130,6 +147,63 @@ impl ActiveTranslation {
             && read_u64(self.mapping, self.register_base + ROOT_TABLE_ADDRESS_OFFSET)
                 == Some(self.root_table_address)
             && fault_status_is_clear(self.mapping, self.register_base)
+    }
+
+    /// Validates and retires the one expected Q35 write fault while keeping
+    /// translation active for a subsequent recovery transaction.
+    pub(crate) fn recover_expected_write_fault(
+        &self,
+        bus: u8,
+        device: u8,
+        function: u8,
+        fault_address: u64,
+    ) -> bool {
+        if device >= 32 || function >= 8 || !fault_address.is_multiple_of(PAGE_SIZE) {
+            return false;
+        }
+        let Some(status) = read_u32(self.mapping, self.register_base + FAULT_STATUS_OFFSET) else {
+            return false;
+        };
+        let Some(low) = read_u64(self.mapping, self.fault_record_register) else {
+            return false;
+        };
+        let Some(high) = read_u64(
+            self.mapping,
+            self.fault_record_register + FAULT_RECORD_HIGH_DELTA,
+        ) else {
+            return false;
+        };
+        let source = (u64::from(bus) << 8) | (u64::from(device) << 3) | u64::from(function);
+        let expected_high = FAULT_RECORD_VALID
+            | (FAULT_RECORD_NO_PASID << FAULT_RECORD_PASID_SHIFT)
+            | (WRITE_PERMISSION_FAULT << FAULT_RECORD_REASON_SHIFT)
+            | source;
+        if status & FAULT_STATUS_MASK != PRIMARY_PENDING_FAULT
+            || low & FAULT_INFORMATION_MASK != fault_address
+            || high != expected_high
+            || high & FAULT_RECORD_TRANSACTION_READ != 0
+            || high >> FAULT_RECORD_REASON_SHIFT & FAULT_RECORD_REASON_MASK
+                != WRITE_PERMISSION_FAULT
+            || high & FAULT_RECORD_SOURCE_MASK != source
+            || read_u32(self.mapping, self.register_base + GLOBAL_STATUS_OFFSET)
+                .is_none_or(|global| global & TRANSLATION_ENABLE_STATUS == 0)
+            || read_u64(self.mapping, self.register_base + ROOT_TABLE_ADDRESS_OFFSET)
+                != Some(self.root_table_address)
+        {
+            return false;
+        }
+
+        write_u64(
+            self.mapping,
+            self.fault_record_register + FAULT_RECORD_HIGH_DELTA,
+            FAULT_RECORD_VALID,
+        ) && fault_status_is_clear(self.mapping, self.register_base)
+            && read_u64(
+                self.mapping,
+                self.fault_record_register + FAULT_RECORD_HIGH_DELTA,
+            ) == Some(expected_high & !FAULT_RECORD_VALID)
+            && invalidate_caches(self.mapping, self.register_base, self.iotlb_register)
+            && self.is_active()
     }
 
     pub(crate) fn finish(self) -> bool {
@@ -278,8 +352,20 @@ pub(crate) fn activate_translation(
             .checked_mul(16)?
             .checked_add(IOTLB_INVALIDATE_REGISTER_DELTA)?,
     )?;
+    let fault_record_count = ((capabilities.capability >> CAPABILITY_FAULT_RECORD_COUNT_SHIFT)
+        & CAPABILITY_FAULT_RECORD_COUNT_MASK)
+        + 1;
+    let fault_record_register = register_base.checked_add(
+        ((capabilities.capability >> CAPABILITY_FAULT_RECORD_OFFSET_SHIFT)
+            & CAPABILITY_FAULT_RECORD_OFFSET_MASK)
+            .checked_mul(FAULT_RECORD_STRIDE)?,
+    )?;
     if !translation.is_exact(dma_frame)
+        || fault_record_count != 1
         || mapping.address(iotlb_register, size_of::<u64>()).is_none()
+        || mapping
+            .address(fault_record_register, FAULT_RECORD_STRIDE as usize)
+            .is_none()
         || !probe(register_base, mapping).is_some_and(|current| {
             current.capability == capabilities.capability
                 && current.extended_capability == capabilities.extended_capability
@@ -311,6 +397,7 @@ pub(crate) fn activate_translation(
         mapping,
         root_table_address,
         iotlb_register,
+        fault_record_register,
     };
     if !installed || !active.is_active() {
         rollback_activation(mapping, register_base);

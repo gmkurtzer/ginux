@@ -43,8 +43,10 @@ unit owns the device.
 
 The [IOMMU Translation Hierarchy v0](iommu-translation-v0.md) contract is the
 only current writer. It limits writes to the root-table, global-command,
-context-command, and capability-selected IOTLB invalidation registers, uses
-bounded status waits, and restores the initial root/translation state.
+context-command, capability-selected IOTLB invalidation, and one
+capability-selected fault-record register. Fault retirement uses only the
+record's write-one-to-clear valid bit. All status waits are bounded, and the
+contract restores the initial root/translation state.
 
 ## Deliberate limits
 

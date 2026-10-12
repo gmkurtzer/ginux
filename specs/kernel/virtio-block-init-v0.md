@@ -38,13 +38,14 @@ service domain can concurrently access PCI configuration or the device:
 3. Write device status zero and poll at most 100,000 times for reset.
 4. Set `ACKNOWLEDGE`, then `DRIVER`.
 5. Read both 32-bit device-feature words.
-6. Require and select only `VIRTIO_F_VERSION_1` and `VIRTIO_BLK_F_FLUSH`.
+6. Require and select only `VIRTIO_F_VERSION_1`,
+   `VIRTIO_F_ACCESS_PLATFORM`, and `VIRTIO_BLK_F_FLUSH`.
 7. Publish both driver-feature words and set `FEATURES_OK`.
 8. Require the device to retain `FEATURES_OK` and expose at least one queue.
 9. Reset the device again and require status zero.
 10. Re-read the PCI command register and require bus mastering to remain clear.
 
-Copied feature-set tests reject a device missing either required feature and
+Copied feature-set tests reject a device missing any required feature and
 prove that no unrequested offered feature enters the accepted set.
 
 ## Authority and limitations

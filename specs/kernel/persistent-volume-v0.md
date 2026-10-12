@@ -122,8 +122,9 @@ modifying the corrupted image. This is rejection testing, not repair.
   filesystem, journal, names, snapshots, or concurrency.
 - Control ABI v4 operation 18 exposes a bounded 64-byte capability-separated
   service path; there is no Linux block-device exposure.
-- There is no NVMe backend, interrupt-driven completion, isolated storage
-  service, or IOMMU confinement.
+- There is no NVMe backend, general interrupt-driven completion, isolated
+  storage service, or IOMMU confinement for the ring-3 volume service. The
+  kernel-reference virtio backend has a separate bounded VT-d profile.
 - SHA-256 is an integrity checksum here, not a signature or MAC.
 - Throughput, p99 latency, endurance, discard, barriers beyond flush, and
   multi-sector atomicity remain M6 work.

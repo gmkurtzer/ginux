@@ -67,8 +67,9 @@ fatal because recycling a page while DMA may continue would violate ownership.
 - The path runs synchronously in kernel bootstrap code with interrupts
   disabled; it is not the intended isolated storage-service architecture.
 - QEMU's VT-d model constrains this kernel-reference path to its one DMA page
-  while bus mastering is enabled. Unauthorized-DMA fault injection and
-  physical-hardware behavior remain unproven.
+  while bus mastering is enabled. A deliberate unmapped payload write is
+  rejected and recovered before the volume transaction; physical-hardware
+  behavior remains unproven.
 - The test relies on QEMU's raw block backend and virtio flush completion. It
   does not inject host crashes, torn physical sectors, dishonest caches, or
   media loss.

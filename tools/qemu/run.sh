@@ -38,7 +38,7 @@ exec "$qemu" \
     -no-reboot \
     -net none \
     -device "intel-iommu,intremap=off" \
-    -device "virtio-blk-pci,drive=ginux-volume,disable-legacy=on,serial=ginux-volume" \
+    -device "virtio-blk-pci,drive=ginux-volume,disable-legacy=on,iommu_platform=on,serial=ginux-volume" \
     -drive "if=none,id=ginux-volume,format=raw,file=$volume_image" \
     -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code" \
     -drive "if=pflash,format=raw,file=$ovmf_vars" \

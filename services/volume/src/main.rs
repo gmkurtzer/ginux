@@ -45,6 +45,7 @@ const STATUS_DRIVER_OK: u8 = 4;
 const STATUS_FEATURES_OK: u8 = 8;
 const FEATURE_FLUSH: u32 = 1 << 9;
 const FEATURE_VERSION_1: u32 = 1;
+const FEATURE_ACCESS_PLATFORM: u32 = 1 << 1;
 const VOLUME_SECTOR_BASE: usize = 4;
 const PAYLOAD: &[u8] = b"ginux-isolated-volume\n";
 
@@ -170,13 +171,18 @@ impl VirtioBlock {
             return None;
         }
         write_u32(common + COMMON_DEVICE_FEATURE_SELECT, 1);
-        if read_u32(common + COMMON_DEVICE_FEATURE) & FEATURE_VERSION_1 == 0 {
+        if read_u32(common + COMMON_DEVICE_FEATURE) & (FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM)
+            != FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM
+        {
             return None;
         }
         write_u32(common + COMMON_DRIVER_FEATURE_SELECT, 0);
         write_u32(common + COMMON_DRIVER_FEATURE, FEATURE_FLUSH);
         write_u32(common + COMMON_DRIVER_FEATURE_SELECT, 1);
-        write_u32(common + COMMON_DRIVER_FEATURE, FEATURE_VERSION_1);
+        write_u32(
+            common + COMMON_DRIVER_FEATURE,
+            FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM,
+        );
         write_u8(
             common + COMMON_DEVICE_STATUS,
             STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK,

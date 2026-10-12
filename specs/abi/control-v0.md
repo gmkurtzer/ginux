@@ -394,7 +394,8 @@ The kernel consumes its attenuated
 `READ` authority while constructing a read-only ring-3 MMIO mapping and its
 separate attenuated `WRITE` authority while constructing a writable control
 mapping. On x86 that leaf is also readable; the service uses it to select
-exactly `VIRTIO_BLK_F_FLUSH|VIRTIO_F_VERSION_1`, complete `FEATURES_OK`, select
+exactly `VIRTIO_BLK_F_FLUSH|VIRTIO_F_VERSION_1|VIRTIO_F_ACCESS_PLATFORM`,
+complete `FEATURES_OK`, select
 queue zero, set size eight, and bind its three addresses. The kernel arms bus
 mastering, after which the service enables the queue and sets `DRIVER_OK`
 after constructing an exact three-descriptor sector-two read chain. It

@@ -52,7 +52,8 @@ and requires ABI version 4 plus opaque-capability and fault-containment feature
 bits. An incompatible kernel therefore faults before the service touches its
 delegated device.
 
-The runtime itself negotiates only `FLUSH` and `VERSION_1`, configures queue
+The runtime itself negotiates only `FLUSH`, `VERSION_1`, and
+`ACCESS_PLATFORM`, configures queue
 zero and MSI-X table entry zero, and implements the shared whole-sector trait
 with one descriptor head. The first submission rejects a stale future request,
 publishes its available entry without notifying the device, and proves a real

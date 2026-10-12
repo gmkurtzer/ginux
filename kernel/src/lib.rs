@@ -757,11 +757,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !arch::x86_64::pci::verify_queue_rejections() {
         kernel_fail("\r\nginux: virtio queue contract invalid\r\n");
     }
-    let Some([virtio_dma_frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
-        kernel_fail("\r\nginux: virtio DMA frame allocation failed\r\n");
+    let Some([virtio_dma_frame, iommu_guard_frame]) =
+        memory::allocate_frames::<2>(memory::FrameOwner::KERNEL)
+    else {
+        kernel_fail("\r\nginux: virtio DMA and guard frame allocation failed\r\n");
     };
-    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[virtio_dma_frame]) {
-        kernel_fail("\r\nginux: virtio DMA frame ownership invalid\r\n");
+    if !memory::frames_owned_by(
+        memory::FrameOwner::KERNEL,
+        &[virtio_dma_frame, iommu_guard_frame],
+    ) {
+        kernel_fail("\r\nginux: virtio DMA and guard frame ownership invalid\r\n");
     }
     let Some(iommu_translation) = arch::x86_64::iommu::build_inactive_translation(
         iommu_capabilities,
@@ -804,6 +809,60 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(virtio_dma_virtual) = virtio_dma_frame.direct_map_address() else {
         kernel_fail("\r\nginux: virtio DMA frame is outside direct map\r\n");
     };
+    let Some(iommu_guard_virtual) = iommu_guard_frame.direct_map_address() else {
+        kernel_fail("\r\nginux: IOMMU guard frame is outside direct map\r\n");
+    };
+    // The guard remains owned but deliberately absent from the translation
+    // hierarchy. A blocked device write must leave every sentinel byte intact.
+    unsafe {
+        core::ptr::write_bytes(iommu_guard_virtual as *mut u8, 0xa5, 4096);
+    }
+    // SAFETY: The queue page is exclusively kernel-owned and mapped by the
+    // active IOMMU hierarchy. The guard target is separately owned, aligned,
+    // and intentionally unmapped. `finish` resets the device and revokes bus
+    // mastering before either lease is inspected or released.
+    let Some(mut fault_probe) = (unsafe {
+        arch::x86_64::pci::VirtioBlockBackend::start(
+            virtio_block,
+            virtio_mmio,
+            virtio_dma_frame.address(),
+            virtio_dma_virtual,
+        )
+    }) else {
+        kernel_fail("\r\nginux: adversarial virtio backend activation failed\r\n");
+    };
+    let Some(unmapped_attempt) = fault_probe.attempt_unmapped_read(2, iommu_guard_frame.address())
+    else {
+        kernel_fail("\r\nginux: unauthorized virtio DMA request was not submitted\r\n");
+    };
+    let faulting_transport_bounded = unmapped_attempt.transport_outcome_is_bounded(0);
+    let faulting_device_quiesced = fault_probe.finish();
+    let guard_unchanged = (0..4096)
+        .all(|offset| unsafe { (iommu_guard_virtual as *const u8).add(offset).read() == 0xa5 });
+    if !faulting_transport_bounded {
+        kernel_fail("\r\nginux: unauthorized virtio DMA request state invalid\r\n");
+    }
+    if !faulting_device_quiesced {
+        kernel_fail("\r\nginux: faulting virtio device teardown failed\r\n");
+    }
+    if !guard_unchanged {
+        kernel_fail("\r\nginux: unmapped DMA guard frame was modified\r\n");
+    }
+    serial_write("\r\nginux: unauthorized virtio DMA payload blocked");
+    serial_write("\r\nginux: faulting virtio transport outcome bounded");
+    serial_write("\r\nginux: unmapped DMA guard frame remained unchanged");
+    serial_write("\r\nginux: faulting virtio device reset and bus mastering revoked");
+    if !iommu_active.recover_expected_write_fault(
+        virtio_block.bus,
+        virtio_block.device,
+        virtio_block.function,
+        iommu_guard_frame.address(),
+    ) {
+        kernel_fail("\r\nginux: expected IOMMU fault validation or recovery failed\r\n");
+    }
+    serial_write("\r\nginux: IOMMU fault source and address validated");
+    serial_write("\r\nginux: IOMMU write-permission fault reason validated");
+    serial_write("\r\nginux: IOMMU fault record cleared and translation recovered");
     // SAFETY: The allocator returned one exclusively kernel-owned page, its
     // direct-map alias covers the complete physical frame, and the lease stays
     // live until the device has reset and bus mastering is disabled.
@@ -868,11 +927,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: IOMMU translation disabled after device quiescence");
     serial_write("\r\nginux: IOMMU root table cleared");
-    serial_write("\r\nginux: IOMMU fault status remained clear");
+    serial_write("\r\nginux: IOMMU fault status clear after recovery");
     if !iommu_translation.retire() {
         kernel_fail("\r\nginux: inactive IOMMU translation retirement failed\r\n");
     }
     serial_write("\r\nginux: IOMMU translation frames scrubbed and released");
+    if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[iommu_guard_frame])
+        || memory::any_frame_lease_live(&[iommu_guard_frame])
+    {
+        kernel_fail("\r\nginux: IOMMU guard frame retirement failed\r\n");
+    }
+    serial_write("\r\nginux: IOMMU guard frame scrubbed and released");
     if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[virtio_dma_frame])
         || memory::any_frame_lease_live(&[virtio_dma_frame])
     {

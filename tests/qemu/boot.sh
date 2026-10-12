@@ -404,10 +404,17 @@ fi
 
 if ! grep -q '^ginux: IOMMU root table installed' "$output_file" ||
     ! grep -q '^ginux: IOMMU translation enabled for virtio DMA' "$output_file" ||
+    ! grep -q '^ginux: unauthorized virtio DMA payload blocked' "$output_file" ||
+    ! grep -q '^ginux: unmapped DMA guard frame remained unchanged' "$output_file" ||
+    ! grep -q '^ginux: faulting virtio device reset and bus mastering revoked' "$output_file" ||
+    ! grep -q '^ginux: IOMMU fault source and address validated' "$output_file" ||
+    ! grep -q '^ginux: IOMMU write-permission fault reason validated' "$output_file" ||
+    ! grep -q '^ginux: IOMMU fault record cleared and translation recovered' "$output_file" ||
     ! grep -q '^ginux: IOMMU translation disabled after device quiescence' "$output_file" ||
     ! grep -q '^ginux: IOMMU root table cleared' "$output_file" ||
-    ! grep -q '^ginux: IOMMU fault status remained clear' "$output_file"; then
-    echo "Boot test failed: active IOMMU translation lifecycle did not complete." >&2
+    ! grep -q '^ginux: IOMMU fault status clear after recovery' "$output_file" ||
+    ! grep -q '^ginux: IOMMU guard frame scrubbed and released' "$output_file"; then
+    echo "Boot test failed: active IOMMU confinement and recovery did not complete." >&2
     exit 1
 fi
 
@@ -592,7 +599,7 @@ if ! grep -Eq '^ginux: virtio block offered features: [1-9][0-9]*' "$output_file
     exit 1
 fi
 
-if ! grep -q '^ginux: virtio block accepted features: 4294967808' "$output_file"; then
+if ! grep -q '^ginux: virtio block accepted features: 12884902400' "$output_file"; then
     echo "Boot test failed: virtio-blk accepted the wrong feature set." >&2
     exit 1
 fi

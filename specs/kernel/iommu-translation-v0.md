@@ -44,22 +44,42 @@ waits for Translation Enable Status. Every wait has a fixed iteration bound;
 an activation failure attempts to disable translation and clear/reload a zero
 root before failing closed.
 
-The hierarchy remains active while the bounded kernel virtio read/write/flush
-transaction uses the corresponding DMA lease. The hardware root must match the
-owned root frame and fault status must remain clear.
+The QEMU virtio-blk function is configured with `iommu_platform=on`, and every
+kernel and native driver negotiation requires `VIRTIO_F_ACCESS_PLATFORM`.
+Without both conditions QEMU may use a bypass address space even while VT-d
+translation is enabled.
+
+Before the ordinary transaction, the kernel allocates a separate owned guard
+frame, fills it with a sentinel, and deliberately leaves it absent from the
+hierarchy. A read request retains its descriptor table, request header, status,
+available ring, and used ring in the permitted page while its 512-byte payload
+descriptor names the guard. QEMU currently publishes an ordinary successful
+virtio completion even though VT-d drops the payload write, so queue status is
+not accepted as confinement evidence. The kernel resets the device, revokes
+bus mastering, and requires every guard byte to remain unchanged.
+
+The capability-selected fault-record offset must describe exactly one bounded
+128-bit record. Its pending bit, fault-information address, source ID, write
+transaction type, no-PASID value, and write-permission reason must exactly
+match the attempted access. The kernel clears the record through its
+write-one-to-clear valid bit, requires fault status to clear, globally
+invalidates the context cache and IOTLB, and requires the original root and
+translation-enable state to remain active. A normal interrupt-driven read and
+the persistent read/write/flush transaction must then succeed through the
+permitted page, proving recovery after the rejected access.
 
 After the device is reset and bus mastering is revoked, the kernel disables
 translation and waits for acknowledgement, invalidates both caches, writes a
 zero root, and reloads it. It then requires a disabled translation status,
 zero root register, and clear fault status. Only afterward are the six
-hierarchy frames scrubbed and released, followed by the separate DMA page.
+hierarchy frames scrubbed and released, followed by the guard and DMA pages.
 
 ## Deliberate limits
 
 This hierarchy is logically immutable after construction but its ordinary
-kernel direct-map aliases are not yet made read-only. Fault status is polled at
-lifecycle boundaries; there is no fault interrupt, recorded-fault diagnosis,
-or deliberate unauthorized-DMA injection yet. The isolated native volume
-service is not yet attached to this domain. The single identity-mapped page and
-fixed domain ID are a bounded bootstrap profile, not a general IOVA allocator,
+kernel direct-map aliases are not yet made read-only. Fault status is polled;
+there is no fault interrupt or general fault-policy engine. The isolated native
+volume service is not yet attached to this domain. The single identity-mapped
+page, fixed domain ID, QEMU-specific single fault record, and exact reason
+encoding are a bounded bootstrap profile, not a general IOVA allocator,
 multi-device domain model, or production hardware claim.

@@ -57,12 +57,15 @@ does not recycle the page.
 
 ## Security limitations
 
-The Q35 reference profile now binds the exact virtio source ID to a 48-bit VT-d
-domain containing only the single live queue/data page. Translation is enabled
-before bus mastering and disabled only after reset and bus-master revocation;
-fault status must remain clear. Deliberate unauthorized-DMA rejection and real
-hardware remain unproven, and the isolated userspace driver path does not yet
-receive this domain.
+The Q35 reference profile binds the exact virtio source ID to a 48-bit VT-d
+domain containing only the single live queue/data page. The device and driver
+require `VIRTIO_F_ACCESS_PLATFORM`, preventing QEMU's virtio DMA-bypass path.
+Translation is enabled before bus mastering and disabled only after reset and
+bus-master revocation. A deliberate payload write to a separate unmapped guard
+page must leave it unchanged, produce the exact source/address/write fault,
+clear cleanly, and be followed by a successful permitted read. Real hardware
+remains unproven, and the isolated userspace driver path does not yet receive
+this domain.
 
 The probe polls synchronously with interrupts disabled and permits one in-flight
 request. The reusable queue added on top of this layout supports bounded reads,

@@ -31,8 +31,9 @@ register, one owned DMA lease, and a read-only bootstrap record. PCI
 configuration, MSI-X tables and pending bits, interrupt-controller registers,
 the IDT, other devices, and port I/O remain unavailable.
 
-The service negotiates exactly `VIRTIO_BLK_F_FLUSH` and
-`VIRTIO_F_VERSION_1`, selects queue zero with size eight, installs its one-page
+The service negotiates exactly `VIRTIO_BLK_F_FLUSH`,
+`VIRTIO_F_VERSION_1`, and `VIRTIO_F_ACCESS_PLATFORM`, selects queue zero with
+size eight, installs its one-page
 split-ring addresses, binds MSI-X entry zero, enables the queue, and sets
 `DRIVER_OK`. It implements the shared two-slot persistent-volume engine over
 serialized read, write, and flush requests to reserved sectors four and five.
