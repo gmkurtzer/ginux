@@ -445,7 +445,13 @@ the same transactional sender/handler handoff returns `EINTR` without changing
 the output or counter. The measured graph then blocks the same read again and
 completes it through a write, proving the descriptor remains live. Blocked
 signals, unsupported dispositions, nested delivery, and syscall restart retain
-their explicit `ENOSYS` boundary. Blocking eventfd writes remain unsupported.
+their explicit `ENOSYS` boundary. A write that would saturate a blocking
+eventfd now stores its already-copied increment in the scheduler wait. A read
+that creates enough capacity wakes and atomically commits that saved value;
+signal interruption returns `EINTR` without changing the counter, and close
+wakes it with `EBADF`. The measured graph mutates the userspace input while the
+retry sleeps and still observes the original saved increment. Blocking without
+a runnable peer retains `ENOSYS`.
 A bounded monotonic timerfd adds one-shot and periodic clock-driven readiness
 with relative or absolute arming. An unexpired or disarmed blocking read sleeps
 in its scheduler slot while a peer is runnable. Arming and disarming refresh the

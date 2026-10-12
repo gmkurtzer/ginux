@@ -1094,6 +1094,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux zero-descriptor poll sleeps validated\r\n");
     serial_write("ginux: Linux scheduler-backed eventfd reads validated\r\n");
     serial_write("ginux: Linux signal-interrupted eventfd reads validated\r\n");
+    serial_write("ginux: Linux scheduler-backed eventfd writes validated\r\n");
+    serial_write("ginux: Linux signal-interrupted eventfd writes validated\r\n");
+    serial_write("ginux: Linux eventfd write snapshot isolation validated\r\n");
     serial_write("ginux: Linux scheduler-backed pipe reads validated\r\n");
     serial_write("ginux: Linux scheduler-backed pipe readv validated\r\n");
     serial_write("ginux: Linux signal-interrupted pipe reads validated\r\n");

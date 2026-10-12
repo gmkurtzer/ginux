@@ -146,7 +146,13 @@ counter. A normal read returns and clears the complete nonzero counter;
 semaphore mode returns one and decrements it. Writing adds any value except
 `UINT64_MAX`. An empty nonblocking read or addition that would exceed
 `UINT64_MAX - 1` returns `-EAGAIN`. A blocking saturated write retains the
-explicit `-ENOSYS` boundary. Invalid lengths return
+already-copied increment in a typed scheduler wait while a peer is runnable.
+A read that creates enough capacity wakes it and atomically commits the saved
+value; later userspace input mutation cannot redirect the addition. Closing the
+descriptor wakes it with `-EBADF`. An admitted caught signal may cancel the
+wait with `-EINTR` without changing the counter, and retry may still complete.
+Blocking without a runnable peer retains the explicit `-ENOSYS` boundary.
+Invalid lengths return
 `-EINVAL` and invalid memory returns `-EFAULT` without consuming or adding a
 value. `poll` and epoll report `POLLIN`/`EPOLLIN` while nonzero and
 `POLLOUT`/`EPOLLOUT` while another value can be added. The proof registers the
@@ -159,8 +165,9 @@ consumes the counter on behalf of the waiter, and makes that thread ready;
 closing the eventfd instead resumes it with `-EBADF`. The eight-byte output is
 validated before blocking and revalidated on completion, so a revoked range
 resumes with `-EFAULT` without consuming the counter. Blocking without a
-runnable peer retains the explicit `-ENOSYS` boundary. Blocking eventfd writes
-remain unsupported.
+runnable peer retains the explicit `-ENOSYS` boundary. The measured two-thread
+graph also proves saturated-write interruption, saved-value isolation, read
+wake, and descriptor-close wake.
 `rax = 283` (`__NR_timerfd_create`) allocates one process-local
 `CLOCK_MONOTONIC` timer in the lowest free auxiliary descriptor. It accepts
 `TFD_CLOEXEC` and `TFD_NONBLOCK`; unsupported clocks or flags return `-EINVAL`,

@@ -380,10 +380,12 @@ valid_interpreter_base:
     pop rsi
     xor edx, edx
     mov r10d, 0x405cd0
-    mov r8d, 7
+    push 7
+    pop r8
     mov eax, 271
     call syscall_expect_einval
-    mov r8d, 8
+    push 8
+    pop r8
     mov eax, 271
     call syscall_expect_three
 
@@ -555,7 +557,8 @@ valid_interpreter_base:
     pop rdi
     mov esi, 0x40b000
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -1336,7 +1339,8 @@ valid_interpreter_base:
     pop rdi
     mov esi, 0x405100
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     push 13
     pop rax
     call syscall_expect_zero
@@ -1704,6 +1708,51 @@ linux_clone_repeat:
     push 3
     pop rax
     call syscall_expect_zero
+    # Saturate a fresh blocking eventfd. Signal interruption preserves the
+    # counter; retry commits the snapshotted increment after the child drains
+    # it, and descriptor closure wakes the final writer with EBADF.
+    xor edi, edi
+    xor esi, esi
+    mov eax, 290
+    call syscall_expect_two
+    mov qword ptr [0x405d80], -2
+    push 2
+    pop rdi
+    mov esi, 0x405d80
+    push 8
+    pop rdx
+    push 1
+    pop rax
+    call syscall_expect_eight
+    mov qword ptr [0x405d80], 1
+    push 1
+    pop rax
+    syscall
+    cmp rax, -4
+    require_equal
+    cmp qword ptr [0x405d80], 1
+    require_equal
+    push 1
+    pop rax
+    call syscall_expect_eight
+    cmp qword ptr [0x405d80], 7
+    require_equal
+    mov esi, 0x405d90
+    xor eax, eax
+    call syscall_expect_eight
+    cmp qword ptr [0x405d90], 1
+    require_equal
+    mov qword ptr [0x405d80], -2
+    mov esi, 0x405d80
+    push 1
+    pop rax
+    call syscall_expect_eight
+    mov qword ptr [0x405d80], 1
+    push 1
+    pop rax
+    syscall
+    cmp rax, -9
+    require_equal
     push 1
     pop rdi
     xor esi, esi
@@ -1830,7 +1879,8 @@ linux_child_joined:
     pop rdi
     xor esi, esi
     mov edx, 0x4050e0
-    mov r10d, 7
+    push 7
+    pop r10
     push 14
     pop rax
     call syscall_expect_einval
@@ -1839,7 +1889,8 @@ linux_child_joined:
     pop rdi
     xor esi, esi
     mov edx, 0x4050e0
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -1849,7 +1900,8 @@ linux_child_joined:
     xor edi, edi
     mov esi, 0x4050c0
     mov edx, 0x4050e0
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -1860,7 +1912,8 @@ linux_child_joined:
     pop rdi
     xor esi, esi
     mov edx, 0x4050e0
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -1871,7 +1924,8 @@ linux_child_joined:
     xor edi, edi
     mov esi, 0x4050c0
     mov edx, 0x406200
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_efault
@@ -1880,7 +1934,8 @@ linux_child_joined:
     pop rdi
     xor esi, esi
     mov edx, 0x4050e0
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -1892,7 +1947,8 @@ linux_child_joined:
     pop rdi
     mov esi, 0x4050c0
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -1901,7 +1957,8 @@ linux_child_joined:
     pop rdi
     xor esi, esi
     mov edx, 0x4050e0
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -1911,7 +1968,8 @@ linux_child_joined:
     xor edi, edi
     mov esi, 0x406200
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_efault
@@ -1927,7 +1985,8 @@ linux_child_joined:
     pop rdi
     mov esi, 0x405100
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     push 13
     pop rax
     call syscall_expect_einval
@@ -1936,7 +1995,8 @@ linux_child_joined:
     pop rdi
     mov esi, 0x405100
     mov edx, 0x405120
-    mov r10d, 8
+    push 8
+    pop r10
     push 13
     pop rax
     call syscall_expect_zero
@@ -1988,7 +2048,8 @@ linux_child_joined:
     pop rdi
     mov esi, 0x405100
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     push 13
     pop rax
     call syscall_expect_zero
@@ -2124,7 +2185,8 @@ linux_child_joined:
     pop rdi
     lea rsi, [rip + proc_self_exe]
     mov edx, 0x405040
-    mov r10d, 5
+    push 5
+    pop r10
     mov eax, 267
     call syscall_expect_five
     cmp dword ptr [0x405040], 0x696e692f
@@ -2135,7 +2197,8 @@ linux_child_joined:
     mov edi, -99
     lea rsi, [rip + proc_self_exe]
     mov edx, 0x405040
-    mov r10d, 5
+    push 5
+    pop r10
     mov eax, 267
     call syscall_expect_ebadf
 
@@ -2149,7 +2212,8 @@ linux_child_joined:
     mov edi, -100
     lea rsi, [rip + proc_self_exe]
     mov edx, 0x406200
-    mov r10d, 5
+    push 5
+    pop r10
     mov eax, 267
     call syscall_expect_efault
 
@@ -2613,7 +2677,8 @@ linux_child_joined:
     mov eax, 262
     call syscall_expect_efault
     mov edx, 0x405350
-    mov r10d, 1
+    push 1
+    pop r10
     mov eax, 262
     call syscall_expect_einval
     xor r10d, r10d
@@ -2645,7 +2710,8 @@ linux_child_joined:
     call syscall_expect_einval
 
     xor edx, edx
-    mov r10d, 1
+    push 1
+    pop r10
     mov eax, 439
     call syscall_expect_einval
     xor r10d, r10d
@@ -2918,8 +2984,10 @@ linux_child_joined:
     mov qword ptr [0x405d04], rax
     push 2
     pop rdi
-    mov esi, 1
-    mov edx, 1
+    push 1
+    pop rsi
+    push 1
+    pop rdx
     mov r10d, 0x4061fc
     mov eax, 233
     call syscall_expect_efault
@@ -2932,7 +3000,8 @@ linux_child_joined:
     cmp rax, -17
     require_equal
 
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405d20
     xor edx, edx
     xor r10d, r10d
@@ -2940,17 +3009,21 @@ linux_child_joined:
     call syscall_expect_einval
 
     mov qword ptr [0x405d40], 0
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     mov r10d, -1
     mov r8d, 0x405d40
-    mov r9d, 7
+    push 7
+    pop r9
     mov eax, 281
     call syscall_expect_einval
 
     mov r8d, 0x406200
-    mov r9d, 8
+    push 8
+    pop r9
     mov eax, 281
     call syscall_expect_efault
 
@@ -2965,12 +3038,15 @@ linux_child_joined:
 
     mov qword ptr [0x405d60], 0
     mov qword ptr [0x405d68], 1000000000
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     mov r10d, 0x405d60
     mov r8d, 0x405d40
-    mov r9d, 8
+    push 8
+    pop r9
     mov eax, 441
     call syscall_expect_einval
 
@@ -2982,9 +3058,11 @@ linux_child_joined:
     mov eax, 441
     call syscall_expect_efault
 
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x4061fc
-    mov edx, 1
+    push 1
+    pop rdx
     mov r10d, -1
     mov eax, 232
     call syscall_expect_efault
@@ -3001,44 +3079,56 @@ linux_child_joined:
     mov dword ptr [0x405d00], 1
     movabs rax, 0x8877665544332211
     mov qword ptr [0x405d04], rax
-    mov edi, 2
-    mov esi, 3
-    mov edx, 1
+    push 2
+    pop rdi
+    push 3
+    pop rsi
+    push 1
+    pop rdx
     mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_zero
 
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
 
-    mov edi, 2
-    mov esi, 2
-    mov edx, 1
+    push 2
+    pop rdi
+    push 2
+    pop rsi
+    push 1
+    pop rdx
     mov r10d, 0x406200
     mov eax, 233
     call syscall_expect_zero
 
-    mov esi, 3
+    push 3
+    pop rsi
     mov r10d, 0x405d00
     mov eax, 233
     syscall
     cmp rax, -2
     require_equal
 
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
-    mov r10d, 1
+    push 1
+    pop r10
     mov eax, 232
     call syscall_expect_enosys
 
-    mov edi, 2
+    push 2
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -3047,15 +3137,18 @@ linux_child_joined:
     xor esi, esi
     mov eax, 283
     call syscall_expect_einval
-    mov edi, 1
-    mov esi, 2
+    push 1
+    pop rdi
+    push 2
+    pop rsi
     mov eax, 283
     call syscall_expect_einval
 
     xor edi, edi
     mov eax, 291
     call syscall_expect_two
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x80800
     mov eax, 283
     call syscall_expect_three
@@ -3078,16 +3171,20 @@ linux_child_joined:
     syscall
     cmp rax, 0x802
     require_equal
-    mov esi, 4
-    mov edx, 2
+    push 4
+    pop rsi
+    push 2
+    pop rdx
     push 72
     pop rax
     call syscall_expect_zero
     mov esi, 0x405e00
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_enosys
-    mov esi, 4
+    push 4
+    pop rsi
     mov edx, 0x802
     push 72
     pop rax
@@ -3104,7 +3201,8 @@ linux_child_joined:
     cmp rax, -29
     require_equal
     mov esi, 0x405e00
-    mov edx, 8
+    push 8
+    pop rdx
     push 1
     pop rax
     call syscall_expect_einval
@@ -3145,14 +3243,18 @@ linux_child_joined:
     mov dword ptr [0x405d00], 1
     movabs rax, 0x54494d4552464433
     mov qword ptr [0x405d04], rax
-    mov edi, 2
-    mov esi, 1
-    mov edx, 3
+    push 2
+    pop rdi
+    push 1
+    pop rsi
+    push 3
+    pop rdx
     mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_zero
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_one
@@ -3160,26 +3262,33 @@ linux_child_joined:
     cmp qword ptr [0x405d24], rax
     require_equal
 
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x4061fc
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_efault
     mov esi, 0x405e60
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405e60], 1
     require_equal
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x405e60
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_eagain
 
@@ -3198,7 +3307,8 @@ linux_child_joined:
     cmp qword ptr [0x405e28], 1
     require_equal
     mov esi, 0x405e60
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405e60], 0
@@ -3214,7 +3324,8 @@ linux_child_joined:
     mov eax, 286
     call syscall_expect_zero
     mov esi, 0x405e60
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405e60], 0
@@ -3245,7 +3356,8 @@ linux_child_joined:
     mov eax, 293
     call syscall_expect_efault
     mov edi, 0x405e80
-    mov esi, 2
+    push 2
+    pop rsi
     mov eax, 293
     call syscall_expect_einval
 
@@ -3264,11 +3376,13 @@ linux_child_joined:
     push 4
     pop rdi
     mov esi, 0x404fff
-    mov edx, 2
+    push 2
+    pop rdx
     push 1
     pop rax
     call syscall_expect_two
-    mov edi, 3
+    push 3
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -3294,7 +3408,8 @@ linux_child_joined:
     push 72
     pop rax
     call syscall_expect_one
-    mov esi, 3
+    push 3
+    pop rsi
     push 72
     pop rax
     syscall
@@ -3307,33 +3422,41 @@ linux_child_joined:
     syscall
     cmp rax, 0x801
     require_equal
-    mov edi, 3
-    mov esi, 4
+    push 3
+    pop rdi
+    push 4
+    pop rsi
     xor edx, edx
     push 72
     pop rax
     call syscall_expect_zero
-    mov esi, 3
+    push 3
+    pop rsi
     push 72
     pop rax
     call syscall_expect_zero
-    mov edi, 4
+    push 4
+    pop rdi
     push 72
     pop rax
     syscall
     cmp rax, 0x801
     require_equal
-    mov edi, 3
-    mov esi, 4
+    push 3
+    pop rdi
+    push 4
+    pop rsi
     mov edx, 0x4000
     push 72
     pop rax
     call syscall_expect_einval
     mov esi, 0x405eb0
-    mov edx, 1
+    push 1
+    pop rdx
     xor eax, eax
     call syscall_expect_enosys
-    mov esi, 4
+    push 4
+    pop rsi
     mov edx, 0x800
     push 72
     pop rax
@@ -3347,36 +3470,46 @@ linux_child_joined:
     mov dword ptr [0x405d00], 1
     movabs rax, 0x5049504552454144
     mov qword ptr [0x405d04], rax
-    mov edi, 2
-    mov esi, 1
-    mov edx, 3
+    push 2
+    pop rdi
+    push 1
+    pop rsi
+    push 3
+    pop rdx
     mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_zero
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
 
-    mov edi, 4
+    push 4
+    pop rdi
     mov esi, 0x406200
-    mov edx, 8
+    push 8
+    pop rdx
     push 1
     pop rax
     call syscall_expect_efault
 
     movabs rax, 0x4847464544434241
     mov qword ptr [0x405ea0], rax
-    mov edi, 4
+    push 4
+    pop rdi
     mov esi, 0x405ea0
-    mov edx, 8
+    push 8
+    pop rdx
     push 1
     pop rax
     call syscall_expect_eight
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_one
@@ -3384,7 +3517,8 @@ linux_child_joined:
     cmp qword ptr [0x405d24], rax
     require_equal
 
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x405350
     push 5
     pop rax
@@ -3403,13 +3537,16 @@ linux_child_joined:
     pop rax
     call syscall_expect_efault
 
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x4061fc
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_efault
     mov esi, 0x405eb0
-    mov edx, 3
+    push 3
+    pop rdx
     xor eax, eax
     call syscall_expect_three
     cmp byte ptr [0x405eb0], 0x41
@@ -3423,9 +3560,11 @@ linux_child_joined:
     call syscall_expect_zero
     cmp dword ptr [0x405ec0], 5
     require_equal
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x405eb8
-    mov edx, 5
+    push 5
+    pop rdx
     xor eax, eax
     call syscall_expect_five
     cmp byte ptr [0x405eb8], 0x44
@@ -3433,7 +3572,8 @@ linux_child_joined:
     cmp byte ptr [0x405ebc], 0x48
     require_equal
     mov esi, 0x405eb0
-    mov edx, 1
+    push 1
+    pop rdx
     xor eax, eax
     call syscall_expect_eagain
 
@@ -3441,9 +3581,11 @@ linux_child_joined:
     mov qword ptr [0x405f08], 3
     mov qword ptr [0x405f10], 0x406200
     mov qword ptr [0x405f18], 5
-    mov edi, 4
+    push 4
+    pop rdi
     mov esi, 0x405f00
-    mov edx, 2
+    push 2
+    pop rdx
     push 20
     pop rax
     call syscall_expect_efault
@@ -3456,7 +3598,8 @@ linux_child_joined:
     mov qword ptr [0x405f28], 3
     mov qword ptr [0x405f30], 0x406200
     mov qword ptr [0x405f38], 5
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x405f20
     push 19
     pop rax
@@ -3474,29 +3617,35 @@ linux_child_joined:
     cmp byte ptr [0x405ebc], 0x48
     require_equal
 
-    mov edi, 4
+    push 4
+    pop rdi
     mov esi, 0x405e00
     mov edx, 256
     push 1
     pop rax
     call syscall_expect_256
-    mov edx, 1
+    push 1
+    pop rdx
     push 1
     pop rax
     call syscall_expect_eagain
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x405e00
     mov edx, 256
     xor eax, eax
     call syscall_expect_256
 
-    mov edi, 4
+    push 4
+    pop rdi
     mov esi, 0x405ea0
-    mov edx, 1
+    push 1
+    pop rdx
     push 1
     pop rax
     call syscall_expect_one
-    mov edi, 4
+    push 4
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -3504,16 +3653,19 @@ linux_child_joined:
     mov word ptr [0x405da4], 1
     mov word ptr [0x405da6], -1
     mov edi, 0x405da0
-    mov esi, 1
+    push 1
+    pop rsi
     xor edx, edx
     push 7
     pop rax
     call syscall_expect_one
     cmp word ptr [0x405da6], 0x11
     require_equal
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x405eb0
-    mov edx, 1
+    push 1
+    pop rdx
     xor eax, eax
     call syscall_expect_one
     cmp byte ptr [0x405eb0], 0x41
@@ -3528,13 +3680,16 @@ linux_child_joined:
     push 22
     pop rax
     call syscall_expect_zero
-    mov edi, 3
+    push 3
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
-    mov edi, 4
+    push 4
+    pop rdi
     mov esi, 0x405ea0
-    mov edx, 1
+    push 1
+    pop rdx
     push 1
     pop rax
     syscall
@@ -3543,7 +3698,8 @@ linux_child_joined:
     push 3
     pop rax
     call syscall_expect_zero
-    mov edi, 2
+    push 2
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -3557,9 +3713,11 @@ linux_child_joined:
     mov eax, 257
     call syscall_expect_two
     mov qword ptr [0x405380], -1
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405380
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405380], 0
@@ -3573,7 +3731,8 @@ linux_child_joined:
     xor r10d, r10d
     mov eax, 262
     call syscall_expect_zero
-    mov edi, 2
+    push 2
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -3584,15 +3743,18 @@ linux_child_joined:
     mov byte ptr [0x40534c], 0
     mov edi, -100
     mov esi, 0x405340
-    mov edx, 1
+    push 1
+    pop rdx
     mov eax, 257
     call syscall_expect_two
     movabs rax, 0x2121454349564544
     mov qword ptr [0x405380], rax
     mov byte ptr [0x405388], 10
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405380
-    mov edx, 9
+    push 9
+    pop rdx
     push 1
     pop rax
     syscall
@@ -3667,9 +3829,11 @@ linux_child_joined:
     mov qword ptr [0x405508], 4
     mov qword ptr [0x405510], 0x406200
     mov qword ptr [0x405518], 4
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405500
-    mov edx, 2
+    push 2
+    pop rdx
     push 19
     pop rax
     call syscall_expect_efault
@@ -3683,7 +3847,8 @@ linux_child_joined:
     require_equal
     cmp dword ptr [0x405550], 0
     require_equal
-    mov edi, 2
+    push 2
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -3693,18 +3858,22 @@ linux_child_joined:
     mov word ptr [0x405348], 0x006c
     mov edi, -100
     mov esi, 0x405340
-    mov edx, 1
+    push 1
+    pop rdx
     mov eax, 257
     call syscall_expect_two
     mov qword ptr [0x405500], 0x406200
     mov qword ptr [0x405508], 8
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405500
-    mov edx, 1
+    push 1
+    pop rdx
     push 20
     pop rax
     call syscall_expect_eight
-    mov edi, 2
+    push 2
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -5247,6 +5416,30 @@ child_thread_probe:
     pop rdx
     xor eax, eax
     call syscall_expect_two
+    push 24
+    pop rax
+    call syscall_expect_zero
+    push 2
+    pop rdi
+    push 3
+    pop rax
+    call syscall_expect_zero
+    push 24
+    pop rax
+    call syscall_expect_zero
+    push 12
+    pop rdx
+    call linux_child_signal_parent
+    # The retry must commit the saved increment even after this shared input
+    # changes. Draining the saturated counter wakes it; close wakes the next.
+    mov qword ptr [0x405d80], 7
+    push 2
+    pop rdi
+    mov esi, 0x405d90
+    push 8
+    pop rdx
+    xor eax, eax
+    call syscall_expect_eight
     push 24
     pop rax
     call syscall_expect_zero

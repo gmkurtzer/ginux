@@ -2203,6 +2203,18 @@ if ! grep -q '^ginux: Linux signal-interrupted eventfd reads validated' "$output
     echo "Boot test failed: Linux signal-interrupted eventfd reads were not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux scheduler-backed eventfd writes validated' "$output_file"; then
+    echo "Boot test failed: Linux scheduler-backed eventfd writes were not validated." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: Linux signal-interrupted eventfd writes validated' "$output_file"; then
+    echo "Boot test failed: Linux signal-interrupted eventfd writes were not validated." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: Linux eventfd write snapshot isolation validated' "$output_file"; then
+    echo "Boot test failed: Linux eventfd write snapshot isolation was not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux scheduler-backed pipe reads validated' "$output_file"; then
     echo "Boot test failed: Linux scheduler-backed pipe reads were not validated." >&2
     exit 1
