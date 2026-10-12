@@ -50,11 +50,12 @@ driver features, sets `FEATURES_OK`, and requires the device to retain that
 bit. The kernel independently reads back the exact selected features and status
 after the service selects queue zero, requires capacity for at least eight
 descriptors, and writes the bounded size eight. The service initializes its
-owned candidate DMA page and writes the exact descriptor, available, and used
-offsets into the three queue-address fields. It verifies queue enable remains
-zero, then takes a deliberate invalid-opcode fault. The kernel independently
-reads back the exact queue selection, size, disabled state, and address-to-lease
-binding.
+owned DMA page and writes the exact descriptor, available, and used
+offsets into the three queue-address fields. After the kernel has armed PCI bus
+mastering, the service enables queue zero, sets `DRIVER_OK`, confirms the bit,
+and takes a deliberate invalid-opcode fault without publishing an available
+entry or sending a notification. The fault hook independently reads back the
+exact active queue and address-to-lease binding.
 
 The stop-only path first revokes the exact object-7 handle. Its registered
 device hook validates the expected features and queue-to-lease binding, disables
@@ -62,10 +63,9 @@ PCI bus mastering, resets device status to zero, and confirms both conditions.
 Only then may the fault path restore the kernel root, destroy the service
 mapping, clear and release all owned frames, retire the domain, and publish the
 fault. Address-space release fails closed if a bound device has not completed
-quiescence. The service never sets `DRIVER_OK` or enables the queue. It owns one
-separate candidate DMA frame and writes its exact ring offsets to the device,
-but queue enable and bus mastering remain off, so binding
-cannot initiate data transfer. The lease lifecycle is specified in
+quiescence. The service owns one DMA frame and writes its exact ring offsets to
+the device. The queue becomes DMA-capable, but the service submits no request
+and performs no notification. The lease lifecycle is specified in
 [Isolated DMA Lease v0](device-dma-lease-v0.md).
 
 ## Deliberate limits
@@ -77,7 +77,7 @@ cannot initiate data transfer. The lease lifecycle is specified in
   readable. The proof touches only feature-selection, feature-value, and device
   status fields. Notification registers, ISR, device configuration, PCI
   configuration, and port I/O are unavailable.
-- No interrupt, enabled queue, active device DMA, or IOMMU domain is delegated.
+- No request submission, completion, interrupt, or IOMMU domain is delegated.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.

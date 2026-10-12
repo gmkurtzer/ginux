@@ -390,10 +390,11 @@ It has no control-call operation yet: the kernel consumes its attenuated
 separate attenuated `WRITE` authority while constructing a writable control
 mapping. On x86 that leaf is also readable; the service uses it to select
 exactly `VIRTIO_BLK_F_FLUSH|VIRTIO_F_VERSION_1`, complete `FEATURES_OK`, select
-queue zero, set size eight, and bind its three addresses while leaving it disabled.
-This proves feature and inert queue-geometry control followed by fault revocation and kernel
-quiescence. The same domain owns one separately tracked RW/NX candidate DMA
-page and binds its exact ring offsets to the disabled device. A domain fault
+queue zero, set size eight, and bind its three addresses. The kernel arms bus
+mastering, after which the service enables the queue and sets `DRIVER_OK`
+without publishing an available entry or notification. This proves active-idle
+queue control followed by fault revocation and kernel quiescence. The same
+domain owns one separately tracked RW/NX DMA page. A domain fault
 triggers an internal teardown obligation: device validation, bus-master
 disable, and reset must complete before its address space or DMA lease can be
 released. A usable device driver still requires a later, separately specified

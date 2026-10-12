@@ -4346,8 +4346,7 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
         return false;
     };
     if registered.device_quiesced
-        || !pci::device_features_are_selected(device, mapping)
-        || !pci::device_inert_queue_is_bound(device, mapping, dma_physical)
+        || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce(device, mapping)
     {
         return false;
@@ -5383,7 +5382,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     const DEVICE_PAGE_INDEX: usize = 5;
     const DMA_PAGE_INDEX: usize = 6;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
-    const SUCCESS_FAULT_OFFSET: u64 = 197;
+    const SUCCESS_FAULT_OFFSET: u64 = 215;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5439,6 +5438,10 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0x48, 0x89, 0x47, 0x30, // publish used ring
         0x66, 0x83, 0x7f, 0x1c, 0, // require queue to remain disabled
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0xc7, 0x47, 0x1c, 0x01, 0, // enable queue zero
+        0xc6, 0x47, 0x14, 0x0f, // set DRIVER_OK
+        0xf6, 0x47, 0x14, 0x04, // require DRIVER_OK to remain set
+        0x75, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x0f, 0x0b, // success: deliberate service fault
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
@@ -5499,6 +5502,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
         || !bind_auxiliary_device_teardown(auxiliary, device, mapping)
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
         || !cpu::activate_user_root(root)
+        || !pci::arm_isolated_device(device, mapping)
     {
         return None;
     }

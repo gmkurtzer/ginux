@@ -1,14 +1,14 @@
 # Isolated DMA Lease v0
 
-**Status:** Domain ownership, ring-3 initialization, and fault cleanup verified in QEMU.
+**Status:** Active-idle queue ownership and fault cleanup verified in QEMU.
 
 ## Purpose
 
 This contract introduces the memory side of an isolated virtio queue without
-yet permitting device DMA. It proves that one candidate DMA page can belong to
-the exact driver-domain generation, be writable from ring 3, be bound to inert
-queue-address registers, and be reclaimed without retaining service data after
-a fault.
+yet submitting device I/O. It proves that one DMA page can belong to
+the exact driver-domain generation, be writable from ring 3, be bound to an
+active-idle queue, and be reclaimed without retaining service data after a
+fault.
 
 ## Mapping and ownership
 
@@ -25,13 +25,14 @@ unowned, stale, or cross-domain frame is rejected.
 
 ## Ring-3 and teardown proof
 
-After negotiating features and inert queue geometry, the service writes a
-fixed 64-bit marker into the candidate DMA page and reads it back. It writes the
+After negotiating features and queue geometry, the service writes a fixed
+64-bit marker into the DMA page and reads it back. It writes the
 lease base to the descriptor address, base plus `0x100` to the driver/available
 address, and base plus `0x200` to the device/used address. The kernel reads back
-all three values and requires exact equality with the returned lease. Queue
-enable and PCI bus mastering remain zero, and `DRIVER_OK` is never set, so the
-device cannot access the frame.
+all three values and requires exact equality with the returned lease. The
+kernel arms PCI bus mastering, then the service enables queue zero and sets
+`DRIVER_OK`. It does not advance the available index or notify the device, so
+the queue is active but idle when the deliberate fault occurs.
 
 The service then deliberately faults. Stop-only teardown revokes object 7 and
 invokes the device hook while the service root and lease are still intact. The
@@ -45,13 +46,13 @@ zero, while the allocator reports zero frames remaining for the retired owner.
 
 ## Deliberate limits
 
-- This is a candidate DMA lease, not an active virtqueue.
+- This is an active but idle virtqueue, not a block-I/O submission path.
 - The physical address is embedded in the bounded bootstrap service and written
   only to the three queue-address registers; no general physical-address ABI is
   exposed.
-- Bus mastering, queue enable, notifications, interrupts, and `DRIVER_OK`
-  remain off.
-- There is no IOMMU domain; actual DMA must not be enabled until confinement and
-  teardown ordering are separately proved.
+- No available entry, notification, completion, or interrupt is produced.
+- There is no IOMMU domain; the trusted-QEMU bootstrap permits bus mastering
+  only because the sole queue points at one bounded owned page and synchronous
+  fault teardown revokes hardware access before releasing it.
 - The fixed single-page layout is a bootstrap proof, not a stable allocation
   or driver ABI.

@@ -771,6 +771,12 @@ pub(crate) fn bus_master_is_disabled(device: VirtioBlockDevice) -> bool {
         == 0
 }
 
+fn bus_master_is_enabled(device: VirtioBlockDevice) -> bool {
+    (unsafe { read_config_u16(device.bus, device.device, device.function, PCI_COMMAND) })
+        & COMMAND_BUS_MASTER
+        != 0
+}
+
 pub(crate) fn device_is_reset(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {
     let Some((physical, length)) = device.common_region() else {
         return false;
@@ -791,8 +797,10 @@ pub(crate) fn device_features_are_selected(
     let Some(common) = mapping.address(common_physical, common_length) else {
         return false;
     };
-    if read_common_u8(common, COMMON_DEVICE_STATUS)
+    let status = read_common_u8(common, COMMON_DEVICE_STATUS);
+    if status & (STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK)
         != STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK
+        || status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) != 0
     {
         return false;
     }
@@ -803,7 +811,7 @@ pub(crate) fn device_features_are_selected(
     u64::from(low) | (u64::from(high) << 32) == FEATURE_VERSION_1 | FEATURE_FLUSH
 }
 
-pub(crate) fn device_inert_queue_is_bound(
+pub(crate) fn device_active_queue_is_bound(
     device: VirtioBlockDevice,
     mapping: MmioMapping,
     dma_physical: u64,
@@ -814,12 +822,23 @@ pub(crate) fn device_inert_queue_is_bound(
     let Some(common) = mapping.address(common_physical, common_length) else {
         return false;
     };
-    read_common_u16(common, COMMON_QUEUE_SELECT) == 0
+    device_features_are_selected(device, mapping)
+        && read_common_u8(common, COMMON_DEVICE_STATUS)
+            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
+        && bus_master_is_enabled(device)
+        && read_common_u16(common, COMMON_QUEUE_SELECT) == 0
         && read_common_u16(common, COMMON_QUEUE_SIZE) == QUEUE_SIZE
-        && read_common_u16(common, COMMON_QUEUE_ENABLE) == 0
+        && read_common_u16(common, COMMON_QUEUE_ENABLE) == 1
         && read_common_u64(common, COMMON_QUEUE_DESC) == dma_physical
         && read_common_u64(common, COMMON_QUEUE_DRIVER) == dma_physical + AVAIL_OFFSET as u64
         && read_common_u64(common, COMMON_QUEUE_DEVICE) == dma_physical + USED_OFFSET as u64
+}
+
+pub(crate) fn arm_isolated_device(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {
+    device_is_reset(device, mapping)
+        && bus_master_is_disabled(device)
+        && set_pci_command(device, true)
+        && bus_master_is_enabled(device)
 }
 
 pub(crate) fn quiesce(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {

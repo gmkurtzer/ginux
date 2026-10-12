@@ -48,17 +48,15 @@ read-only observer sees reset status and faults on mutation. A control service
 with a write-only capability uses its necessarily read/write x86 leaf to
 require `FLUSH` and `VERSION_1`, publish exactly those features, and complete
 `FEATURES_OK`, select queue zero, and set its bounded size to eight before
-deliberately faulting. It leaves queue enable and every queue address zero.
-Each service loses its capability, mapping, and owned frames. The kernel
-independently verifies negotiation and inert queue geometry, then disables PCI
-bus mastering, resets the device, and verifies both conditions; neither service
-enables a queue or sets `DRIVER_OK`. The control domain now owns one additional
-RW/NX page suitable for a future DMA ring. It initializes that page in ring 3,
-then publishes its exact base, `+0x100`, and `+0x200` offsets as the descriptor,
-available, and used-ring addresses. The kernel verifies the binding while queue
-enable and bus mastering remain off. On fault, the registered device hook
-validates the binding, disables bus mastering, and resets the device before the
-page is scrubbed and released; release is rejected unless quiescence completed. See
+deliberately faulting. The control domain owns one additional RW/NX DMA page,
+initializes it in ring 3, and publishes its exact base, `+0x100`, and `+0x200`
+offsets as the descriptor, available, and used-ring addresses. After the kernel
+arms PCI bus mastering, the service enables queue zero and sets `DRIVER_OK`, but
+publishes no available entry and sends no notification. On fault, the registered
+device hook validates the active-idle binding, disables bus mastering, and
+resets the device before the page is scrubbed and released; release is rejected
+unless quiescence completed. Each service loses its capability, mapping, and
+owned frames. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
 [Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md).
 
