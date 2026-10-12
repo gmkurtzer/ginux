@@ -528,17 +528,17 @@ a timer returns `-ENOSYS` until asynchronous signal delivery exists. Invalid
 selectors return `-EINVAL`; invalid complete input or output ranges return
 `-EFAULT`, and rejected requests do not partially change the old-value output.
 `rax = 9` (`__NR_mmap`) has a scratch-window profile and one authenticated
-executable-install profile. The scratch window has two entries over
-`0x40b000..0x40d000` and admits either two independent private one-page areas
-or one private two-page area. A null hint selects the lowest contiguous free
-entry. Its anonymous form requires a null hint, an
-exact 4096- or 8192-byte length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
+executable-install profile. The scratch window has four page slots over
+`0x40b000..0x40f000` and admits private extents of one through four pages. A
+null hint selects the lowest contiguous free run. Its anonymous form requires a
+null hint, a nonzero page-multiple length no larger than 16384 bytes,
+`PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
 MAP_ANONYMOUS`, fd -1, and offset zero, and allocates and installs zero-filled
 generation-bound RW/NX frame leases.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
 descriptor for `/init`, `/lib64/ld-ginux.so`, `/lib64/libginux.so`, or
 `/lib64/libginux-aux.so`, and a
-page-aligned offset. Its complete one- or two-page window must fit within the
+page-aligned offset. Its complete one- through four-page window must fit within the
 file length rounded up to a page; offsets at or beyond EOF are rejected rather
 than deferred to a `SIGBUS` path. The kernel copies the authenticated bytes
 into allocator-owned read-only/NX frames and zero-fills a partial final page.
@@ -603,14 +603,14 @@ are released; the kernel-owned live-frame count must return to its
 pre-execution value. This is bounded userspace-owned loading for two
 preauthenticated images and one fixed dependency window, not ASLR, a general
 executable allocator, or authority to map unauthenticated bytes.
-`rax = 11` (`__NR_munmap`) accepts a complete active scratch area or one
-page-aligned head or tail page of a two-page area. It clears the selected
+`rax = 11` (`__NR_munmap`) accepts any page-aligned subrange of the four-page
+scratch window, including mapped pages, holes, or both. It clears the selected
 hardware leaves, invalidates their TLB entries, and scrubs the physical frames
 before returning their exact generation leases to the allocator. A partial
-removal splits or truncates the registry record while
-preserving the remaining page's write and immutable-file attributes. Repeating
-a supported exact unmap succeeds. A two-page range can remove two independent
-adjacent areas or an active page beside an already-unmapped hole. The anonymous
+removal rebuilds the registry around the holes while preserving every remaining
+page's write and immutable-file attributes. Repeating a supported exact unmap
+succeeds. A range can remove independent adjacent areas and already-unmapped
+holes in one transaction. The anonymous
 proof keeps two one-page areas active, queries and removes the second
 independently, and proves the first remains intact. It then
 removes both the head and tail of separate two-page areas and validates the
@@ -618,14 +618,17 @@ surviving area's residency, access, and contents. It also crosses a two-page
 area boundary with syscall copy-out, while the file proof maps the complete two-page interpreter,
 observes ELF magic and its entry byte, checks the zero-filled tail, proves
 syscall copy-out is denied, and rejects an unaligned file offset. Both paths
-exit with both leaves absent. This is not a general VMA allocator: arbitrary
+exit with the selected leaves absent. A four-page proof seals its middle two
+pages, creates separated holes, reuses the lowest hole, rejects a fragmented
+two-page allocation with `-ENOMEM`, and releases the complete sparse range.
+This is not a general VMA allocator: arbitrary
 hints, fixed mappings, writable or shared file
-mappings outside the admitted executable pages, partial ranges, arbitrary
+mappings outside the admitted executable pages, ranges outside the bounded window, arbitrary
 files, demand paging, and mapping growth are unsupported. Fixed placement is
 available only for the seven admitted main pages and two admitted dependency
 pages described above.
 `rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for a fully mapped
-one- or two-page anonymous range. The range may cross two adjacent registry
+one- through four-page anonymous range. The range may cross adjacent registry
 records. Immutable-file mappings reject advice with `-EINVAL`. For an anonymous
 range it validates that every leaf still maps its allocator-owned frame, then
 zeros the frames through the supervisor direct map without changing their
@@ -633,8 +636,8 @@ present, user, NX, or writable state. The proof also discards a sealed one-page
 read-only mapping, observes zeroes from ring 3, and unmaps it normally. Other
 advice, ranges, or inactive mappings return `-EINVAL` without changing the
 contents. There is no paging policy, reclamation queue, or lazy refill.
-`rax = 27` (`__NR_mincore`) accepts either kind of fully mapped one- or two-page
-range, including a range crossing adjacent registry records, and atomically
+`rax = 27` (`__NR_mincore`) accepts either kind of fully mapped one- through
+four-page range, including a range crossing adjacent registry records, and atomically
 writes one resident byte per page to a fully validated vector. It returns
 `-ENOMEM` when any requested page is unmapped. Misaligned or out-of-window
 ranges return `-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only

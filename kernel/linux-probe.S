@@ -806,21 +806,108 @@ valid_interpreter_base:
     mov eax, 1
     call syscall_expect_efault
 
+    # Fill the complete four-page scratch window, split its permissions,
+    # create holes, and prove first-fit allocation does not cross them.
+    xor edi, edi
+    mov esi, 16384
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
+    jne failure
+    mov qword ptr [0x40b000], 11
+    mov qword ptr [0x40c000], 12
+    mov qword ptr [0x40d000], 13
+    mov qword ptr [0x40e000], 14
+
+    mov edi, 0x40c000
+    mov esi, 8192
+    mov edx, 1
+    mov eax, 10
+    call syscall_expect_zero
+    mov edi, 0x40c000
+    mov esi, 4096
+    mov eax, 11
+    call syscall_expect_zero
+    mov edi, 0x40e000
+    mov eax, 11
+    call syscall_expect_zero
+
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40c000
+    jne failure
+    mov qword ptr [0x40c000], 15
+
+    xor edi, edi
+    mov esi, 8192
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, -12
+    jne failure
+
+    mov byte ptr [0x40594a], 0
+    mov byte ptr [0x40594b], 0
+    mov byte ptr [0x40594c], 0
+    mov edi, 0x40b000
+    mov esi, 12288
+    mov edx, 0x40594a
+    mov eax, 27
+    call syscall_expect_zero
+    cmp byte ptr [0x40594a], 1
+    jne failure
+    cmp byte ptr [0x40594b], 1
+    jne failure
+    cmp byte ptr [0x40594c], 1
+    jne failure
+
+    mov edi, 0x40b000
+    mov esi, 16384
+    mov eax, 11
+    call syscall_expect_zero
+    mov edi, 1
+    mov esi, 0x40b000
+    mov edx, 8
+    mov eax, 1
+    call syscall_expect_efault
+    mov esi, 0x40c000
+    mov eax, 1
+    call syscall_expect_efault
+    mov esi, 0x40d000
+    mov eax, 1
+    call syscall_expect_efault
+    mov esi, 0x40e000
+    mov eax, 1
+    call syscall_expect_efault
+
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     xor edi, edi
-    mov esi, 0x411000
+    mov esi, 0x413000
     mov edx, 0x405194
     lea r8d, [edx + 4]
-    mov r9d, 0x40efc0
+    mov r9d, 0x410fc0
     mov eax, 56
     call syscall_expect_einval
     mov r14d, 2
 linux_clone_repeat:
     mov edi, 0x13d0f00
-    mov esi, 0x411000
+    mov esi, 0x413000
     mov edx, 0x405194
     lea r8d, [edx + 4]
-    mov r9d, 0x40efc0
+    mov r9d, 0x410fc0
     mov eax, 56
     syscall
     test rax, rax
@@ -834,10 +921,10 @@ linux_clone_repeat:
     mov eax, 24
     call syscall_expect_zero
     mov edi, 0x13d0f00
-    mov esi, 0x411000
+    mov esi, 0x413000
     mov edx, ebp
     lea r8d, [edx + 4]
-    mov r9d, 0x40efc0
+    mov r9d, 0x410fc0
     mov eax, 56
     call syscall_expect_eagain
     mov eax, 24
@@ -3608,10 +3695,10 @@ resolution_valid:
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     mov edi, 0x13d0f00
-    mov esi, 0x411000
+    mov esi, 0x413000
     mov edx, 0x4061fc
     mov r8d, 0x405198
-    mov r9d, 0x40efc0
+    mov r9d, 0x410fc0
     mov eax, 56
     call syscall_expect_efault
 #endif

@@ -123,11 +123,14 @@ pub(crate) fn verify_linux_elf_mapping(
     let mmap_virtual_page = stack_virtual_page
         .checked_add(2 * PAGE_SIZE as u64)
         .unwrap_or(0);
-    let mmap_tail_virtual_page = mmap_virtual_page.checked_add(PAGE_SIZE as u64).unwrap_or(0);
+    let mmap_virtual_pages: [u64; cpu::LINUX_MMAP_SLOT_COUNT] = core::array::from_fn(|index| {
+        mmap_virtual_page
+            .checked_add((index * PAGE_SIZE) as u64)
+            .unwrap_or(0)
+    });
     let heap_indexes = indexes(heap_virtual_page);
     let stack_indexes = indexes(stack_virtual_page);
-    let mmap_indexes = indexes(mmap_virtual_page);
-    let mmap_tail_indexes = indexes(mmap_tail_virtual_page);
+    let mmap_indexes: [[usize; 4]; cpu::LINUX_MMAP_SLOT_COUNT] = mmap_virtual_pages.map(indexes);
     let Some(protected_end) = protected_start.checked_add(protected_size as u64) else {
         return false;
     };
@@ -158,18 +161,18 @@ pub(crate) fn verify_linux_elf_mapping(
         || heap_virtual_page == 0
         || stack_virtual_page == 0
         || mmap_virtual_page == 0
-        || mmap_tail_virtual_page == 0
+        || mmap_virtual_pages.contains(&0)
         || overlaps_protected(heap_virtual_page)
         || overlaps_protected(stack_virtual_page)
-        || overlaps_protected(mmap_virtual_page)
-        || overlaps_protected(mmap_tail_virtual_page)
+        || mmap_virtual_pages.iter().copied().any(overlaps_protected)
         || first_indexes[..3] != second_indexes[..3]
         || first_last_indexes[..3] != first_indexes[..3]
         || second_last_indexes[..3] != first_indexes[..3]
         || heap_indexes[..3] != first_indexes[..3]
         || stack_indexes[..3] != first_indexes[..3]
-        || mmap_indexes[..3] != first_indexes[..3]
-        || mmap_tail_indexes[..3] != first_indexes[..3]
+        || mmap_indexes
+            .iter()
+            .any(|indexes| indexes[..3] != first_indexes[..3])
         || first_indexes[0] != 0
         || first_indexes[1] != 0
         || second.virtual_address != second.virtual_page
@@ -375,8 +378,9 @@ pub(crate) fn verify_linux_elf_mapping(
             table_entries
                 .add(stack_indexes[3])
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
-            table_entries.add(mmap_indexes[3]).write(0);
-            table_entries.add(mmap_tail_indexes[3]).write(0);
+            for indexes in mmap_indexes {
+                table_entries.add(indexes[3]).write(0);
+            }
 
             let stack_bytes = mapped_frame::<u8>(stack_page)?;
             let stack_offset = PAGE_SIZE - 48 * size_of::<u64>();
@@ -453,7 +457,6 @@ pub(crate) fn verify_linux_elf_mapping(
             let stack_entry = table_entries.add(stack_indexes[3]).read();
             let lower_guard = table_entries.add(stack_indexes[3] - 1).read();
             let upper_guard = table_entries.add(stack_indexes[3] + 1).read();
-            let mmap_entry = table_entries.add(mmap_indexes[3]).read();
             let header_entries_valid = header.is_none_or(|segment| {
                 header_entry & (PRESENT | USER | NO_EXECUTE) == PRESENT | USER | NO_EXECUTE
                     && header_entry & WRITABLE == 0
@@ -496,8 +499,9 @@ pub(crate) fn verify_linux_elf_mapping(
                     == PRESENT | WRITABLE | USER | NO_EXECUTE
                 && lower_guard & USER == 0
                 && upper_guard & USER == 0
-                && mmap_entry == 0
-                && table_entries.add(mmap_tail_indexes[3]).read() == 0
+                && mmap_indexes
+                    .iter()
+                    .all(|indexes| table_entries.add(indexes[3]).read() == 0)
                 && header_entries_valid
                 && crate::linux_elf::materialized_page_matches(first, 0, first_bytes)
                 && (first.page_count == 1
@@ -758,8 +762,9 @@ pub(crate) fn verify_linux_elf_mapping(
                 && exec_mappings_valid
                 && exec_stack_mapping_valid
                 && exec_heap_mapping_valid;
-            let mapping_removed = table_entries.add(mmap_indexes[3]).read() == 0
-                && table_entries.add(mmap_tail_indexes[3]).read() == 0;
+            let mapping_removed = mmap_indexes
+                .iter()
+                .all(|indexes| table_entries.add(indexes[3]).read() == 0);
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
             Some(executed && mapping_removed && restored)
@@ -1047,9 +1052,13 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let mmap_virtual_page = stack_virtual_page
         .checked_add(2 * PAGE_SIZE as u64)
         .unwrap_or(0);
-    let mmap_tail_virtual_page = mmap_virtual_page.checked_add(PAGE_SIZE as u64).unwrap_or(0);
-    let tls_virtual_page = mmap_tail_virtual_page
-        .checked_add(PAGE_SIZE as u64)
+    let mmap_virtual_pages: [u64; cpu::LINUX_MMAP_SLOT_COUNT] = core::array::from_fn(|index| {
+        mmap_virtual_page
+            .checked_add((index * PAGE_SIZE) as u64)
+            .unwrap_or(0)
+    });
+    let tls_virtual_page = mmap_virtual_page
+        .checked_add((cpu::LINUX_MMAP_SLOT_COUNT * PAGE_SIZE) as u64)
         .unwrap_or(0);
     let sibling_tls_virtual_page = tls_virtual_page.checked_add(PAGE_SIZE as u64).unwrap_or(0);
     let sibling_stack_lower_guard = sibling_tls_virtual_page
@@ -1100,8 +1109,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     });
     let heap_indexes = indexes(heap_virtual_page);
     let stack_indexes = indexes(stack_virtual_page);
-    let mmap_indexes = indexes(mmap_virtual_page);
-    let mmap_tail_indexes = indexes(mmap_tail_virtual_page);
+    let mmap_indexes: [[usize; 4]; cpu::LINUX_MMAP_SLOT_COUNT] = mmap_virtual_pages.map(indexes);
     let tls_indexes = indexes(tls_virtual_page);
     let sibling_tls_indexes = indexes(sibling_tls_virtual_page);
     let sibling_stack_lower_guard_indexes = indexes(sibling_stack_lower_guard);
@@ -1132,11 +1140,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 || [main_ro, main_rx, main_rw, interpreter_rx, interpreter_rw]
                     .into_iter()
                     .any(overlaps_segment)
+                || mmap_virtual_pages.contains(&page)
                 || [
                     heap_virtual_page,
                     stack_virtual_page,
-                    mmap_virtual_page,
-                    mmap_tail_virtual_page,
                     tls_virtual_page,
                     sibling_tls_virtual_page,
                     sibling_stack_lower_guard,
@@ -1207,7 +1214,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || heap_virtual_page == 0
         || stack_virtual_page == 0
         || mmap_virtual_page == 0
-        || mmap_tail_virtual_page == 0
+        || mmap_virtual_pages.contains(&0)
         || tls_virtual_page == 0
         || sibling_tls_virtual_page == 0
         || sibling_stack_lower_guard == 0
@@ -1217,8 +1224,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || sibling_tls_base == 0
         || heap_indexes[..3] != main_indexes[..3]
         || stack_indexes[..3] != main_indexes[..3]
-        || mmap_indexes[..3] != main_indexes[..3]
-        || mmap_tail_indexes[..3] != main_indexes[..3]
+        || mmap_indexes
+            .iter()
+            .any(|indexes| indexes[..3] != main_indexes[..3])
         || tls_indexes[..3] != main_indexes[..3]
         || sibling_tls_indexes[..3] != main_indexes[..3]
         || sibling_stack_lower_guard_indexes[..3] != main_indexes[..3]
@@ -1230,11 +1238,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
         || overlaps_protected(main_rw)
         || overlaps_protected(interpreter_rx)
         || overlaps_protected(interpreter_rw)
+        || mmap_virtual_pages.iter().any(|page| {
+            *page < protected_end && protected_start < page.saturating_add(PAGE_SIZE as u64)
+        })
         || [
             heap_virtual_page,
             stack_virtual_page,
-            mmap_virtual_page,
-            mmap_tail_virtual_page,
             tls_virtual_page,
             sibling_tls_virtual_page,
             sibling_stack_lower_guard,
@@ -1432,8 +1441,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             main_entries
                 .add(stack_indexes[3])
                 .write(stack_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
-            main_entries.add(mmap_indexes[3]).write(0);
-            main_entries.add(mmap_tail_indexes[3]).write(0);
+            for indexes in mmap_indexes {
+                main_entries.add(indexes[3]).write(0);
+            }
             main_entries
                 .add(tls_indexes[3])
                 .write(tls_page | PRESENT | WRITABLE | USER | NO_EXECUTE);
@@ -1516,8 +1526,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 && main_entries.add(stack_indexes[3]).read()
                     & (PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == PRESENT | USER | WRITABLE | NO_EXECUTE
-                && main_entries.add(mmap_indexes[3]).read() == 0
-                && main_entries.add(mmap_tail_indexes[3]).read() == 0
+                && mmap_indexes
+                    .iter()
+                    .all(|indexes| main_entries.add(indexes[3]).read() == 0)
                 && main_entries.add(tls_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
                     == tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
@@ -1786,8 +1797,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && frame != frames[13]
                         && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frames[13]])
                 });
-            let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
-                && main_entries.add(mmap_tail_indexes[3]).read() == 0;
+            let mapping_removed = mmap_indexes
+                .iter()
+                .all(|indexes| main_entries.add(indexes[3]).read() == 0);
             let tls_runtime_valid = executed
                 && main_entries.add(tls_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
@@ -2332,7 +2344,7 @@ pub(crate) fn protect_current_user_page_read_only(address: u64) -> bool {
 }
 
 pub(crate) fn protect_current_linux_pages_read_only(address: u64, frames: &[u64]) -> bool {
-    if !(1..=2).contains(&frames.len())
+    if !(1..=cpu::LINUX_MMAP_SLOT_COUNT).contains(&frames.len())
         || address >= 1 << 47
         || !address.is_multiple_of(PAGE_SIZE as u64)
         || frames
@@ -2342,8 +2354,8 @@ pub(crate) fn protect_current_linux_pages_read_only(address: u64, frames: &[u64]
     {
         return false;
     }
-    let mut leaves = [core::ptr::null_mut(); 2];
-    let mut values = [0_u64; 2];
+    let mut leaves = [core::ptr::null_mut(); cpu::LINUX_MMAP_SLOT_COUNT];
+    let mut values = [0_u64; cpu::LINUX_MMAP_SLOT_COUNT];
     for (index, frame) in frames.iter().enumerate() {
         let page = address + index as u64 * PAGE_SIZE as u64;
         let Some(leaf) = current_linux_leaf(page) else {

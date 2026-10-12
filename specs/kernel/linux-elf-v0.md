@@ -778,15 +778,15 @@ segment ranges; retains the supervisor-only higher-half direct map; and verifies
 RX versus RW/NX permissions plus exact materialized contents through the direct
 map. An owned page at `0x407000` supplies one zero-filled RW/NX heap page. The
 page at `0x408000` remains an unmapped lower stack guard, and an owned page at
-`0x409000` supplies a RW/NX stack; `0x40a000` remains an upper guard. Two final
-leaves are initially absent at `0x40b000` and `0x40c000`. A two-entry
-registry allocates frames on demand and installs them as two independent one-page areas or one two-page area
+`0x409000` supplies a RW/NX stack; `0x40a000` remains an upper guard. Four final
+leaves are initially absent at `0x40b000..0x40f000`. A four-page registry
+allocates frames on demand and installs private extents of one through four pages
 for the bounded anonymous or immutable-runtime-file `mmap` lifecycle.
-Removing either page of a two-page area preserves the other as a one-page
-registry entry with unchanged access and file-kind metadata. Protecting either
-page read-only similarly splits the area while retaining write access only on
-the other entry. The bounded range operations walk adjacent entries rather
-than requiring both pages to share one registry record. File-backed windows are private,
+Removing a subrange rebuilds the remaining runs with unchanged access and
+file-kind metadata. Protecting a subrange read-only similarly retains write
+access only on the pages outside it. The bounded range operations walk adjacent
+entries rather than requiring the pages to share one registry record.
+File-backed windows are private,
 read-only/NX copies of authenticated bytes and are scrubbed during unmap.
 Before changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.

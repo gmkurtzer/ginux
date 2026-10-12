@@ -39,19 +39,19 @@ CPL3 entry/return on a distinct RW/NX stack page with supervisor-only neighbors
 before restoring the kernel root. General Linux process execution and collision
 policy remain separate milestones.
 
-That Linux proof also reserves two physical frames behind initially absent
-leaves at `0x40b000` and `0x40c000`. Its bounded anonymous mapping call
-validates an exact one- or two-page RW/NX request before installing any leaf;
-unmap requires the complete active extent, clears its leaves, invalidates the
-local translations, and scrubs both frames before they can be installed again.
-While active, all leaves in the exact extent can be irreversibly sealed
+That Linux proof also reserves four initially absent leaves over
+`0x40b000..0x40f000`. Its bounded anonymous mapping call validates a one-
+through four-page RW/NX request and allocates exact generation-bound frames
+before installing any leaf. Unmap accepts a page-aligned window subrange,
+clears each occupied leaf, invalidates its local translation, and scrubs and
+releases every selected frame before reuse. While active, mapped subranges can be irreversibly sealed
 read-only after one validation pass; copy permissions change with the hardware
 leaves, and unmap accepts either state. Bounded discard validates the same owned leaf and zeros its frame in place,
 preserving whichever writable state the mapping currently has.
-The matching residency query reports each present page only while this modeled
-extent is active and does not walk or disclose any caller-selected address.
-The gate observes both leaves absent after ring-3 exit. This is a single-core,
-single-slot lifecycle, not a general VMA allocator or TLB-shootdown protocol.
+The matching residency query reports each requested page only while it is
+active and does not walk or disclose addresses outside the fixed window. The
+gate observes all four leaves absent after ring-3 exit. This is a single-core,
+four-page lifecycle, not a general VMA allocator or TLB-shootdown protocol.
 
 Completed proof address-space page-table and data frames are cleared and
 returned through the allocator's generation-checked live-ownership ledger.

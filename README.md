@@ -433,35 +433,36 @@ the blocked parent. Mismatches return `EAGAIN`, and a matching wait without
 another runnable thread returns `ENOSYS`. General futex queues, timeouts, and
 robust futex recovery are not implemented.
 Bounded `mprotect` can irreversibly seal the page named by the parsed
-`PT_GNU_RELRO` range or any complete page in an active anonymous area as
-read-only/NX. Sealing one page of a two-page area splits its registry record so
-the other page retains independent write permission. The page-table
+`PT_GNU_RELRO` range or any complete page range in the scratch window as
+read-only/NX. Sealing a subrange rebuilds the bounded registry around it so
+the other pages retain independent write permission. The page-table
 permissions and syscall copy direction change together: reads continue, writes
 fail, and executable permissions are rejected.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
-A two-entry fixed `mmap` registry can install two independent one-page areas or
-one two-page area in its reserved virtual window. Physical frames are allocated
+A four-page fixed `mmap` registry can install page-aligned private areas of one
+through four pages in its reserved virtual window. Physical frames are allocated
 only when a mapping is admitted. Anonymous areas are RW/NX,
 removed from the hardware page table by exact `munmap`, scrubbed, and proven
 zero on reuse. Bounded `MADV_DONTNEED` also zeros an anonymous area in place
 without widening a sealed read-only area, while `mincore` reports each page
-resident only while its area is active. Either entry can instead expose a
-one-page private read-only/NX window into an immutable runtime ELF file; the
-complete two-page window can expose a two-page file extent. File offsets must
+resident only while its area is active. Any contiguous part of the window can
+instead expose a private read-only/NX copy of an immutable runtime ELF file.
+File offsets must
 be page aligned, partial final pages are zero-filled, syscall copy-out cannot
 modify the mapping, and unmap scrubs every payload frame. The runtime proof
-keeps two one-page areas live simultaneously, queries and removes the second,
-and verifies that the first remains usable. Removing either the head or tail
-page of a two-page area preserves the other page as an independent one-page
-area with the original access and immutable-file attributes. `mprotect`,
-`madvise`, `mincore`, and `munmap` walk both entries when a two-page request
-crosses two adjacent one-page areas, so range behavior no longer depends on
-whether the registry contains one record or two.
-Every unmap shape validates generation ownership, removes the hardware leaf,
-scrubs the released frame, and returns its lease to the allocator; process exit
-requires both registry and lease state to be empty.
+keeps independent areas live simultaneously, queries and removes them without
+disturbing their neighbors, and preserves access and immutable-file attributes
+across splits. A four-page proof seals the middle pair, punches two holes,
+reuses the lowest hole, rejects a two-page request when free pages are
+fragmented, and finally unmaps the complete sparse window. `mprotect`,
+`madvise`, `mincore`, and `munmap` walk adjacent records, so range behavior no
+longer depends on their original allocation boundaries.
+Every occupied page selected by unmap validates generation ownership, removes
+the hardware leaf, scrubs the released frame, and returns its lease to the
+allocator; process exit requires the complete registry and all four lease
+slots to be empty.
 General mapping placement, shared file mappings, writable mappings outside the
 exact authenticated main/dependency data pages, and arbitrary filesystem-backed
 mappings are not implemented.
