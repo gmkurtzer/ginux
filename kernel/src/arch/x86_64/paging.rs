@@ -10,6 +10,7 @@ const MAX_FINE_TABLES: usize = 8;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
+const WRITE_THROUGH: u64 = 1 << 3;
 const ACCESSED: u64 = 1 << 5;
 const CACHE_DISABLE: u64 = 1 << 4;
 const LARGE_PAGE: u64 = 1 << 7;
@@ -115,9 +116,17 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
     let first_stack = unsafe { table.add(2).read() };
     let second_guard = unsafe { table.add(3).read() };
     let second_stack = unsafe { table.add(4).read() };
+    let device = unsafe { table.add(5).read() };
     let code_address = code & ADDRESS_MASK as u64;
     let first_stack_address = first_stack & ADDRESS_MASK as u64;
     let second_stack_address = second_stack & ADDRESS_MASK as u64;
+    let device_address = device & ADDRESS_MASK as u64;
+    let device_flags = PRESENT | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
+    let device_valid = device == 0
+        || (device_address >= INITIAL_IDENTITY_LIMIT as u64
+            && device & device_flags == device_flags
+            && device & (WRITABLE | LARGE_PAGE) == 0
+            && device & !(ADDRESS_MASK as u64 | device_flags | ACCESSED) == 0);
     let frames = [
         root,
         pdpt_address,
@@ -137,7 +146,8 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
         && second_stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
             == (PRESENT | WRITABLE | USER | NO_EXECUTE)
         && second_stack & LARGE_PAGE == 0
-        && (5..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
+        && device_valid
+        && (6..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
         && frames
             .iter()
             .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)

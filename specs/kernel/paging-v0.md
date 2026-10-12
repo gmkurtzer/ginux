@@ -115,7 +115,10 @@ This map is intentionally transitional:
   mappings until those kernel accesses migrate to the direct map.
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.
 
-Untrusted code executes only in domain roots where the identity, direct, and
-MMIO mappings are supervisor-only. Later paging revisions must replace the
-firmware shutdown dependency, generalize explicit MMIO ownership and unmapping,
-and define permissions for dynamically loaded kernel modules.
+Untrusted code executes only in domain roots where the shared identity, direct,
+and kernel MMIO mappings are supervisor-only. One device-observer proof root
+adds a separate fixed read-only, NX, cache-disabled user mapping of the reset
+virtio status page; the root is destroyed on service retirement. Later paging
+revisions must replace the firmware shutdown dependency, generalize explicit
+MMIO ownership and unmapping, and define permissions for dynamically loaded
+kernel modules.

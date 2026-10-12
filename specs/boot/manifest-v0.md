@@ -32,6 +32,9 @@ skeleton and can be delegated to an isolated native service.
 Object 5 grants read-only access to the measured root. Object 6 grants
 read/write access to the bounded persistent-volume reference service; its
 rights can be attenuated independently for writer and reader domains.
+Object 7 grants read-only inspection authority for the discovered block
+device. The first proof uses it only to install a read-only MMIO observation
+mapping in one isolated domain; it does not grant queue control or DMA.
 The bundle and root-image ranges in handoff v4 must exactly match their
 recorded sizes and digests. Only verified bundle bytes are copied into the
 ring-3 executable mapping, and only the verified root image reaches the

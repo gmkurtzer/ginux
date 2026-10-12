@@ -191,8 +191,8 @@ if ! grep -q '^ginux: malformed boot manifests rejected' "$output_file"; then
     exit 1
 fi
 
-if ! grep -Eq '^ginux: manifest authority grants: [1-8]' "$output_file"; then
-    echo "Boot test failed: the boot manifest did not provide bounded authority grants." >&2
+if ! grep -q '^ginux: manifest authority grants: 7' "$output_file"; then
+    echo "Boot test failed: the signed block-device authority grant is missing." >&2
     exit 1
 fi
 
@@ -693,6 +693,21 @@ fi
 
 if ! grep -q '^ginux: virtio DMA frame scrubbed and released' "$output_file"; then
     echo "Boot test failed: the virtio DMA lease was not retired." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: read-only virtio MMIO grant exercised in ring 3' "$output_file"; then
+    echo "Boot test failed: the isolated service did not exercise its virtio MMIO grant." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: denied virtio MMIO write contained and revoked' "$output_file"; then
+    echo "Boot test failed: a read-only virtio MMIO grant permitted mutation." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: observed virtio device remained reset and DMA-disabled' "$output_file"; then
+    echo "Boot test failed: the virtio observer changed device or DMA state." >&2
     exit 1
 fi
 

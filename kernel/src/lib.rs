@@ -1591,6 +1591,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }
     serial_write("\r\nginux: stop-only auxiliary fault executed and contained");
+    let Some(virtio_status_physical) = virtio_block.status_register_physical() else {
+        kernel_fail("\r\nginux: virtio status register unavailable\r\n");
+    };
+    if !address_space::verify_ring3_read_only_device_grant(virtio_status_physical, 0) {
+        kernel_fail("\r\nginux: ring-3 block-device grant invariant failed\r\n");
+    }
+    if !arch::x86_64::pci::bus_master_is_disabled(virtio_block)
+        || !arch::x86_64::pci::device_is_reset(virtio_block, virtio_mmio)
+    {
+        kernel_fail("\r\nginux: block-device observer changed device state\r\n");
+    }
+    serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
+    serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
+    serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v4 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");

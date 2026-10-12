@@ -384,6 +384,11 @@ volume, commits generation one, faults, and loses its capability. The
 replacement recovers the exact payload, is denied mutation, exits, and also
 loses its capability. The current backend is volatile kernel memory, so this
 proves persistence across isolated service failure rather than VM restart.
+Object 7 is reserved by this v4 authority envelope for a block-device grant.
+It has no control-call operation yet: the kernel consumes its attenuated
+`READ` authority while constructing the first read-only ring-3 MMIO mapping.
+Writable device control and DMA require a later, separately specified driver
+contract rather than an implicit extension of operation 18.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler

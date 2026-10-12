@@ -94,6 +94,11 @@ impl VirtioBlockDevice {
         (length > COMMON_DEVICE_STATUS).then_some((physical, length))
     }
 
+    pub(crate) fn status_register_physical(self) -> Option<u64> {
+        let (physical, length) = self.common_region()?;
+        (length > COMMON_DEVICE_STATUS).then(|| physical + COMMON_DEVICE_STATUS as u64)
+    }
+
     pub(crate) fn mmio_span(self) -> Option<(u64, usize)> {
         let regions = [
             (

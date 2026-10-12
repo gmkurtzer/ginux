@@ -42,6 +42,12 @@ scrubs the lease before release. This trusted-QEMU bootstrap proof has no IOMMU
 confinement and does not yet place the device path in an isolated service. See
 [Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md) and
 [Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
+The first device-isolation step delegates manifest object 7 with read-only
+authority to a stop-only ring-3 observer. Its address space contains one fixed,
+uncached, non-executable, read-only mapping of the reset virtio status page. It
+observes status zero, faults on a write, and loses both the capability and
+mapping while the device remains reset and bus mastering remains disabled. See
+[Read-only Block-device Grant v0](specs/kernel/device-grant-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
