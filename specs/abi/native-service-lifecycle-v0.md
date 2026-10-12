@@ -27,7 +27,9 @@ remain faults. They emit lifecycle kind 4 (`AUXILIARY_FAULT`) with architectural
 fault metadata and use the independently tested fault-containment path. The
 fault path masks and disables interrupts, revokes bus mastering, resets the
 device, and scrubs DMA without trusting queue state or a completed request. A
-service must not encode a successful result in a deliberate fault.
+service must not encode a successful result in a deliberate fault. The volume
+proof starts a fresh generation only after fault retirement is complete and
+requires stable service identity with freshly delegated authority and DMA.
 
 ## Sources and compatibility
 

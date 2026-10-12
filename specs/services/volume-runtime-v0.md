@@ -90,7 +90,11 @@ the compiled service receives a structurally valid but intentionally invalid
 opaque device handle. It configures and notifies its queue, cannot authorize
 the wait, and executes its real fatal `HLT` path. The kernel accepts only the
 measured `HLT` fault, quiesces the device without assuming a completed request,
-scrubs the incomplete DMA page, revokes authority, and continues booting.
+scrubs the incomplete DMA page, and revokes authority. Only after complete
+retirement, it starts a fourth generation with the same logical identity but a
+fresh capability table, address space, and DMA lease. That post-fault
+generation must recover the exact record or preserve fail-closed rejection,
+then cleanly retire while the kernel continues booting.
 
 ## Deliberate limits
 
