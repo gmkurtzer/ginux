@@ -15426,7 +15426,11 @@ pub(crate) fn activate_user_root(root: u64) -> bool {
     let Some(frames) = paging::validated_user_root_frames(root) else {
         return false;
     };
-    if !memory::frame_addresses_owned_by(owner, &frames) {
+    if !memory::frame_addresses_owned_by(owner, frames.base())
+        || frames
+            .dma()
+            .is_some_and(|dma| !memory::frame_addresses_owned_by(owner, &[dma]))
+    {
         return false;
     }
     let active: u64;

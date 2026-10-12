@@ -726,6 +726,12 @@ if ! grep -q '^ginux: isolated virtio queue geometry configured without DMA' "$o
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated DMA lease initialized in ring 3' "$output_file" ||
+    ! grep -q '^ginux: faulted DMA lease scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the isolated DMA lease lifecycle was not completed safely." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; then
     echo "Boot test failed: the faulted virtio control service retained authority." >&2
     exit 1

@@ -164,12 +164,13 @@ be absent. Validation follows the user hierarchy through the direct map and
 requires exactly one non-large PDPT entry, one non-large directory entry, and
 the fixed code/guard/stack/guard/stack leaf layout with W^X permissions. One
 additional fixed leaf may name a read-only or writable, non-executable,
-write-through, cache-disabled device page above the 4 GiB allocator ceiling. It is not included
-in the owned-frame list and cannot alias domain RAM; every later leaf remains
-absent. All seven allocator-owned page-table and payload frames must be
+write-through, cache-disabled device page above the 4 GiB allocator ceiling. It
+is not included in the owned-frame list and cannot alias domain RAM. The next
+leaf may be absent or name one owned RW/NX candidate DMA frame; every later leaf
+remains absent. All seven base allocator-owned page-table and payload frames must be
 distinct, nonzero, and below 4 GiB. The hardware readback still has to
-match after the load. Before activation, all seven physical addresses must also
-appear in the allocator's live ledger under the scheduler's exact current
+match after the load. Before activation, all seven base physical addresses and
+the optional DMA frame must also appear in the allocator's live ledger under the scheduler's exact current
 domain generation. This prevents an internally corrupted or stale scheduler
 root from silently widening a domain's mappings or borrowing another domain's
 frames.
@@ -189,6 +190,14 @@ and scrubs each page-table hierarchy, so both MMIO mappings disappear with
 their exact domain generations. Hardware Dirty is admitted only for the
 explicitly writable leaf. See
 [Block-device Control Grant v0](device-grant-v0.md).
+
+The control proof may add one more fixed RW/NX leaf backed by an allocator
+lease below 4 GiB. Root validation requires this candidate DMA frame to be
+distinct from all seven base frames and live under the scheduler's exact domain
+generation. Unlike external MMIO, it participates in ownership and teardown:
+the fault path clears and releases it with the address space, and the gate
+checks both the zeroed physical page and zero remaining owner frames. See
+[Isolated DMA Lease v0](device-dma-lease-v0.md).
 
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3

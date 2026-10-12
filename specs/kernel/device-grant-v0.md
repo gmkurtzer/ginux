@@ -7,7 +7,7 @@
 This contract is the first step from a kernel-owned virtio bootstrap path to an
 isolated storage-driver domain. It separately delegates bounded observation and
 control authority to ring-3 services and exposes one real MMIO page. It
-deliberately does not delegate queues or DMA yet.
+deliberately does not enable a queue or device DMA yet.
 
 ## Authority and mapping
 
@@ -55,13 +55,14 @@ fault. The kernel independently reads back the exact queue selection, size,
 disabled state, and zero addresses.
 
 The stop-only path revokes the exact object-7 handle, destroys its mapping,
-clears and releases all seven owned frames, and publishes the fault. Regardless
+clears and releases all owned frames, and publishes the fault. Regardless
 of whether verification succeeds, the kernel's following quiesce operation
 first disables PCI bus mastering, resets device status to zero, and confirms
 both conditions before continuing. The service never sets `DRIVER_OK`, selects
-a queue, writes a queue address, owns a virtqueue, or receives a DMA frame, so
-geometry selection cannot
-initiate data transfer.
+a queue or writes a queue address. It owns one separate candidate DMA frame,
+but the device never receives that frame's physical address, so geometry
+selection cannot initiate data transfer. The lease lifecycle is specified in
+[Isolated DMA Lease v0](device-dma-lease-v0.md).
 
 ## Deliberate limits
 
@@ -72,7 +73,7 @@ initiate data transfer.
   readable. The proof touches only feature-selection, feature-value, and device
   status fields. Notification registers, ISR, device configuration, PCI
   configuration, and port I/O are unavailable.
-- No DMA frame, interrupt, enabled queue, or IOMMU domain is delegated.
+- No interrupt, enabled queue, active device DMA, or IOMMU domain is delegated.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.

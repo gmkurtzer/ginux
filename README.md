@@ -52,8 +52,12 @@ deliberately faulting. It leaves queue enable and every queue address zero.
 Each service loses its capability, mapping, and owned frames. The kernel
 independently verifies negotiation and inert queue geometry, then disables PCI
 bus mastering, resets the device, and verifies both conditions; neither service
-receives a DMA frame, enables a queue, or sets `DRIVER_OK`. See
-[Block-device Control Grant v0](specs/kernel/device-grant-v0.md).
+enables a queue or sets `DRIVER_OK`. The control domain now owns one additional
+RW/NX page suitable for a future DMA ring. It initializes that page in ring 3,
+but never publishes its physical address to the device; fault teardown scrubs
+and releases it before the device is reset. See
+[Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
+[Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed

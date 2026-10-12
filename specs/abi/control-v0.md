@@ -392,7 +392,8 @@ mapping. On x86 that leaf is also readable; the service uses it to select
 exactly `VIRTIO_BLK_F_FLUSH|VIRTIO_F_VERSION_1`, complete `FEATURES_OK`, select
 queue zero, and set size eight while leaving it disabled with zero addresses.
 This proves feature and inert queue-geometry control followed by fault revocation and kernel
-quiescence, but receives no DMA or queue authority. A usable device
+quiescence. The same domain owns one separately tracked RW/NX candidate DMA
+page, but cannot publish its physical address to the disabled device. A usable device
 driver still requires a later, separately specified contract rather than an
 implicit extension of operation 18.
 Each charged entry first acquires a bounded in-flight operation reference on

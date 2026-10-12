@@ -73,7 +73,22 @@ pub(crate) fn verify_user_context_layout_invariants() -> bool {
         && !user_context_matches_layout(USER_REGION_BASE, USER_REGION_BASE + 5 * page + 1)
 }
 
-pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
+pub(crate) struct ValidatedUserRootFrames {
+    base: [u64; 7],
+    dma: Option<u64>,
+}
+
+impl ValidatedUserRootFrames {
+    pub(crate) fn base(&self) -> &[u64; 7] {
+        &self.base
+    }
+
+    pub(crate) fn dma(&self) -> Option<u64> {
+        self.dma
+    }
+}
+
+pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootFrames> {
     if root == 0 || root >= INITIAL_IDENTITY_LIMIT as u64 || !root.is_multiple_of(PAGE_SIZE as u64)
     {
         return None;
@@ -118,10 +133,12 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
     let second_guard = unsafe { table.add(3).read() };
     let second_stack = unsafe { table.add(4).read() };
     let device = unsafe { table.add(5).read() };
+    let dma = unsafe { table.add(6).read() };
     let code_address = code & ADDRESS_MASK as u64;
     let first_stack_address = first_stack & ADDRESS_MASK as u64;
     let second_stack_address = second_stack & ADDRESS_MASK as u64;
     let device_address = device & ADDRESS_MASK as u64;
+    let dma_address = dma & ADDRESS_MASK as u64;
     let device_flags = PRESENT | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
     let device_valid = device == 0
         || (device_address >= INITIAL_IDENTITY_LIMIT as u64
@@ -129,6 +146,13 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
             && device & LARGE_PAGE == 0
             && (device & DIRTY == 0 || device & WRITABLE != 0)
             && device & !(ADDRESS_MASK as u64 | device_flags | WRITABLE | ACCESSED | DIRTY) == 0);
+    let dma_flags = PRESENT | WRITABLE | USER | NO_EXECUTE;
+    let dma_valid = dma == 0
+        || (dma_address != 0
+            && dma_address < INITIAL_IDENTITY_LIMIT as u64
+            && dma & dma_flags == dma_flags
+            && dma & LARGE_PAGE == 0
+            && dma & !(ADDRESS_MASK as u64 | dma_flags | ACCESSED | DIRTY) == 0);
     let frames = [
         root,
         pdpt_address,
@@ -149,15 +173,20 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
             == (PRESENT | WRITABLE | USER | NO_EXECUTE)
         && second_stack & LARGE_PAGE == 0
         && device_valid
-        && (6..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
+        && dma_valid
+        && (7..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
         && frames
             .iter()
             .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)
         && frames
             .iter()
             .enumerate()
-            .all(|(index, frame)| !frames[index + 1..].contains(frame)))
-    .then_some(frames)
+            .all(|(index, frame)| !frames[index + 1..].contains(frame))
+        && (dma == 0 || !frames.contains(&dma_address)))
+    .then_some(ValidatedUserRootFrames {
+        base: frames,
+        dma: (dma != 0).then_some(dma_address),
+    })
 }
 
 fn single_user_table_entry(table_address: u64) -> Option<u64> {

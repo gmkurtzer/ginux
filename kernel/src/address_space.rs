@@ -3819,7 +3819,10 @@ fn current_user_root_is_owned(root: u64) -> bool {
     let Some(frames) = paging::validated_user_root_frames(root) else {
         return false;
     };
-    memory::frame_addresses_owned_by(owner, &frames)
+    memory::frame_addresses_owned_by(owner, frames.base())
+        && frames
+            .dma()
+            .is_none_or(|dma| memory::frame_addresses_owned_by(owner, &[dma]))
 }
 
 fn user_range_has_permissions(root: u64, start: u64, end: u64, required: u64) -> bool {
@@ -4272,7 +4275,11 @@ pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
     let root = registered.space.root;
     let owner = registered.space.owner;
     let frames = registered.space.frames;
+    let dma_frame = registered.space.dma_frame;
     if !memory::frames_owned_by(owner, &frames)
+        || dma_frame.is_some_and(|frame| !memory::frames_owned_by(owner, &[frame]))
+        || !memory::frame_leases_releasable(owner, &frames)
+        || dma_frame.is_some_and(|frame| !memory::frame_leases_releasable(owner, &[frame]))
         || !domain::unbind_auxiliary_address_space(domain_id, root)
     {
         return false;
@@ -4284,9 +4291,15 @@ pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
                 return false;
             }
         }
+        if let Some(frame) = dma_frame {
+            if zero_frame(frame.address()).is_none() {
+                return false;
+            }
+        }
     }
-    if !memory::release_frames(owner, frames) {
-        let _ = domain::bind_auxiliary_address_space(domain_id, root);
+    if !memory::release_frames(owner, frames)
+        || dma_frame.is_some_and(|frame| !memory::release_frames(owner, [frame]))
+    {
         return false;
     }
     unsafe {
@@ -5316,8 +5329,9 @@ pub(crate) fn verify_ring3_read_only_device_grant(
 
 pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool {
     const DEVICE_PAGE_INDEX: usize = 5;
+    const DMA_PAGE_INDEX: usize = 6;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
-    const SUCCESS_FAULT_OFFSET: u64 = 124;
+    const SUCCESS_FAULT_OFFSET: u64 = 154;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5337,6 +5351,8 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
     if user_common & (PAGE_SIZE - 1) != 0 {
         return false;
     }
+    let user_dma = USER_TEST_ADDRESS + DMA_PAGE_INDEX * PAGE_SIZE;
+    const DMA_PATTERN: u64 = 0x444d_415f_4c45_4153;
     let mut program = [
         0x48, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rdi, common
         0xc6, 0x47, 0x14, 0x01, // status = ACKNOWLEDGE
@@ -5362,9 +5378,16 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
         0x66, 0xc7, 0x47, 0x18, 0x08, 0, // select bounded queue size eight
         0x66, 0x83, 0x7f, 0x1c, 0, // require queue to remain disabled
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x48, 0xbe, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rsi, DMA page
+        0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rax, pattern
+        0x48, 0x89, 0x06, // initialize DMA page
+        0x48, 0x39, 0x06, // verify service-visible contents
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x0f, 0x0b, // success: deliberate service fault
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
+    program[126..134].copy_from_slice(&(user_dma as u64).to_le_bytes());
+    program[136..144].copy_from_slice(&DMA_PATTERN.to_le_bytes());
 
     let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
         6,
@@ -5403,6 +5426,14 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
         let _ = space.release();
         return false;
     }
+    let Some((mapped_dma, dma_physical)) = space.map_owned_dma_page(DMA_PAGE_INDEX) else {
+        let _ = space.release();
+        return false;
+    };
+    if mapped_dma != user_dma || memory::owner_live_frame_count(owner) != Some(8) {
+        let _ = space.release();
+        return false;
+    }
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
@@ -5423,6 +5454,7 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
         && scheduler::current_domain().is_none()
         && registered_auxiliary_address_space_count() == 0
         && memory::owner_live_frame_count(owner) == Some(0)
+        && unsafe { frame_is_zero(dma_physical) }
         && domain::domain_is_retired(auxiliary)
         && !domain::handle_permits(
             auxiliary,
@@ -5478,6 +5510,7 @@ struct WxAddressSpace {
     first_stack_frame: *mut u8,
     second_stack_frame: *mut u8,
     frames: [memory::FrameLease; USER_ADDRESS_SPACE_FRAMES],
+    dma_frame: Option<memory::FrameLease>,
     owner: memory::FrameOwner,
 }
 
@@ -5522,6 +5555,7 @@ impl WxAddressSpace {
             first_stack_frame: mapped_frame::<u8>(first_stack)?,
             second_stack_frame: mapped_frame::<u8>(second_stack)?,
             frames,
+            dma_frame: None,
             owner,
         })
     }
@@ -5609,6 +5643,36 @@ impl WxAddressSpace {
         }
     }
 
+    fn map_owned_dma_page(&mut self, index: usize) -> Option<(usize, u64)> {
+        if index >= ENTRY_COUNT || self.dma_frame.is_some() {
+            return None;
+        }
+        let [frame] = memory::allocate_frames::<1>(self.owner)?;
+        let physical = frame.address();
+        let mapped = unsafe {
+            (|| {
+                let root = mapped_frame::<u64>(self.root)?;
+                let pdpt = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK)?;
+                let directory = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK)?;
+                let table = mapped_frame::<u64>(directory.read() & ADDRESS_MASK)?;
+                let entry = table.add(index);
+                let expected = physical | PRESENT | WRITABLE | USER | NO_EXECUTE;
+                if entry.read() != 0 {
+                    return Some(false);
+                }
+                entry.write(expected);
+                Some(entry.read() == expected)
+            })()
+            .unwrap_or(false)
+        };
+        if !mapped {
+            let _ = memory::scrub_and_release_frames(self.owner, &[frame]);
+            return None;
+        }
+        self.dma_frame = Some(frame);
+        Some((USER_TEST_ADDRESS + index * PAGE_SIZE, physical))
+    }
+
     fn is_disjoint_from(&self, other: &Self) -> bool {
         self.root != other.root
             && self.code_frame != other.code_frame
@@ -5617,7 +5681,11 @@ impl WxAddressSpace {
     }
 
     fn adopt_transferred_owner(&mut self, owner: memory::FrameOwner) -> bool {
-        if !memory::frames_owned_by(owner, &self.frames) {
+        if !memory::frames_owned_by(owner, &self.frames)
+            || self
+                .dma_frame
+                .is_some_and(|frame| !memory::frames_owned_by(owner, &[frame]))
+        {
             return false;
         }
         self.owner = owner;
@@ -5626,14 +5694,26 @@ impl WxAddressSpace {
 
     fn release(self) -> bool {
         let frames = self.frames;
+        let dma_frame = self.dma_frame;
+        if !memory::frame_leases_releasable(self.owner, &frames)
+            || dma_frame.is_some_and(|frame| !memory::frame_leases_releasable(self.owner, &[frame]))
+        {
+            return false;
+        }
         unsafe {
             for frame in &frames {
                 if zero_frame(frame.address()).is_none() {
                     return false;
                 }
             }
+            if let Some(frame) = dma_frame {
+                if zero_frame(frame.address()).is_none() {
+                    return false;
+                }
+            }
         }
         memory::release_frames(self.owner, frames)
+            && dma_frame.is_none_or(|frame| memory::release_frames(self.owner, [frame]))
     }
 }
 

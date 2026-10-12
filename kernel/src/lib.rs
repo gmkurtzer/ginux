@@ -1630,7 +1630,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: write-only virtio control grant exercised in ring 3");
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
     serial_write("\r\nginux: isolated virtio queue geometry configured without DMA");
+    serial_write("\r\nginux: isolated DMA lease initialized in ring 3");
     serial_write("\r\nginux: faulted virtio control service revoked");
+    serial_write("\r\nginux: faulted DMA lease scrubbed and released");
     serial_write("\r\nginux: faulted virtio control device quiesced without DMA");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v4 negotiated");

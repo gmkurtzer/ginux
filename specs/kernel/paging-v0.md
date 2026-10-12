@@ -124,3 +124,9 @@ is destroyed on service retirement. Later paging
 revisions must replace the firmware shutdown dependency, generalize explicit
 MMIO ownership and unmapping, and define permissions for dynamically loaded
 kernel modules.
+
+The same fixed hierarchy can optionally map one allocator-owned RW/NX candidate
+DMA page immediately after the device leaf. Validation requires an exact leaf,
+a below-4-GiB nonzero frame distinct from every base address-space frame, and
+generation-correct allocator ownership before CR3 activation. The page is not
+yet published to an active device and has no IOMMU mapping.
