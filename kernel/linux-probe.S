@@ -3474,10 +3474,38 @@ resolution_valid:
     call syscall_expect_zero
 
     mov edi, 3
-    lea rsi, [rip + exec_mode]
+    lea rsi, [rip + missing_relative_exec_path]
     mov rdx, rsp
     lea r10, [rsp + 24]
     xor r8d, r8d
+    mov eax, 322
+    call syscall_expect_enoent
+
+    mov edi, 3
+    lea rsi, [rip + empty_exec_path]
+    mov rdx, rsp
+    lea r10, [rsp + 24]
+    mov r8d, 0x1000
+    mov eax, 322
+    syscall
+    cmp rax, -13
+    jne failure
+
+    mov edi, 3
+    mov eax, 3
+    call syscall_expect_zero
+
+    mov edi, -100
+    lea rsi, [rip + exec_path]
+    xor edx, edx
+    mov eax, 257
+    call syscall_expect_three
+
+    mov edi, 3
+    lea rsi, [rip + empty_exec_path]
+    mov rdx, rsp
+    lea r10, [rsp + 24]
+    mov r8d, 0x1000
     mov eax, 322
     syscall
     jmp failure
@@ -3616,10 +3644,14 @@ exec_environment:
     .asciz "GINUX_EXEC=1"
 missing_exec_path:
     .asciz "/bin/missing"
+missing_relative_exec_path:
+    .asciz "missing"
 exec_directory_path:
     .asciz "/bin"
 exec_root_path:
     .asciz "/"
+empty_exec_path:
+    .byte 0
 invalid_exec_path:
     .asciz "/init"
 exec_zero_path:

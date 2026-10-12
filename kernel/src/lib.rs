@@ -653,6 +653,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux executable link followed exec identity\r\n");
     serial_write("ginux: measured-root Linux exec selection validated\r\n");
     serial_write("ginux: measured-dirfd Linux execveat validated\r\n");
+    serial_write("ginux: measured-fd Linux empty-path exec validated\r\n");
     if !linux_elf::verify_load_plan() {
         kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
     }

@@ -229,6 +229,7 @@ const LINUX_TFD_TIMER_ABSTIME: u64 = 1;
 const LINUX_TFD_NONBLOCK: u64 = 0x800;
 const LINUX_PIPE_CAPACITY: usize = 256;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
+const LINUX_AT_EMPTY_PATH: u64 = 0x1000;
 const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_FIONREAD: u64 = 0x541b;
@@ -4729,7 +4730,29 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
         path_address,
         arguments_address,
         environment_address,
+        false,
     )
+}
+
+fn linux_exec_descriptor_node(descriptor: u64) -> Result<u8, u64> {
+    let state = linux_device_descriptor(descriptor);
+    if state == 0 {
+        return Err(LINUX_EBADF);
+    }
+    if state & LINUX_DEVICE_DIRECTORY != 0 {
+        return Err(LINUX_EACCES);
+    }
+    let node = ((state & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT) as u8;
+    let Some(name) = initramfs::published_file_name_by_node(node) else {
+        return Err(LINUX_EACCES);
+    };
+    let Some((mode, _)) = initramfs::published_lookup(name) else {
+        return Err(LINUX_ENOENT);
+    };
+    if mode & 0o111 == 0 {
+        return Err(LINUX_EACCES);
+    }
+    Ok(node)
 }
 
 fn linux_execveat(
@@ -4739,7 +4762,7 @@ fn linux_execveat(
     environment_address: u64,
     flags: u64,
 ) -> u64 {
-    if flags != 0 {
+    if flags & !LINUX_AT_EMPTY_PATH != 0 {
         return LINUX_EINVAL;
     }
     linux_execve_at(
@@ -4747,6 +4770,7 @@ fn linux_execveat(
         path_address,
         arguments_address,
         environment_address,
+        flags & LINUX_AT_EMPTY_PATH != 0,
     )
 }
 
@@ -4755,6 +4779,7 @@ fn linux_execve_at(
     path_address: u64,
     arguments_address: u64,
     environment_address: u64,
+    allow_empty_path: bool,
 ) -> u64 {
     if current_linux_tid() != Some(1)
         || LINUX_THREAD_STATES
@@ -4771,7 +4796,15 @@ fn linux_execve_at(
         Ok(length) => length,
         Err(error) => return error,
     };
-    let exec_node = match linux_exec_root_node(directory, &path[..path_length]) {
+    let exec_node = match if path_length == 0 {
+        if allow_empty_path {
+            linux_exec_descriptor_node(directory)
+        } else {
+            Err(LINUX_ENOENT)
+        }
+    } else {
+        linux_exec_root_node(directory, &path[..path_length])
+    } {
         Ok(node) => node,
         Err(error) => return error,
     };

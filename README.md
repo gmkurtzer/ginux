@@ -432,6 +432,9 @@ The same atomic transaction is exposed through a flags-zero `execveat` profile;
 the proof opens `/bin`, returns cwd to `/`, and resolves `exec-target` relative
 to that measured-directory descriptor while rejecting bad descriptors,
 non-directory descriptors, and unsupported flags.
+`AT_EMPTY_PATH` also executes the authenticated image through an open regular
+file descriptor, rejects a directory descriptor, and retains the canonical
+measured-root executable identity.
 The proof also closes only `FD_CLOEXEC` descriptors, preserves an ordinary
 descriptor, resets caught signals while retaining an ignored disposition,
 disables the alternate signal stack, and changes the process name to

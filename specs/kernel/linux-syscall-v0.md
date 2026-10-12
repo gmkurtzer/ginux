@@ -379,14 +379,18 @@ all surviving proof descriptors, and exits with status 42. General ELF
 loading, dynamic targets, shebangs, and arbitrary argument or environment
 vectors are outside this version.
 
-`rax = 322` (`__NR_execveat`) enters the same transaction and accepts only
-flags zero. An absolute path ignores `dirfd`; a relative path resolves beneath
+`rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
+or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath
 `AT_FDCWD` or an open measured-root directory descriptor. Unknown descriptors
 return `-EBADF`, non-directory descriptors return `-ENOTDIR`, and nonzero flags
-return `-EINVAL` before image state changes. The proof closes an ordinary
-descriptor, reopens `/bin` in that slot, restores cwd to `/`, and successfully
-executes relative `exec-target` through the directory descriptor. Empty-path,
-`AT_EMPTY_PATH`, and `AT_SYMLINK_NOFOLLOW` behavior remain unsupported.
+return `-EINVAL` before image state changes. With `AT_EMPTY_PATH`, an empty
+pathname selects an already-open executable measured-root regular file;
+directories and non-executable objects return `-EACCES`. The proof closes an
+ordinary descriptor, reopens `/bin` in that slot, restores cwd to `/`, and
+validates directory-relative resolution. It then rejects empty-path execution
+of that directory, reopens `/bin/exec-target` in the same slot, and executes it
+through the descriptor while retaining canonical `/proc/self/exe` identity.
+`AT_SYMLINK_NOFOLLOW` behavior remains unsupported.
 
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
