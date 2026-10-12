@@ -353,7 +353,9 @@ contract below.
 single-threaded static proof process. Absolute and current-directory-relative
 normalized paths resolve through the retained measured-root index. The selected
 node must be an executable regular file and must match the admitted static ELF
-profile; the sole current target is `bin/exec-target`. `argv` admits one through eight pointers and `envp` zero
+profile. The independently built `bin/exec-target` and `bin/exec-second`
+fixtures both execute, proving selection is based on the measured bytes and
+profile rather than equality with one kernel-compiled artifact. `argv` admits one through eight pointers and `envp` zero
 through eight, each terminated by a null pointer. Each string is limited to 63
 bytes plus its terminator, and the complete rebuilt initial stack is limited to
 512 bytes. The proof supplies
@@ -373,11 +375,12 @@ returning. Descriptors marked
 `FD_CLOEXEC` close only after the mapping commit, while ordinary descriptors
 survive. Caught signal dispositions reset to default, ignored dispositions
 remain ignored, the alternate signal stack becomes disabled, the signal mask
-and `no_new_privs` remain unchanged, and the process name becomes
-`exec-target`. The canonical measured-root node is retained as process state,
-so `/proc/self/exe` reports `/bin/exec-target` independently of the accepted
-pathname form. The replacement validates each of these transitions, reopens
-`/dev/console`, validates its complete initial stack, emits `EXEC_OK`, closes
+and `no_new_privs` remain unchanged, and the process name becomes the selected
+node's bounded basename. The canonical measured-root node is retained as
+process state, so `/proc/self/exe` reports `/bin/exec-target` or
+`/bin/exec-second` independently of the accepted pathname form. Each
+replacement validates these transitions, reopens `/dev/console`, validates its
+complete initial stack, emits its distinct proof marker, closes
 all surviving proof descriptors, and exits with status 42. General ELF
 loading, dynamic targets, shebangs, and arbitrary argument or environment
 vectors are outside this version.
@@ -391,8 +394,9 @@ pathname selects an already-open executable measured-root regular file;
 directories and non-executable objects return `-EACCES`. The proof closes an
 ordinary descriptor, reopens `/bin` in that slot, restores cwd to `/`, and
 validates directory-relative resolution. It then rejects empty-path execution
-of that directory, reopens `/bin/exec-target` in the same slot, and executes it
-through the descriptor while retaining canonical `/proc/self/exe` identity.
+of that directory, reopens the selected measured executable in the same slot,
+and executes it through the descriptor while retaining canonical
+`/proc/self/exe` identity.
 `AT_SYMLINK_NOFOLLOW` behavior remains unsupported.
 
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable

@@ -588,8 +588,8 @@ if ! grep -q '^ginux: measured root published in kernel-owned memory' "$output_f
     exit 1
 fi
 
-if ! grep -q '^ginux: measured Linux exec target planned' "$output_file"; then
-    echo "Boot test failed: the measured Linux exec target was not planned." >&2
+if ! grep -q '^ginux: multiple measured Linux exec targets planned' "$output_file"; then
+    echo "Boot test failed: the measured Linux exec targets were not planned." >&2
     exit 1
 fi
 
@@ -668,8 +668,9 @@ if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$outpu
     exit 1
 fi
 
-if [[ "$(grep -c '^EXEC_OK' "$output_file")" -ne 2 ]]; then
-    echo "Boot test failed: the replacement Linux image did not execute twice." >&2
+if [[ "$(grep -c '^EXEC_OK' "$output_file")" -ne 1 ]] ||
+    [[ "$(grep -c '^SECOND!' "$output_file")" -ne 1 ]]; then
+    echo "Boot test failed: both measured replacement Linux images did not execute." >&2
     exit 1
 fi
 
@@ -686,6 +687,7 @@ for marker in \
     'measured-root Linux exec selection validated' \
     'measured-dirfd Linux execveat validated' \
     'measured-fd Linux empty-path exec validated' \
+    'measured Linux exec selection is profile-driven' \
     'Linux replacement frames allocated on demand' \
     'Linux replacement frame generations reclaimed'; do
     if ! grep -q "^ginux: $marker" "$output_file"; then

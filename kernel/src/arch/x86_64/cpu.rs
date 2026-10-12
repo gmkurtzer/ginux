@@ -270,8 +270,6 @@ const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
 const LINUX_PR_GET_NO_NEW_PRIVS: u64 = 39;
 const LINUX_PROCESS_NAME_SIZE: usize = 16;
 const LINUX_INITIAL_PROCESS_NAME: u64 = 0x7469_6e69;
-const LINUX_EXEC_PROCESS_NAME_LOW: u64 = 0x7261_742d_6365_7865;
-const LINUX_EXEC_PROCESS_NAME_HIGH: u64 = 0x0074_6567;
 const LINUX_SIG_BLOCK: u64 = 0;
 const LINUX_SIG_UNBLOCK: u64 = 1;
 const LINUX_SIG_SETMASK: u64 = 2;
@@ -1161,6 +1159,7 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) dependency_base_end: [usize; LINUX_DEPENDENCY_COUNT],
     pub(crate) dependency_mappings:
         [[LinuxRelativeFileMapping; LINUX_DEPENDENCY_MAPPING_COUNT]; LINUX_DEPENDENCY_COUNT],
+    pub(crate) exec_node: u8,
     pub(crate) exec_entry: usize,
     pub(crate) exec_mappings: [LinuxExecMapping; LINUX_EXEC_MAPPING_COUNT],
     pub(crate) exec_clear_addresses: [usize; LINUX_EXEC_CLEAR_COUNT],
@@ -1862,16 +1861,18 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         return LinuxElfResult::FAILED;
     };
     let exec_contract_valid = if execution.exec_entry == 0 {
-        execution
-            .exec_mappings
-            .iter()
-            .all(|mapping| mapping.address == 0 && mapping.frame == 0)
+        execution.exec_node == 0
+            && execution
+                .exec_mappings
+                .iter()
+                .all(|mapping| mapping.address == 0 && mapping.frame == 0)
             && execution
                 .exec_clear_addresses
                 .iter()
                 .all(|address| *address == 0)
     } else {
-        execution.exec_mappings[0].address != 0
+        execution.exec_node != 0
+            && execution.exec_mappings[0].address != 0
             && !execution.exec_mappings[0].writable
             && !execution.exec_mappings[0].executable
             && !execution.exec_mappings[1].writable
@@ -2713,7 +2714,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         }
     }
     let expected_process_name = if exec_replaced {
-        [LINUX_EXEC_PROCESS_NAME_LOW, LINUX_EXEC_PROCESS_NAME_HIGH]
+        linux_exec_process_name(execution.exec_node).unwrap_or([0; 2])
     } else {
         [LINUX_INITIAL_PROCESS_NAME, 0]
     };
@@ -2721,7 +2722,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         == expected_process_name[0]
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == expected_process_name[1];
     let executable_identity_restored = if exec_replaced {
-        initramfs::published_file_name_by_node(exec_node) == Some(b"bin/exec-target")
+        exec_node == execution.exec_node
     } else {
         exec_node == 0
     };
@@ -4772,6 +4773,20 @@ fn linux_exec_descriptor_node(descriptor: u64) -> Result<u8, u64> {
     Ok(node)
 }
 
+fn linux_exec_process_name(node: u8) -> Option<[u64; 2]> {
+    let name = initramfs::published_file_name_by_node(node)?;
+    let basename = name.rsplit(|byte| *byte == b'/').next()?;
+    if basename.is_empty() || basename.len() > 15 {
+        return None;
+    }
+    let mut bytes = [0_u8; 16];
+    bytes[..basename.len()].copy_from_slice(basename);
+    Some([
+        u64::from_ne_bytes(bytes[..8].try_into().ok()?),
+        u64::from_ne_bytes(bytes[8..].try_into().ok()?),
+    ])
+}
+
 fn release_linux_exec_frames(frames: [memory::FrameLease; LINUX_EXEC_MAPPING_COUNT]) -> bool {
     let mut scrubbed = true;
     for frame in frames {
@@ -4836,7 +4851,10 @@ fn linux_execve_at(
     let Some(exec_bytes) = initramfs::published_file_by_node(exec_node) else {
         return LINUX_ENOENT;
     };
-    let Some(exec_plan) = crate::linux_elf::measured_exec_target_plan(exec_bytes) else {
+    let Some(exec_plan) = crate::linux_elf::measured_static_exec_plan(exec_bytes) else {
+        return LINUX_ENOEXEC;
+    };
+    let Some(process_name) = linux_exec_process_name(exec_node) else {
         return LINUX_ENOEXEC;
     };
     let (argument_pointers, argument_count) = match linux_exec_vector(arguments_address, true) {
@@ -5003,8 +5021,8 @@ fn linux_execve_at(
     ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
-    ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_EXEC_PROCESS_NAME_LOW, Ordering::SeqCst);
-    ELF_PROBE_PROCESS_NAME_HIGH.store(LINUX_EXEC_PROCESS_NAME_HIGH, Ordering::SeqCst);
+    ELF_PROBE_PROCESS_NAME_LOW.store(process_name[0], Ordering::SeqCst);
+    ELF_PROBE_PROCESS_NAME_HIGH.store(process_name[1], Ordering::SeqCst);
     ELF_PROBE_EXITED_CLEAR_CHILD_TID.store(clear_child_tid, Ordering::SeqCst);
     ELF_PROBE_EXITED_ROBUST_LIST.store(robust_list, Ordering::SeqCst);
     ELF_PROBE_CODE_BASE.store(mappings[1].address as u64, Ordering::SeqCst);

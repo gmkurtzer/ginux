@@ -90,12 +90,15 @@ entry through the end of its five-page executable mapping. Probe
 growth therefore fails at build time instead of overlapping the writable load
 or silently exceeding the runtime loader profile.
 
-A second LLD-produced static image is retained directly under the measured-root
-name `bin/exec-target` and exposed as `/bin/exec-target`. Its bounded plan has one
+Two distinct LLD-produced static images are retained directly under the
+measured-root names `bin/exec-target` and `bin/exec-second`. Each bounded plan has one
 R/NX header page at `0x3ff000`, one RX page entered at `0x400100`, and one
-RW/NX page at `0x401000`. Boot requires the measured bytes to match the
-build-time artifact exactly and validates the complete plan before any Linux
-workload runs. After path, vector, string, and mapping-template validation, the
+RW/NX page at `0x401000`. Boot requires both measured files to match their
+build-time artifacts and validates both complete plans before any Linux
+workload runs. Runtime admission does not compare against either compiled byte
+array: it parses the selected measured-root file and requires this exact static
+layout, entry, protection, and absence of dynamic, TLS, and RELRO metadata.
+After path, vector, string, and mapping-template validation, the
 bounded exec transaction allocates three generation-tagged kernel frame leases
 and materializes the selected measured bytes into them. It installs those pages
 atomically, retains the existing
@@ -108,13 +111,14 @@ entries, and returns an error. Successful teardown runs after the process root
 is inactive, scrubs all three frames, releases their exact generations, and
 requires the allocator's prior live-frame count to be restored.
 
-This is deliberately one authenticated replacement image, not a general ELF
-loader. `execve` resolves absolute or current-directory-relative normalized
-paths through the retained measured-root index, requires an executable regular
-node, and then admits only the exact ELF profile of `bin/exec-target`. The profile admits one live thread,
+This is deliberately a bounded static profile, not a general ELF loader.
+`execve` resolves absolute or current-directory-relative normalized paths
+through the retained measured-root index, requires an executable regular node,
+and admits either fixture because both independently satisfy that profile. The
+profile admits one live thread,
 up to eight bounded argument strings, up to eight bounded environment strings,
 and a 512-byte replacement stack image. It does not yet support an interpreter,
-dependencies, shebangs, unbounded vectors, or additional static or dynamic exec targets.
+dependencies, shebangs, unbounded vectors, broader static layouts, or dynamic exec targets.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory

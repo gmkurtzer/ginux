@@ -23,16 +23,16 @@ executable regular file named `init`.
 
 The generated proof contains `bin`, `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
 `var/lib`, `var/lib/state`, `var/lib/version`, the native `init` marker, `etc/hostname`,
-`etc/os-release`, `etc/motd`, and five build-produced Linux ELF artifacts
+`etc/os-release`, `etc/motd`, and four build-produced Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and auxiliary
-DSO. The static exec target is published at its Linux-visible measured-root
-path `bin/exec-target`. The hostname is immutable mode `0555` with exact contents
+DSO. Two distinct static exec targets are published at their Linux-visible
+measured-root paths `bin/exec-target` and `bin/exec-second`. The hostname is immutable mode `0555` with exact contents
 `ginux\n`; `os-release` is immutable mode `0555` with exact contents
 `NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`; and the nested
 state file contains `ready\n` and the version marker contains `0\n`. The ELF entries must byte-match the authenticated artifacts compiled
 into the kernel's bounded execution plan.
 
-After validation, the current roughly 81 KiB proof image is copied into a
+After validation, the current roughly 90 KiB proof image is copied into a
 fixed 32-frame, 128 KiB physically contiguous kernel-owned allocation. The
 boot proof requires exact bytes, a zero tail across the remaining allocation,
 ownership of every frame, sequential physical and direct-map addresses, and no
@@ -43,7 +43,7 @@ broader than this v0 publication capacity; images above 128 KiB fail closed
 during materialization.
 
 A second lifecycle proof constructs a fixed index of at most 64 nodes. The
-19-entry proof crosses the former 16-node limit while remaining representable
+20-entry proof crosses the former 16-node limit while remaining representable
 by the private one-byte descriptor selector. Each
 node stores only checked 32-bit name and data offsets inside the owned image; no node
 retains a pointer into the handed boot source. Exact `init` and directory

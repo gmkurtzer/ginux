@@ -10,16 +10,28 @@ ginux_linux_exec_target:
     movabs rcx, 0x6578652f6e69622f
     cmp qword ptr [rax], rcx
     jne .Lfailure
+#ifdef GINUX_EXEC_SECOND
+    movabs rcx, 0x646e6f6365732d63
+#else
     movabs rcx, 0x7465677261742d63
+#endif
     cmp qword ptr [rax + 8], rcx
     jne .Lfailure
     cmp byte ptr [rax + 16], 0
     jne .Lfailure
     mov rax, qword ptr [rsp + 16]
+#ifdef GINUX_EXEC_SECOND
+    movabs rcx, 0x6365732d63657865
+#else
     movabs rcx, 0x7261742d63657865
+#endif
     cmp qword ptr [rax], rcx
     jne .Lfailure
+#ifdef GINUX_EXEC_SECOND
+    cmp dword ptr [rax + 8], 0x00646e6f
+#else
     cmp dword ptr [rax + 8], 0x00746567
+#endif
     jne .Lfailure
     cmp qword ptr [rsp + 24], 0
     jne .Lfailure
@@ -105,10 +117,18 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
+#ifdef GINUX_EXEC_SECOND
+    movabs rcx, 0x6365732d63657865
+#else
     movabs rcx, 0x7261742d63657865
+#endif
     cmp qword ptr [rip + .Lprocess_name], rcx
     jne .Lfailure
+#ifdef GINUX_EXEC_SECOND
+    cmp dword ptr [rip + .Lprocess_name + 8], 0x00646e6f
+#else
     cmp dword ptr [rip + .Lprocess_name + 8], 0x00746567
+#endif
     jne .Lfailure
 
     lea rdi, [rip + .Lexecutable_link]
@@ -121,7 +141,11 @@ ginux_linux_exec_target:
     movabs rcx, 0x6578652f6e69622f
     cmp qword ptr [rip + .Lexecutable_path], rcx
     jne .Lfailure
+#ifdef GINUX_EXEC_SECOND
+    movabs rcx, 0x646e6f6365732d63
+#else
     movabs rcx, 0x7465677261742d63
+#endif
     cmp qword ptr [rip + .Lexecutable_path + 8], rcx
     jne .Lfailure
 
@@ -162,7 +186,11 @@ ginux_linux_exec_target:
     ud2
 
 .Lmessage:
+#ifdef GINUX_EXEC_SECOND
+    .ascii "SECOND!\n"
+#else
     .ascii "EXEC_OK\n"
+#endif
 .Lconsole:
     .asciz "/dev/console"
 .Lexecutable_link:
@@ -170,7 +198,11 @@ ginux_linux_exec_target:
 .size ginux_linux_exec_target, . - ginux_linux_exec_target
 
 .section .data
+#ifdef GINUX_EXEC_SECOND
+.quad 0x5345434f4e444152
+#else
 .quad 0x4558454354415247
+#endif
 
 .section .bss
 .balign 8

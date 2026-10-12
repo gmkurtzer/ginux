@@ -36,14 +36,17 @@ pub(crate) fn verify_linux_elf_mapping(
     plan: &crate::linux_elf::LoadPlan<'_>,
     protected_start: u64,
     protected_size: usize,
+    exec_name: &[u8],
 ) -> bool {
     let Some(kernel_frames_before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL)
     else {
         return false;
     };
-    let exec_target = crate::initramfs::published_regular_file_node(b"bin/exec-target")
-        .and_then(crate::initramfs::published_file_by_node)
-        .and_then(crate::linux_elf::measured_exec_target_plan);
+    let Some(exec_node) = crate::initramfs::published_regular_file_node(exec_name) else {
+        return false;
+    };
+    let exec_target = crate::initramfs::published_file_by_node(exec_node)
+        .and_then(crate::linux_elf::measured_static_exec_plan);
     let Some(exec_plan) = exec_target else {
         return false;
     };
@@ -583,6 +586,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     dependency_base_min: [0; 2],
                     dependency_base_end: [0; 2],
                     dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
+                    exec_node,
                     exec_entry: exec_plan.entry as usize,
                     exec_mappings: [
                         cpu::LinuxExecMapping {
@@ -1483,6 +1487,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_base_min: dependency_base_min.map(|base| base as usize),
                     dependency_base_end: dependency_base_end.map(|base| base as usize),
                     dependency_mappings,
+                    exec_node: 0,
                     exec_entry: 0,
                     exec_mappings: [cpu::LinuxExecMapping::EMPTY; 3],
                     exec_clear_addresses: [0; 5],

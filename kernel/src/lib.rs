@@ -624,10 +624,19 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(exec_target) = initramfs::published_file_by_node(exec_target_node) else {
         kernel_fail("ginux: measured Linux exec target unreadable\r\n");
     };
-    if !linux_elf::verify_measured_exec_target(exec_target) {
+    let Some(exec_second_node) = initramfs::published_regular_file_node(b"bin/exec-second") else {
+        kernel_fail("ginux: second measured Linux exec target missing\r\n");
+    };
+    let Some(exec_second) = initramfs::published_file_by_node(exec_second_node) else {
+        kernel_fail("ginux: second measured Linux exec target unreadable\r\n");
+    };
+    if exec_target == exec_second
+        || linux_elf::measured_static_exec_plan(exec_target).is_none()
+        || linux_elf::measured_static_exec_plan(exec_second).is_none()
+    {
         kernel_fail("ginux: measured Linux exec target invalid\r\n");
     }
-    serial_write("ginux: measured Linux exec target planned\r\n");
+    serial_write("ginux: multiple measured Linux exec targets planned\r\n");
     if !linux_elf::verify_parser() {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
     }
@@ -654,6 +663,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured-root Linux exec selection validated\r\n");
     serial_write("ginux: measured-dirfd Linux execveat validated\r\n");
     serial_write("ginux: measured-fd Linux empty-path exec validated\r\n");
+    serial_write("ginux: measured Linux exec selection is profile-driven\r\n");
     serial_write("ginux: Linux replacement frames allocated on demand\r\n");
     serial_write("ginux: Linux replacement frame generations reclaimed\r\n");
     if !linux_elf::verify_load_plan() {

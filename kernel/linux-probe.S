@@ -3637,9 +3637,17 @@ nested_getpid:
 
 #ifndef GINUX_LINKED
 exec_path:
+#ifdef GINUX_EXEC_SECOND
+    .asciz "/bin/exec-second"
+#else
     .asciz "/bin/exec-target"
+#endif
 exec_mode:
+#ifdef GINUX_EXEC_SECOND
+    .asciz "exec-second"
+#else
     .asciz "exec-target"
+#endif
 exec_environment:
     .asciz "GINUX_EXEC=1"
 missing_exec_path:

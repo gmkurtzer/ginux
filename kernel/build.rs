@@ -53,6 +53,35 @@ fn main() {
     );
     fs::write(output.join("linux-probe.bin"), text).expect("failed to write Linux probe bytes");
 
+    let second_probe_object = output.join("linux-probe-second.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-DGINUX_EXEC_SECOND",
+            "-c",
+            "linux-probe.S",
+            "-o",
+        ])
+        .arg(&second_probe_object)
+        .status()
+        .expect("failed to run clang for second Linux probe");
+    assert!(
+        status.success(),
+        "clang failed to assemble second Linux probe"
+    );
+    let second_probe_elf =
+        fs::read(&second_probe_object).expect("failed to read second Linux probe object");
+    let second_probe_text = elf_section(&second_probe_elf, b".text")
+        .expect("second Linux probe object has no .text section");
+    assert_eq!(
+        second_probe_text.len(),
+        text.len(),
+        "second Linux probe must preserve the bounded executable layout"
+    );
+    fs::write(output.join("linux-probe-second.bin"), second_probe_text)
+        .expect("failed to write second Linux probe bytes");
+
     let interpreter_object = output.join("linux-interpreter.o");
     let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
     let status = Command::new(clang)
@@ -249,6 +278,23 @@ fn main() {
         status.success(),
         "clang failed to assemble Linux exec target"
     );
+    let exec_second_object = output.join("linux-exec-second.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-DGINUX_EXEC_SECOND",
+            "-c",
+            "linux-exec-target.S",
+            "-o",
+        ])
+        .arg(&exec_second_object)
+        .status()
+        .expect("failed to assemble second Linux exec target");
+    assert!(
+        status.success(),
+        "clang failed to assemble second Linux exec target"
+    );
 
     let linked_dependency = output.join("libginux.so");
     let linked_dependency_script =
@@ -365,6 +411,33 @@ fn main() {
         .expect("failed to link Linux exec target");
     assert!(status.success(), "LLD failed to link Linux exec target");
 
+    let exec_second = output.join("linux-exec-second.elf");
+    let mut exec_second_link = Command::new(&lld);
+    exec_second_link
+        .args([
+            "-flavor",
+            "gnu",
+            "-m",
+            "elf_x86_64",
+            "-static",
+            "-nostdlib",
+            "-e",
+            "ginux_linux_exec_target",
+            "-T",
+        ])
+        .arg(&exec_target_script)
+        .arg(&exec_second_object)
+        .arg("-o")
+        .arg(&exec_second);
+    configure_linker_library_path(&mut exec_second_link, toolchain_library.as_ref());
+    let status = exec_second_link
+        .status()
+        .expect("failed to link second Linux exec target");
+    assert!(
+        status.success(),
+        "LLD failed to link second Linux exec target"
+    );
+
     let linked_main = output.join("linux-linked-main.elf");
     let linked_main_script =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
@@ -441,6 +514,8 @@ fn main() {
             .expect("failed to export linked Linux interpreter");
         fs::copy(&exec_target, directory.join("linux-exec-target.elf"))
             .expect("failed to export Linux exec target");
+        fs::copy(&exec_second, directory.join("linux-exec-second.elf"))
+            .expect("failed to export second Linux exec target");
     }
 
     let linked = output.join("linux-probe.elf");

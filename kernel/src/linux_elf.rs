@@ -66,6 +66,8 @@ const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_RELATIVE: u64 = 8;
 const R_X86_64_TPOFF64: u32 = 18;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
+const SECOND_PROBE_CODE: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe-second.bin"));
 const INTERPRETER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-interpreter.bin"));
 const DEPENDENCY_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-dependency.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
@@ -77,6 +79,8 @@ const LINKED_DYNAMIC_AUXILIARY: &[u8] =
 const LINKED_DYNAMIC_INTERPRETER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ld-ginux.so"));
 const LINKED_EXEC_TARGET: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/linux-exec-target.elf"));
+const LINKED_EXEC_SECOND: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/linux-exec-second.elf"));
 
 pub(crate) fn runtime_main_bytes() -> &'static [u8] {
     LINKED_DYNAMIC_GRAPH_MAIN
@@ -281,14 +285,11 @@ pub(crate) fn runtime_exec_target_bytes() -> &'static [u8] {
     LINKED_EXEC_TARGET
 }
 
-pub(crate) fn verify_measured_exec_target(bytes: &[u8]) -> bool {
-    measured_exec_target_plan(bytes).is_some()
+pub(crate) fn runtime_exec_second_bytes() -> &'static [u8] {
+    LINKED_EXEC_SECOND
 }
 
-pub(crate) fn measured_exec_target_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
-    if bytes != LINKED_EXEC_TARGET {
-        return None;
-    }
+pub(crate) fn measured_static_exec_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
     let image = parse(bytes)?;
     let plan = plan(&image)?;
     (plan.entry == 0x40_0100
@@ -3522,18 +3523,23 @@ pub(crate) fn verify_linked_probe() -> bool {
         && read_only_valid
         && executable_valid
         && writable_valid
-        && crate::address_space::verify_linux_elf_mapping(&plan, 1, 1)
+        && crate::address_space::verify_linux_elf_mapping(&plan, 1, 1, b"bin/exec-target")
 }
 
 pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usize) -> bool {
-    let image = fixture();
+    let image = fixture_with_code(SECOND_PROBE_CODE);
     let Some(parsed) = parse(&image) else {
         return false;
     };
     let Some(plan) = plan(&parsed) else {
         return false;
     };
-    crate::address_space::verify_linux_elf_mapping(&plan, protected_start, protected_size)
+    crate::address_space::verify_linux_elf_mapping(
+        &plan,
+        protected_start,
+        protected_size,
+        b"bin/exec-second",
+    )
 }
 
 pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_size: usize) -> bool {
@@ -3804,6 +3810,10 @@ fn interpreted_main_fixture() -> [u8; INTERPRETED_FIXTURE_SIZE] {
 }
 
 fn fixture() -> [u8; FIXTURE_SIZE] {
+    fixture_with_code(PROBE_CODE)
+}
+
+fn fixture_with_code(code: &[u8]) -> [u8; FIXTURE_SIZE] {
     let mut bytes = [0_u8; FIXTURE_SIZE];
     bytes[0..4].copy_from_slice(b"\x7fELF");
     bytes[4] = 2;
@@ -3822,7 +3832,7 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
         ELF_HEADER_SIZE,
         0,
         0x40_0000,
-        (0x100 + PROBE_CODE.len()) as u64,
+        (0x100 + code.len()) as u64,
         FIXTURE_EXECUTABLE_MEMORY_SIZE,
         PF_READ | PF_EXECUTE,
     );
@@ -3837,7 +3847,7 @@ fn fixture() -> [u8; FIXTURE_SIZE] {
     );
     let stack_header = ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE;
     write_relro(&mut bytes, stack_header, 0x40_6000, 512);
-    bytes[0x100..0x100 + PROBE_CODE.len()].copy_from_slice(PROBE_CODE);
+    bytes[0x100..0x100 + code.len()].copy_from_slice(code);
     bytes[FIXTURE_DATA_OFFSET..FIXTURE_SIZE].copy_from_slice(b"PROBE!!\n");
     bytes
 }

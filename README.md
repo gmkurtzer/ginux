@@ -7,8 +7,8 @@ ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
 boot manifest. The kernel validates its measurement, normalized metadata, safe relative
 paths, uniqueness, alignment, an executable `init`, and an exact trailer while
 rejecting malformed variants during every QEMU boot. The generated archive now
-contains the build-produced Linux main, interpreter, two DSOs, and static exec
-target and is about 81 KiB. The kernel copies it into a zeroed, contiguous 32-frame allocation,
+contains the build-produced Linux main, interpreter, two DSOs, and two static
+exec targets and is about 90 KiB. The kernel copies it into a zeroed, contiguous 32-frame allocation,
 verifies source independence and the complete zero tail, and builds a bounded
 pathname index whose 32-bit offsets resolve only inside the owned image. A
 final indexed copy remains kernel-owned through
@@ -36,10 +36,10 @@ The publication index now admits 64 nodes and is exercised beyond its original
 16-node limit. Open, metadata, and access checks share that lookup. The current native
 `init` remains a format marker, not PID 1, but the Linux-visible `/init`,
 and `/lib64/*` paths map to internal measured-root entries, while
-`/bin/exec-target` is a direct measured-root node. The complete dynamic
+`/bin/exec-target` and `/bin/exec-second` are direct measured-root nodes. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
-single-threaded `execve` proof atomically replaces the static workload with the
-measured `/bin/exec-target`, rebuilds bounded argument and environment vectors
+single-threaded `execve` proof atomically replaces two independent static workloads with the
+selected measured executable, rebuilds bounded argument and environment vectors
 on a fresh 512-byte initial stack, allocates and materializes its three measured
 ELF pages only during the transaction, removes the old image pages, applies close-on-exec and
 signal/alternate-stack transition rules, installs the replacement process
@@ -411,7 +411,8 @@ beneath the current measured directory; empty, `.`, `..`, and empty path
 components are rejected. Paths and outputs remain fixed-size, and no mutable
 VFS is implied.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
-`readlink` result is `/init` before replacement and `/bin/exec-target` after
+`readlink` result is `/init` before replacement and the selected canonical
+`/bin/exec-target` or `/bin/exec-second` path after
 the bounded exec commit; rejected exec calls retain the old identity.
 An immutable runtime-file view exposes the exact authenticated `/init`,
 `/lib64/ld-ginux.so`, `/lib64/libginux.so`, and `/lib64/libginux-aux.so` bytes
@@ -424,24 +425,26 @@ bounded immutable-root traversal, not a general VFS or general executable
 loading. The kernel
 authenticates and plans the fixed four-image graph; the interpreter installs
 the authenticated main and both dependency segments admitted by that exact plan.
-The separate static proof resolves normalized absolute or current-directory-relative
-`execve` paths through the measured root, then admits only the exact measured
-`bin/exec-target` ELF profile, with up to eight 63-byte `argv` strings, eight equivalent
+The separate static proofs resolve normalized absolute or current-directory-relative
+`execve` paths through the measured root, then admit any measured regular file
+that satisfies the strict three-page static ELF execution profile. The two
+independently linked fixtures, `bin/exec-target` and `bin/exec-second`, prove
+selection is not compiled-byte identity, with up to eight 63-byte `argv` strings, eight equivalent
 `envp` strings, and one live thread. Rejected path, pointer, count, string, and
 aggregate-stack cases leave the original image
 running; success installs exact W^X target frames, unmaps the old image, and
-retains the canonical `/bin/exec-target` identity.
+retains the selected canonical measured-root identity.
 The same atomic transaction is exposed through a flags-zero `execveat` profile;
-the proof opens `/bin`, returns cwd to `/`, and resolves `exec-target` relative
+each proof opens `/bin`, returns cwd to `/`, and resolves its selected basename relative
 to that measured-directory descriptor while rejecting bad descriptors,
 non-directory descriptors, and unsupported flags.
-`AT_EMPTY_PATH` also executes the authenticated image through an open regular
+`AT_EMPTY_PATH` also executes the selected authenticated image through an open regular
 file descriptor, rejects a directory descriptor, and retains the canonical
 measured-root executable identity.
 The proof also closes only `FD_CLOEXEC` descriptors, preserves an ordinary
 descriptor, resets caught signals while retaining an ignored disposition,
-disables the alternate signal stack, and changes the process name to
-`exec-target`.
+disables the alternate signal stack, and derives the bounded process name from
+the selected measured node's basename.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
 Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and
@@ -523,8 +526,8 @@ static artifact at `build/linux-probe.elf` and the dynamic fixtures at
 `build/linux-dynamic/ld-ginux.so`,
 `build/linux-dynamic/linux-linked-main.elf`, and
 `build/linux-dynamic/libginux.so`. It also emits the bounded dependency-list
-fixtures `linux-linked-graph-main.elf`, `libginux-aux.so`, and
-`linux-exec-target.elf` for inspection
+fixtures `linux-linked-graph-main.elf`, `libginux-aux.so`,
+`linux-exec-target.elf`, and `linux-exec-second.elf` for inspection
 and the deterministic proof root at `build/initramfs-v0.cpio` without assembling the EFI
 filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and
