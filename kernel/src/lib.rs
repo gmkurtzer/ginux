@@ -806,6 +806,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: interpreted Linux exec heap replaced atomically\r\n");
     serial_write("ginux: old interpreted Linux heap lease retired at exec\r\n");
     serial_write("ginux: replacement Linux heap lease reclaimed\r\n");
+    serial_write("ginux: static Linux exec heap replaced atomically\r\n");
+    serial_write("ginux: old static Linux heap lease retired at exec\r\n");
+    serial_write("ginux: replacement static Linux heap lease reclaimed\r\n");
     serial_write("ginux: Linux exec process break reset\r\n");
     serial_write("ginux: interpreted Linux TLS state rematerialized\r\n");
     serial_write("ginux: interpreted Linux TLS leases replaced atomically\r\n");

@@ -408,9 +408,8 @@ the old stack's exact live generation and permissions, then
 scrubs and releases that lease; teardown reclaims the replacement stack after
 the process root is inactive. The same commit installs a fresh zero-filled
 RW/NX heap frame, retires the old exact lease, and resets the process break to
-the heap base. The replacement heap is reclaimed only after the process root is
-inactive. Static exec also resets the break but retains its heap frame in this
-version. Fresh primary and sibling TLS frames are fully materialized from the
+the heap base. Static exec applies the same fresh-heap transaction. The
+replacement heap is reclaimed only after the process root is inactive. Fresh primary and sibling TLS frames are fully materialized from the
 authenticated templates before commit and replace both exact old leases in the
 same transaction. The initial FS base is restored against the fresh primary
 mapping. The guarded sibling stack is replaced by a fresh zeroed RW/NX lease in
@@ -428,8 +427,8 @@ CR3, activates the verified clone, and retires the old exact leases. Static
 exec retains its hierarchy. The inactive anonymous-mapping backing frames are replaced
 with fresh zeroed generation-bound leases after the image commit; the old exact
 leases are scrubbed and retired, and teardown reclaims the replacements.
-Replacing the heap and hierarchy outside the interpreted profile are later
-lifecycle milestones.
+Replacing the hierarchy outside the interpreted profile is a later lifecycle
+milestone.
 
 `rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
 or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath

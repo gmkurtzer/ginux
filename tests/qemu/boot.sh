@@ -696,6 +696,9 @@ for marker in \
     'interpreted Linux exec heap replaced atomically' \
     'old interpreted Linux heap lease retired at exec' \
     'replacement Linux heap lease reclaimed' \
+    'static Linux exec heap replaced atomically' \
+    'old static Linux heap lease retired at exec' \
+    'replacement static Linux heap lease reclaimed' \
     'Linux exec process break reset' \
     'interpreted Linux TLS state rematerialized' \
     'interpreted Linux TLS leases replaced atomically' \

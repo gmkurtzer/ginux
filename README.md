@@ -61,10 +61,9 @@ stack lease in the rollback-capable image transaction, and reclaims the fresh
 lease after the process root is inactive. The execution contract binds every active
 page-table hierarchy frame to its exact allocator generation, verifies that
 the live CR3 and all admitted Linux ranges traverse only that owned hierarchy,
-and rejects a stale root lease without mutation. Interpreted replacement additionally
-replaces the bounded heap with a
-fresh zeroed RW/NX lease, while every successful exec resets the process break
-to the fixed heap base. The old heap is scrubbed at commit and the replacement
+and rejects a stale root lease without mutation. Every successful exec also
+replaces the bounded heap with a fresh zeroed RW/NX lease and resets the process
+break to the fixed heap base. The old heap is scrubbed at commit and the replacement
 lease is reclaimed after the process root becomes inactive. Interpreted replacement installs the measured
 interpreter first, lets it remap the authenticated main and both DSOs, reapplies
 RELRO, pre-materializes fresh primary and sibling TLS leases from the complete

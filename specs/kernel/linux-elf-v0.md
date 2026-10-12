@@ -446,11 +446,10 @@ returns exactly those five bytes before it can complete.
 Post-exit validation requires the stack leaf to name the fresh lease, rejects
 the retired generation even if its physical address has since been reused, and
 reclaims the replacement stack only after the process page-table root is
-inactive. The interpreted transaction applies the same exact-generation,
-rollback, scrub, and reclamation rules to the fixed one-page RW/NX heap. Its
-replacement frame begins fully zeroed. Every successful exec also resets the
-bounded process break to the heap base; the static profile retains its heap
-frame in this version, while interpreted exec replaces it.
+inactive. Both static and interpreted transactions apply the same
+exact-generation, rollback, scrub, and reclamation rules to the fixed one-page
+RW/NX heap. Its replacement frame begins fully zeroed. Every successful exec
+also resets the bounded process break to the heap base.
 The fresh TLS leaves, authenticated contents, TCB self-pointers, and FS context
 are revalidated after execution. Both old TLS leases must be retired, and both
 replacement leases are scrubbed and reclaimed only after the process root is

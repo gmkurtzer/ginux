@@ -3375,7 +3375,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     // and SMAP access is enabled only around the bounded read.
     let heap_contents_valid = unsafe {
         with_supervisor_user_access(|| {
-            if interpreted_exec_replaced {
+            if exec_replaced {
                 core::slice::from_raw_parts(execution.heap as *const u8, PAGE_SIZE)
                     .iter()
                     .all(|byte| *byte == 0)
@@ -3407,11 +3407,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             }
         });
     let exec_stack_frame = current_stack_frame.filter(|frame| *frame != execution.stack_frame);
-    let heap_frame_state_valid = finalize_linux_exec_heap_frame(
-        execution.heap,
-        execution.heap_frame,
-        interpreted_exec_replaced,
-    );
+    let heap_frame_state_valid =
+        finalize_linux_exec_heap_frame(execution.heap, execution.heap_frame, exec_replaced);
     let expected_code = if exec_replaced {
         selected_runtime_plan
             .as_ref()
@@ -5960,7 +5957,7 @@ fn linux_execve_at(
         return LINUX_ENOEXEC;
     };
     let interpreted = interpreted_exec_plan.is_some();
-    let ancillary_mapping_count = 1 + 4 * usize::from(interpreted);
+    let ancillary_mapping_count = 2 + 3 * usize::from(interpreted);
     if mapping_count > LINUX_EXEC_MAPPING_LIMIT - ancillary_mapping_count {
         return LINUX_E2BIG;
     }
@@ -6179,7 +6176,7 @@ fn linux_execve_at(
             return LINUX_ENOMEM;
         }
     }
-    if interpreted {
+    {
         let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
             let _ = release_linux_exec_frames(&mut exec_frames);
             return LINUX_ENOMEM;
@@ -6204,15 +6201,15 @@ fn linux_execve_at(
             executable: false,
         };
     }
+    if let Some(frame) = exec_frames[mapping_count + 1] {
+        mappings[mapping_count + 1] = LinuxExecMapping {
+            address: heap_base as usize,
+            frame: frame.address(),
+            writable: true,
+            executable: false,
+        };
+    }
     if interpreted {
-        if let Some(frame) = exec_frames[mapping_count + 1] {
-            mappings[mapping_count + 1] = LinuxExecMapping {
-                address: heap_base as usize,
-                frame: frame.address(),
-                writable: true,
-                executable: false,
-            };
-        }
         if let Some((_, thread_pointers)) = interpreted_tls {
             for (offset, thread_pointer) in thread_pointers.into_iter().enumerate() {
                 if let Some(frame) = exec_frames[mapping_count + 2 + offset] {
@@ -6241,28 +6238,26 @@ fn linux_execve_at(
         writable: true,
         executable: false,
     };
-    if interpreted {
-        let Some(frame) = memory::FrameLease::from_parts(
-            ELF_PROBE_HEAP_FRAME.load(Ordering::SeqCst),
-            ELF_PROBE_HEAP_GENERATION.load(Ordering::SeqCst),
-        ) else {
-            let _ = release_linux_exec_frames(&mut exec_frames);
-            return LINUX_ENOEXEC;
-        };
-        if frame == old_stack_frame
-            || heap_base == 0
-            || !address_space::current_linux_mapping_matches(heap_base, frame, true, false)
-        {
-            let _ = release_linux_exec_frames(&mut exec_frames);
-            return LINUX_ENOEXEC;
-        }
-        active_image_mappings[active_image_count + 1] = LinuxActiveImageMapping {
-            address: heap_base as usize,
-            frame,
-            writable: true,
-            executable: false,
-        };
+    let Some(old_heap_frame) = memory::FrameLease::from_parts(
+        ELF_PROBE_HEAP_FRAME.load(Ordering::SeqCst),
+        ELF_PROBE_HEAP_GENERATION.load(Ordering::SeqCst),
+    ) else {
+        let _ = release_linux_exec_frames(&mut exec_frames);
+        return LINUX_ENOEXEC;
+    };
+    if old_heap_frame == old_stack_frame
+        || heap_base == 0
+        || !address_space::current_linux_mapping_matches(heap_base, old_heap_frame, true, false)
+    {
+        let _ = release_linux_exec_frames(&mut exec_frames);
+        return LINUX_ENOEXEC;
     }
+    active_image_mappings[active_image_count + 1] = LinuxActiveImageMapping {
+        address: heap_base as usize,
+        frame: old_heap_frame,
+        writable: true,
+        executable: false,
+    };
     if let Some((_, thread_pointers)) = interpreted_tls {
         for (index, thread_pointer) in thread_pointers.into_iter().enumerate() {
             let Some(frame) = memory::FrameLease::from_parts(
@@ -6379,11 +6374,11 @@ fn linux_execve_at(
         ELF_PROBE_STACK_FRAME.store(frame.address(), Ordering::SeqCst);
         ELF_PROBE_STACK_GENERATION.store(frame.generation(), Ordering::SeqCst);
     }
+    if let Some(frame) = exec_frames[mapping_count + 1] {
+        ELF_PROBE_HEAP_FRAME.store(frame.address(), Ordering::SeqCst);
+        ELF_PROBE_HEAP_GENERATION.store(frame.generation(), Ordering::SeqCst);
+    }
     if interpreted {
-        if let Some(frame) = exec_frames[mapping_count + 1] {
-            ELF_PROBE_HEAP_FRAME.store(frame.address(), Ordering::SeqCst);
-            ELF_PROBE_HEAP_GENERATION.store(frame.generation(), Ordering::SeqCst);
-        }
         for index in 0..2 {
             if let Some(frame) = exec_frames[mapping_count + 2 + index] {
                 ELF_PROBE_TLS_FRAMES[index].store(frame.address(), Ordering::SeqCst);
