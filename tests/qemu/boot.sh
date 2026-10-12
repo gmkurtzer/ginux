@@ -772,8 +772,9 @@ if ! grep -q '^ginux: Linux privilege policy sealed fail-closed' "$output_file" 
 fi
 
 if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 1 ]] ||
-    ! grep -q '^ginux: bounded writable tmp scratch file validated' "$output_file"; then
-    echo "Boot test failed: the bounded writable tmp file was not validated." >&2
+    ! grep -q '^ginux: generation-safe Linux tmpfs mounted at /tmp' "$output_file" ||
+    ! grep -q '^ginux: generation-safe bounded tmpfs lifecycle validated' "$output_file"; then
+    echo "Boot test failed: the generation-safe bounded tmpfs lifecycle was not validated." >&2
     exit 1
 fi
 

@@ -43,10 +43,14 @@ I/O privilege, namespace, and BPF requests all return `-EPERM`; an unknown
 syscall separately returns `-ENOSYS`. UID/GID 0 and the immutable mount remain
 unchanged. This makes `privilege-boundary` ready for the bounded profile, not a
 claim that every future Linux privileged syscall has already been classified.
-PID 1 also enumerates the measured `/tmp` anchor, writes `ready\n` to the
-bounded kernel-owned `ginux-ready` scratch file, closes and reopens it, and
-validates the exact bytes. Process exit scrubs the complete 64-byte backing
-store. This moves tmpfs to `partial`; it is not a mounted general tmpfs.
+PID 1 first observes the measured `/tmp` anchor as empty, creates the bounded
+kernel-owned `ginux-ready` file with `O_CREAT | O_EXCL`, writes `ready\n`,
+enumerates the new dirent, closes and reopens the file, and validates the exact
+bytes. It then unlinks the closed file and proves that lookup fails and `/tmp`
+is empty again. Creation assigns a new generation, descriptor access requires
+that exact generation, and unlink or final teardown scrubs the complete
+64-byte backing store. This makes `tmpfs.tmp` ready for this bounded profile;
+it is not a claim of general Linux tmpfs compatibility.
 Before publishing readiness, PID 1 invokes Linux `fork`. The independently
 owned PID 2 resumes at the actual post-fork instruction with `RAX = 0`, verifies
 `getpid() == 2` and `getppid() == 1`, and exits with status 42. PID 1 first

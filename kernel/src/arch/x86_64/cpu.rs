@@ -10,8 +10,8 @@ use super::{paging, timer};
 use crate::{
     address_space,
     capability::Rights,
-    control_abi, domain, initramfs, ipc, linux_mount, linux_process, linux_user, memory, network,
-    scheduler,
+    control_abi, domain, initramfs, ipc, linux_mount, linux_process, linux_tmpfs, linux_user,
+    memory, network, scheduler,
     scheduler::{
         RuntimeAction, UserFaultContext, UserFaultFrame, UserInterruptFrame, UserTrapFrame,
     },
@@ -177,6 +177,7 @@ const LINUX_EPOLL_WAIT_SYSCALL: u64 = 232;
 const LINUX_EPOLL_CTL_SYSCALL: u64 = 233;
 const LINUX_OPENAT_SYSCALL: u64 = 257;
 const LINUX_NEWFSTATAT_SYSCALL: u64 = 262;
+const LINUX_UNLINKAT_SYSCALL: u64 = 263;
 const LINUX_READLINKAT_SYSCALL: u64 = 267;
 const LINUX_FACCESSAT_SYSCALL: u64 = 269;
 const LINUX_PPOLL_SYSCALL: u64 = 271;
@@ -221,6 +222,7 @@ const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EAGAIN: u64 = u64::MAX - 10;
 const LINUX_EPIPE: u64 = u64::MAX - 31;
 const LINUX_EACCES: u64 = u64::MAX - 12;
+const LINUX_EBUSY: u64 = u64::MAX - 15;
 const LINUX_EEXIST: u64 = u64::MAX - 16;
 const LINUX_ENODEV: u64 = u64::MAX - 18;
 const LINUX_ENOTDIR: u64 = u64::MAX - 19;
@@ -312,7 +314,6 @@ const LINUX_SETGROUPS_FILE_NODE: u16 = 0xfb00;
 const LINUX_FILE_PROC_SETGROUPS: u16 = LINUX_FILE_MASK | LINUX_SETGROUPS_FILE_NODE;
 const LINUX_TMP_FILE_NODE: u16 = 0xff00;
 const LINUX_FILE_TMP_SCRATCH: u16 = LINUX_FILE_MASK | LINUX_TMP_FILE_NODE;
-const LINUX_TMP_FILE_CAPACITY: usize = 64;
 const LINUX_PROC_PID1_STATUS: &[u8] = b"Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 32;
@@ -335,6 +336,8 @@ const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
 const LINUX_O_CLOEXEC: u64 = 0x80000;
 const LINUX_O_DIRECTORY: u64 = 0x10000;
+const LINUX_O_CREAT: u64 = 0x40;
+const LINUX_O_EXCL: u64 = 0x80;
 const LINUX_O_NONBLOCK: u64 = 0x800;
 const LINUX_PR_SET_NAME: u64 = 15;
 const LINUX_PR_GET_NAME: u64 = 16;
@@ -719,6 +722,7 @@ static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU16; 4] = [const { AtomicU16::new(0) }; 4];
+static ELF_PROBE_TMP_FILE_GENERATIONS: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
 static ELF_PROBE_CWD: AtomicU16 = AtomicU16::new(LINUX_ROOT_DIRECTORY);
 static ELF_PROBE_EPOLL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
@@ -738,9 +742,6 @@ static ELF_PROBE_PIPE_WRITE_FLAGS: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_LENGTH: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_BUFFER: [AtomicU8; LINUX_PIPE_CAPACITY] =
     [const { AtomicU8::new(0) }; LINUX_PIPE_CAPACITY];
-static ELF_PROBE_TMP_FILE_LENGTH: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_TMP_FILE: [AtomicU8; LINUX_TMP_FILE_CAPACITY] =
-    [const { AtomicU8::new(0) }; LINUX_TMP_FILE_CAPACITY];
 static ELF_PROBE_DESCRIPTOR_OFFSETS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
@@ -4024,6 +4025,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
+    for generation in &ELF_PROBE_TMP_FILE_GENERATIONS {
+        generation.store(0, Ordering::SeqCst);
+    }
     ELF_PROBE_CWD.store(LINUX_ROOT_DIRECTORY, Ordering::SeqCst);
     ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
@@ -4044,7 +4048,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     for byte in &ELF_PROBE_PIPE_BUFFER {
         byte.store(0, Ordering::SeqCst);
     }
-    let _ = linux_clear_tmp_file();
+    let _ = linux_tmpfs::teardown();
     for cursor in &ELF_PROBE_DESCRIPTOR_OFFSETS {
         cursor.store(0, Ordering::SeqCst);
     }
@@ -6124,6 +6128,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_READLINK_SYSCALL => linux_readlink_self(first_argument, buffer, count),
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count),
         LINUX_NEWFSTATAT_SYSCALL => linux_newfstatat(first_argument, buffer, count, register(0)),
+        LINUX_UNLINKAT_SYSCALL => linux_unlinkat(first_argument, buffer, count),
         LINUX_READLINKAT_SYSCALL => {
             if first_argument as u32 != LINUX_AT_FDCWD {
                 return LINUX_EBADF;
@@ -6283,7 +6288,7 @@ extern "sysv64" fn linux_syscall_handler(
                 if current_linux_clear_child_tid() != Some(0)
                     || current_linux_robust_list() != Some(0)
                     || !linux_close_all_descriptors()
-                    || !linux_clear_tmp_file()
+                    || !linux_tmpfs::teardown()
                     || !retire_current_linux_thread()
                 {
                     return LINUX_ESRCH;
@@ -6307,7 +6312,7 @@ extern "sysv64" fn linux_syscall_handler(
                 || !set_current_linux_clear_child_tid(0)
                 || !set_current_linux_robust_list(0)
                 || !linux_close_all_descriptors()
-                || !linux_clear_tmp_file()
+                || !linux_tmpfs::teardown()
             {
                 return LINUX_ESRCH;
             }
@@ -7921,7 +7926,7 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     if path == b"/proc/1/setgroups" {
         return Some(LINUX_FILE_PROC_SETGROUPS);
     }
-    if path == b"/tmp/ginux-ready" {
+    if path == b"/tmp/ginux-ready" && linux_tmpfs::open(b"ginux-ready").is_some() {
         return Some(LINUX_FILE_TMP_SCRATCH);
     }
     let (kind, root_name) = match path {
@@ -7990,7 +7995,7 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     if path == b"proc/1/setgroups" {
         return Some(LINUX_FILE_PROC_SETGROUPS);
     }
-    if path == b"tmp/ginux-ready" {
+    if path == b"tmp/ginux-ready" && linux_tmpfs::open(b"ginux-ready").is_some() {
         return Some(LINUX_FILE_TMP_SCRATCH);
     }
     if let Some(node) = initramfs::published_directory_node(path) {
@@ -9019,24 +9024,57 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    let kind = match linux_relative_path_kind(directory, path) {
-        Ok(Some(kind)) => kind,
-        Ok(None) => match path {
-            b"/dev/null" => 0,
-            b"/dev/zero" => LINUX_DEVICE_ZERO,
-            b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
-            path => match linux_root_directory_kind(path).or_else(|| linux_runtime_file_kind(path))
-            {
-                Some(kind) => kind,
-                None => return LINUX_ENOENT,
-            },
-        },
-        Err(error) => return error,
-    };
     let access = flags & 3;
-    if access == 3 || flags & !(3 | LINUX_O_CLOEXEC | LINUX_O_DIRECTORY) != 0 {
+    if access == 3
+        || flags & !(3 | LINUX_O_CLOEXEC | LINUX_O_DIRECTORY | LINUX_O_CREAT | LINUX_O_EXCL) != 0
+        || flags & LINUX_O_EXCL != 0 && flags & LINUX_O_CREAT == 0
+    {
         return LINUX_EINVAL;
     }
+    let tmp_path = path == b"/tmp/ginux-ready";
+    if tmp_path && flags & LINUX_O_DIRECTORY != 0 {
+        return LINUX_ENOTDIR;
+    }
+    if flags & LINUX_O_CREAT != 0 && !tmp_path {
+        return LINUX_EACCES;
+    }
+    let mut tmp_handle = None;
+    let mut tmp_created = false;
+    let kind = if tmp_path {
+        let existing = linux_tmpfs::open(b"ginux-ready");
+        if existing.is_some()
+            && flags & (LINUX_O_CREAT | LINUX_O_EXCL) == (LINUX_O_CREAT | LINUX_O_EXCL)
+        {
+            return LINUX_EEXIST;
+        }
+        tmp_handle = existing.or_else(|| {
+            let created = (flags & LINUX_O_CREAT != 0)
+                .then(|| linux_tmpfs::create(b"ginux-ready"))
+                .flatten();
+            tmp_created = created.is_some();
+            created
+        });
+        if tmp_handle.is_none() {
+            return LINUX_ENOENT;
+        }
+        LINUX_FILE_TMP_SCRATCH
+    } else {
+        match linux_relative_path_kind(directory, path) {
+            Ok(Some(kind)) => kind,
+            Ok(None) => match path {
+                b"/dev/null" => 0,
+                b"/dev/zero" => LINUX_DEVICE_ZERO,
+                b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
+                path => match linux_root_directory_kind(path)
+                    .or_else(|| linux_runtime_file_kind(path))
+                {
+                    Some(kind) => kind,
+                    None => return LINUX_ENOENT,
+                },
+            },
+            Err(error) => return error,
+        }
+    };
     if kind & LINUX_DEVICE_DIRECTORY != 0 && access != 0 {
         return LINUX_EISDIR;
     }
@@ -9050,10 +9088,17 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
     let Some(descriptor) = (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT)
         .find(|descriptor| linux_aux_descriptor_free(*descriptor))
     else {
+        if tmp_created {
+            let _ = tmp_handle.is_some_and(|handle| linux_tmpfs::unlink(b"ginux-ready", handle));
+        }
         return LINUX_EMFILE;
     };
     ELF_PROBE_DEVICE_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
         .store(state, Ordering::SeqCst);
+    ELF_PROBE_TMP_FILE_GENERATIONS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize].store(
+        tmp_handle.map_or(0, linux_tmpfs::generation),
+        Ordering::SeqCst,
+    );
     if flags & LINUX_O_CLOEXEC != 0 {
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
     } else {
@@ -9099,6 +9144,38 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_unlinkat(directory: u64, path_address: u64, flags: u64) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    let mut path = [0_u8; 32];
+    let path_length = match copy_linux_c_string(path_address, &mut path) {
+        Ok(length) => length,
+        Err(error) => return error,
+    };
+    let path = &path[..path_length];
+    if directory as u32 != LINUX_AT_FDCWD || path != b"/tmp/ginux-ready" {
+        return LINUX_ENOENT;
+    }
+    let Some(handle) = linux_tmpfs::open(b"ginux-ready") else {
+        return LINUX_ENOENT;
+    };
+    let generation = linux_tmpfs::generation(handle);
+    if (LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT).any(|descriptor| {
+        linux_tmp_file(linux_device_descriptor(descriptor))
+            && ELF_PROBE_TMP_FILE_GENERATIONS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+                .load(Ordering::SeqCst)
+                == generation
+    }) {
+        return LINUX_EBUSY;
+    }
+    if linux_tmpfs::unlink(b"ginux-ready", handle) {
+        0
+    } else {
+        LINUX_ENOENT
+    }
 }
 
 fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> u64 {
@@ -11400,6 +11477,17 @@ fn linux_tmp_file(state: u16) -> bool {
         && state & LINUX_ROOT_NODE_MASK == LINUX_TMP_FILE_NODE
 }
 
+fn linux_tmp_descriptor_handle(descriptor: u64, state: u16) -> Option<linux_tmpfs::FileHandle> {
+    if !linux_tmp_file(state) {
+        return None;
+    }
+    let index = descriptor.checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)? as usize;
+    let generation = ELF_PROBE_TMP_FILE_GENERATIONS
+        .get(index)?
+        .load(Ordering::SeqCst);
+    linux_tmpfs::from_generation(generation)
+}
+
 fn linux_proc_file(state: u16) -> bool {
     let kind = state & !3;
     matches!(
@@ -11469,7 +11557,7 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
         _ => {}
     }
     if linux_tmp_file(state) {
-        return Some(18);
+        return linux_tmpfs::open(b"ginux-ready").map(linux_tmpfs::inode);
     }
     match state & LINUX_FILE_MASK {
         LINUX_FILE_INIT => Some(5),
@@ -11504,28 +11592,25 @@ fn linux_tmp_read(descriptor: u64, state: u16, address: u64, count: u64) -> u64 
     if state & 3 != LINUX_DESCRIPTOR_INPUT && state & 3 != 3 {
         return LINUX_EBADF;
     }
+    let Some(handle) = linux_tmp_descriptor_handle(descriptor, state) else {
+        return LINUX_EBADF;
+    };
     let Ok(start) = usize::try_from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst))
     else {
-        return 0;
+        return LINUX_EINVAL;
     };
-    let length = usize::from(ELF_PROBE_TMP_FILE_LENGTH.load(Ordering::SeqCst));
-    if start >= length || count == 0 {
-        return 0;
-    }
-    let requested = usize::try_from(count).unwrap_or(usize::MAX);
-    let end = start.saturating_add(requested).min(length);
-    let mut output = [0_u8; LINUX_TMP_FILE_CAPACITY];
-    for (destination, source) in output[..end - start]
-        .iter_mut()
-        .zip(&ELF_PROBE_TMP_FILE[start..end])
-    {
-        *destination = source.load(Ordering::SeqCst);
-    }
-    if !copy_to_linux_user(address, &output[..end - start]) {
+    let requested = usize::try_from(count)
+        .unwrap_or(usize::MAX)
+        .min(linux_tmpfs::FILE_CAPACITY);
+    let mut output = [0_u8; linux_tmpfs::FILE_CAPACITY];
+    let Some(length) = linux_tmpfs::read(handle, start, &mut output[..requested]) else {
+        return LINUX_EBADF;
+    };
+    if !copy_to_linux_user(address, &output[..length]) {
         return LINUX_EFAULT;
     }
-    linux_descriptor_offset(descriptor).store(end as u64, Ordering::SeqCst);
-    (end - start) as u64
+    linux_descriptor_offset(descriptor).store((start + length) as u64, Ordering::SeqCst);
+    length as u64
 }
 
 fn linux_tmp_write(descriptor: u64, state: u16, address: u64, count: u64) -> u64 {
@@ -11542,34 +11627,24 @@ fn linux_tmp_write(descriptor: u64, state: u16, address: u64, count: u64) -> u64
     let Some(end) = start.checked_add(length) else {
         return LINUX_EINVAL;
     };
-    if end > LINUX_TMP_FILE_CAPACITY {
+    if end > linux_tmpfs::FILE_CAPACITY {
         return LINUX_ENOSPC;
     }
     if length == 0 {
         return 0;
     }
-    let mut input = [0_u8; LINUX_TMP_FILE_CAPACITY];
+    let Some(handle) = linux_tmp_descriptor_handle(descriptor, state) else {
+        return LINUX_EBADF;
+    };
+    let mut input = [0_u8; linux_tmpfs::FILE_CAPACITY];
     if !copy_from_linux_user(address, &mut input[..length]) {
         return LINUX_EFAULT;
     }
-    for (destination, source) in ELF_PROBE_TMP_FILE[start..end].iter().zip(&input[..length]) {
-        destination.store(*source, Ordering::SeqCst);
+    if linux_tmpfs::write(handle, start, &input[..length]) != Some(length) {
+        return LINUX_EBADF;
     }
-    let prior = usize::from(ELF_PROBE_TMP_FILE_LENGTH.load(Ordering::SeqCst));
-    ELF_PROBE_TMP_FILE_LENGTH.store(prior.max(end) as u8, Ordering::SeqCst);
     linux_descriptor_offset(descriptor).store(end as u64, Ordering::SeqCst);
     count
-}
-
-fn linux_clear_tmp_file() -> bool {
-    ELF_PROBE_TMP_FILE_LENGTH.store(0, Ordering::SeqCst);
-    for byte in &ELF_PROBE_TMP_FILE {
-        byte.store(0, Ordering::SeqCst);
-    }
-    ELF_PROBE_TMP_FILE_LENGTH.load(Ordering::SeqCst) == 0
-        && ELF_PROBE_TMP_FILE
-            .iter()
-            .all(|byte| byte.load(Ordering::SeqCst) == 0)
 }
 
 fn linux_descriptor_offset(descriptor: u64) -> &'static AtomicU64 {
@@ -11684,6 +11759,8 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
     {
         return LINUX_EBADF;
     }
+    ELF_PROBE_TMP_FILE_GENERATIONS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+        .store(0, Ordering::SeqCst);
     linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
     ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
     0
@@ -12044,15 +12121,17 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 return LINUX_EINVAL;
             }
             if cursor == 0 {
-                let (inode, kind, name) = if directory == b"proc" {
-                    (16, 4, &b"1"[..])
+                let entry = if directory == b"proc" {
+                    Some((16, 4, &b"1"[..]))
                 } else {
-                    (18, 8, &b"ginux-ready"[..])
+                    linux_tmpfs::entry().map(|(handle, name)| (linux_tmpfs::inode(handle), 8, name))
                 };
-                if !append_linux_dirent(&mut entries, &mut used, inode, 3, kind, name) {
-                    return LINUX_EINVAL;
+                if let Some((inode, kind, name)) = entry {
+                    if !append_linux_dirent(&mut entries, &mut used, inode, 3, kind, name) {
+                        return LINUX_EINVAL;
+                    }
+                    cursor = 1;
                 }
-                cursor = 1;
             }
         } else {
             loop {
@@ -12244,7 +12323,9 @@ fn linux_regular_file_mode(state: u16) -> u32 {
 
 fn linux_file_size(state: u16) -> u64 {
     if linux_tmp_file(state) {
-        u64::from(ELF_PROBE_TMP_FILE_LENGTH.load(Ordering::SeqCst))
+        linux_tmpfs::open(b"ginux-ready")
+            .and_then(linux_tmpfs::size)
+            .map_or(0, |size| size as u64)
     } else {
         linux_regular_file(state).map_or(0, |file| file.len() as u64)
     }

@@ -18,9 +18,10 @@ identity, opens `/dev/console`, emits `GINUX_SYSTEM_INIT_V0`, and exits cleanly
 while final process teardown closes all inherited descriptors. Before
 readiness it enumerates `/proc` and `/proc/1`, then reads a bounded read-only
 `/proc/1/status` view containing its exact name, running state, PID 1, and
-parent PID 0. It also enumerates `/tmp`, writes and rereads `ready\n` through a
-bounded 64-byte `ginux-ready` scratch file, and relies on final teardown to
-scrub that backing store. The kernel installs the measured root as the sole
+parent PID 0. It also proves `/tmp` starts empty, creates the generation-bound
+64-byte `ginux-ready` file, enumerates, writes, rereads, unlinks, and confirms
+removal; unlink or final teardown scrubs the backing store. The kernel installs
+the measured root as the sole
 `ro,nosuid,nodev` mount in a generation-bound Linux mount namespace; PID 1
 enumerates and reads `/proc/1/mountinfo` to verify that exact state. A separate
 generation-bound user namespace maps container UID/GID 0 to outside ID 100000,
@@ -59,8 +60,9 @@ selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open
 without per-directory kernel identities; `dev`
 retains its synthetic device entries. The measured `proc` node is populated by
 the bounded synthetic PID 1 directory plus status, root-mount, and user-namespace records;
-it is not yet a general procfs. The measured `tmp` node similarly exposes one bounded mutable
-`ginux-ready` file; it is not yet a mounted tmpfs. A
+it is not yet a general procfs. The measured `tmp` node anchors a separate
+generation-safe bounded tmpfs whose one admitted `ginux-ready` file is created,
+enumerated, used, unlinked, and scrubbed at runtime; it is not a general tmpfs. A
 bounded index-driven contract resolves any direct measured regular child below
 an open measured directory; `motd` proves the syscall layer needs no
 per-filename case. Normalized multi-component paths are bounded and `lib` is

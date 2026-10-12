@@ -13,7 +13,7 @@ runtime	clock.monotonic	ready	Monotonic time sleep and timer waits
 runtime	futex.private	partial	Bounded private waits wakes and clear-child-TID
 filesystem	root.read-only	ready	Authenticated indexed newc root is immutable
 filesystem	root.mount	ready	Measured root is installed read-only nodev nosuid in a generation-bound Linux mount namespace
-filesystem	tmpfs.tmp	partial	Bounded kernel-owned /tmp/ginux-ready supports scrubbed scalar I/O
+filesystem	tmpfs.tmp	ready	Generation-safe bounded /tmp file supports create enumerate scalar I/O unlink and scrubbed reuse
 filesystem	procfs	partial	Bounded /proc/1 exposes identity mount and user-namespace state
 filesystem	devfs	partial	Console null zero and tty compatibility nodes
 security	credentials.root	ready	Container-local root credential queries

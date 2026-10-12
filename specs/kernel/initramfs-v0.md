@@ -99,9 +99,10 @@ The measured `proc` node anchors synthetic bounded `1/status`, `1/mountinfo`,
 bytes to the authenticated archive. The PID 1 proof enumerates both synthetic
 directories, reads the status record, and verifies the immutable root mount
 and user-namespace records.
-The measured `tmp` node similarly anchors a kernel-owned, 64-byte
-`ginux-ready` scratch file whose contents are outside the signed archive and
-are scrubbed at process teardown.
+The measured `tmp` node similarly anchors a generation-safe bounded tmpfs. Its
+single admitted 64-byte `ginux-ready` file is created and unlinked at runtime;
+its contents are outside the signed archive and are scrubbed at unlink or
+process teardown.
 The proof also opens and enumerates the
 otherwise unlisted `var` node, then opens its indexed `lib` child relative to
 the live descriptor. `dev`

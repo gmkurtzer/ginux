@@ -12,6 +12,7 @@ mod ipc;
 mod linux_elf;
 mod linux_mount;
 mod linux_process;
+mod linux_tmpfs;
 mod linux_user;
 mod manifest;
 mod memory;
@@ -632,6 +633,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: generation-safe Linux user namespace installed\r\n");
     serial_write("ginux: container root mapped outside native authority\r\n");
     serial_write("ginux: Linux privilege policy sealed fail-closed\r\n");
+    if !linux_tmpfs::verify_contract() || !linux_tmpfs::install() {
+        kernel_fail("ginux: bounded Linux tmpfs invalid\r\n");
+    }
+    serial_write("ginux: generation-safe Linux tmpfs mounted at /tmp\r\n");
     let Some(system_profile_node) =
         initramfs::published_regular_file_node(b"etc/ginux-system-profile")
     else {
@@ -877,7 +882,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: measured minimal system init executed as PID 1\r\n");
     serial_write("ginux: bounded procfs PID 1 status validated\r\n");
-    serial_write("ginux: bounded writable tmp scratch file validated\r\n");
+    serial_write("ginux: generation-safe bounded tmpfs lifecycle validated\r\n");
     serial_write("ginux: minimal system init exited cleanly\r\n");
     if !linux_elf::verify_mapped_interpreted_plan(boot_info.image_base as u64, boot_info.image_size)
     {

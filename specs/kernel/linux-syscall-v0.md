@@ -484,17 +484,20 @@ PIDs, mutable process state, threads, fd links, sysctl, or post-exit records
 exist.
 
 The measured `/tmp` directory anchors one synthetic mutable regular file,
-`/tmp/ginux-ready`. It has mode `0600`, zero initial length, a fixed 64-byte
-kernel-owned capacity, independent descriptor offsets, scalar `read` and
-`write`, and `lseek` with the existing checked `SEEK_SET`, `SEEK_CUR`, and
-`SEEK_END` rules. Writes are fully staged from userspace before committing any
-byte; overflow returns `-ENOSPC`. `readv`, `writev`, file mapping, creation,
-truncation, unlink, rename, subdirectories, and additional files are outside
-this profile. PID 1 enumerates the `ginux-ready` dirent, writes `ready\n`,
-closes and reopens the file, and validates all six bytes. Final process teardown
-zeros the length and all 64 backing bytes before retiring PID 1. This is a
-bounded volatile-storage bridge inside the initial namespace, not a mounted
-general tmpfs.
+`/tmp/ginux-ready`. The directory begins empty. Absolute `openat` with
+`O_CREAT | O_EXCL` creates the one admitted file with mode `0600`, zero length,
+a new nonzero generation, and a fixed 64-byte kernel-owned capacity.
+Descriptors retain that generation and have independent offsets. Scalar
+`read`, `write`, and `lseek` use the existing checked offset rules; writes are
+fully staged before committing any byte and overflow returns `-ENOSPC`.
+`getdents64` reflects creation and removal. `unlinkat` accepts the closed file,
+scrubs all backing bytes, and makes later lookup return `-ENOENT`; an open file
+is rejected with `-EBUSY`. Final process teardown performs the same scrub if
+the file remains. The in-kernel contract also creates a replacement generation
+and rejects the retired handle. `readv`, `writev`, file mapping, truncation,
+rename, subdirectories, relative creation/unlink, additional files, and
+unlink-while-open Linux semantics remain outside this profile. This is a
+bounded volatile filesystem contract, not general tmpfs.
 
 `rax = 59` (`__NR_execve`) provides bounded replacement transitions for the
 single-threaded proof process. Absolute and current-directory-relative
