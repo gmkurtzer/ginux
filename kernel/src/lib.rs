@@ -271,6 +271,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     else {
         kernel_fail("ginux: invalid virtio network common configuration range\r\n");
     };
+    let Some((virtio_network_device_physical, virtio_network_device_length)) =
+        virtio_network.device_region()
+    else {
+        kernel_fail("ginux: invalid virtio network device configuration range\r\n");
+    };
 
     let Some(memory_map_end) = boot_info
         .memory_map_size
@@ -328,7 +333,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     // SAFETY: The entry trampoline disabled interrupts. The required live
     // addresses and the page-table objects are checked against the complete
     // transitional identity-map range before CR3 is changed.
-    let Ok((virtio_mmio, virtio_msix_mmio, iommu_mmio, virtio_network_mmio)) = (unsafe {
+    let Ok((
+        virtio_mmio,
+        virtio_msix_mmio,
+        iommu_mmio,
+        virtio_network_common_mmio,
+        virtio_network_device_mmio,
+    )) = (unsafe {
         arch::x86_64::paging::install_initial_identity_map(
             boot_info,
             &image,
@@ -339,9 +350,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 (virtio_msix_physical, virtio_msix_length),
                 (Q35_IOMMU_REGISTER_BASE, PAGE_SIZE),
                 (virtio_network_common_physical, virtio_network_common_length),
+                (virtio_network_device_physical, virtio_network_device_length),
             ],
         )
-    }) else {
+    })
+    else {
         kernel_fail("ginux: page-table transition failed\r\n");
     };
     serial_write("ginux: kernel page tables active\r\n");
@@ -653,7 +666,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             virtio_mmio,
             virtio_msix_mmio,
             iommu_mmio,
-            virtio_network_mmio,
+            virtio_network_common_mmio,
+            virtio_network_device_mmio,
         ])
         || !arch::x86_64::paging::mmio_identity_alias_is_absent(virtio_msix_mmio)
         || !arch::x86_64::paging::mmio_translation_is_bounded(
@@ -675,15 +689,27 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || virtio_mmio
             .address(virtio_common_physical, virtio_common_length)
             .is_none()
-        || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_network_mmio)
-        || !arch::x86_64::paging::mmio_identity_alias_is_absent(virtio_network_mmio)
+        || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_network_common_mmio)
+        || !arch::x86_64::paging::mmio_mapping_is_writable(virtio_network_common_mmio)
+        || !arch::x86_64::paging::mmio_identity_alias_is_absent(virtio_network_common_mmio)
         || !arch::x86_64::paging::mmio_translation_is_bounded(
-            virtio_network_mmio,
+            virtio_network_common_mmio,
             virtio_network_common_physical,
             virtio_network_common_length,
         )
-        || virtio_network_mmio
+        || virtio_network_common_mmio
             .address(virtio_network_common_physical, virtio_network_common_length)
+            .is_none()
+        || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_network_device_mmio)
+        || arch::x86_64::paging::mmio_mapping_is_writable(virtio_network_device_mmio)
+        || !arch::x86_64::paging::mmio_identity_alias_is_absent(virtio_network_device_mmio)
+        || !arch::x86_64::paging::mmio_translation_is_bounded(
+            virtio_network_device_mmio,
+            virtio_network_device_physical,
+            virtio_network_device_length,
+        )
+        || virtio_network_device_mmio
+            .address(virtio_network_device_physical, virtio_network_device_length)
             .is_none()
     {
         kernel_fail("ginux: virtio MMIO mapping invalid\r\n");
@@ -693,17 +719,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded uncached MSI-X mapping active\r\n");
     serial_write("ginux: MSI-X cacheable aliases removed\r\n");
     serial_write("ginux: bounded uncached virtio-net common mapping active\r\n");
+    serial_write("ginux: bounded read-only uncached virtio-net device mapping active\r\n");
     serial_write("ginux: virtio-net cacheable alias absent\r\n");
-    let Some(virtio_network_initialization) =
-        arch::x86_64::pci::initialize_network_without_dma(virtio_network, virtio_network_mmio)
-    else {
+    let Some(virtio_network_initialization) = arch::x86_64::pci::initialize_network_without_dma(
+        virtio_network,
+        virtio_network_common_mmio,
+        virtio_network_device_mmio,
+    ) else {
         kernel_fail("ginux: virtio network initialization failed\r\n");
     };
     if !arch::x86_64::pci::verify_network_feature_rejections(
         virtio_network_initialization.offered_features,
         virtio_network_initialization.accepted_features,
     ) || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
-        || !arch::x86_64::pci::network_device_is_reset(virtio_network, virtio_network_mmio)
+        || !arch::x86_64::pci::network_device_is_reset(virtio_network, virtio_network_common_mmio)
     {
         kernel_fail("ginux: virtio network initialization invariant failed\r\n");
     }
@@ -713,6 +742,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(virtio_network_initialization.accepted_features);
     serial_write("\r\nginux: virtio-net queues available: ");
     serial_write_u64(u64::from(virtio_network_initialization.queue_count));
+    serial_write("\r\nginux: virtio-net stable MAC validated: ");
+    serial_write_u64(
+        virtio_network_initialization
+            .mac
+            .into_iter()
+            .fold(0_u64, |value, byte| (value << 8) | u64::from(byte)),
+    );
     serial_write("\r\nginux: virtio-net platform DMA negotiation validated");
     serial_write("\r\nginux: invalid virtio-net feature sets rejected");
     serial_write("\r\nginux: virtio-net returned to reset with PCI decoding disabled\r\n");

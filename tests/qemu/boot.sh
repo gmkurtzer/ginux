@@ -99,9 +99,11 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net PCI decoding and bus mastering disabled' "$output_file" ||
     ! grep -q '^ginux: virtio-net IOMMU endpoint scope resolved exactly' "$output_file" ||
     ! grep -q '^ginux: bounded uncached virtio-net common mapping active' "$output_file" ||
+    ! grep -q '^ginux: bounded read-only uncached virtio-net device mapping active' "$output_file" ||
     ! grep -q '^ginux: virtio-net cacheable alias absent' "$output_file" ||
     ! grep -q '^ginux: virtio-net accepted features: 12884901920' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues available: 3' "$output_file" ||
+    ! grep -q '^ginux: virtio-net stable MAC validated: 90520731923542' "$output_file" ||
     ! grep -q '^ginux: virtio-net platform DMA negotiation validated' "$output_file" ||
     ! grep -q '^ginux: invalid virtio-net feature sets rejected' "$output_file" ||
     ! grep -q '^ginux: virtio-net returned to reset with PCI decoding disabled' "$output_file"; then

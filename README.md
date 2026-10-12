@@ -37,10 +37,12 @@ three command bits before physical-memory initialization and requires them to
 remain clear.
 The DMAR scope must resolve the network endpoint exactly. See
 [PCI Virtio Network Discovery v0](specs/kernel/pci-virtio-network-v0.md).
-After that authority boundary is established, only the common-configuration
-page is mapped supervisor-only, uncached, and non-executable. The kernel resets
-the device, accepts exactly `VERSION_1`, `ACCESS_PLATFORM`, and `MAC`, verifies
-three available queues, and resets it again with all PCI decoding disabled.
+After that authority boundary is established, the common-configuration page
+and a read-only device-configuration page are mapped supervisor-only, uncached,
+and non-executable. The kernel resets the device, accepts exactly `VERSION_1`,
+`ACCESS_PLATFORM`, and `MAC`, verifies three available queues, reads the pinned
+MAC through a stable configuration-generation snapshot, and resets it again
+with all PCI decoding disabled.
 No queue, interrupt, DMA lease, packet traffic, or service delegation is active.
 See [Virtio Network Initialization v0](specs/kernel/virtio-network-init-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

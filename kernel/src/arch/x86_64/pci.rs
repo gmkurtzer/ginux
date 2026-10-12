@@ -193,6 +193,9 @@ pub(crate) struct VirtioNetworkDevice {
     pub(crate) common_bar_address: u64,
     pub(crate) common_offset: u32,
     pub(crate) common_length: u32,
+    device_bar_address: u64,
+    device_offset: u32,
+    device_length: u32,
     pub(crate) notify_multiplier: u32,
     pub(crate) capability_count: u8,
     pub(crate) msix: MsixCapability,
@@ -219,6 +222,14 @@ impl VirtioNetworkDevice {
         let length = usize::try_from(self.common_length).ok()?;
         physical.checked_add(length as u64)?;
         (length > COMMON_QUEUE_DEVICE).then_some((physical, length))
+    }
+
+    pub(crate) fn device_region(self) -> Option<(u64, usize)> {
+        region_bounds(
+            self.device_bar_address,
+            self.device_offset,
+            self.device_length,
+        )
     }
 }
 
@@ -324,6 +335,7 @@ pub(crate) struct VirtioNetworkInitialization {
     pub(crate) offered_features: u64,
     pub(crate) accepted_features: u64,
     pub(crate) queue_count: u16,
+    pub(crate) mac: [u8; 6],
 }
 
 #[derive(Clone, Copy)]
@@ -803,10 +815,16 @@ pub(crate) fn initialize_without_dma(
 
 pub(crate) fn initialize_network_without_dma(
     device: VirtioNetworkDevice,
-    mapping: MmioMapping,
+    common_mapping: MmioMapping,
+    device_mapping: MmioMapping,
 ) -> Option<VirtioNetworkInitialization> {
     let (common_physical, common_length) = device.common_region()?;
-    let common = mapping.address(common_physical, common_length)?;
+    let common = common_mapping.address(common_physical, common_length)?;
+    let (device_physical, device_length) = device.device_region()?;
+    if device_length < 6 {
+        return None;
+    }
+    let device_configuration = device_mapping.address(device_physical, device_length)?;
     if common % align_of::<u32>() != 0 || !network_function_is_disabled(device) {
         return None;
     }
@@ -824,7 +842,13 @@ pub(crate) fn initialize_network_without_dma(
     let memory_enabled = network_function_command(device)
         & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
         == COMMAND_MEMORY_SPACE;
-    let result = memory_enabled.then(|| negotiate_network(common)).flatten();
+    let result = memory_enabled
+        .then(|| {
+            let mut initialization = negotiate_network(common)?;
+            initialization.mac = read_network_mac(common, device_configuration)?;
+            Some(initialization)
+        })
+        .flatten();
     let reset_complete = reset(common).is_some();
     let revoked = revoke_network_function(device);
     if !reset_complete || !revoked {
@@ -1388,7 +1412,20 @@ fn negotiate_network(common: usize) -> Option<VirtioNetworkInitialization> {
         offered_features,
         accepted_features,
         queue_count,
+        mac: [0; 6],
     })
+}
+
+fn read_network_mac(common: usize, device_configuration: usize) -> Option<[u8; 6]> {
+    for _ in 0..8 {
+        let before = read_common_u8(common, COMMON_CONFIG_GENERATION);
+        let mac = core::array::from_fn(|offset| read_common_u8(device_configuration, offset));
+        let after = read_common_u8(common, COMMON_CONFIG_GENERATION);
+        if before == after && mac != [0; 6] && mac != [0xff; 6] && mac[0] & 1 == 0 {
+            return Some(mac);
+        }
+    }
+    None
 }
 
 pub(crate) fn verify_feature_rejections(offered: u64, accepted: u64) -> bool {
@@ -2035,6 +2072,9 @@ fn parse_virtio_network(
         common_bar_address: parsed.common_bar_address,
         common_offset: parsed.common_offset,
         common_length: parsed.common_length,
+        device_bar_address: parsed.device_bar_address,
+        device_offset: parsed.device_offset,
+        device_length: parsed.device_length,
         notify_multiplier: parsed.notify_multiplier,
         capability_count: parsed.capability_count,
         msix: parsed.msix,

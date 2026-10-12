@@ -40,7 +40,7 @@ exec "$qemu" \
     -device "intel-iommu,intremap=off" \
     -device "virtio-blk-pci,drive=ginux-volume,disable-legacy=on,iommu_platform=on,serial=ginux-volume" \
     -netdev "user,id=ginux-net,restrict=on" \
-    -device "virtio-net-pci,netdev=ginux-net,disable-legacy=on,iommu_platform=on,addr=0x3" \
+    -device "virtio-net-pci,netdev=ginux-net,disable-legacy=on,iommu_platform=on,mac=52:54:00:12:34:56,addr=0x3" \
     -drive "if=none,id=ginux-volume,format=raw,file=$volume_image" \
     -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code" \
     -drive "if=pflash,format=raw,file=$ovmf_vars" \

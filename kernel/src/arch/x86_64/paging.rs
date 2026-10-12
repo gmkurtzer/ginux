@@ -336,13 +336,23 @@ pub(crate) unsafe fn install_initial_identity_map(
     image: &ImageSummary,
     required_addresses: &[usize],
     guard_pages: &[usize],
-    mmio_regions: [(u64, usize); 4],
-) -> Result<(MmioMapping, MmioMapping, MmioMapping, MmioMapping), PagingError> {
-    let [mmio, auxiliary_mmio, platform_mmio, device_mmio] = mmio_regions;
+    mmio_regions: [(u64, usize); 5],
+) -> Result<
+    (
+        MmioMapping,
+        MmioMapping,
+        MmioMapping,
+        MmioMapping,
+        MmioMapping,
+    ),
+    PagingError,
+> {
+    let [mmio, auxiliary_mmio, platform_mmio, device_mmio, device_config_mmio] = mmio_regions;
     let (mmio_physical, mmio_length) = mmio;
     let (auxiliary_mmio_physical, auxiliary_mmio_length) = auxiliary_mmio;
     let (platform_mmio_physical, platform_mmio_length) = platform_mmio;
     let (device_mmio_physical, device_mmio_length) = device_mmio;
+    let (device_config_mmio_physical, device_config_mmio_length) = device_config_mmio;
     if required_addresses
         .iter()
         .any(|address| *address >= INITIAL_IDENTITY_LIMIT)
@@ -557,6 +567,57 @@ pub(crate) unsafe fn install_initial_identity_map(
     {
         return Err(PagingError::MmioMapInvalid);
     }
+    let device_config_mmio_page = device_config_mmio_physical & !(PAGE_SIZE as u64 - 1);
+    let device_config_mmio_offset =
+        usize::try_from(device_config_mmio_physical - device_config_mmio_page)
+            .map_err(|_| PagingError::MmioMapInvalid)?;
+    let device_config_mmio_span = device_config_mmio_offset
+        .checked_add(device_config_mmio_length)
+        .ok_or(PagingError::MmioMapInvalid)?;
+    let device_config_mmio_pages = device_config_mmio_span
+        .checked_add(PAGE_SIZE - 1)
+        .ok_or(PagingError::MmioMapInvalid)?
+        / PAGE_SIZE;
+    let device_config_mmio_index = device_mmio_index
+        .checked_add(device_mmio_pages)
+        .ok_or(PagingError::MmioMapInvalid)?;
+    let device_config_mmio_mapped_end =
+        device_config_mmio_page.checked_add((device_config_mmio_pages * PAGE_SIZE) as u64);
+    let existing_mmio_ranges = [
+        (mmio_page, mmio_mapped_end.unwrap_or(mmio_page)),
+        (
+            auxiliary_mmio_page,
+            auxiliary_mmio_mapped_end.unwrap_or(auxiliary_mmio_page),
+        ),
+        (
+            platform_mmio_page,
+            platform_mmio_mapped_end.unwrap_or(platform_mmio_page),
+        ),
+        (
+            device_mmio_page,
+            device_mmio_mapped_end.unwrap_or(device_mmio_page),
+        ),
+    ];
+    if device_config_mmio_length == 0
+        || device_config_mmio_pages == 0
+        || device_config_mmio_index
+            .checked_add(device_config_mmio_pages)
+            .is_none_or(|end| end > auxiliary_mmio_index)
+        || device_config_mmio_page & !(ADDRESS_MASK as u64) != 0
+        || device_config_mmio_mapped_end
+            .is_none_or(|end| end > ADDRESS_MASK as u64 + PAGE_SIZE as u64)
+        || existing_mmio_ranges.into_iter().any(|range| {
+            ranges_overlap_u64(
+                range,
+                (
+                    device_config_mmio_page,
+                    device_config_mmio_mapped_end.unwrap_or(device_config_mmio_page),
+                ),
+            )
+        })
+    {
+        return Err(PagingError::MmioMapInvalid);
+    }
     let mmio_directory = core::ptr::addr_of_mut!(MMIO_DIRECTORY.0).cast::<u64>();
     let mmio_table = core::ptr::addr_of_mut!(MMIO_TABLE.0).cast::<u64>();
     zero_entries(mmio_directory);
@@ -597,6 +658,14 @@ pub(crate) unsafe fn install_initial_identity_map(
                 | NO_EXECUTE,
         );
     }
+    for index in 0..device_config_mmio_pages {
+        mmio_table.add(device_config_mmio_index + index).write(
+            (device_config_mmio_page + (index * PAGE_SIZE) as u64)
+                | PRESENT
+                | CACHE_DISABLE
+                | NO_EXECUTE,
+        );
+    }
     mmio_directory.write((mmio_table_address as u64) | PRESENT | WRITABLE);
     direct_pdpt
         .add(MMIO_PDPT_INDEX)
@@ -632,6 +701,14 @@ pub(crate) unsafe fn install_initial_identity_map(
         length: device_mmio_length,
         mapped_length: device_mmio_pages * PAGE_SIZE,
         writable: true,
+    };
+    let device_config_mmio_mapping = MmioMapping {
+        physical_page: device_config_mmio_page,
+        physical_start: device_config_mmio_physical,
+        virtual_page: MMIO_WINDOW_BASE + device_config_mmio_index * PAGE_SIZE,
+        length: device_config_mmio_length,
+        mapped_length: device_config_mmio_pages * PAGE_SIZE,
+        writable: false,
     };
 
     let fine_tables = core::ptr::addr_of_mut!(FINE_PAGE_TABLES).cast::<PageTable>();
@@ -902,6 +979,7 @@ pub(crate) unsafe fn install_initial_identity_map(
         auxiliary_mmio_mapping,
         platform_mmio_mapping,
         device_mmio_mapping,
+        device_config_mmio_mapping,
     ))
 }
 

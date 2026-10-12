@@ -25,11 +25,12 @@ map's page-directory hierarchy rather than using separately permissive leaves. C
 read-only, non-present, and NX decision—including guard pages, kernel image
 permissions, and sealed page-table pages—is identical through both aliases.
 The final higher-half pointer-table entry owns one bounded MMIO directory and
-table. It maps exactly four disjoint spans: the virtio-blk transport, its MSI-X
-state, the VT-d register page, and the virtio-net common-configuration page.
-Every span is supervisor-only, writable, NX, and cache-disabled, with no low
-identity alias for its above-4-GiB physical address. Every unused MMIO-table
-entry remains non-present.
+table. It maps exactly five disjoint spans: the virtio-blk transport, its MSI-X
+state, the VT-d register page, and the separate virtio-net common- and
+device-configuration pages. Every span is supervisor-only, NX, and
+cache-disabled, with no low identity alias for its above-4-GiB physical
+address. The network device-configuration page is read-only; the other four
+spans are writable. Every unused MMIO-table entry remains non-present.
 Every derived domain root copies both supervisor-only kernel PML4 entries, and
 root validation rejects a missing, altered, or user-accessible direct-map entry.
 The bounded Linux process proof applies the same rule to its private roots:
@@ -106,7 +107,7 @@ This map is intentionally transitional:
   kernel-owned read-only data, mutable data, MMIO, and firmware mapping classes.
 - Most identity-map aliases remain writable, so this revision does not yet make
   kernel text or user-code physical frames immutable through every alias.
-- General physical addresses above 4 GiB are unavailable; only the four bounded
+- General physical addresses above 4 GiB are unavailable; only the five bounded
   device/platform MMIO spans are explicitly mapped.
 - Kernel static paging objects and the pre-transition boot-validation path still
   use identity addresses. Post-transition ACPI reads, xAPIC MMIO,
