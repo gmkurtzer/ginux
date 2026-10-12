@@ -2186,6 +2186,10 @@ if ! grep -q '^ginux: Linux signal-interrupted epoll_wait validated' "$output_fi
     echo "Boot test failed: Linux signal-interrupted epoll_wait was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux zero-descriptor poll sleeps validated' "$output_file"; then
+    echo "Boot test failed: Linux zero-descriptor poll sleeps were not validated." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux scheduler-backed eventfd reads validated' "$output_file"; then
     echo "Boot test failed: Linux scheduler-backed eventfd reads were not validated." >&2

@@ -3641,11 +3641,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && sleep_block_count == 2
             && sleep_wake_count == 1
             && sleep_interrupt_count == 1
-            && timer_wait_expiry_count == 6
-            && timer_wait_preemption_count == 7
-            && poll_wait_block_count == 3
+            && timer_wait_expiry_count == 8
+            && timer_wait_preemption_count == 9
+            && poll_wait_block_count == 4
             && poll_wait_wake_count == 1
-            && poll_wait_timeout_count == 1
+            && poll_wait_timeout_count == 2
             && poll_wait_interrupt_count == 1
             && epoll_wait_block_count == 2
             && epoll_wait_wake_count == 1
@@ -3660,9 +3660,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && timerfd_read_block_count == 2
             && timerfd_read_wake_count == 1
             && timerfd_read_interrupt_count == 1
-            && ppoll_wait_block_count == 2
+            && ppoll_wait_block_count == 3
             && ppoll_wait_wake_count == 0
-            && ppoll_wait_timeout_count == 1
+            && ppoll_wait_timeout_count == 2
             && epoll_pwait_block_count == 2
             && epoll_pwait_wake_count == 0
             && epoll_pwait_timeout_count == 1
@@ -3691,11 +3691,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             sleep_block_count == 2,
             sleep_wake_count == 1,
             sleep_interrupt_count == 1,
-            timer_wait_expiry_count == 6,
-            timer_wait_preemption_count == 7,
-            poll_wait_block_count == 3,
+            timer_wait_expiry_count == 8,
+            timer_wait_preemption_count == 9,
+            poll_wait_block_count == 4,
             poll_wait_wake_count == 1,
-            poll_wait_timeout_count == 1,
+            poll_wait_timeout_count == 2,
             poll_wait_interrupt_count == 1,
             epoll_wait_block_count == 2,
             epoll_wait_wake_count == 1,
@@ -3710,9 +3710,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             timerfd_read_block_count == 2,
             timerfd_read_wake_count == 1,
             timerfd_read_interrupt_count == 1,
-            ppoll_wait_block_count == 2,
+            ppoll_wait_block_count == 3,
             ppoll_wait_wake_count == 0,
-            ppoll_wait_timeout_count == 1,
+            ppoll_wait_timeout_count == 2,
             epoll_pwait_block_count == 2,
             epoll_pwait_wake_count == 0,
             epoll_pwait_timeout_count == 1,
@@ -4400,11 +4400,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && sleep_block_count == 2
                 && sleep_wake_count == 1
                 && sleep_interrupt_count == 1
-                && timer_wait_expiry_count == 6
-                && timer_wait_preemption_count == 7
-                && poll_wait_block_count == 3
+                && timer_wait_expiry_count == 8
+                && timer_wait_preemption_count == 9
+                && poll_wait_block_count == 4
                 && poll_wait_wake_count == 1
-                && poll_wait_timeout_count == 1
+                && poll_wait_timeout_count == 2
                 && poll_wait_interrupt_count == 1
                 && epoll_wait_block_count == 2
                 && epoll_wait_wake_count == 1
@@ -4419,9 +4419,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && timerfd_read_block_count == 2
                 && timerfd_read_wake_count == 1
                 && timerfd_read_interrupt_count == 1
-                && ppoll_wait_block_count == 2
+                && ppoll_wait_block_count == 3
                 && ppoll_wait_wake_count == 0
-                && ppoll_wait_timeout_count == 1
+                && ppoll_wait_timeout_count == 2
                 && epoll_pwait_block_count == 2
                 && epoll_pwait_wake_count == 0
                 && epoll_pwait_timeout_count == 1
@@ -8345,13 +8345,11 @@ fn linux_poll_wait_live_return(
     if descriptor_count > LINUX_POLLFD_LIMIT {
         return LINUX_EINVAL;
     }
-    if descriptor_count == 0 {
-        return if duration == Some(0) { 0 } else { LINUX_ENOSYS };
-    }
     let mut pollfds = [0_u8; LINUX_POLLFD_LIMIT * 8];
     let active = &mut pollfds[..descriptor_count * 8];
-    if !copy_from_linux_user(address, active)
-        || !linux_writable_user_range_contains(address, active.len())
+    if descriptor_count != 0
+        && (!copy_from_linux_user(address, active)
+            || !linux_writable_user_range_contains(address, active.len()))
     {
         return LINUX_EFAULT;
     }
@@ -8362,6 +8360,9 @@ fn linux_poll_wait_live_return(
         let returned = linux_descriptor_poll_events(descriptor, events);
         pollfd[6..8].copy_from_slice(&returned.to_ne_bytes());
         ready += u64::from(returned != 0);
+    }
+    if descriptor_count == 0 && duration == Some(0) {
+        return 0;
     }
     if ready != 0 || duration == Some(0) {
         return if copy_to_linux_user(address, active) {

@@ -1090,6 +1090,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux signal-interrupted epoll waits validated\r\n");
     serial_write("ginux: Linux signal-interrupted poll waits validated\r\n");
     serial_write("ginux: Linux signal-interrupted epoll_wait validated\r\n");
+    serial_write("ginux: Linux zero-descriptor poll sleeps validated\r\n");
     serial_write("ginux: Linux scheduler-backed eventfd reads validated\r\n");
     serial_write("ginux: Linux signal-interrupted eventfd reads validated\r\n");
     serial_write("ginux: Linux scheduler-backed pipe reads validated\r\n");

@@ -1406,6 +1406,7 @@ linux_clone_repeat:
     call syscall_expect_zero
     cmp word ptr [0x405da6], 0
     require_equal
+    call zero_descriptor_poll_sleep_test
     push 3
     pop rdi
     push 3
@@ -4883,10 +4884,10 @@ child_thread_probe:
     pause
     loop .Llinux_wait_timer_spin
     call linux_child_eventfd_write_and_yield
-    # The parent blocks in epoll_wait, poll, and ppoll with positive timeouts.
-    # Keep this peer in userspace across three APIC ticks so each expiry
-    # immediately preempts back to the parent.
-    push 3
+    # The parent blocks in epoll_wait, poll, ppoll, and both zero-descriptor
+    # poll variants with positive timeouts. Keep this peer in userspace across
+    # five APIC ticks so each expiry immediately preempts back to the parent.
+    push 5
     pop rbx
 .Llinux_timeout_spin_next:
     mov ecx, 0x100000
@@ -5212,9 +5213,11 @@ long_exec_value:
 linked_file_mmap_test:
     xor edi, edi
     mov esi, 8192
-    mov edx, 1
+    push 1
+    pop rdx
     mov r10d, 2
-    mov r8d, 2
+    push 2
+    pop r8
     xor r9d, r9d
     push 9
     pop rax
@@ -5254,6 +5257,24 @@ linked_file_mmap_test:
     call syscall_expect_einval
 #endif
     ret
+#ifdef GINUX_GRAPH
+.type zero_descriptor_poll_sleep_test,@function
+zero_descriptor_poll_sleep_test:
+    # Linux ignores the pollfd pointer when nfds is zero. Preserve the ppoll
+    # timeout address already in rdx while proving both positive-timeout forms.
+    push rdx
+    or edi, -1
+    xor esi, esi
+    push 1
+    pop rdx
+    push 7
+    pop rax
+    call syscall_expect_zero
+    pop rdx
+    mov ax, 271
+    call syscall_expect_zero
+    ret
+#endif
 .section .text
 #endif
 

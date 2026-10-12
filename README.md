@@ -398,8 +398,10 @@ immediate console and device readiness across four descriptors. With one to
 four descriptors and a runnable peer, it also blocks in the scheduler for a
 signed millisecond timeout or indefinitely, wakes after relevant eventfd,
 pipe, close, or timerfd state changes, and returns zero after an APIC-driven
-timeout. This is a fixed two-thread proof, not a general wait-queue facility;
-zero-descriptor sleeps and blocking without a runnable peer return `ENOSYS`.
+timeout. A zero-descriptor `poll` or `ppoll` ignores the table pointer and uses
+the same timeout path as a sleep; the measured graph proves positive timeouts
+for both forms. This is a fixed two-thread proof, not a general wait-queue
+facility; blocking without a runnable peer returns `ENOSYS`.
 A caught signal unblocked by the ordinary thread mask can interrupt `poll` with
 `EINTR` without changing the output table.
 `ppoll` uses the same scheduler-backed descriptor path with a checked
