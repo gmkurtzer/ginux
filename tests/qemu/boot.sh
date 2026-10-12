@@ -603,6 +603,11 @@ if ! grep -q '^ginux: transactional Linux child publication validated' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux private page copy validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux private page copying was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     echo "Boot test failed: the minimal system init was not planned." >&2
     exit 1

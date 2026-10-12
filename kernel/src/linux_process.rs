@@ -1,4 +1,8 @@
+use crate::memory;
+
 const PROCESS_LIMIT: usize = 4;
+const PAGE_SIZE: usize = 4096;
+const FORK_PRIVATE_PAGE_LIMIT: usize = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ProcessHandle {
@@ -228,4 +232,144 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         && table.release_address_space(second_child, 0x3000)
         && table.exit(second_child, 7)
         && table.wait(init, second_child.pid) == Some(WaitResult { pid: 4, status: 7 })
+}
+
+fn copy_private_pages(
+    source: &[memory::FrameLease; FORK_PRIVATE_PAGE_LIMIT],
+    destination: &[memory::FrameLease; FORK_PRIVATE_PAGE_LIMIT],
+) -> bool {
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, source)
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, destination)
+        || source
+            .iter()
+            .enumerate()
+            .any(|(index, frame)| source[..index].contains(frame) || destination.contains(frame))
+        || destination
+            .iter()
+            .enumerate()
+            .any(|(index, frame)| destination[..index].contains(frame))
+    {
+        return false;
+    }
+    let mut source_addresses = [0_usize; FORK_PRIVATE_PAGE_LIMIT];
+    let mut destination_addresses = [0_usize; FORK_PRIVATE_PAGE_LIMIT];
+    for (((source_frame, destination_frame), source_address), destination_address) in source
+        .iter()
+        .zip(destination)
+        .zip(&mut source_addresses)
+        .zip(&mut destination_addresses)
+    {
+        let (Some(source_direct), Some(destination_direct)) = (
+            source_frame.direct_map_address(),
+            destination_frame.direct_map_address(),
+        ) else {
+            return false;
+        };
+        *source_address = source_direct;
+        *destination_address = destination_direct;
+    }
+    for (source_address, destination_address) in
+        source_addresses.into_iter().zip(destination_addresses)
+    {
+        // SAFETY: all leases and direct-map extents were validated before the
+        // first write, and source/destination frames are live and disjoint.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                source_address as *const u8,
+                destination_address as *mut u8,
+                PAGE_SIZE,
+            );
+        }
+    }
+    true
+}
+
+pub(crate) fn verify_private_page_copy_contract() -> bool {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let Some(source) =
+        memory::allocate_frames::<FORK_PRIVATE_PAGE_LIMIT>(memory::FrameOwner::KERNEL)
+    else {
+        return false;
+    };
+    let Some(destination) =
+        memory::allocate_frames::<FORK_PRIVATE_PAGE_LIMIT>(memory::FrameOwner::KERNEL)
+    else {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &source);
+        return false;
+    };
+
+    let result = (|| {
+        let source_addresses = source.map(memory::FrameLease::direct_map_address);
+        let destination_addresses = destination.map(memory::FrameLease::direct_map_address);
+        if source_addresses.iter().any(Option::is_none)
+            || destination_addresses.iter().any(Option::is_none)
+        {
+            return None;
+        }
+        for (index, source_address) in source_addresses.iter().copied().enumerate() {
+            let source_address = source_address?;
+            // SAFETY: allocation returned a private zeroed frame with a valid
+            // complete direct-map extent.
+            unsafe {
+                (source_address as *mut u8).write(0x41 + index as u8);
+                (source_address as *mut u8)
+                    .add(PAGE_SIZE - 1)
+                    .write(0x61 + index as u8);
+            }
+        }
+
+        let stale_generation = destination[0].generation().checked_add(1)?;
+        let stale = memory::FrameLease::from_parts(destination[0].address(), stale_generation)?;
+        let mut stale_destination = destination;
+        stale_destination[0] = stale;
+        if copy_private_pages(&source, &stale_destination)
+            || copy_private_pages(&source, &source)
+            || destination_addresses.into_iter().any(|address| {
+                address.is_none_or(|address| unsafe {
+                    core::slice::from_raw_parts(address as *const u8, PAGE_SIZE)
+                        .iter()
+                        .any(|byte| *byte != 0)
+                })
+            })
+            || !copy_private_pages(&source, &destination)
+        {
+            return None;
+        }
+
+        for (source_address, destination_address) in source_addresses
+            .iter()
+            .copied()
+            .zip(destination_addresses.iter().copied())
+        {
+            let source_address = source_address?;
+            let destination_address = destination_address?;
+            // SAFETY: both complete direct-map extents remain live.
+            let (source_page, destination_page) = unsafe {
+                (
+                    core::slice::from_raw_parts(source_address as *const u8, PAGE_SIZE),
+                    core::slice::from_raw_parts(destination_address as *const u8, PAGE_SIZE),
+                )
+            };
+            if source_page != destination_page {
+                return None;
+            }
+        }
+
+        let first_source = source_addresses[0]?;
+        let first_destination = destination_addresses[0]?;
+        // SAFETY: the destination is a distinct, live, private frame.
+        unsafe { (first_destination as *mut u8).write(0xff) };
+        Some(unsafe { (first_source as *const u8).read() == 0x41 })
+    })()
+    .unwrap_or(false);
+
+    let destination_released =
+        memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &destination);
+    let source_released = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &source);
+    result
+        && destination_released
+        && source_released
+        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }

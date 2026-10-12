@@ -46,12 +46,29 @@ that it cannot be reaped or exited early, releases its root, publishes status
 42, and reaps it through PID 1. Finally, it reuses the same slot for PID 4 and
 repeats teardown with status 7.
 
+## Private page copy primitive
+
+The v0 fork preparation path also has a two-page eager-copy primitive for
+private process memory. Before copying any byte, it validates every source and
+destination frame lease, kernel ownership, direct-map extent, and pairwise
+separation. A stale lease or any aliased frame rejects the complete operation
+without modifying the zeroed destination. A successful copy transfers both
+complete pages. The verifier then mutates the child copy and proves the parent
+page remains unchanged, scrubs and releases both sides, and requires the
+kernel's live-frame count to return to its starting value.
+
+This is the physical payload operation needed by a future eager fork. It does
+not yet duplicate or rewire the Linux page-table hierarchy, enumerate every
+mapped process page, or associate the copied leases with a prepared process
+record.
+
 ## Deliberate limits
 
 This is an internal ownership contract, not Linux process compatibility yet.
 It is not connected to the syscall dispatcher and does not implement:
 
-- construction, copying, or copy-on-write of the address space named at commit;
+- construction, hierarchy duplication, or copy-on-write of the complete
+  address space named at commit;
 - process-style `clone`, `fork`, `vfork`, `wait4`, or `waitid`;
 - descriptor, credential, signal, mount, or namespace inheritance;
 - concurrent process scheduling or process-directed signal delivery;

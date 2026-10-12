@@ -289,7 +289,12 @@ the reservation and stale handles cannot commit a reused slot. Exit cannot
 publish a zombie until that exact root is released, and only the live parent
 can reap it. The QEMU proof aborts one reservation, then creates and reaps two
 children through one reused slot. This table is not wired to Linux syscalls and
-does not yet construct or copy address spaces or inherit process resources, so the minimal system
+does not yet construct a runnable child hierarchy or inherit process resources.
+A separate eager-copy primitive validates generation-bound ownership and
+pairwise separation before copying two complete private pages. Its proof
+rejects stale and aliased destinations without partial writes, demonstrates
+parent/child independence, scrubs both copies, and restores the allocator's
+live-frame count. It is not yet a complete address-space clone, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).

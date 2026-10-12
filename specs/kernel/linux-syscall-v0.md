@@ -1237,6 +1237,9 @@ two-phase child publication, exit-to-zombie ordering, and parent-only reap. It i
 boot-verified model and is not reachable through this syscall profile. In
 particular, the exact bounded `clone` below remains thread-only and `fork`,
 process-style `clone`, and `wait4` remain unsupported.
+The process model's eager-copy helper can duplicate two generation-checked
+private physical pages without aliasing, but it does not yet construct a child
+Linux page-table hierarchy or make that memory schedulable.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;
