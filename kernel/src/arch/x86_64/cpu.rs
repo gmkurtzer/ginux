@@ -11,7 +11,7 @@ use crate::{
     address_space,
     capability::Rights,
     control_abi, domain, initramfs, ipc, memory, network, scheduler,
-    scheduler::{RuntimeAction, UserFaultFrame, UserTrapFrame},
+    scheduler::{RuntimeAction, UserFaultContext, UserFaultFrame, UserTrapFrame},
     serial_write, serial_write_u64,
 };
 
@@ -57,6 +57,7 @@ const LINUX_MUNMAP_SYSCALL: u64 = 11;
 const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_RT_SIGACTION_SYSCALL: u64 = 13;
 const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
+const LINUX_RT_SIGRETURN_SYSCALL: u64 = 15;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_PREAD64_SYSCALL: u64 = 17;
 const LINUX_READV_SYSCALL: u64 = 19;
@@ -167,6 +168,7 @@ const LINUX_PROBE_EXIT_STATUS: u64 = 42;
 const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 const LINUX_CAPABILITY_DATA_SIZE: usize = 24;
 const LINUX_RETURN_TO_KERNEL: u64 = (-4096_i64) as u64;
+const LINUX_RETURN_FROM_SIGNAL: u64 = (-4095_i64) as u64;
 const LINUX_EPERM: u64 = u64::MAX;
 const LINUX_E2BIG: u64 = u64::MAX - 6;
 const LINUX_ENOEXEC: u64 = u64::MAX - 7;
@@ -283,6 +285,10 @@ const LINUX_ALT_STACK_SIZE: usize = 24;
 const LINUX_MIN_ALT_STACK_SIZE: u64 = 2048;
 const LINUX_SS_DISABLE: u32 = 2;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
+const LINUX_SIGSEGV: u64 = 11;
+const LINUX_SA_RESTORER: u64 = 0x0400_0000;
+const LINUX_SIGNAL_FRAME_SIZE: usize = 16;
+const LINUX_SIGNAL_FRAME_COOKIE: u64 = 0x4749_4e55_5853_4947;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -575,6 +581,9 @@ static ELF_PROBE_SIGNAL_ACTION_MASKS: [AtomicU64; LINUX_SIGNAL_COUNT] =
 static ELF_PROBE_ALT_STACK_POINTER: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ALT_STACK_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ALT_STACK_FLAGS: AtomicU32 = AtomicU32::new(LINUX_SS_DISABLE);
+static LINUX_SIGNAL_ACTIVE: AtomicBool = AtomicBool::new(false);
+static LINUX_SIGNAL_DELIVERY_COUNT: AtomicU64 = AtomicU64::new(0);
+static LINUX_SIGNAL_RETURN_COUNT: AtomicU64 = AtomicU64::new(0);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -583,6 +592,10 @@ static mut LINUX_USER_RIP: u64 = 0;
 static mut LINUX_USER_RFLAGS: u64 = 0;
 static mut LINUX_KERNEL_FRAME: u64 = 0;
 static mut LINUX_SYSCALL_RESULT: u64 = 0;
+static mut LINUX_SIGNAL_RAX: u64 = 0;
+static mut LINUX_SIGNAL_RCX: u64 = 0;
+static mut LINUX_SIGNAL_R11: u64 = 0;
+static mut LINUX_SIGNAL_CONTEXT: LinuxSignalContext = LinuxSignalContext::ZERO;
 static mut GDT: [u64; 7] = [0; 7];
 static mut TSS: TaskStateSegment = TaskStateSegment {
     reserved0: 0,
@@ -878,6 +891,8 @@ ginux_linux_syscall_entry:
     call {linux_syscall_handler}
     cmp rax, {linux_return_to_kernel}
     je ginux_user_return_kernel
+    cmp rax, {linux_return_from_signal}
+    je ginux_linux_signal_return
     mov [rip + {linux_syscall_result}], rax
     mov rsp, [rip + {linux_kernel_frame}]
     pop r15
@@ -897,6 +912,29 @@ ginux_linux_syscall_entry:
     mov r11, [rip + {linux_user_rflags}]
     mov rsp, [rip + {linux_user_rsp}]
     sysretq
+ginux_linux_signal_return:
+    mov rsp, [rip + {linux_kernel_frame}]
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rsi
+    pop rdi
+    push {user_data}
+    push [rip + {linux_user_rsp}]
+    push [rip + {linux_user_rflags}]
+    push {user_code}
+    push [rip + {linux_user_rip}]
+    mov rax, [rip + {linux_signal_rax}]
+    mov rcx, [rip + {linux_signal_rcx}]
+    mov r11, [rip + {linux_signal_r11}]
+    iretq
 ginux_user_return_kernel:
     mov rsp, [rip + {user_return_stack}]
     pop r15
@@ -918,7 +956,11 @@ ginux_user_return_kernel:
     linux_user_rflags = sym LINUX_USER_RFLAGS,
     linux_kernel_frame = sym LINUX_KERNEL_FRAME,
     linux_syscall_result = sym LINUX_SYSCALL_RESULT,
+    linux_signal_rax = sym LINUX_SIGNAL_RAX,
+    linux_signal_rcx = sym LINUX_SIGNAL_RCX,
+    linux_signal_r11 = sym LINUX_SIGNAL_R11,
     linux_return_to_kernel = const LINUX_RETURN_TO_KERNEL as i64,
+    linux_return_from_signal = const LINUX_RETURN_FROM_SIGNAL as i64,
     user_data = const USER_DATA_SELECTOR as u64,
     user_code = const USER_CODE_SELECTOR as u64,
 );
@@ -1460,6 +1502,71 @@ impl LinuxSyscallFrame {
 
     fn argument(self, index: usize) -> Option<u64> {
         self.into_array().get(index.checked_add(6)?).copied()
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct LinuxSignalContext {
+    registers: LinuxSyscallFrame,
+    rax: u64,
+    rcx: u64,
+    r11: u64,
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    signal_stack: u64,
+    signal_mask: u64,
+}
+
+impl LinuxSignalContext {
+    const ZERO: Self = Self {
+        registers: LinuxSyscallFrame::ZERO,
+        rax: 0,
+        rcx: 0,
+        r11: 0,
+        rip: 0,
+        rsp: 0,
+        rflags: 0,
+        signal_stack: 0,
+        signal_mask: 0,
+    };
+
+    fn from_fault(context: UserFaultContext, signal_stack: u64, signal_mask: u64) -> Self {
+        Self {
+            registers: LinuxSyscallFrame {
+                r15: context.r15,
+                r14: context.r14,
+                r13: context.r13,
+                r12: context.r12,
+                rbp: context.rbp,
+                rbx: context.rbx,
+                r10: context.r10,
+                r9: context.r9,
+                r8: context.r8,
+                rdx: context.rdx,
+                rsi: context.rsi,
+                rdi: context.rdi,
+            },
+            rax: context.rax,
+            rcx: context.rcx,
+            r11: context.r11,
+            rip: context.rip,
+            rsp: context.rsp,
+            rflags: context.rflags,
+            signal_stack,
+            signal_mask,
+        }
+    }
+
+    fn user_context(self) -> LinuxUserContext {
+        LinuxUserContext {
+            registers: self.registers,
+            rip: self.rip,
+            rsp: self.rsp,
+            rflags: self.rflags,
+            rax: self.rax,
+            fs_base: active_fs_base(),
+        }
     }
 }
 
@@ -2872,6 +2979,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+    LINUX_SIGNAL_ACTIVE.store(false, Ordering::SeqCst);
+    LINUX_SIGNAL_DELIVERY_COUNT.store(0, Ordering::SeqCst);
+    LINUX_SIGNAL_RETURN_COUNT.store(0, Ordering::SeqCst);
+    unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO) };
     let linux_clone_publication_valid = if execution.tls_size == 0 {
         true
     } else {
@@ -3043,6 +3154,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let futex_wait_block_count = LINUX_FUTEX_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let futex_explicit_wake_count = LINUX_FUTEX_EXPLICIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let futex_exit_wake_count = LINUX_FUTEX_EXIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
+    let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
+    let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
+    let signal_lifecycle_valid = !LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst)
+        && signal_delivery_count == 1
+        && signal_return_count == 1
+        && unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() == LinuxSignalContext::ZERO };
     if execution.tls_size != 0
         && !(child_exit_count == 2
             && parent_resumed
@@ -3738,6 +3855,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && process_name_restored
         && executable_identity_restored
         && no_new_privileges_enforced
+        && signal_lifecycle_valid
         && signal_mask_restored
         && signal_actions_restored
         && alt_stack_disabled
@@ -3777,6 +3895,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             process_name_restored,
             executable_identity_restored,
             no_new_privileges_enforced,
+            signal_lifecycle_valid,
             signal_mask_restored,
             signal_actions_restored,
             alt_stack_disabled,
@@ -4256,6 +4375,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_RT_SIGPROCMASK_SYSCALL => {
             linux_rt_sigprocmask(first_argument, buffer, count, register(0))
         }
+        LINUX_RT_SIGRETURN_SYSCALL => linux_rt_sigreturn(registers, user_stack),
         LINUX_CLONE_SYSCALL => linux_clone_thread(saved_registers, user_rip, user_rflags),
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
         LINUX_EXECVEAT_SYSCALL => {
@@ -9284,6 +9404,114 @@ fn linux_rt_sigprocmask(how: u64, set: u64, old_set: u64, set_size: u64) -> u64 
     0
 }
 
+fn linux_executable_user_address(address: u64) -> bool {
+    let code = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
+    let code_end = code.saturating_add(ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst));
+    let loader = ELF_PROBE_LOADER_CODE_BASE.load(Ordering::SeqCst);
+    let loader_end = loader.saturating_add(ELF_PROBE_LOADER_CODE_SIZE.load(Ordering::SeqCst));
+    (code..code_end).contains(&address) || (loader..loader_end).contains(&address)
+}
+
+fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {
+    if !frame.is_page_fault()
+        || current_linux_thread_handle().is_none()
+        || LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
+    {
+        return false;
+    }
+    let signal_bit = 1 << (LINUX_SIGSEGV - 1);
+    let old_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    if old_mask & signal_bit != 0 {
+        return false;
+    }
+    let index = LINUX_SIGSEGV as usize - 1;
+    let handler = ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
+    let flags = ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
+    let restorer = ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
+    if handler <= 1
+        || flags != LINUX_SA_RESTORER
+        || !linux_executable_user_address(handler)
+        || !linux_executable_user_address(restorer)
+    {
+        return false;
+    }
+    let interrupted = frame.context();
+    let Some(stack_floor) = interrupted.rsp.checked_sub(24) else {
+        return false;
+    };
+    let Some(signal_stack) = (stack_floor & !15).checked_add(8) else {
+        return false;
+    };
+    let context = LinuxSignalContext::from_fault(interrupted, signal_stack, old_mask);
+    if !context.user_context().is_valid() {
+        return false;
+    }
+    let mut signal_frame = [0_u8; LINUX_SIGNAL_FRAME_SIZE];
+    signal_frame[..8].copy_from_slice(&restorer.to_ne_bytes());
+    signal_frame[8..].copy_from_slice(&LINUX_SIGNAL_FRAME_COOKIE.to_ne_bytes());
+    if !copy_to_linux_user(signal_stack, &signal_frame)
+        || !frame.enter_signal_handler(
+            handler,
+            signal_stack,
+            LINUX_SIGSEGV,
+            USER_CODE_SELECTOR,
+            USER_DATA_SELECTOR,
+        )
+    {
+        return false;
+    }
+    // SAFETY: interrupts are disabled from exception entry through IRETQ, and
+    // only one bounded Linux signal frame may be active at a time.
+    unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(context) };
+    let action_mask = ELF_PROBE_SIGNAL_ACTION_MASKS[index].load(Ordering::SeqCst);
+    ELF_PROBE_SIGNAL_MASK.store(old_mask | action_mask | signal_bit, Ordering::SeqCst);
+    LINUX_SIGNAL_ACTIVE.store(true, Ordering::SeqCst);
+    LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
+    true
+}
+
+fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64) -> u64 {
+    if output.is_null() || !LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {
+        return LINUX_EINVAL;
+    }
+    // SAFETY: signal delivery serializes this context while interrupts remain
+    // disabled; active is cleared before another delivery can publish state.
+    let context = unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() };
+    if context.signal_stack.checked_add(8) != Some(user_stack) {
+        return LINUX_EINVAL;
+    }
+    let mut cookie = [0_u8; 8];
+    if !copy_from_linux_user(user_stack, &mut cookie)
+        || u64::from_ne_bytes(cookie) != LINUX_SIGNAL_FRAME_COOKIE
+        || !context.user_context().is_valid()
+        || !write_linux_live_return(output, context.user_context())
+    {
+        return LINUX_EINVAL;
+    }
+    // SAFETY: the dedicated IRETQ epilogue consumes these values before this
+    // serialized syscall entry can be reused.
+    unsafe {
+        LINUX_SIGNAL_RAX = context.rax;
+        LINUX_SIGNAL_RCX = context.rcx;
+        LINUX_SIGNAL_R11 = context.r11;
+        core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO);
+    }
+    ELF_PROBE_SIGNAL_MASK.store(context.signal_mask, Ordering::SeqCst);
+    LINUX_SIGNAL_ACTIVE.store(false, Ordering::SeqCst);
+    LINUX_SIGNAL_RETURN_COUNT.fetch_add(1, Ordering::SeqCst);
+    LINUX_RETURN_FROM_SIGNAL
+}
+
+fn abort_linux_signal() {
+    if LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst) {
+        // SAFETY: the active context is exclusively owned by this serialized
+        // Linux execution while interrupts remain disabled.
+        let context = unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() };
+        ELF_PROBE_SIGNAL_MASK.store(context.signal_mask, Ordering::SeqCst);
+        unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO) };
+    }
+}
+
 fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {
     if !linux_writable_user_range_contains(address, input.len()) {
         return false;
@@ -10154,6 +10382,12 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         serial_write(" ");
         serial_write_u64(fault_metadata.instruction);
         serial_write("\r\n");
+        if deliver_linux_sigsegv(frame) {
+            return 0;
+        }
+        abort_linux_signal();
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return u64::MAX;
     }
     let action = scheduler::fault_runtime(
         frame,

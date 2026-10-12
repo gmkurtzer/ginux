@@ -1563,6 +1563,10 @@ if ! grep -q '^ginux: Linux bounded signal actions validated' "$output_file"; th
     echo "Boot test failed: Linux bounded signal actions were not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux synchronous SIGSEGV lifecycle validated' "$output_file"; then
+    echo "Boot test failed: Linux synchronous SIGSEGV lifecycle was not validated." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux bounded alternate signal stack validated' "$output_file"; then
     echo "Boot test failed: Linux bounded alternate signal stack was not validated." >&2

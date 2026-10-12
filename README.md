@@ -416,6 +416,17 @@ every byte with the requested permission. The pipe proof copies two bytes
 across the exact linked-main RX-to-RW boundary; gaps, RELRO, guard pages, and
 address overflow still fail closed.
 The ring-3 workload verifies each error and continues into valid calls.
+A real ring-3 page fault now enters a bounded `SIGSEGV` handler registered with
+`rt_sigaction` and `SA_RESTORER`. The kernel builds a validated 16-byte frame on
+the current writable stack, applies the automatic signal and action masks, and
+retains the complete interrupted register state. The handler proves a premature
+`rt_sigreturn` is rejected without consuming that state, maps the missing page,
+and returns through the restorer. A dedicated `IRETQ` syscall epilogue restores
+all general registers—including `rcx` and `r11`—plus RIP, RSP, RFLAGS, and the
+prior mask before retrying the faulting load. This is synchronous page-fault
+delivery only: pending/asynchronous signals, `SA_SIGINFO`, user-editable
+`ucontext`, alternate-stack entry, nested delivery, and syscall restart remain
+future work.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
 Real/effective/saved UID and GID triples are also zero and are copied only

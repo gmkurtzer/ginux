@@ -1287,17 +1287,12 @@ linux_clone_repeat:
     mov eax, 13
     call syscall_expect_einval
 
-    xor edi, edi
-    xor esi, esi
-    xor edx, edx
-    mov r10d, 8
-    mov eax, 13
-    call syscall_expect_einval
-
-    mov qword ptr [0x405100], 1
-    mov qword ptr [0x405108], 0x1234
-    mov qword ptr [0x405110], 0x400100
-    mov qword ptr [0x405118], 0x40102
+    lea rax, [rip + linux_sigsegv_handler]
+    mov qword ptr [0x405100], rax
+    mov qword ptr [0x405108], 0x4000000
+    lea rax, [rip + linux_signal_restorer]
+    mov qword ptr [0x405110], rax
+    mov qword ptr [0x405118], 0x800
     mov edi, 9
     mov esi, 0x405100
     xor edx, edx
@@ -1305,14 +1300,7 @@ linux_clone_repeat:
     mov eax, 13
     call syscall_expect_einval
 
-    mov edi, 10
-    mov esi, 0x406200
-    xor edx, edx
-    mov r10d, 8
-    mov eax, 13
-    call syscall_expect_efault
-
-    mov edi, 10
+    mov edi, 11
     mov esi, 0x405100
     mov edx, 0x405120
     mov r10d, 8
@@ -1324,42 +1312,22 @@ linux_clone_repeat:
     cmp qword ptr [0x405138], 0
     jne failure
 
-    mov edi, 10
-    xor esi, esi
-    mov edx, 0x405120
-    mov r10d, 8
-    mov eax, 13
+    mov qword ptr [0x405180], 0
+    cmp qword ptr [0x40b000], 0
+    jne failure
+    cmp qword ptr [0x405180], 11
+    jne failure
+    mov edi, 0x40b000
+    mov esi, 4096
+    mov eax, 11
     call syscall_expect_zero
-    cmp qword ptr [0x405120], 1
-    jne failure
-    cmp qword ptr [0x405128], 0x1234
-    jne failure
-    cmp qword ptr [0x405130], 0x400100
-    jne failure
-    cmp qword ptr [0x405138], 2
-    jne failure
 
+    xor eax, eax
     mov qword ptr [0x405100], 0
-    mov qword ptr [0x405108], 0
-    mov qword ptr [0x405110], 0
-    mov qword ptr [0x405118], 0
-    mov edi, 10
-    mov esi, 0x405100
-    mov edx, 0x406200
-    mov r10d, 8
-    mov eax, 13
-    call syscall_expect_efault
-
-    mov edi, 10
-    xor esi, esi
-    mov edx, 0x405120
-    mov r10d, 8
-    mov eax, 13
-    call syscall_expect_zero
-    cmp qword ptr [0x405120], 1
-    jne failure
-
-    mov edi, 10
+    mov qword ptr [0x405108], rax
+    mov qword ptr [0x405110], rax
+    mov qword ptr [0x405118], rax
+    mov edi, 11
     mov esi, 0x405100
     xor edx, edx
     mov r10d, 8
@@ -4190,6 +4158,42 @@ child_thread_probe:
     mov eax, 60
     syscall
 #endif
+
+linux_sigsegv_handler:
+    cmp edi, 11
+    jne failure
+    mov qword ptr [0x405180], rdi
+    mov edi, 99
+    xor esi, esi
+    mov edx, 0x405188
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne failure
+    cmp qword ptr [0x405188], 0xc00
+    jne failure
+    mov eax, 15
+    syscall
+    cmp rax, -22
+    jne failure
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
+    jne failure
+    ret
+
+linux_signal_restorer:
+    mov eax, 15
+    syscall
+    ud2
+
 failure:
     ud2
 

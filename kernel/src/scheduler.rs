@@ -118,6 +118,28 @@ pub(crate) struct UserFaultFrame {
     ss: u64,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct UserFaultContext {
+    pub(crate) r15: u64,
+    pub(crate) r14: u64,
+    pub(crate) r13: u64,
+    pub(crate) r12: u64,
+    pub(crate) r11: u64,
+    pub(crate) r10: u64,
+    pub(crate) r9: u64,
+    pub(crate) r8: u64,
+    pub(crate) rbp: u64,
+    pub(crate) rdi: u64,
+    pub(crate) rsi: u64,
+    pub(crate) rdx: u64,
+    pub(crate) rcx: u64,
+    pub(crate) rbx: u64,
+    pub(crate) rax: u64,
+    pub(crate) rip: u64,
+    pub(crate) rflags: u64,
+    pub(crate) rsp: u64,
+}
+
 impl UserFaultFrame {
     pub(crate) const fn is_page_fault(&self) -> bool {
         self.vector == 14
@@ -130,6 +152,53 @@ impl UserFaultFrame {
             address,
             instruction: self.rip,
         }
+    }
+
+    pub(crate) const fn context(&self) -> UserFaultContext {
+        UserFaultContext {
+            r15: self.r15,
+            r14: self.r14,
+            r13: self.r13,
+            r12: self.r12,
+            r11: self.r11,
+            r10: self.r10,
+            r9: self.r9,
+            r8: self.r8,
+            rbp: self.rbp,
+            rdi: self.rdi,
+            rsi: self.rsi,
+            rdx: self.rdx,
+            rcx: self.rcx,
+            rbx: self.rbx,
+            rax: self.rax,
+            rip: self.rip,
+            rflags: self.rflags,
+            rsp: self.rsp,
+        }
+    }
+
+    pub(crate) fn enter_signal_handler(
+        &mut self,
+        handler: u64,
+        stack: u64,
+        signal: u64,
+        code_selector: u16,
+        data_selector: u16,
+    ) -> bool {
+        if !self.selectors_match(code_selector, data_selector)
+            || handler == 0
+            || handler >= 1 << 47
+            || stack == 0
+            || stack >= 1 << 47
+        {
+            return false;
+        }
+        self.rip = handler;
+        self.rsp = stack;
+        self.rdi = signal;
+        self.rsi = 0;
+        self.rdx = 0;
+        true
     }
 }
 

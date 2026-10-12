@@ -693,25 +693,50 @@ respects VMA permissions rather than treating every mapped page as writable.
 mask for the sole thread. It supports `SIG_BLOCK`, `SIG_UNBLOCK`, `SIG_SETMASK`,
 and a null-set query; `SIGKILL` and `SIGSTOP` are always cleared. The kernel
 validates the set size and every complete input/output range before mutation,
-so `-EINVAL` and `-EFAULT` leave the prior mask intact. The proof restores an
-empty mask before exit. This is process state only: signal actions, generation,
-delivery, pending sets, alternate stacks, and interrupted-syscall behavior are
-not implemented yet.
+so `-EINVAL` and `-EFAULT` leave the prior mask intact. The bounded synchronous
+delivery path temporarily adds the delivered signal and the action mask, then
+restores the exact prior mask through `rt_sigreturn`. Pending sets,
+asynchronous generation, and interrupted-syscall restart behavior are not
+implemented yet.
 `rax = 13` (`__NR_rt_sigaction`) stores and queries one 32-byte x86-64 action
 record for each of signals 1 through 64. Complete action and old-action ranges
 are validated before state changes; action masks also clear `SIGKILL` and
 `SIGSTOP`. Installing handlers for those two uncatchable signals returns
-`-EINVAL`. Handler, flags, and restorer values are retained as opaque ABI state
-until delivery is implemented. The proof exercises default queries, normalized
-registration, fault atomicity, and restoration of every action before exit.
+`-EINVAL`. Other records remain opaque state unless selected by the bounded
+`SIGSEGV` delivery contract below. The proof exercises default queries,
+normalized registration, fault atomicity, and restoration of every action
+before exit.
+
+An unmasked ring-3 page fault is delivered as signal 11 when its action has
+exactly `SA_RESTORER`, both handler and restorer point into a current executable
+image extent, a Linux thread is current, and no signal frame is active. The
+kernel retains the complete interrupted general-register, RIP, RSP, RFLAGS, and
+mask state. It places a bounded 16-byte frame containing the restorer address
+and an opaque validation cookie below the current writable user stack, aligns
+handler entry to the x86-64 function ABI, sets `rdi = 11`, and enters the
+handler through the exception `IRETQ` path. The proof handler observes the
+automatic `SIGSEGV` bit plus its action mask, maps the missing page, and returns
+through the registered restorer.
+
+`rax = 15` (`__NR_rt_sigreturn`) succeeds only for that one active frame at its
+exact post-`ret` stack address with the intact cookie. A premature call returns
+`-EINVAL` without consuming the frame. Successful return clears the kernel
+record, restores the prior mask, and uses a dedicated `IRETQ` syscall epilogue
+to restore all interrupted registers, including `rcx` and `r11`; the retried
+load then observes the newly mapped zero page. Nested delivery, pending signals,
+`SA_SIGINFO`, alternate-stack selection, user-editable `ucontext`, restartable
+syscalls, and non-page-fault signal sources remain unsupported. A page fault
+that does not meet this contract terminates the bounded Linux execution rather
+than entering the native-domain scheduler fault path.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE` or a zero-flag stack of at least
 2048 bytes wholly contained in one currently writable probe VMA. Invalid
 records return `-EINVAL`, undersized stacks return `-ENOMEM`, and inaccessible
 records or stack ranges return `-EFAULT` before state changes. The proof enables,
 queries, rejects invalid replacements, and disables the stack before exit.
-`SS_ONSTACK`, automatic disarming, and actual signal-stack entry remain
-undefined until signal delivery exists.
+`SS_ONSTACK`, automatic disarming, and signal delivery onto the alternate stack
+remain unsupported; the current synchronous path always uses the active thread
+stack.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active
@@ -910,7 +935,7 @@ reads back all four syscall MSRs plus FS base before any later control-plane
 workload executes.
 
 This milestone proves the hardware transition and Linux argument registers. It
-does not provide persistent per-thread kernel stacks, `IRETQ` fallback, signal
+does not provide persistent per-thread kernel stacks, general signal
 interruption, restartable syscalls, scheduler integration, mutable credentials
 or credential-based permissions, a general file-descriptor table, arbitrary
 user buffers,
@@ -922,7 +947,8 @@ bounded device/runtime-file `openat`, `lseek`, console `ioctl`, `brk`, `uname`,
 `readlink`/`readlinkat`,
 bounded anonymous and immutable-file `mmap`/`munmap` plus bounded
 `madvise`/`mincore`, bounded read-only `mprotect`,
-`rt_sigaction`, `rt_sigprocmask`, `sigaltstack`, `umask`, read-only
+`rt_sigaction`, `rt_sigprocmask`, bounded synchronous `rt_sigreturn`,
+`sigaltstack`, `umask`, read-only
 `getrlimit`/`prlimit64`,
 bounded one-waiter `futex`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
