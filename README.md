@@ -2,6 +2,17 @@
 
 Ginux is an immutable, capability-secure, container-native operating system for AI infrastructure. The native host is intentionally small: an immutable kernel boots one constrained control-plane domain, which creates isolated services and containers through stable interfaces.
 
+The first M6 storage primitive is a canonical two-sector persistent-volume
+record. It preserves the older generation while preparing and flushing an
+inactive slot, writes the commit marker last, and accepts the new generation
+only after the final flush. Every QEMU boot proves recovery at all five commit
+stages, rejects partial commit markers and corrupt records, falls back to the
+older valid slot, and fails closed on generation exhaustion or ambiguity. The
+current backend models durable versus pending sectors in memory; it is not yet
+connected to virtio-blk and therefore does not claim persistence across a
+machine restart. See
+[Persistent Volume Record v0](specs/kernel/persistent-volume-v0.md).
+
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
 boot manifest. The kernel validates its measurement, normalized metadata, safe relative

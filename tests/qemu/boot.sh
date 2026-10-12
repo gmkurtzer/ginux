@@ -283,6 +283,21 @@ if ! grep -q '^ginux: local APIC timer interrupt handled' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded persistent volume format validated' "$output_file"; then
+    echo "Boot test failed: the persistent volume format was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: interrupted volume commits recovered' "$output_file"; then
+    echo "Boot test failed: interrupted volume commits were not recovered." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: corrupt persistent volume records rejected' "$output_file"; then
+    echo "Boot test failed: corrupt persistent volume records were not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: capability derivation and revocation verified' "$output_file"; then
     echo "Boot test failed: capability authority invariants failed." >&2
     exit 1

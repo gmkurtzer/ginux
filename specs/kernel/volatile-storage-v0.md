@@ -23,5 +23,8 @@ This is an execution and isolation proof, not a filesystem or stable storage
 ABI. The value is lost when the service exits or faults. There is one fixed
 value, one fixed command, one client, no names, no request identifiers, no
 concurrency, no recovery, and no persistence across service restart or machine
-reboot. A later storage protocol must define those semantics before exposing a
+reboot. The separate [Persistent Volume Record v0](persistent-volume-v0.md)
+now defines a crash-consistent two-slot block format and recovery algorithm,
+but it is not yet connected to this ring-3 protocol or to a durable backend.
+A later storage-service ABI must join those pieces before exposing a
 general-purpose interface.

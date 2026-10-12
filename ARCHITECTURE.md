@@ -117,6 +117,7 @@ The native host does not require a traditional distribution root filesystem. It 
 - The first proof of concept may unpack a CPIO/initramfs into memory and use `tmpfs`, avoiding an early persistent-filesystem dependency.
 - The first minimal system container should use a verified read-only root image plus explicitly writable temporary paths. Later distribution images add explicitly authorized persistent paths.
 - A later isolated storage service should expose `virtio-blk` and then selected NVMe hardware through a stable block-device contract.
+- The first M6 storage primitive is a versioned two-slot persistent-volume record with explicit prepare/flush/commit/flush ordering, checksum validation, and fail-closed generation recovery. Its QEMU proof currently uses a volatile reference backend; machine-reboot persistence begins only when the same contract is bound to an isolated `virtio-blk` service.
 - Existing filesystem implementations may be ported or wrapped inside isolated services, including non-Rust implementations where a rewrite would add risk. Kernel memory safety and service isolation must not depend on the filesystem implementation language.
 - Container image layers should be content-addressed and read-only; per-container writable overlays and persistent volumes are separate, explicitly authorized objects.
 - Filesystem-service crashes must not panic the kernel. Recovery guarantees for mounted domains and crash consistency must be specified per filesystem.

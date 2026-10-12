@@ -19,6 +19,7 @@ mod memory;
 mod network;
 mod pe;
 mod scheduler;
+mod volume;
 
 use core::arch::{asm, global_asm};
 use core::ffi::c_void;
@@ -458,6 +459,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: local APIC timer interrupt failed\r\n");
     }
     serial_write("ginux: local APIC timer interrupt handled\r\n");
+
+    if !volume::verify_contract() {
+        kernel_fail("ginux: persistent volume contract invalid\r\n");
+    }
+    serial_write("ginux: bounded persistent volume format validated\r\n");
+    serial_write("ginux: interrupted volume commits recovered\r\n");
+    serial_write("ginux: corrupt persistent volume records rejected\r\n");
 
     if !capability::verify_authority_invariants() {
         kernel_fail("ginux: capability authority invariant failed\r\n");
