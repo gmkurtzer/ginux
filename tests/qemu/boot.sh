@@ -431,6 +431,12 @@ if ! grep -q '^ginux: bounded uncached virtio MMIO mapping active' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded uncached MSI-X mapping active' "$output_file" ||
+    ! grep -q '^ginux: MSI-X cacheable aliases removed' "$output_file"; then
+    echo "Boot test failed: the bounded MSI-X mapping retained an unsafe alias." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: virtio MMIO translation bounds verified' "$output_file"; then
     echo "Boot test failed: virtio MMIO translation was not bounded." >&2
     exit 1

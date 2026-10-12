@@ -25,6 +25,11 @@ queues. Discovery also requires one disabled MSI-X capability, validates its
 vector count and memory-BAR-backed table and pending-bit ranges, and rejects
 malformed interrupt metadata without mapping or programming it. See
 [PCI Virtio Block Discovery v0](specs/kernel/pci-virtio-block-v0.md).
+The validated MSI-X table and pending-bit array are now placed in a separate,
+bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
+are removed before page-table activation, and the complete sealed MMIO table
+is verified on every boot. MSI-X remains disabled and unprogrammed. See
+[Virtio MSI-X Mapping v0](specs/kernel/virtio-msix-mapping-v0.md).
 The validated configuration regions are now mapped through a bounded,
 uncached, supervisor-only higher-half window. The kernel forces PCI bus mastering off,
 resets the device, accepts only modern virtio plus flush support, confirms one

@@ -185,6 +185,17 @@ impl VirtioBlockDevice {
             self.msix.pba_length,
         )
     }
+
+    pub(crate) fn msix_mmio_span(self) -> Option<(u64, usize)> {
+        let (table, table_length) = self.msix_table_region()?;
+        let (pba, pba_length) = self.msix_pba_region()?;
+        let start = table.min(pba);
+        let end = table
+            .checked_add(table_length as u64)?
+            .max(pba.checked_add(pba_length as u64)?);
+        let length = usize::try_from(end.checked_sub(start)?).ok()?;
+        (length != 0).then_some((start, length))
+    }
 }
 
 #[derive(Clone, Copy)]

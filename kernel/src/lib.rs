@@ -242,6 +242,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some((virtio_mmio_physical, virtio_mmio_length)) = virtio_block.mmio_span() else {
         kernel_fail("ginux: invalid virtio MMIO span\r\n");
     };
+    let Some((virtio_msix_physical, virtio_msix_length)) = virtio_block.msix_mmio_span() else {
+        kernel_fail("ginux: invalid virtio MSI-X MMIO span\r\n");
+    };
 
     let Some(memory_map_end) = boot_info
         .memory_map_size
@@ -299,14 +302,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     // SAFETY: The entry trampoline disabled interrupts. The required live
     // addresses and the page-table objects are checked against the complete
     // transitional identity-map range before CR3 is changed.
-    let Ok(virtio_mmio) = (unsafe {
+    let Ok((virtio_mmio, virtio_msix_mmio)) = (unsafe {
         arch::x86_64::paging::install_initial_identity_map(
             boot_info,
             &image,
             &required_addresses,
             &guard_pages,
-            virtio_mmio_physical,
-            virtio_mmio_length,
+            (virtio_mmio_physical, virtio_mmio_length),
+            (virtio_msix_physical, virtio_msix_length),
         )
     }) else {
         kernel_fail("ginux: page-table transition failed\r\n");
@@ -518,11 +521,25 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     });
     serial_write("\r\nginux: disabled virtio MSI-X capability validated\r\n");
     if !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
+        || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_msix_mmio)
+        || !arch::x86_64::paging::mmio_mappings_are_exact(virtio_mmio, virtio_msix_mmio)
+        || !arch::x86_64::paging::mmio_identity_alias_is_absent(virtio_msix_mmio)
         || !arch::x86_64::paging::mmio_translation_is_bounded(
             virtio_mmio,
             virtio_mmio_physical,
             virtio_mmio_length,
         )
+        || !arch::x86_64::paging::mmio_translation_is_bounded(
+            virtio_msix_mmio,
+            virtio_msix_physical,
+            virtio_msix_length,
+        )
+        || virtio_msix_mmio
+            .address(msix_table_physical, msix_table_length)
+            .is_none()
+        || virtio_msix_mmio
+            .address(msix_pba_physical, msix_pba_length)
+            .is_none()
         || virtio_mmio
             .address(virtio_common_physical, virtio_common_length)
             .is_none()
@@ -531,6 +548,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded uncached virtio MMIO mapping active\r\n");
     serial_write("ginux: virtio MMIO translation bounds verified\r\n");
+    serial_write("ginux: bounded uncached MSI-X mapping active\r\n");
+    serial_write("ginux: MSI-X cacheable aliases removed\r\n");
     let Some(virtio_initialization) =
         arch::x86_64::pci::initialize_without_dma(virtio_block, virtio_mmio)
     else {
