@@ -936,6 +936,18 @@ if ! grep -q '^ginux: deterministic initramfs image accepted' "$output_file"; th
     echo "Boot test failed: the deterministic initramfs image was not accepted." >&2
     exit 1
 fi
+if ! grep -q '^ginux: measured isolated volume service discovered' "$output_file"; then
+    echo "Boot test failed: the measured isolated volume service was not discovered." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: bounded native PIE load plan accepted' "$output_file"; then
+    echo "Boot test failed: the bounded native PIE load plan was not accepted." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: relative-only service relocations accepted' "$output_file"; then
+    echo "Boot test failed: the native service relocation contract was not accepted." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: bounded newc archive paths validated' "$output_file"; then
     echo "Boot test failed: bounded initramfs paths were not validated." >&2

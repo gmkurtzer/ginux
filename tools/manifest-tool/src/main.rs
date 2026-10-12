@@ -20,6 +20,8 @@ const EXECUTABLE_MAGIC: &[u8; 8] = b"GINXBIN\0";
 const EXECUTABLE_VERSION: u16 = 2;
 const EXECUTABLE_HEADER_SIZE: u16 = 40;
 const EXECUTABLE_MAX_CODE_SIZE: usize = 4096;
+const VOLUME_SERVICE_MAX_SIZE: usize = 64 * 1024;
+const ROOT_IMAGE_MAX_SIZE: usize = 48 * 4096;
 const DEVELOPMENT_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
@@ -27,9 +29,9 @@ const DEVELOPMENT_SEED: [u8; 32] = [
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 7 {
+    if arguments.len() != 8 {
         fail(
-            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS SYSTEM_PROFILE OUTPUT_RS",
+            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS VOLUME_SERVICE SYSTEM_PROFILE OUTPUT_RS",
         );
     }
     let config = fs::read_to_string(&arguments[1]).unwrap_or_else(|error| {
@@ -44,11 +46,18 @@ fn main() {
         fail("control-plane code must contain 1 through 4096 bytes");
     }
     let bundle = wrap_executable(&code, entries);
-    let system_profile = fs::read(&arguments[5]).unwrap_or_else(|error| {
-        fail(&format!("cannot read {}: {error}", arguments[5]));
+    let volume_service = read_root_artifact(Path::new(&arguments[5]));
+    if volume_service.is_empty() || volume_service.len() > VOLUME_SERVICE_MAX_SIZE {
+        fail("volume service must contain 1 through 65536 bytes");
+    }
+    let system_profile = fs::read(&arguments[6]).unwrap_or_else(|error| {
+        fail(&format!("cannot read {}: {error}", arguments[6]));
     });
     validate_system_profile(&system_profile);
-    let root_image = build_initramfs(&arguments[4], &system_profile);
+    let root_image = build_initramfs(&arguments[4], &volume_service, &system_profile);
+    if root_image.len() > ROOT_IMAGE_MAX_SIZE {
+        fail("generated root image exceeds the 48-page publication capacity");
+    }
 
     let bundle_digest: [u8; 32] = Sha256::digest(&bundle).into();
     let root_digest: [u8; 32] = Sha256::digest(&root_image).into();
@@ -85,7 +94,7 @@ fn main() {
         &bundle,
         &root_image,
     );
-    let output_path = Path::new(&arguments[6]);
+    let output_path = Path::new(&arguments[7]);
     fs::write(output_path, output).unwrap_or_else(|error| {
         fail(&format!("cannot write {}: {error}", output_path.display()));
     });
@@ -96,7 +105,7 @@ fn main() {
     );
 }
 
-fn build_initramfs(linux_artifacts: &str, system_profile: &[u8]) -> Vec<u8> {
+fn build_initramfs(linux_artifacts: &str, volume_service: &[u8], system_profile: &[u8]) -> Vec<u8> {
     let artifacts = Path::new(linux_artifacts);
     let linux_init = read_root_artifact(&artifacts.join("linux-linked-graph-main.elf"));
     let linux_interpreter = read_root_artifact(&artifacts.join("ld-ginux.so"));
@@ -138,11 +147,12 @@ fn build_initramfs(linux_artifacts: &str, system_profile: &[u8]) -> Vec<u8> {
         (18, "bin/signal-probe", linux_signal_probe.as_slice()),
         (20, "bin/exec-second", linux_exec_second.as_slice()),
         (24, "sbin/init", linux_system_init.as_slice()),
+        (25, "native/volume", volume_service),
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
     append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
-    append_newc_entry(&mut archive, 25, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 26, 0, "TRAILER!!!", &[]);
     archive
 }
 

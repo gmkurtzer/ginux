@@ -35,9 +35,9 @@ help:
 doctor:
 	@tools/qemu/doctor.sh
 
-manifest: linux-probe
+manifest: linux-probe volume-service
 	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
 	@test -s "$(INITRAMFS)"
 
 system-image: manifest
@@ -92,7 +92,6 @@ gate:
 	@$(MAKE) fmt
 	@$(MAKE) clean
 	@$(MAKE) check
-	@$(MAKE) volume-service
 	@$(MAKE) test
 	@git diff --check
 	@echo "Clean build and QEMU test gate passed"

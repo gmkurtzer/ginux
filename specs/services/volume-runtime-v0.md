@@ -1,7 +1,8 @@
 # Isolated Volume Runtime v0
 
-**Status:** Freestanding x86-64 service artifact builds; native loading remains
-the next milestone.
+**Status:** Freestanding x86-64 service artifact builds and is authenticated and
+validated as a bounded native PIE; address-space materialization remains the
+next milestone.
 
 ## Artifact
 
@@ -11,6 +12,18 @@ separate read-only, RX, and RW load segments and a non-executable stack. It has
 no host libc, allocator, filesystem, firmware, or kernel-library dependency.
 The runtime links the same `ginux-volume-format` and `ginux-volume-service`
 `no_std` crates used by the kernel reference backend.
+
+Manifest generation places the artifact at the internal `native/volume` path in the
+deterministic initramfs. The existing root-image digest therefore authenticates
+the exact service bytes before the kernel copies and publishes them as its
+immutable measured root. No corresponding top-level directory is published, so
+the native artifact does not become part of the Linux container's root view.
+
+The kernel accepts only a bounded 64 KiB x86-64 static PIE with one read-only,
+one RX, and one RW load segment, non-overlapping pages, a non-executable stack,
+full RW `GNU_RELRO`, immediate binding, and at most eight relative-only
+relocations. Unsupported headers, dynamic tags, writable executable mappings,
+symbol relocations, and out-of-range relocation targets or addends fail closed.
 
 ## Bootstrap contract
 
@@ -37,9 +50,9 @@ the supervisor can exercise the same mandatory device-quiescence path.
 
 ## Deliberate limits
 
-- The artifact is built and linted but is not yet loaded or executed by the
-  native service loader. The existing raw ring-3 proof still owns the live
-  virtio path.
+- The artifact is authenticated and parsed but its segments are not yet
+  materialized, relocated, or executed. The existing raw ring-3 proof still
+  owns the live virtio path.
 - `BootInfo` is an internal bootstrap structure, not the stable driver ABI.
 - One queue, one DMA page, one outstanding request, and one object-7 device are
   supported. There is no IOMMU domain or concurrent request path.

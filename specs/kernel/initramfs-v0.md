@@ -46,18 +46,24 @@ complete archive; after publication, the ELF planners parse and bind the
 selected measured files to their canonical paths, interpreter name, dependency
 order, SONAMEs, and bounded load layout.
 
-After validation, the current roughly 90 KiB proof image is copied into a
-fixed 32-frame, 128 KiB physically contiguous kernel-owned allocation. The
+The freestanding volume service is stored at the internal `native/volume`
+path. Like the internal `linux/*` linker artifacts, it has no corresponding
+top-level directory entry and therefore is not enumerated in the Linux-visible
+root filesystem. Its bytes remain available to the native loader by exact
+kernel lookup and are covered by the same signed root-image digest.
+
+After validation, the proof image is copied into a fixed 48-frame, 192 KiB
+physically contiguous kernel-owned allocation. The
 boot proof requires exact bytes, a zero tail across the remaining allocation,
 ownership of every frame, sequential physical and direct-map addresses, and no
 source alias. It deliberately mutates and restores the private copy to prove
 the measured boot source does not change, then scrubs the complete allocation
 before releasing every lease. The parser's general 16 MiB bound remains
-broader than this v0 publication capacity; images above 128 KiB fail closed
+broader than this v0 publication capacity; images above 192 KiB fail closed
 during materialization.
 
 A second lifecycle proof constructs a fixed index of at most 64 nodes. The
-22-entry proof crosses the former 16-node limit while remaining representable
+24-entry proof crosses the former 16-node limit while remaining representable
 by the private one-byte descriptor selector. Each
 node stores only checked 32-bit name and data offsets inside the owned image; no node
 retains a pointer into the handed boot source. Exact `init` and directory
@@ -65,7 +71,7 @@ lookups resolve into the owned allocation, while missing, absolute, and
 traversal paths fail. Destroying the index scrubs and releases all image frames.
 
 The runtime publication then materializes a third indexed copy and retains its
-32 frames under kernel ownership through shutdown. Signed manifest object 5 grants
+48 frames under kernel ownership through shutdown. Signed manifest object 5 grants
 the control plane `READ` authority only. Control ABI v4 operation 17 exposes a
 versioned profile probe, exact-path metadata lookup, reads of at most 64 bytes,
 and cursor-based direct-child enumeration.

@@ -16,6 +16,7 @@ mod linux_tmpfs;
 mod linux_user;
 mod manifest;
 mod memory;
+mod native_elf;
 mod network;
 mod pe;
 mod scheduler;
@@ -850,6 +851,30 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: persistent read-only root publication failed\r\n");
     }
     serial_write("ginux: measured root published in kernel-owned memory\r\n");
+    let Some(volume_service_node) = initramfs::published_regular_file_node(b"native/volume") else {
+        kernel_fail("ginux: isolated volume service missing\r\n");
+    };
+    let Some(volume_service) = initramfs::published_file_by_node(volume_service_node) else {
+        kernel_fail("ginux: isolated volume service unreadable\r\n");
+    };
+    let Some(volume_image) = native_elf::inspect(volume_service) else {
+        kernel_fail("ginux: isolated volume service ELF invalid\r\n");
+    };
+    if volume_image.bytes.len() != volume_service.len()
+        || volume_image.entry == 0
+        || volume_image.segments.iter().flatten().count() != 3
+        || volume_image.relocation_count == 0
+        || volume_image.relocations[..volume_image.relocation_count]
+            .iter()
+            .any(|relocation| {
+                relocation.is_none_or(|relocation| relocation.target == 0 || relocation.addend == 0)
+            })
+    {
+        kernel_fail("ginux: isolated volume service load plan incomplete\r\n");
+    }
+    serial_write("ginux: measured isolated volume service discovered\r\n");
+    serial_write("ginux: bounded native PIE load plan accepted\r\n");
+    serial_write("ginux: relative-only service relocations accepted\r\n");
     if !linux_mount::verify_contract() || !linux_mount::install_initial() {
         kernel_fail("ginux: initial Linux mount namespace invalid\r\n");
     }
