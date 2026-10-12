@@ -234,7 +234,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         && table.wait(init, second_child.pid) == Some(WaitResult { pid: 4, status: 7 })
 }
 
-fn copy_private_pages(
+pub(crate) fn copy_private_pages(
     source: &[memory::FrameLease; FORK_PRIVATE_PAGE_LIMIT],
     destination: &[memory::FrameLease; FORK_PRIVATE_PAGE_LIMIT],
 ) -> bool {

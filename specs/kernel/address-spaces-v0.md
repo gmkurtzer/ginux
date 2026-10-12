@@ -187,6 +187,27 @@ allocator's new owner and reclaims the frames using that owner. General
 mutable-region inventory, shared ownership, and fresh-address-space restart
 remain future work.
 
+## Bounded Linux child hierarchy clone
+
+The process foundation can eagerly clone a four-through-six-frame Linux page
+table hierarchy into distinct generation-checked frames. A bounded four-level
+walk first requires an exact inventory of every present user leaf, rejects
+large user pages, high-half user entries, repeated or untracked page-table
+frames, incomplete mapping lists, stale leases, and every parent/child alias.
+Only after complete validation does the transaction copy the tables, rewire
+their internal references to the child hierarchy, and replace every enumerated
+leaf with the corresponding private child frame while preserving read, write,
+execute, user, and NX behavior.
+
+The QEMU verifier uses a synthetic lower-half hierarchy with one RX page and
+one RW/NX page. It rejects stale, aliased, and incomplete inputs without
+changing the zeroed destination, then proves both roots resolve to different
+physical pages with identical initial contents. Child mutation leaves the
+parent unchanged, and teardown scrubs and releases all hierarchy and payload
+frames. This proof does not activate the child root, provide its required
+kernel mappings, snapshot the live Linux mapping registry, or install a
+schedulable execution context.
+
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate
 manifest-derived grant succeeds.

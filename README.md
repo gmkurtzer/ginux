@@ -294,7 +294,12 @@ A separate eager-copy primitive validates generation-bound ownership and
 pairwise separation before copying two complete private pages. Its proof
 rejects stale and aliased destinations without partial writes, demonstrates
 parent/child independence, scrubs both copies, and restores the allocator's
-live-frame count. It is not yet a complete address-space clone, so the minimal system
+live-frame count. A companion transaction walks every user leaf in a bounded
+four-to-six-frame hierarchy, rejects incomplete inventories, copies and
+rewires the page tables, and replaces every parent leaf with its corresponding
+private child frame while preserving W^X. The QEMU proof validates two
+independent roots and reclaims all twelve temporary frames. The transaction is
+not yet attached to the live Linux runtime or a schedulable process, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).

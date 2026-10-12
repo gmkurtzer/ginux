@@ -637,6 +637,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: bounded Linux private page copy invalid\r\n");
     }
     serial_write("ginux: bounded Linux private page copy validated\r\n");
+    if !address_space::verify_linux_process_hierarchy_clone() {
+        kernel_fail("ginux: bounded Linux child hierarchy clone invalid\r\n");
+    }
+    serial_write("ginux: bounded Linux child hierarchy clone validated\r\n");
     let Some(system_init_node) = initramfs::published_regular_file_node(b"sbin/init") else {
         kernel_fail("ginux: minimal system init missing\r\n");
     };

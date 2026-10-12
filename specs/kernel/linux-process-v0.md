@@ -57,18 +57,34 @@ complete pages. The verifier then mutates the child copy and proves the parent
 page remains unchanged, scrubs and releases both sides, and requires the
 kernel's live-frame count to return to its starting value.
 
-This is the physical payload operation needed by a future eager fork. It does
-not yet duplicate or rewire the Linux page-table hierarchy, enumerate every
-mapped process page, or associate the copied leases with a prepared process
-record.
+The companion hierarchy-clone transaction accepts four through six
+generation-checked parent and child page-table frames. Before writing the child
+hierarchy, a bounded four-level walk requires the supplied parent mapping list
+to cover every present user leaf exactly once, rejects user large pages and
+untracked or multiply referenced hierarchy frames, and requires every child
+page to be distinct from all parent and hierarchy frames. It then copies every
+table, rewires all hierarchy references to the child leases, and replaces each
+parent leaf with the corresponding private child page while preserving its W^X
+permissions. Incomplete mapping inventories, stale hierarchy leases, and
+aliased child pages fail before modifying the destination hierarchy.
+
+The boot proof constructs a four-level, two-page parent hierarchy, copies its
+RX and RW/NX pages, clones and rewires the child hierarchy, and verifies that
+both roots retain their own mappings and contents. It then scrubs and releases
+all twelve frames and requires the allocator count to return to its starting
+value.
+
+This is the physical address-space operation needed by a future eager fork. It
+does not yet enumerate the live Linux runtime's complete mapping registry,
+attach the resulting leases to a prepared process record, install a child
+execution context, or activate the child CR3.
 
 ## Deliberate limits
 
 This is an internal ownership contract, not Linux process compatibility yet.
 It is not connected to the syscall dispatcher and does not implement:
 
-- construction, hierarchy duplication, or copy-on-write of the complete
-  address space named at commit;
+- construction of a complete live Linux child address space or copy-on-write;
 - process-style `clone`, `fork`, `vfork`, `wait4`, or `waitid`;
 - descriptor, credential, signal, mount, or namespace inheritance;
 - concurrent process scheduling or process-directed signal delivery;
