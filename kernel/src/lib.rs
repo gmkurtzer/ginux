@@ -632,6 +632,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: bounded Linux process lifecycle contract invalid\r\n");
     }
     serial_write("ginux: bounded Linux process lifecycle contract validated\r\n");
+    serial_write("ginux: transactional Linux child publication validated\r\n");
     let Some(system_init_node) = initramfs::published_regular_file_node(b"sbin/init") else {
         kernel_fail("ginux: minimal system init missing\r\n");
     };

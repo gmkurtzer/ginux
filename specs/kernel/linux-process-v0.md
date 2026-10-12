@@ -16,10 +16,17 @@ increase on reuse and PIDs increase monotonically, so a handle retained after
 reaping cannot select a replacement process.
 
 The first record is PID 1 and has no parent. PID 1 can be created only once.
-Every later record names a live parent and receives a distinct address-space
-root. Creation fails without partial publication when the table is full, the
-parent is absent or not running, the root is zero, the root is already owned,
-or an identity counter is exhausted.
+Every later record names a live parent. Child creation first reserves a
+`Preparing` record with no address-space root. That record cannot exit, become
+a zombie, or be observed through wait. Commit requires a distinct nonzero root
+and atomically changes the record to `Running`; abort removes the reservation.
+Both commit and abort require the exact generation-checked handle, so neither
+can affect a slot that has since been reused. A failed transaction may consume
+an internal PID, but never publishes that PID as a running process.
+
+Reservation fails without partial publication when the table is full, the
+parent is absent or not running, or an identity counter is exhausted. Commit
+fails without changing the reservation when the root is zero or already owned.
 
 ## Exit and wait ordering
 
@@ -32,17 +39,19 @@ Waiting for a running child or an unrelated process has no effect. Reaping
 removes the complete record and makes its slot reusable; the next occupant has
 a new generation and PID.
 
-The boot verifier constructs PID 1, rejects an aliased child root, creates PID
-2, proves that it cannot be reaped or exited early, releases its root, publishes
-status 42, and reaps it through PID 1. It then reuses the same slot for PID 3,
-rejects the stale PID 2 handle, and repeats teardown with status 7.
+The boot verifier constructs PID 1 and reserves PID 2. It rejects zero and
+aliased roots, proves the unpublished child cannot exit or be reaped, aborts
+the reservation, and rejects its stale handle. It then commits PID 3, proves
+that it cannot be reaped or exited early, releases its root, publishes status
+42, and reaps it through PID 1. Finally, it reuses the same slot for PID 4 and
+repeats teardown with status 7.
 
 ## Deliberate limits
 
 This is an internal ownership contract, not Linux process compatibility yet.
 It is not connected to the syscall dispatcher and does not implement:
 
-- address-space copying or copy-on-write;
+- construction, copying, or copy-on-write of the address space named at commit;
 - process-style `clone`, `fork`, `vfork`, `wait4`, or `waitid`;
 - descriptor, credential, signal, mount, or namespace inheritance;
 - concurrent process scheduling or process-directed signal delivery;

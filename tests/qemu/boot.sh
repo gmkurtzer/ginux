@@ -598,6 +598,11 @@ if ! grep -q '^ginux: bounded Linux process lifecycle contract validated' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: transactional Linux child publication validated' "$output_file"; then
+    echo "Boot test failed: transactional Linux child publication was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     echo "Boot test failed: the minimal system init was not planned." >&2
     exit 1

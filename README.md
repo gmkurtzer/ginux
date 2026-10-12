@@ -283,11 +283,13 @@ operations, or a general scheduler.
 A separate four-slot process-lifecycle table now establishes the ownership
 model required before process-style creation is exposed. Internal identities
 bind slot, generation, and monotonic PID; every child has a live recorded
-parent and a distinct nonzero address-space root. Exit cannot publish a zombie
-until that exact root is released, only the live parent can reap it, and slot
-reuse rejects stale handles. The QEMU proof creates and reaps PIDs 2 and 3
-through one reused slot. This table is not wired to Linux syscalls and does not
-yet copy address spaces or inherit process resources, so the minimal system
+parent. Creation reserves an invisible `Preparing` record, and only a validated
+distinct nonzero address-space root can publish it as running; abort removes
+the reservation and stale handles cannot commit a reused slot. Exit cannot
+publish a zombie until that exact root is released, and only the live parent
+can reap it. The QEMU proof aborts one reservation, then creates and reaps two
+children through one reused slot. This table is not wired to Linux syscalls and
+does not yet construct or copy address spaces or inherit process resources, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).
