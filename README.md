@@ -35,7 +35,11 @@ and is inherited by the fork child. PID 1 validates its read-only `uid_map`,
 `gid_map`, and `setgroups` proc records. PID 1 also
 proves identity, root, mount, kernel, namespace, raw-I/O, and BPF management
 requests fail with `EPERM`, while an unknown syscall remains `ENOSYS` and its
-credentials and immutable root remain unchanged. PID 1 then
+credentials and immutable root remain unchanged. PID 1 installs a caught
+`SIGUSR1`, blocks and queues it, observes it through `rt_sigpending`, consumes
+it with `rt_sigtimedwait`, restores the inherited action, and separately proves
+an ignored `SIGUSR2` is discarded without disturbing inherited signal state.
+PID 1 then
 invokes the public Linux `fork` ABI,
 resumes an independently owned PID 2 under its private CR3, and reaps its
 `exit(42)` status through `wait4` before publishing readiness. The kernel

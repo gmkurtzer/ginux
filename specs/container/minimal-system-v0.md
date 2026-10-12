@@ -71,6 +71,15 @@ zombie, then receives PID 2 and encoded status `42 << 8`; a repeated wait
 returns `-ECHILD`. This makes `process.fork-wait` ready for the bounded profile.
 PID 1 then publishes `PROCFS_READY`, tying the observable process records to
 the same fork, zombie, wait, and reap lifecycle.
+Before fork, PID 1 saves the inherited `SIGUSR1` and `SIGUSR2` actions. It
+installs a caught `SIGUSR1`, blocks and generates it with `kill`, observes the
+pending bit, consumes the exact signal and `siginfo_t` synchronously through
+`rt_sigtimedwait`, and proves the pending set is empty. It then unblocks the
+signal, proves an ignored `SIGUSR2` is discarded, restores both inherited
+actions, and publishes `SIGNAL_READY`. Together with the dedicated measured
+signal runtime's caught-handler, `rt_sigreturn`, synchronous-fault, alternate
+stack, ordering, and selected fatal-disposition proofs, this makes
+`signal.standard` ready for the bounded profile.
 
 This execution gate deliberately does not claim M5 completion. The immutable
 root publishes an explicit `/sbin` directory containing the exact `init` node,

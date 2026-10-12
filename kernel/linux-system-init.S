@@ -561,6 +561,118 @@ ginux_linux_system_init:
     cmp rax, 12
     jne .Lfailure
 
+    lea rax, [rip + .Lsignal_handler]
+    mov qword ptr [rip + .Lsignal_action], rax
+    mov qword ptr [rip + .Lsignal_action + 8], 0x4000000
+    lea rax, [rip + .Lsignal_restorer]
+    mov qword ptr [rip + .Lsignal_action + 16], rax
+    mov qword ptr [rip + .Lsignal_action + 24], 0
+    mov edi, 10
+    lea rsi, [rip + .Lsignal_action]
+    lea rdx, [rip + .Lsignal_old_usr1]
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov qword ptr [rip + .Lsignal_set], 0x200
+    xor edi, edi
+    lea rsi, [rip + .Lsignal_set]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, 1
+    mov esi, 10
+    mov eax, 62
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    lea rdi, [rip + .Lstatus]
+    mov esi, 8
+    mov eax, 127
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lstatus], 0x200
+    jne .Lfailure
+
+    lea rdi, [rip + .Lsignal_set]
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 128
+    syscall
+    cmp rax, 10
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 10
+    jne .Lfailure
+
+    lea rdi, [rip + .Lstatus]
+    mov esi, 8
+    mov eax, 127
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lstatus], 0
+    jne .Lfailure
+
+    mov edi, 1
+    lea rsi, [rip + .Lsignal_set]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov qword ptr [rip + .Lsignal_action], 1
+    mov qword ptr [rip + .Lsignal_action + 8], 0
+    mov qword ptr [rip + .Lsignal_action + 16], 0
+    mov qword ptr [rip + .Lsignal_action + 24], 0
+    mov edi, 12
+    lea rsi, [rip + .Lsignal_action]
+    lea rdx, [rip + .Lsignal_old_usr2]
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 12
+    mov eax, 62
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, 10
+    lea rsi, [rip + .Lsignal_old_usr1]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 12
+    lea rsi, [rip + .Lsignal_old_usr2]
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov rdi, r8
+    lea rsi, [rip + .Lsignal_marker]
+    mov edx, 13
+    mov eax, 1
+    syscall
+    cmp rax, 13
+    jne .Lfailure
+
     mov eax, 57
     syscall
     test rax, rax
@@ -745,6 +857,14 @@ ginux_linux_system_init:
     syscall
     ud2
 
+.Lsignal_handler:
+    jmp .Lfailure
+
+.Lsignal_restorer:
+    mov eax, 15
+    syscall
+    ud2
+
 .section .data
 .align 8
 .Lready:
@@ -790,6 +910,17 @@ ginux_linux_system_init:
     .ascii "DEVFS_READY\n"
 .Lprocfs_marker:
     .ascii "PROCFS_READY\n"
+.Lsignal_marker:
+    .ascii "SIGNAL_READY\n"
+.align 8
+.Lsignal_set:
+    .quad 0
+.Lsignal_action:
+    .space 32
+.Lsignal_old_usr1:
+    .space 32
+.Lsignal_old_usr2:
+    .space 32
 .Luserns_marker:
     .ascii "USERNS_READY\n"
 .Lprivilege_marker:

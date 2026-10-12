@@ -741,6 +741,12 @@ if [[ "$(grep -c '^GINUX_SYSTEM_INIT_V0' "$output_file")" -ne 1 ]] ||
     exit 1
 fi
 
+if [[ "$(grep -c '^SIGNAL_READY' "$output_file")" -ne 1 ]] ||
+    ! grep -q '^ginux: bounded Linux standard signal lifecycle validated' "$output_file"; then
+    echo "Boot test failed: the bounded Linux standard signal lifecycle was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q $'^Name:\tinit$' "$output_file" ||
     ! grep -q $'^State:\tR (running)$' "$output_file" ||
     ! grep -q $'^Pid:\t1$' "$output_file" ||

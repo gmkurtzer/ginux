@@ -881,6 +881,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: minimal system init execution failed\r\n");
     }
     serial_write("ginux: measured minimal system init executed as PID 1\r\n");
+    serial_write("ginux: bounded Linux standard signal lifecycle validated\r\n");
     serial_write("ginux: bounded Linux devfs profile validated\r\n");
     serial_write("ginux: lifecycle-aware bounded procfs validated\r\n");
     serial_write("ginux: generation-safe bounded tmpfs lifecycle validated\r\n");
