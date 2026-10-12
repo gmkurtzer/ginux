@@ -167,6 +167,75 @@ ginux_linux_system_init:
     cmp rax, 13
     jne .Lfailure
 
+    mov edi, 1
+    mov eax, 105
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov eax, 116
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    xor edi, edi
+    mov eax, 161
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 165
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 169
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    mov edi, 3
+    mov eax, 172
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    mov edi, 0x10000000
+    mov eax, 272
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+    mov eax, 321
+    syscall
+    cmp rax, -1
+    jne .Lfailure
+    mov eax, 0x474e
+    syscall
+    cmp rax, -38
+    jne .Lfailure
+    mov eax, 102
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov eax, 104
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r8
+    lea rsi, [rip + .Lprivilege_marker]
+    mov edx, 25
+    mov eax, 1
+    syscall
+    cmp rax, 25
+    jne .Lfailure
+
     mov edi, -100
     lea rsi, [rip + .Lstatus_path]
     xor edx, edx
@@ -428,5 +497,7 @@ ginux_linux_system_init:
     .ascii "TMPFS_READY\n"
 .Luserns_marker:
     .ascii "USERNS_READY\n"
+.Lprivilege_marker:
+    .ascii "PRIVILEGE_BOUNDARY_READY\n"
 .Lstatus:
     .space 256

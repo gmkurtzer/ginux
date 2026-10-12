@@ -1161,8 +1161,15 @@ therefore carries no Linux capabilities and still grants no native kernel
 authority. `/proc/1/uid_map` and `/proc/1/gid_map` each contain
 `0 100000 1\n`; `/proc/1/setgroups` contains `deny\n`. All are immutable,
 read-only, and non-mappable. The fork child inherits the exact generation-bound
-namespace handle and verifies UID and GID 0 before exit. The initial process
-namespace has one visible process and one
+namespace handle and verifies UID and GID 0 before exit. The bounded privileged
+surface classifies credential mutation, root and mount changes, kernel/module
+control, namespace control, raw I/O/performance access, and BPF loading. With
+the namespace's empty privilege mask each returns `-EPERM` before inspecting
+request pointers. PID 1 proves representative calls fail, an unknown syscall
+still returns `-ENOSYS`, and credentials plus mount state remain unchanged;
+the complete list is specified in
+[Linux Privilege Boundary v0](linux-privilege-boundary-v0.md). The initial
+process namespace has one visible process and one
 runnable thread. `getpid` returns the fixed process ID 1, while `gettid`
 resolves the running entry in the bounded generation-tagged thread table and
 returns its TID 1. Internal lifecycle verification temporarily reserves TIDs 2

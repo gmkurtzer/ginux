@@ -43,4 +43,6 @@ This contract does not implement `clone(CLONE_NEWUSER)`, `unshare`, `setns`,
 namespace nesting, multiple or writable mappings, subordinate-ID allocation,
 credential mutation, file ownership translation, credential-based VFS
 permissions, namespaced Linux capabilities, or privileged Linux operations.
-Those remain separate compatibility and policy milestones.
+The separately classified fail-closed privileged surface is defined by
+[Linux Privilege Boundary v0](linux-privilege-boundary-v0.md); any operation
+beyond it remains a separate compatibility and policy milestone.

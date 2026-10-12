@@ -765,6 +765,12 @@ if ! grep -q '^ginux: generation-safe Linux user namespace installed' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux privilege policy sealed fail-closed' "$output_file" ||
+    ! grep -q '^PRIVILEGE_BOUNDARY_READY$' "$output_file"; then
+    echo "Boot test failed: Linux root crossed or bypassed the bounded privilege policy." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: bounded writable tmp scratch file validated' "$output_file"; then
     echo "Boot test failed: the bounded writable tmp file was not validated." >&2

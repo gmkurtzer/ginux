@@ -631,6 +631,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: generation-safe Linux user namespace installed\r\n");
     serial_write("ginux: container root mapped outside native authority\r\n");
+    serial_write("ginux: Linux privilege policy sealed fail-closed\r\n");
     let Some(system_profile_node) =
         initramfs::published_regular_file_node(b"etc/ginux-system-profile")
     else {

@@ -34,6 +34,23 @@ pub(crate) struct Credentials {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PrivilegedOperation {
+    ChangeIdentity,
+    ChangeRoot,
+    ManageMounts,
+    ManageKernel,
+    ManageNamespaces,
+    RawIo,
+    LoadBpf,
+}
+
+impl PrivilegedOperation {
+    const fn bit(self) -> u32 {
+        1 << self as u32
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct IdMap {
     inside: u32,
     outside: u32,
@@ -65,6 +82,7 @@ struct UserNamespace {
     gid_map: IdMap,
     setgroups_allowed: bool,
     linux_capabilities: u64,
+    privileged_operations: u32,
 }
 
 struct UserNamespaceTable {
@@ -104,6 +122,7 @@ impl UserNamespaceTable {
             gid_map,
             setgroups_allowed: false,
             linux_capabilities: 0,
+            privileged_operations: 0,
         });
         Some(handle)
     }
@@ -151,6 +170,17 @@ pub(crate) fn verify_contract() -> bool {
         || namespace.gid_map.inside(ROOT_OUTSIDE_ID + 1).is_some()
         || namespace.setgroups_allowed
         || namespace.linux_capabilities != 0
+        || [
+            PrivilegedOperation::ChangeIdentity,
+            PrivilegedOperation::ChangeRoot,
+            PrivilegedOperation::ManageMounts,
+            PrivilegedOperation::ManageKernel,
+            PrivilegedOperation::ManageNamespaces,
+            PrivilegedOperation::RawIo,
+            PrivilegedOperation::LoadBpf,
+        ]
+        .into_iter()
+        .any(|operation| !privileged_operation_denied_in(namespace, operation))
         || table.namespace(stale).is_some()
         || table.retire(first)
     {
@@ -226,6 +256,22 @@ pub(crate) fn setgroups_allowed(handle: UserNamespaceHandle) -> bool {
     live_table()
         .and_then(|table| table.namespace(handle))
         .is_some_and(|namespace| namespace.setgroups_allowed)
+}
+
+pub(crate) fn privileged_operation_denied(
+    handle: UserNamespaceHandle,
+    operation: PrivilegedOperation,
+) -> bool {
+    live_table()
+        .and_then(|table| table.namespace(handle))
+        .is_some_and(|namespace| privileged_operation_denied_in(namespace, operation))
+}
+
+fn privileged_operation_denied_in(
+    namespace: &UserNamespace,
+    operation: PrivilegedOperation,
+) -> bool {
+    namespace.linux_capabilities == 0 && namespace.privileged_operations & operation.bit() == 0
 }
 
 fn live_table() -> Option<&'static UserNamespaceTable> {

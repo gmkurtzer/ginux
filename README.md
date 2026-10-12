@@ -27,6 +27,9 @@ generation-bound user namespace maps container UID/GID 0 to outside ID 100000,
 denies supplementary-group mutation, carries no Linux or native capabilities,
 and is inherited by the fork child. PID 1 validates its read-only `uid_map`,
 `gid_map`, and `setgroups` proc records. PID 1 also
+proves identity, root, mount, kernel, namespace, raw-I/O, and BPF management
+requests fail with `EPERM`, while an unknown syscall remains `ENOSYS` and its
+credentials and immutable root remain unchanged. PID 1 then
 invokes the public Linux `fork` ABI,
 resumes an independently owned PID 2 under its private CR3, and reaps its
 `exit(42)` status through `wait4` before publishing readiness. The kernel

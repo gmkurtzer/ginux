@@ -37,6 +37,12 @@ enumerates and validates `/proc/1/uid_map`, `/proc/1/gid_map`, and
 UID/GID 0 after fork. This makes `namespace.user` ready for the bounded profile.
 Creating or joining namespaces, multiple mappings, map mutation, mutable
 credentials, and namespace nesting remain outside it.
+The namespace's privileged-operation mask is empty. Before reading status and
+mount state, PID 1 proves that representative identity, chroot, mount, reboot,
+I/O privilege, namespace, and BPF requests all return `-EPERM`; an unknown
+syscall separately returns `-ENOSYS`. UID/GID 0 and the immutable mount remain
+unchanged. This makes `privilege-boundary` ready for the bounded profile, not a
+claim that every future Linux privileged syscall has already been classified.
 PID 1 also enumerates the measured `/tmp` anchor, writes `ready\n` to the
 bounded kernel-owned `ginux-ready` scratch file, closes and reopens it, and
 validates the exact bytes. Process exit scrubs the complete 64-byte backing

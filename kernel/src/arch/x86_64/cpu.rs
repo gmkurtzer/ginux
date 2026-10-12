@@ -117,15 +117,23 @@ const LINUX_GETRUSAGE_SYSCALL: u64 = 98;
 const LINUX_TIMES_SYSCALL: u64 = 100;
 const LINUX_GETUID_SYSCALL: u64 = 102;
 const LINUX_GETGID_SYSCALL: u64 = 104;
+const LINUX_SETUID_SYSCALL: u64 = 105;
+const LINUX_SETGID_SYSCALL: u64 = 106;
 const LINUX_GETEUID_SYSCALL: u64 = 107;
 const LINUX_GETEGID_SYSCALL: u64 = 108;
 const LINUX_GETPPID_SYSCALL: u64 = 110;
 const LINUX_GETPGRP_SYSCALL: u64 = 111;
 const LINUX_GETGROUPS_SYSCALL: u64 = 115;
 const LINUX_SETGROUPS_SYSCALL: u64 = 116;
+const LINUX_SETREUID_SYSCALL: u64 = 113;
+const LINUX_SETREGID_SYSCALL: u64 = 114;
+const LINUX_SETRESUID_SYSCALL: u64 = 117;
 const LINUX_GETRESUID_SYSCALL: u64 = 118;
+const LINUX_SETRESGID_SYSCALL: u64 = 119;
 const LINUX_GETRESGID_SYSCALL: u64 = 120;
 const LINUX_GETPGID_SYSCALL: u64 = 121;
+const LINUX_SETFSUID_SYSCALL: u64 = 122;
+const LINUX_SETFSGID_SYSCALL: u64 = 123;
 const LINUX_GETSID_SYSCALL: u64 = 124;
 const LINUX_CAPGET_SYSCALL: u64 = 125;
 const LINUX_CAPSET_SYSCALL: u64 = 126;
@@ -141,6 +149,19 @@ const LINUX_SCHED_GET_PRIORITY_MAX_SYSCALL: u64 = 146;
 const LINUX_SCHED_GET_PRIORITY_MIN_SYSCALL: u64 = 147;
 const LINUX_PRCTL_SYSCALL: u64 = 157;
 const LINUX_ARCH_PRCTL_SYSCALL: u64 = 158;
+const LINUX_PIVOT_ROOT_SYSCALL: u64 = 155;
+const LINUX_CHROOT_SYSCALL: u64 = 161;
+const LINUX_MOUNT_SYSCALL: u64 = 165;
+const LINUX_UMOUNT2_SYSCALL: u64 = 166;
+const LINUX_SWAPON_SYSCALL: u64 = 167;
+const LINUX_SWAPOFF_SYSCALL: u64 = 168;
+const LINUX_REBOOT_SYSCALL: u64 = 169;
+const LINUX_SETHOSTNAME_SYSCALL: u64 = 170;
+const LINUX_SETDOMAINNAME_SYSCALL: u64 = 171;
+const LINUX_IOPL_SYSCALL: u64 = 172;
+const LINUX_IOPERM_SYSCALL: u64 = 173;
+const LINUX_INIT_MODULE_SYSCALL: u64 = 175;
+const LINUX_DELETE_MODULE_SYSCALL: u64 = 176;
 const LINUX_GETTID_SYSCALL: u64 = 186;
 const LINUX_FUTEX_SYSCALL: u64 = 202;
 const LINUX_SCHED_SETAFFINITY_SYSCALL: u64 = 203;
@@ -150,6 +171,7 @@ const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
 const LINUX_CLOCK_NANOSLEEP_SYSCALL: u64 = 230;
+const LINUX_KEXEC_LOAD_SYSCALL: u64 = 246;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_EPOLL_WAIT_SYSCALL: u64 = 232;
 const LINUX_EPOLL_CTL_SYSCALL: u64 = 233;
@@ -160,6 +182,7 @@ const LINUX_FACCESSAT_SYSCALL: u64 = 269;
 const LINUX_PPOLL_SYSCALL: u64 = 271;
 const LINUX_SET_ROBUST_LIST_SYSCALL: u64 = 273;
 const LINUX_GET_ROBUST_LIST_SYSCALL: u64 = 274;
+const LINUX_UNSHARE_SYSCALL: u64 = 272;
 const LINUX_EPOLL_PWAIT_SYSCALL: u64 = 281;
 const LINUX_TIMERFD_CREATE_SYSCALL: u64 = 283;
 const LINUX_EVENTFD_SYSCALL: u64 = 284;
@@ -170,6 +193,11 @@ const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
+const LINUX_PERF_EVENT_OPEN_SYSCALL: u64 = 298;
+const LINUX_SETNS_SYSCALL: u64 = 308;
+const LINUX_FINIT_MODULE_SYSCALL: u64 = 313;
+const LINUX_KEXEC_FILE_LOAD_SYSCALL: u64 = 320;
+const LINUX_BPF_SYSCALL: u64 = 321;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
@@ -6292,7 +6320,57 @@ extern "sysv64" fn linux_syscall_handler(
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
             LINUX_RETURN_TO_KERNEL
         }
+        number if linux_privileged_operation(number).is_some() => {
+            linux_deny_privileged_operation(number)
+        }
         _ => LINUX_ENOSYS,
+    }
+}
+
+fn linux_privileged_operation(number: u64) -> Option<linux_user::PrivilegedOperation> {
+    use linux_user::PrivilegedOperation;
+    match number {
+        LINUX_SETUID_SYSCALL
+        | LINUX_SETGID_SYSCALL
+        | LINUX_SETREUID_SYSCALL
+        | LINUX_SETREGID_SYSCALL
+        | LINUX_SETRESUID_SYSCALL
+        | LINUX_SETRESGID_SYSCALL
+        | LINUX_SETFSUID_SYSCALL
+        | LINUX_SETFSGID_SYSCALL => Some(PrivilegedOperation::ChangeIdentity),
+        LINUX_CHROOT_SYSCALL | LINUX_PIVOT_ROOT_SYSCALL => Some(PrivilegedOperation::ChangeRoot),
+        LINUX_MOUNT_SYSCALL
+        | LINUX_UMOUNT2_SYSCALL
+        | LINUX_SWAPON_SYSCALL
+        | LINUX_SWAPOFF_SYSCALL => Some(PrivilegedOperation::ManageMounts),
+        LINUX_REBOOT_SYSCALL
+        | LINUX_SETHOSTNAME_SYSCALL
+        | LINUX_SETDOMAINNAME_SYSCALL
+        | LINUX_INIT_MODULE_SYSCALL
+        | LINUX_DELETE_MODULE_SYSCALL
+        | LINUX_KEXEC_LOAD_SYSCALL
+        | LINUX_FINIT_MODULE_SYSCALL
+        | LINUX_KEXEC_FILE_LOAD_SYSCALL => Some(PrivilegedOperation::ManageKernel),
+        LINUX_UNSHARE_SYSCALL | LINUX_SETNS_SYSCALL => Some(PrivilegedOperation::ManageNamespaces),
+        LINUX_IOPL_SYSCALL | LINUX_IOPERM_SYSCALL | LINUX_PERF_EVENT_OPEN_SYSCALL => {
+            Some(PrivilegedOperation::RawIo)
+        }
+        LINUX_BPF_SYSCALL => Some(PrivilegedOperation::LoadBpf),
+        _ => None,
+    }
+}
+
+fn linux_deny_privileged_operation(number: u64) -> u64 {
+    let Some(namespace) = current_linux_user_namespace() else {
+        return LINUX_ESRCH;
+    };
+    let Some(operation) = linux_privileged_operation(number) else {
+        return LINUX_ENOSYS;
+    };
+    if linux_user::privileged_operation_denied(namespace, operation) {
+        LINUX_EPERM
+    } else {
+        LINUX_ENOSYS
     }
 }
 
