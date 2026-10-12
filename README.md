@@ -59,8 +59,12 @@ proves nonempty invalid media is rejected without modification after safe
 device and DMA teardown. Teardown revokes bus mastering, resets the device, and
 scrubs the lease before release. This trusted-QEMU kernel reference path remains
 separate from the isolated native service described below, and neither path yet
-has IOMMU confinement. See
-[Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md) and
+has IOMMU confinement. The kernel now validates the Q35 DMAR unit and maps its
+single register page supervisor-only, read-only, uncached, and non-executable.
+It reads the VT-d version and capabilities while proving translation and the
+root-table pointer remain disabled; it does not yet program a DMA domain. See
+[IOMMU Register Probe v0](specs/kernel/iommu-v0.md),
+[Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md), and
 [Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
 The device boundary delegates manifest object 7 and attenuates it into
 separate ring-3 grants. A read-only observer can inspect reset state but faults

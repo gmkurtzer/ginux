@@ -6,7 +6,7 @@ const ENTRY_COUNT: usize = 512;
 const DIRECTORY_COUNT: usize = 4;
 const LARGE_PAGE_SIZE: u64 = 2 * 1024 * 1024;
 const PAGE_SIZE: usize = 4096;
-const MAX_FINE_TABLES: usize = 9;
+const MAX_FINE_TABLES: usize = 10;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
@@ -33,6 +33,7 @@ pub(crate) struct MmioMapping {
     virtual_page: usize,
     length: usize,
     mapped_length: usize,
+    writable: bool,
 }
 
 impl MmioMapping {
@@ -337,9 +338,11 @@ pub(crate) unsafe fn install_initial_identity_map(
     guard_pages: &[usize],
     mmio: (u64, usize),
     auxiliary_mmio: (u64, usize),
-) -> Result<(MmioMapping, MmioMapping), PagingError> {
+    platform_mmio: (u64, usize),
+) -> Result<(MmioMapping, MmioMapping, MmioMapping), PagingError> {
     let (mmio_physical, mmio_length) = mmio;
     let (auxiliary_mmio_physical, auxiliary_mmio_length) = auxiliary_mmio;
+    let (platform_mmio_physical, platform_mmio_length) = platform_mmio;
     if required_addresses
         .iter()
         .any(|address| *address >= INITIAL_IDENTITY_LIMIT)
@@ -462,6 +465,46 @@ pub(crate) unsafe fn install_initial_identity_map(
     {
         return Err(PagingError::MmioMapInvalid);
     }
+    let platform_mmio_page = platform_mmio_physical & !(PAGE_SIZE as u64 - 1);
+    let platform_mmio_offset = usize::try_from(platform_mmio_physical - platform_mmio_page)
+        .map_err(|_| PagingError::MmioMapInvalid)?;
+    let platform_mmio_span = platform_mmio_offset
+        .checked_add(platform_mmio_length)
+        .ok_or(PagingError::MmioMapInvalid)?;
+    let platform_mmio_pages = platform_mmio_span
+        .checked_add(PAGE_SIZE - 1)
+        .ok_or(PagingError::MmioMapInvalid)?
+        / PAGE_SIZE;
+    let platform_mmio_index = mmio_pages;
+    let platform_mmio_mapped_end =
+        platform_mmio_page.checked_add((platform_mmio_pages * PAGE_SIZE) as u64);
+    if platform_mmio_length == 0
+        || platform_mmio_pages == 0
+        || platform_mmio_index
+            .checked_add(platform_mmio_pages)
+            .is_none_or(|end| end > auxiliary_mmio_index)
+        || platform_mmio_page & !(ADDRESS_MASK as u64) != 0
+        || platform_mmio_mapped_end.is_none_or(|end| end > ADDRESS_MASK as u64 + PAGE_SIZE as u64)
+        || ranges_overlap_u64(
+            (mmio_page, mmio_mapped_end.unwrap_or(mmio_page)),
+            (
+                platform_mmio_page,
+                platform_mmio_mapped_end.unwrap_or(platform_mmio_page),
+            ),
+        )
+        || ranges_overlap_u64(
+            (
+                auxiliary_mmio_page,
+                auxiliary_mmio_mapped_end.unwrap_or(auxiliary_mmio_page),
+            ),
+            (
+                platform_mmio_page,
+                platform_mmio_mapped_end.unwrap_or(platform_mmio_page),
+            ),
+        )
+    {
+        return Err(PagingError::MmioMapInvalid);
+    }
     let mmio_directory = core::ptr::addr_of_mut!(MMIO_DIRECTORY.0).cast::<u64>();
     let mmio_table = core::ptr::addr_of_mut!(MMIO_TABLE.0).cast::<u64>();
     zero_entries(mmio_directory);
@@ -484,6 +527,14 @@ pub(crate) unsafe fn install_initial_identity_map(
                 | NO_EXECUTE,
         );
     }
+    for index in 0..platform_mmio_pages {
+        mmio_table.add(platform_mmio_index + index).write(
+            (platform_mmio_page + (index * PAGE_SIZE) as u64)
+                | PRESENT
+                | CACHE_DISABLE
+                | NO_EXECUTE,
+        );
+    }
     mmio_directory.write((mmio_table_address as u64) | PRESENT | WRITABLE);
     direct_pdpt
         .add(MMIO_PDPT_INDEX)
@@ -494,6 +545,7 @@ pub(crate) unsafe fn install_initial_identity_map(
         virtual_page: MMIO_WINDOW_BASE,
         length: mmio_length,
         mapped_length: mmio_pages * PAGE_SIZE,
+        writable: true,
     };
     let auxiliary_mmio_mapping = MmioMapping {
         physical_page: auxiliary_mmio_page,
@@ -501,6 +553,15 @@ pub(crate) unsafe fn install_initial_identity_map(
         virtual_page: MMIO_WINDOW_BASE + auxiliary_mmio_index * PAGE_SIZE,
         length: auxiliary_mmio_length,
         mapped_length: auxiliary_mmio_pages * PAGE_SIZE,
+        writable: true,
+    };
+    let platform_mmio_mapping = MmioMapping {
+        physical_page: platform_mmio_page,
+        physical_start: platform_mmio_physical,
+        virtual_page: MMIO_WINDOW_BASE + platform_mmio_index * PAGE_SIZE,
+        length: platform_mmio_length,
+        mapped_length: platform_mmio_pages * PAGE_SIZE,
+        writable: false,
     };
 
     let fine_tables = core::ptr::addr_of_mut!(FINE_PAGE_TABLES).cast::<PageTable>();
@@ -589,6 +650,26 @@ pub(crate) unsafe fn install_initial_identity_map(
             return Err(PagingError::MmioMapInvalid);
         }
         for physical in (auxiliary_mmio_page..auxiliary_end).step_by(PAGE_SIZE) {
+            let physical = usize::try_from(physical).map_err(|_| PagingError::MmioMapInvalid)?;
+            let region = physical / LARGE_PAGE_SIZE as usize;
+            let fine_index = ensure_fine_region(
+                region,
+                &mut fine_regions,
+                &mut fine_count,
+                fine_tables,
+                directories,
+            )?;
+            let page = (physical % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
+            let entries = core::ptr::addr_of_mut!((*fine_tables.add(fine_index)).0).cast::<u64>();
+            entries.add(page).write(0);
+        }
+    }
+    if platform_mmio_page < INITIAL_IDENTITY_LIMIT as u64 {
+        let platform_end = platform_mmio_mapped_end.ok_or(PagingError::MmioMapInvalid)?;
+        if platform_end > INITIAL_IDENTITY_LIMIT as u64 {
+            return Err(PagingError::MmioMapInvalid);
+        }
+        for physical in (platform_mmio_page..platform_end).step_by(PAGE_SIZE) {
             let physical = usize::try_from(physical).map_err(|_| PagingError::MmioMapInvalid)?;
             let region = physical / LARGE_PAGE_SIZE as usize;
             let fine_index = ensure_fine_region(
@@ -746,7 +827,7 @@ pub(crate) unsafe fn install_initial_identity_map(
         return Err(PagingError::HardeningFailed);
     }
 
-    Ok((mmio_mapping, auxiliary_mmio_mapping))
+    Ok((mmio_mapping, auxiliary_mmio_mapping, platform_mmio_mapping))
 }
 
 unsafe fn ensure_fine_region(
@@ -894,54 +975,67 @@ pub(crate) fn mmio_mapping_is_valid(mapping: MmioMapping) -> bool {
         let table = core::ptr::addr_of!(MMIO_TABLE.0).cast::<u64>();
         let page_count = mapping.mapped_length / PAGE_SIZE;
         let first_page = window_offset / PAGE_SIZE;
+        let expected_flags =
+            PRESENT | CACHE_DISABLE | NO_EXECUTE | if mapping.writable { WRITABLE } else { 0 };
         (0..page_count).all(|index| {
             let entry = table.add(first_page + index).read();
             entry & (ADDRESS_MASK as u64 | PRESENT | WRITABLE | USER | CACHE_DISABLE | NO_EXECUTE)
-                == (mapping.physical_page + (index * PAGE_SIZE) as u64)
-                    | PRESENT
-                    | WRITABLE
-                    | CACHE_DISABLE
-                    | NO_EXECUTE
+                == (mapping.physical_page + (index * PAGE_SIZE) as u64) | expected_flags
                 && entry & LARGE_PAGE == 0
         })
     }
 }
 
-pub(crate) fn mmio_mappings_are_exact(first: MmioMapping, second: MmioMapping) -> bool {
-    if !mmio_mapping_is_valid(first) || !mmio_mapping_is_valid(second) {
+pub(crate) fn mmio_mappings_are_exact(
+    first: MmioMapping,
+    second: MmioMapping,
+    third: MmioMapping,
+) -> bool {
+    let mappings = [first, second, third];
+    if !mappings.into_iter().all(mmio_mapping_is_valid) {
         return false;
     }
-    let first_index = (first.virtual_page - MMIO_WINDOW_BASE) / PAGE_SIZE;
-    let second_index = (second.virtual_page - MMIO_WINDOW_BASE) / PAGE_SIZE;
-    let first_pages = first.mapped_length / PAGE_SIZE;
-    let second_pages = second.mapped_length / PAGE_SIZE;
-    if ranges_overlap(
-        (first_index, first_index + first_pages),
-        (second_index, second_index + second_pages),
-    ) || ranges_overlap_u64(
-        (
-            first.physical_page,
-            first.physical_page + first.mapped_length as u64,
-        ),
-        (
-            second.physical_page,
-            second.physical_page + second.mapped_length as u64,
-        ),
-    ) {
-        return false;
+    for left in 0..mappings.len() {
+        for right in left + 1..mappings.len() {
+            let left_index = (mappings[left].virtual_page - MMIO_WINDOW_BASE) / PAGE_SIZE;
+            let right_index = (mappings[right].virtual_page - MMIO_WINDOW_BASE) / PAGE_SIZE;
+            let left_pages = mappings[left].mapped_length / PAGE_SIZE;
+            let right_pages = mappings[right].mapped_length / PAGE_SIZE;
+            if ranges_overlap(
+                (left_index, left_index + left_pages),
+                (right_index, right_index + right_pages),
+            ) || ranges_overlap_u64(
+                (
+                    mappings[left].physical_page,
+                    mappings[left].physical_page + mappings[left].mapped_length as u64,
+                ),
+                (
+                    mappings[right].physical_page,
+                    mappings[right].physical_page + mappings[right].mapped_length as u64,
+                ),
+            ) {
+                return false;
+            }
+        }
     }
     let table = unsafe { core::ptr::addr_of!(MMIO_TABLE.0).cast::<u64>() };
     (0..ENTRY_COUNT).all(|index| {
-        let expected = if (first_index..first_index + first_pages).contains(&index) {
-            first.physical_page + ((index - first_index) * PAGE_SIZE) as u64
-        } else if (second_index..second_index + second_pages).contains(&index) {
-            second.physical_page + ((index - second_index) * PAGE_SIZE) as u64
-        } else {
+        let expected = mappings.into_iter().find_map(|mapping| {
+            let first_index = (mapping.virtual_page - MMIO_WINDOW_BASE) / PAGE_SIZE;
+            let pages = mapping.mapped_length / PAGE_SIZE;
+            (first_index..first_index + pages)
+                .contains(&index)
+                .then_some(
+                    (mapping.physical_page + ((index - first_index) * PAGE_SIZE) as u64)
+                        | PRESENT
+                        | CACHE_DISABLE
+                        | NO_EXECUTE
+                        | if mapping.writable { WRITABLE } else { 0 },
+                )
+        });
+        let Some(expected) = expected else {
             return unsafe { table.add(index).read() == 0 };
-        } | PRESENT
-            | WRITABLE
-            | CACHE_DISABLE
-            | NO_EXECUTE;
+        };
         let entry = unsafe { table.add(index).read() };
         entry & (ADDRESS_MASK as u64 | PRESENT | WRITABLE | USER | CACHE_DISABLE | NO_EXECUTE)
             == expected
@@ -976,6 +1070,10 @@ pub(crate) fn mmio_identity_alias_is_absent(mapping: MmioMapping) -> bool {
             let page = (physical % LARGE_PAGE_SIZE as usize) / PAGE_SIZE;
             unsafe { table.add(page).read() == 0 }
         })
+}
+
+pub(crate) fn mmio_mapping_is_read_only(mapping: MmioMapping) -> bool {
+    mmio_mapping_is_valid(mapping) && !mapping.writable
 }
 
 pub(crate) fn mmio_translation_is_bounded(

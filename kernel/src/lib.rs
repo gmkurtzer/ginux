@@ -37,6 +37,7 @@ pub(crate) const EFI_RUNTIME_SERVICES_CODE: u32 = 5;
 const EFI_CONVENTIONAL_MEMORY: u32 = 7;
 const UEFI_PAGES_PER_MIB: u64 = 256;
 const PAGE_SIZE: usize = 4096;
+const Q35_IOMMU_REGISTER_BASE: u64 = 0xfed9_0000;
 const KERNEL_STACK_SIZE: usize = 128 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
@@ -303,7 +304,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     // SAFETY: The entry trampoline disabled interrupts. The required live
     // addresses and the page-table objects are checked against the complete
     // transitional identity-map range before CR3 is changed.
-    let Ok((virtio_mmio, virtio_msix_mmio)) = (unsafe {
+    let Ok((virtio_mmio, virtio_msix_mmio, iommu_mmio)) = (unsafe {
         arch::x86_64::paging::install_initial_identity_map(
             boot_info,
             &image,
@@ -311,6 +312,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             &guard_pages,
             (virtio_mmio_physical, virtio_mmio_length),
             (virtio_msix_physical, virtio_msix_length),
+            (Q35_IOMMU_REGISTER_BASE, PAGE_SIZE),
         )
     }) else {
         kernel_fail("ginux: page-table transition failed\r\n");
@@ -392,12 +394,39 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(platform.first_iommu_register_base);
     serial_write("\r\nginux: first remapping unit includes all PCI devices: ");
     serial_write_u64(u64::from(platform.first_iommu_include_all));
-    if !arch::x86_64::acpi::verify_malformed_dmar_rejected(
-        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
-    ) {
+    if platform.first_iommu_register_base != Q35_IOMMU_REGISTER_BASE
+        || !arch::x86_64::acpi::verify_malformed_dmar_rejected(
+            arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+        )
+    {
         kernel_fail("\r\nginux: ACPI DMAR validation invariant failed\r\n");
     }
     serial_write("\r\nginux: malformed DMAR structures rejected");
+    if !arch::x86_64::paging::mmio_mapping_is_read_only(iommu_mmio)
+        || !arch::x86_64::paging::mmio_identity_alias_is_absent(iommu_mmio)
+        || !arch::x86_64::paging::mmio_translation_is_bounded(
+            iommu_mmio,
+            platform.first_iommu_register_base,
+            PAGE_SIZE,
+        )
+    {
+        kernel_fail("\r\nginux: IOMMU MMIO mapping invariant failed\r\n");
+    }
+    let Some(iommu_capabilities) =
+        arch::x86_64::iommu::probe(platform.first_iommu_register_base, iommu_mmio)
+    else {
+        kernel_fail("\r\nginux: IOMMU capability probe failed\r\n");
+    };
+    serial_write("\r\nginux: read-only uncached IOMMU mapping active");
+    serial_write("\r\nginux: IOMMU version: ");
+    serial_write_u64(u64::from(iommu_capabilities.major_version));
+    serial_write(".");
+    serial_write_u64(u64::from(iommu_capabilities.minor_version));
+    serial_write("\r\nginux: IOMMU capability: ");
+    serial_write_u64(iommu_capabilities.capability);
+    serial_write("\r\nginux: IOMMU extended capability: ");
+    serial_write_u64(iommu_capabilities.extended_capability);
+    serial_write("\r\nginux: IOMMU translation remained disabled");
     serial_write("\r\n");
     serial_write("ginux: ACPI tables use higher-half direct map\r\n");
 
@@ -538,7 +567,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: disabled virtio MSI-X capability validated\r\n");
     if !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
         || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_msix_mmio)
-        || !arch::x86_64::paging::mmio_mappings_are_exact(virtio_mmio, virtio_msix_mmio)
+        || !arch::x86_64::paging::mmio_mappings_are_exact(virtio_mmio, virtio_msix_mmio, iommu_mmio)
         || !arch::x86_64::paging::mmio_identity_alias_is_absent(virtio_msix_mmio)
         || !arch::x86_64::paging::mmio_translation_is_bounded(
             virtio_mmio,

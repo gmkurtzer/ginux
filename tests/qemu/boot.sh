@@ -379,6 +379,13 @@ if ! grep -q '^ginux: ACPI DMAR validated' "$output_file" ||
     exit 1
 fi
 
+if ! grep -q '^ginux: read-only uncached IOMMU mapping active' "$output_file" ||
+    ! grep -q '^ginux: IOMMU version: 1\.0' "$output_file" ||
+    ! grep -q '^ginux: IOMMU translation remained disabled' "$output_file"; then
+    echo "Boot test failed: bounded read-only IOMMU capability probe did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: ACPI tables use higher-half direct map' "$output_file"; then
     echo "Boot test failed: ACPI table access did not use the direct map." >&2
     exit 1
