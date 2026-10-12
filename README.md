@@ -314,8 +314,10 @@ bundle with a parent-derived execution context whose fork return value is zero;
 child mutation leaves the parent unchanged. PID 1 and that child are then
 admitted to the real native scheduler, selected under their exact roots, and
 yielded in both directions before their generation-tagged bindings are retired.
-The transaction is not yet attached to the running Linux workload or dispatched
-to ring 3 under the child CR3, so the minimal system
+Each root inherits the supervisor-only identity and higher-half kernel entries;
+the selected child CR3 is loaded, verified through the direct map, and restored
+in kernel mode. The transaction is not yet attached to the running Linux
+workload or returned to ring 3 under the child CR3, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).

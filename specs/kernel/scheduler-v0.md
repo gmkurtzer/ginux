@@ -67,9 +67,11 @@ selects both contexts through normal round-robin yield, and matches their full
 register, root, stack, flags, and FS state. A process record retains the exact
 scheduler thread identity and cannot begin address-space teardown until that
 binding is withdrawn. Withdrawal handles an exact ready or running identity;
-the proof rejects reuse of the retired child identity. This does not yet enter
-ring 3 under the synthetic child root or attach the live Linux PID 1 runtime to
-the native scheduler.
+the proof rejects reuse of the retired child identity. While the child is
+selected, its validated root is installed in CR3 and then replaced with the
+exact prior root, proving the scheduler-selected address space is safe for
+kernel execution. This does not yet return the synthetic child context to ring
+3 or attach the live Linux PID 1 runtime to the native scheduler.
 
 Scheduler capacity does not grant permission to create a thread. Runtime
 creation first reserves a slot from the generation-checked owning domain; exit

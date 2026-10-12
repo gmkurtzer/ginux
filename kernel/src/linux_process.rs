@@ -679,6 +679,18 @@ fn test_context() -> ProcessExecutionContext {
     }
 }
 
+fn verify_user_kernel_mapping_rejected(root: memory::FrameLease) -> bool {
+    let Some(address) = root.direct_map_address() else {
+        return false;
+    };
+    let entry = unsafe { (address as *mut u64).add(256) };
+    let original = unsafe { entry.read() };
+    unsafe { entry.write(original | USER) };
+    let rejected = !address_space::verify_linux_process_root_activation(root);
+    unsafe { entry.write(original) };
+    rejected && unsafe { entry.read() } == original
+}
+
 pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
@@ -690,7 +702,10 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         test_mapping(TEST_USER_ADDRESS, frames[4], false, true),
         test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[5], true, false),
     ];
-    if !write_test_hierarchy(&frames[0..4], &init_mappings) {
+    if !write_test_hierarchy(&frames[0..4], &init_mappings)
+        || address_space::verify_linux_process_root_activation(frames[0])
+        || !address_space::inherit_linux_process_kernel_mappings(frames[0])
+    {
         return false;
     }
     let Some(init_space) = ProcessAddressSpace::new(&frames[0..4], &init_mappings) else {
@@ -738,7 +753,9 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         test_mapping(TEST_USER_ADDRESS, frames[4], false, true),
         test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[11], true, false),
     ];
-    if !write_test_hierarchy(&frames[6..10], &shared_page_mappings) {
+    if !write_test_hierarchy(&frames[6..10], &shared_page_mappings)
+        || !address_space::inherit_linux_process_kernel_mappings(frames[6])
+    {
         return false;
     }
     let Some(shared_page_space) = ProcessAddressSpace::new(&frames[6..10], &shared_page_mappings)
@@ -757,7 +774,10 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[17], true, false),
     ];
     if !write_test_hierarchy(&frames[6..10], &first_mappings)
+        || !address_space::inherit_linux_process_kernel_mappings(frames[6])
+        || !verify_user_kernel_mapping_rejected(frames[6])
         || !write_test_hierarchy(&frames[12..16], &second_mappings)
+        || !address_space::inherit_linux_process_kernel_mappings(frames[12])
     {
         return false;
     }
@@ -795,6 +815,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         || table.create_init(first_space, init_context).is_some()
         || table.commit_fork(rejected_child, init_space, init_context.fork_child())
         || stale_space.is_some()
+        || address_space::verify_linux_process_root_activation(stale_root)
         || table.wait(init, rejected_child.pid).is_some()
         || table.exit(rejected_child, 1)
         || table.commit_cloned_fork(rejected_child, &frames[0..4], &frames[4..6])
@@ -865,14 +886,18 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(selected_child) = run_queue.yield_current(init_thread, init_scheduler_context) else {
         return false;
     };
+    if selected_child.handle() != child_thread
+        || selected_child.context() != child_scheduler_context
+        || !address_space::verify_linux_process_root_activation(first_space.root())
+    {
+        return false;
+    }
     let Some(resumed_parent) = run_queue.yield_current(child_thread, child_scheduler_context)
     else {
         return false;
     };
     if initial.handle() != init_thread
         || initial.context() != init_scheduler_context
-        || selected_child.handle() != child_thread
-        || selected_child.context() != child_scheduler_context
         || resumed_parent.handle() != init_thread
         || resumed_parent.context() != init_scheduler_context
         || table.begin_exit(first_child, first_space).is_some()

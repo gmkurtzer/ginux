@@ -15,6 +15,7 @@ const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
 const LARGE_PAGE: u64 = 1 << 7;
+const ACCESSED: u64 = 1 << 5;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const USER_TEST_ADDRESS: usize = 1usize << 39;
 const EXPECTED_SERVICE_FAULT_OFFSET: usize = 197;
@@ -2971,6 +2972,71 @@ pub(crate) fn validate_linux_process_address_space(
         && visited_mappings[..mappings.len()]
             .iter()
             .all(|visited| *visited)
+}
+
+pub(crate) fn inherit_linux_process_kernel_mappings(root: memory::FrameLease) -> bool {
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root])
+        || root.address() == current_root()
+    {
+        return false;
+    }
+    let (Some(kernel), Some(process)) = (
+        mapped_frame::<u64>(current_root()),
+        mapped_frame::<u64>(root.address()),
+    ) else {
+        return false;
+    };
+    let indexes = [0_usize, 256];
+    let values = indexes.map(|index| unsafe { kernel.add(index).read() });
+    if values
+        .iter()
+        .any(|value| value & PRESENT == 0 || value & USER != 0)
+    {
+        return false;
+    }
+    for (index, value) in indexes.into_iter().zip(values) {
+        unsafe { process.add(index).write(value) };
+    }
+    indexes.into_iter().zip(values).all(|(index, value)| {
+        let actual = unsafe { process.add(index).read() };
+        actual & !ACCESSED == value & !ACCESSED && actual & USER == 0
+    })
+}
+
+pub(crate) fn verify_linux_process_root_activation(root: memory::FrameLease) -> bool {
+    let previous = current_root();
+    let rflags: u64;
+    unsafe { asm!("pushfq", "pop {}", out(reg) rflags, options(preserves_flags)) };
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root])
+        || root.address() == previous
+        || rflags & (1 << 9) != 0
+    {
+        return false;
+    }
+    let (Some(kernel), Some(process)) = (
+        mapped_frame::<u64>(previous),
+        mapped_frame::<u64>(root.address()),
+    ) else {
+        return false;
+    };
+    if [0_usize, 256].into_iter().any(|index| {
+        let expected = unsafe { kernel.add(index).read() };
+        let candidate = unsafe { process.add(index).read() };
+        expected & PRESENT == 0
+            || expected & USER != 0
+            || candidate & !ACCESSED != expected & !ACCESSED
+    }) {
+        return false;
+    }
+    unsafe { activate(root.address()) };
+    let selected = current_root() == root.address();
+    let process_visible = mapped_frame::<u64>(root.address()).is_some_and(|active| {
+        [0_usize, 256]
+            .into_iter()
+            .all(|index| unsafe { active.add(index).read() } & USER == 0)
+    });
+    unsafe { activate(previous) };
+    selected && process_visible && current_root() == previous
 }
 
 fn validate_complete_linux_process_user_tree(

@@ -26,6 +26,12 @@ read-only, non-present, and NX decision—including guard pages, kernel image
 permissions, and sealed page-table pages—is identical through both aliases.
 Every derived domain root copies both supervisor-only kernel PML4 entries, and
 root validation rejects a missing, altered, or user-accessible direct-map entry.
+The bounded Linux process proof applies the same rule to its private roots:
+PML4 entries 0 and 256 are copied only from the active kernel root after their
+presence and supervisor status are checked. A scheduler-selected child root is
+then loaded into CR3 in kernel mode, verified through the inherited direct map,
+and replaced with the exact prior root. Generation-stale roots and mismatched
+kernel entries fail before CR3 is changed.
 The kernel verifies the alias after CR3 activation by comparing its PML4 entry
 with the identity entry, excluding only the hardware-maintained Accessed bit,
 and reading the PML4 page through both addresses.

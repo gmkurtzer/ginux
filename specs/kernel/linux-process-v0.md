@@ -84,8 +84,17 @@ scheduler state machine under one synthetic container domain. It selects PID 1,
 yields to the child while matching the child's root, all saved registers, zero
 fork return, stack, flags, and FS base, then yields back to the unchanged parent
 context. It withdraws the ready child and running parent by their exact thread
-identities and proves the retired child identity cannot be used again. This is
-scheduler-state integration, not ring-3 dispatch of the synthetic child.
+identities and proves the retired child identity cannot be used again.
+
+Before publication, each synthetic process root inherits exact supervisor-only
+copies of PML4 entries 0 and 256 from the active kernel root, preserving the
+transitional identity mapping and higher-half direct map without adding user
+authority. While the scheduler has selected the child, the boot proof validates
+those entries, loads the child's generation-checked root into CR3, confirms the
+root remains reachable through the direct map, and restores the prior CR3. A
+stale root is rejected before activation, and the switch refuses to run with
+maskable interrupts enabled. This is hardware root activation, not yet ring-3
+dispatch of the synthetic child context.
 
 ## Exit and wait ordering
 
@@ -155,9 +164,10 @@ This now supplies the ownership, publication, and scheduler-staging operations
 needed by a future eager fork. The process bundle retains and cross-checks its
 virtual address, frame, and permission inventory, the synthetic hierarchy clone
 is published through the process table, and its saved context is selected by
-the native scheduler under the child root. It does not yet snapshot the running
-Linux workload's mapping registry, activate the child CR3 for ring-3 execution,
-or expose the operation through the Linux ABI.
+the native scheduler under the child root. The child CR3 is activated and
+restored in kernel mode. The proof does not yet snapshot the running Linux
+workload's mapping registry, return the child context to ring 3, or expose the
+operation through the Linux ABI.
 
 ## Deliberate limits
 

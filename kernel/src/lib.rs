@@ -642,6 +642,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux process contexts staged on native scheduler\r\n");
     serial_write("ginux: scheduled Linux process roots matched ownership\r\n");
     serial_write("ginux: stale Linux process scheduler bindings rejected\r\n");
+    serial_write("ginux: Linux process roots inherited kernel mappings\r\n");
+    serial_write("ginux: scheduled Linux child CR3 activated and restored\r\n");
     if !linux_process::verify_private_page_copy_contract() {
         kernel_fail("ginux: bounded Linux private page copy invalid\r\n");
     }

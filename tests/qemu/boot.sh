@@ -648,6 +648,16 @@ if ! grep -q '^ginux: stale Linux process scheduler bindings rejected' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux process roots inherited kernel mappings' "$output_file"; then
+    echo "Boot test failed: Linux process roots did not inherit kernel mappings." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: scheduled Linux child CR3 activated and restored' "$output_file"; then
+    echo "Boot test failed: the scheduled Linux child CR3 was not activated and restored." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux private page copy validated' "$output_file"; then
     echo "Boot test failed: bounded Linux private page copying was not validated." >&2
     exit 1
