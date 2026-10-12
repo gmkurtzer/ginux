@@ -416,6 +416,16 @@ if ! grep -q '^ginux: malformed virtio PCI configurations rejected' "$output_fil
     exit 1
 fi
 
+if ! grep -Eq '^ginux: virtio MSI-X capability offset: [1-9][0-9]*' "$output_file" ||
+    ! grep -Eq '^ginux: virtio MSI-X vectors: [1-9][0-9]*' "$output_file" ||
+    ! grep -Eq '^ginux: virtio MSI-X table address/length: [1-9][0-9]*/[1-9][0-9]*' "$output_file" ||
+    ! grep -Eq '^ginux: virtio MSI-X PBA address/length: [1-9][0-9]*/[1-9][0-9]*' "$output_file" ||
+    ! grep -Eq '^ginux: virtio MSI-X function mask: (masked|unmasked)' "$output_file" ||
+    ! grep -q '^ginux: disabled virtio MSI-X capability validated' "$output_file"; then
+    echo "Boot test failed: the disabled virtio MSI-X capability was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded uncached virtio MMIO mapping active' "$output_file"; then
     echo "Boot test failed: the bounded virtio MMIO mapping is inactive." >&2
     exit 1

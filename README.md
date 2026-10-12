@@ -21,7 +21,9 @@ The next M6 layer attaches a deterministic 1 MiB modern virtio-blk function
 and performs bounded, read-only PCI configuration discovery. Every boot
 validates its common, notification, ISR, and device capabilities and rejects
 malformed copied configurations without enabling MMIO, bus mastering, DMA, or
-queues. See
+queues. Discovery also requires one disabled MSI-X capability, validates its
+vector count and memory-BAR-backed table and pending-bit ranges, and rejects
+malformed interrupt metadata without mapping or programming it. See
 [PCI Virtio Block Discovery v0](specs/kernel/pci-virtio-block-v0.md).
 The validated configuration regions are now mapped through a bounded,
 uncached, supervisor-only higher-half window. The kernel forces PCI bus mastering off,
@@ -63,7 +65,8 @@ mastering, resets the device, and only then validates every byte of the now-stab
 completed DMA layout before the page is scrubbed and released;
 release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
-owned frames. See
+owned frames. MSI-X routing and blocked interrupt completion are not yet
+implemented, so this isolated completion path still polls. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
 [Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md).
 

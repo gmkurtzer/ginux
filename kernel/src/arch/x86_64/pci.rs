@@ -14,6 +14,16 @@ const VIRTIO_VENDOR: u16 = 0x1af4;
 const VIRTIO_BLOCK_DEVICE: u16 = 0x1042;
 const STATUS_CAPABILITIES: u16 = 1 << 4;
 const CAPABILITY_VENDOR_SPECIFIC: u8 = 0x09;
+const CAPABILITY_MSIX: u8 = 0x11;
+const MSIX_CAPABILITY_SIZE: usize = 12;
+const MSIX_TABLE_SIZE_MASK: u16 = 0x07ff;
+const MSIX_FUNCTION_MASK: u16 = 1 << 14;
+const MSIX_ENABLE: u16 = 1 << 15;
+const MSIX_BIR_MASK: u32 = 0x7;
+const MSIX_OFFSET_MASK: u32 = !MSIX_BIR_MASK;
+const MSIX_TABLE_ENTRY_SIZE: u32 = 16;
+const MSIX_PBA_BITS_PER_ENTRY: u32 = 64;
+const MSIX_PBA_ENTRY_SIZE: u32 = 8;
 const VIRTIO_COMMON: u8 = 1;
 const VIRTIO_NOTIFY: u8 = 2;
 const VIRTIO_ISR: u8 = 3;
@@ -82,6 +92,20 @@ pub(crate) struct VirtioBlockDevice {
     device_length: u32,
     pub(crate) notify_multiplier: u32,
     pub(crate) capability_count: u8,
+    pub(crate) msix: MsixCapability,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct MsixCapability {
+    pub(crate) capability_offset: u8,
+    pub(crate) vector_count: u16,
+    pub(crate) table_bar_address: u64,
+    pub(crate) table_offset: u32,
+    pub(crate) table_length: u32,
+    pub(crate) pba_bar_address: u64,
+    pub(crate) pba_offset: u32,
+    pub(crate) pba_length: u32,
+    pub(crate) function_masked: bool,
 }
 
 impl VirtioBlockDevice {
@@ -143,6 +167,22 @@ impl VirtioBlockDevice {
             self.device_bar_address,
             self.device_offset,
             self.device_length,
+        )
+    }
+
+    pub(crate) fn msix_table_region(self) -> Option<(u64, usize)> {
+        region_bounds(
+            self.msix.table_bar_address,
+            self.msix.table_offset,
+            self.msix.table_length,
+        )
+    }
+
+    pub(crate) fn msix_pba_region(self) -> Option<(u64, usize)> {
+        region_bounds(
+            self.msix.pba_bar_address,
+            self.msix.pba_offset,
+            self.msix.pba_length,
         )
     }
 }
@@ -245,6 +285,24 @@ pub(crate) fn verify_parser_rejections(device: VirtioBlockDevice) -> bool {
     let mut invalid_bar = config;
     invalid_bar.bytes[required + 4] = 6;
 
+    let Some(msix) = first_capability(&config, CAPABILITY_MSIX) else {
+        return false;
+    };
+    let mut missing_msix = config;
+    missing_msix.bytes[msix] = 0;
+
+    let mut enabled_msix = config;
+    let enabled_control = read_u16(&enabled_msix.bytes, msix + 2) | MSIX_ENABLE;
+    enabled_msix.bytes[msix + 2..msix + 4].copy_from_slice(&enabled_control.to_le_bytes());
+
+    let mut invalid_msix_table_bar = config;
+    let invalid_table = read_u32(&invalid_msix_table_bar.bytes, msix + 4) | MSIX_BIR_MASK;
+    invalid_msix_table_bar.bytes[msix + 4..msix + 8].copy_from_slice(&invalid_table.to_le_bytes());
+
+    let mut invalid_msix_pba_bar = config;
+    let invalid_pba = read_u32(&invalid_msix_pba_bar.bytes, msix + 8) | MSIX_BIR_MASK;
+    invalid_msix_pba_bar.bytes[msix + 8..msix + 12].copy_from_slice(&invalid_pba.to_le_bytes());
+
     parse_virtio_block(&wrong_identity, device.bus, device.device, device.function).is_none()
         && parse_virtio_block(&no_capabilities, device.bus, device.device, device.function)
             .is_none()
@@ -252,6 +310,22 @@ pub(crate) fn verify_parser_rejections(device: VirtioBlockDevice) -> bool {
         && parse_virtio_block(&cycle, device.bus, device.device, device.function).is_none()
         && parse_virtio_block(&invalid_length, device.bus, device.device, device.function).is_none()
         && parse_virtio_block(&invalid_bar, device.bus, device.device, device.function).is_none()
+        && parse_virtio_block(&missing_msix, device.bus, device.device, device.function).is_none()
+        && parse_virtio_block(&enabled_msix, device.bus, device.device, device.function).is_none()
+        && parse_virtio_block(
+            &invalid_msix_table_bar,
+            device.bus,
+            device.device,
+            device.function,
+        )
+        .is_none()
+        && parse_virtio_block(
+            &invalid_msix_pba_bar,
+            device.bus,
+            device.device,
+            device.function,
+        )
+        .is_none()
 }
 
 pub(crate) fn initialize_without_dma(
@@ -1116,6 +1190,7 @@ fn parse_virtio_block(
     let mut isr = None;
     let mut device_region = None;
     let mut notify_multiplier = None;
+    let mut msix = None;
 
     while offset != 0 {
         if !(0x40..=0xfc).contains(&offset)
@@ -1165,6 +1240,37 @@ fn parse_virtio_block(
                     _ => return None,
                 }
             }
+        } else if id == CAPABILITY_MSIX {
+            if offset.checked_add(MSIX_CAPABILITY_SIZE)? > CONFIG_SIZE || msix.is_some() {
+                return None;
+            }
+            let control = read_u16(&config.bytes, offset + 2);
+            if control & MSIX_ENABLE != 0 {
+                return None;
+            }
+            let vector_count = (control & MSIX_TABLE_SIZE_MASK).checked_add(1)?;
+            let table = read_u32(&config.bytes, offset + 4);
+            let pba = read_u32(&config.bytes, offset + 8);
+            let table_length = u32::from(vector_count).checked_mul(MSIX_TABLE_ENTRY_SIZE)?;
+            let pba_length = u32::from(vector_count)
+                .checked_add(MSIX_PBA_BITS_PER_ENTRY - 1)?
+                .checked_div(MSIX_PBA_BITS_PER_ENTRY)?
+                .checked_mul(MSIX_PBA_ENTRY_SIZE)?;
+            let table_offset = table & MSIX_OFFSET_MASK;
+            let pba_offset = pba & MSIX_OFFSET_MASK;
+            table_offset.checked_add(table_length)?;
+            pba_offset.checked_add(pba_length)?;
+            msix = Some(MsixCapability {
+                capability_offset: u8::try_from(offset).ok()?,
+                vector_count,
+                table_bar_address: memory_bar(config, (table & MSIX_BIR_MASK) as u8)?,
+                table_offset,
+                table_length,
+                pba_bar_address: memory_bar(config, (pba & MSIX_BIR_MASK) as u8)?,
+                pba_offset,
+                pba_length,
+                function_masked: control & MSIX_FUNCTION_MASK != 0,
+            });
         }
         if next != 0 && (!(0x40..=0xfc).contains(&next) || next % 4 != 0) {
             return None;
@@ -1194,6 +1300,7 @@ fn parse_virtio_block(
         device_length: device_region.length,
         notify_multiplier: notify_multiplier?,
         capability_count: u8::try_from(capability_count).ok()?,
+        msix: msix?,
     })
 }
 
@@ -1222,11 +1329,33 @@ fn first_required_capability(config: &ConfigSpace) -> Option<usize> {
     None
 }
 
+fn first_capability(config: &ConfigSpace, id: u8) -> Option<usize> {
+    let mut offset = usize::from(config.bytes[0x34]);
+    let mut visited = [false; CONFIG_DWORDS];
+    while offset != 0 {
+        if !(0x40..=0xfc).contains(&offset) || offset % 4 != 0 || visited[offset / 4] {
+            return None;
+        }
+        visited[offset / 4] = true;
+        if config.bytes[offset] == id {
+            return Some(offset);
+        }
+        offset = usize::from(config.bytes[offset + 1]);
+    }
+    None
+}
+
 fn memory_bar(config: &ConfigSpace, bar: u8) -> Option<u64> {
     if bar >= 6 {
         return None;
     }
     let offset = 0x10 + usize::from(bar) * 4;
+    if bar > 0 {
+        let previous = read_u32(&config.bytes, offset - 4);
+        if previous & 1 == 0 && (previous >> 1) & 3 == 2 {
+            return None;
+        }
+    }
     let low = read_u32(&config.bytes, offset);
     if low & 1 != 0 {
         return None;

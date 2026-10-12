@@ -492,6 +492,31 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(u64::from(virtio_block.capability_count));
     serial_write("\r\nginux: modern virtio-blk PCI capabilities validated\r\n");
     serial_write("ginux: malformed virtio PCI configurations rejected\r\n");
+    let Some((msix_table_physical, msix_table_length)) = virtio_block.msix_table_region() else {
+        kernel_fail("ginux: invalid virtio MSI-X table range\r\n");
+    };
+    let Some((msix_pba_physical, msix_pba_length)) = virtio_block.msix_pba_region() else {
+        kernel_fail("ginux: invalid virtio MSI-X pending-bit range\r\n");
+    };
+    serial_write("ginux: virtio MSI-X capability offset: ");
+    serial_write_u64(u64::from(virtio_block.msix.capability_offset));
+    serial_write("\r\nginux: virtio MSI-X vectors: ");
+    serial_write_u64(u64::from(virtio_block.msix.vector_count));
+    serial_write("\r\nginux: virtio MSI-X table address/length: ");
+    serial_write_u64(msix_table_physical);
+    serial_write("/");
+    serial_write_usize(msix_table_length);
+    serial_write("\r\nginux: virtio MSI-X PBA address/length: ");
+    serial_write_u64(msix_pba_physical);
+    serial_write("/");
+    serial_write_usize(msix_pba_length);
+    serial_write("\r\nginux: virtio MSI-X function mask: ");
+    serial_write(if virtio_block.msix.function_masked {
+        "masked"
+    } else {
+        "unmasked"
+    });
+    serial_write("\r\nginux: disabled virtio MSI-X capability validated\r\n");
     if !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
         || !arch::x86_64::paging::mmio_translation_is_bounded(
             virtio_mmio,

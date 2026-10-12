@@ -33,13 +33,26 @@ The kernel copies the function's 256-byte configuration space using aligned
 - bounds every vendor capability inside the snapshot;
 - requires exactly one common, notification, ISR, and device configuration
   region;
+- requires exactly one disabled MSI-X capability;
+- derives the MSI-X vector count from the bounded eleven-bit table-size field;
+- requires the MSI-X table and pending-bit array to select valid memory BARs;
+- bounds the complete 16-byte-per-vector table and eight-byte-per-64-vector
+  pending-bit array against 32-bit offset overflow;
 - rejects I/O, reserved, zero, or invalid BAR addresses;
 - rejects zero-length or overflowing regions; and
 - requires a nonzero notification multiplier.
 
 Every QEMU boot also runs copied-snapshot negative cases for the wrong device
 identity, absent capability list, unaligned head, cyclic list, invalid
-capability length, and invalid BAR selector. These tests perform no PCI writes.
+capability length, invalid BAR selector, absent MSI-X, enabled MSI-X, and
+invalid MSI-X table and pending-bit BAR selectors. These tests perform no PCI
+writes.
+
+The pinned QEMU profile currently exposes two MSI-X vectors. Discovery retains
+the capability offset, table and pending-bit-array addresses and lengths, and
+the function-mask state for the later interrupt-routing contract. It does not
+interpret an unmasked function as an enabled interrupt source: the MSI-X enable
+bit must be clear.
 
 ## Authority and limitations
 
@@ -47,6 +60,12 @@ Discovery creates no userspace capability and performs no MMIO access. The
 kernel does not enable memory space, bus mastering, interrupts, queues, or
 device features. It does not read or write a disk sector and makes no reboot
 persistence claim.
+
+This profile does not destructively probe BAR aperture sizes, map the MSI-X
+table or pending-bit array, allocate a vector, program a message address/data
+pair, expose interrupt authority to userspace, or prove interrupt delivery.
+Those actions belong to a separate kernel-owned routing milestone. Until that
+milestone, isolated virtio completion remains bounded polling.
 
 The separate
 [Virtio Block Initialization v0](virtio-block-init-v0.md) contract maps the
