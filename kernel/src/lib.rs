@@ -1233,6 +1233,40 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: virtio-net DMA and IOMMU leases are generation-fresh");
     serial_write("\r\nginux: virtio-net IOMMU hardware remained inactive");
     serial_write("\r\nginux: virtio-net bus mastering remained disabled");
+    let Some(virtio_network_dma_virtual) = virtio_network_dma_frame.direct_map_address() else {
+        kernel_fail("\r\nginux: virtio-net DMA page is outside direct map\r\n");
+    };
+    let Some(virtio_network_active) = arch::x86_64::iommu::activate_translation(
+        platform.first_iommu_register_base,
+        iommu_mmio,
+        iommu_capabilities,
+        &virtio_network_translation,
+        virtio_network_dma_frame,
+    ) else {
+        kernel_fail("\r\nginux: virtio-net IOMMU activation failed\r\n");
+    };
+    let network_queues_activated = virtio_network_active.is_active()
+        && unsafe {
+            arch::x86_64::pci::activate_network_queues_without_io(
+                virtio_network,
+                virtio_network_common_mmio,
+                virtio_network_dma_frame.address(),
+                virtio_network_dma_virtual,
+            )
+        };
+    let network_translation_retired = virtio_network_active.finish();
+    if !network_queues_activated
+        || !network_translation_retired
+        || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
+    {
+        kernel_fail("\r\nginux: virtio-net empty queue activation failed\r\n");
+    }
+    serial_write("\r\nginux: virtio-net IOMMU activated before queue authority");
+    serial_write("\r\nginux: empty virtio-net RX/TX queues bound to confined DMA");
+    serial_write("\r\nginux: virtio-net DRIVER_OK established with empty rings");
+    serial_write("\r\nginux: virtio-net bus mastering enabled last");
+    serial_write("\r\nginux: empty virtio-net queues quiesced without notification");
+    serial_write("\r\nginux: virtio-net bus mastering revoked before IOMMU teardown");
     if !virtio_network_translation.retire()
         || !memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
@@ -1242,7 +1276,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: virtio-net DMA confinement retirement failed\r\n");
     }
-    serial_write("\r\nginux: inactive virtio-net DMA confinement retired cleanly");
+    serial_write("\r\nginux: virtio-net DMA confinement retired cleanly");
     let Some((disk_record, recovered_after_reboot)) = disk_volume else {
         kernel_fail("\r\nginux: persistent virtio volume transaction failed\r\n");
     };

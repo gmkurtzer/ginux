@@ -120,7 +120,13 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net DMA and IOMMU leases are generation-fresh' "$output_file" ||
     ! grep -q '^ginux: virtio-net IOMMU hardware remained inactive' "$output_file" ||
     ! grep -q '^ginux: virtio-net bus mastering remained disabled' "$output_file" ||
-    ! grep -q '^ginux: inactive virtio-net DMA confinement retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: virtio-net IOMMU activated before queue authority' "$output_file" ||
+    ! grep -q '^ginux: empty virtio-net RX/TX queues bound to confined DMA' "$output_file" ||
+    ! grep -q '^ginux: virtio-net DRIVER_OK established with empty rings' "$output_file" ||
+    ! grep -q '^ginux: virtio-net bus mastering enabled last' "$output_file" ||
+    ! grep -q '^ginux: empty virtio-net queues quiesced without notification' "$output_file" ||
+    ! grep -q '^ginux: virtio-net bus mastering revoked before IOMMU teardown' "$output_file" ||
+    ! grep -q '^ginux: virtio-net DMA confinement retired cleanly' "$output_file" ||
     ! grep -q '^ginux: virtio-net stable MAC validated: 90520731923542' "$output_file" ||
     ! grep -q '^ginux: virtio-net platform DMA negotiation validated' "$output_file" ||
     ! grep -q '^ginux: invalid virtio-net feature sets rejected' "$output_file" ||

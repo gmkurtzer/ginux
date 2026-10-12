@@ -43,15 +43,14 @@ from the preceding virtio-blk proof. Construction requires the block domain to
 be completely retired, VT-d translation to be disabled with a zero root, and
 all virtio-net PCI command authority to remain clear.
 
-This milestone never installs the root, enables VT-d translation, enables bus
-mastering, configures a queue, maps notification MMIO, or sets `DRIVER_OK`.
-After validation, the hierarchy is scrubbed and released before the DMA page
-is scrubbed and released. Evidence must show that no lease remains live.
+The construction phase never installs the root, enables VT-d translation,
+enables bus mastering, configures a queue, or sets `DRIVER_OK`. The subsequent
+[Virtio Network Empty Queue Activation v0](virtio-network-queue-activation-v0.md)
+proof activates this exact boundary in a separately ordered phase.
 
 ## Deliberate limits
 
-- Queue activation, MSI-X, packet movement, and fault injection are subsequent
-  milestones.
+- MSI-X, packet movement, and fault injection are subsequent milestones.
 - One page and eight-entry queues are a bootstrap profile, not a throughput
   target.
 - The kernel owns this construction proof. The final path must recreate the

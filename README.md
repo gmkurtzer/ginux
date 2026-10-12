@@ -60,6 +60,13 @@ exactly seven spans, both queue notification registers resolve inside their
 mapping, cacheable aliases are absent, and MSI-X plus all PCI authority remain
 disabled. See
 [Virtio Network Queue MMIO v0](specs/kernel/virtio-network-mmio-v0.md).
+With those prerequisites sealed, the kernel activates the NIC's exact VT-d
+hierarchy first, binds empty eight-entry RX/TX queues inside the permitted DMA
+page, establishes `DRIVER_OK`, and enables bus mastering last. It publishes no
+descriptor and performs no notification. Teardown revokes bus mastering before
+resetting the device and disabling VT-d, then scrubs translation tables before
+the DMA page. See
+[Virtio Network Empty Queue Activation v0](specs/kernel/virtio-network-queue-activation-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table
