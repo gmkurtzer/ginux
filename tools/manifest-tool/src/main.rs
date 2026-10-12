@@ -157,8 +157,6 @@ fn validate_system_profile(bytes: &[u8]) {
     }
     let mut names = BTreeSet::new();
     let mut ready = false;
-    let mut partial = false;
-    let mut missing = false;
     let mut metadata = [false; 4];
     for line in lines {
         let mut fields = line.split('\t');
@@ -194,8 +192,7 @@ fn validate_system_profile(bytes: &[u8]) {
         } else {
             match state {
                 "ready" => ready = true,
-                "partial" => partial = true,
-                "missing" => missing = true,
+                "partial" | "missing" => {}
                 _ => fail("system profile row has an unsupported state"),
             }
         }
@@ -203,8 +200,8 @@ fn validate_system_profile(bytes: &[u8]) {
     if metadata != [true; 4] {
         fail("system profile is missing required metadata");
     }
-    if !ready || !partial || !missing {
-        fail("system profile must expose ready, partial, and missing requirements");
+    if !ready {
+        fail("system profile must expose at least one ready requirement");
     }
 }
 

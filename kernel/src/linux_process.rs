@@ -3,7 +3,7 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
-use crate::{address_space, arch::x86_64::cpu, memory, scheduler};
+use crate::{address_space, arch::x86_64::cpu, linux_user, memory, scheduler};
 
 const PROCESS_LIMIT: usize = 4;
 const PROCESS_HIERARCHY_LIMIT: usize = 6;
@@ -247,6 +247,7 @@ impl ProcessAddressSpace {
 struct Process {
     handle: ProcessHandle,
     parent: Option<ProcessHandle>,
+    user_namespace: linux_user::UserNamespaceHandle,
     address_space: Option<ProcessAddressSpace>,
     retiring_address_space: Option<ProcessAddressSpace>,
     context: Option<ProcessExecutionContext>,
@@ -300,8 +301,10 @@ impl ProcessTable {
         {
             return None;
         }
+        let user_namespace = linux_user::initial()?;
         let handle = self.allocate(
             None,
+            user_namespace,
             Some(address_space),
             Some(context),
             ProcessState::Running,
@@ -321,7 +324,15 @@ impl ProcessTable {
         {
             return None;
         }
-        self.allocate(Some(parent), None, None, ProcessState::Preparing)
+        let user_namespace = parent_process.user_namespace;
+        linux_user::credentials(user_namespace)?;
+        self.allocate(
+            Some(parent),
+            user_namespace,
+            None,
+            None,
+            ProcessState::Preparing,
+        )
     }
 
     fn refresh_init(
@@ -339,6 +350,7 @@ impl ProcessTable {
             return false;
         };
         if process.parent.is_some()
+            || linux_user::credentials(process.user_namespace).is_none()
             || process.retiring_address_space.is_some()
             || process.scheduler_thread.is_some()
             || process.state != ProcessState::Running
@@ -683,6 +695,7 @@ impl ProcessTable {
     fn allocate(
         &mut self,
         parent: Option<ProcessHandle>,
+        user_namespace: linux_user::UserNamespaceHandle,
         address_space: Option<ProcessAddressSpace>,
         context: Option<ProcessExecutionContext>,
         state: ProcessState,
@@ -700,6 +713,7 @@ impl ProcessTable {
         self.processes[slot] = Some(Process {
             handle,
             parent,
+            user_namespace,
             address_space,
             retiring_address_space: None,
             context,
@@ -1189,6 +1203,7 @@ pub(crate) fn finish_live_process_registry() -> bool {
         && table.processes.iter().flatten().count() == 1
         && table.processes.iter().flatten().all(|process| {
             process.parent.is_none()
+                && linux_user::credentials(process.user_namespace).is_some()
                 && process.state == ProcessState::Running
                 && process.retiring_address_space.is_none()
                 && process.scheduler_thread.is_none()
@@ -1199,6 +1214,13 @@ pub(crate) fn finish_live_process_registry() -> bool {
     LIVE_PROCESS_TABLE_INITIALIZED.store(false, Ordering::Release);
     LIVE_PROCESS_REFRESH_COUNT.store(0, Ordering::Release);
     true
+}
+
+pub(crate) fn live_process_user_namespace(pid: u32) -> Option<linux_user::UserNamespaceHandle> {
+    let table = live_process_table_mut()?;
+    let handle = table.handle_by_pid(pid)?;
+    let namespace = table.process(handle)?.user_namespace;
+    linux_user::credentials(namespace).map(|_| namespace)
 }
 
 #[inline(never)]
@@ -1414,6 +1436,7 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
     let (Some(parent_space), Some(parent_context)) = (parent.address_space, parent.context) else {
         return false;
     };
+    let parent_user_namespace = parent.user_namespace;
     if parent.state != ProcessState::Running || !parent_space.is_valid() {
         return false;
     }
@@ -1461,6 +1484,8 @@ fn verify_live_fork_clone_and_execution_transaction() -> bool {
         return false;
     };
     let child_valid = child.parent == Some(parent_handle)
+        && child.user_namespace == parent_user_namespace
+        && linux_user::credentials(child.user_namespace).is_some()
         && child.state == ProcessState::Running
         && child.context == Some(parent_context.fork_child())
         && child_space.is_valid()
@@ -1546,6 +1571,7 @@ fn verify_live_fork_clone_only_transaction() -> bool {
     let (Some(parent_space), Some(parent_context)) = (parent.address_space, parent.context) else {
         return false;
     };
+    let parent_user_namespace = parent.user_namespace;
     if parent.state != ProcessState::Running || !parent_space.is_valid() {
         return false;
     }
@@ -1592,6 +1618,8 @@ fn verify_live_fork_clone_only_transaction() -> bool {
         return false;
     };
     let child_valid = child.parent == Some(parent_handle)
+        && child.user_namespace == parent_user_namespace
+        && linux_user::credentials(child.user_namespace).is_some()
         && child.state == ProcessState::Running
         && child.context == Some(parent_context.fork_child())
         && child_space.is_valid()

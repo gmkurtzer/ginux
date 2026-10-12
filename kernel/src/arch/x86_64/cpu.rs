@@ -10,7 +10,8 @@ use super::{paging, timer};
 use crate::{
     address_space,
     capability::Rights,
-    control_abi, domain, initramfs, ipc, linux_mount, linux_process, memory, network, scheduler,
+    control_abi, domain, initramfs, ipc, linux_mount, linux_process, linux_user, memory, network,
+    scheduler,
     scheduler::{
         RuntimeAction, UserFaultContext, UserFaultFrame, UserInterruptFrame, UserTrapFrame,
     },
@@ -275,6 +276,12 @@ const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
 const LINUX_MOUNTINFO_FILE_NODE: u16 = 0xfe00;
 const LINUX_FILE_PROC_MOUNTINFO: u16 = LINUX_FILE_MASK | LINUX_MOUNTINFO_FILE_NODE;
+const LINUX_UID_MAP_FILE_NODE: u16 = 0xfd00;
+const LINUX_FILE_PROC_UID_MAP: u16 = LINUX_FILE_MASK | LINUX_UID_MAP_FILE_NODE;
+const LINUX_GID_MAP_FILE_NODE: u16 = 0xfc00;
+const LINUX_FILE_PROC_GID_MAP: u16 = LINUX_FILE_MASK | LINUX_GID_MAP_FILE_NODE;
+const LINUX_SETGROUPS_FILE_NODE: u16 = 0xfb00;
+const LINUX_FILE_PROC_SETGROUPS: u16 = LINUX_FILE_MASK | LINUX_SETGROUPS_FILE_NODE;
 const LINUX_TMP_FILE_NODE: u16 = 0xff00;
 const LINUX_FILE_TMP_SCRATCH: u16 = LINUX_FILE_MASK | LINUX_TMP_FILE_NODE;
 const LINUX_TMP_FILE_CAPACITY: usize = 64;
@@ -2098,6 +2105,7 @@ fn execute_deferred_live_fork() -> bool {
     );
     if valid {
         serial_write("ginux: Linux PID 1 fork and wait4 lifecycle completed\r\n");
+        serial_write("ginux: Linux fork inherited user namespace\r\n");
     }
     valid
 }
@@ -5928,25 +5936,53 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
-        LINUX_GETUID_SYSCALL
-        | LINUX_GETGID_SYSCALL
-        | LINUX_GETEUID_SYSCALL
-        | LINUX_GETEGID_SYSCALL => 0,
+        LINUX_GETUID_SYSCALL => {
+            current_linux_credentials().map_or(LINUX_ESRCH, |value| u64::from(value.uid))
+        }
+        LINUX_GETGID_SYSCALL => {
+            current_linux_credentials().map_or(LINUX_ESRCH, |value| u64::from(value.gid))
+        }
+        LINUX_GETEUID_SYSCALL => {
+            current_linux_credentials().map_or(LINUX_ESRCH, |value| u64::from(value.euid))
+        }
+        LINUX_GETEGID_SYSCALL => {
+            current_linux_credentials().map_or(LINUX_ESRCH, |value| u64::from(value.egid))
+        }
         LINUX_GETGROUPS_SYSCALL => {
+            let Some(credentials) = current_linux_credentials() else {
+                return LINUX_ESRCH;
+            };
             if (first_argument as i32) < 0 {
                 return LINUX_EINVAL;
             }
             if first_argument == 0 {
                 return 1;
             }
-            if !copy_to_linux_user(buffer, &0_u32.to_ne_bytes()) {
+            if !copy_to_linux_user(buffer, &credentials.supplementary_gid.to_ne_bytes()) {
                 return LINUX_EFAULT;
             }
             1
         }
-        LINUX_SETGROUPS_SYSCALL => LINUX_EPERM,
+        LINUX_SETGROUPS_SYSCALL => {
+            let Some(namespace) = current_linux_user_namespace() else {
+                return LINUX_ESRCH;
+            };
+            if linux_user::setgroups_allowed(namespace) {
+                LINUX_ENOSYS
+            } else {
+                LINUX_EPERM
+            }
+        }
         LINUX_GETRESUID_SYSCALL | LINUX_GETRESGID_SYSCALL => {
-            if !copy_linux_root_id_triple(first_argument, buffer, count) {
+            let Some(credentials) = current_linux_credentials() else {
+                return LINUX_ESRCH;
+            };
+            let ids = if number == LINUX_GETRESUID_SYSCALL {
+                (credentials.uid, credentials.euid, credentials.suid)
+            } else {
+                (credentials.gid, credentials.egid, credentials.sgid)
+            };
+            if !copy_linux_id_triple(first_argument, buffer, count, ids) {
                 return LINUX_EFAULT;
             }
             0
@@ -6399,6 +6435,14 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
 
 fn current_linux_process_pid() -> u32 {
     LINUX_CURRENT_PROCESS_PID.load(Ordering::SeqCst)
+}
+
+fn current_linux_user_namespace() -> Option<linux_user::UserNamespaceHandle> {
+    linux_process::live_process_user_namespace(current_linux_process_pid())
+}
+
+fn current_linux_credentials() -> Option<linux_user::Credentials> {
+    linux_user::credentials(current_linux_user_namespace()?)
 }
 
 fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 {
@@ -7790,6 +7834,15 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     if path == b"/proc/1/mountinfo" {
         return Some(LINUX_FILE_PROC_MOUNTINFO);
     }
+    if path == b"/proc/1/uid_map" {
+        return Some(LINUX_FILE_PROC_UID_MAP);
+    }
+    if path == b"/proc/1/gid_map" {
+        return Some(LINUX_FILE_PROC_GID_MAP);
+    }
+    if path == b"/proc/1/setgroups" {
+        return Some(LINUX_FILE_PROC_SETGROUPS);
+    }
     if path == b"/tmp/ginux-ready" {
         return Some(LINUX_FILE_TMP_SCRATCH);
     }
@@ -7849,6 +7902,15 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     }
     if path == b"proc/1/mountinfo" {
         return Some(LINUX_FILE_PROC_MOUNTINFO);
+    }
+    if path == b"proc/1/uid_map" {
+        return Some(LINUX_FILE_PROC_UID_MAP);
+    }
+    if path == b"proc/1/gid_map" {
+        return Some(LINUX_FILE_PROC_GID_MAP);
+    }
+    if path == b"proc/1/setgroups" {
+        return Some(LINUX_FILE_PROC_SETGROUPS);
     }
     if path == b"tmp/ginux-ready" {
         return Some(LINUX_FILE_TMP_SCRATCH);
@@ -11262,11 +11324,28 @@ fn linux_tmp_file(state: u16) -> bool {
 
 fn linux_proc_file(state: u16) -> bool {
     let kind = state & !3;
-    kind == LINUX_FILE_PROC_STATUS || kind == LINUX_FILE_PROC_MOUNTINFO
+    matches!(
+        kind,
+        LINUX_FILE_PROC_STATUS
+            | LINUX_FILE_PROC_MOUNTINFO
+            | LINUX_FILE_PROC_UID_MAP
+            | LINUX_FILE_PROC_GID_MAP
+            | LINUX_FILE_PROC_SETGROUPS
+    )
 }
 
 fn linux_mountinfo_file(state: u16) -> bool {
     state & !3 == LINUX_FILE_PROC_MOUNTINFO
+}
+
+fn linux_user_namespace_file(state: u16) -> Option<&'static [u8]> {
+    current_linux_user_namespace()?;
+    match state & !3 {
+        LINUX_FILE_PROC_UID_MAP => Some(linux_user::UID_MAP),
+        LINUX_FILE_PROC_GID_MAP => Some(linux_user::GID_MAP),
+        LINUX_FILE_PROC_SETGROUPS => Some(linux_user::SETGROUPS),
+        _ => None,
+    }
 }
 
 fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
@@ -11278,6 +11357,9 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
     }
     if linux_mountinfo_file(state) {
         return linux_mount::current_mountinfo();
+    }
+    if let Some(file) = linux_user_namespace_file(state) {
+        return Some(file);
     }
     if state & !3 == LINUX_FILE_PROC_STATUS {
         return Some(LINUX_PROC_PID1_STATUS);
@@ -11301,6 +11383,12 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
     }
     if linux_mountinfo_file(state) {
         return Some(19);
+    }
+    match state & !3 {
+        LINUX_FILE_PROC_UID_MAP => return Some(20),
+        LINUX_FILE_PROC_GID_MAP => return Some(21),
+        LINUX_FILE_PROC_SETGROUPS => return Some(22),
+        _ => {}
     }
     if linux_tmp_file(state) {
         return Some(18);
@@ -11849,12 +11937,15 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             }
         }
         if directory == b"proc/1" {
-            if cursor > 2 {
+            if cursor > 5 {
                 return LINUX_EINVAL;
             }
             for (index, inode, name) in [
                 (0_usize, 17_u64, &b"status"[..]),
                 (1_usize, 19_u64, &b"mountinfo"[..]),
+                (2_usize, 20_u64, &b"uid_map"[..]),
+                (3_usize, 21_u64, &b"gid_map"[..]),
+                (4_usize, 22_u64, &b"setgroups"[..]),
             ] {
                 if cursor == index {
                     if !append_linux_dirent(
@@ -12262,7 +12353,7 @@ fn copy_linux_c_string(address: u64, output: &mut [u8]) -> Result<usize, u64> {
     Err(LINUX_ENAMETOOLONG)
 }
 
-fn copy_linux_root_id_triple(first: u64, second: u64, third: u64) -> bool {
+fn copy_linux_id_triple(first: u64, second: u64, third: u64, ids: (u32, u32, u32)) -> bool {
     let width = size_of::<u32>();
     if !linux_writable_user_range_contains(first, width)
         || !linux_writable_user_range_contains(second, width)
@@ -12270,13 +12361,15 @@ fn copy_linux_root_id_triple(first: u64, second: u64, third: u64) -> bool {
     {
         return false;
     }
-    let root = 0_u32.to_ne_bytes();
-    copy_to_linux_user(first, &root)
-        && copy_to_linux_user(second, &root)
-        && copy_to_linux_user(third, &root)
+    copy_to_linux_user(first, &ids.0.to_ne_bytes())
+        && copy_to_linux_user(second, &ids.1.to_ne_bytes())
+        && copy_to_linux_user(third, &ids.2.to_ne_bytes())
 }
 
 fn linux_capget(header_address: u64, data_address: u64) -> u64 {
+    let Some(namespace) = current_linux_user_namespace() else {
+        return LINUX_ESRCH;
+    };
     let mut header = [0_u8; 8];
     if !copy_from_linux_user(header_address, &mut header) {
         return LINUX_EFAULT;
@@ -12290,8 +12383,11 @@ fn linux_capget(header_address: u64, data_address: u64) -> u64 {
         };
     }
     let pid = i32::from_ne_bytes(header[4..].try_into().unwrap());
-    if !matches!(pid, 0 | 1) {
+    if pid != 0 && u32::try_from(pid).ok() != Some(current_linux_process_pid()) {
         return LINUX_ESRCH;
+    }
+    if !linux_user::has_no_linux_capabilities(namespace) {
+        return LINUX_EPERM;
     }
     if data_address != 0 && !copy_to_linux_user(data_address, &[0_u8; LINUX_CAPABILITY_DATA_SIZE]) {
         return LINUX_EFAULT;
@@ -12300,6 +12396,9 @@ fn linux_capget(header_address: u64, data_address: u64) -> u64 {
 }
 
 fn linux_capset(header_address: u64, data_address: u64) -> u64 {
+    let Some(namespace) = current_linux_user_namespace() else {
+        return LINUX_ESRCH;
+    };
     let mut header = [0_u8; 8];
     if !copy_from_linux_user(header_address, &mut header) {
         return LINUX_EFAULT;
@@ -12307,7 +12406,9 @@ fn linux_capset(header_address: u64, data_address: u64) -> u64 {
     if u32::from_ne_bytes(header[..4].try_into().unwrap()) != LINUX_CAPABILITY_VERSION_3 {
         return LINUX_EINVAL;
     }
-    if i32::from_ne_bytes(header[4..].try_into().unwrap()) != 0 {
+    if i32::from_ne_bytes(header[4..].try_into().unwrap()) != 0
+        || !linux_user::has_no_linux_capabilities(namespace)
+    {
         return LINUX_EPERM;
     }
     let mut data = [0_u8; LINUX_CAPABILITY_DATA_SIZE];

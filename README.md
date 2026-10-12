@@ -22,7 +22,11 @@ parent PID 0. It also enumerates `/tmp`, writes and rereads `ready\n` through a
 bounded 64-byte `ginux-ready` scratch file, and relies on final teardown to
 scrub that backing store. The kernel installs the measured root as the sole
 `ro,nosuid,nodev` mount in a generation-bound Linux mount namespace; PID 1
-enumerates and reads `/proc/1/mountinfo` to verify that exact state. PID 1 also
+enumerates and reads `/proc/1/mountinfo` to verify that exact state. A separate
+generation-bound user namespace maps container UID/GID 0 to outside ID 100000,
+denies supplementary-group mutation, carries no Linux or native capabilities,
+and is inherited by the fork child. PID 1 validates its read-only `uid_map`,
+`gid_map`, and `setgroups` proc records. PID 1 also
 invokes the public Linux `fork` ABI,
 resumes an independently owned PID 2 under its private CR3, and reaps its
 `exit(42)` status through `wait4` before publishing readiness. The kernel
@@ -51,7 +55,7 @@ staging buffer returns `sbin` on a second cursor page. Measured directory descri
 selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open
 without per-directory kernel identities; `dev`
 retains its synthetic device entries. The measured `proc` node is populated by
-the bounded synthetic PID 1 directory, status record, and root-mount record;
+the bounded synthetic PID 1 directory plus status, root-mount, and user-namespace records;
 it is not yet a general procfs. The measured `tmp` node similarly exposes one bounded mutable
 `ginux-ready` file; it is not yet a mounted tmpfs. A
 bounded index-driven contract resolves any direct measured regular child below

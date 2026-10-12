@@ -12,6 +12,7 @@ mod ipc;
 mod linux_elf;
 mod linux_mount;
 mod linux_process;
+mod linux_user;
 mod manifest;
 mod memory;
 mod network;
@@ -625,6 +626,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: generation-safe Linux mount namespace installed\r\n");
     serial_write("ginux: immutable measured root mounted read-only\r\n");
+    if !linux_user::verify_contract() || !linux_user::install_initial() {
+        kernel_fail("ginux: initial Linux user namespace invalid\r\n");
+    }
+    serial_write("ginux: generation-safe Linux user namespace installed\r\n");
+    serial_write("ginux: container root mapped outside native authority\r\n");
     let Some(system_profile_node) =
         initramfs::published_regular_file_node(b"etc/ginux-system-profile")
     else {

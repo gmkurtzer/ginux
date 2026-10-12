@@ -51,10 +51,10 @@ ginux_linux_system_init:
     mov r9, rax
     mov rdi, rax
     lea rsi, [rip + .Lstatus]
-    mov edx, 128
+    mov edx, 256
     mov eax, 217
     syscall
-    cmp rax, 112
+    cmp rax, 208
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 67], 0x74617473
     jne .Lfailure
@@ -64,10 +64,107 @@ ginux_linux_system_init:
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 103], 0x666e6974
     jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 131], 0x5f646975
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 163], 0x5f646967
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 195], 0x67746573
+    jne .Lfailure
     mov rdi, r9
     mov eax, 3
     syscall
     test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Luid_map_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 11
+    xor eax, eax
+    syscall
+    cmp rax, 11
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 0x30312030
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 4], 0x30303030
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 8], 0x20
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus + 9], 0x0a31
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Lgid_map_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 11
+    xor eax, eax
+    syscall
+    cmp rax, 11
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 0x30312030
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 4], 0x30303030
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 8], 0x20
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus + 9], 0x0a31
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Lsetgroups_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 5
+    xor eax, eax
+    syscall
+    cmp rax, 5
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 0x796e6564
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 4], 0x0a
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov rdi, r8
+    lea rsi, [rip + .Luserns_marker]
+    mov edx, 13
+    mov eax, 1
+    syscall
+    cmp rax, 13
     jne .Lfailure
 
     mov edi, -100
@@ -262,6 +359,14 @@ ginux_linux_system_init:
     syscall
     cmp rax, 1
     jne .Lfailure
+    mov eax, 102
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov eax, 104
+    syscall
+    test rax, rax
+    jne .Lfailure
     mov edi, 42
     mov eax, 60
     syscall
@@ -303,6 +408,12 @@ ginux_linux_system_init:
     .asciz "/proc/1/status"
 .Lmountinfo_path:
     .asciz "/proc/1/mountinfo"
+.Luid_map_path:
+    .asciz "/proc/1/uid_map"
+.Lgid_map_path:
+    .asciz "/proc/1/gid_map"
+.Lsetgroups_path:
+    .asciz "/proc/1/setgroups"
 .Lproc_path:
     .asciz "/proc"
 .Lpid1_path:
@@ -315,5 +426,7 @@ ginux_linux_system_init:
     .ascii "ready\n"
 .Ltmp_marker:
     .ascii "TMPFS_READY\n"
+.Luserns_marker:
+    .ascii "USERNS_READY\n"
 .Lstatus:
-    .space 128
+    .space 256

@@ -469,14 +469,17 @@ contract below.
 The measured `/proc` directory is the immutable mount-point anchor for a
 synthetic bounded PID 1 view. Its `getdents64` result contains `.`, `..`, and
 the directory `1`; `/proc/1` likewise contains `.`, `..`, and the read-only
-regular files `status` and `mountinfo`. `/proc/1/status` has fixed mode `0444` and exact bytes
+regular files `status`, `mountinfo`, `uid_map`, `gid_map`, and `setgroups`.
+`/proc/1/status` has fixed mode `0444` and exact bytes
 `Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n`. PID 1 enumerates both
 directories, validates their child records, reads all 45 bytes, and copies the
 snapshot to the measured console before readiness. `/proc/1/mountinfo` has
 fixed mode `0444` and exposes the exact 51-byte record
 `1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro\n` while the namespace is
-active. Writes, execute access, and file mapping are denied for both records.
-This is a boot-state identity and mount snapshot, not general procfs: no other
+active. The three user-namespace records have the exact contents specified in
+[Linux User Namespace v0](linux-user-namespace-v0.md). Writes, execute access,
+and file mapping are denied for all five records. This is a boot-state identity,
+mount, and namespace snapshot, not general procfs: no other
 PIDs, mutable process state, threads, fd links, sysctl, or post-exit records
 exist.
 
@@ -1133,10 +1136,12 @@ While the first child is ready between its two parent selections, a second
 otherwise-valid syscall 56 request returns `-EAGAIN`. That rejection does not
 change either published TID word or replace the live child context.
 Before `getpid`, the probe also invokes `getuid`, `getgid`, `geteuid`, and
-`getegid`; each returns zero. These are Linux-container credentials only. They
-do not select a native domain, add a capability, or authorize a kernel control
-operation. `getresuid` and `getresgid` copy real/effective/saved triples of
-zero. All three destinations are validated before any write, so an invalid
+`getegid`; each resolves the current process's live user-namespace handle and
+returns zero. The initial namespace maps that container ID to outside ID
+100000. These are Linux-container credentials only. They do not select a native
+domain, add a capability, or authorize a kernel control operation. `getresuid`
+and `getresgid` copy real/effective/saved triples from the same immutable
+namespace. All three destinations are validated before any write, so an invalid
 third pointer cannot leave a partial result. `rax = 115` (`__NR_getgroups`)
 reports one immutable supplementary group, container-local GID 0. A zero-sized
 query returns the required count without accessing its pointer, a negative size
@@ -1153,7 +1158,11 @@ unknown version is replaced with v3 before returning `-EINVAL`. `rax = 126`
 (`__NR_capset`) accepts only an idempotent all-zero v3 set for the current
 process; nonzero capabilities or another PID return `-EPERM`. Container UID 0
 therefore carries no Linux capabilities and still grants no native kernel
-authority. The initial process namespace has one visible process and one
+authority. `/proc/1/uid_map` and `/proc/1/gid_map` each contain
+`0 100000 1\n`; `/proc/1/setgroups` contains `deny\n`. All are immutable,
+read-only, and non-mappable. The fork child inherits the exact generation-bound
+namespace handle and verifies UID and GID 0 before exit. The initial process
+namespace has one visible process and one
 runnable thread. `getpid` returns the fixed process ID 1, while `gettid`
 resolves the running entry in the bounded generation-tagged thread table and
 returns its TID 1. Internal lifecycle verification temporarily reserves TIDs 2
@@ -1326,8 +1335,9 @@ workload executes.
 
 This milestone proves the hardware transition and Linux argument registers. It
 does not provide persistent per-thread kernel stacks, general signal
-interruption, restartable syscalls, scheduler integration, mutable credentials
-or credential-based permissions, a general file-descriptor table, arbitrary
+interruption, restartable syscalls, scheduler integration, mutable credentials,
+general user-namespace creation, credential-based permissions, a general
+file-descriptor table, arbitrary
 user buffers,
 general thread allocation, general TLS state, or any syscall other than the exact bounded
 `read`, `pread64`, `write`, `readv`, `writev`, bounded

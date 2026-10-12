@@ -296,8 +296,6 @@ fn valid_system_profile(bytes: &[u8]) -> bool {
             b"meta\tconsole\t/dev/console\trequired\n",
             b"meta\troot\tnewc-ro\trequired\n",
             b"\tready\t",
-            b"\tpartial\t",
-            b"\tmissing\t",
         ]
         .iter()
         .all(|needle| bytes.windows(needle.len()).any(|window| window == *needle))

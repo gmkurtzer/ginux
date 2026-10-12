@@ -757,6 +757,14 @@ if ! grep -q '^ginux: generation-safe Linux mount namespace installed' "$output_
     exit 1
 fi
 
+if ! grep -q '^ginux: generation-safe Linux user namespace installed' "$output_file" ||
+    ! grep -q '^ginux: container root mapped outside native authority' "$output_file" ||
+    ! grep -q '^ginux: Linux fork inherited user namespace' "$output_file" ||
+    ! grep -q '^USERNS_READY$' "$output_file"; then
+    echo "Boot test failed: the bounded Linux user namespace was not observed." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: bounded writable tmp scratch file validated' "$output_file"; then
     echo "Boot test failed: the bounded writable tmp file was not validated." >&2

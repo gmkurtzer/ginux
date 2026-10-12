@@ -29,6 +29,14 @@ Its sole root mount references the live measured-root generation and has fixed
 `/proc/1/mountinfo` record before readiness. This makes `root.mount` ready for
 this bounded profile; mount creation, bind mounts, remounting, propagation,
 namespace cloning, and a general mount syscall remain outside it.
+PID 1 is also bound to the initial generation-tagged user namespace. Its
+single-entry UID and GID maps translate container ID 0 to outside ID 100000,
+Linux capability sets are empty, and `setgroups` is permanently denied. PID 1
+enumerates and validates `/proc/1/uid_map`, `/proc/1/gid_map`, and
+`/proc/1/setgroups`; PID 2 inherits the exact namespace handle and confirms
+UID/GID 0 after fork. This makes `namespace.user` ready for the bounded profile.
+Creating or joining namespaces, multiple mappings, map mutation, mutable
+credentials, and namespace nesting remain outside it.
 PID 1 also enumerates the measured `/tmp` anchor, writes `ready\n` to the
 bounded kernel-owned `ginux-ready` scratch file, closes and reopens it, and
 validates the exact bytes. Process exit scrubs the complete 64-byte backing
@@ -45,8 +53,8 @@ root publishes an explicit `/sbin` directory containing the exact `init` node,
 and bounded root enumeration reaches it through a second cursor page. PID 1 is
 currently a bounded readiness-and-exit workload, not a persistent supervisor
 or interactive console owner. General process concurrency, mutable or multiple
-mounts, a general tmpfs, a complete procfs, and a complete user-namespace contract
-remain explicit gaps in the matrix.
+mounts, a general tmpfs, a complete procfs, and general user-namespace creation
+and mapping APIs remain explicit gaps in the matrix.
 
 Build the exact candidate root and signed development image with:
 

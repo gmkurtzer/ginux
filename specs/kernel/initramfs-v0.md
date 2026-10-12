@@ -94,10 +94,11 @@ Its fixed 256-byte staging buffer returns the first eight children through
 `bin` on one page and the explicit `sbin` directory on a second cursor page.
 Measured directory descriptors use their own bounded node
 selectors to recover names from the index. The measured `sys` node is empty.
-The measured `proc` node anchors synthetic bounded `1/status` and
-`1/mountinfo` runtime views; neither adds mutable bytes to the authenticated
-archive. The PID 1 proof enumerates both synthetic directories, reads the
-status record, and verifies the immutable root mount record.
+The measured `proc` node anchors synthetic bounded `1/status`, `1/mountinfo`,
+`1/uid_map`, `1/gid_map`, and `1/setgroups` runtime views; none adds mutable
+bytes to the authenticated archive. The PID 1 proof enumerates both synthetic
+directories, reads the status record, and verifies the immutable root mount
+and user-namespace records.
 The measured `tmp` node similarly anchors a kernel-owned, 64-byte
 `ginux-ready` scratch file whose contents are outside the signed archive and
 are scrubbed at process teardown.

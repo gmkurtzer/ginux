@@ -302,8 +302,8 @@ management. It does not implement:
 - copy-on-write, concurrent parent/child execution, or more than one public
   child lifecycle;
 - process-style `clone`, `vfork`, `waitid`, wait groups, `WNOHANG`, or rusage;
-- independently modeled descriptor, credential, signal, mount, or namespace
-  inheritance;
+- independently modeled descriptor, signal, or mount inheritance; the user
+  namespace handle alone is inherited exactly;
 - concurrent process scheduling or process-directed signal delivery;
 - orphan reparenting, subreapers, process groups, or sessions;
 - resource accounting, limits, PID namespaces, or procfs generation from this
