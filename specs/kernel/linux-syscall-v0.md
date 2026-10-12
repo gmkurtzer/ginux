@@ -727,7 +727,7 @@ exact post-`ret` stack address with the intact cookie. A premature call returns
 `-EINVAL` without consuming the frame. Successful return clears the kernel
 record, restores the prior mask, and uses a dedicated `IRETQ` syscall epilogue
 to restore all interrupted registers, including `rcx` and `r11`; the retried
-load then observes the newly mapped zero page. Nested delivery, pending signals,
+load then observes the newly mapped zero page. Nested delivery,
 `SA_SIGINFO`, alternate-stack automatic disarming, user-editable `ucontext`,
 restartable syscalls, and other asynchronous signal sources remain unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
@@ -749,9 +749,23 @@ thread groups or thread IDs return `-ESRCH`. An unmasked admitted `SIGSEGV`
 uses the same live-return delivery path as `kill`, and the dedicated measured
 `/bin/signal-probe` installs a fresh post-`execve` handler, exercises every
 identity class, completes one handler/`rt_sigreturn` lifecycle, then restores
-the default action before exit. The verifier therefore requires three exact
+the default action before exit. The verifier therefore requires four exact
 delivery/return pairs for that measured runtime and two for the other probe
 executions.
+When that admitted caught `SIGSEGV` is blocked, `kill` or `tgkill` coalesces it
+into one bounded pending bit and returns success without constructing a frame.
+`rax = 127` (`__NR_rt_sigpending`) requires the exact eight-byte signal-set size
+and a writable output range, then reports pending signals intersected with the
+current mask. Wrong sizes return `-EINVAL`, and inaccessible output returns
+`-EFAULT` without changing pending state. Unblocking the bit with
+`rt_sigprocmask` redirects that syscall's live return into the handler, clears
+the pending bit only after the frame and return context are committed, and
+resumes after `rt_sigprocmask` following `rt_sigreturn`. The measured signal
+runtime proves the signal remains pending while masked, the prior mask is
+reported during unblock, exactly one coalesced delivery occurs, and both mask
+and pending state are zero at teardown. Pending state for other signals,
+process/thread selection among multiple runnable threads, and asynchronous
+sources remain unsupported.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE` or a zero-flag stack of at least
 2048 bytes wholly contained in one currently writable probe VMA. Invalid

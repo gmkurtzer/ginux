@@ -58,6 +58,7 @@ const LINUX_BRK_SYSCALL: u64 = 12;
 const LINUX_RT_SIGACTION_SYSCALL: u64 = 13;
 const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_RT_SIGRETURN_SYSCALL: u64 = 15;
+const LINUX_RT_SIGPENDING_SYSCALL: u64 = 127;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_PREAD64_SYSCALL: u64 = 17;
 const LINUX_READV_SYSCALL: u64 = 19;
@@ -573,6 +574,7 @@ static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_SIGNAL_MASK: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_PENDING_SIGNALS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_EXEC_IGNORED_SIGNALS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_SIGNAL_HANDLERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
     [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
@@ -3004,6 +3006,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
     for signal in 0..LINUX_SIGNAL_COUNT {
         ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
@@ -3193,7 +3196,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
-    let expected_signal_count = if signal_probe_executed { 3 } else { 2 };
+    let expected_signal_count = if signal_probe_executed { 4 } else { 2 };
     let signal_lifecycle_valid = !LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst)
         && signal_delivery_count == expected_signal_count
         && signal_return_count == expected_signal_count
@@ -3467,6 +3470,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     };
     let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
     let signal_mask_restored = ELF_PROBE_SIGNAL_MASK.swap(0, Ordering::SeqCst) == 0;
+    let pending_signals_cleared = ELF_PROBE_PENDING_SIGNALS.swap(0, Ordering::SeqCst) == 0;
     let ignored_signals = ELF_PROBE_EXEC_IGNORED_SIGNALS.swap(0, Ordering::SeqCst);
     let signal_actions_restored = (exec_replaced || ignored_signals == 0)
         && (0..LINUX_SIGNAL_COUNT).all(|signal| {
@@ -3895,6 +3899,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && no_new_privileges_enforced
         && signal_lifecycle_valid
         && signal_mask_restored
+        && pending_signals_cleared
         && signal_actions_restored
         && alt_stack_disabled
         && msrs_restored;
@@ -3935,6 +3940,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             no_new_privileges_enforced,
             signal_lifecycle_valid,
             signal_mask_restored,
+            pending_signals_cleared,
             signal_actions_restored,
             alt_stack_disabled,
             msrs_restored,
@@ -4411,9 +4417,21 @@ extern "sysv64" fn linux_syscall_handler(
             linux_rt_sigaction(first_argument, buffer, count, register(0))
         }
         LINUX_RT_SIGPROCMASK_SYSCALL => {
-            linux_rt_sigprocmask(first_argument, buffer, count, register(0))
+            let result = linux_rt_sigprocmask(first_argument, buffer, count, register(0));
+            if result == 0 {
+                linux_deliver_pending_signal(
+                    registers,
+                    saved_registers,
+                    user_stack,
+                    user_rip,
+                    user_rflags,
+                )
+            } else {
+                result
+            }
         }
         LINUX_RT_SIGRETURN_SYSCALL => linux_rt_sigreturn(registers, user_stack),
+        LINUX_RT_SIGPENDING_SYSCALL => linux_rt_sigpending(first_argument, buffer),
         LINUX_CLONE_SYSCALL => linux_clone_thread(saved_registers, user_rip, user_rflags),
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
         LINUX_KILL_SYSCALL => linux_kill(
@@ -9481,6 +9499,19 @@ fn linux_rt_sigprocmask(how: u64, set: u64, old_set: u64, set_size: u64) -> u64 
     0
 }
 
+fn linux_rt_sigpending(set: u64, set_size: u64) -> u64 {
+    if set_size != LINUX_SIGNAL_SET_SIZE {
+        return LINUX_EINVAL;
+    }
+    let pending = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst)
+        & ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    if copy_to_linux_user(set, &pending.to_ne_bytes()) {
+        0
+    } else {
+        LINUX_EFAULT
+    }
+}
+
 fn linux_executable_user_address(address: u64) -> bool {
     let code = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
     let code_end = code.saturating_add(ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst));
@@ -9524,9 +9555,6 @@ fn linux_kill(
     }
     let signal_bit = 1 << (signal - 1);
     let old_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
-    if old_mask & signal_bit != 0 {
-        return LINUX_ENOSYS;
-    }
     let flags = ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
     let restorer = ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
     if (flags != LINUX_SA_RESTORER && flags != (LINUX_SA_RESTORER | LINUX_SA_ONSTACK))
@@ -9534,6 +9562,10 @@ fn linux_kill(
         || !linux_executable_user_address(restorer)
     {
         return LINUX_ENOSYS;
+    }
+    if old_mask & signal_bit != 0 {
+        ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
+        return 0;
     }
     let old_alt_stack_flags = ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst);
     let use_alt_stack = flags & LINUX_SA_ONSTACK != 0 && old_alt_stack_flags == 0;
@@ -9612,6 +9644,34 @@ fn linux_tgkill_identity(thread_group: u64, thread: u64) -> Result<(), u64> {
         return Err(LINUX_ESRCH);
     }
     Ok(())
+}
+
+fn linux_deliver_pending_signal(
+    output: *mut LinuxSyscallFrame,
+    registers: LinuxSyscallFrame,
+    user_stack: u64,
+    user_rip: u64,
+    user_rflags: u64,
+) -> u64 {
+    let signal_bit = 1 << (LINUX_SIGSEGV - 1);
+    if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & signal_bit == 0
+        || ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst) & signal_bit != 0
+    {
+        return 0;
+    }
+    let result = linux_kill(
+        1,
+        LINUX_SIGSEGV,
+        output,
+        registers,
+        user_stack,
+        user_rip,
+        user_rflags,
+    );
+    if result == 0 {
+        ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
+    }
+    result
 }
 
 fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {

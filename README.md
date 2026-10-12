@@ -433,8 +433,9 @@ delivery plus two software-generated paths: `kill(1, SIGSEGV)` and
 `tgkill(1, 1, SIGSEGV)` redirect the live syscall return into the same handler
 and resume after that syscall. The thread-directed path rejects zero or
 out-of-range identities before distinguishing absent thread groups or threads.
-Other
-pending/asynchronous sources, `SA_SIGINFO`, user-editable
+If this admitted signal is blocked, delivery coalesces into a pending bit;
+`rt_sigpending` reports it and `rt_sigprocmask` delivers it directly when the
+bit is unblocked. Other asynchronous sources, `SA_SIGINFO`, user-editable
 `ucontext`, nested delivery, automatic alternate-stack disarming, and syscall
 restart remain future work.
 The bounded process reports UID, effective UID, GID, and effective GID zero as

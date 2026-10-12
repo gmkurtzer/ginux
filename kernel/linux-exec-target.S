@@ -281,6 +281,68 @@ ginux_linux_exec_target:
     jne .Lfailure
     cmp qword ptr [rip + .Lsignal_count], 1
     jne .Lfailure
+
+    mov qword ptr [rip + .Lsignal_mask], 0x400
+    xor edi, edi
+    lea rsi, [rip + .Lsignal_mask]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 1
+    mov edx, 11
+    mov eax, 234
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_count], 1
+    jne .Lfailure
+
+    lea rdi, [rip + .Lpending_mask]
+    mov esi, 7
+    mov eax, 127
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 8
+    mov eax, 127
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+    lea rdi, [rip + .Lpending_mask]
+    mov esi, 8
+    mov eax, 127
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lpending_mask], 0x400
+    jne .Lfailure
+
+    mov edi, 1
+    lea rsi, [rip + .Lsignal_mask]
+    lea rdx, [rip + .Lold_signal_mask]
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_count], 2
+    jne .Lfailure
+    cmp qword ptr [rip + .Lold_signal_mask], 0x400
+    jne .Lfailure
+    lea rdi, [rip + .Lpending_mask]
+    mov esi, 8
+    mov eax, 127
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lpending_mask], 0
+    jne .Lfailure
+
     mov qword ptr [rip + .Lsignal_action], 0
     mov qword ptr [rip + .Lsignal_action + 8], 0
     mov qword ptr [rip + .Lsignal_action + 16], 0
@@ -440,6 +502,12 @@ ginux_linux_exec_target:
     .zero 32
 #ifdef GINUX_SIGNAL_PROBE
 .Lsignal_count:
+    .zero 8
+.Lsignal_mask:
+    .zero 8
+.Lold_signal_mask:
+    .zero 8
+.Lpending_mask:
     .zero 8
 #endif
 
