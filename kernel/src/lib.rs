@@ -961,6 +961,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux single-thread signal mask validated\r\n");
     serial_write("ginux: Linux bounded signal actions validated\r\n");
     serial_write("ginux: Linux synchronous SIGSEGV lifecycle validated\r\n");
+    serial_write("ginux: Linux alternate signal stack delivery validated\r\n");
     serial_write("ginux: Linux bounded alternate signal stack validated\r\n");
     serial_write("ginux: Linux single-thread process identity verified\r\n");
     serial_write("ginux: Linux initial environment vector validated\r\n");

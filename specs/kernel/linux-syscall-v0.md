@@ -708,13 +708,17 @@ normalized registration, fault atomicity, and restoration of every action
 before exit.
 
 An unmasked ring-3 page fault is delivered as signal 11 when its action has
-exactly `SA_RESTORER`, both handler and restorer point into a current executable
-image extent, a Linux thread is current, and no signal frame is active. The
+`SA_RESTORER` and optionally `SA_ONSTACK`, both handler and restorer point into
+a current executable image extent, a Linux thread is current, and no signal
+frame is active. The
 kernel retains the complete interrupted general-register, RIP, RSP, RFLAGS, and
 mask state. It places a bounded 16-byte frame containing the restorer address
-and an opaque validation cookie below the current writable user stack, aligns
+and an opaque validation cookie below the selected writable stack, aligns
 handler entry to the x86-64 function ABI, sets `rdi = 11`, and enters the
-handler through the exception `IRETQ` path. The proof handler observes the
+handler through the exception `IRETQ` path. `SA_ONSTACK` selects the registered
+alternate-stack top and publishes `SS_ONSTACK`; the syscall gate admits that
+range only while both the flag and active frame agree. The proof handler
+observes `SS_ONSTACK`, proves replacement returns `-EPERM`, observes the
 automatic `SIGSEGV` bit plus its action mask, maps the missing page, and returns
 through the registered restorer.
 
@@ -724,8 +728,8 @@ exact post-`ret` stack address with the intact cookie. A premature call returns
 record, restores the prior mask, and uses a dedicated `IRETQ` syscall epilogue
 to restore all interrupted registers, including `rcx` and `r11`; the retried
 load then observes the newly mapped zero page. Nested delivery, pending signals,
-`SA_SIGINFO`, alternate-stack selection, user-editable `ucontext`, restartable
-syscalls, and non-page-fault signal sources remain unsupported. A page fault
+`SA_SIGINFO`, alternate-stack automatic disarming, user-editable `ucontext`,
+restartable syscalls, and non-page-fault signal sources remain unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
 than entering the native-domain scheduler fault path.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
@@ -734,9 +738,9 @@ alternate-stack record. It accepts `SS_DISABLE` or a zero-flag stack of at least
 records return `-EINVAL`, undersized stacks return `-ENOMEM`, and inaccessible
 records or stack ranges return `-EFAULT` before state changes. The proof enables,
 queries, rejects invalid replacements, and disables the stack before exit.
-`SS_ONSTACK`, automatic disarming, and signal delivery onto the alternate stack
-remain unsupported; the current synchronous path always uses the active thread
-stack.
+While delivery is using the alternate stack, null-new-stack queries report
+`SS_ONSTACK` and any replacement returns `-EPERM`. Successful `rt_sigreturn`
+restores the prior zero flag. Automatic disarming remains unsupported.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active

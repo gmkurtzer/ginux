@@ -287,8 +287,10 @@ const LINUX_SS_DISABLE: u32 = 2;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SA_RESTORER: u64 = 0x0400_0000;
+const LINUX_SA_ONSTACK: u64 = 0x0800_0000;
 const LINUX_SIGNAL_FRAME_SIZE: usize = 16;
 const LINUX_SIGNAL_FRAME_COOKIE: u64 = 0x4749_4e55_5853_4947;
+const LINUX_SS_ONSTACK: u32 = 1;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
@@ -1516,6 +1518,7 @@ struct LinuxSignalContext {
     rflags: u64,
     signal_stack: u64,
     signal_mask: u64,
+    alt_stack_flags: u32,
 }
 
 impl LinuxSignalContext {
@@ -1529,9 +1532,15 @@ impl LinuxSignalContext {
         rflags: 0,
         signal_stack: 0,
         signal_mask: 0,
+        alt_stack_flags: 0,
     };
 
-    fn from_fault(context: UserFaultContext, signal_stack: u64, signal_mask: u64) -> Self {
+    fn from_fault(
+        context: UserFaultContext,
+        signal_stack: u64,
+        signal_mask: u64,
+        alt_stack_flags: u32,
+    ) -> Self {
         Self {
             registers: LinuxSyscallFrame {
                 r15: context.r15,
@@ -1555,6 +1564,7 @@ impl LinuxSignalContext {
             rflags: context.rflags,
             signal_stack,
             signal_mask,
+            alt_stack_flags,
         }
     }
 
@@ -4960,11 +4970,26 @@ fn linux_user_stack_pointer_valid(user_stack: u64) -> bool {
     };
     let base = LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst);
     let size = LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst);
-    base != 0
+    let primary = base != 0
         && size != 0
         && base
             .checked_add(size)
-            .is_some_and(|end| user_stack >= base && user_stack <= end)
+            .is_some_and(|end| user_stack >= base && user_stack <= end);
+    if primary {
+        return true;
+    }
+    if !LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
+        || ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst) != LINUX_SS_ONSTACK
+    {
+        return false;
+    }
+    let alt_base = ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst);
+    let alt_size = ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst);
+    alt_base != 0
+        && alt_size != 0
+        && alt_base
+            .checked_add(alt_size)
+            .is_some_and(|end| user_stack >= alt_base && user_stack <= end)
 }
 
 fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
@@ -9312,6 +9337,9 @@ fn linux_sigaltstack(new_stack: u64, old_stack: u64) -> u64 {
     if old_stack != 0 && !linux_writable_user_range_contains(old_stack, LINUX_ALT_STACK_SIZE) {
         return LINUX_EFAULT;
     }
+    if new_stack != 0 && ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst) == LINUX_SS_ONSTACK {
+        return LINUX_EPERM;
+    }
     let replacement = if new_stack == 0 {
         None
     } else {
@@ -9429,35 +9457,49 @@ fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {
     let flags = ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
     let restorer = ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
     if handler <= 1
-        || flags != LINUX_SA_RESTORER
+        || (flags != LINUX_SA_RESTORER && flags != (LINUX_SA_RESTORER | LINUX_SA_ONSTACK))
         || !linux_executable_user_address(handler)
         || !linux_executable_user_address(restorer)
     {
         return false;
     }
     let interrupted = frame.context();
-    let Some(stack_floor) = interrupted.rsp.checked_sub(24) else {
+    let old_alt_stack_flags = ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst);
+    let use_alt_stack = flags & LINUX_SA_ONSTACK != 0 && old_alt_stack_flags == 0;
+    let stack_top = if use_alt_stack {
+        let pointer = ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst);
+        let size = ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst);
+        let Some(top) = pointer.checked_add(size) else {
+            return false;
+        };
+        top
+    } else {
+        interrupted.rsp
+    };
+    let Some(stack_floor) = stack_top.checked_sub(24) else {
         return false;
     };
     let Some(signal_stack) = (stack_floor & !15).checked_add(8) else {
         return false;
     };
-    let context = LinuxSignalContext::from_fault(interrupted, signal_stack, old_mask);
+    let context =
+        LinuxSignalContext::from_fault(interrupted, signal_stack, old_mask, old_alt_stack_flags);
     if !context.user_context().is_valid() {
         return false;
     }
     let mut signal_frame = [0_u8; LINUX_SIGNAL_FRAME_SIZE];
     signal_frame[..8].copy_from_slice(&restorer.to_ne_bytes());
     signal_frame[8..].copy_from_slice(&LINUX_SIGNAL_FRAME_COOKIE.to_ne_bytes());
-    if !copy_to_linux_user(signal_stack, &signal_frame)
-        || !frame.enter_signal_handler(
-            handler,
-            signal_stack,
-            LINUX_SIGSEGV,
-            USER_CODE_SELECTOR,
-            USER_DATA_SELECTOR,
-        )
-    {
+    if !copy_to_linux_user(signal_stack, &signal_frame) {
+        return false;
+    }
+    if !frame.enter_signal_handler(
+        handler,
+        signal_stack,
+        LINUX_SIGSEGV,
+        USER_CODE_SELECTOR,
+        USER_DATA_SELECTOR,
+    ) {
         return false;
     }
     // SAFETY: interrupts are disabled from exception entry through IRETQ, and
@@ -9465,6 +9507,9 @@ fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {
     unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(context) };
     let action_mask = ELF_PROBE_SIGNAL_ACTION_MASKS[index].load(Ordering::SeqCst);
     ELF_PROBE_SIGNAL_MASK.store(old_mask | action_mask | signal_bit, Ordering::SeqCst);
+    if use_alt_stack {
+        ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_ONSTACK, Ordering::SeqCst);
+    }
     LINUX_SIGNAL_ACTIVE.store(true, Ordering::SeqCst);
     LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
     true
@@ -9497,6 +9542,7 @@ fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64) -> u64 {
         core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO);
     }
     ELF_PROBE_SIGNAL_MASK.store(context.signal_mask, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_FLAGS.store(context.alt_stack_flags, Ordering::SeqCst);
     LINUX_SIGNAL_ACTIVE.store(false, Ordering::SeqCst);
     LINUX_SIGNAL_RETURN_COUNT.fetch_add(1, Ordering::SeqCst);
     LINUX_RETURN_FROM_SIGNAL
@@ -9508,6 +9554,7 @@ fn abort_linux_signal() {
         // Linux execution while interrupts remain disabled.
         let context = unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() };
         ELF_PROBE_SIGNAL_MASK.store(context.signal_mask, Ordering::SeqCst);
+        ELF_PROBE_ALT_STACK_FLAGS.store(context.alt_stack_flags, Ordering::SeqCst);
         unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO) };
     }
 }

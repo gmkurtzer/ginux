@@ -1289,7 +1289,7 @@ linux_clone_repeat:
 
     lea rax, [rip + linux_sigsegv_handler]
     mov qword ptr [0x405100], rax
-    mov qword ptr [0x405108], 0x4000000
+    mov qword ptr [0x405108], 0xc000000
     lea rax, [rip + linux_signal_restorer]
     mov qword ptr [0x405110], rax
     mov qword ptr [0x405118], 0x800
@@ -1311,6 +1311,14 @@ linux_clone_repeat:
     jne failure
     cmp qword ptr [0x405138], 0
     jne failure
+
+    mov qword ptr [0x405140], 0x405800
+    mov qword ptr [0x405148], 0
+    mov qword ptr [0x405150], 2048
+    mov edi, 0x405140
+    xor esi, esi
+    mov eax, 131
+    call syscall_expect_zero
 
     mov qword ptr [0x405180], 0
     cmp qword ptr [0x40b000], 0
@@ -1338,38 +1346,17 @@ linux_clone_repeat:
     mov esi, 0x405158
     mov eax, 131
     call syscall_expect_zero
-    cmp qword ptr [0x405158], 0
-    jne failure
-    cmp dword ptr [0x405160], 2
-    jne failure
-    cmp qword ptr [0x405168], 0
-    jne failure
-
-    xor edi, edi
-    mov esi, 0x406200
-    mov eax, 131
-    call syscall_expect_efault
-
-    mov qword ptr [0x405140], 0x405800
-    mov qword ptr [0x405148], 0
-    mov qword ptr [0x405150], 2048
-    mov edi, 0x405140
-    mov esi, 0x405158
-    mov eax, 131
-    call syscall_expect_zero
-    cmp dword ptr [0x405160], 2
-    jne failure
-
-    xor edi, edi
-    mov esi, 0x405158
-    mov eax, 131
-    call syscall_expect_zero
     cmp qword ptr [0x405158], 0x405800
     jne failure
     cmp dword ptr [0x405160], 0
     jne failure
     cmp qword ptr [0x405168], 2048
     jne failure
+
+    xor edi, edi
+    mov esi, 0x406200
+    mov eax, 131
+    call syscall_expect_efault
 
     mov qword ptr [0x405140], 0x406000
     mov qword ptr [0x405148], 0
@@ -4162,7 +4149,28 @@ child_thread_probe:
 linux_sigsegv_handler:
     cmp edi, 11
     jne failure
+    cmp rsp, 0x405800
+    jb failure
+    cmp rsp, 0x406000
+    jae failure
     mov qword ptr [0x405180], rdi
+    xor edi, edi
+    mov esi, 0x405158
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne failure
+    cmp dword ptr [0x405160], 1
+    jne failure
+    mov qword ptr [0x405140], 0
+    mov qword ptr [0x405148], 2
+    mov qword ptr [0x405150], 0
+    mov edi, 0x405140
+    xor esi, esi
+    mov eax, 131
+    syscall
+    cmp rax, -1
+    jne failure
     mov edi, 99
     xor esi, esi
     mov edx, 0x405188
