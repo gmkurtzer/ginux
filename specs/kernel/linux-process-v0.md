@@ -93,8 +93,16 @@ authority. While the scheduler has selected the child, the boot proof validates
 those entries, loads the child's generation-checked root into CR3, confirms the
 root remains reachable through the direct map, and restores the prior CR3. A
 stale root is rejected before activation, and the switch refuses to run with
-maskable interrupts enabled. This is hardware root activation, not yet ring-3
-dispatch of the synthetic child context.
+maskable interrupts enabled.
+
+The selected child subsequently enters ring 3 at its recorded executable RIP,
+with its recorded stack, RFLAGS, FS base, private CR3, and Linux fork return
+value zero. Its bounded payload traps on nonzero `RAX`, writes `0x5a` through
+`FS:[0]`, and returns through the existing user interrupt gate; `UD2` is the
+fail-closed fallthrough. After return, the verifier requires the child stack/TLS
+page to contain the marker, the corresponding parent page to remain zero, and
+both the prior FS base and kernel CR3 to be restored. The dedicated entry stub
+does not yet restore the other fourteen saved general registers.
 
 ## Exit and wait ordering
 
@@ -164,10 +172,10 @@ This now supplies the ownership, publication, and scheduler-staging operations
 needed by a future eager fork. The process bundle retains and cross-checks its
 virtual address, frame, and permission inventory, the synthetic hierarchy clone
 is published through the process table, and its saved context is selected by
-the native scheduler under the child root. The child CR3 is activated and
-restored in kernel mode. The proof does not yet snapshot the running Linux
-workload's mapping registry, return the child context to ring 3, or expose the
-operation through the Linux ABI.
+the native scheduler under the child root. The child executes a bounded ring-3
+return proof under that CR3. The proof does not yet snapshot the running Linux
+workload's mapping registry, restore every saved general register, implement a
+Linux child exit transition, or expose fork/wait through the Linux ABI.
 
 ## Deliberate limits
 

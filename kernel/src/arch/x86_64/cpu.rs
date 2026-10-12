@@ -937,6 +937,23 @@ ginux_user_enter:
     push rdi
     iretq
 
+    .global ginux_process_user_enter
+ginux_process_user_enter:
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+    mov [rip + {user_return_stack}], rsp
+    push {user_data}
+    push rsi
+    push 0x202
+    push {user_code}
+    push rdi
+    xor eax, eax
+    iretq
+
     .global ginux_syscall_entry
 ginux_syscall_entry:
     cli
@@ -1104,6 +1121,7 @@ extern "sysv64" {
         service_identity: u64,
         root_handle: u64,
     );
+    fn ginux_process_user_enter(entry: usize, stack: usize);
 }
 
 pub(crate) fn install() -> bool {
@@ -1234,6 +1252,36 @@ pub(crate) unsafe fn with_supervisor_user_access<T>(operation: impl FnOnce() -> 
     let result = operation();
     asm!("clac", options(nostack));
     result
+}
+
+pub(crate) fn execute_linux_process_child(entry: usize, stack: usize, fs_base: u64) -> bool {
+    if entry == 0
+        || entry >= 1 << 47
+        || stack == 0
+        || stack >= 1 << 47
+        || !stack.is_multiple_of(16)
+        || fs_base >= 1 << 47
+        || scheduler::current_domain().is_some()
+        || !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
+        || !user_interrupt_surface_is_minimal()
+    {
+        return false;
+    }
+    let saved_fs = active_fs_base();
+    unsafe { write_msr(FS_BASE_MSR, fs_base) };
+    if active_fs_base() != fs_base {
+        unsafe { write_msr(FS_BASE_MSR, saved_fs) };
+        return false;
+    }
+    // SAFETY: The caller has activated a root containing the validated RX
+    // entry, writable stack, supervisor kernel mappings, and TSS stack. The
+    // process entry stub fixes RAX at the Linux fork-child return value. Its
+    // INT 0x80 reaches the installed user gate, which returns directly to the
+    // saved kernel stack because no global native scheduler runtime is active.
+    unsafe { ginux_process_user_enter(entry, stack) };
+    let child_fs_preserved = active_fs_base() == fs_base;
+    unsafe { write_msr(FS_BASE_MSR, saved_fs) };
+    child_fs_preserved && active_fs_base() == saved_fs
 }
 
 pub(crate) fn verify_user_syscall(

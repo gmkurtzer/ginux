@@ -70,8 +70,11 @@ binding is withdrawn. Withdrawal handles an exact ready or running identity;
 the proof rejects reuse of the retired child identity. While the child is
 selected, its validated root is installed in CR3 and then replaced with the
 exact prior root, proving the scheduler-selected address space is safe for
-kernel execution. This does not yet return the synthetic child context to ring
-3 or attach the live Linux PID 1 runtime to the native scheduler.
+kernel execution. The synthetic child then enters ring 3 with its selected RIP,
+RSP, RFLAGS, zero fork return, and FS base, writes its private page, and returns
+through the user gate. The dedicated proof entry does not yet restore the other
+fourteen general registers or attach the live Linux PID 1 runtime to the native
+scheduler.
 
 Scheduler capacity does not grant permission to create a thread. Runtime
 creation first reserves a slot from the generation-checked owning domain; exit

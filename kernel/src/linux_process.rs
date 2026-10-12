@@ -14,6 +14,13 @@ const USER: u64 = 1 << 2;
 const NO_EXECUTE: u64 = 1 << 63;
 const TEST_USER_ADDRESS: usize = 1usize << 39;
 const PROCESS_RAX_INDEX: usize = 0;
+const PROCESS_CHILD_PROGRAM: [u8; 18] = [
+    0x48, 0x85, 0xc0, // test rax, rax
+    0x75, 0x0b, // jne failure
+    0x64, 0xc6, 0x04, 0x25, 0, 0, 0, 0, 0x5a, // mov byte ptr fs:[0], 0x5a
+    0xcd, 0x80, // int 0x80
+    0x0f, 0x0b, // failure: ud2
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ProcessHandle {
@@ -828,19 +835,27 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(first_child) = table.prepare_fork(init) else {
         return false;
     };
-    let (Some(parent_page), Some(child_page)) = (
+    let (Some(parent_page), Some(parent_stack), Some(child_page), Some(child_stack)) = (
         frames[4].direct_map_address(),
+        frames[5].direct_map_address(),
         frames[10].direct_map_address(),
+        frames[11].direct_map_address(),
     ) else {
         return false;
     };
     unsafe {
-        (parent_page as *mut u8).write(0x31);
+        core::ptr::copy_nonoverlapping(
+            PROCESS_CHILD_PROGRAM.as_ptr(),
+            parent_page as *mut u8,
+            PROCESS_CHILD_PROGRAM.len(),
+        );
         (parent_page as *mut u8).add(PAGE_SIZE - 1).write(0x32);
     }
     if first_child.pid != 3
         || !table.commit_cloned_fork(first_child, &frames[6..10], &frames[10..12])
-        || unsafe { (child_page as *const u8).read() } != 0x31
+        || unsafe {
+            core::slice::from_raw_parts(child_page as *const u8, PROCESS_CHILD_PROGRAM.len())
+        } != PROCESS_CHILD_PROGRAM
         || unsafe { (child_page as *const u8).add(PAGE_SIZE - 1).read() } != 0x32
         || table.commit_fork(first_child, second_space, init_context.fork_child())
         || table.wait(init, first_child.pid).is_some()
@@ -888,7 +903,14 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     };
     if selected_child.handle() != child_thread
         || selected_child.context() != child_scheduler_context
-        || !address_space::verify_linux_process_root_activation(first_space.root())
+        || !address_space::execute_linux_process_child(
+            first_space.root(),
+            child_context.rip,
+            child_context.rsp,
+            child_context.fs_base,
+        )
+        || unsafe { (child_stack as *const u8).read() } != 0x5a
+        || unsafe { (parent_stack as *const u8).read() } != 0
     {
         return false;
     }
@@ -908,8 +930,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     {
         return false;
     }
-    unsafe { (child_page as *mut u8).write(0x7f) };
-    if unsafe { (parent_page as *const u8).read() } != 0x31 {
+    if unsafe { (parent_page as *const u8).read() } != PROCESS_CHILD_PROGRAM[0] {
         return false;
     }
     let Some(first_resources) = table.begin_exit(first_child, first_space) else {

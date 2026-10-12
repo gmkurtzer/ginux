@@ -658,6 +658,21 @@ if ! grep -q '^ginux: scheduled Linux child CR3 activated and restored' "$output
     exit 1
 fi
 
+if ! grep -q '^ginux: scheduled Linux child returned from ring 3' "$output_file"; then
+    echo "Boot test failed: the scheduled Linux child did not return from ring 3." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux fork child RAX zero executed' "$output_file"; then
+    echo "Boot test failed: the Linux fork child did not execute with RAX zero." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux process child FS isolation executed' "$output_file"; then
+    echo "Boot test failed: the Linux process child's FS isolation was not executed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux private page copy validated' "$output_file"; then
     echo "Boot test failed: bounded Linux private page copying was not validated." >&2
     exit 1

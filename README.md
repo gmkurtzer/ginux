@@ -316,8 +316,12 @@ admitted to the real native scheduler, selected under their exact roots, and
 yielded in both directions before their generation-tagged bindings are retired.
 Each root inherits the supervisor-only identity and higher-half kernel entries;
 the selected child CR3 is loaded, verified through the direct map, and restored
-in kernel mode. The transaction is not yet attached to the running Linux
-workload or returned to ring 3 under the child CR3, so the minimal system
+in kernel mode. A bounded child then enters ring 3 under that CR3, requires its
+fork return in `RAX` to be zero, writes through its recorded FS base without
+changing the parent page, and returns through the user gate with FS and CR3
+restored. This entry stub does not yet install the other fourteen saved general
+registers, and the transaction is not attached to the running Linux workload,
+so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).

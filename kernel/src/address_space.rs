@@ -3039,6 +3039,26 @@ pub(crate) fn verify_linux_process_root_activation(root: memory::FrameLease) -> 
     selected && process_visible && current_root() == previous
 }
 
+pub(crate) fn execute_linux_process_child(
+    root: memory::FrameLease,
+    entry: u64,
+    stack: u64,
+    fs_base: u64,
+) -> bool {
+    let previous = current_root();
+    let (Ok(entry), Ok(stack)) = (usize::try_from(entry), usize::try_from(stack)) else {
+        return false;
+    };
+    if !verify_linux_process_root_activation(root) || current_root() != previous {
+        return false;
+    }
+    unsafe { activate(root.address()) };
+    let selected = current_root() == root.address();
+    let executed = selected && cpu::execute_linux_process_child(entry, stack, fs_base);
+    unsafe { activate(previous) };
+    selected && executed && current_root() == previous
+}
+
 fn validate_complete_linux_process_user_tree(
     table: u64,
     level: usize,
