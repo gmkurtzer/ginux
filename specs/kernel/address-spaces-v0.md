@@ -199,6 +199,13 @@ the fault path clears and releases it with the address space, and the gate
 checks both the zeroed physical page and zero remaining owner frames. See
 [Isolated DMA Lease v0](device-dma-lease-v0.md).
 
+A registered device teardown record changes release ordering for that domain.
+The stop-only fault path must validate and quiesce the exact device before
+restoring the kernel root and releasing any address-space or DMA frame. The
+registry records successful quiescence and rejects release when the record is
+missing, preventing device-visible physical addresses from outliving their
+allocator leases.
+
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3
 is still active, the exception path clears and verifies the entire stack page

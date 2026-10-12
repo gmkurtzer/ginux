@@ -33,9 +33,13 @@ all three values and requires exact equality with the returned lease. Queue
 enable and PCI bus mastering remain zero, and `DRIVER_OK` is never set, so the
 device cannot access the frame.
 
-The service then deliberately faults. Stop-only teardown restores the kernel
-root, revokes object 7, zeros all eight owned frames, releases their exact
-generation-tagged leases, and retires the domain. The gate reads the former DMA
+The service then deliberately faults. Stop-only teardown revokes object 7 and
+invokes the device hook while the service root and lease are still intact. The
+hook revalidates exact feature and queue-address state, disables PCI bus
+mastering, resets the device, and records quiescence. Only then does teardown
+restore the kernel root, zero all eight owned frames, release their exact
+generation-tagged leases, and retire the domain. Registry release rejects a
+bound device whose quiescence record is absent. The gate reads the former DMA
 physical page through the supervisor direct map and requires it to be entirely
 zero, while the allocator reports zero frames remaining for the retired owner.
 

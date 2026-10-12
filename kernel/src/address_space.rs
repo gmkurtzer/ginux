@@ -7,6 +7,7 @@ use crate::{
     arch::x86_64::{
         apic::LocalApic,
         cpu, paging,
+        pci::{self, VirtioBlockDevice},
         timer::{self, LocalApicCalibration},
     },
     domain, ipc, memory, network, scheduler, volume,
@@ -2262,6 +2263,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
 struct RegisteredAuxiliaryAddressSpace {
     domain: u64,
     space: WxAddressSpace,
+    device_teardown: Option<(VirtioBlockDevice, paging::MmioMapping)>,
+    device_quiesced: bool,
 }
 
 pub(crate) fn expected_service_fault_instruction(service_entry_offset: usize) -> Option<u64> {
@@ -4255,6 +4258,8 @@ fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bo
         (*registry)[slot] = Some(RegisteredAuxiliaryAddressSpace {
             domain: domain_id,
             space,
+            device_teardown: None,
+            device_quiesced: false,
         });
     }
     true
@@ -4276,7 +4281,8 @@ pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
     let owner = registered.space.owner;
     let frames = registered.space.frames;
     let dma_frame = registered.space.dma_frame;
-    if !memory::frames_owned_by(owner, &frames)
+    if registered.device_teardown.is_some() && !registered.device_quiesced
+        || !memory::frames_owned_by(owner, &frames)
         || dma_frame.is_some_and(|frame| !memory::frames_owned_by(owner, &[frame]))
         || !memory::frame_leases_releasable(owner, &frames)
         || dma_frame.is_some_and(|frame| !memory::frame_leases_releasable(owner, &[frame]))
@@ -4305,6 +4311,48 @@ pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
     unsafe {
         (*registry)[slot] = None;
     }
+    true
+}
+
+pub(crate) fn bind_auxiliary_device_teardown(
+    domain_id: u64,
+    device: VirtioBlockDevice,
+    mapping: paging::MmioMapping,
+) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if registered.device_teardown.is_some() || registered.device_quiesced {
+        return false;
+    }
+    registered.device_teardown = Some((device, mapping));
+    true
+}
+
+pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    let Some((device, mapping)) = registered.device_teardown else {
+        return true;
+    };
+    let Some(dma_physical) = registered.space.dma_frame.map(memory::FrameLease::address) else {
+        return false;
+    };
+    if registered.device_quiesced
+        || !pci::device_features_are_selected(device, mapping)
+        || !pci::device_inert_queue_is_bound(device, mapping, dma_physical)
+        || !pci::quiesce(device, mapping)
+    {
+        return false;
+    }
+    registered.device_quiesced = true;
     true
 }
 
@@ -5327,7 +5375,11 @@ pub(crate) fn verify_ring3_read_only_device_grant(
     valid
 }
 
-pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> Option<u64> {
+pub(crate) fn verify_ring3_writable_device_grant(
+    register_physical: u64,
+    device: VirtioBlockDevice,
+    mapping: paging::MmioMapping,
+) -> Option<u64> {
     const DEVICE_PAGE_INDEX: usize = 5;
     const DMA_PAGE_INDEX: usize = 6;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
@@ -5444,6 +5496,7 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> Opti
     let entry = USER_TEST_ADDRESS;
     let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
     if !register_auxiliary_address_space(auxiliary, space)
+        || !bind_auxiliary_device_teardown(auxiliary, device, mapping)
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
         || !cpu::activate_user_root(root)
     {

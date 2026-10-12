@@ -737,6 +737,11 @@ if ! grep -q '^ginux: isolated virtio queue bound to inactive DMA lease' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: fault path quiesced device before DMA release' "$output_file"; then
+    echo "Boot test failed: device teardown did not precede DMA lease release." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; then
     echo "Boot test failed: the faulted virtio control service retained authority." >&2
     exit 1

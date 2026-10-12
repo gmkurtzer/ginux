@@ -15215,6 +15215,10 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             serial_write("ginux: auxiliary fault transition failed\r\n");
             return u64::MAX;
         }
+        if !address_space::quiesce_auxiliary_device(fault_domain) {
+            serial_write("ginux: auxiliary device quiesce failed\r\n");
+            return u64::MAX;
+        }
         if !address_space::activate_kernel_root_for_auxiliary(fault_domain) {
             serial_write("ginux: auxiliary kernel-root restoration failed\r\n");
             return u64::MAX;

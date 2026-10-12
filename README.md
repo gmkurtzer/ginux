@@ -56,8 +56,9 @@ enables a queue or sets `DRIVER_OK`. The control domain now owns one additional
 RW/NX page suitable for a future DMA ring. It initializes that page in ring 3,
 then publishes its exact base, `+0x100`, and `+0x200` offsets as the descriptor,
 available, and used-ring addresses. The kernel verifies the binding while queue
-enable and bus mastering remain off; fault teardown scrubs and releases the
-page before the device is reset. See
+enable and bus mastering remain off. On fault, the registered device hook
+validates the binding, disables bus mastering, and resets the device before the
+page is scrubbed and released; release is rejected unless quiescence completed. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
 [Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md).
 

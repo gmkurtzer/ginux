@@ -56,13 +56,15 @@ zero, then takes a deliberate invalid-opcode fault. The kernel independently
 reads back the exact queue selection, size, disabled state, and address-to-lease
 binding.
 
-The stop-only path revokes the exact object-7 handle, destroys its mapping,
-clears and releases all owned frames, and publishes the fault. Regardless
-of whether verification succeeds, the kernel's following quiesce operation
-first disables PCI bus mastering, resets device status to zero, and confirms
-both conditions before continuing. The service never sets `DRIVER_OK` or
-enables the queue. It owns one separate candidate DMA frame and writes its exact ring
-offsets to the device, but queue enable and bus mastering remain off, so binding
+The stop-only path first revokes the exact object-7 handle. Its registered
+device hook validates the expected features and queue-to-lease binding, disables
+PCI bus mastering, resets device status to zero, and confirms both conditions.
+Only then may the fault path restore the kernel root, destroy the service
+mapping, clear and release all owned frames, retire the domain, and publish the
+fault. Address-space release fails closed if a bound device has not completed
+quiescence. The service never sets `DRIVER_OK` or enables the queue. It owns one
+separate candidate DMA frame and writes its exact ring offsets to the device,
+but queue enable and bus mastering remain off, so binding
 cannot initiate data transfer. The lease lifecycle is specified in
 [Isolated DMA Lease v0](device-dma-lease-v0.md).
 
