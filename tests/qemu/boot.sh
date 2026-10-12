@@ -716,6 +716,9 @@ for marker in \
     'interpreted Linux page-table hierarchy replaced atomically' \
     'old interpreted Linux page-table leases retired at exec' \
     'replacement Linux page-table leases reclaimed' \
+    'static Linux page-table hierarchy replaced atomically' \
+    'old static Linux page-table leases retired at exec' \
+    'replacement static Linux page-table leases reclaimed' \
     'canonical interpreted Linux executable identity validated'; do
     if ! grep -q "^ginux: ${marker}" "$output_file"; then
         echo "Boot test failed: ${marker}." >&2

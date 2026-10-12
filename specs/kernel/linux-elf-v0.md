@@ -472,14 +472,14 @@ exact generation-tagged leases. Entry requires the live CR3 to equal the root
 lease and requires the primary stack, heap, anonymous-map window, TLS, sibling
 stack, code, data, RELRO, loader, and initial image ranges to traverse only
 those owned hierarchy frames. Duplicate leases and a synthesized stale root
-generation are rejected without changing ownership. This version retains the
-same hierarchy for static exec. Interpreted exec instead clones all six tables
-into fresh generation-bound frames, rewrites only child-table references that
-belong to that exact hierarchy, and applies the complete image/stack/heap/TLS
-replacement to the inactive clone. A forced verification failure and a stale
-root generation leave live CR3 and the old hierarchy unchanged. Success
-activates the verified root before scrubbing the complete old hierarchy; the
-replacement tables are reclaimed only after the process root is inactive.
+generation are rejected without changing ownership. Static exec clones its
+five tables and interpreted exec clones all six tables into fresh
+generation-bound frames. Each transaction rewrites only child-table references
+that belong to that exact hierarchy and applies the complete replacement to the
+inactive clone. A forced verification failure and a stale root generation leave
+live CR3 and the old hierarchy unchanged. Success activates the verified root
+before scrubbing the complete old hierarchy; the replacement tables are
+reclaimed only after the process root is inactive.
 
 The initial-thread execution profile allocates a separate owned RW/NX page for
 the main image and both DSO TLS templates. It rounds each `p_memsz` up to

@@ -420,16 +420,15 @@ pre-exec set, caught dispositions are cleared, and RELRO is applied again.
 The replacement main emits the kernel-observed `DYNEXEC` completion by exiting
 with status 42. Other dynamic targets, general dependency resolution,
 shebangs, and arbitrary interpreted argument or environment vectors are
-outside this version. Interpreted exec replaces the complete process page-table
-hierarchy: it constructs the new image in an inactive six-frame clone, rejects
+outside this version. Both exec profiles replace the complete process
+page-table hierarchy: static exec constructs the new image in an inactive
+five-frame clone and interpreted exec uses a six-frame clone. Each rejects
 forced verification failure and stale root generations without changing live
-CR3, activates the verified clone, and retires the old exact leases. Static
-exec retains its hierarchy. Both exec profiles replace the inactive
+CR3, activates the verified clone, and retires the old exact leases. Both exec
+profiles replace the inactive
 anonymous-mapping backing frames with fresh zeroed generation-bound leases
 after the image commit; the old exact leases are scrubbed and retired, and
 teardown reclaims the replacements.
-Replacing the hierarchy outside the interpreted profile is a later lifecycle
-milestone.
 
 `rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
 or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath

@@ -61,7 +61,12 @@ stack lease in the rollback-capable image transaction, and reclaims the fresh
 lease after the process root is inactive. The execution contract binds every active
 page-table hierarchy frame to its exact allocator generation, verifies that
 the live CR3 and all admitted Linux ranges traverse only that owned hierarchy,
-and rejects a stale root lease without mutation. Every successful exec also
+and rejects a stale root lease without mutation. Every successful exec clones
+the complete hierarchy into fresh generation-bound frames—five for the static
+profile and six for the interpreted profile—applies and verifies the replacement
+only in that inactive clone, switches CR3 after verification, and then scrubs
+and retires the exact old hierarchy. The fresh tables are reclaimed after the
+process root becomes inactive. Every successful exec also
 replaces the bounded heap with a fresh zeroed RW/NX lease and resets the process
 break to the fixed heap base. The old heap is scrubbed at commit and the replacement
 lease is reclaimed after the process root becomes inactive. Every successful
@@ -74,11 +79,7 @@ RELRO, pre-materializes fresh primary and sibling TLS leases from the complete
 authenticated templates in the same transaction, restores FS to the fresh
 primary mapping, replaces the guarded sibling stack with a fresh zeroed RW/NX
 lease while preserving both guard pages, and retires the complete old
-interpreter/main/DSO graph. It also clones the complete six-frame
-process page-table hierarchy into fresh generation-bound frames, applies and
-verifies the replacement image only in that inactive clone, switches CR3 after
-verification, and then scrubs and retires the old hierarchy. The fresh tables
-are reclaimed after the process root becomes inactive. The archive
+interpreter/main/DSO graph. The archive
 is not yet a general mount or a system-container image.
 
 The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. A separate isolated service probes and configures link, IPv4, default-gateway, and one static-route record through the first manifest-authorized network-device contract in control ABI v2; a monotonic generation makes effective configuration changes observable and rejects stale whole-state applies. Distinct read-only and write-only services prove that observation and mutation authority can be delegated independently, and a faulted network service is retired without losing mediated state or panicking the kernel. Packet I/O and a general route table remain deliberately unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.

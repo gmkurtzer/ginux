@@ -201,6 +201,7 @@ pub(crate) fn verify_linux_elf_mapping(
     let mut exec_stack_frame = None;
     let mut exec_heap_frame = None;
     let mut exec_mmap_frames = [None; 2];
+    let mut exec_page_table_frames = [None; 6];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [root, pdpt, directory, table, header_table] {
@@ -210,7 +211,7 @@ pub(crate) fn verify_linux_elf_mapping(
             let root_entries = mapped_frame::<u64>(root)?;
             let pdpt_entries = mapped_frame::<u64>(pdpt)?;
             let directory_entries = mapped_frame::<u64>(directory)?;
-            let table_entries = mapped_frame::<u64>(table)?;
+            let mut table_entries = mapped_frame::<u64>(table)?;
             let header_table_entries = mapped_frame::<u64>(header_table)?;
             root_entries.add(256).write(kernel_root.add(256).read());
             root_entries.write(pdpt | PRESENT | WRITABLE | USER);
@@ -666,7 +667,7 @@ pub(crate) fn verify_linux_elf_mapping(
             } else {
                 cpu::LinuxElfResult::FAILED
             };
-            let page_table_frame_state_valid = cpu::finalize_linux_exec_page_table_frames(
+            if !cpu::finalize_linux_exec_page_table_frames(
                 [
                     frames[0],
                     frames[1],
@@ -676,8 +677,17 @@ pub(crate) fn verify_linux_elf_mapping(
                     memory::FrameLease::EMPTY,
                 ],
                 5,
-                false,
-            );
+                true,
+            ) {
+                return None;
+            }
+            exec_page_table_frames = cpu::take_linux_exec_page_table_frames();
+            if exec_page_table_frames[..5].iter().any(Option::is_none)
+                || exec_page_table_frames[5].is_some()
+            {
+                return None;
+            }
+            table_entries = mapped_frame::<u64>(exec_page_table_frames[3]?.address())?;
             exec_frames = execution_result.exec_frames;
             if execution_result.exec_mapping_count < cpu::LINUX_EXEC_MAPPING_LIMIT {
                 exec_stack_frame = exec_frames[execution_result.exec_mapping_count];
@@ -769,14 +779,15 @@ pub(crate) fn verify_linux_elf_mapping(
                 && table_entries.add(mmap_tail_indexes[3]).read() == 0;
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
-            Some(executed && page_table_frame_state_valid && mapping_removed && restored)
+            Some(executed && mapping_removed && restored)
         }
     })()
     .unwrap_or(false);
     let cleared = frames.iter().enumerate().all(|(index, frame)| unsafe {
         if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame]) {
             zero_frame(frame.address()).is_some()
-        } else if (index == 15 && exec_stack_frame.is_some())
+        } else if (index < 5 && exec_page_table_frames[index].is_some())
+            || (index == 15 && exec_stack_frame.is_some())
             || (index == 14 && exec_heap_frame.is_some())
             || ((index == 16 || index == 17) && exec_mmap_frames[index - 16].is_some())
         {
@@ -804,6 +815,12 @@ pub(crate) fn verify_linux_elf_mapping(
                 && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
         })
     });
+    let exec_page_table_frames_released = exec_page_table_frames[..5].iter().all(|frame| {
+        frame.is_some_and(|frame| {
+            prepare_linux_frame(frame.address(), &[])
+                && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
+        })
+    }) && exec_page_table_frames[5].is_none();
     let mut original_frames_released = cleared;
     if cleared {
         for frame in frames {
@@ -819,6 +836,7 @@ pub(crate) fn verify_linux_elf_mapping(
         && exec_stack_released
         && exec_heap_released
         && exec_mmap_frames_released
+        && exec_page_table_frames_released
         && original_frames_released;
     released
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(kernel_frames_before)
@@ -2512,21 +2530,15 @@ pub(crate) fn materialize_linux_exec_tls_frames(
     true
 }
 
-pub(crate) fn replace_current_linux_image(
-    mappings: &[cpu::LinuxExecMapping],
-    old_mappings: &[cpu::LinuxActiveImageMapping],
-) -> bool {
-    verify_current_linux_image_rollback(mappings, old_mappings)
-        && replace_current_linux_image_inner(mappings, old_mappings, false)
-}
-
 pub(crate) fn replace_current_linux_image_and_hierarchy(
     mappings: &[cpu::LinuxExecMapping],
     old_mappings: &[cpu::LinuxActiveImageMapping],
-    old_hierarchy: &[memory::FrameLease; 6],
-    new_hierarchy: &[memory::FrameLease; 6],
+    old_hierarchy: &[memory::FrameLease],
+    new_hierarchy: &[memory::FrameLease],
 ) -> bool {
-    if current_root() != old_hierarchy[0].address()
+    if old_hierarchy.len() != new_hierarchy.len()
+        || !(5..=6).contains(&old_hierarchy.len())
+        || current_root() != old_hierarchy[0].address()
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, old_hierarchy)
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, new_hierarchy)
         || old_hierarchy.iter().enumerate().any(|(index, frame)| {
@@ -2593,8 +2605,8 @@ pub(crate) fn replace_current_linux_image_and_hierarchy(
 fn prepare_linux_hierarchy_replacement(
     mappings: &[cpu::LinuxExecMapping],
     old_mappings: &[cpu::LinuxActiveImageMapping],
-    old_hierarchy: &[memory::FrameLease; 6],
-    new_hierarchy: &[memory::FrameLease; 6],
+    old_hierarchy: &[memory::FrameLease],
+    new_hierarchy: &[memory::FrameLease],
     force_verification_failure: bool,
 ) -> bool {
     if mappings.is_empty()

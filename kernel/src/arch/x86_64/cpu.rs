@@ -5801,9 +5801,10 @@ fn release_linux_exec_frames(
 }
 
 #[inline(never)]
-fn replace_current_interpreted_linux_image(
+fn replace_current_linux_image_with_hierarchy(
     mappings: &[LinuxExecMapping],
     old_mappings: &[LinuxActiveImageMapping],
+    hierarchy_count: usize,
 ) -> bool {
     let old: [Option<memory::FrameLease>; 6] = core::array::from_fn(|index| {
         memory::FrameLease::from_parts(
@@ -5811,13 +5812,33 @@ fn replace_current_interpreted_linux_image(
             ELF_PROBE_PAGE_TABLE_GENERATIONS[index].load(Ordering::SeqCst),
         )
     });
-    let [Some(root), Some(pdpt), Some(directory), Some(read_only), Some(main), Some(interpreter)] =
-        old
-    else {
-        return false;
-    };
-    let old = [root, pdpt, directory, read_only, main, interpreter];
-    if address_space::current_root_address() != root.address()
+    match (hierarchy_count, old) {
+        (5, [Some(root), Some(pdpt), Some(directory), Some(main), Some(read_only), None]) => {
+            replace_current_linux_image_hierarchy(
+                mappings,
+                old_mappings,
+                [root, pdpt, directory, main, read_only],
+            )
+        }
+        (
+            6,
+            [Some(root), Some(pdpt), Some(directory), Some(read_only), Some(main), Some(interpreter)],
+        ) => replace_current_linux_image_hierarchy(
+            mappings,
+            old_mappings,
+            [root, pdpt, directory, read_only, main, interpreter],
+        ),
+        _ => false,
+    }
+}
+
+#[inline(never)]
+fn replace_current_linux_image_hierarchy<const N: usize>(
+    mappings: &[LinuxExecMapping],
+    old_mappings: &[LinuxActiveImageMapping],
+    old: [memory::FrameLease; N],
+) -> bool {
+    if address_space::current_root_address() != old[0].address()
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &old)
         || old
             .iter()
@@ -5826,7 +5847,7 @@ fn replace_current_interpreted_linux_image(
     {
         return false;
     }
-    let Some(new) = memory::allocate_frames::<6>(memory::FrameOwner::KERNEL) else {
+    let Some(new) = memory::allocate_frames::<N>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     if !new
@@ -6346,14 +6367,16 @@ fn linux_execve_at(
         return LINUX_ENOMEM;
     }
     let image_replaced = if interpreted {
-        replace_current_interpreted_linux_image(
+        replace_current_linux_image_with_hierarchy(
             &mappings[..transaction_mapping_count],
             &active_image_mappings[..old_mapping_count],
+            6,
         )
     } else {
-        address_space::replace_current_linux_image(
+        replace_current_linux_image_with_hierarchy(
             &mappings[..transaction_mapping_count],
             &active_image_mappings[..old_mapping_count],
+            5,
         )
     };
     if !image_replaced {

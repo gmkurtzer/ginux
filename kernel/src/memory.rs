@@ -374,7 +374,7 @@ impl FrameAllocator {
             .count()
     }
 
-    fn owns<const N: usize>(&self, owner: FrameOwner, frames: &[FrameLease; N]) -> bool {
+    fn owns(&self, owner: FrameOwner, frames: &[FrameLease]) -> bool {
         frames.iter().all(|frame| {
             self.live_frames[..self.live_count]
                 .iter()
@@ -544,7 +544,7 @@ pub(crate) fn transfer_frame_owner(from: FrameOwner, to: FrameOwner) -> Option<u
     }
 }
 
-pub(crate) fn frames_owned_by<const N: usize>(owner: FrameOwner, frames: &[FrameLease; N]) -> bool {
+pub(crate) fn frames_owned_by(owner: FrameOwner, frames: &[FrameLease]) -> bool {
     if !INITIALIZED.load(Ordering::Acquire) {
         return false;
     }
