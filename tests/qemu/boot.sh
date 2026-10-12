@@ -109,6 +109,15 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net transmit notification address: [0-9]' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues remain disabled and DMA-unbound' "$output_file" ||
     ! grep -q '^ginux: invalid virtio-net queue geometry rejected' "$output_file" ||
+    ! grep -q '^ginux: generation-owned virtio-net DMA page allocated' "$output_file" ||
+    ! grep -q '^ginux: bounded virtio-net RX/TX DMA layout validated' "$output_file" ||
+    ! grep -q '^ginux: malformed virtio-net DMA layouts rejected' "$output_file" ||
+    ! grep -q '^ginux: dedicated virtio-net IOMMU hierarchy constructed' "$output_file" ||
+    ! grep -q '^ginux: virtio-net IOMMU source and DMA page encoded exactly' "$output_file" ||
+    ! grep -q '^ginux: virtio-net DMA and IOMMU leases are generation-fresh' "$output_file" ||
+    ! grep -q '^ginux: virtio-net IOMMU hardware remained inactive' "$output_file" ||
+    ! grep -q '^ginux: virtio-net bus mastering remained disabled' "$output_file" ||
+    ! grep -q '^ginux: inactive virtio-net DMA confinement retired cleanly' "$output_file" ||
     ! grep -q '^ginux: virtio-net stable MAC validated: 90520731923542' "$output_file" ||
     ! grep -q '^ginux: virtio-net platform DMA negotiation validated' "$output_file" ||
     ! grep -q '^ginux: invalid virtio-net feature sets rejected' "$output_file" ||

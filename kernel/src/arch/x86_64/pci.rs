@@ -89,6 +89,18 @@ const REQUEST_OFFSET: usize = 0x400;
 const DATA_OFFSET: usize = 0x600;
 const DATA_LENGTH: usize = 512;
 const STATUS_OFFSET: usize = 0x900;
+const NET_RX_DESC_OFFSET: usize = 0x000;
+const NET_RX_AVAIL_OFFSET: usize = 0x080;
+const NET_RX_USED_OFFSET: usize = 0x100;
+const NET_TX_DESC_OFFSET: usize = 0x180;
+const NET_TX_AVAIL_OFFSET: usize = 0x200;
+const NET_TX_USED_OFFSET: usize = 0x280;
+const NET_RX_BUFFER_OFFSET: usize = 0x400;
+const NET_TX_BUFFER_OFFSET: usize = 0xa00;
+const NET_BUFFER_LENGTH: usize = 0x600;
+const NET_DESCRIPTOR_BYTES: usize = QUEUE_SIZE as usize * 16;
+const NET_AVAILABLE_BYTES: usize = 6 + QUEUE_SIZE as usize * 2;
+const NET_USED_BYTES: usize = 6 + QUEUE_SIZE as usize * 8;
 
 static VIRTIO_INTERRUPT_FIRED: AtomicBool = AtomicBool::new(false);
 static VIRTIO_INTERRUPT_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -1489,6 +1501,62 @@ pub(crate) fn verify_network_queue_rejections(initialization: VirtioNetworkIniti
         && validate_network_queue_size(256) == Some(256)
         && notification_byte_offset(1, 4, 4).is_none()
         && notification_byte_offset(u16::MAX, u32::MAX, 4096).is_none()
+}
+
+pub(crate) fn verify_network_dma_layout() -> bool {
+    network_dma_layout_is_valid(&network_dma_regions())
+        && NET_BUFFER_LENGTH >= 12 + 1514
+        && NET_TX_BUFFER_OFFSET + NET_BUFFER_LENGTH == DMA_PAGE_SIZE
+}
+
+pub(crate) fn verify_network_dma_layout_rejections() -> bool {
+    let mut zero_length = network_dma_regions();
+    zero_length[0].1 = 0;
+    let mut overlap = network_dma_regions();
+    overlap[3].0 = NET_RX_DESC_OFFSET;
+    let mut misaligned = network_dma_regions();
+    misaligned[2].0 += 1;
+    let mut out_of_page = network_dma_regions();
+    out_of_page[7].1 += 1;
+    !network_dma_layout_is_valid(&zero_length)
+        && !network_dma_layout_is_valid(&overlap)
+        && !network_dma_layout_is_valid(&misaligned)
+        && !network_dma_layout_is_valid(&out_of_page)
+}
+
+fn network_dma_regions() -> [(usize, usize, usize); 8] {
+    [
+        (NET_RX_DESC_OFFSET, NET_DESCRIPTOR_BYTES, 16),
+        (NET_RX_AVAIL_OFFSET, NET_AVAILABLE_BYTES, 2),
+        (NET_RX_USED_OFFSET, NET_USED_BYTES, 4),
+        (NET_TX_DESC_OFFSET, NET_DESCRIPTOR_BYTES, 16),
+        (NET_TX_AVAIL_OFFSET, NET_AVAILABLE_BYTES, 2),
+        (NET_TX_USED_OFFSET, NET_USED_BYTES, 4),
+        (NET_RX_BUFFER_OFFSET, NET_BUFFER_LENGTH, 2),
+        (NET_TX_BUFFER_OFFSET, NET_BUFFER_LENGTH, 2),
+    ]
+}
+
+fn network_dma_layout_is_valid(regions: &[(usize, usize, usize); 8]) -> bool {
+    for (index, (offset, length, alignment)) in regions.iter().copied().enumerate() {
+        if length == 0
+            || alignment == 0
+            || !offset.is_multiple_of(alignment)
+            || offset
+                .checked_add(length)
+                .is_none_or(|end| end > DMA_PAGE_SIZE)
+            || regions[index + 1..]
+                .iter()
+                .any(|(other_offset, other_length, _)| {
+                    let end = offset + length;
+                    let other_end = other_offset.saturating_add(*other_length);
+                    offset < other_end && *other_offset < end
+                })
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn read_network_mac(common: usize, device_configuration: usize) -> Option<[u8; 6]> {

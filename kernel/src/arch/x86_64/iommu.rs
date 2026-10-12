@@ -260,6 +260,13 @@ impl InactiveTranslation {
         )
     }
 
+    pub(crate) fn evidence(&self, dma_frame: FrameLease) -> Option<TranslationEvidence> {
+        self.is_exact(dma_frame).then_some(TranslationEvidence {
+            table_frames: self.frames,
+            dma_frame,
+        })
+    }
+
     pub(crate) fn retire(self) -> bool {
         memory::scrub_and_release_frames(FrameOwner::KERNEL, &self.frames)
             && !memory::any_frame_lease_live(&self.frames)

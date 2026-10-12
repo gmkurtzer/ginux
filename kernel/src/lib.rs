@@ -467,6 +467,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     ) else {
         kernel_fail("\r\nginux: virtio IOMMU translation profile invalid\r\n");
     };
+    let Some(virtio_network_iommu_profile) = arch::x86_64::iommu::DeviceTranslationProfile::new(
+        platform.first_iommu_register_base,
+        iommu_mmio,
+        iommu_capabilities,
+        virtio_network.bus,
+        virtio_network.device,
+        virtio_network.function,
+    ) else {
+        kernel_fail("\r\nginux: virtio-net IOMMU translation profile invalid\r\n");
+    };
+    if !virtio_network_iommu_profile.matches_source(
+        virtio_network.bus,
+        virtio_network.device,
+        virtio_network.function,
+    ) {
+        kernel_fail("\r\nginux: virtio-net IOMMU source identity mismatch\r\n");
+    }
     serial_write("\r\nginux: bounded writable uncached IOMMU mapping active");
     serial_write("\r\nginux: IOMMU version: ");
     serial_write_u64(u64::from(iommu_capabilities.major_version));
@@ -942,6 +959,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: inactive IOMMU translation invariant failed\r\n");
     }
+    let Some(virtio_iommu_evidence) = iommu_translation.evidence(virtio_dma_frame) else {
+        kernel_fail("\r\nginux: inactive IOMMU translation evidence unavailable\r\n");
+    };
     serial_write("\r\nginux: IOMMU root/context hierarchy constructed");
     serial_write("\r\nginux: IOMMU root table address: ");
     serial_write_u64(iommu_translation.root_table_address());
@@ -1100,6 +1120,67 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: virtio DMA frame retirement failed\r\n");
     }
     serial_write("\r\nginux: virtio DMA frame scrubbed and released");
+    if !virtio_iommu_evidence.is_retired()
+        || !virtio_network_iommu_profile.is_inactive()
+        || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
+        || !arch::x86_64::pci::verify_network_dma_layout()
+        || !arch::x86_64::pci::verify_network_dma_layout_rejections()
+    {
+        kernel_fail("\r\nginux: virtio-net DMA construction precondition failed\r\n");
+    }
+    let Some([virtio_network_dma_frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)
+    else {
+        kernel_fail("\r\nginux: virtio-net DMA frame allocation failed\r\n");
+    };
+    // SAFETY: The allocator owns and directly maps this live kernel lease.
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[virtio_network_dma_frame])
+        || unsafe { !frame_is_zero(virtio_network_dma_frame) }
+    {
+        kernel_fail("\r\nginux: virtio-net DMA frame ownership invalid\r\n");
+    }
+    let Some(virtio_network_translation) = arch::x86_64::iommu::build_inactive_translation(
+        iommu_capabilities,
+        virtio_network.bus,
+        virtio_network.device,
+        virtio_network.function,
+        virtio_network_dma_frame,
+    ) else {
+        kernel_fail("\r\nginux: virtio-net IOMMU hierarchy construction failed\r\n");
+    };
+    let Some(virtio_network_evidence) =
+        virtio_network_translation.evidence(virtio_network_dma_frame)
+    else {
+        kernel_fail("\r\nginux: virtio-net IOMMU evidence unavailable\r\n");
+    };
+    if !virtio_network_translation.is_exact(virtio_network_dma_frame)
+        || !virtio_network_evidence.is_fresh_after(virtio_iommu_evidence)
+        || !virtio_network_iommu_profile.is_inactive()
+        || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
+        || !arch::x86_64::iommu::verify_inactive_translation_rejections(
+            iommu_capabilities,
+            virtio_network_dma_frame,
+        )
+    {
+        kernel_fail("\r\nginux: virtio-net DMA confinement invariant failed\r\n");
+    }
+    serial_write("\r\nginux: generation-owned virtio-net DMA page allocated");
+    serial_write("\r\nginux: bounded virtio-net RX/TX DMA layout validated");
+    serial_write("\r\nginux: malformed virtio-net DMA layouts rejected");
+    serial_write("\r\nginux: dedicated virtio-net IOMMU hierarchy constructed");
+    serial_write("\r\nginux: virtio-net IOMMU source and DMA page encoded exactly");
+    serial_write("\r\nginux: virtio-net DMA and IOMMU leases are generation-fresh");
+    serial_write("\r\nginux: virtio-net IOMMU hardware remained inactive");
+    serial_write("\r\nginux: virtio-net bus mastering remained disabled");
+    if !virtio_network_translation.retire()
+        || !memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &[virtio_network_dma_frame],
+        )
+        || !virtio_network_evidence.is_retired()
+    {
+        kernel_fail("\r\nginux: virtio-net DMA confinement retirement failed\r\n");
+    }
+    serial_write("\r\nginux: inactive virtio-net DMA confinement retired cleanly");
     let Some((disk_record, recovered_after_reboot)) = disk_volume else {
         kernel_fail("\r\nginux: persistent virtio volume transaction failed\r\n");
     };

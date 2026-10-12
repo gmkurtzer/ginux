@@ -46,7 +46,13 @@ receive/transmit queue sizes and notification offsets without mapping the
 notification page. Both queues must remain disabled, interrupt-unbound, and
 free of DMA addresses before the device is reset again with all PCI decoding
 disabled.
-No queue, interrupt, DMA lease, packet traffic, or service delegation is active.
+No queue, interrupt, DMA lease, packet traffic, or service delegation remains
+active. A subsequent construction proof allocates one zeroed page with exact
+eight-entry RX/TX rings and 1536-byte packet buffers, encodes only that page and
+PCI source `00:03.0` in a fresh six-frame VT-d hierarchy, and then scrubs the
+inactive hierarchy and DMA lease. Translation and bus mastering stay disabled
+throughout. See
+[Virtio Network DMA Confinement v0](specs/kernel/virtio-network-dma-v0.md).
 See [Virtio Network Initialization v0](specs/kernel/virtio-network-init-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases

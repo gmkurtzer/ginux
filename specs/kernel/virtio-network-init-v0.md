@@ -61,7 +61,7 @@ Boot-time checks reject undersized and non-power-of-two capacities, zero and
 overflowing notification geometry, and any queue that already has interrupt,
 enable, or DMA state. Queue selection itself grants no DMA authority.
 
-No queue is selected or configured and `DRIVER_OK` is never set. The kernel
+No queue is configured and `DRIVER_OK` is never set. The kernel
 then resets the device again, clears all PCI decoding and bus-master bits, and
 requires both zero device status and zero authority bits.
 
@@ -73,7 +73,9 @@ must contain no optional feature beyond the three listed above.
 
 ## Deliberate limits
 
-- Queue programming, notification MMIO mapping, MSI-X routing, DMA rings, VT-d
-  tables, packet validation, and service delegation remain later M6 milestones.
+- Queue programming, notification MMIO mapping, MSI-X routing, packet
+  validation, and service delegation remain later M6 milestones. The inactive
+  one-page DMA and VT-d construction is specified separately in
+  [Virtio Network DMA Confinement v0](virtio-network-dma-v0.md).
 - This is a serialized bootstrap proof for the deterministic Q35 device, not a
   general virtio transport implementation.
