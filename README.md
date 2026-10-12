@@ -90,6 +90,14 @@ kernel validates the 12-byte modern header, one-buffer count, exact gateway and
 guest MAC/IP identities, ARP reply fields, length bounds, and canaries before
 retiring both interrupt routes and DMA authority. See
 [Virtio Network Receive v0](specs/kernel/virtio-network-receive-v0.md).
+The negative receive proof redirects that same write-only descriptor to a
+sentinel-filled, owned page deliberately absent from the NIC's VT-d hierarchy.
+The gate requires the page to remain unchanged, validates the exact `00:03.0`
+write-permission fault and attempted address, clears and invalidates the fault,
+then completes a valid ARP exchange through the still-authorized page. Device
+and interrupt authority are quiesced before fault recovery; translation tables,
+the guard, and the authorized DMA page are scrubbed in order afterward. See
+[Virtio Network DMA Fault v0](specs/kernel/virtio-network-dma-fault-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table

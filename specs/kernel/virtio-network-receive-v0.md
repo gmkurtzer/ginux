@@ -60,6 +60,7 @@ uses the same teardown.
 
 This is a serialized bootstrap exchange, not a network stack. It has one RX
 buffer, one request type, fixed QEMU addresses, no retry or timeout injection,
-no fragmented receive chain, and no native-service delegation. Protocol state,
-general packet queues, failure recovery, and container networking remain later
-M6 work.
+no fragmented receive chain, and no native-service delegation. The separate
+[Virtio Network DMA Fault v0](virtio-network-dma-fault-v0.md) contract proves
+recovery after a blocked unauthorized receive. General protocol state, packet
+queues, service recovery, and container networking remain later M6 work.

@@ -436,6 +436,16 @@ pub(crate) struct VirtioNetworkReceive {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) struct VirtioNetworkDmaFault {
+    pub(crate) completion_published: bool,
+}
+
+enum NetworkArpOutcome {
+    Reply(VirtioNetworkReceive),
+    DmaBlocked(VirtioNetworkDmaFault),
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct VirtioBlockRead {
     pub(crate) capacity_sectors: u64,
     pub(crate) used_length: u32,
@@ -1453,6 +1463,76 @@ pub(crate) unsafe fn receive_network_arp_reply(
     dma_physical: u64,
     dma_virtual: usize,
 ) -> Option<VirtioNetworkReceive> {
+    let receive_physical = dma_physical.checked_add(NET_RX_BUFFER_OFFSET as u64)?;
+    match network_arp_exchange(
+        device,
+        common_mapping,
+        notification_mapping,
+        msix_mapping,
+        apic,
+        dma_physical,
+        dma_virtual,
+        receive_physical,
+        true,
+    )? {
+        NetworkArpOutcome::Reply(receive) => Some(receive),
+        NetworkArpOutcome::DmaBlocked(_) => None,
+    }
+}
+
+/// Attempts one receive into an owned page absent from the active IOMMU map.
+///
+/// # Safety
+///
+/// The caller must exclusively own both pages, map only `dma_physical` into the
+/// active device domain, and keep both leases live until return.
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn attempt_unmapped_network_receive(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    notification_mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    apic: &LocalApic,
+    dma_physical: u64,
+    dma_virtual: usize,
+    unmapped_physical: u64,
+) -> Option<VirtioNetworkDmaFault> {
+    if !unmapped_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || unmapped_physical == dma_physical
+        || unmapped_physical
+            .checked_add(DMA_PAGE_SIZE as u64)
+            .is_none()
+    {
+        return None;
+    }
+    match network_arp_exchange(
+        device,
+        common_mapping,
+        notification_mapping,
+        msix_mapping,
+        apic,
+        dma_physical,
+        dma_virtual,
+        unmapped_physical,
+        false,
+    )? {
+        NetworkArpOutcome::DmaBlocked(fault) => Some(fault),
+        NetworkArpOutcome::Reply(_) => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn network_arp_exchange(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    notification_mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    apic: &LocalApic,
+    dma_physical: u64,
+    dma_virtual: usize,
+    receive_physical: u64,
+    expect_reply: bool,
+) -> Option<NetworkArpOutcome> {
     const HEADER_LENGTH: usize = 12;
     const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
     const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
@@ -1466,11 +1546,16 @@ pub(crate) unsafe fn receive_network_arp_reply(
     ];
     const TX_LENGTH: usize = HEADER_LENGTH + ARP_REQUEST.len();
     const RX_DESCRIPTOR_LENGTH: usize = NET_BUFFER_LENGTH - 1;
+    let mapped_receive = dma_physical.checked_add(NET_RX_BUFFER_OFFSET as u64)?;
 
     if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
         || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
         || !network_function_is_disabled(device)
         || TX_LENGTH >= NET_BUFFER_LENGTH
+        || receive_physical
+            .checked_add(RX_DESCRIPTOR_LENGTH as u64)
+            .is_none()
+        || expect_reply != (receive_physical == mapped_receive)
     {
         return None;
     }
@@ -1588,21 +1673,20 @@ pub(crate) unsafe fn receive_network_arp_reply(
             return None;
         }
 
-        write_dma_u64(
-            dma_virtual + NET_RX_DESC_OFFSET,
-            dma_physical + NET_RX_BUFFER_OFFSET as u64,
-        );
+        write_dma_u64(dma_virtual + NET_RX_DESC_OFFSET, receive_physical);
         write_dma_u32(
             dma_virtual + NET_RX_DESC_OFFSET + 8,
             RX_DESCRIPTOR_LENGTH as u32,
         );
         write_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 12, DESC_WRITE);
         write_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 14, 0);
-        write_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1, 0x3c);
-        write_dma_u8(
-            dma_virtual + NET_RX_BUFFER_OFFSET + RX_DESCRIPTOR_LENGTH,
-            0xc3,
-        );
+        if expect_reply {
+            write_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1, 0x3c);
+            write_dma_u8(
+                dma_virtual + NET_RX_BUFFER_OFFSET + RX_DESCRIPTOR_LENGTH,
+                0xc3,
+            );
+        }
         write_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET, 0);
         write_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 2, 1);
         write_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 4, 0);
@@ -1685,26 +1769,49 @@ pub(crate) unsafe fn receive_network_arp_reply(
             return None;
         }
         let receive_interrupted = wait_for_one_virtio_interrupt();
+        let receive_index = read_dma_u16(dma_virtual + NET_RX_USED_OFFSET + 2);
+        let receive_id = read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 4);
         let receive_length = read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 8);
         let device_status = read_common_u8(common, COMMON_DEVICE_STATUS);
-        let ring_valid = receive_interrupted
-            && read_dma_u16(dma_virtual + NET_RX_USED_OFFSET + 2) == 1
-            && read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 4) == 0
-            && device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) == 0;
-        let guards_valid = read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1) == 0x3c
-            && read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET + RX_DESCRIPTOR_LENGTH) == 0xc3;
-        let reply_valid = network_arp_reply_is_valid(
-            dma_virtual + NET_RX_BUFFER_OFFSET,
-            receive_length,
-            GUEST_MAC,
-            GATEWAY_MAC,
-            GUEST_IP,
-            GATEWAY_IP,
-        );
-        let valid = ring_valid && guards_valid && reply_valid;
-        valid.then_some(VirtioNetworkReceive {
-            frame_length: receive_length.checked_sub(HEADER_LENGTH as u32)?,
-        })
+        let device_healthy = device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) == 0;
+        if expect_reply {
+            let guards_valid = read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1) == 0x3c
+                && read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET + RX_DESCRIPTOR_LENGTH) == 0xc3;
+            let reply_valid = network_arp_reply_is_valid(
+                dma_virtual + NET_RX_BUFFER_OFFSET,
+                receive_length,
+                GUEST_MAC,
+                GATEWAY_MAC,
+                GUEST_IP,
+                GATEWAY_IP,
+            );
+            (receive_interrupted
+                && receive_index == 1
+                && receive_id == 0
+                && device_healthy
+                && guards_valid
+                && reply_valid)
+                .then_some(NetworkArpOutcome::Reply(VirtioNetworkReceive {
+                    frame_length: receive_length.checked_sub(HEADER_LENGTH as u32)?,
+                }))
+        } else {
+            let completion_published = receive_index == 1;
+            let completion_bounded = if completion_published {
+                receive_interrupted
+                    && receive_id == 0
+                    && receive_length <= RX_DESCRIPTOR_LENGTH as u32
+            } else {
+                !receive_interrupted && receive_index == 0 && receive_id == 0 && receive_length == 0
+            };
+            (completion_bounded
+                && device_healthy
+                && read_dma_u64(dma_virtual + NET_RX_DESC_OFFSET) == receive_physical
+                && (0..NET_BUFFER_LENGTH)
+                    .all(|offset| read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET + offset) == 0))
+            .then_some(NetworkArpOutcome::DmaBlocked(VirtioNetworkDmaFault {
+                completion_published,
+            }))
+        }
     })();
 
     asm!("cli", options(nomem, nostack));

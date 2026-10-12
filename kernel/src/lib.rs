@@ -1209,15 +1209,19 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: virtio-net DMA construction precondition failed\r\n");
     }
-    let Some([virtio_network_dma_frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)
+    let Some([virtio_network_dma_frame, virtio_network_guard_frame]) =
+        memory::allocate_frames::<2>(memory::FrameOwner::KERNEL)
     else {
-        kernel_fail("\r\nginux: virtio-net DMA frame allocation failed\r\n");
+        kernel_fail("\r\nginux: virtio-net DMA and guard frame allocation failed\r\n");
     };
     // SAFETY: The allocator owns and directly maps this live kernel lease.
-    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[virtio_network_dma_frame])
-        || unsafe { !frame_is_zero(virtio_network_dma_frame) }
+    if !memory::frames_owned_by(
+        memory::FrameOwner::KERNEL,
+        &[virtio_network_dma_frame, virtio_network_guard_frame],
+    ) || unsafe { !frame_is_zero(virtio_network_dma_frame) }
+        || unsafe { !frame_is_zero(virtio_network_guard_frame) }
     {
-        kernel_fail("\r\nginux: virtio-net DMA frame ownership invalid\r\n");
+        kernel_fail("\r\nginux: virtio-net DMA or guard frame ownership invalid\r\n");
     }
     let Some(virtio_network_translation) = arch::x86_64::iommu::build_inactive_translation(
         iommu_capabilities,
@@ -1255,6 +1259,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(virtio_network_dma_virtual) = virtio_network_dma_frame.direct_map_address() else {
         kernel_fail("\r\nginux: virtio-net DMA page is outside direct map\r\n");
     };
+    let Some(virtio_network_guard_virtual) = virtio_network_guard_frame.direct_map_address() else {
+        kernel_fail("\r\nginux: virtio-net guard page is outside direct map\r\n");
+    };
     let Some(virtio_network_active) = arch::x86_64::iommu::activate_translation(
         platform.first_iommu_register_base,
         iommu_mmio,
@@ -1290,10 +1297,52 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             )
         })
         .flatten();
-    // SAFETY: The transmit proof returned with the function reset and DMA
-    // disabled while the same exact VT-d translation and exclusive page remain
-    // live for this bounded request/reply exchange.
-    let network_receive = network_transmit
+    // The guard is owned but absent from the NIC's exact translation. A
+    // blocked receive write must leave every byte unchanged.
+    unsafe {
+        core::ptr::write_bytes(virtio_network_guard_virtual as *mut u8, 0xa5, PAGE_SIZE);
+    }
+    // SAFETY: Both pages are exclusively kernel-owned. Only the queue page is
+    // in the active VT-d hierarchy; the aligned guard target is deliberately
+    // absent and remains live until after the device is reset below.
+    let network_dma_fault = network_transmit
+        .is_some()
+        .then(|| unsafe {
+            arch::x86_64::pci::attempt_unmapped_network_receive(
+                virtio_network,
+                virtio_network_common_mmio,
+                virtio_network_notify_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+                virtio_network_dma_frame.address(),
+                virtio_network_dma_virtual,
+                virtio_network_guard_frame.address(),
+            )
+        })
+        .flatten();
+    let network_fault_completion_published =
+        network_dma_fault.map(|fault| fault.completion_published);
+    let network_guard_unchanged = (0..PAGE_SIZE).all(|offset| unsafe {
+        (virtio_network_guard_virtual as *const u8)
+            .add(offset)
+            .read()
+            == 0xa5
+    });
+    if network_fault_completion_published.is_none() || !network_guard_unchanged {
+        kernel_fail("\r\nginux: unauthorized virtio-net RX DMA was not contained\r\n");
+    }
+    if !virtio_network_active.recover_expected_write_fault(
+        virtio_network.bus,
+        virtio_network.device,
+        virtio_network.function,
+        virtio_network_guard_frame.address(),
+    ) {
+        kernel_fail("\r\nginux: virtio-net IOMMU fault validation or recovery failed\r\n");
+    }
+    // SAFETY: The faulting exchange returned with the function reset and bus
+    // mastering revoked. Fault state has been cleared and the exact translation
+    // recovered before reusing the mapped page for a valid reply.
+    let network_receive = network_dma_fault
         .is_some()
         .then(|| unsafe {
             arch::x86_64::pci::receive_network_arp_reply(
@@ -1335,6 +1384,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: virtio-net TX payload and guards preserved");
     serial_write("\r\nginux: bounded Ethernet probe transmitted");
     serial_write("\r\nginux: virtio-net TX route retired before DMA release");
+    serial_write("\r\nginux: unauthorized virtio-net RX DMA payload blocked");
+    serial_write("\r\nginux: faulting virtio-net transport outcome bounded");
+    serial_write("\r\nginux: virtio-net unmapped guard page remained unchanged");
+    serial_write("\r\nginux: faulting virtio-net device quiesced before recovery");
+    serial_write("\r\nginux: virtio-net IOMMU fault source and address validated");
+    serial_write("\r\nginux: virtio-net IOMMU write fault cleared and translation recovered");
     serial_write("\r\nginux: confined virtio-net RX descriptor published");
     serial_write("\r\nginux: bounded ARP request transmitted");
     serial_write("\r\nginux: exactly one virtio-net RX interrupt delivered");
@@ -1342,14 +1397,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: QEMU gateway ARP reply validated");
     serial_write("\r\nginux: virtio-net RX payload bounds preserved");
     serial_write("\r\nginux: virtio-net RX/TX routes retired before DMA release");
-    if !virtio_network_translation.retire()
-        || !memory::scrub_and_release_frames(
-            memory::FrameOwner::KERNEL,
-            &[virtio_network_dma_frame],
-        )
+    if !virtio_network_translation.retire() {
+        kernel_fail("\r\nginux: virtio-net DMA confinement retirement failed\r\n");
+    }
+    if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[virtio_network_guard_frame])
+        || memory::any_frame_lease_live(&[virtio_network_guard_frame])
+    {
+        kernel_fail("\r\nginux: virtio-net guard frame retirement failed\r\n");
+    }
+    serial_write("\r\nginux: virtio-net unmapped guard page scrubbed and released");
+    if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[virtio_network_dma_frame])
+        || memory::any_frame_lease_live(&[virtio_network_dma_frame])
         || !virtio_network_evidence.is_retired()
     {
-        kernel_fail("\r\nginux: virtio-net DMA confinement retirement failed\r\n");
+        kernel_fail("\r\nginux: virtio-net DMA frame retirement failed\r\n");
     }
     serial_write("\r\nginux: virtio-net DMA confinement retired cleanly");
     let Some((disk_record, recovered_after_reboot)) = disk_volume else {

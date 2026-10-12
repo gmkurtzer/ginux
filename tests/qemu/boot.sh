@@ -137,6 +137,12 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net TX payload and guards preserved' "$output_file" ||
     ! grep -q '^ginux: bounded Ethernet probe transmitted' "$output_file" ||
     ! grep -q '^ginux: virtio-net TX route retired before DMA release' "$output_file" ||
+    ! grep -q '^ginux: unauthorized virtio-net RX DMA payload blocked' "$output_file" ||
+    ! grep -q '^ginux: faulting virtio-net transport outcome bounded' "$output_file" ||
+    ! grep -q '^ginux: virtio-net unmapped guard page remained unchanged' "$output_file" ||
+    ! grep -q '^ginux: faulting virtio-net device quiesced before recovery' "$output_file" ||
+    ! grep -q '^ginux: virtio-net IOMMU fault source and address validated' "$output_file" ||
+    ! grep -q '^ginux: virtio-net IOMMU write fault cleared and translation recovered' "$output_file" ||
     ! grep -q '^ginux: confined virtio-net RX descriptor published' "$output_file" ||
     ! grep -q '^ginux: bounded ARP request transmitted' "$output_file" ||
     ! grep -q '^ginux: exactly one virtio-net RX interrupt delivered' "$output_file" ||
@@ -144,6 +150,7 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: QEMU gateway ARP reply validated' "$output_file" ||
     ! grep -q '^ginux: virtio-net RX payload bounds preserved' "$output_file" ||
     ! grep -q '^ginux: virtio-net RX/TX routes retired before DMA release' "$output_file" ||
+    ! grep -q '^ginux: virtio-net unmapped guard page scrubbed and released' "$output_file" ||
     ! grep -q '^ginux: virtio-net DMA confinement retired cleanly' "$output_file" ||
     ! grep -q '^ginux: virtio-net stable MAC validated: 90520731923542' "$output_file" ||
     ! grep -q '^ginux: virtio-net platform DMA negotiation validated' "$output_file" ||
