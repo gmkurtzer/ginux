@@ -420,7 +420,8 @@ address overflow still fail closed.
 The ring-3 workload verifies each error and continues into valid calls.
 A real ring-3 page fault now enters a bounded `SIGSEGV` handler registered with
 `rt_sigaction` and `SA_RESTORER`. With `SA_ONSTACK`, the kernel selects the
-registered writable alternate stack, marks it `SS_ONSTACK`, and admits syscall
+registered writable alternate stack, marks an ordinary registration
+`SS_ONSTACK`, and admits syscall
 entry from that range only for the active signal frame. It builds the 440-byte
 x86-64 Linux `rt_sigframe` base layout with the restorer, `ucontext`, and
 128-byte `siginfo_t` at their UAPI offsets, preserves the normal-stack red zone,
@@ -447,8 +448,10 @@ valid, then restores user-edited integer registers, Linux-restorable RFLAGS
 bits, and `uc_sigmask` with `SIGKILL` and `SIGSTOP` removed. A malformed frame
 fails without consuming the active context. Floating-point/XSAVE state,
 user-edited alternate-stack restoration, other asynchronous sources, nested
-delivery, automatic alternate-stack disarming, and syscall restart remain
-future work.
+delivery, and syscall restart remain future work. `SS_AUTODISARM` is supported:
+delivery records the configured stack in `ucontext`, makes the handler-visible
+configuration disabled, retains syscall access through the active kernel frame,
+and restores the exact configuration on `rt_sigreturn`.
 `SA_NODEFER` suppresses the automatic delivered-signal mask bit while retaining
 the explicit action mask, and `SA_RESETHAND` atomically restores the default
 disposition after committing a delivery. The measured handler observes that

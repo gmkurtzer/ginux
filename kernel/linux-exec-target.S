@@ -208,9 +208,19 @@ ginux_linux_exec_target:
     jne .Lfailure
 
 #ifdef GINUX_SIGNAL_PROBE
+    mov qword ptr [rip + .Lalt_stack], 0x401800
+    mov dword ptr [rip + .Lalt_stack + 8], 0x80000000
+    mov qword ptr [rip + .Lalt_stack + 16], 2048
+    lea rdi, [rip + .Lalt_stack]
+    xor esi, esi
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     lea rax, [rip + .Lsignal_handler]
     mov qword ptr [rip + .Lsignal_action], rax
-    mov qword ptr [rip + .Lsignal_action + 8], 0x04000004
+    mov qword ptr [rip + .Lsignal_action + 8], 0x0c000004
     lea rax, [rip + .Lsignal_restorer]
     mov qword ptr [rip + .Lsignal_action + 16], rax
     mov qword ptr [rip + .Lsignal_action + 24], 0
@@ -228,6 +238,27 @@ ginux_linux_exec_target:
     jne .Lfailure
     mov qword ptr [rip + .Lsignal_mode], 0
     cmp qword ptr [rip + .Lsignal_count], 1
+    jne .Lfailure
+    xor edi, edi
+    lea rsi, [rip + .Lalt_stack]
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lalt_stack], 0x401800
+    jne .Lfailure
+    cmp dword ptr [rip + .Lalt_stack + 8], 0x80000000
+    jne .Lfailure
+    cmp qword ptr [rip + .Lalt_stack + 16], 2048
+    jne .Lfailure
+    mov qword ptr [rip + .Lalt_stack], 0
+    mov dword ptr [rip + .Lalt_stack + 8], 2
+    mov qword ptr [rip + .Lalt_stack + 16], 0
+    lea rdi, [rip + .Lalt_stack]
+    xor esi, esi
+    mov eax, 131
+    syscall
+    test rax, rax
     jne .Lfailure
     mov edi, 0x40b000
     mov esi, 4096
@@ -566,19 +597,19 @@ ginux_linux_exec_target:
     jne .Lfailure
     cmp qword ptr [rdx + 8], 0
     jne .Lfailure
+    cmp qword ptr [rdx + 224], 0
+    jne .Lfailure
+    inc qword ptr [rip + .Lsignal_count]
+    cmp qword ptr [rip + .Lsignal_mode], 2
+    je .Lsignal_fault_handler
     cmp qword ptr [rdx + 16], 0
     jne .Lfailure
     cmp dword ptr [rdx + 24], 2
     jne .Lfailure
     cmp qword ptr [rdx + 32], 0
     jne .Lfailure
-    cmp qword ptr [rdx + 224], 0
-    jne .Lfailure
-    inc qword ptr [rip + .Lsignal_count]
     cmp qword ptr [rip + .Lsignal_mode], 0
     je .Lsignal_handler_return
-    cmp qword ptr [rip + .Lsignal_mode], 2
-    je .Lsignal_fault_handler
     cmp dword ptr [rsi], 11
     jne .Lfailure
     cmp dword ptr [rsi + 4], 0
@@ -621,6 +652,16 @@ ginux_linux_exec_target:
     jne .Lfailure
     jmp .Lsignal_handler_return
 .Lsignal_fault_handler:
+    cmp rsp, 0x401800
+    jb .Lfailure
+    cmp rsp, 0x402000
+    jae .Lfailure
+    cmp qword ptr [rdx + 16], 0x401800
+    jne .Lfailure
+    cmp dword ptr [rdx + 24], 0x80000000
+    jne .Lfailure
+    cmp qword ptr [rdx + 32], 2048
+    jne .Lfailure
     cmp dword ptr [rsi], 11
     jne .Lfailure
     cmp dword ptr [rsi + 4], 0
@@ -636,6 +677,18 @@ ginux_linux_exec_target:
     cmp qword ptr [rdx + 216], 0x40b000
     jne .Lfailure
     cmp qword ptr [rdx + 296], 0
+    jne .Lfailure
+    xor edi, edi
+    lea rsi, [rip + .Lalt_stack]
+    mov eax, 131
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lalt_stack], 0
+    jne .Lfailure
+    cmp dword ptr [rip + .Lalt_stack + 8], 2
+    jne .Lfailure
+    cmp qword ptr [rip + .Lalt_stack + 16], 0
     jne .Lfailure
     xor edi, edi
     mov esi, 4096

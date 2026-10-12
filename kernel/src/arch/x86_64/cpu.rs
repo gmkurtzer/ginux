@@ -288,6 +288,7 @@ const LINUX_SIGNAL_COUNT: usize = 64;
 const LINUX_ALT_STACK_SIZE: usize = 24;
 const LINUX_MIN_ALT_STACK_SIZE: u64 = 2048;
 const LINUX_SS_DISABLE: u32 = 2;
+const LINUX_SS_AUTODISARM: u32 = 1 << 31;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SI_USER: i32 = 0;
@@ -1537,6 +1538,8 @@ struct LinuxSignalContext {
     signal_stack: u64,
     signal_restorer: u64,
     signal_mask: u64,
+    alt_stack_pointer: u64,
+    alt_stack_size: u64,
     alt_stack_flags: u32,
 }
 
@@ -1552,6 +1555,8 @@ impl LinuxSignalContext {
         signal_stack: 0,
         signal_restorer: 0,
         signal_mask: 0,
+        alt_stack_pointer: 0,
+        alt_stack_size: 0,
         alt_stack_flags: 0,
     };
 
@@ -1586,6 +1591,8 @@ impl LinuxSignalContext {
             signal_stack,
             signal_restorer,
             signal_mask,
+            alt_stack_pointer: ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst),
+            alt_stack_size: ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst),
             alt_stack_flags,
         }
     }
@@ -1621,6 +1628,8 @@ impl LinuxSignalContext {
             signal_stack: signal_frame.0,
             signal_restorer: signal_frame.1,
             signal_mask,
+            alt_stack_pointer: ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst),
+            alt_stack_size: ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst),
             alt_stack_flags,
         }
     }
@@ -5213,15 +5222,20 @@ fn linux_user_stack_pointer_valid(user_stack: u64) -> bool {
     if primary {
         return true;
     }
-    if !LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
-        || ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst) != LINUX_SS_ONSTACK
-    {
+    if !LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {
         return false;
     }
-    let alt_base = ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst);
-    let alt_size = ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst);
-    alt_base != 0
+    // SAFETY: active signal delivery owns this context until the serialized
+    // rt_sigreturn or abort path clears active and the record.
+    let signal = unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() };
+    let alt_base = signal.alt_stack_pointer;
+    let alt_size = signal.alt_stack_size;
+    let frame_uses_alt_stack = alt_base != 0
         && alt_size != 0
+        && alt_base
+            .checked_add(alt_size)
+            .is_some_and(|end| signal.signal_stack >= alt_base && signal.signal_stack < end);
+    frame_uses_alt_stack
         && alt_base
             .checked_add(alt_size)
             .is_some_and(|end| user_stack >= alt_base && user_stack <= end)
@@ -9593,15 +9607,15 @@ fn linux_sigaltstack(new_stack: u64, old_stack: u64) -> u64 {
         let size = u64::from_ne_bytes(size_bytes);
         match flags {
             LINUX_SS_DISABLE => Some((0, LINUX_SS_DISABLE, 0)),
-            0 if size < LINUX_MIN_ALT_STACK_SIZE => return LINUX_ENOMEM,
-            0 => {
+            0 | LINUX_SS_AUTODISARM if size < LINUX_MIN_ALT_STACK_SIZE => return LINUX_ENOMEM,
+            0 | LINUX_SS_AUTODISARM => {
                 let Ok(length) = usize::try_from(size) else {
                     return LINUX_EFAULT;
                 };
                 if !linux_writable_user_range_contains(pointer, length) {
                     return LINUX_EFAULT;
                 }
-                Some((pointer, 0, size))
+                Some((pointer, flags, size))
             }
             _ => return LINUX_EINVAL,
         }
@@ -9739,14 +9753,14 @@ fn linux_rt_signal_frame(
                 pointer: if alt_stack_disabled {
                     0
                 } else {
-                    ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst)
+                    context.alt_stack_pointer
                 },
                 flags: alt_stack_flags,
                 padding: 0,
                 size: if alt_stack_disabled {
                     0
                 } else {
-                    ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst)
+                    context.alt_stack_size
                 },
             },
             machine: LinuxSignalMachineContext {
@@ -9928,7 +9942,8 @@ fn linux_kill(
         return 0;
     }
     let old_alt_stack_flags = ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst);
-    let use_alt_stack = flags & LINUX_SA_ONSTACK != 0 && old_alt_stack_flags == 0;
+    let use_alt_stack = flags & LINUX_SA_ONSTACK != 0
+        && old_alt_stack_flags & (LINUX_SS_DISABLE | LINUX_SS_ONSTACK) == 0;
     let stack_top = if use_alt_stack {
         let pointer = ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst);
         let size = ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst);
@@ -9985,7 +10000,13 @@ fn linux_kill(
     unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(context) };
     linux_apply_delivered_signal_action(index, signal_bit, old_mask, flags);
     if use_alt_stack {
-        ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_ONSTACK, Ordering::SeqCst);
+        if old_alt_stack_flags & LINUX_SS_AUTODISARM != 0 {
+            ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
+            ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
+            ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+        } else {
+            ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_ONSTACK, Ordering::SeqCst);
+        }
     }
     LINUX_SIGNAL_ACTIVE.store(true, Ordering::SeqCst);
     LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -10069,7 +10090,8 @@ fn deliver_linux_sigsegv(frame: &mut UserFaultFrame, fault: domain::FaultMetadat
     }
     let interrupted = frame.context();
     let old_alt_stack_flags = ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst);
-    let use_alt_stack = flags & LINUX_SA_ONSTACK != 0 && old_alt_stack_flags == 0;
+    let use_alt_stack = flags & LINUX_SA_ONSTACK != 0
+        && old_alt_stack_flags & (LINUX_SS_DISABLE | LINUX_SS_ONSTACK) == 0;
     let stack_top = if use_alt_stack {
         let pointer = ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst);
         let size = ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst);
@@ -10130,7 +10152,13 @@ fn deliver_linux_sigsegv(frame: &mut UserFaultFrame, fault: domain::FaultMetadat
     unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(context) };
     linux_apply_delivered_signal_action(index, signal_bit, old_mask, flags);
     if use_alt_stack {
-        ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_ONSTACK, Ordering::SeqCst);
+        if old_alt_stack_flags & LINUX_SS_AUTODISARM != 0 {
+            ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
+            ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
+            ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+        } else {
+            ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_ONSTACK, Ordering::SeqCst);
+        }
     }
     LINUX_SIGNAL_ACTIVE.store(true, Ordering::SeqCst);
     LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -10166,6 +10194,8 @@ fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64) -> u64 {
         core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO);
     }
     ELF_PROBE_SIGNAL_MASK.store(restored.signal_mask, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_POINTER.store(context.alt_stack_pointer, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_SIZE.store(context.alt_stack_size, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(context.alt_stack_flags, Ordering::SeqCst);
     LINUX_SIGNAL_ACTIVE.store(false, Ordering::SeqCst);
     LINUX_SIGNAL_RETURN_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -10178,6 +10208,8 @@ fn abort_linux_signal() {
         // Linux execution while interrupts remain disabled.
         let context = unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() };
         ELF_PROBE_SIGNAL_MASK.store(context.signal_mask, Ordering::SeqCst);
+        ELF_PROBE_ALT_STACK_POINTER.store(context.alt_stack_pointer, Ordering::SeqCst);
+        ELF_PROBE_ALT_STACK_SIZE.store(context.alt_stack_size, Ordering::SeqCst);
         ELF_PROBE_ALT_STACK_FLAGS.store(context.alt_stack_flags, Ordering::SeqCst);
         unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO) };
     }

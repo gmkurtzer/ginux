@@ -728,7 +728,7 @@ floating-point/XSAVE preservation is not implemented yet. Handler entry sets
 `rdi = 11`, `rsi = &frame.info`, and `rdx = &frame.uc` even when `SA_SIGINFO` is
 clear, and clears DF, RF, and TF as required by the x86 signal ABI before
 entering through the exception `IRETQ` path. `SA_ONSTACK` selects the registered
-alternate-stack top and publishes `SS_ONSTACK`; the syscall gate admits that
+alternate-stack top and publishes `SS_ONSTACK` for an ordinary registration; the syscall gate admits that
 range only while both the flag and active frame agree. The proof handler
 observes `SS_ONSTACK`, proves replacement returns `-EPERM`, observes the
 automatic `SIGSEGV` bit plus its action mask, maps the missing page, and returns
@@ -767,8 +767,7 @@ context, so the handler may repair it and retry. The proof temporarily supplies
 a forbidden non-null FP-state pointer and observes that atomic rejection, then
 restores it to zero, changes saved `rax` and `uc_sigmask`, and observes both
 changes after return. Floating-point/XSAVE restoration, user-edited
-alternate-stack restoration, nested delivery, automatic alternate-stack
-disarming, restartable syscalls, and other asynchronous signal sources remain
+alternate-stack restoration, nested delivery, restartable syscalls, and other asynchronous signal sources remain
 unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
 than entering the native-domain scheduler fault path.
@@ -818,14 +817,21 @@ is retained across coalescing and cleared only with the pending bit. Pending sta
 process/thread selection among multiple runnable threads, and asynchronous
 sources remain unsupported.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
-alternate-stack record. It accepts `SS_DISABLE` or a zero-flag stack of at least
+alternate-stack record. It accepts `SS_DISABLE`, or a zero-flag or
+`SS_AUTODISARM` stack of at least
 2048 bytes wholly contained in one currently writable probe VMA. Invalid
 records return `-EINVAL`, undersized stacks return `-ENOMEM`, and inaccessible
 records or stack ranges return `-EFAULT` before state changes. The proof enables,
 queries, rejects invalid replacements, and disables the stack before exit.
-While delivery is using the alternate stack, null-new-stack queries report
-`SS_ONSTACK` and any replacement returns `-EPERM`. Successful `rt_sigreturn`
-restores the prior zero flag. Automatic disarming remains unsupported.
+While ordinary delivery is using the alternate stack, null-new-stack queries
+report `SS_ONSTACK` and any replacement returns `-EPERM`. With
+`SS_AUTODISARM`, the frame retains the prior pointer, size, and flag before the
+handler-visible configuration is atomically reset to disabled. Syscall stack
+admission follows that retained active-frame extent rather than granting access
+from the disabled public configuration. The measured handler queries the
+disabled state from the autodisarmed stack; successful `rt_sigreturn` restores
+the exact prior registration, which is queried before the probe explicitly
+disables it. User edits to the frame's alternate-stack record remain rejected.
 Before that overwrite, `rax = 158` (`__NR_arch_prctl`) with `ARCH_SET_FS` and
 the exact RW segment base establishes a bounded TLS pointer; an FS-relative
 load in ring 3 verifies the original payload. `ARCH_GET_FS` copies the active
