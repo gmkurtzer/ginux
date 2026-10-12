@@ -425,9 +425,11 @@ static LINUX_TIMER_WAIT_PREEMPTION_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_POLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_POLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_POLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_POLL_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_EPOLL_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EVENTFD_READ_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EVENTFD_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EVENTFD_READ_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -3200,9 +3202,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_POLL_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_POLL_WAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_POLL_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_POLL_WAIT_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
     LINUX_EPOLL_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_EPOLL_WAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_EPOLL_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_EPOLL_WAIT_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
     LINUX_EVENTFD_READ_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_EVENTFD_READ_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_EVENTFD_READ_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
@@ -3579,9 +3583,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let poll_wait_block_count = LINUX_POLL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let poll_wait_wake_count = LINUX_POLL_WAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let poll_wait_timeout_count = LINUX_POLL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
+    let poll_wait_interrupt_count = LINUX_POLL_WAIT_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
     let epoll_wait_block_count = LINUX_EPOLL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let epoll_wait_wake_count = LINUX_EPOLL_WAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let epoll_wait_timeout_count = LINUX_EPOLL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
+    let epoll_wait_interrupt_count = LINUX_EPOLL_WAIT_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
     let eventfd_read_block_count = LINUX_EVENTFD_READ_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let eventfd_read_wake_count = LINUX_EVENTFD_READ_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let eventfd_read_interrupt_count = LINUX_EVENTFD_READ_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
@@ -3609,7 +3615,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let expected_signal_count = if signal_probe_executed {
         10
     } else if execution.tls_size != 0 {
-        9
+        11
     } else {
         2
     };
@@ -3637,12 +3643,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && sleep_interrupt_count == 1
             && timer_wait_expiry_count == 6
             && timer_wait_preemption_count == 7
-            && poll_wait_block_count == 2
+            && poll_wait_block_count == 3
             && poll_wait_wake_count == 1
             && poll_wait_timeout_count == 1
-            && epoll_wait_block_count == 1
+            && poll_wait_interrupt_count == 1
+            && epoll_wait_block_count == 2
             && epoll_wait_wake_count == 1
             && epoll_wait_timeout_count == 0
+            && epoll_wait_interrupt_count == 1
             && eventfd_read_block_count == 2
             && eventfd_read_wake_count == 1
             && eventfd_read_interrupt_count == 1
@@ -3685,12 +3693,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             sleep_interrupt_count == 1,
             timer_wait_expiry_count == 6,
             timer_wait_preemption_count == 7,
-            poll_wait_block_count == 2,
+            poll_wait_block_count == 3,
             poll_wait_wake_count == 1,
             poll_wait_timeout_count == 1,
-            epoll_wait_block_count == 1,
+            poll_wait_interrupt_count == 1,
+            epoll_wait_block_count == 2,
             epoll_wait_wake_count == 1,
             epoll_wait_timeout_count == 0,
+            epoll_wait_interrupt_count == 1,
             eventfd_read_block_count == 2,
             eventfd_read_wake_count == 1,
             eventfd_read_interrupt_count == 1,
@@ -3738,9 +3748,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             poll_wait_block_count,
             poll_wait_wake_count,
             poll_wait_timeout_count,
+            poll_wait_interrupt_count,
             epoll_wait_block_count,
             epoll_wait_wake_count,
             epoll_wait_timeout_count,
+            epoll_wait_interrupt_count,
             eventfd_read_block_count,
             eventfd_read_wake_count,
             eventfd_read_interrupt_count,
@@ -4390,12 +4402,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && sleep_interrupt_count == 1
                 && timer_wait_expiry_count == 6
                 && timer_wait_preemption_count == 7
-                && poll_wait_block_count == 2
+                && poll_wait_block_count == 3
                 && poll_wait_wake_count == 1
                 && poll_wait_timeout_count == 1
-                && epoll_wait_block_count == 1
+                && poll_wait_interrupt_count == 1
+                && epoll_wait_block_count == 2
                 && epoll_wait_wake_count == 1
                 && epoll_wait_timeout_count == 0
+                && epoll_wait_interrupt_count == 1
                 && eventfd_read_block_count == 2
                 && eventfd_read_wake_count == 1
                 && eventfd_read_interrupt_count == 1
@@ -11590,6 +11604,8 @@ fn linux_interrupt_blocked_wait(
             wait_kind,
             LINUX_THREAD_WAIT_SIGNAL
                 | LINUX_THREAD_WAIT_SLEEP
+                | LINUX_THREAD_WAIT_POLL
+                | LINUX_THREAD_WAIT_EPOLL
                 | LINUX_THREAD_WAIT_EVENTFD_READ
                 | LINUX_THREAD_WAIT_PIPE_READ
                 | LINUX_THREAD_WAIT_TIMERFD_READ
@@ -11777,7 +11793,7 @@ fn linux_interrupt_blocked_wait(
     if masked_wait {
         LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
     }
-    if wait_kind == LINUX_THREAD_WAIT_PPOLL {
+    if matches!(wait_kind, LINUX_THREAD_WAIT_POLL | LINUX_THREAD_WAIT_PPOLL) {
         clear_linux_poll_snapshot(slot);
     }
     // SAFETY: the switch above made the target the sole running Linux thread,
@@ -11799,6 +11815,10 @@ fn linux_interrupt_blocked_wait(
         LINUX_SIGNAL_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     } else if wait_kind == LINUX_THREAD_WAIT_SLEEP {
         LINUX_SLEEP_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    } else if wait_kind == LINUX_THREAD_WAIT_POLL {
+        LINUX_POLL_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    } else if wait_kind == LINUX_THREAD_WAIT_EPOLL {
+        LINUX_EPOLL_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     } else if wait_kind == LINUX_THREAD_WAIT_EVENTFD_READ {
         LINUX_EVENTFD_READ_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     } else if wait_kind == LINUX_THREAD_WAIT_PIPE_READ {

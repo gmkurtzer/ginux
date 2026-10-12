@@ -1330,6 +1330,34 @@ linux_clone_repeat:
     mov edi, 0x405da0
     push 1
     pop rsi
+    or edx, -1
+    push 7
+    pop rax
+    syscall
+    cmp rax, -4
+    require_equal
+    cmp word ptr [0x405da6], -1
+    require_equal
+    mov dword ptr [0x405dc0], -1
+    mov qword ptr [0x405dc4], -1
+    push 2
+    pop rdi
+    mov esi, 0x405dc0
+    push 1
+    pop rdx
+    or r10d, -1
+    mov eax, 232
+    syscall
+    cmp rax, -4
+    require_equal
+    cmp dword ptr [0x405dc0], -1
+    require_equal
+    cmp qword ptr [0x405dc4], -1
+    require_equal
+    mov word ptr [0x405da6], -1
+    mov edi, 0x405da0
+    push 1
+    pop rsi
     xor edx, edx
     mov r10d, 0x405cd0
     push 8
@@ -5113,6 +5141,10 @@ linux_child_eventfd_write_and_yield:
     push 24
     pop rax
     call syscall_expect_zero
+    push 12
+    pop rdx
+    call linux_child_signal_parent
+    call linux_child_signal_parent
     push 11
     pop rdx
     call linux_child_signal_parent

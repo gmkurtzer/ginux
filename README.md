@@ -400,6 +400,8 @@ signed millisecond timeout or indefinitely, wakes after relevant eventfd,
 pipe, close, or timerfd state changes, and returns zero after an APIC-driven
 timeout. This is a fixed two-thread proof, not a general wait-queue facility;
 zero-descriptor sleeps and blocking without a runnable peer return `ENOSYS`.
+A caught signal unblocked by the ordinary thread mask can interrupt `poll` with
+`EINTR` without changing the output table.
 `ppoll` uses the same scheduler-backed descriptor path with a checked
 nanosecond timespec or an infinite null timeout. Its optional eight-byte signal
 mask is installed only for the blocked interval, with `SIGKILL` and `SIGSTOP`
@@ -420,15 +422,17 @@ millisecond timeout or indefinitely, wakes after relevant descriptor or
 registration changes, and returns zero after an APIC-driven timeout. The
 registration, readiness, and data word remain live while blocked, and the
 output event is revalidated before completion. This remains a fixed two-thread,
-one-registration proof; blocking without a runnable peer returns `ENOSYS`.
+one-registration proof; blocking without a runnable peer returns `ENOSYS`. A
+caught signal unblocked by the ordinary thread mask can interrupt `epoll_wait`
+with `EINTR` without changing its output event.
 `epoll_pwait` and `epoll_pwait2` use the same scheduler path after validating
 their temporary signal mask, and the latter converts a null or checked
 nanosecond timespec. The mask is installed only while blocked and restored on
 readiness, timeout, rollback, or targeted signal interruption. The measured
-graph now drives separate `tgkill` handoffs through both `ppoll` and
-`epoll_pwait`, verifies `EINTR` with unchanged output, and then proves an
-`epoll_pwait` APIC timeout and mask restoration. Syscall restart remains
-unsupported. A bounded eventfd
+graph drives separate `tgkill` handoffs through `poll`, `epoll_wait`, `ppoll`,
+and `epoll_pwait`, verifies `EINTR` with unchanged output, and then proves an
+`epoll_pwait` APIC timeout and mask restoration. Blocked signals, nested
+delivery, and syscall restart remain unsupported. A bounded eventfd
 counter provides a signalable source for that epoll path, including
 nonblocking saturation and semaphore reads. With a runnable peer, a blocking
 read on an empty eventfd now sleeps in its scheduler slot until a write makes

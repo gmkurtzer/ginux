@@ -55,9 +55,12 @@ ready when at least one is nonzero. A positive deadline instead atomically
 copies zero `revents` words, returns zero, and can preempt the running peer
 directly from the local-APIC interrupt. The complete output table is
 revalidated on completion; a revoked output range resumes with `-EFAULT`.
+Delivery of a caught signal that is unblocked by the caller's ordinary signal
+mask cancels the wait, returns `-EINTR`, and leaves the output table unchanged.
 Blocking with no runnable peer, or with zero descriptors, retains the explicit
 `-ENOSYS` boundary. This is a two-slot, fixed-snapshot proof rather than a
-general descriptor wait queue.
+general descriptor wait queue. Blocked-signal delivery, nested delivery, and
+syscall restart remain outside this profile.
 `rax = 271` (`__NR_ppoll`) uses the same bounded readiness engine. A null
 timeout means an infinite wait request; otherwise the complete 16-byte x86-64
 `timespec` must contain nonnegative seconds and normalized nanoseconds. An
@@ -72,8 +75,11 @@ measured graph proves an eventfd wake, a positive timeout, zeroed timeout
 `revents`, and restoration of the caller's original mask. Blocking without a
 runnable peer, or with zero descriptors, returns `-ENOSYS`. Invalid timespecs
 or mask sizes return `-EINVAL`, invalid input or output ranges return `-EFAULT`,
-and the timeout is not rewritten. Asynchronous signal interruption, `EINTR`,
-remaining-time reporting, and syscall restart remain outside this profile.
+and the timeout is not rewritten. Delivery of a caught signal that the
+temporary mask leaves unblocked cancels the wait, restores the caller's prior
+mask, returns `-EINTR`, and leaves the output table unchanged. Blocked-signal
+delivery, nested delivery, remaining-time reporting, and syscall restart
+remain outside this profile.
 `rax = 291` (`__NR_epoll_create1`) allocates one process-local epoll instance
 in the lowest free auxiliary descriptor, 2 through 5. It accepts only zero or
 `EPOLL_CLOEXEC`; a second epoll instance or exhausted auxiliary table returns
@@ -99,7 +105,10 @@ revoked output range resumes with `-EFAULT`. Closing the waited-on epoll
 descriptor wakes the waiter with `-EBADF`. Blocking without a runnable peer
 retains the explicit `-ENOSYS` boundary. The epoll descriptor participates in
 `F_GETFD`, `F_SETFD`, `F_GETFL`, `poll`, and `close`; closing it clears the
-registration and releases its descriptor.
+registration and releases its descriptor. Delivery of a caught signal that is
+unblocked by the caller's ordinary signal mask cancels the wait, returns
+`-EINTR`, and leaves the output event unchanged. Blocked-signal delivery,
+nested delivery, and syscall restart remain outside this profile.
 `rax = 281` (`__NR_epoll_pwait`) uses the same bounded wait operation after
 validating an optional eight-byte signal mask and its exact signal-set size.
 The mask is sanitized to keep `SIGKILL` and `SIGSTOP` unblocked, installed in
@@ -108,16 +117,19 @@ or timeout makes the caller runnable. Scheduler-handoff rollback restores the
 mask and wait record together. Invalid sizes return `-EINVAL` and invalid mask
 ranges return `-EFAULT` before examining readiness. An immediately ready event
 or zero timeout behaves like `epoll_wait`; otherwise the same runnable-peer and
-output-validation requirements apply. The measured graph proves a positive
-APIC-driven timeout, unchanged output, and restoration of the original mask.
+output-validation requirements apply. The measured graph proves signal
+interruption, a positive APIC-driven timeout, unchanged output, and restoration
+of the original mask.
 `rax = 441` (`__NR_epoll_pwait2`) replaces the integer timeout with a null or
 complete 16-byte x86-64 `timespec`. Negative seconds and non-normalized
 nanoseconds return `-EINVAL`; checked conversion overflow also returns
 `-EINVAL`, and invalid memory returns `-EFAULT`. A zero timespec queries
 immediately, while a nonzero or null timeout uses the same scheduler-backed
-masked wait as `epoll_pwait`. Neither masked entry point yet supports
-asynchronous signal interruption, `EINTR`, remaining-time reporting, or syscall
-restart.
+masked wait as `epoll_pwait`. For both masked entry points, delivery of a
+caught signal that the temporary mask leaves unblocked cancels the wait,
+restores the caller's prior mask, returns `-EINTR`, and leaves the output event
+unchanged. Blocked-signal delivery, nested delivery, remaining-time reporting,
+and syscall restart remain unsupported.
 This is a bounded event-notification proof, not a general epoll interest tree.
 The scheduler-backed path has two fixed thread slots and one live registration.
 `rax = 284` (`__NR_eventfd`) and `rax = 290` (`__NR_eventfd2`) allocate one
