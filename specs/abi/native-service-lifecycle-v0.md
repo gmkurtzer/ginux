@@ -24,7 +24,9 @@ retirement. A clean exit carries no architectural fault descriptor.
 
 Panics, privileged instructions, invalid memory access, or any other exception
 remain faults. They emit lifecycle kind 4 (`AUXILIARY_FAULT`) with architectural
-fault metadata and use the independently tested fault-containment path. A
+fault metadata and use the independently tested fault-containment path. The
+fault path masks and disables interrupts, revokes bus mastering, resets the
+device, and scrubs DMA without trusting queue state or a completed request. A
 service must not encode a successful result in a deliberate fault.
 
 ## Sources and compatibility

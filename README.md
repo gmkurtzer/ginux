@@ -93,7 +93,10 @@ the rest of the kernel boot complete. Completed and rejected outcomes use the
 stable native lifecycle ABI rather than deliberate faults; clean exit drives
 mandatory interrupt, device, capability, address-space, and DMA cleanup. A
 separate invalid-opcode auxiliary proves genuine fault containment without
-panicking the kernel. The volume service's first request
+panicking the kernel. A separate compiled-volume-service run is denied by an
+invalid opaque handle after queue notification and proves an incomplete
+device request can be reset, revoked, and scrubbed without a kernel panic. The
+volume service's first successful request
 also proves stale-generation rejection, live timeout without generation
 consumption, successful same-generation retry, and consumed-generation replay
 rejection. After teardown, the kernel creates a fresh domain generation with

@@ -132,6 +132,7 @@ if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboo
     ! grep -q '^ginux: native volume service identity survived replacement' "$reboot_output_file" ||
     ! grep -q '^ginux: replacement native volume service recovered exact record' "$reboot_output_file" ||
     ! grep -q '^ginux: replacement native volume resources retired cleanly' "$reboot_output_file" ||
+    ! grep -q '^ginux: compiled native volume service fault contained' "$reboot_output_file" ||
     grep -q '^ginux: native volume record initialized and flushed' "$reboot_output_file"; then
     cat "$reboot_output_file"
     echo "Boot test failed: compiled native volume service did not recover its record." >&2
@@ -152,6 +153,7 @@ if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native volume service identity survived replacement' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume service repeated fail-closed rejection' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume resources retired cleanly' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: compiled native volume service fault contained' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native volume service exited cleanly and device quiesced' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: retired DMA lease scrubbed and released' "$native_corrupt_output_file"; then
     cat "$native_corrupt_output_file"
@@ -3238,6 +3240,13 @@ if ! grep -q '^ginux: native volume service exited cleanly and device quiesced' 
     ! grep -q '^ginux: clean exit quiesced device before DMA release' "$output_file" ||
     grep -q '^ginux: native volume service fault contained and device quiesced' "$output_file"; then
     echo "Boot test failed: native service completion was not distinct from a fault." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: compiled native volume service fault contained' "$output_file" ||
+    ! grep -q '^ginux: faulted native device service authority revoked' "$output_file" ||
+    ! grep -q '^ginux: incomplete native DMA scrubbed after fault' "$output_file"; then
+    echo "Boot test failed: an incomplete native device-service request was not contained." >&2
     exit 1
 fi
 

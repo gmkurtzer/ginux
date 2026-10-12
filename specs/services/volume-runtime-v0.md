@@ -85,7 +85,12 @@ the same fail-closed rejection on corrupt media. Its second clean exit must
 again leave the device reset, authority revoked, and every owned frame scrubbed
 and released. An independent stop-only auxiliary still executes a genuine
 invalid-opcode fault on every ordinary QEMU boot, proving that fault lifecycle
-metadata and containment remain distinct from clean completion.
+metadata and containment remain distinct from clean completion. A third run of
+the compiled service receives a structurally valid but intentionally invalid
+opaque device handle. It configures and notifies its queue, cannot authorize
+the wait, and executes its real fatal `HLT` path. The kernel accepts only the
+measured `HLT` fault, quiesces the device without assuming a completed request,
+scrubs the incomplete DMA page, revokes authority, and continues booting.
 
 ## Deliberate limits
 

@@ -15302,7 +15302,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             serial_write("ginux: auxiliary fault transition failed\r\n");
             return u64::MAX;
         }
-        if !address_space::quiesce_auxiliary_device(fault_domain) {
+        if !address_space::quiesce_faulted_auxiliary_device(fault_domain) {
             serial_write("ginux: auxiliary device quiesce failed vector/error/address/rip:");
             serial_write_u64(fault_metadata.vector);
             serial_write(" ");

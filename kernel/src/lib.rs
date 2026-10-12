@@ -1743,6 +1743,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         address_space::NativeVolumeOutcome::Rejected => {
             serial_write("\r\nginux: corrupt native volume media rejected without modification");
         }
+        address_space::NativeVolumeOutcome::Faulted => {
+            kernel_fail("\r\nginux: normal native volume run reported a fault\r\n");
+        }
     }
     serial_write("\r\nginux: native volume service exited cleanly and device quiesced");
     let replacement_volume_run = address_space::verify_native_volume_service(
@@ -1767,6 +1770,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     address_space::NativeVolumeOutcome::Rejected => {
                         address_space::NativeVolumeOutcome::Rejected
                     }
+                    address_space::NativeVolumeOutcome::Faulted => {
+                        address_space::NativeVolumeOutcome::Faulted
+                    }
                 }
     });
     if !replacement_volume_valid || !replacement_volume_quiesced {
@@ -1786,8 +1792,36 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         address_space::NativeVolumeOutcome::Rejected => {
             "\r\nginux: replacement native volume service repeated fail-closed rejection"
         }
+        address_space::NativeVolumeOutcome::Faulted => {
+            "\r\nginux: replacement native volume service faulted unexpectedly"
+        }
     });
     serial_write("\r\nginux: replacement native volume resources retired cleanly");
+    let faulted_volume_run = address_space::verify_native_volume_service_fault(
+        &volume_image,
+        virtio_status_physical,
+        virtio_block,
+        virtio_mmio,
+        virtio_msix_mmio,
+        &local_apic,
+        native_volume_run.service_identity,
+    );
+    let faulted_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    let faulted_volume_valid = faulted_volume_run.is_some_and(|faulted| {
+        faulted.domain != native_volume_run.domain
+            && faulted.service_identity == native_volume_run.service_identity
+            && faulted.outcome == address_space::NativeVolumeOutcome::Faulted
+    });
+    if !faulted_volume_valid || !faulted_volume_quiesced {
+        serial_write("\r\nginux: faulted native volume valid/quiesced: ");
+        serial_write_u64(u64::from(faulted_volume_valid));
+        serial_write(" ");
+        serial_write_u64(u64::from(faulted_volume_quiesced));
+        kernel_fail("\r\nginux: faulted native volume service invariant failed\r\n");
+    }
+    serial_write("\r\nginux: compiled native volume service fault contained");
+    serial_write("\r\nginux: faulted native device service authority revoked");
+    serial_write("\r\nginux: incomplete native DMA scrubbed after fault");
     serial_write("\r\nginux: native volume write-only grant exercised in ring 3");
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
     serial_write("\r\nginux: isolated virtio queue geometry configured with owned DMA");

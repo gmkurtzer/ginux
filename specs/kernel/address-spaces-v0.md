@@ -214,7 +214,11 @@ The stop-only fault path must validate and quiesce the exact device before
 restoring the kernel root and releasing any address-space or DMA frame. The
 registry records successful quiescence and rejects release when the record is
 missing, preventing device-visible physical addresses from outliving their
-allocator leases.
+allocator leases. Clean exit additionally requires the expected completed DMA
+shape. Fault teardown does not trust queue contents: after masking interrupts,
+revoking bus mastering, and resetting the device, it may scrub an incomplete
+DMA page. The compiled-service proof exercises that path after notifying a
+request with an unauthorized wait handle.
 
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3
