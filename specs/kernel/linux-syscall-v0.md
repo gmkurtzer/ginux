@@ -203,8 +203,15 @@ eight-byte user array. The pipe has a fixed 256-byte FIFO. `pipe2` accepts
 output memory returns `-EFAULT` without allocating, and an existing pipe or
 fewer than two free slots returns `-EMFILE`. Writes of one through 256 bytes
 are all-or-nothing: invalid input leaves the FIFO unchanged, insufficient
-capacity returns `-EAGAIN` in nonblocking mode or `-ENOSYS` without wait
-queues, and larger writes return `-EINVAL`. One proof write spans the final
+capacity returns `-EAGAIN` in nonblocking mode. A blocking scalar write with a
+runnable peer stores its input address, bounded count, and descriptor in a
+typed scheduler wait. The input range is revalidated and copied atomically
+only when enough capacity becomes available. A reader that frees insufficient
+capacity leaves the writer asleep; closing the reader wakes it with `-EPIPE`.
+An admitted caught signal may cancel the wait with `-EINTR` without changing
+the input or FIFO, and retry may complete normally. Blocking without a
+runnable peer retains `-ENOSYS`; saturated vectored writes do not yet enter a
+scheduler wait. Larger writes return `-EINVAL`. One proof write spans the final
 byte of the linked main's RX area and the first byte of its adjacent RW area;
 the pipe is closed and recreated before the FIFO lifecycle continues. Reads
 return up to the requested
@@ -222,7 +229,7 @@ measured graph retries that read, consumes the sibling's byte, and then proves
 writer-close EOF. Blocked signals, nested delivery, and syscall restart remain
 unsupported. Closing the writer makes any later empty read return EOF and
 reports `POLLHUP`, while buffered bytes remain readable.
-Closing the reader makes writes return `-EPIPE` and reports `POLLERR`; SIGPIPE
+Closing the reader makes writes return `-EPIPE` and reports `POLLERR`; `SIGPIPE`
 delivery is not yet implemented. The endpoints participate in `F_GETFD`,
 `F_SETFD`, `F_GETFL`, `lseek`, `poll`, epoll, and `close`. The ring-3 proof
 checks FIFO ordering across partial reads, failed-read non-consumption, full

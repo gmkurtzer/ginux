@@ -149,16 +149,19 @@ ginux_linux_probe:
     syscall
     cmp rax, 2
     require_equal
-    mov edi, 2
+    push 2
+    pop rdi
     lea rsi, [rsp - 32]
-    mov edx, 4
+    push 4
+    pop rdx
     xor eax, eax
     syscall
     cmp rax, 4
     require_equal
     cmp dword ptr [rsp - 32], 0x464c457f
     require_equal
-    mov eax, 3
+    push 3
+    pop rax
     syscall
     test rax, rax
     require_equal
@@ -243,7 +246,8 @@ valid_interpreter_base:
     call syscall_expect_eight
 
     mov edi, 0x400000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
 
     movabs rax, 0x0a212145424f5250
@@ -384,12 +388,14 @@ valid_interpreter_base:
     call syscall_expect_three
 
     xor edi, edi
-    mov eax, 12
+    push 12
+    pop rax
     syscall
     cmp rax, 0x407000
     require_equal
     mov edi, 0x407080
-    mov eax, 12
+    push 12
+    pop rax
     syscall
     cmp rax, 0x407080
     require_equal
@@ -403,40 +409,49 @@ valid_interpreter_base:
     push 1
     pop rax
     call syscall_expect_eight
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x407079
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
     movabs rax, 0x4845415042524b21
     mov qword ptr [0x407000], rax
     mov edi, 0x408001
-    mov eax, 12
+    push 12
+    pop rax
     syscall
     cmp rax, 0x407080
     require_equal
     mov edi, 0x407040
-    mov eax, 12
+    push 12
+    pop rax
     syscall
     cmp rax, 0x407040
     require_equal
 
     xor edi, edi
     mov esi, 4096
-    mov edx, 7
+    push 7
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     call syscall_expect_einval
 
     xor edi, edi
     mov esi, 4096
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -444,18 +459,21 @@ valid_interpreter_base:
     require_equal
 
     mov edi, 0x40b000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_zero
     cmp dword ptr [0x40b000], 0x756e6947
     require_equal
 
     xor edi, edi
     mov esi, 4096
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40c000
     require_equal
@@ -465,39 +483,51 @@ valid_interpreter_base:
     mov edi, 0x40c000
     mov esi, 4096
     mov edx, 0x405949
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x405949], 1
     require_equal
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x40c000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
 
     mov edi, 0x40b000
     mov esi, 4095
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x40b000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
 
     xor edi, edi
     mov esi, 4096
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -507,52 +537,66 @@ valid_interpreter_base:
 
     mov edi, 0x40b000
     mov esi, 4096
-    mov edx, 1
-    mov eax, 10
+    push 1
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
-    mov eax, 10
+    push 10
+    pop rax
     call syscall_expect_zero
 
     mov edi, 0x40b000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
 
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x40b000
     xor edx, edx
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
     mov qword ptr [0x405940], 0
     mov esi, 0x405940
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
 
     mov edi, 0x40b000
     mov esi, 4096
-    mov edx, 3
-    mov eax, 28
+    push 3
+    pop rdx
+    push 28
+    pop rax
     call syscall_expect_einval
     cmp qword ptr [0x40b000], 2
     require_equal
-    mov edx, 4
-    mov eax, 28
+    push 4
+    pop rdx
+    push 28
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 0
     require_equal
 
     mov edi, 0x40b000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
     mov esi, 4096
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -562,41 +606,50 @@ valid_interpreter_base:
     mov edi, 0x40b001
     mov esi, 4096
     mov edx, 0x405948
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_einval
     mov edi, 0x40b000
     mov edx, 0x406200
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_efault
     mov byte ptr [0x405948], 0
     mov edx, 0x405948
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x405948], 1
     require_equal
 
     mov edi, 0x40b000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40b000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
     mov edx, 0x405948
-    mov eax, 27
+    push 27
+    pop rax
     syscall
     cmp rax, -12
     require_equal
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
     mov esi, 8192
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -607,7 +660,8 @@ valid_interpreter_base:
 
     mov qword ptr [0x40c000], -1
     mov edi, 0x40bf80
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_zero
     cmp dword ptr [0x40bf80], 0x756e6947
     require_equal
@@ -619,7 +673,8 @@ valid_interpreter_base:
     mov edi, 0x40b000
     mov esi, 8192
     mov edx, 0x40594a
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
     require_equal
@@ -628,8 +683,10 @@ valid_interpreter_base:
 
     mov qword ptr [0x40b000], 1
     mov qword ptr [0x40c000], 2
-    mov edx, 4
-    mov eax, 28
+    push 4
+    pop rdx
+    push 28
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 0
     require_equal
@@ -638,29 +695,38 @@ valid_interpreter_base:
 
     mov edi, 0x40b000
     mov esi, 8192
-    mov edx, 1
-    mov eax, 10
+    push 1
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
-    mov eax, 10
+    push 10
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40bf80
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
     mov edi, 0x40b000
 
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x40b000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
     mov byte ptr [0x40594a], 0
     mov edi, 0x40c000
     mov esi, 4096
     mov edx, 0x40594a
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
     require_equal
@@ -668,16 +734,19 @@ valid_interpreter_base:
     require_equal
     mov edi, 0x40c000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
     mov esi, 8192
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -685,35 +754,43 @@ valid_interpreter_base:
     mov qword ptr [0x40c000], 4
     mov edi, 0x40c000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 3
     require_equal
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x40c000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
     mov byte ptr [0x40594a], 0
     mov edi, 0x40b000
     mov esi, 4096
     mov edx, 0x40594a
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
     require_equal
     mov edi, 0x40b000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
     mov esi, 8192
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -721,32 +798,41 @@ valid_interpreter_base:
     mov qword ptr [0x40c000], 6
     mov edi, 0x40b000
     mov esi, 4096
-    mov edx, 1
-    mov eax, 10
+    push 1
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
-    mov eax, 10
+    push 10
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40b000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
     cmp qword ptr [0x40b000], 5
     require_equal
     mov edi, 0x40c000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_zero
     cmp dword ptr [0x40c000], 0x756e6947
     require_equal
     mov edi, 0x40c000
     mov esi, 4096
-    mov edx, 1
-    mov eax, 10
+    push 1
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40c000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
     mov edi, 0x40b000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40c000
     mov eax, 11
@@ -1452,6 +1538,42 @@ linux_clone_repeat:
     xor eax, eax
     call syscall_expect_zero
     cmp byte ptr [0x405eb0], 0x7f
+    require_equal
+    push 3
+    pop rax
+    call syscall_expect_zero
+    # Fill a fresh blocking pipe. The first saturated write is interrupted;
+    # retry completes after the child frees one byte, and a third write wakes
+    # with EPIPE after the child closes the reader.
+    mov edi, 0x405e80
+    push 22
+    pop rax
+    call syscall_expect_zero
+    push 3
+    pop rdi
+    mov esi, 0x405e00
+    mov edx, 256
+    push 1
+    pop rax
+    call syscall_expect_256
+    mov byte ptr [0x405eb0], 'W'
+    mov esi, 0x405eb0
+    push 1
+    pop rdx
+    push 1
+    pop rax
+    syscall
+    cmp rax, -4
+    require_equal
+    cmp byte ptr [0x405eb0], 'W'
+    require_equal
+    push 1
+    pop rax
+    call syscall_expect_one
+    push 1
+    pop rax
+    syscall
+    cmp rax, -32
     require_equal
     push 3
     pop rax
@@ -4937,6 +5059,27 @@ child_thread_probe:
     pop rax
     call syscall_expect_zero
     push 3
+    pop rdi
+    push 3
+    pop rax
+    call syscall_expect_zero
+    push 24
+    pop rax
+    call syscall_expect_zero
+    push 12
+    pop rdx
+    call linux_child_signal_parent
+    push 2
+    pop rdi
+    mov esi, 0x405eb8
+    push 1
+    pop rdx
+    xor eax, eax
+    call syscall_expect_one
+    push 24
+    pop rax
+    call syscall_expect_zero
+    push 2
     pop rdi
     push 3
     pop rax

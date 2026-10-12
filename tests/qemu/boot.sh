@@ -2215,6 +2215,14 @@ if ! grep -q '^ginux: Linux signal-interrupted pipe reads validated' "$output_fi
     echo "Boot test failed: Linux signal-interrupted pipe reads were not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux scheduler-backed pipe writes validated' "$output_file"; then
+    echo "Boot test failed: Linux scheduler-backed pipe writes were not validated." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: Linux signal-interrupted pipe writes validated' "$output_file"; then
+    echo "Boot test failed: Linux signal-interrupted pipe writes were not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux scheduler-backed timerfd reads validated' "$output_file"; then
     echo "Boot test failed: Linux scheduler-backed timerfd reads were not validated." >&2
     exit 1
