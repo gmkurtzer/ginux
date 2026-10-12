@@ -826,6 +826,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: minimal system init execution failed\r\n");
     }
     serial_write("ginux: measured minimal system init executed as PID 1\r\n");
+    serial_write("ginux: bounded procfs PID 1 status validated\r\n");
     serial_write("ginux: minimal system init exited cleanly\r\n");
     if !linux_elf::verify_mapped_interpreted_plan(boot_info.image_base as u64, boot_info.image_size)
     {

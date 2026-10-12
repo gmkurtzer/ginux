@@ -19,14 +19,18 @@ PID-1 path receives an initial stack naming `/sbin/init`, observes PID 1, opens
 the measured `/dev/console`, writes the exact `GINUX_SYSTEM_INIT_V0` readiness
 line, and exits through `exit_group(42)`. Final process teardown closes both
 the candidate's console descriptor and descriptors inherited across `exec`.
+Before readiness, PID 1 enumerates `/proc` and `/proc/1`, reads the immutable
+bounded `/proc/1/status` snapshot, and publishes its exact `init`, running,
+PID 1, and parent PID 0 fields to the console. This moves procfs to `partial`;
+general process enumeration and lifecycle updates remain absent.
 
 This execution gate deliberately does not claim M5 completion. The immutable
 root publishes an explicit `/sbin` directory containing the exact `init` node,
 and bounded root enumeration reaches it through a second cursor page. PID 1 is
 currently a bounded readiness-and-exit workload, not a persistent supervisor
 or interactive console owner. Process creation/reaping, a mount namespace,
-tmpfs, procfs, and a complete user-namespace contract remain explicit missing
-rows in the matrix.
+tmpfs, a complete procfs, and a complete user-namespace contract remain
+explicit gaps in the matrix.
 
 Build the exact candidate root and signed development image with:
 

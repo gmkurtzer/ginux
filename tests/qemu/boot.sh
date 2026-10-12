@@ -605,6 +605,15 @@ if [[ "$(grep -c '^GINUX_SYSTEM_INIT_V0' "$output_file")" -ne 1 ]] ||
     exit 1
 fi
 
+if ! grep -q $'^Name:\tinit$' "$output_file" ||
+    ! grep -q $'^State:\tR (running)$' "$output_file" ||
+    ! grep -q $'^Pid:\t1$' "$output_file" ||
+    ! grep -q $'^PPid:\t0$' "$output_file" ||
+    ! grep -q '^ginux: bounded procfs PID 1 status validated' "$output_file"; then
+    echo "Boot test failed: the bounded PID 1 procfs view was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured-root Linux interpreted exec graph planned' "$output_file" ||
     ! grep -q '^ginux: measured-root Linux graph substitution rejected' "$output_file"; then
     echo "Boot test failed: the measured-root interpreted graph was not validated." >&2

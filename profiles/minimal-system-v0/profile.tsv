@@ -14,7 +14,7 @@ runtime	futex.private	partial	Bounded private waits wakes and clear-child-TID
 filesystem	root.read-only	ready	Authenticated indexed newc root is immutable
 filesystem	root.mount	missing	Root is installed through a Linux mount namespace
 filesystem	tmpfs.tmp	missing	Writable tmpfs is mounted at /tmp
-filesystem	procfs	missing	Bounded /proc exposes process identity and lifecycle
+filesystem	procfs	partial	Bounded /proc/1/status exposes PID 1 identity and running lifecycle state
 filesystem	devfs	partial	Console null zero and tty compatibility nodes
 security	credentials.root	ready	Container-local root credential queries
 security	namespace.user	missing	Container credentials are isolated by a user namespace contract

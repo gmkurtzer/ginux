@@ -15,7 +15,10 @@ partial behavior as compatibility. The kernel resolves the candidate only
 from the authenticated index and validates its one-page RX/one-page RW ELF
 plan. A dedicated measured exec workload launches it as PID 1, verifies its
 identity, opens `/dev/console`, emits `GINUX_SYSTEM_INIT_V0`, and exits cleanly
-while final process teardown closes all inherited descriptors. The kernel
+while final process teardown closes all inherited descriptors. Before
+readiness it enumerates `/proc` and `/proc/1`, then reads a bounded read-only
+`/proc/1/status` view containing its exact name, running state, PID 1, and
+parent PID 0. The kernel
 copies the root into a zeroed, contiguous 32-frame allocation,
 verifies source independence and the complete zero tail, and builds a bounded
 pathname index whose 32-bit offsets resolve only inside the owned image. A
@@ -40,7 +43,9 @@ direct measured child, including an explicit `/sbin`; the fixed 256-byte
 staging buffer returns `sbin` on a second cursor page. Measured directory descriptors also carry index
 selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open
 without per-directory kernel identities; `dev`
-retains its synthetic device entries. A
+retains its synthetic device entries. The measured `proc` node is populated by
+the bounded synthetic PID 1 directory and status record; it is not yet a
+general procfs. A
 bounded index-driven contract resolves any direct measured regular child below
 an open measured directory; `motd` proves the syscall layer needs no
 per-filename case. Normalized multi-component paths are bounded and `lib` is

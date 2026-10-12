@@ -265,8 +265,11 @@ const LINUX_FILE_ROOT_GENERIC: u16 = LINUX_FILE_INIT | LINUX_FILE_DEPENDENCY;
 const LINUX_ROOT_MEASURED_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INIT;
 const LINUX_ROOT_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INTERPRETER;
 const LINUX_FILE_MASK: u16 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
+const LINUX_FILE_PROC_STATUS: u16 = LINUX_FILE_MASK;
+const LINUX_PROC_PID1_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS;
 const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
+const LINUX_PROC_PID1_STATUS: &[u8] = b"Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 32;
 const LINUX_EXEC_VECTOR_LIMIT: usize = 8;
@@ -6454,45 +6457,50 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
         return LINUX_ENOMEM;
     }
 
-    let (file_kind, file_source) =
-        if flags == anonymous_flags || fixed_anonymous || replace_anonymous {
-            if protection != 0
-                && protection != LINUX_PROT_READ
-                && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
-                || fd != u64::MAX
-                || offset != 0
-            {
-                return LINUX_EINVAL;
-            }
-            (0, None)
-        } else {
-            if protection != LINUX_PROT_READ || flags != LINUX_MAP_PRIVATE {
-                return LINUX_EINVAL;
-            }
-            let state = linux_device_descriptor(fd);
-            let Some(file) = linux_regular_file(state) else {
-                return if linux_descriptor_open(fd) {
-                    LINUX_ENODEV
-                } else {
-                    LINUX_EBADF
-                };
+    let (file_kind, file_source) = if flags == anonymous_flags
+        || fixed_anonymous
+        || replace_anonymous
+    {
+        if protection != 0
+            && protection != LINUX_PROT_READ
+            && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
+            || fd != u64::MAX
+            || offset != 0
+        {
+            return LINUX_EINVAL;
+        }
+        (0, None)
+    } else {
+        if protection != LINUX_PROT_READ || flags != LINUX_MAP_PRIVATE {
+            return LINUX_EINVAL;
+        }
+        let state = linux_device_descriptor(fd);
+        let Some(file) = linux_regular_file(state) else {
+            return if linux_descriptor_open(fd) {
+                LINUX_ENODEV
+            } else {
+                LINUX_EBADF
             };
-            if state & 3 != LINUX_DESCRIPTOR_INPUT || !offset.is_multiple_of(PAGE_SIZE as u64) {
-                return LINUX_EINVAL;
-            }
-            let Ok(start) = usize::try_from(offset) else {
-                return LINUX_EINVAL;
-            };
-            let mapped_length = usize::from(pages) * PAGE_SIZE;
-            if start >= file.len()
-                || start
-                    .checked_add(mapped_length)
-                    .is_none_or(|end| end > file.len().next_multiple_of(PAGE_SIZE))
-            {
-                return LINUX_EINVAL;
-            }
-            (state & LINUX_FILE_MASK, Some((file, start)))
         };
+        if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+            return LINUX_ENODEV;
+        }
+        if state & 3 != LINUX_DESCRIPTOR_INPUT || !offset.is_multiple_of(PAGE_SIZE as u64) {
+            return LINUX_EINVAL;
+        }
+        let Ok(start) = usize::try_from(offset) else {
+            return LINUX_EINVAL;
+        };
+        let mapped_length = usize::from(pages) * PAGE_SIZE;
+        if start >= file.len()
+            || start
+                .checked_add(mapped_length)
+                .is_none_or(|end| end > file.len().next_multiple_of(PAGE_SIZE))
+        {
+            return LINUX_EINVAL;
+        }
+        (state & LINUX_FILE_MASK, Some((file, start)))
+    };
 
     if protection == 0 {
         if replace_anonymous {
@@ -6715,6 +6723,9 @@ fn linux_mmap_fixed_file(
             LINUX_EBADF
         };
     };
+    if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+        return LINUX_ENODEV;
+    }
     if state & 3 != LINUX_DESCRIPTOR_INPUT {
         return LINUX_EACCES;
     }
@@ -7036,6 +7047,9 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
 }
 
 fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
+    if path == b"/proc/1/status" {
+        return Some(LINUX_FILE_PROC_STATUS);
+    }
     let (kind, root_name) = match path {
         b"/init" => (LINUX_FILE_INIT, b"linux/init" as &[u8]),
         b"/lib64/ld-ginux.so" => (LINUX_FILE_INTERPRETER, b"linux/ld-ginux.so" as &[u8]),
@@ -7065,6 +7079,7 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
     match path {
         b"/" => Some(LINUX_ROOT_DIRECTORY),
         b"/dev" => Some(LINUX_DEVICE_DIRECTORY),
+        b"/proc/1" => Some(LINUX_PROC_PID1_DIRECTORY),
         _ => {
             let name = path.strip_prefix(b"/")?;
             let node = initramfs::published_directory_node(name)?;
@@ -7076,6 +7091,12 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
 fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     if path == b"dev" {
         return Some(LINUX_DEVICE_DIRECTORY);
+    }
+    if path == b"proc/1" {
+        return Some(LINUX_PROC_PID1_DIRECTORY);
+    }
+    if path == b"proc/1/status" {
+        return Some(LINUX_FILE_PROC_STATUS);
     }
     if let Some(node) = initramfs::published_directory_node(path) {
         return Some(LINUX_ROOT_MEASURED_DIRECTORY | (u16::from(node) << LINUX_ROOT_NODE_SHIFT));
@@ -8027,6 +8048,9 @@ fn linux_root_directory_inode(kind: u16) -> Option<u64> {
     if role == LINUX_ROOT_DIRECTORY {
         return Some(11);
     }
+    if role == LINUX_PROC_PID1_DIRECTORY {
+        return Some(16);
+    }
     let node = (kind & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT;
     (role == LINUX_ROOT_MEASURED_DIRECTORY && node != 0).then_some(64 + u64::from(node))
 }
@@ -8035,6 +8059,9 @@ fn linux_measured_directory_path(kind: u16) -> Option<&'static [u8]> {
     let role = kind & (LINUX_DEVICE_DIRECTORY | LINUX_FILE_MASK);
     if role == LINUX_ROOT_DIRECTORY {
         return Some(b"");
+    }
+    if role == LINUX_PROC_PID1_DIRECTORY {
+        return Some(b"proc/1");
     }
     let node = ((kind & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT) as u8;
     (role == LINUX_ROOT_MEASURED_DIRECTORY)
@@ -8187,14 +8214,29 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         Ok(kind) => kind,
         Err(error) => return error,
     };
-    if relative_kind.is_some() {
-        return if mode & 2 != 0 { LINUX_EACCES } else { 0 };
+    if let Some(kind) = relative_kind {
+        let denied = if kind & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS
+            && kind & LINUX_ROOT_NODE_MASK == 0
+        {
+            mode & 3 != 0
+        } else {
+            mode & 2 != 0
+        };
+        return if denied { LINUX_EACCES } else { 0 };
     }
     let directory = match path {
         b"/dev/null" | b"/dev/zero" | b"/dev/console" | b"/dev/tty" => false,
         path if linux_root_directory_kind(path).is_some() => true,
         path if linux_runtime_file_kind(path).is_some() => {
-            if mode & 2 != 0 {
+            let kind = linux_runtime_file_kind(path).unwrap_or(0);
+            let denied = if kind & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS
+                && kind & LINUX_ROOT_NODE_MASK == 0
+            {
+                mode & 3 != 0
+            } else {
+                mode & 2 != 0
+            };
+            if denied {
                 return LINUX_EACCES;
             }
             return 0;
@@ -8232,7 +8274,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         (Some(kind), _) => (
             linux_regular_file_inode(kind).unwrap_or(0),
             0,
-            LINUX_STAT_REGULAR_MODE,
+            linux_regular_file_mode(kind),
             linux_regular_file(kind).map_or(0, |file| file.len() as u64),
         ),
         (None, b"/dev/null") => (1_u64, 3_u32, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
@@ -8249,7 +8291,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
             Some(kind) => (
                 linux_regular_file_inode(kind).unwrap_or(0),
                 0,
-                LINUX_STAT_REGULAR_MODE,
+                linux_regular_file_mode(kind),
                 linux_regular_file(kind).map_or(0, |file| file.len() as u64),
             ),
             None => return LINUX_ENOENT,
@@ -10443,6 +10485,9 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
     if state & LINUX_DEVICE_DIRECTORY != 0 {
         return None;
     }
+    if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+        return Some(LINUX_PROC_PID1_STATUS);
+    }
     let node = ((state & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT) as u8;
     if node != 0 {
         return initramfs::published_file_by_node(node);
@@ -10453,6 +10498,9 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
 fn linux_regular_file_inode(state: u16) -> Option<u64> {
     if state & LINUX_DEVICE_DIRECTORY != 0 {
         return None;
+    }
+    if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+        return Some(17);
     }
     match state & LINUX_FILE_MASK {
         LINUX_FILE_INIT => Some(5),
@@ -10896,6 +10944,10 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
         let directory_inode = linux_root_directory_inode(state).unwrap_or(0);
         let parent_inode = if directory.is_empty() {
             directory_inode
+        } else if directory == b"proc/1" {
+            initramfs::published_directory_node(b"proc")
+                .map(|node| 64 + u64::from(node))
+                .unwrap_or(11)
         } else {
             11
         };
@@ -10921,50 +10973,74 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 }
             }
         }
-        loop {
-            let Some(child) = initramfs::published_next_child(directory, cursor) else {
+        if directory == b"proc" || directory == b"proc/1" {
+            if cursor > 1 {
                 return LINUX_EINVAL;
-            };
-            let Some(child) = child else {
-                break;
-            };
-            let kind = match child.mode & 0o170000 {
-                0o040000 => 4,
-                0o100000 => 8,
-                0o120000 => 10,
-                _ => return LINUX_EINVAL,
-            };
-            let child_inode = match (directory, child.name) {
-                (b"", b"dev") => 4,
-                (b"", b"etc") => 10,
-                (b"", b"proc") => 12,
-                (b"", b"sys") => 13,
-                (b"", b"tmp") => 14,
-                (b"", b"init") => 5,
-                (b"etc", b"hostname") => 9,
-                _ => {
-                    let Ok(node) = u64::try_from(child.next_cursor) else {
-                        return LINUX_EINVAL;
-                    };
-                    let Some(inode) = 32_u64.checked_add(node) else {
-                        return LINUX_EINVAL;
-                    };
-                    inode
-                }
-            };
-            let Some(cookie) = child.next_cursor.checked_add(2) else {
-                return LINUX_EINVAL;
-            };
-            let Ok(next) = i64::try_from(cookie) else {
-                return LINUX_EINVAL;
-            };
-            if !append_linux_dirent(&mut entries, &mut used, child_inode, next, kind, child.name) {
-                if used == 0 {
+            }
+            if cursor == 0 {
+                let (inode, kind, name) = if directory == b"proc" {
+                    (16, 4, &b"1"[..])
+                } else {
+                    (17, 8, &b"status"[..])
+                };
+                if !append_linux_dirent(&mut entries, &mut used, inode, 3, kind, name) {
                     return LINUX_EINVAL;
                 }
-                break;
+                cursor = 1;
             }
-            cursor = child.next_cursor;
+        } else {
+            loop {
+                let Some(child) = initramfs::published_next_child(directory, cursor) else {
+                    return LINUX_EINVAL;
+                };
+                let Some(child) = child else {
+                    break;
+                };
+                let kind = match child.mode & 0o170000 {
+                    0o040000 => 4,
+                    0o100000 => 8,
+                    0o120000 => 10,
+                    _ => return LINUX_EINVAL,
+                };
+                let child_inode = match (directory, child.name) {
+                    (b"", b"dev") => 4,
+                    (b"", b"etc") => 10,
+                    (b"", b"proc") => 12,
+                    (b"", b"sys") => 13,
+                    (b"", b"tmp") => 14,
+                    (b"", b"init") => 5,
+                    (b"etc", b"hostname") => 9,
+                    _ => {
+                        let Ok(node) = u64::try_from(child.next_cursor) else {
+                            return LINUX_EINVAL;
+                        };
+                        let Some(inode) = 32_u64.checked_add(node) else {
+                            return LINUX_EINVAL;
+                        };
+                        inode
+                    }
+                };
+                let Some(cookie) = child.next_cursor.checked_add(2) else {
+                    return LINUX_EINVAL;
+                };
+                let Ok(next) = i64::try_from(cookie) else {
+                    return LINUX_EINVAL;
+                };
+                if !append_linux_dirent(
+                    &mut entries,
+                    &mut used,
+                    child_inode,
+                    next,
+                    kind,
+                    child.name,
+                ) {
+                    if used == 0 {
+                        return LINUX_EINVAL;
+                    }
+                    break;
+                }
+                cursor = child.next_cursor;
+            }
         }
         if used == 0 {
             return 0;
@@ -11081,13 +11157,21 @@ fn linux_stat(mode: u32, inode: u64) -> [u8; LINUX_STAT_SIZE] {
 
 fn linux_regular_file_stat(state: u16) -> [u8; LINUX_STAT_SIZE] {
     let mut stat = linux_stat(
-        LINUX_STAT_REGULAR_MODE,
+        linux_regular_file_mode(state),
         linux_regular_file_inode(state).unwrap_or(0),
     );
     let size = linux_regular_file(state).map_or(0, |file| file.len() as u64);
     stat[48..56].copy_from_slice(&size.to_ne_bytes());
     stat[64..72].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
     stat
+}
+
+fn linux_regular_file_mode(state: u16) -> u32 {
+    if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+        0o100444
+    } else {
+        LINUX_STAT_REGULAR_MODE
+    }
 }
 
 fn copy_linux_cpu_location(cpu_address: u64, node_address: u64) -> bool {
