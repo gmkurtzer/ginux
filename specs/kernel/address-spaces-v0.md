@@ -42,21 +42,31 @@ policy remain separate milestones.
 That Linux proof also reserves four initially absent leaves over
 `0x40b000..0x40f000`. Its bounded anonymous mapping call rounds a nonzero
 length up to one through four pages, validates the resulting RW/NX request,
-and allocates exact generation-bound frames
-before installing any leaf. The lowest-free placement policy and exact
+and allocates exact generation-bound frames before installing any leaf. The
+lowest-free placement policy and exact
 `MAP_FIXED_NOREPLACE` placement share the same overlap preflight; fixed overlap
 returns `EEXIST` before frame allocation. Unmap accepts a page-aligned window
 address and nonzero length rounded to the selected subrange,
 clears each occupied leaf, invalidates its local translation, and scrubs and
 releases every selected frame before reuse. While active, mapped subranges can
-be irreversibly sealed
-read-only after one validation pass; copy permissions change with the hardware
-leaves, and unmap accepts either state. Bounded discard validates the same owned leaf and zeros its frame in place,
-preserving whichever writable state the mapping currently has.
+be irreversibly sealed read-only after one validation pass; copy permissions
+change with the hardware
+leaves, and unmap accepts either state. Bounded discard validates the same owned
+leaf and zeros its frame in place, preserving whichever writable state the
+mapping currently has.
 The matching residency query reports each requested page only while it is
 active and does not walk or disclose addresses outside the fixed window. The
 gate observes all four leaves absent after ring-3 exit. This is a single-core,
 four-page lifecycle, not a general VMA allocator or TLB-shootdown protocol.
+
+Anonymous `MAP_FIXED` replacement allocates and zeroes every fresh frame before
+preflighting the complete selected leaf range. Each old leaf must either be
+absent with no lease or match its exact generation-owned frame and current
+write state. The kernel then replaces every selected PTE, invalidates the local
+translations, rebuilds the bounded registry, and scrubs and releases the
+displaced leases before returning. No userspace instruction runs during this
+single-core transaction. File/shared replacement and cross-CPU shootdown remain
+unsupported.
 
 Completed proof address-space page-table and data frames are cleared and
 returned through the allocator's generation-checked live-ownership ledger.

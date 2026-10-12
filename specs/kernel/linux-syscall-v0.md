@@ -533,16 +533,19 @@ executable-install profile. The scratch window has four page slots over
 null hint selects the lowest contiguous free run. Alternatively, anonymous
 `MAP_FIXED_NOREPLACE` requires an exact page-aligned free subrange wholly inside
 that window and returns `-EEXIST` without mutation if any selected slot is
-active. Its anonymous form otherwise requires a nonzero length that rounds up
-to no more than four pages,
-`PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
-MAP_ANONYMOUS`, fd -1, and offset zero, and allocates and installs zero-filled
+active. Anonymous `MAP_FIXED` accepts the same bounded placement and atomically
+fills holes or replaces active pages with fresh zeroed RW/NX generation leases.
+It preflights every old leaf and lease before changing the page table, then
+scrubs and releases every displaced lease before returning. Its anonymous form
+otherwise requires a nonzero length that rounds up to no more than four pages,
+`PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and offset zero,
+and allocates and installs zero-filled
 generation-bound RW/NX frame leases.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
 descriptor for `/init`, `/lib64/ld-ginux.so`, `/lib64/libginux.so`, or
 `/lib64/libginux-aux.so`, and a
-page-aligned offset. Its complete one- through four-page window must fit within the
-file length rounded up to a page; offsets at or beyond EOF are rejected rather
+page-aligned offset. Its complete one- through four-page window must fit within
+the file length rounded up to a page; offsets at or beyond EOF are rejected rather
 than deferred to a `SIGBUS` path. The kernel copies the authenticated bytes
 into allocator-owned read-only/NX frames and zero-fills a partial final page.
 Mapping failure scrubs and releases every provisional lease before returning.
@@ -551,8 +554,8 @@ non-file descriptor returns `-ENODEV`, an invalid descriptor returns `-EBADF`,
 and a first-fit request without enough contiguous free entries returns
 `-ENOMEM`. A fixed request outside the window returns `-EINVAL`.
 The executable-install profile accepts only open `/init`,
-`/lib64/libginux.so`, or `/lib64/libginux-aux.so` descriptors and exact one-page `MAP_PRIVATE |
-MAP_FIXED_NOREPLACE` requests already authenticated by the kernel plan. For
+`/lib64/libginux.so`, or `/lib64/libginux-aux.so` descriptors and exact one-page
+`MAP_PRIVATE | MAP_FIXED_NOREPLACE` requests already authenticated by the kernel plan. For
 `/init`, those contracts are offset `0` at `0x3ff000` with `PROT_READ`, offsets
 `0x1000..0x5000` at `0x400000..0x404000` with `PROT_READ | PROT_EXEC`, and
 offsets `0x6000..0x7000` at `0x405000..0x406000` with `PROT_READ |
@@ -627,7 +630,7 @@ exit with the selected leaves absent. A four-page proof seals its middle two
 pages, creates separated holes, reuses the lowest hole, rejects a fragmented
 two-page allocation with `-ENOMEM`, and releases the complete sparse range.
 This is not a general VMA allocator: arbitrary
-hints, replacement mappings, writable or shared file
+hints, fixed shared or file replacement mappings, writable or shared file
 mappings outside the admitted executable pages, ranges outside the bounded
 window, arbitrary files, demand paging, and mapping growth are unsupported.
 Outside the scratch window, fixed placement is available only for the seven

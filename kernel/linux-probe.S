@@ -878,6 +878,25 @@ valid_interpreter_base:
     mov eax, 9
     call syscall_expect_einval
 
+    mov edi, 0x40c000
+    mov esi, 8192
+    mov edx, 3
+    mov r10d, 0x32
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40c000
+    jne failure
+    cmp qword ptr [0x40b000], 11
+    jne failure
+    cmp qword ptr [0x40c000], 0
+    jne failure
+    cmp qword ptr [0x40d000], 0
+    jne failure
+    cmp qword ptr [0x40e000], 16
+    jne failure
+
     mov byte ptr [0x40594a], 0
     mov byte ptr [0x40594b], 0
     mov byte ptr [0x40594c], 0
@@ -914,6 +933,21 @@ valid_interpreter_base:
     mov esi, 0x40e000
     mov eax, 1
     call syscall_expect_efault
+
+    mov edi, 0x40d000
+    mov esi, 1
+    mov edx, 3
+    mov r10d, 0x32
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40d000
+    jne failure
+    cmp qword ptr [0x40d000], 0
+    jne failure
+    mov eax, 11
+    call syscall_expect_zero
 
     # Linux rounds every nonzero scratch length up to a page.
     xor edi, edi

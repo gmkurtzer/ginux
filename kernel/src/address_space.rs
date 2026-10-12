@@ -2383,6 +2383,58 @@ pub(crate) fn protect_current_linux_pages_read_only(address: u64, frames: &[u64]
         .all(|leaf| unsafe { leaf.read() } & WRITABLE == 0)
 }
 
+pub(crate) fn replace_current_linux_pages(
+    address: u64,
+    old_frames: &[Option<memory::FrameLease>],
+    old_writable: &[bool],
+    new_frames: &[memory::FrameLease],
+) -> bool {
+    if !(1..=cpu::LINUX_MMAP_SLOT_COUNT).contains(&new_frames.len())
+        || old_frames.len() != new_frames.len()
+        || old_writable.len() != new_frames.len()
+        || address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, new_frames)
+        || old_frames.iter().flatten().any(|frame| {
+            !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame])
+                || new_frames.contains(frame)
+        })
+    {
+        return false;
+    }
+    let mut leaves = [core::ptr::null_mut(); cpu::LINUX_MMAP_SLOT_COUNT];
+    for index in 0..new_frames.len() {
+        let page = address + (index * PAGE_SIZE) as u64;
+        let Some(leaf) = current_linux_leaf(page) else {
+            return false;
+        };
+        let value = unsafe { leaf.read() };
+        let valid = old_frames[index].map_or(value == 0, |frame| {
+            value & ADDRESS_MASK == frame.address()
+                && value & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                    == PRESENT | USER | NO_EXECUTE | if old_writable[index] { WRITABLE } else { 0 }
+        });
+        if !valid {
+            return false;
+        }
+        leaves[index] = leaf;
+    }
+    for (index, frame) in new_frames.iter().enumerate() {
+        let page = address + (index * PAGE_SIZE) as u64;
+        unsafe {
+            leaves[index].write(frame.address() | PRESENT | WRITABLE | USER | NO_EXECUTE);
+            asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
+        }
+    }
+    leaves[..new_frames.len()]
+        .iter()
+        .zip(new_frames)
+        .all(|(leaf, frame)| {
+            (unsafe { leaf.read() } & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE))
+                == (frame.address() | PRESENT | WRITABLE | USER | NO_EXECUTE)
+        })
+}
+
 pub(crate) fn map_current_linux_page(address: u64, frame: u64) -> bool {
     map_current_linux_page_with_permissions(address, frame, true, false)
 }

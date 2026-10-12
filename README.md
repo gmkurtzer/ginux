@@ -463,12 +463,15 @@ fragmented, and finally unmaps the complete sparse window. `mprotect`,
 longer depends on their original allocation boundaries. Anonymous
 `MAP_FIXED_NOREPLACE` can select an exact free subrange inside the window;
 overlap returns `EEXIST` without changing either the existing mappings or frame
-ownership.
+ownership. Anonymous `MAP_FIXED` can atomically fill holes or replace a selected
+subrange after all old and new frame leases and page-table leaves pass one
+preflight. Replacement publishes fresh zeroed RW/NX pages before scrubbing and
+retiring the displaced generation leases.
 Every occupied page selected by unmap validates generation ownership, removes
 the hardware leaf, scrubs the released frame, and returns its lease to the
 allocator; process exit requires the complete registry and all four lease
 slots to be empty.
-Placement outside the bounded window, replacement mappings, shared file
+Placement outside the bounded window, fixed shared or file replacement
 mappings, writable mappings outside the exact authenticated main/dependency
 data pages, and arbitrary filesystem-backed
 mappings are not implemented.
