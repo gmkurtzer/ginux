@@ -557,11 +557,19 @@ periodic local-APIC tick clears an expired wait in interrupt context and marks
 the sleeper ready with zero. It saves the interrupted peer's complete integer,
 instruction, stack, flags, and FS-base context and dispatches the sleeper before
 returning to ring 3. The optional remainder range is prevalidated but remains untouched
-on successful expiry. Invalid request or remainder ranges return `-EFAULT`,
-invalid fields or deadline overflow return `-EINVAL`, and a positive sleep with
-no runnable peer returns `-ENOSYS`. Interruption, remainder reporting, absolute
-sleeps, and `clock_nanosleep`
-remain unsupported.
+on successful expiry. An admitted caught standard signal that is unblocked by
+the waiting thread's ordinary mask cancels the wait and returns `-EINTR`
+through `rt_sigreturn`. Before the signal frame commits, a non-null remainder
+receives the current deadline minus monotonic time as a normalized relative
+timespec. The remainder, signal frame, saved contexts, wait record, thread
+states, and live return form one rollback transaction; failure restores the
+prior user bytes and blocked wait. The measured two-thread graph interrupts a
+five-second sleep with targeted `SIGUSR2`, validates the remainder, and then
+completes another sleep through APIC expiry. Invalid request or remainder ranges
+return `-EFAULT`, invalid fields or deadline overflow return `-EINVAL`, and a
+positive sleep with no runnable peer returns `-ENOSYS`. Blocked signals, nested
+delivery, syscall restart, absolute sleeps, and `clock_nanosleep` remain
+unsupported.
 The same two calls accept `CLOCK_PROCESS_CPUTIME_ID` and
 `CLOCK_THREAD_CPUTIME_ID`. In this proof the process has one thread, never
 deschedules, and owns the processor from its private epoch, so both clocks use

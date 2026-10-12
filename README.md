@@ -686,10 +686,15 @@ immediately for zero or stores a positive relative monotonic deadline while a
 peer is runnable. A periodic local-APIC interrupt marks the sleeper ready after
 expiry without requiring another syscall, preserves the interrupted peer's
 `RAX`, `RCX`, `R11`, remaining integer registers, RIP/RSP/RFLAGS, and FS base,
-then dispatches the sleeper immediately. Interruption and remainder reporting
-remain unsupported. The three interval-timer classes can be queried
-and idempotently disarmed; arming remains unsupported until asynchronous signal
-delivery exists.
+then dispatches the sleeper immediately. A caught standard signal unblocked by
+the sleeper's ordinary mask may interrupt that wait with `EINTR`; a non-null
+remainder pointer receives the normalized unslept relative duration before the
+signal frame commits, while successful expiry leaves it untouched. The measured
+graph proves both interruption and a subsequent APIC-driven expiry. Blocked
+signals, nested delivery, syscall restart, absolute sleeps, and
+`clock_nanosleep` remain unsupported. The three interval-timer classes can be
+queried and idempotently disarmed; arming remains unsupported until asynchronous
+signal delivery exists.
 The bounded ELF parser and page-image planner also validate checked,
 page-aligned load-bias plans for position-independent `ET_DYN` images. Dynamic
 execution planning binds an exact `PT_INTERP` path to a non-overlapping relocated

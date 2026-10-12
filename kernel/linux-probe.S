@@ -1232,6 +1232,24 @@ linux_clone_repeat:
     call syscall_expect_one
     cmp r14d, 2
     jne linux_parent_futex_wait
+    # A caught cross-thread signal interrupts a relative sleep, returns EINTR,
+    # and replaces the sentinel with a normalized unslept duration.
+    push -1
+    push -1
+    push 0
+    push 5
+    mov rdi, rsp
+    lea rsi, [rsp + 16]
+    push 35
+    pop rax
+    syscall
+    cmp rax, -4
+    require_equal
+    cmp qword ptr [rsp + 16], 5
+    ja failure
+    cmp qword ptr [rsp + 24], 1000000000
+    jae failure
+    add rsp, 32
     push 1
     push 0
     mov rdi, rsp
@@ -4759,6 +4777,11 @@ child_thread_probe:
     call syscall_expect_zero
     cmp r14d, 2
     jne child_thread_exit
+    # Interrupt the parent's first relative sleep before allowing its second
+    # sleep to exercise the ordinary APIC-expiry path.
+    push 12
+    pop rdx
+    call linux_child_signal_parent
     # Keep the child in userspace long enough for the APIC deadline tick to
     # expire the parent's nanosleep before the child reaches a syscall.
     mov ecx, 0x100000

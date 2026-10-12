@@ -419,6 +419,7 @@ static LINUX_FUTEX_EXIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SLEEP_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SLEEP_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_SLEEP_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_TIMER_WAIT_EXPIRY_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_TIMER_WAIT_PREEMPTION_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_POLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -2157,6 +2158,17 @@ fn save_linux_thread_return_context(handle: LinuxThreadHandle, context: LinuxUse
     true
 }
 
+fn restore_linux_thread_return_context(
+    handle: LinuxThreadHandle,
+    snapshot: Option<LinuxUserContext>,
+) {
+    if let Some(context) = snapshot {
+        let _ = save_linux_thread_return_context(handle, context);
+    } else {
+        clear_linux_thread_execution(usize::from(handle.slot));
+    }
+}
+
 fn install_linux_thread_return(
     handle: LinuxThreadHandle,
     registers: &mut LinuxSyscallFrame,
@@ -3172,6 +3184,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_FUTEX_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
     LINUX_SLEEP_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_SLEEP_WAKE_COUNT.store(0, Ordering::SeqCst);
+    LINUX_SLEEP_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
     LINUX_TIMER_WAIT_EXPIRY_COUNT.store(0, Ordering::SeqCst);
     LINUX_TIMER_WAIT_PREEMPTION_COUNT.store(0, Ordering::SeqCst);
     LINUX_POLL_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
@@ -3544,6 +3557,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let futex_wait_timeout_count = LINUX_FUTEX_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
     let sleep_block_count = LINUX_SLEEP_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let sleep_wake_count = LINUX_SLEEP_WAKE_COUNT.swap(0, Ordering::SeqCst);
+    let sleep_interrupt_count = LINUX_SLEEP_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
     let timer_wait_expiry_count = LINUX_TIMER_WAIT_EXPIRY_COUNT.swap(0, Ordering::SeqCst);
     let timer_wait_preemption_count = LINUX_TIMER_WAIT_PREEMPTION_COUNT.swap(0, Ordering::SeqCst);
     let poll_wait_block_count = LINUX_POLL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
@@ -3573,7 +3587,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let expected_signal_count = if signal_probe_executed {
         10
     } else if execution.tls_size != 0 {
-        6
+        7
     } else {
         2
     };
@@ -3596,8 +3610,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && futex_explicit_wake_count == 2
             && futex_exit_wake_count == 1
             && futex_wait_timeout_count == 1
-            && sleep_block_count == 1
+            && sleep_block_count == 2
             && sleep_wake_count == 1
+            && sleep_interrupt_count == 1
             && timer_wait_expiry_count == 6
             && timer_wait_preemption_count == 6
             && poll_wait_block_count == 2
@@ -3637,8 +3652,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             futex_explicit_wake_count == 2,
             futex_exit_wake_count == 1,
             futex_wait_timeout_count == 1,
-            sleep_block_count == 1,
+            sleep_block_count == 2,
             sleep_wake_count == 1,
+            sleep_interrupt_count == 1,
             timer_wait_expiry_count == 6,
             timer_wait_preemption_count == 6,
             poll_wait_block_count == 2,
@@ -3682,6 +3698,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             futex_wait_timeout_count,
             sleep_block_count,
             sleep_wake_count,
+            sleep_interrupt_count,
             timer_wait_expiry_count,
             timer_wait_preemption_count,
             poll_wait_block_count,
@@ -4328,8 +4345,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && futex_explicit_wake_count == 2
                 && futex_exit_wake_count == 1
                 && futex_wait_timeout_count == 1
-                && sleep_block_count == 1
+                && sleep_block_count == 2
                 && sleep_wake_count == 1
+                && sleep_interrupt_count == 1
                 && timer_wait_expiry_count == 6
                 && timer_wait_preemption_count == 6
                 && poll_wait_block_count == 2
@@ -11399,6 +11417,7 @@ fn linux_interrupt_blocked_wait(
     let Some(sender_tls) = linux_thread_context(sender) else {
         return LINUX_ESRCH;
     };
+    let saved_sender = linux_thread_return_context(sender);
     let slot = usize::from(target.slot);
     let wait_kind = LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst);
     if sender == target
@@ -11406,6 +11425,7 @@ fn linux_interrupt_blocked_wait(
         || !matches!(
             wait_kind,
             LINUX_THREAD_WAIT_SIGNAL
+                | LINUX_THREAD_WAIT_SLEEP
                 | LINUX_THREAD_WAIT_EVENTFD_READ
                 | LINUX_THREAD_WAIT_PPOLL
                 | LINUX_THREAD_WAIT_EPOLL_PWAIT
@@ -11509,34 +11529,79 @@ fn linux_interrupt_blocked_wait(
     if !context.user_context().is_valid() || !handler_context.is_valid() {
         return LINUX_EINVAL;
     }
+    let sleep_remaining = if wait_kind == LINUX_THREAD_WAIT_SLEEP {
+        let address = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
+        if address == 0 {
+            None
+        } else {
+            let Some(now) = linux_elapsed_nanoseconds() else {
+                return LINUX_ENOSYS;
+            };
+            let deadline = LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst);
+            let mut replaced = [0_u8; 16];
+            if deadline == 0 || !copy_from_linux_user(address, &mut replaced) {
+                return LINUX_EFAULT;
+            }
+            let mut remaining = [0_u8; 16];
+            linux_store_timespec(&mut remaining, deadline.saturating_sub(now));
+            Some((address, replaced, remaining))
+        }
+    } else {
+        None
+    };
     let mut replaced = [0_u8; LINUX_SIGNAL_FRAME_SIZE];
-    if !copy_from_linux_user(signal_stack, &mut replaced)
-        || !copy_linux_signal_frame(signal_stack, &signal_frame)
-    {
+    if !copy_from_linux_user(signal_stack, &mut replaced) {
+        return LINUX_EFAULT;
+    }
+    if let Some((address, _, remaining)) = &sleep_remaining {
+        if !copy_to_linux_user(*address, remaining) {
+            return LINUX_EFAULT;
+        }
+    }
+    if !copy_linux_signal_frame(signal_stack, &signal_frame) {
+        let _ = copy_to_linux_user(signal_stack, &replaced);
+        if let Some((address, original, _)) = &sleep_remaining {
+            let _ = copy_to_linux_user(*address, original);
+        }
         return LINUX_EFAULT;
     }
     if !save_linux_thread_return_context(sender, sender_return) {
         let _ = copy_to_linux_user(signal_stack, &replaced);
+        if let Some((address, original, _)) = &sleep_remaining {
+            let _ = copy_to_linux_user(*address, original);
+        }
         return LINUX_EINVAL;
     }
     if !save_linux_thread_return_context(target, interrupted) {
+        restore_linux_thread_return_context(sender, saved_sender);
         let _ = copy_to_linux_user(signal_stack, &replaced);
+        if let Some((address, original, _)) = &sleep_remaining {
+            let _ = copy_to_linux_user(*address, original);
+        }
         return LINUX_EINVAL;
     }
     if !write_linux_live_return(output, handler_context) {
         let _ = save_linux_thread_return_context(target, saved_interrupted);
+        restore_linux_thread_return_context(sender, saved_sender);
         let _ = copy_to_linux_user(signal_stack, &replaced);
+        if let Some((address, original, _)) = &sleep_remaining {
+            let _ = copy_to_linux_user(*address, original);
+        }
         return LINUX_EINVAL;
     }
     LINUX_THREAD_SIGNAL_MASKS[slot].store(restored_mask, Ordering::SeqCst);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
     if !switch_linux_thread(target) {
         let _ = save_linux_thread_return_context(target, saved_interrupted);
+        restore_linux_thread_return_context(sender, saved_sender);
         LINUX_THREAD_SIGNAL_MASKS[slot].store(wait_mask, Ordering::SeqCst);
         LINUX_THREAD_STATES[slot].store(LINUX_THREAD_BLOCKED, Ordering::SeqCst);
         let _ = install_linux_tls_context(sender_tls);
         let _ = write_linux_live_return(output, sender_return);
         let _ = copy_to_linux_user(signal_stack, &replaced);
+        if let Some((address, original, _)) = &sleep_remaining {
+            let _ = copy_to_linux_user(*address, original);
+        }
         return LINUX_EINVAL;
     }
     LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
@@ -11566,6 +11631,8 @@ fn linux_interrupt_blocked_wait(
     LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
     if wait_kind == LINUX_THREAD_WAIT_SIGNAL {
         LINUX_SIGNAL_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    } else if wait_kind == LINUX_THREAD_WAIT_SLEEP {
+        LINUX_SLEEP_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     } else if wait_kind == LINUX_THREAD_WAIT_EVENTFD_READ {
         LINUX_EVENTFD_READ_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     } else {
