@@ -1905,6 +1905,23 @@ linux_clone_repeat:
     jne failure
     cmp dword ptr [0x405e84], 4
     jne failure
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+    mov edi, 4
+    mov esi, 0x404fff
+    mov edx, 2
+    mov eax, 1
+    call syscall_expect_two
+    mov edi, 3
+    mov eax, 3
+    call syscall_expect_zero
+    mov edi, 4
+    mov eax, 3
+    call syscall_expect_zero
+    mov edi, 0x405e80
+    mov esi, 0x80800
+    mov eax, 293
+    call syscall_expect_zero
+#endif
     mov eax, 293
     syscall
     cmp rax, -24

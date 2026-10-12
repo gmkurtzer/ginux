@@ -686,6 +686,7 @@ for marker in \
     'interpreted Linux exec image committed' \
     'measured-root interpreted Linux exec committed' \
     'interpreted Linux exec graph remapped' \
+    'bounded Linux cross-area copy-in validated' \
     'complete interpreted Linux graph retired at exec' \
     'interpreted Linux exec stack replaced atomically' \
     'old interpreted Linux stack lease retired at exec' \

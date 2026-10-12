@@ -136,7 +136,10 @@ output memory returns `-EFAULT` without allocating, and an existing pipe or
 fewer than two free slots returns `-EMFILE`. Writes of one through 256 bytes
 are all-or-nothing: invalid input leaves the FIFO unchanged, insufficient
 capacity returns `-EAGAIN` in nonblocking mode or `-ENOSYS` without wait
-queues, and larger writes return `-EINVAL`. Reads return up to the requested
+queues, and larger writes return `-EINVAL`. One proof write spans the final
+byte of the linked main's RX area and the first byte of its adjacent RW area;
+the pipe is closed and recreated before the FIFO lifecycle continues. Reads
+return up to the requested
 count and consume only after successful copy-out. An empty live pipe follows
 the same nonblocking or would-block errors; closing the writer makes an empty
 read return EOF and reports `POLLHUP`, while buffered bytes remain readable.
@@ -880,10 +883,11 @@ parallel thread creation, general futex queue, or robust futex recovery yet.
 Every other call
 returns `-ENOSYS` without disarming
 the task, so a caller can handle the error and continue. The entire path
-remains disarmed outside the proof. The current copy helpers cover only the one
-declared RW segment and the bounded heap below its current break; general
-stack-page ranges are also accepted. General VM-area lookup and cross-area
-copies remain future work.
+remains disarmed outside the proof. The current copy helpers cover only the
+declared main/interpreter, TLS, stack, bounded heap, and active mapping areas.
+They walk adjacent areas only when every byte carries the requested permission,
+so holes, RELRO, guards, and arithmetic overflow fail closed. General VM-area
+registration, arbitrary mappings, and fault-driven copies remain future work.
 Invalid `write` descriptors return `-EBADF`, unsupported lengths return
 `-EINVAL`, and a `write` or `uname` range outside that segment returns
 `-EFAULT`. Boot verification covers the exact lower and upper boundaries, the

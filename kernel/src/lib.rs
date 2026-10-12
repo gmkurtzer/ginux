@@ -796,6 +796,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: measured-root interpreted Linux exec committed\r\n");
     serial_write("ginux: interpreted Linux exec graph remapped\r\n");
+    serial_write("ginux: bounded Linux cross-area copy-in validated\r\n");
     serial_write("ginux: complete interpreted Linux graph retired at exec\r\n");
     serial_write("ginux: interpreted Linux exec stack replaced atomically\r\n");
     serial_write("ginux: old interpreted Linux stack lease retired at exec\r\n");

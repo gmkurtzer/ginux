@@ -409,6 +409,10 @@ break, the mapped user stack, or the active one- or two-page mapping. They
 cannot cross the stack's guard-page boundaries. Invalid ranges and write
 arguments return Linux `-EFAULT`, `-EBADF`, or `-EINVAL`. Copy-in may also read
 the declared main or interpreter RX ELF extent, while copy-out rejects both.
+A bounded area walker admits a buffer only when adjacent declared areas cover
+every byte with the requested permission. The pipe proof copies two bytes
+across the exact linked-main RX-to-RW boundary; gaps, RELRO, guard pages, and
+address overflow still fail closed.
 The ring-3 workload verifies each error and continues into valid calls.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.

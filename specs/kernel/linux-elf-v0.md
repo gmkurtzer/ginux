@@ -806,7 +806,12 @@ than the rest of its final mapped page. Copy helpers also accept heap bytes
 strictly below the current break, not the entire mapped heap page, ranges
 wholly inside the user stack page, and ranges inside the active mapping.
 Copy-in additionally permits the declared main and interpreter RX ELF memory
-extents; copy-out does not. The interpreter uses its RX-resident path strings
+extents; copy-out does not. A bounded area walker can continue across adjacent
+declared extents only while every byte has the requested permission. The
+linked-main proof writes a two-byte buffer spanning the final RX byte and first
+RW byte into a pipe, then closes and recreates the pipe so the established FIFO
+proof begins from an empty state. The interpreter uses its RX-resident path
+strings
 for `openat`; the main proof reads an embedded RX payload through `write` and
 requires `-EFAULT` when `uname` targets that read-only page.
 Ranges crossing a stack guard page are rejected before SMAP access. Bounded

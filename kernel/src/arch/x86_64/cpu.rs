@@ -8460,45 +8460,7 @@ fn copy_linux_cpu_location(cpu_address: u64, node_address: u64) -> bool {
 }
 
 fn linux_writable_user_range_contains(address: u64, length: usize) -> bool {
-    let base = ELF_PROBE_DATA.load(Ordering::SeqCst);
-    let size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
-    let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst);
-    if linux_range_contains(base, size, address, length)
-        && (protected_page == 0
-            || !linux_ranges_overlap(address, length, protected_page, PAGE_SIZE))
-    {
-        return true;
-    }
-    if linux_range_contains(
-        ELF_PROBE_TLS.load(Ordering::SeqCst),
-        ELF_PROBE_TLS_SIZE.load(Ordering::SeqCst),
-        address,
-        length,
-    ) {
-        return true;
-    }
-    let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
-    if linux_range_contains(stack_base, PAGE_SIZE as u64, address, length) {
-        return true;
-    }
-    let mmap_base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
-    let mmap_pages = ELF_PROBE_MMAP_PAGES.load(Ordering::SeqCst);
-    if mmap_pages != 0
-        && ELF_PROBE_MMAP_WRITABLE.load(Ordering::SeqCst)
-        && linux_range_contains(
-            mmap_base,
-            u64::from(mmap_pages) * PAGE_SIZE as u64,
-            address,
-            length,
-        )
-    {
-        return true;
-    }
-    let brk = ELF_PROBE_BRK.load(Ordering::SeqCst);
-    let heap_base = ELF_PROBE_BRK_LIMIT
-        .load(Ordering::SeqCst)
-        .saturating_sub(PAGE_SIZE as u64);
-    linux_range_contains(heap_base, brk.saturating_sub(heap_base), address, length)
+    linux_user_range_covered(address, length, true)
 }
 
 fn linux_ranges_overlap(
@@ -8525,17 +8487,84 @@ fn linux_range_contains(base: u64, size: u64, address: u64, length: usize) -> bo
 }
 
 fn linux_readable_user_range_contains(address: u64, length: usize) -> bool {
-    if linux_writable_user_range_contains(address, length) {
-        return true;
+    linux_user_range_covered(address, length, false)
+}
+
+fn linux_user_area_end(base: u64, size: u64, address: u64) -> Option<u64> {
+    let end = base.checked_add(size)?;
+    (size != 0 && (base..end).contains(&address)).then_some(end)
+}
+
+fn extend_linux_user_area(next: &mut u64, base: u64, size: u64, address: u64) {
+    if let Some(end) = linux_user_area_end(base, size, address) {
+        *next = (*next).max(end);
     }
+}
+
+fn linux_user_range_covered(address: u64, length: usize, writable: bool) -> bool {
+    let Some(target) = address.checked_add(length as u64) else {
+        return false;
+    };
+    if length == 0 {
+        return false;
+    }
+    let data_base = ELF_PROBE_DATA.load(Ordering::SeqCst);
+    let data_size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
+    let protected_page = ELF_PROBE_READ_ONLY_DATA_PAGE.load(Ordering::SeqCst);
+    let tls_base = ELF_PROBE_TLS.load(Ordering::SeqCst);
+    let tls_size = ELF_PROBE_TLS_SIZE.load(Ordering::SeqCst);
+    let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
+    let mmap_base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
     let mmap_pages = ELF_PROBE_MMAP_PAGES.load(Ordering::SeqCst);
-    mmap_pages != 0
-        && linux_range_contains(
-            ELF_PROBE_MMAP.load(Ordering::SeqCst),
-            u64::from(mmap_pages) * PAGE_SIZE as u64,
-            address,
-            length,
-        )
+    let mmap_size = u64::from(mmap_pages) * PAGE_SIZE as u64;
+    let brk = ELF_PROBE_BRK.load(Ordering::SeqCst);
+    let heap_base = ELF_PROBE_BRK_LIMIT
+        .load(Ordering::SeqCst)
+        .saturating_sub(PAGE_SIZE as u64);
+    let mut current = address;
+    while current < target {
+        let mut next = current;
+        if writable {
+            if let Some(data_end) = linux_user_area_end(data_base, data_size, current) {
+                let protected_end = protected_page.checked_add(PAGE_SIZE as u64);
+                if protected_page == 0
+                    || current < protected_page
+                    || protected_end.is_some_and(|end| current >= end)
+                {
+                    next = next.max(if protected_page != 0 && current < protected_page {
+                        data_end.min(protected_page)
+                    } else {
+                        data_end
+                    });
+                }
+            }
+        } else {
+            extend_linux_user_area(&mut next, data_base, data_size, current);
+            extend_linux_user_area(
+                &mut next,
+                ELF_PROBE_CODE_BASE.load(Ordering::SeqCst),
+                ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst),
+                current,
+            );
+            extend_linux_user_area(
+                &mut next,
+                ELF_PROBE_LOADER_CODE_BASE.load(Ordering::SeqCst),
+                ELF_PROBE_LOADER_CODE_SIZE.load(Ordering::SeqCst),
+                current,
+            );
+        }
+        extend_linux_user_area(&mut next, tls_base, tls_size, current);
+        extend_linux_user_area(&mut next, stack_base, PAGE_SIZE as u64, current);
+        if mmap_pages != 0 && (!writable || ELF_PROBE_MMAP_WRITABLE.load(Ordering::SeqCst)) {
+            extend_linux_user_area(&mut next, mmap_base, mmap_size, current);
+        }
+        extend_linux_user_area(&mut next, heap_base, brk.saturating_sub(heap_base), current);
+        if next == current {
+            return false;
+        }
+        current = next.min(target);
+    }
+    true
 }
 
 pub(crate) fn verify_linux_copy_bounds(base: u64, size: usize) -> bool {
@@ -8558,21 +8587,11 @@ pub(crate) fn verify_linux_copy_bounds(base: u64, size: usize) -> bool {
 }
 
 fn copy_from_linux_user(address: u64, output: &mut [u8]) -> bool {
-    let code_base = ELF_PROBE_CODE_BASE.load(Ordering::SeqCst);
-    let code_size = ELF_PROBE_CODE_SIZE.load(Ordering::SeqCst);
-    let loader_code_base = ELF_PROBE_LOADER_CODE_BASE.load(Ordering::SeqCst);
-    let loader_code_size = ELF_PROBE_LOADER_CODE_SIZE.load(Ordering::SeqCst);
-    let data_base = ELF_PROBE_DATA.load(Ordering::SeqCst);
-    let data_size = ELF_PROBE_DATA_SIZE.load(Ordering::SeqCst);
-    if !linux_range_contains(code_base, code_size, address, output.len())
-        && !linux_range_contains(loader_code_base, loader_code_size, address, output.len())
-        && !linux_range_contains(data_base, data_size, address, output.len())
-        && !linux_readable_user_range_contains(address, output.len())
-    {
+    if !linux_readable_user_range_contains(address, output.len()) {
         return false;
     }
-    // SAFETY: the readable range is contained by one active probe VMA, which
-    // remains mapped in the current root for the whole call.
+    // SAFETY: every byte is covered by a contiguous chain of declared readable
+    // areas that remain mapped in the current root for the whole call.
     unsafe {
         with_supervisor_user_access(|| {
             for (offset, byte) in output.iter_mut().enumerate() {
@@ -8871,7 +8890,8 @@ fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {
     if !linux_writable_user_range_contains(address, input.len()) {
         return false;
     }
-    // SAFETY: the range is contained by one writable active probe VMA.
+    // SAFETY: every byte is covered by a contiguous chain of declared writable
+    // areas that remain mapped in the current root for the whole call.
     unsafe {
         with_supervisor_user_access(|| {
             for (offset, byte) in input.iter().enumerate() {
