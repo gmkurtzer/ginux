@@ -54,7 +54,8 @@ address space or represented by a userspace capability. This milestone does
 not install an IDT gate, bind the virtio queue to the entry, clear the entry
 mask, set the MSI-X enable bit, handle an interrupt, or replace virtio
 completion polling. Those operations require a separate routing and delivery
-contract.
+contract; the kernel-owned bootstrap implementation is specified by
+[Virtio MSI-X Interrupt v0](virtio-msix-interrupt-v0.md).
 
 BAR aperture sizes are still trusted from the pinned QEMU machine profile;
 the kernel does not destructively probe them during bootstrap.

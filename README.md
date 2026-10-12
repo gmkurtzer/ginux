@@ -32,6 +32,12 @@ is verified on every boot. The kernel atomically rejects invalid programming,
 then writes one exact local-APIC message entry while keeping both that entry
 masked and MSI-X disabled. See
 [Virtio MSI-X Mapping v0](specs/kernel/virtio-msix-mapping-v0.md).
+The kernel now temporarily routes table entry zero to local-APIC vector 33,
+binds queue zero to that entry, and accepts a blank-sector read only after
+exactly one MSI-X delivery plus complete used-ring and payload validation.
+Teardown masks and disables MSI-X, revokes bus mastering, resets the device,
+verifies the APIC vector is idle, and removes the temporary IDT gate. See
+[Virtio MSI-X Interrupt v0](specs/kernel/virtio-msix-interrupt-v0.md).
 The validated configuration regions are now mapped through a bounded,
 uncached, supervisor-only higher-half window. The kernel forces PCI bus mastering off,
 resets the device, accepts only modern virtio plus flush support, confirms one

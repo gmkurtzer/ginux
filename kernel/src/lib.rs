@@ -713,9 +713,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     // direct-map alias covers the complete physical frame, and the lease stays
     // live until the device has reset and bus mastering is disabled.
     let Some(virtio_read) = (unsafe {
-        arch::x86_64::pci::read_blank_sector(
+        arch::x86_64::pci::read_blank_sector_interrupt(
             virtio_block,
             virtio_mmio,
+            virtio_msix_mmio,
+            &local_apic,
             virtio_dma_frame.address(),
             virtio_dma_virtual,
             2,
@@ -723,6 +725,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }) else {
         kernel_fail("\r\nginux: bounded virtio block read failed\r\n");
     };
+    serial_write("\r\nginux: kernel-owned virtio MSI-X interrupt delivered");
+    serial_write("\r\nginux: exactly one virtio completion interrupt handled");
+    serial_write("\r\nginux: virtio MSI-X masked and disabled after completion");
+    serial_write("\r\nginux: temporary virtio interrupt gate retired");
     if virtio_read.capacity_sectors != 2048 || virtio_read.used_length != 513 {
         kernel_fail("\r\nginux: deterministic virtio block geometry invalid\r\n");
     }

@@ -5518,6 +5518,20 @@ pub(crate) fn install_interrupt_gate(vector: u8, handler: usize) -> bool {
     }
 }
 
+/// Removes a temporary kernel interrupt gate while interrupts are disabled.
+pub(crate) fn clear_interrupt_gate(vector: u8) -> bool {
+    if vector <= 32 || vector == SYSCALL_VECTOR || vector == u8::MAX {
+        return false;
+    }
+    let idt = core::ptr::addr_of_mut!(IDT).cast::<IdtEntry>();
+    // SAFETY: The caller has quiesced the interrupt source and keeps
+    // interrupts disabled while replacing this non-reserved gate.
+    unsafe {
+        idt.add(usize::from(vector)).write(IdtEntry::MISSING);
+        idt.add(usize::from(vector)).read().is_missing()
+    }
+}
+
 fn install_user_interrupt_gate(vector: u8, handler: usize) -> bool {
     if vector < 32 || handler == 0 {
         return false;

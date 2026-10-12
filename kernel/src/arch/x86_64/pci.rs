@@ -1,9 +1,13 @@
-use core::arch::asm;
+use core::arch::{asm, global_asm};
 use core::ptr::{read_volatile, write_volatile};
-use core::sync::atomic::{compiler_fence, Ordering};
+use core::sync::atomic::{compiler_fence, AtomicBool, AtomicU64, AtomicU8, Ordering};
 
-use super::paging::MmioMapping;
-use crate::volume;
+use super::{
+    apic::{LocalApic, Mode},
+    cpu,
+    paging::MmioMapping,
+};
+use crate::{scheduler::UserInterruptFrame, volume};
 
 const CONFIG_ADDRESS_PORT: u16 = 0x0cf8;
 const CONFIG_DATA_PORT: u16 = 0x0cfc;
@@ -30,6 +34,8 @@ const MSI_DESTINATION_SHIFT: u32 = 12;
 const FIRST_DEVICE_VECTOR: u8 = 33;
 const LAST_DEVICE_VECTOR: u8 = 0xef;
 const SYSCALL_VECTOR: u8 = 0x80;
+const VIRTIO_INTERRUPT_VECTOR: u8 = FIRST_DEVICE_VECTOR;
+const APIC_EOI: u32 = 0xb0;
 const VIRTIO_COMMON: u8 = 1;
 const VIRTIO_NOTIFY: u8 = 2;
 const VIRTIO_ISR: u8 = 3;
@@ -47,6 +53,7 @@ const COMMON_DEVICE_STATUS: usize = 0x14;
 const COMMON_CONFIG_GENERATION: usize = 0x15;
 const COMMON_QUEUE_SELECT: usize = 0x16;
 const COMMON_QUEUE_SIZE: usize = 0x18;
+const COMMON_QUEUE_MSIX_VECTOR: usize = 0x1a;
 const COMMON_QUEUE_ENABLE: usize = 0x1c;
 const COMMON_QUEUE_NOTIFY_OFF: usize = 0x1e;
 const COMMON_QUEUE_DESC: usize = 0x20;
@@ -73,6 +80,63 @@ const REQUEST_OFFSET: usize = 0x400;
 const DATA_OFFSET: usize = 0x600;
 const DATA_LENGTH: usize = 512;
 const STATUS_OFFSET: usize = 0x900;
+
+static VIRTIO_INTERRUPT_FIRED: AtomicBool = AtomicBool::new(false);
+static VIRTIO_INTERRUPT_ACTIVE: AtomicBool = AtomicBool::new(false);
+static VIRTIO_INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
+static VIRTIO_INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
+static VIRTIO_INTERRUPT_COUNT: AtomicU8 = AtomicU8::new(0);
+
+global_asm!(
+    r#"
+    .text
+    .global ginux_virtio_interrupt_entry
+ginux_virtio_interrupt_entry:
+    clac
+    cld
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r12, rsp
+    mov rdi, r12
+    and rsp, -16
+    call {interrupt_handler}
+    mov rsp, r12
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    iretq
+"#,
+    interrupt_handler = sym virtio_interrupt_handler,
+);
+
+extern "C" {
+    fn ginux_virtio_interrupt_entry();
+}
 
 #[derive(Clone, Copy)]
 struct ConfigSpace {
@@ -438,6 +502,104 @@ pub(crate) fn verify_msix_programming_rejections(
             ]
 }
 
+fn set_msix_control(device: VirtioBlockDevice, enabled: bool, function_masked: bool) -> bool {
+    let Some(offset) = device.msix.capability_offset.checked_add(2) else {
+        return false;
+    };
+    let current = unsafe { read_config_u16(device.bus, device.device, device.function, offset) };
+    let desired = (current & !(MSIX_ENABLE | MSIX_FUNCTION_MASK))
+        | if enabled { MSIX_ENABLE } else { 0 }
+        | if function_masked {
+            MSIX_FUNCTION_MASK
+        } else {
+            0
+        };
+    unsafe {
+        write_config_u16(device.bus, device.device, device.function, offset, desired);
+    }
+    (unsafe { read_config_u16(device.bus, device.device, device.function, offset) }) == desired
+}
+
+fn set_msix_entry_mask(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+    index: u16,
+    masked: bool,
+) -> bool {
+    if index >= device.msix.vector_count {
+        return false;
+    }
+    let Some((table, table_length)) = device.msix_table_region() else {
+        return false;
+    };
+    let Some(offset) = usize::from(index).checked_mul(MSIX_TABLE_ENTRY_SIZE as usize) else {
+        return false;
+    };
+    if offset
+        .checked_add(MSIX_TABLE_ENTRY_SIZE as usize)
+        .is_none_or(|end| end > table_length)
+    {
+        return false;
+    }
+    let Some(entry) = table
+        .checked_add(offset as u64)
+        .and_then(|physical| mapping.address(physical, MSIX_TABLE_ENTRY_SIZE as usize))
+    else {
+        return false;
+    };
+    write_mmio_u32(entry + 12, if masked { MSIX_VECTOR_MASK } else { 0 });
+    read_mmio_u32(entry + 12) == if masked { MSIX_VECTOR_MASK } else { 0 }
+}
+
+fn install_virtio_interrupt(apic: &LocalApic) -> bool {
+    VIRTIO_INTERRUPT_APIC_BASE.store(apic.physical_base, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_APIC_MODE.store(
+        if apic.mode == Mode::X2Apic { 1 } else { 0 },
+        Ordering::SeqCst,
+    );
+    VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    cpu::install_interrupt_gate(
+        VIRTIO_INTERRUPT_VECTOR,
+        ginux_virtio_interrupt_entry as *const () as usize,
+    )
+}
+
+fn retire_virtio_interrupt(apic: &LocalApic) -> bool {
+    if VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
+        || !apic.vector_is_idle(VIRTIO_INTERRUPT_VECTOR)
+    {
+        return false;
+    }
+    let cleared = cpu::clear_interrupt_gate(VIRTIO_INTERRUPT_VECTOR);
+    if cleared {
+        VIRTIO_INTERRUPT_APIC_BASE.store(0, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_APIC_MODE.store(0, Ordering::SeqCst);
+    }
+    cleared
+}
+
+extern "sysv64" fn virtio_interrupt_handler(_frame: *mut UserInterruptFrame) {
+    VIRTIO_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    if VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst) {
+        VIRTIO_INTERRUPT_FIRED.store(true, Ordering::SeqCst);
+    }
+    let mode = if VIRTIO_INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let Some(apic) =
+        LocalApic::from_saved(0, mode, VIRTIO_INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    else {
+        return;
+    };
+    // SAFETY: The interrupt proof owns this vector and stored the validated
+    // local APIC before installing the IDT gate.
+    unsafe { apic.write(APIC_EOI, 0) };
+}
+
 pub(crate) fn initialize_without_dma(
     device: VirtioBlockDevice,
     mapping: MmioMapping,
@@ -479,16 +641,19 @@ pub(crate) fn initialize_without_dma(
     result
 }
 
-/// Executes one read-only DMA request using one caller-owned page.
+/// Executes one interrupt-driven read-only DMA request using one caller-owned
+/// page and one kernel-owned MSI-X vector.
 ///
 /// # Safety
 ///
 /// `dma_virtual` must be a writable direct-map alias of the complete physical
 /// page at `dma_physical`, and that page must remain exclusively owned until
 /// this function returns.
-pub(crate) unsafe fn read_blank_sector(
+pub(crate) unsafe fn read_blank_sector_interrupt(
     device: VirtioBlockDevice,
     mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    apic: &LocalApic,
     dma_physical: u64,
     dma_virtual: usize,
     sector: u64,
@@ -514,12 +679,20 @@ pub(crate) unsafe fn read_blank_sector(
         return None;
     }
 
-    if !set_pci_command(device, false) {
+    if !program_masked_msix_vector(device, msix_mapping, 0, apic.id, VIRTIO_INTERRUPT_VECTOR)
+        || !install_virtio_interrupt(apic)
+    {
         return None;
     }
     let result = (|| {
+        if !set_pci_command(device, false) {
+            return None;
+        }
         let initialization = negotiate(common)?;
         if initialization.queue_count == 0 {
+            return None;
+        }
+        if !set_msix_control(device, true, true) {
             return None;
         }
         let capacity_sectors = read_capacity(common, device_configuration)?;
@@ -535,6 +708,10 @@ pub(crate) unsafe fn read_blank_sector(
         let queue_size = select_queue_size(maximum_size)?;
         write_common_u16(common, COMMON_QUEUE_SIZE, queue_size);
         if read_common_u16(common, COMMON_QUEUE_SIZE) != queue_size {
+            return None;
+        }
+        write_common_u16(common, COMMON_QUEUE_MSIX_VECTOR, 0);
+        if read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) != 0 {
             return None;
         }
         let notify_offset = notification_byte_offset(
@@ -577,23 +754,31 @@ pub(crate) unsafe fn read_blank_sector(
             return None;
         }
 
+        VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+        if !set_msix_entry_mask(device, msix_mapping, 0, false)
+            || !set_msix_control(device, true, false)
+        {
+            return None;
+        }
+
         compiler_fence(Ordering::SeqCst);
         write_mmio_u16(notification, 0);
-        let mut completed = false;
+        asm!("sti", options(nomem, nostack));
+        let mut interrupted = false;
         for _ in 0..QUEUE_POLL_LIMIT {
-            compiler_fence(Ordering::SeqCst);
-            let device_status = read_common_u8(common, COMMON_DEVICE_STATUS);
-            if device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) != 0 {
-                return None;
-            }
-            if read_dma_u16(dma_virtual + USED_OFFSET + 2) == 1 {
-                completed = true;
+            if VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst) {
+                interrupted = true;
                 break;
             }
             core::hint::spin_loop();
         }
+        asm!("cli", options(nomem, nostack));
         compiler_fence(Ordering::SeqCst);
-        if !completed
+        let device_status = read_common_u8(common, COMMON_DEVICE_STATUS);
+        if !interrupted
+            || device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) != 0
+            || read_dma_u16(dma_virtual + USED_OFFSET + 2) != 1
             || read_dma_u32(dma_virtual + USED_OFFSET + 4) != 0
             || read_dma_u8(dma_virtual + STATUS_OFFSET) != 0
             || read_dma_u8(dma_virtual + DATA_OFFSET - 1) != 0x3c
@@ -609,9 +794,24 @@ pub(crate) unsafe fn read_blank_sector(
         })
     })();
 
+    asm!("cli", options(nomem, nostack));
+    let function_masked = set_msix_control(device, true, true);
+    let entry_masked = set_msix_entry_mask(device, msix_mapping, 0, true);
+    let msix_disabled = set_msix_control(device, false, true);
     let bus_master_disabled = set_pci_command(device, false);
     let reset_complete = reset(common).is_some();
-    if !bus_master_disabled || !reset_complete || !bus_master_is_disabled(device) {
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    let interrupt_retired = retire_virtio_interrupt(apic);
+    if !function_masked
+        || !entry_masked
+        || !msix_disabled
+        || !bus_master_disabled
+        || !reset_complete
+        || !bus_master_is_disabled(device)
+        || !interrupt_retired
+        || !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+        || VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) != 1
+    {
         return None;
     }
     result
@@ -623,7 +823,8 @@ impl VirtioBlockBackend {
     /// # Safety
     ///
     /// The DMA addresses must satisfy the same ownership and alias contract as
-    /// [`read_blank_sector`] and remain live until `finish` succeeds.
+    /// [`read_blank_sector_interrupt`] and remain live until `finish`
+    /// succeeds.
     pub(crate) unsafe fn start(
         device: VirtioBlockDevice,
         mapping: MmioMapping,

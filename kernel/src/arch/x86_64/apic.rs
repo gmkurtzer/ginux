@@ -9,6 +9,9 @@ const IA32_APIC_BASE: u32 = 0x1b;
 const APIC_GLOBAL_ENABLE: u64 = 1 << 11;
 const APIC_X2_MODE: u64 = 1 << 10;
 const APIC_BASE_MASK: u64 = 0x000f_ffff_ffff_f000;
+const APIC_IN_SERVICE_BASE: u32 = 0x100;
+const APIC_TRIGGER_MODE_BASE: u32 = 0x180;
+const APIC_INTERRUPT_REQUEST_BASE: u32 = 0x200;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Mode {
@@ -66,6 +69,18 @@ impl LocalApic {
     pub(crate) fn mmio_uses_direct_map(&self) -> bool {
         self.mode == Mode::X2Apic
             || paging::direct_map_range_address(self.physical_base, 0x400) == Some(self.mapped_base)
+    }
+
+    pub(crate) fn vector_is_idle(&self, vector: u8) -> bool {
+        let bank = u32::from(vector / 32) * 0x10;
+        let bit = 1_u32 << (vector % 32);
+        // SAFETY: Discovery validated this APIC mapping. These three register
+        // banks are read-only architectural state.
+        unsafe {
+            self.read(APIC_IN_SERVICE_BASE + bank) & bit == 0
+                && self.read(APIC_TRIGGER_MODE_BASE + bank) & bit == 0
+                && self.read(APIC_INTERRUPT_REQUEST_BASE + bank) & bit == 0
+        }
     }
 }
 

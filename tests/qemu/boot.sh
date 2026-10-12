@@ -444,6 +444,14 @@ if ! grep -q '^ginux: invalid MSI-X programming rejected atomically' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: kernel-owned virtio MSI-X interrupt delivered' "$output_file" ||
+    ! grep -q '^ginux: exactly one virtio completion interrupt handled' "$output_file" ||
+    ! grep -q '^ginux: virtio MSI-X masked and disabled after completion' "$output_file" ||
+    ! grep -q '^ginux: temporary virtio interrupt gate retired' "$output_file"; then
+    echo "Boot test failed: kernel-owned virtio MSI-X delivery was incomplete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: virtio MMIO translation bounds verified' "$output_file"; then
     echo "Boot test failed: virtio MMIO translation was not bounded." >&2
     exit 1
