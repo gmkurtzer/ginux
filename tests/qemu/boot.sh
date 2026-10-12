@@ -283,6 +283,46 @@ if ! grep -q '^ginux: local APIC timer interrupt handled' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded PCI bus 0 enumerated' "$output_file"; then
+    echo "Boot test failed: bounded PCI enumeration did not complete." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: modern virtio block function: 0:[0-9]+\.0' "$output_file"; then
+    echo "Boot test failed: the modern virtio block function was not discovered." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: virtio common BAR address: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the virtio common BAR address is invalid." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: virtio common configuration length: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the virtio common configuration region is empty." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: virtio notification multiplier: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the virtio notification multiplier is invalid." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: virtio PCI capabilities: [4-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: the required virtio PCI capabilities were not present." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: modern virtio-blk PCI capabilities validated' "$output_file"; then
+    echo "Boot test failed: virtio-blk PCI capabilities were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: malformed virtio PCI configurations rejected' "$output_file"; then
+    echo "Boot test failed: malformed virtio PCI configurations were not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded persistent volume format validated' "$output_file"; then
     echo "Boot test failed: the persistent volume format was not validated." >&2
     exit 1

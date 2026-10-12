@@ -460,6 +460,32 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: local APIC timer interrupt handled\r\n");
 
+    let Some(virtio_block) = arch::x86_64::pci::discover_virtio_block() else {
+        kernel_fail("ginux: modern virtio block device discovery failed\r\n");
+    };
+    if !arch::x86_64::pci::verify_parser_rejections(virtio_block) {
+        kernel_fail("ginux: malformed virtio PCI configuration accepted\r\n");
+    }
+    serial_write("ginux: bounded PCI bus 0 enumerated\r\n");
+    serial_write("ginux: modern virtio block function: ");
+    serial_write_u64(u64::from(virtio_block.bus));
+    serial_write(":");
+    serial_write_u64(u64::from(virtio_block.device));
+    serial_write(".");
+    serial_write_u64(u64::from(virtio_block.function));
+    serial_write("\r\nginux: virtio common BAR address: ");
+    serial_write_u64(virtio_block.common_bar_address);
+    serial_write("\r\nginux: virtio common configuration offset: ");
+    serial_write_u64(u64::from(virtio_block.common_offset));
+    serial_write("\r\nginux: virtio common configuration length: ");
+    serial_write_u64(u64::from(virtio_block.common_length));
+    serial_write("\r\nginux: virtio notification multiplier: ");
+    serial_write_u64(u64::from(virtio_block.notify_multiplier));
+    serial_write("\r\nginux: virtio PCI capabilities: ");
+    serial_write_u64(u64::from(virtio_block.capability_count));
+    serial_write("\r\nginux: modern virtio-blk PCI capabilities validated\r\n");
+    serial_write("ginux: malformed virtio PCI configurations rejected\r\n");
+
     if !volume::verify_contract() || !volume::install_live() {
         kernel_fail("ginux: persistent volume contract invalid\r\n");
     }

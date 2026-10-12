@@ -19,6 +19,12 @@ A fresh read-only service recovers the exact payload, cannot mutate it, and
 also loses its attenuated handle at exit. This proves service-restart
 persistence and authority separation, not host reboot persistence. See
 [Persistent Volume Service v0](specs/kernel/volume-service-v0.md).
+The next M6 layer attaches a deterministic 1 MiB modern virtio-blk function
+and performs bounded, read-only PCI configuration discovery. Every boot
+validates its common, notification, ISR, and device capabilities and rejects
+malformed copied configurations without enabling MMIO, bus mastering, DMA, or
+queues. See
+[PCI Virtio Block Discovery v0](specs/kernel/pci-virtio-block-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
