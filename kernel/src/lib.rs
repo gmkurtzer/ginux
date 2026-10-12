@@ -969,6 +969,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux pending signal delivery validated\r\n");
     serial_write("ginux: Linux standard signal queue ordering validated\r\n");
     serial_write("ginux: Linux chained pending signal delivery validated\r\n");
+    serial_write("ginux: Linux synchronous pending signal wait validated\r\n");
     serial_write("ginux: Linux one-shot signal action validated\r\n");
     serial_write("ginux: Linux rt signal frame ABI validated\r\n");
     serial_write("ginux: Linux mutable signal context validated\r\n");

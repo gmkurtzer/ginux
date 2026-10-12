@@ -59,6 +59,7 @@ const LINUX_RT_SIGACTION_SYSCALL: u64 = 13;
 const LINUX_RT_SIGPROCMASK_SYSCALL: u64 = 14;
 const LINUX_RT_SIGRETURN_SYSCALL: u64 = 15;
 const LINUX_RT_SIGPENDING_SYSCALL: u64 = 127;
+const LINUX_RT_SIGTIMEDWAIT_SYSCALL: u64 = 128;
 const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_PREAD64_SYSCALL: u64 = 17;
 const LINUX_READV_SYSCALL: u64 = 19;
@@ -4601,6 +4602,9 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_RT_SIGRETURN_SYSCALL => linux_rt_sigreturn(registers, user_stack),
         LINUX_RT_SIGPENDING_SYSCALL => linux_rt_sigpending(first_argument, buffer),
+        LINUX_RT_SIGTIMEDWAIT_SYSCALL => {
+            linux_rt_sigtimedwait(first_argument, buffer, count, register(0))
+        }
         LINUX_CLONE_SYSCALL => linux_clone_thread(saved_registers, user_rip, user_rflags),
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
         LINUX_KILL_SYSCALL => linux_kill(
@@ -9690,6 +9694,63 @@ fn linux_rt_sigpending(set: u64, set_size: u64) -> u64 {
     } else {
         LINUX_EFAULT
     }
+}
+
+fn linux_rt_sigtimedwait(set: u64, information: u64, timeout: u64, set_size: u64) -> u64 {
+    if set_size != LINUX_SIGNAL_SET_SIZE {
+        return LINUX_EINVAL;
+    }
+    let mut set_bytes = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+    if !copy_from_linux_user(set, &mut set_bytes) {
+        return LINUX_EFAULT;
+    }
+    let requested = u64::from_ne_bytes(set_bytes) & !LINUX_UNBLOCKABLE_SIGNALS;
+    let polls = if timeout == 0 {
+        false
+    } else {
+        let mut timeout_bytes = [0_u8; 16];
+        if !copy_from_linux_user(timeout, &mut timeout_bytes) {
+            return LINUX_EFAULT;
+        }
+        let seconds = i64::from_ne_bytes(timeout_bytes[..8].try_into().unwrap());
+        let nanoseconds = i64::from_ne_bytes(timeout_bytes[8..].try_into().unwrap());
+        if seconds < 0 || !(0..NANOSECONDS_PER_SECOND as i64).contains(&nanoseconds) {
+            return LINUX_EINVAL;
+        }
+        seconds == 0 && nanoseconds == 0
+    };
+    let matching = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & requested;
+    if matching == 0 {
+        return if polls { LINUX_EAGAIN } else { LINUX_ENOSYS };
+    }
+    if information != 0
+        && !linux_writable_user_range_contains(information, size_of::<LinuxSignalInformation>())
+    {
+        return LINUX_EFAULT;
+    }
+    let signal = u64::from(matching.trailing_zeros()) + 1;
+    let index = signal as usize - 1;
+    let signal_bit = 1 << (signal - 1);
+    let signal_information = LinuxSignalInformation::generated(
+        signal,
+        ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
+    );
+    if information != 0 {
+        // SAFETY: every byte in this repr(C) value is initialized, including
+        // padding and the complete signal-specific payload.
+        let bytes = unsafe {
+            core::slice::from_raw_parts(
+                core::ptr::from_ref(&signal_information).cast::<u8>(),
+                size_of::<LinuxSignalInformation>(),
+            )
+        };
+        if !copy_to_linux_user(information, bytes) {
+            return LINUX_EFAULT;
+        }
+    }
+    ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+    signal
 }
 
 fn linux_executable_user_address(address: u64) -> bool {

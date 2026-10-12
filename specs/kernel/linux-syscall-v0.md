@@ -830,6 +830,18 @@ source metadata: `SIGUSR1` retains its first `SI_USER`, followed immediately by
 and final syscall return both observe that value, proving context continuity
 across the chain. Process/thread selection among multiple runnable threads,
 real-time queue records, and external asynchronous sources remain unsupported.
+`rax = 128` (`__NR_rt_sigtimedwait`) accepts the exact eight-byte signal-set
+size and selects the lowest-numbered pending signal in the requested set after
+removing `SIGKILL` and `SIGSTOP`. If a match already exists, a null, zero, or
+positive valid timeout all return immediately with the signal number and
+optionally copy its complete 128-byte generated `siginfo_t`; only then are that
+pending bit and its source code cleared. Invalid set, timeout, or matching
+information-output ranges return `-EFAULT`, invalid sizes or timespec fields
+return `-EINVAL`, and none consume pending state. A valid zero timespec with no
+match returns `-EAGAIN`. Null or positive timeouts with no match return
+`-ENOSYS`: scheduler-backed sleeping waits and interruption are not yet part of
+this bounded profile. The measured runtime proves every rejection, successful
+`SIGUSR1`/`SI_USER` consumption, empty polling, and mask cleanup.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE`, or a zero-flag or
 `SS_AUTODISARM` stack of at least

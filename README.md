@@ -464,6 +464,13 @@ and restores the exact configuration on `rt_sigreturn`.
 the explicit action mask, and `SA_RESETHAND` atomically restores the default
 disposition after committing a delivery. The measured handler observes that
 mask and verifies the one-shot action is already cleared after return.
+Bounded `rt_sigtimedwait` synchronously consumes the lowest-numbered matching
+pending standard signal. It supports an immediate zero-time poll, optional
+128-byte `siginfo_t` output, and immediate consumption when a signal is already
+pending even if the supplied timeout is nonzero or null. Empty zero-time polls
+return `EAGAIN`; a wait that would block returns `ENOSYS` until scheduler-backed
+signal waits exist. Input, timeout, and output failures leave pending state
+unchanged.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
 Real/effective/saved UID and GID triples are also zero and are copied only
