@@ -1,4 +1,8 @@
 use core::arch::asm;
+use core::ptr::{read_volatile, write_volatile};
+use core::sync::atomic::{compiler_fence, Ordering};
+
+use super::paging::MmioMapping;
 
 const CONFIG_ADDRESS_PORT: u16 = 0x0cf8;
 const CONFIG_DATA_PORT: u16 = 0x0cfc;
@@ -14,6 +18,21 @@ const VIRTIO_NOTIFY: u8 = 2;
 const VIRTIO_ISR: u8 = 3;
 const VIRTIO_DEVICE: u8 = 4;
 const MAX_CAPABILITIES: usize = 48;
+const PCI_COMMAND: u8 = 0x04;
+const COMMAND_MEMORY_SPACE: u16 = 1 << 1;
+const COMMAND_BUS_MASTER: u16 = 1 << 2;
+const COMMON_DEVICE_FEATURE_SELECT: usize = 0x00;
+const COMMON_DEVICE_FEATURE: usize = 0x04;
+const COMMON_DRIVER_FEATURE_SELECT: usize = 0x08;
+const COMMON_DRIVER_FEATURE: usize = 0x0c;
+const COMMON_NUM_QUEUES: usize = 0x12;
+const COMMON_DEVICE_STATUS: usize = 0x14;
+const STATUS_ACKNOWLEDGE: u8 = 1;
+const STATUS_DRIVER: u8 = 2;
+const STATUS_FEATURES_OK: u8 = 8;
+const FEATURE_FLUSH: u64 = 1 << 9;
+const FEATURE_VERSION_1: u64 = 1 << 32;
+const RESET_POLL_LIMIT: usize = 100_000;
 
 #[derive(Clone, Copy)]
 struct ConfigSpace {
@@ -30,6 +49,24 @@ pub(crate) struct VirtioBlockDevice {
     pub(crate) common_length: u32,
     pub(crate) notify_multiplier: u32,
     pub(crate) capability_count: u8,
+}
+
+impl VirtioBlockDevice {
+    pub(crate) fn common_region(self) -> Option<(u64, usize)> {
+        let physical = self
+            .common_bar_address
+            .checked_add(u64::from(self.common_offset))?;
+        let length = usize::try_from(self.common_length).ok()?;
+        physical.checked_add(length as u64)?;
+        (length > COMMON_DEVICE_STATUS).then_some((physical, length))
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct VirtioBlockInitialization {
+    pub(crate) offered_features: u64,
+    pub(crate) accepted_features: u64,
+    pub(crate) queue_count: u16,
 }
 
 #[derive(Clone, Copy)]
@@ -99,6 +136,142 @@ pub(crate) fn verify_parser_rejections(device: VirtioBlockDevice) -> bool {
         && parse_virtio_block(&cycle, device.bus, device.device, device.function).is_none()
         && parse_virtio_block(&invalid_length, device.bus, device.device, device.function).is_none()
         && parse_virtio_block(&invalid_bar, device.bus, device.device, device.function).is_none()
+}
+
+pub(crate) fn initialize_without_dma(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+) -> Option<VirtioBlockInitialization> {
+    let (common_physical, common_length) = device.common_region()?;
+    let common = mapping.address(common_physical, common_length)?;
+    if common % align_of::<u32>() != 0 {
+        return None;
+    }
+
+    let command =
+        unsafe { read_config_u16(device.bus, device.device, device.function, PCI_COMMAND) };
+    let safe_command = (command | COMMAND_MEMORY_SPACE) & !COMMAND_BUS_MASTER;
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            safe_command,
+        );
+    }
+    if unsafe { read_config_u16(device.bus, device.device, device.function, PCI_COMMAND) }
+        & (COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+        != COMMAND_MEMORY_SPACE
+    {
+        return None;
+    }
+
+    let result = (|| {
+        reset(common)?;
+        write_common_u8(common, COMMON_DEVICE_STATUS, STATUS_ACKNOWLEDGE);
+        write_common_u8(
+            common,
+            COMMON_DEVICE_STATUS,
+            STATUS_ACKNOWLEDGE | STATUS_DRIVER,
+        );
+
+        write_common_u32(common, COMMON_DEVICE_FEATURE_SELECT, 0);
+        let low = read_common_u32(common, COMMON_DEVICE_FEATURE);
+        write_common_u32(common, COMMON_DEVICE_FEATURE_SELECT, 1);
+        let high = read_common_u32(common, COMMON_DEVICE_FEATURE);
+        let offered_features = u64::from(low) | (u64::from(high) << 32);
+        let accepted_features = select_features(offered_features)?;
+
+        write_common_u32(common, COMMON_DRIVER_FEATURE_SELECT, 0);
+        write_common_u32(common, COMMON_DRIVER_FEATURE, accepted_features as u32);
+        write_common_u32(common, COMMON_DRIVER_FEATURE_SELECT, 1);
+        write_common_u32(
+            common,
+            COMMON_DRIVER_FEATURE,
+            (accepted_features >> 32) as u32,
+        );
+        write_common_u8(
+            common,
+            COMMON_DEVICE_STATUS,
+            STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK,
+        );
+        if read_common_u8(common, COMMON_DEVICE_STATUS) & STATUS_FEATURES_OK == 0 {
+            return None;
+        }
+        let queue_count = read_common_u16(common, COMMON_NUM_QUEUES);
+        (queue_count != 0).then_some(VirtioBlockInitialization {
+            offered_features,
+            accepted_features,
+            queue_count,
+        })
+    })();
+
+    if reset(common).is_none()
+        || unsafe { read_config_u16(device.bus, device.device, device.function, PCI_COMMAND) }
+            & COMMAND_BUS_MASTER
+            != 0
+    {
+        return None;
+    }
+    result
+}
+
+pub(crate) fn verify_feature_rejections(offered: u64, accepted: u64) -> bool {
+    accepted == (FEATURE_VERSION_1 | FEATURE_FLUSH)
+        && select_features(offered) == Some(accepted)
+        && select_features(offered & !FEATURE_VERSION_1).is_none()
+        && select_features(offered & !FEATURE_FLUSH).is_none()
+        && select_features(0).is_none()
+}
+
+fn select_features(offered: u64) -> Option<u64> {
+    let required = FEATURE_VERSION_1 | FEATURE_FLUSH;
+    (offered & required == required).then_some(required)
+}
+
+fn reset(common: usize) -> Option<()> {
+    write_common_u8(common, COMMON_DEVICE_STATUS, 0);
+    for _ in 0..RESET_POLL_LIMIT {
+        if read_common_u8(common, COMMON_DEVICE_STATUS) == 0 {
+            return Some(());
+        }
+        core::hint::spin_loop();
+    }
+    None
+}
+
+fn read_common_u8(common: usize, offset: usize) -> u8 {
+    compiler_fence(Ordering::SeqCst);
+    let value = unsafe { read_volatile((common + offset) as *const u8) };
+    compiler_fence(Ordering::SeqCst);
+    value
+}
+
+fn read_common_u16(common: usize, offset: usize) -> u16 {
+    compiler_fence(Ordering::SeqCst);
+    let value = unsafe { read_volatile((common + offset) as *const u16) };
+    compiler_fence(Ordering::SeqCst);
+    u16::from_le(value)
+}
+
+fn read_common_u32(common: usize, offset: usize) -> u32 {
+    compiler_fence(Ordering::SeqCst);
+    let value = unsafe { read_volatile((common + offset) as *const u32) };
+    compiler_fence(Ordering::SeqCst);
+    u32::from_le(value)
+}
+
+fn write_common_u8(common: usize, offset: usize, value: u8) {
+    compiler_fence(Ordering::SeqCst);
+    unsafe { write_volatile((common + offset) as *mut u8, value) };
+    compiler_fence(Ordering::SeqCst);
+}
+
+fn write_common_u32(common: usize, offset: usize, value: u32) {
+    compiler_fence(Ordering::SeqCst);
+    unsafe { write_volatile((common + offset) as *mut u32, value.to_le()) };
+    compiler_fence(Ordering::SeqCst);
 }
 
 fn parse_virtio_block(
@@ -269,4 +442,46 @@ unsafe fn read_config_u32(bus: u8, device: u8, function: u8, offset: u8) -> u32 
         options(nomem, nostack, preserves_flags)
     );
     value
+}
+
+unsafe fn read_config_u16(bus: u8, device: u8, function: u8, offset: u8) -> u16 {
+    let address = CONFIG_ENABLE
+        | (u32::from(bus) << 16)
+        | (u32::from(device) << 11)
+        | (u32::from(function) << 8)
+        | u32::from(offset & 0xfc);
+    asm!(
+        "out dx, eax",
+        in("dx") CONFIG_ADDRESS_PORT,
+        in("eax") address,
+        options(nomem, nostack, preserves_flags)
+    );
+    let value: u16;
+    asm!(
+        "in ax, dx",
+        in("dx") CONFIG_DATA_PORT + u16::from(offset & 2),
+        out("ax") value,
+        options(nomem, nostack, preserves_flags)
+    );
+    value
+}
+
+unsafe fn write_config_u16(bus: u8, device: u8, function: u8, offset: u8, value: u16) {
+    let address = CONFIG_ENABLE
+        | (u32::from(bus) << 16)
+        | (u32::from(device) << 11)
+        | (u32::from(function) << 8)
+        | u32::from(offset & 0xfc);
+    asm!(
+        "out dx, eax",
+        in("dx") CONFIG_ADDRESS_PORT,
+        in("eax") address,
+        options(nomem, nostack, preserves_flags)
+    );
+    asm!(
+        "out dx, ax",
+        in("dx") CONFIG_DATA_PORT + u16::from(offset & 2),
+        in("ax") value,
+        options(nomem, nostack, preserves_flags)
+    );
 }

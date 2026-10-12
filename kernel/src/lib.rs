@@ -230,6 +230,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: root-image measurement rejection verified\r\n");
 
+    let Some(virtio_block) = arch::x86_64::pci::discover_virtio_block() else {
+        kernel_fail("ginux: modern virtio block device discovery failed\r\n");
+    };
+    if !arch::x86_64::pci::verify_parser_rejections(virtio_block) {
+        kernel_fail("ginux: malformed virtio PCI configuration accepted\r\n");
+    }
+    let Some((virtio_common_physical, virtio_common_length)) = virtio_block.common_region() else {
+        kernel_fail("ginux: invalid virtio common configuration range\r\n");
+    };
+
     let Some(memory_map_end) = boot_info
         .memory_map_size
         .checked_sub(1)
@@ -286,18 +296,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     // SAFETY: The entry trampoline disabled interrupts. The required live
     // addresses and the page-table objects are checked against the complete
     // transitional identity-map range before CR3 is changed.
-    if unsafe {
+    let Ok(virtio_mmio) = (unsafe {
         arch::x86_64::paging::install_initial_identity_map(
             boot_info,
             &image,
             &required_addresses,
             &guard_pages,
+            virtio_common_physical,
+            virtio_common_length,
         )
-    }
-    .is_err()
-    {
+    }) else {
         kernel_fail("ginux: page-table transition failed\r\n");
-    }
+    };
     serial_write("ginux: kernel page tables active\r\n");
     if !arch::x86_64::cpu::execute_disable_enabled()
         || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
@@ -460,12 +470,6 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: local APIC timer interrupt handled\r\n");
 
-    let Some(virtio_block) = arch::x86_64::pci::discover_virtio_block() else {
-        kernel_fail("ginux: modern virtio block device discovery failed\r\n");
-    };
-    if !arch::x86_64::pci::verify_parser_rejections(virtio_block) {
-        kernel_fail("ginux: malformed virtio PCI configuration accepted\r\n");
-    }
     serial_write("ginux: bounded PCI bus 0 enumerated\r\n");
     serial_write("ginux: modern virtio block function: ");
     serial_write_u64(u64::from(virtio_block.bus));
@@ -485,6 +489,37 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(u64::from(virtio_block.capability_count));
     serial_write("\r\nginux: modern virtio-blk PCI capabilities validated\r\n");
     serial_write("ginux: malformed virtio PCI configurations rejected\r\n");
+    if !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
+        || !arch::x86_64::paging::mmio_translation_is_bounded(
+            virtio_mmio,
+            virtio_common_physical,
+            virtio_common_length,
+        )
+    {
+        kernel_fail("ginux: virtio MMIO mapping invalid\r\n");
+    }
+    serial_write("ginux: bounded uncached virtio MMIO mapping active\r\n");
+    serial_write("ginux: virtio MMIO translation bounds verified\r\n");
+    let Some(virtio_initialization) =
+        arch::x86_64::pci::initialize_without_dma(virtio_block, virtio_mmio)
+    else {
+        kernel_fail("ginux: virtio block initialization failed\r\n");
+    };
+    if !arch::x86_64::pci::verify_feature_rejections(
+        virtio_initialization.offered_features,
+        virtio_initialization.accepted_features,
+    ) {
+        kernel_fail("ginux: invalid virtio block features accepted\r\n");
+    }
+    serial_write("ginux: virtio block offered features: ");
+    serial_write_u64(virtio_initialization.offered_features);
+    serial_write("\r\nginux: virtio block accepted features: ");
+    serial_write_u64(virtio_initialization.accepted_features);
+    serial_write("\r\nginux: virtio block queues available: ");
+    serial_write_u64(u64::from(virtio_initialization.queue_count));
+    serial_write("\r\nginux: virtio block reset and feature negotiation validated\r\n");
+    serial_write("ginux: virtio bus mastering remained disabled\r\n");
+    serial_write("ginux: virtio block returned to reset state\r\n");
 
     if !volume::verify_contract() || !volume::install_live() {
         kernel_fail("ginux: persistent volume contract invalid\r\n");
@@ -1332,6 +1367,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             },
         )
         || !arch::x86_64::paging::static_page_tables_are_read_only()
+        || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
         || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
         || !arch::x86_64::paging::identity_range_is_read_only_data(
             boot_info.manifest as usize,

@@ -323,6 +323,46 @@ if ! grep -q '^ginux: malformed virtio PCI configurations rejected' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded uncached virtio MMIO mapping active' "$output_file"; then
+    echo "Boot test failed: the bounded virtio MMIO mapping is inactive." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio MMIO translation bounds verified' "$output_file"; then
+    echo "Boot test failed: virtio MMIO translation was not bounded." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: virtio block offered features: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: virtio-blk offered no usable features." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio block accepted features: 4294967808' "$output_file"; then
+    echo "Boot test failed: virtio-blk accepted the wrong feature set." >&2
+    exit 1
+fi
+
+if ! grep -Eq '^ginux: virtio block queues available: [1-9][0-9]*' "$output_file"; then
+    echo "Boot test failed: virtio-blk exposed no queues." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio block reset and feature negotiation validated' "$output_file"; then
+    echo "Boot test failed: virtio-blk initialization did not complete." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio bus mastering remained disabled' "$output_file"; then
+    echo "Boot test failed: virtio-blk gained premature DMA authority." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio block returned to reset state' "$output_file"; then
+    echo "Boot test failed: virtio-blk was not returned to reset state." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded persistent volume format validated' "$output_file"; then
     echo "Boot test failed: the persistent volume format was not validated." >&2
     exit 1

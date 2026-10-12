@@ -11,19 +11,23 @@ Remove the kernel's dependency on firmware-owned page tables while preserving th
 The kernel constructs and activates its own four-level x86-64 page tables:
 
 - PML4 entry 0 addresses one page-directory-pointer table.
-- PML4 entry 256 addresses the same page-directory-pointer table, providing a
-  higher-half alias beginning at `0xffff800000000000`.
+- PML4 entry 256 addresses a separate page-directory-pointer table, providing
+  a higher-half mapping beginning at `0xffff800000000000`.
 - The first four pointer-table entries address four page directories.
 - Most page-directory entries identity-map 2 MiB pages.
 - Regions containing protected pages or executable UEFI descriptors are split
   into 4 KiB mappings.
 - The resulting transitional address space identity maps physical addresses from 0 through 4 GiB.
 
-The higher-half alias covers that same 4 GiB physical range and is
-supervisor-only. It deliberately shares the identity map's complete lower-level
-hierarchy rather than using separately permissive leaves. Consequently, every
+The first four entries of the higher-half pointer table cover that same 4 GiB
+physical range and are supervisor-only. They deliberately share the identity
+map's page-directory hierarchy rather than using separately permissive leaves. Consequently, every
 read-only, non-present, and NX decision—including guard pages, kernel image
 permissions, and sealed page-table pages—is identical through both aliases.
+The final higher-half pointer-table entry owns one bounded MMIO directory and
+table. It maps only the validated virtio common-configuration pages as
+supervisor-only, writable, NX, cache-disabled memory; it has no low identity
+alias for the device's above-4-GiB physical BAR.
 Every derived domain root copies both supervisor-only kernel PML4 entries, and
 root validation rejects a missing, altered, or user-accessible direct-map entry.
 The bounded Linux process proof applies the same rule to its private roots:
@@ -32,9 +36,9 @@ presence and supervisor status are checked. A scheduler-selected child root is
 then loaded into CR3 in kernel mode, verified through the inherited direct map,
 and replaced with the exact prior root. Generation-stale roots and mismatched
 kernel entries fail before CR3 is changed.
-The kernel verifies the alias after CR3 activation by comparing its PML4 entry
-with the identity entry, excluding only the hardware-maintained Accessed bit,
-and reading the PML4 page through both addresses.
+The kernel verifies both root entries and the first four matching pointer-table
+entries after CR3 activation, excluding only the hardware-maintained Accessed
+bit, and reads the PML4 page through both addresses.
 
 Physical-to-direct-map conversion is checked as a half-open byte range. Empty,
 overflowing, and beyond-4-GiB ranges are rejected. The physical-frame allocator
@@ -79,8 +83,9 @@ for immutable kernel text and prevents privileged code from bypassing the
 read-only user-code mapping through its user virtual address.
 
 Before activation, every identity-map region containing the statically
-allocated PML4, PDPT, four page directories, or eight fine page tables is split
-into 4 KiB mappings. The kernel clears `WRITABLE` on all fourteen table pages,
+allocated PML4, two PDPTs, four page directories, eight fine page tables, or
+the MMIO directory and table is split into 4 KiB mappings. The kernel clears
+`WRITABLE` on all seventeen table pages,
 loads CR3, enables `CR0.WP`, and reads every leaf PTE back. It repeats that
 readback after the complete ring-3 scheduling and fault/restart workload. The
 active mapping hierarchy is therefore not writable through its identity alias;
@@ -99,7 +104,8 @@ This map is intentionally transitional:
   kernel-owned read-only data, mutable data, MMIO, and firmware mapping classes.
 - Most identity-map aliases remain writable, so this revision does not yet make
   kernel text or user-code physical frames immutable through every alias.
-- Addresses above 4 GiB are unavailable.
+- General physical addresses above 4 GiB are unavailable; only the one bounded
+  virtio MMIO window is explicitly mapped.
 - Kernel static paging objects and the pre-transition boot-validation path still
   use identity addresses. Post-transition ACPI reads, xAPIC MMIO,
   allocator-owned frame scrubbing, and all dynamic domain page-table and
@@ -108,7 +114,7 @@ This map is intentionally transitional:
   mappings until those kernel accesses migrate to the direct map.
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.
 
-Untrusted code executes only in domain roots where this identity map is
-supervisor-only. Later paging revisions must replace the firmware shutdown
-dependency, provide explicit MMIO mappings and direct-map bounds, and define
-permissions for dynamically loaded kernel modules.
+Untrusted code executes only in domain roots where the identity, direct, and
+MMIO mappings are supervisor-only. Later paging revisions must replace the
+firmware shutdown dependency, generalize explicit MMIO ownership and unmapping,
+and define permissions for dynamically loaded kernel modules.

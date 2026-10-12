@@ -25,6 +25,12 @@ validates its common, notification, ISR, and device capabilities and rejects
 malformed copied configurations without enabling MMIO, bus mastering, DMA, or
 queues. See
 [PCI Virtio Block Discovery v0](specs/kernel/pci-virtio-block-v0.md).
+The common configuration is now mapped through a bounded, uncached,
+supervisor-only higher-half window. The kernel forces PCI bus mastering off,
+resets the device, accepts only modern virtio plus flush support, confirms one
+or more queues, and returns the device to reset without setting `DRIVER_OK` or
+providing DMA memory. See
+[Virtio Block Initialization v0](specs/kernel/virtio-block-init-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
