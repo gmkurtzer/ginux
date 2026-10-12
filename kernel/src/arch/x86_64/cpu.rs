@@ -486,6 +486,10 @@ static ELF_PROBE_MMAP_TAIL_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
 static ELF_PROBE_RECLAIM_MMAP_FRAMES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 static ELF_PROBE_RECLAIM_MMAP_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
+static ELF_PROBE_PAGE_TABLE_FRAMES: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+static ELF_PROBE_PAGE_TABLE_GENERATIONS: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
+static ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+static ELF_PROBE_RECLAIM_PAGE_TABLE_GENERATIONS: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
 static ELF_PROBE_MMAP_PAGES: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_MMAP_WRITABLE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_MMAP_FILE: AtomicU8 = AtomicU8::new(0);
@@ -2239,6 +2243,56 @@ pub(crate) fn take_linux_exec_mmap_frames() -> [Option<memory::FrameLease>; 2] {
     })
 }
 
+#[inline(never)]
+pub(crate) fn finalize_linux_exec_page_table_frames(
+    initial: [memory::FrameLease; 6],
+    count: usize,
+    replaced: bool,
+) -> bool {
+    if !(5..=6).contains(&count) {
+        return false;
+    }
+    let mut valid = true;
+    for index in 0..6 {
+        let current = memory::FrameLease::from_parts(
+            ELF_PROBE_PAGE_TABLE_FRAMES[index].swap(0, Ordering::SeqCst),
+            ELF_PROBE_PAGE_TABLE_GENERATIONS[index].swap(0, Ordering::SeqCst),
+        );
+        if index >= count {
+            valid &= current.is_none();
+            continue;
+        }
+        valid &= current.is_some_and(|frame| {
+            let replacement_valid = frame != initial[index]
+                && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+                && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[initial[index]])
+                && ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES[index].load(Ordering::SeqCst) == 0
+                && ELF_PROBE_RECLAIM_PAGE_TABLE_GENERATIONS[index].load(Ordering::SeqCst) == 0;
+            if replaced && replacement_valid {
+                ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+                ELF_PROBE_RECLAIM_PAGE_TABLE_GENERATIONS[index]
+                    .store(frame.generation(), Ordering::SeqCst);
+            }
+            if replaced {
+                replacement_valid
+                    && (index != 0 || address_space::current_root_address() == frame.address())
+            } else {
+                frame == initial[index]
+            }
+        });
+    }
+    valid
+}
+
+pub(crate) fn take_linux_exec_page_table_frames() -> [Option<memory::FrameLease>; 6] {
+    core::array::from_fn(|index| {
+        memory::FrameLease::from_parts(
+            ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES[index].swap(0, Ordering::SeqCst),
+            ELF_PROBE_RECLAIM_PAGE_TABLE_GENERATIONS[index].swap(0, Ordering::SeqCst),
+        )
+    })
+}
+
 pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfResult {
     let Some(heap_limit) = execution.heap.checked_add(execution.heap_size) else {
         return LinuxElfResult::FAILED;
@@ -2287,7 +2341,13 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                     mapping.address as u64,
                     &execution.page_table_frames[..execution.page_table_frame_count],
                 )
-            });
+            })
+        && ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES
+            .iter()
+            .all(|frame| frame.load(Ordering::SeqCst) == 0)
+        && ELF_PROBE_RECLAIM_PAGE_TABLE_GENERATIONS
+            .iter()
+            .all(|generation| generation.load(Ordering::SeqCst) == 0);
     let stale_page_table_lease_rejected = execution.page_table_frames[0]
         .generation()
         .checked_add(1)
@@ -2699,6 +2759,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_SIBLING_STACK_FRAME.store(execution.sibling_stack_frame.address(), Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK_GENERATION
         .store(execution.sibling_stack_frame.generation(), Ordering::SeqCst);
+    for index in 0..ELF_PROBE_PAGE_TABLE_FRAMES.len() {
+        let frame = execution.page_table_frames[index];
+        ELF_PROBE_PAGE_TABLE_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+        ELF_PROBE_PAGE_TABLE_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
+    }
     ELF_PROBE_STACK.store(execution.stack as u64, Ordering::SeqCst);
     ELF_PROBE_STACK_FRAME.store(execution.stack_frame.address(), Ordering::SeqCst);
     ELF_PROBE_STACK_GENERATION.store(execution.stack_frame.generation(), Ordering::SeqCst);
@@ -5739,6 +5804,55 @@ fn release_linux_exec_frames(
     scrubbed && released
 }
 
+#[inline(never)]
+fn replace_current_interpreted_linux_image(
+    mappings: &[LinuxExecMapping],
+    old_mappings: &[LinuxActiveImageMapping],
+) -> bool {
+    let old: [Option<memory::FrameLease>; 6] = core::array::from_fn(|index| {
+        memory::FrameLease::from_parts(
+            ELF_PROBE_PAGE_TABLE_FRAMES[index].load(Ordering::SeqCst),
+            ELF_PROBE_PAGE_TABLE_GENERATIONS[index].load(Ordering::SeqCst),
+        )
+    });
+    let [Some(root), Some(pdpt), Some(directory), Some(read_only), Some(main), Some(interpreter)] =
+        old
+    else {
+        return false;
+    };
+    let old = [root, pdpt, directory, read_only, main, interpreter];
+    if address_space::current_root_address() != root.address()
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &old)
+        || old
+            .iter()
+            .enumerate()
+            .any(|(index, frame)| old[..index].contains(frame))
+    {
+        return false;
+    }
+    let Some(new) = memory::allocate_frames::<6>(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    if !new
+        .iter()
+        .all(|frame| address_space::prepare_linux_frame(frame.address(), &[]))
+        || !address_space::replace_current_linux_image_and_hierarchy(
+            mappings,
+            old_mappings,
+            &old,
+            &new,
+        )
+    {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &new);
+        return false;
+    }
+    for (index, frame) in new.into_iter().enumerate() {
+        ELF_PROBE_PAGE_TABLE_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+        ELF_PROBE_PAGE_TABLE_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
+    }
+    true
+}
+
 fn linux_execveat(
     directory: u64,
     path_address: u64,
@@ -6260,10 +6374,18 @@ fn linux_execve_at(
     } else {
         None
     };
-    if !address_space::replace_current_linux_image(
-        &mappings[..transaction_mapping_count],
-        &active_image_mappings[..old_mapping_count],
-    ) {
+    let image_replaced = if interpreted {
+        replace_current_interpreted_linux_image(
+            &mappings[..transaction_mapping_count],
+            &active_image_mappings[..old_mapping_count],
+        )
+    } else {
+        address_space::replace_current_linux_image(
+            &mappings[..transaction_mapping_count],
+            &active_image_mappings[..old_mapping_count],
+        )
+    };
+    if !image_replaced {
         if let Some(frames) = replacement_mmap_frames {
             let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &frames);
         }

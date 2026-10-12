@@ -663,6 +663,18 @@ pub(crate) fn verify_linux_elf_mapping(
             } else {
                 cpu::LinuxElfResult::FAILED
             };
+            let page_table_frame_state_valid = cpu::finalize_linux_exec_page_table_frames(
+                [
+                    frames[0],
+                    frames[1],
+                    frames[2],
+                    frames[3],
+                    frames[4],
+                    memory::FrameLease::EMPTY,
+                ],
+                5,
+                false,
+            );
             exec_frames = execution_result.exec_frames;
             let retired_image_frames = execution_result.retired_image_frames;
             let retired_image_valid = execution_result.retired_image_count == initial_image_count
@@ -719,7 +731,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 && table_entries.add(mmap_tail_indexes[3]).read() == 0;
             activate(kernel_root_physical);
             let restored = current_root() == kernel_root_physical;
-            Some(executed && mapping_removed && restored)
+            Some(executed && page_table_frame_state_valid && mapping_removed && restored)
         }
     })()
     .unwrap_or(false);
@@ -1232,6 +1244,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let mut exec_tls_frames = [None; 2];
     let mut exec_sibling_stack_frame = None;
     let mut exec_mmap_frames = [None; 2];
+    let mut exec_page_table_frames = [None; 6];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [
@@ -1248,9 +1261,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             let root_entries = mapped_frame::<u64>(root)?;
             let pdpt_entries = mapped_frame::<u64>(pdpt)?;
             let directory_entries = mapped_frame::<u64>(directory)?;
-            let main_ro_entries = mapped_frame::<u64>(main_ro_table)?;
-            let main_entries = mapped_frame::<u64>(main_table)?;
-            let interpreter_entries = mapped_frame::<u64>(interpreter_table)?;
+            let mut main_ro_entries = mapped_frame::<u64>(main_ro_table)?;
+            let mut main_entries = mapped_frame::<u64>(main_table)?;
+            let mut interpreter_entries = mapped_frame::<u64>(interpreter_table)?;
             root_entries.add(256).write(kernel_root.add(256).read());
             root_entries.write(pdpt | PRESENT | WRITABLE | USER);
 
@@ -1657,6 +1670,22 @@ pub(crate) fn verify_interpreted_elf_mapping(
             exec_tls_frames = cpu::take_linux_exec_tls_frames();
             exec_sibling_stack_frame = cpu::take_linux_exec_sibling_stack_frame();
             exec_mmap_frames = cpu::take_linux_exec_mmap_frames();
+            if !cpu::finalize_linux_exec_page_table_frames(
+                [
+                    frames[0], frames[1], frames[2], frames[3], frames[4], frames[5],
+                ],
+                6,
+                true,
+            ) {
+                return None;
+            }
+            exec_page_table_frames = cpu::take_linux_exec_page_table_frames();
+            if !execution_result.valid || exec_page_table_frames.iter().any(Option::is_none) {
+                return None;
+            }
+            main_ro_entries = mapped_frame::<u64>(exec_page_table_frames[3]?.address())?;
+            main_entries = mapped_frame::<u64>(exec_page_table_frames[4]?.address())?;
+            interpreter_entries = mapped_frame::<u64>(exec_page_table_frames[5]?.address())?;
             let expected_active_image_count = initial_image_count
                 + main_mappings
                     .iter()
@@ -2075,6 +2104,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
         if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame]) {
             zero_frame(frame.address()).is_some()
         } else if (index == 9 && exec_heap_frame.is_some())
+            || (index < 6 && exec_page_table_frames[index].is_some())
             || (index == 10 && exec_stack_frame.is_some())
             || (index == 13 && exec_tls_frames[0].is_some())
             || (index == 14 && exec_tls_frames[1].is_some())
@@ -2127,6 +2157,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
         })
     });
+    let exec_page_table_frames_released = exec_page_table_frames.into_iter().all(|frame| {
+        frame.is_some_and(|frame| {
+            prepare_linux_frame(frame.address(), &[])
+                && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
+        })
+    });
     let mut original_frames_released = sibling_resources_scrubbed;
     if sibling_resources_scrubbed {
         for frame in frames {
@@ -2159,6 +2195,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
         && exec_tls_frames_released
         && exec_sibling_stack_frame_released
         && exec_mmap_frames_released
+        && exec_page_table_frames_released
         && main_frames_released
         && dependency_frames_released
         && frame_count_restored
@@ -2418,6 +2455,195 @@ pub(crate) fn replace_current_linux_image(
 ) -> bool {
     verify_current_linux_image_rollback(mappings, old_mappings)
         && replace_current_linux_image_inner(mappings, old_mappings, false)
+}
+
+pub(crate) fn replace_current_linux_image_and_hierarchy(
+    mappings: &[cpu::LinuxExecMapping],
+    old_mappings: &[cpu::LinuxActiveImageMapping],
+    old_hierarchy: &[memory::FrameLease; 6],
+    new_hierarchy: &[memory::FrameLease; 6],
+) -> bool {
+    if current_root() != old_hierarchy[0].address()
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, old_hierarchy)
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, new_hierarchy)
+        || old_hierarchy.iter().enumerate().any(|(index, frame)| {
+            old_hierarchy[..index].contains(frame) || new_hierarchy.contains(frame)
+        })
+        || new_hierarchy
+            .iter()
+            .enumerate()
+            .any(|(index, frame)| new_hierarchy[..index].contains(frame))
+        || old_mappings.iter().any(|mapping| {
+            old_hierarchy.contains(&mapping.frame) || new_hierarchy.contains(&mapping.frame)
+        })
+    {
+        return false;
+    }
+    let Some(stale_generation) = old_hierarchy[0].generation().checked_add(1) else {
+        return false;
+    };
+    let Some(stale_root) =
+        memory::FrameLease::from_parts(old_hierarchy[0].address(), stale_generation)
+    else {
+        return false;
+    };
+    if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[stale_root])
+        || prepare_linux_hierarchy_replacement(
+            mappings,
+            old_mappings,
+            old_hierarchy,
+            new_hierarchy,
+            true,
+        )
+        || current_root() != old_hierarchy[0].address()
+    {
+        return false;
+    }
+    if !prepare_linux_hierarchy_replacement(
+        mappings,
+        old_mappings,
+        old_hierarchy,
+        new_hierarchy,
+        false,
+    ) {
+        return false;
+    }
+    let mut retired_mappings = [memory::FrameLease::EMPTY; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+    for (output, mapping) in retired_mappings.iter_mut().zip(old_mappings) {
+        *output = mapping.frame;
+    }
+    let retired_mappings = &retired_mappings[..old_mappings.len()];
+    if !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, retired_mappings)
+        || !memory::frame_leases_releasable(memory::FrameOwner::KERNEL, old_hierarchy)
+    {
+        return false;
+    }
+    unsafe { activate(new_hierarchy[0].address()) };
+    if current_root() != new_hierarchy[0].address() {
+        unsafe { activate(old_hierarchy[0].address()) };
+        return false;
+    }
+    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, retired_mappings)
+        && memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, old_hierarchy)
+}
+
+fn prepare_linux_hierarchy_replacement(
+    mappings: &[cpu::LinuxExecMapping],
+    old_mappings: &[cpu::LinuxActiveImageMapping],
+    old_hierarchy: &[memory::FrameLease; 6],
+    new_hierarchy: &[memory::FrameLease; 6],
+    force_verification_failure: bool,
+) -> bool {
+    if mappings.is_empty()
+        || mappings.len() > cpu::LINUX_EXEC_MAPPING_LIMIT
+        || old_mappings.is_empty()
+        || old_mappings.len() > cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
+        || mappings.iter().enumerate().any(|(index, mapping)| {
+            mappings[..index]
+                .iter()
+                .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
+                || new_hierarchy
+                    .iter()
+                    .any(|frame| frame.address() == mapping.frame)
+        })
+        || old_mappings.iter().enumerate().any(|(index, mapping)| {
+            old_mappings[..index]
+                .iter()
+                .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
+        })
+    {
+        return false;
+    }
+    for (old, new) in old_hierarchy
+        .iter()
+        .copied()
+        .zip(new_hierarchy.iter().copied())
+    {
+        let (Some(source), Some(destination)) = (
+            mapped_frame::<u64>(old.address()),
+            mapped_frame::<u64>(new.address()),
+        ) else {
+            return false;
+        };
+        unsafe { core::ptr::copy_nonoverlapping(source, destination, ENTRY_COUNT) };
+    }
+    for frame in new_hierarchy.iter().copied() {
+        let Some(entries) = mapped_frame::<u64>(frame.address()) else {
+            return false;
+        };
+        for index in 0..ENTRY_COUNT {
+            let value = unsafe { entries.add(index).read() };
+            if value & PRESENT == 0 {
+                continue;
+            }
+            if let Some(position) = old_hierarchy
+                .iter()
+                .position(|old| old.address() == value & ADDRESS_MASK)
+            {
+                unsafe {
+                    entries
+                        .add(index)
+                        .write((value & !ADDRESS_MASK) | new_hierarchy[position].address());
+                }
+            }
+        }
+    }
+    for mapping in old_mappings {
+        let Some(entry) = linux_leaf_in_root(new_hierarchy[0].address(), mapping.address as u64)
+        else {
+            return false;
+        };
+        let expected = mapping.frame.address()
+            | PRESENT
+            | USER
+            | if mapping.writable { WRITABLE } else { 0 }
+            | if mapping.executable { 0 } else { NO_EXECUTE };
+        if unsafe { entry.read() } & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
+            != expected
+        {
+            return false;
+        }
+        unsafe { entry.write(0) };
+    }
+    for mapping in mappings {
+        if mapping.address == 0
+            || !(mapping.address as u64).is_multiple_of(PAGE_SIZE as u64)
+            || !mapping.frame.is_multiple_of(PAGE_SIZE as u64)
+            || mapping.writable && mapping.executable
+            || !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+        {
+            return false;
+        }
+        let Some(entry) = linux_leaf_in_root(new_hierarchy[0].address(), mapping.address as u64)
+        else {
+            return false;
+        };
+        let flags = PRESENT
+            | USER
+            | if mapping.writable { WRITABLE } else { 0 }
+            | if mapping.executable { 0 } else { NO_EXECUTE };
+        unsafe { entry.write(mapping.frame | flags) };
+    }
+    !force_verification_failure
+        && mappings.iter().all(|mapping| {
+            let flags = PRESENT
+                | USER
+                | if mapping.writable { WRITABLE } else { 0 }
+                | if mapping.executable { 0 } else { NO_EXECUTE };
+            linux_leaf_in_root(new_hierarchy[0].address(), mapping.address as u64).is_some_and(
+                |entry| unsafe {
+                    entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
+                        == mapping.frame | flags
+                },
+            )
+        })
+        && old_mappings.iter().all(|mapping| {
+            mappings
+                .iter()
+                .any(|replacement| replacement.address == mapping.address)
+                || linux_leaf_in_root(new_hierarchy[0].address(), mapping.address as u64)
+                    .is_some_and(|entry| unsafe { entry.read() == 0 })
+        })
 }
 
 fn verify_current_linux_image_rollback(
@@ -2795,13 +3021,17 @@ pub(crate) fn zero_current_linux_page(address: u64, frame: u64) -> bool {
 }
 
 fn current_linux_leaf(address: u64) -> Option<*mut u64> {
+    linux_leaf_in_root(current_root(), address)
+}
+
+fn linux_leaf_in_root(root: u64, address: u64) -> Option<*mut u64> {
     let indexes = [
         ((address >> 39) & 0x1ff) as usize,
         ((address >> 30) & 0x1ff) as usize,
         ((address >> 21) & 0x1ff) as usize,
         ((address >> 12) & 0x1ff) as usize,
     ];
-    let mut table = current_root();
+    let mut table = root;
     for (level, index) in indexes.into_iter().enumerate() {
         if !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[table & ADDRESS_MASK]) {
             return None;

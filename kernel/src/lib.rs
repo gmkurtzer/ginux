@@ -814,6 +814,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: interpreted Linux mmap reserves replaced at exec commit\r\n");
     serial_write("ginux: old interpreted Linux mmap reserve leases retired at exec\r\n");
     serial_write("ginux: replacement Linux mmap reserve leases reclaimed\r\n");
+    serial_write("ginux: interpreted Linux page-table hierarchy replaced atomically\r\n");
+    serial_write("ginux: old interpreted Linux page-table leases retired at exec\r\n");
+    serial_write("ginux: replacement Linux page-table leases reclaimed\r\n");
     serial_write("ginux: canonical interpreted Linux executable identity validated\r\n");
     serial_write("ginux: combined Linux static TLS materialized\r\n");
     serial_write("ginux: ordered Linux dependency TLS layout materialized\r\n");
