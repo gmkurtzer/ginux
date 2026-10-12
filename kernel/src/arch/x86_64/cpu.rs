@@ -75,6 +75,7 @@ const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_CLONE_SYSCALL: u64 = 56;
 const LINUX_EXECVE_SYSCALL: u64 = 59;
 const LINUX_KILL_SYSCALL: u64 = 62;
+const LINUX_TKILL_SYSCALL: u64 = 200;
 const LINUX_TGKILL_SYSCALL: u64 = 234;
 const LINUX_CLONE_VM: u64 = 0x0000_0100;
 const LINUX_CLONE_FS: u64 = 0x0000_0200;
@@ -3196,7 +3197,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
-    let expected_signal_count = if signal_probe_executed { 4 } else { 2 };
+    let expected_signal_count = if signal_probe_executed { 5 } else { 2 };
     let signal_lifecycle_valid = !LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst)
         && signal_delivery_count == expected_signal_count
         && signal_return_count == expected_signal_count
@@ -4447,6 +4448,18 @@ extern "sysv64" fn linux_syscall_handler(
             Ok(()) => linux_kill(
                 1,
                 count,
+                registers,
+                saved_registers,
+                user_stack,
+                user_rip,
+                user_rflags,
+            ),
+            Err(error) => error,
+        },
+        LINUX_TKILL_SYSCALL => match linux_tkill_identity(first_argument) {
+            Ok(()) => linux_kill(
+                1,
+                buffer,
                 registers,
                 saved_registers,
                 user_stack,
@@ -9641,6 +9654,16 @@ fn linux_tgkill_identity(thread_group: u64, thread: u64) -> Result<(), u64> {
         return Err(LINUX_EINVAL);
     }
     if thread_group != 1 || current_linux_tid().map(u64::from) != Some(thread) {
+        return Err(LINUX_ESRCH);
+    }
+    Ok(())
+}
+
+fn linux_tkill_identity(thread: u64) -> Result<(), u64> {
+    if thread == 0 || thread > i32::MAX as u64 {
+        return Err(LINUX_EINVAL);
+    }
+    if current_linux_tid().map(u64::from) != Some(thread) {
         return Err(LINUX_ESRCH);
     }
     Ok(())

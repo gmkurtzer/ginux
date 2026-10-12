@@ -742,6 +742,13 @@ self-signal after the page-fault delivery and requires exactly two complete
 delivery/return lifecycles. Foreign PIDs return `-ESRCH`, invalid signal numbers
 return `-EINVAL`, and otherwise-valid signals outside this first generated
 profile return `-ENOSYS` instead of pretending to queue them.
+`rax = 200` (`__NR_tkill`) admits positive, in-range container-local TID 1.
+Zero, negative, and out-of-range identities return `-EINVAL`; other valid TIDs
+return `-ESRCH`. Signal zero probes existence, while an admitted unmasked
+`SIGSEGV` uses the same generated-signal and full-context-return path as
+`kill`. Although Linux callers should prefer `tgkill`, this bounded legacy
+entry point is retained for compatibility and has no independent delivery
+implementation.
 `rax = 234` (`__NR_tgkill`) admits the positive container-local thread group
 and thread pair `(1, 1)`, including signal zero as an existence query. Zero,
 negative, or out-of-range identities return `-EINVAL`; well-formed foreign
@@ -749,10 +756,10 @@ thread groups or thread IDs return `-ESRCH`. An unmasked admitted `SIGSEGV`
 uses the same live-return delivery path as `kill`, and the dedicated measured
 `/bin/signal-probe` installs a fresh post-`execve` handler, exercises every
 identity class, completes one handler/`rt_sigreturn` lifecycle, then restores
-the default action before exit. The verifier therefore requires four exact
+the default action before exit. The verifier therefore requires five exact
 delivery/return pairs for that measured runtime and two for the other probe
 executions.
-When that admitted caught `SIGSEGV` is blocked, `kill` or `tgkill` coalesces it
+When that admitted caught `SIGSEGV` is blocked, `kill`, `tkill`, or `tgkill` coalesces it
 into one bounded pending bit and returns success without constructing a frame.
 `rax = 127` (`__NR_rt_sigpending`) requires the exact eight-byte signal-set size
 and a writable output range, then reports pending signals intersected with the
