@@ -483,6 +483,9 @@ static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP_TAIL_FRAME: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_MMAP_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
+static ELF_PROBE_RECLAIM_MMAP_FRAMES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+static ELF_PROBE_RECLAIM_MMAP_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
 static ELF_PROBE_MMAP_PAGES: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_MMAP_WRITABLE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_MMAP_FILE: AtomicU8 = AtomicU8::new(0);
@@ -1189,7 +1192,7 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) heap: usize,
     pub(crate) heap_size: usize,
     pub(crate) mmap: usize,
-    pub(crate) mmap_frames: [u64; 2],
+    pub(crate) mmap_frames: [memory::FrameLease; 2],
     pub(crate) main_mappings: [LinuxFileMapping; LINUX_MAIN_MAPPING_COUNT],
     pub(crate) dependency_base_min: [usize; LINUX_DEPENDENCY_COUNT],
     pub(crate) dependency_base_end: [usize; LINUX_DEPENDENCY_COUNT],
@@ -2191,6 +2194,49 @@ pub(crate) fn take_linux_exec_sibling_stack_frame() -> Option<memory::FrameLease
     )
 }
 
+#[inline(never)]
+fn finalize_linux_exec_mmap_frames(initial: [memory::FrameLease; 2], replaced: bool) -> bool {
+    let current = [
+        memory::FrameLease::from_parts(
+            ELF_PROBE_MMAP_FRAME.swap(0, Ordering::SeqCst),
+            ELF_PROBE_MMAP_GENERATIONS[0].swap(0, Ordering::SeqCst),
+        ),
+        memory::FrameLease::from_parts(
+            ELF_PROBE_MMAP_TAIL_FRAME.swap(0, Ordering::SeqCst),
+            ELF_PROBE_MMAP_GENERATIONS[1].swap(0, Ordering::SeqCst),
+        ),
+    ];
+    let mut valid = true;
+    for index in 0..2 {
+        valid &= current[index].is_some_and(|frame| {
+            let replacement_valid = frame != initial[index]
+                && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[initial[index]])
+                && ELF_PROBE_RECLAIM_MMAP_FRAMES[index].load(Ordering::SeqCst) == 0
+                && ELF_PROBE_RECLAIM_MMAP_GENERATIONS[index].load(Ordering::SeqCst) == 0;
+            if replaced && replacement_valid {
+                ELF_PROBE_RECLAIM_MMAP_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+                ELF_PROBE_RECLAIM_MMAP_GENERATIONS[index]
+                    .store(frame.generation(), Ordering::SeqCst);
+            }
+            if replaced {
+                replacement_valid
+            } else {
+                frame == initial[index]
+            }
+        });
+    }
+    valid
+}
+
+pub(crate) fn take_linux_exec_mmap_frames() -> [Option<memory::FrameLease>; 2] {
+    core::array::from_fn(|index| {
+        memory::FrameLease::from_parts(
+            ELF_PROBE_RECLAIM_MMAP_FRAMES[index].swap(0, Ordering::SeqCst),
+            ELF_PROBE_RECLAIM_MMAP_GENERATIONS[index].swap(0, Ordering::SeqCst),
+        )
+    })
+}
+
 pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfResult {
     let Some(heap_limit) = execution.heap.checked_add(execution.heap_size) else {
         return LinuxElfResult::FAILED;
@@ -2250,11 +2296,26 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         });
     let heap_reclaim_state_clean = ELF_PROBE_RECLAIM_HEAP_FRAME.load(Ordering::SeqCst) == 0
         && ELF_PROBE_RECLAIM_HEAP_GENERATION.load(Ordering::SeqCst) == 0;
+    let mmap_contract_valid = execution.mmap != 0
+        && execution.mmap.is_multiple_of(PAGE_SIZE)
+        && execution.mmap_frames[0] != execution.mmap_frames[1]
+        && execution.mmap_frames.iter().all(|frame| {
+            *frame != execution.stack_frame
+                && *frame != execution.heap_frame
+                && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame])
+        })
+        && ELF_PROBE_RECLAIM_MMAP_FRAMES
+            .iter()
+            .all(|frame| frame.load(Ordering::SeqCst) == 0)
+        && ELF_PROBE_RECLAIM_MMAP_GENERATIONS
+            .iter()
+            .all(|generation| generation.load(Ordering::SeqCst) == 0);
     if !stack_contract_valid
         || !heap_contract_valid
         || !initial_image_valid
         || !retired_image_state_clean
         || !heap_reclaim_state_clean
+        || !mmap_contract_valid
         || execution.exec_expected && execution.initial_image_count == 0
     {
         return LinuxElfResult::FAILED;
@@ -2615,8 +2676,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         ELF_PROBE_TLS_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
     }
     ELF_PROBE_MMAP.store(execution.mmap as u64, Ordering::SeqCst);
-    ELF_PROBE_MMAP_FRAME.store(execution.mmap_frames[0], Ordering::SeqCst);
-    ELF_PROBE_MMAP_TAIL_FRAME.store(execution.mmap_frames[1], Ordering::SeqCst);
+    ELF_PROBE_MMAP_FRAME.store(execution.mmap_frames[0].address(), Ordering::SeqCst);
+    ELF_PROBE_MMAP_TAIL_FRAME.store(execution.mmap_frames[1].address(), Ordering::SeqCst);
+    for (index, frame) in execution.mmap_frames.iter().copied().enumerate() {
+        ELF_PROBE_MMAP_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
+    }
     ELF_PROBE_MMAP_PAGES.store(0, Ordering::SeqCst);
     ELF_PROBE_MMAP_WRITABLE.store(false, Ordering::SeqCst);
     ELF_PROBE_MMAP_FILE.store(0, Ordering::SeqCst);
@@ -2880,6 +2944,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let selected_exec_mappings = selected_exec_plan
         .as_ref()
         .and_then(|plan| linux_exec_mapping_plan(plan));
+    let interpreted_exec_replaced = selected_interpreted_exec_plan.is_some();
     let live_return_validated = LINUX_LIVE_RETURN_VALIDATED.swap(false, Ordering::SeqCst);
     let child_exit_count = LINUX_CHILD_EXIT_COUNT.swap(0, Ordering::SeqCst);
     let parent_resumed = LINUX_PARENT_RESUMED.swap(false, Ordering::SeqCst);
@@ -3021,9 +3086,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let mmap_not_writable = !ELF_PROBE_MMAP_WRITABLE.swap(false, Ordering::SeqCst);
     let mmap_file_released = ELF_PROBE_MMAP_FILE.swap(0, Ordering::SeqCst) == 0;
     let mmap_address_valid = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64;
-    let mmap_frames_valid = ELF_PROBE_MMAP_FRAME.swap(0, Ordering::SeqCst)
-        == execution.mmap_frames[0]
-        && ELF_PROBE_MMAP_TAIL_FRAME.swap(0, Ordering::SeqCst) == execution.mmap_frames[1];
+    let mmap_frames_valid =
+        finalize_linux_exec_mmap_frames(execution.mmap_frames, interpreted_exec_replaced);
     let mmap_state_valid = mmap_inactive
         && mmap_not_writable
         && mmap_file_released
@@ -3181,7 +3245,6 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && (exec_replaced
             || copy_from_linux_user(clear_child_tid, &mut cleared_tid)
                 && cleared_tid == [0; size_of::<u32>()]);
-    let interpreted_exec_replaced = selected_interpreted_exec_plan.is_some();
     // SAFETY: the loader owns the mapped heap page through this verification,
     // and SMAP access is enabled only around the bounded read.
     let heap_contents_valid = unsafe {
@@ -5750,6 +5813,41 @@ fn linux_execve_at(
     } else {
         None
     };
+    let old_mmap_frames = if interpreted {
+        if ELF_PROBE_MMAP_PAGES.load(Ordering::SeqCst) != 0
+            || ELF_PROBE_MMAP_WRITABLE.load(Ordering::SeqCst)
+            || ELF_PROBE_MMAP_FILE.load(Ordering::SeqCst) != 0
+        {
+            return LINUX_ENOEXEC;
+        }
+        let frames = [
+            memory::FrameLease::from_parts(
+                ELF_PROBE_MMAP_FRAME.load(Ordering::SeqCst),
+                ELF_PROBE_MMAP_GENERATIONS[0].load(Ordering::SeqCst),
+            ),
+            memory::FrameLease::from_parts(
+                ELF_PROBE_MMAP_TAIL_FRAME.load(Ordering::SeqCst),
+                ELF_PROBE_MMAP_GENERATIONS[1].load(Ordering::SeqCst),
+            ),
+        ];
+        let [Some(first), Some(second)] = frames else {
+            return LINUX_ENOEXEC;
+        };
+        if first == second
+            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[first, second])
+            || ELF_PROBE_RECLAIM_MMAP_FRAMES
+                .iter()
+                .any(|frame| frame.load(Ordering::SeqCst) != 0)
+            || ELF_PROBE_RECLAIM_MMAP_GENERATIONS
+                .iter()
+                .any(|generation| generation.load(Ordering::SeqCst) != 0)
+        {
+            return LINUX_ENOEXEC;
+        }
+        Some([first, second])
+    } else {
+        None
+    };
     if interpreted && (argument_count != 1 || environment_count != 1) {
         return LINUX_E2BIG;
     }
@@ -6080,10 +6178,34 @@ fn linux_execve_at(
         let _ = release_linux_exec_frames(&mut exec_frames);
         return LINUX_ESRCH;
     }
+    let replacement_mmap_frames = if interpreted {
+        let Some(frames) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL) else {
+            let _ = set_current_linux_clear_child_tid(clear_child_tid);
+            let _ = set_current_linux_robust_list(robust_list);
+            let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
+            return LINUX_ENOMEM;
+        };
+        if !frames
+            .iter()
+            .all(|frame| address_space::prepare_linux_frame(frame.address(), &[]))
+        {
+            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &frames);
+            let _ = set_current_linux_clear_child_tid(clear_child_tid);
+            let _ = set_current_linux_robust_list(robust_list);
+            let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
+            return LINUX_ENOMEM;
+        }
+        Some(frames)
+    } else {
+        None
+    };
     if !address_space::replace_current_linux_image(
         &mappings[..transaction_mapping_count],
         &active_image_mappings[..old_mapping_count],
     ) {
+        if let Some(frames) = replacement_mmap_frames {
+            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &frames);
+        }
         let _ = set_current_linux_clear_child_tid(clear_child_tid);
         let _ = set_current_linux_robust_list(robust_list);
         let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
@@ -6111,6 +6233,16 @@ fn linux_execve_at(
         if let Some(frame) = exec_frames[mapping_count + 4] {
             ELF_PROBE_SIBLING_STACK_FRAME.store(frame.address(), Ordering::SeqCst);
             ELF_PROBE_SIBLING_STACK_GENERATION.store(frame.generation(), Ordering::SeqCst);
+        }
+        if let (Some(old_frames), Some(new_frames)) = (old_mmap_frames, replacement_mmap_frames) {
+            ELF_PROBE_MMAP_FRAME.store(new_frames[0].address(), Ordering::SeqCst);
+            ELF_PROBE_MMAP_TAIL_FRAME.store(new_frames[1].address(), Ordering::SeqCst);
+            for (index, frame) in new_frames.into_iter().enumerate() {
+                ELF_PROBE_MMAP_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
+            }
+            if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &old_frames) {
+                return LINUX_ENOMEM;
+            }
         }
     }
     ELF_PROBE_BRK.store(heap_base, Ordering::SeqCst);

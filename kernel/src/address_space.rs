@@ -642,7 +642,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     heap: heap_virtual_page as usize,
                     heap_size: PAGE_SIZE,
                     mmap: mmap_virtual_page as usize,
-                    mmap_frames: [mmap_page, mmap_tail_page],
+                    mmap_frames: [frames[16], frames[17]],
                     main_mappings: [cpu::LinuxFileMapping::EMPTY; 8],
                     dependency_base_min: [0; 2],
                     dependency_base_end: [0; 2],
@@ -1222,6 +1222,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let mut exec_heap_frame = None;
     let mut exec_tls_frames = [None; 2];
     let mut exec_sibling_stack_frame = None;
+    let mut exec_mmap_frames = [None; 2];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [
@@ -1620,7 +1621,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     heap: heap_virtual_page as usize,
                     heap_size: PAGE_SIZE,
                     mmap: mmap_virtual_page as usize,
-                    mmap_frames: [mmap_page, mmap_tail_page],
+                    mmap_frames: [frames[11], frames[12]],
                     main_mappings,
                     dependency_base_min: dependency_base_min.map(|base| base as usize),
                     dependency_base_end: dependency_base_end.map(|base| base as usize),
@@ -1642,6 +1643,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             exec_heap_frame = cpu::take_linux_exec_heap_frame();
             exec_tls_frames = cpu::take_linux_exec_tls_frames();
             exec_sibling_stack_frame = cpu::take_linux_exec_sibling_stack_frame();
+            exec_mmap_frames = cpu::take_linux_exec_mmap_frames();
             let expected_active_image_count = initial_image_count
                 + main_mappings
                     .iter()
@@ -1693,6 +1695,17 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 });
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
+            let exec_mmap_frames_valid = executed
+                && exec_mmap_frames.iter().enumerate().all(|(index, frame)| {
+                    frame.is_some_and(|frame| {
+                        frame != frames[11 + index]
+                            && !memory::frames_owned_by(
+                                memory::FrameOwner::KERNEL,
+                                &[frames[11 + index]],
+                            )
+                            && frame_is_zero(frame.address())
+                    })
+                });
             let tls_runtime_valid = executed
                 && main_entries.add(tls_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
@@ -1964,6 +1977,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             if !mapping_removed {
                 crate::serial_write_bytes(b"\r\nginux: linked dynamic mmap teardown incomplete");
             }
+            if !exec_mmap_frames_valid {
+                crate::serial_write_bytes(b"\r\nginux: replacement Linux mmap backing invalid");
+            }
             if !tls_runtime_valid {
                 crate::serial_write_bytes(b"\r\nginux: initial Linux TLS runtime invalid");
             }
@@ -2022,6 +2038,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 permissions_valid
                     && executed
                     && mapping_removed
+                    && exec_mmap_frames_valid
                     && tls_runtime_valid
                     && sibling_tls_runtime_valid
                     && sibling_stack_runtime_valid
@@ -2049,6 +2066,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             || (index == 13 && exec_tls_frames[0].is_some())
             || (index == 14 && exec_tls_frames[1].is_some())
             || (index == 15 && exec_sibling_stack_frame.is_some())
+            || ((index == 11 || index == 12) && exec_mmap_frames[index - 11].is_some())
         {
             true
         } else {
@@ -2090,6 +2108,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
         prepare_linux_frame(frame.address(), &[])
             && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
     });
+    let exec_mmap_frames_released = exec_mmap_frames.into_iter().all(|frame| {
+        frame.is_some_and(|frame| {
+            prepare_linux_frame(frame.address(), &[])
+                && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
+        })
+    });
     let mut original_frames_released = sibling_resources_scrubbed;
     if sibling_resources_scrubbed {
         for frame in frames {
@@ -2121,6 +2145,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
         && exec_heap_frame_released
         && exec_tls_frames_released
         && exec_sibling_stack_frame_released
+        && exec_mmap_frames_released
         && main_frames_released
         && dependency_frames_released
         && frame_count_restored

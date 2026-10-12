@@ -456,6 +456,11 @@ are revalidated after execution. Both old TLS leases must be retired, and both
 replacement leases are scrubbed and reclaimed only after the process root is
 inactive. The old sibling-stack lease is likewise scrubbed at commit, and its
 replacement is validated and reclaimed only after the root is inactive.
+The two inactive anonymous-mapping reserve frames are also generation-bound.
+Interpreted exec preallocates and zeros their replacements before commit,
+publishes them only after the image transaction succeeds, and scrubs the exact
+old leases. Both replacement reserves must remain unmapped and zeroed through
+execution and are reclaimed after the process root becomes inactive.
 
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF

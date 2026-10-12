@@ -421,10 +421,12 @@ pre-exec set, caught dispositions are cleared, and RELRO is applied again.
 The replacement main emits the kernel-observed `DYNEXEC` completion by exiting
 with status 42. Other dynamic targets, general dependency resolution,
 shebangs, and arbitrary interpreted argument or environment vectors are
-outside this version. The process page-table hierarchy and inactive
-preallocated anonymous-mapping backing frames remain allocated across this
-transaction. Replacing the heap outside the interpreted profile and those
-retained leases are later lifecycle milestones.
+outside this version. The process page-table hierarchy remains allocated across
+this transaction. The inactive anonymous-mapping backing frames are replaced
+with fresh zeroed generation-bound leases after the image commit; the old exact
+leases are scrubbed and retired, and teardown reclaims the replacements.
+Replacing the heap outside the interpreted profile and the retained page-table
+hierarchy are later lifecycle milestones.
 
 `rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
 or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath
