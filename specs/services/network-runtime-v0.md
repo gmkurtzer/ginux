@@ -55,6 +55,11 @@ probe, and exits cleanly. Its common and notification mappings remain inert
 because PCI decoding is disabled; its owned DMA page remains inaccessible to
 the device because VT-d and bus mastering are disabled. Teardown revokes the
 capability and scrubs the bootstrap, image, stack, page-table, and DMA frames.
+A separate measured generation receives an otherwise valid record with a
+nonzero reserved field. The service rejects it through its fault path before
+accessing MMIO or probing the capability; the kernel contains the fault,
+restores its root, revokes the capability, and scrubs all resources while PCI
+and VT-d remain inactive.
 
 ## Deliberate limits
 

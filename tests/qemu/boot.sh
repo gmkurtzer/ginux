@@ -190,6 +190,14 @@ if ! grep -q '^ginux: native network bootstrap ABI v0 validated in ring 3' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: malformed native network bootstrap rejected in ring 3' "$output_file" ||
+    ! grep -q '^ginux: malformed network generation fault contained' "$output_file" ||
+    ! grep -q '^ginux: malformed network capability revoked' "$output_file" ||
+    ! grep -q '^ginux: malformed network resources retired before device activation' "$output_file"; then
+    echo "Boot test failed: malformed native network bootstrap was not contained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

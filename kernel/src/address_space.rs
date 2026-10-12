@@ -4334,6 +4334,10 @@ impl NativeServiceAddressSpace {
         if !info.is_valid_virtio_network() {
             return false;
         }
+        self.write_network_boot_info_raw(info)
+    }
+
+    fn write_network_boot_info_raw(&self, info: ginux_native_abi::NativeNetworkBootV0) -> bool {
         let Some(page) =
             mapped_frame::<ginux_native_abi::NativeNetworkBootV0>(self.frames[12].address())
         else {
@@ -4557,6 +4561,25 @@ pub(crate) fn verify_native_network_bootstrap(
     initialization: VirtioNetworkInitialization,
     iommu_profile: iommu::DeviceTranslationProfile,
 ) -> bool {
+    verify_native_network_bootstrap_run(image, device, initialization, iommu_profile, false)
+}
+
+pub(crate) fn verify_native_network_bootstrap_rejection(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+) -> bool {
+    verify_native_network_bootstrap_run(image, device, initialization, iommu_profile, true)
+}
+
+fn verify_native_network_bootstrap_run(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    reject_reserved: bool,
+) -> bool {
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4637,7 +4660,7 @@ pub(crate) fn verify_native_network_bootstrap(
         .mac
         .into_iter()
         .fold(0_u64, |value, byte| (value << 8) | u64::from(byte));
-    if !space.write_network_boot_info(ginux_native_abi::NativeNetworkBootV0::virtio_network(
+    let mut boot = ginux_native_abi::NativeNetworkBootV0::virtio_network(
         user_common as u64,
         user_receive as u64,
         user_transmit as u64,
@@ -4645,7 +4668,17 @@ pub(crate) fn verify_native_network_bootstrap(
         dma_physical,
         handle,
         mac,
-    )) || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT + 1)
+    );
+    if reject_reserved {
+        boot.reserved = 1;
+    }
+    let boot_written = if reject_reserved {
+        !boot.is_valid_virtio_network() && space.write_network_boot_info_raw(boot)
+    } else {
+        space.write_network_boot_info(boot)
+    };
+    if !boot_written
+        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT + 1)
     {
         let _ = space.release();
         return false;
@@ -4674,6 +4707,11 @@ pub(crate) fn verify_native_network_bootstrap(
     }
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     let event = domain::take_lifecycle_event();
+    let expected_kind = if reject_reserved {
+        crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+    } else {
+        crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
+    };
     current_root() == kernel_root
         && scheduler::current_domain().is_none()
         && registered_auxiliary_address_space_count() == 0
@@ -4685,14 +4723,11 @@ pub(crate) fn verify_native_network_bootstrap(
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             crate::capability::Rights::READ,
         )
-        && event
-            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED))
-        && domain::last_lifecycle_event_audit().is_some_and(|(kind, audited, _)| {
-            kind == crate::control_abi::LIFECYCLE_AUXILIARY_EXITED && audited == auxiliary
-        })
-        && domain::last_lifecycle_event_detail()
-            == Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED)
-        && domain::last_lifecycle_event_has_fault() == Some(false)
+        && event == Some((auxiliary << 8) | u64::from(expected_kind))
+        && domain::last_lifecycle_event_audit()
+            .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary)
+        && domain::last_lifecycle_event_detail() == Some(0)
+        && domain::last_lifecycle_event_has_fault() == Some(reject_reserved)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::take_lifecycle_event().is_none()
         && iommu_profile.is_inactive()

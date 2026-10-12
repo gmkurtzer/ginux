@@ -2846,6 +2846,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: native network DMA lease remained device-inaccessible");
     serial_write("\r\nginux: native network MMIO remained PCI-disabled");
     serial_write("\r\nginux: native network bootstrap resources retired cleanly");
+    if !address_space::verify_native_network_bootstrap_rejection(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+    ) {
+        kernel_fail("\r\nginux: malformed native network bootstrap invariant failed\r\n");
+    }
+    serial_write("\r\nginux: malformed native network bootstrap rejected in ring 3");
+    serial_write("\r\nginux: malformed network generation fault contained");
+    serial_write("\r\nginux: malformed network capability revoked");
+    serial_write("\r\nginux: malformed network resources retired before device activation");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

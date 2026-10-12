@@ -49,5 +49,8 @@ ABI v0 is exact-version only. The first delivery proof maps the common and
 notification pages and allocates one DMA page, but keeps PCI memory decoding,
 bus mastering, MSI-X, and VT-d disabled. The service exercises only its
 read-only logical network capability and exits; teardown revokes the capability
-and scrubs every owned frame. Device activation, interrupts, and packet-queue
-contents require separate generation-bound kernel checks and QEMU proofs.
+and scrubs every owned frame. A separate generation receives a nonzero reserved
+field, faults before device activation, and undergoes the same capability,
+address-space, and DMA retirement. Device activation, interrupts, and
+packet-queue contents require separate generation-bound kernel checks and QEMU
+proofs.

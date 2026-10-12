@@ -111,6 +111,8 @@ freezes the common configuration, RX/TX notifications, DMA identity,
 generation capability, and MAC fields. A second service generation validates
 that record and its read-only logical network capability while PCI decoding,
 bus mastering, MSI-X, and VT-d remain disabled, then retires every owned frame.
+A malformed-reserved-field generation is separately contained and retired
+before device activation.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
