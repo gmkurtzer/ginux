@@ -654,11 +654,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     // direct-map alias covers the complete physical frame, and the lease stays
     // live until the device has reset and bus mastering is disabled.
     let Some(virtio_read) = (unsafe {
-        arch::x86_64::pci::read_zero_sector(
+        arch::x86_64::pci::read_blank_sector(
             virtio_block,
             virtio_mmio,
             virtio_dma_frame.address(),
             virtio_dma_virtual,
+            2,
         )
     }) else {
         kernel_fail("\r\nginux: bounded virtio block read failed\r\n");
@@ -666,6 +667,42 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if virtio_read.capacity_sectors != 2048 || virtio_read.used_length != 513 {
         kernel_fail("\r\nginux: deterministic virtio block geometry invalid\r\n");
     }
+    // SAFETY: The one-shot probe returned only after reset and bus-master
+    // revocation. The same exclusive lease remains live and is reused by the
+    // persistent backend until `finish` proves teardown.
+    let Some(mut persistent_block) = (unsafe {
+        arch::x86_64::pci::VirtioBlockBackend::start(
+            virtio_block,
+            virtio_mmio,
+            virtio_dma_frame.address(),
+            virtio_dma_virtual,
+        )
+    }) else {
+        kernel_fail("\r\nginux: persistent virtio backend activation failed\r\n");
+    };
+    const DISK_VOLUME_PAYLOAD: &[u8] = b"ginux-reboot-persistent\n";
+    let disk_volume = (|| {
+        if persistent_block.capacity_sectors() != 2048 {
+            return None;
+        }
+        let initial = volume::recover(&mut persistent_block);
+        let recovered_after_reboot = initial.is_some();
+        let record = match initial {
+            Some(record) => record,
+            None => volume::commit(&mut persistent_block, DISK_VOLUME_PAYLOAD).ok()?,
+        };
+        if record.generation != 1 || record.payload() != DISK_VOLUME_PAYLOAD {
+            return None;
+        }
+        let verified = volume::recover(&mut persistent_block)?;
+        (verified == record).then_some((verified, recovered_after_reboot))
+    })();
+    if !persistent_block.finish() {
+        kernel_fail("\r\nginux: persistent virtio backend teardown failed\r\n");
+    }
+    let Some((disk_record, recovered_after_reboot)) = disk_volume else {
+        kernel_fail("\r\nginux: persistent virtio volume transaction failed\r\n");
+    };
     if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[virtio_dma_frame])
         || memory::any_frame_lease_live(&[virtio_dma_frame])
     {
@@ -673,13 +710,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: generation-owned virtio DMA frame allocated");
     serial_write("\r\nginux: malformed virtio queue geometry rejected");
-    serial_write("\r\nginux: bounded virtio sector zero read completed");
+    serial_write("\r\nginux: bounded blank virtio sector read completed");
     serial_write("\r\nginux: virtio read guard bytes preserved");
     serial_write("\r\nginux: virtio used-ring completion validated");
     serial_write("\r\nginux: deterministic virtio capacity sectors: ");
     serial_write_u64(virtio_read.capacity_sectors);
     serial_write("\r\nginux: virtio bus mastering revoked after read");
     serial_write("\r\nginux: virtio DMA frame scrubbed and released");
+    serial_write("\r\nginux: bounded virtio volume transaction completed");
+    serial_write("\r\nginux: persistent virtio device reset and bus mastering revoked");
+    serial_write("\r\nginux: disk-backed volume generation: ");
+    serial_write_u64(disk_record.generation);
+    serial_write(if recovered_after_reboot {
+        "\r\nginux: disk-backed volume recovered after reboot"
+    } else {
+        "\r\nginux: disk-backed volume initialized and flushed"
+    });
     if !address_space::verify_isolated_user_mapping() {
         kernel_fail("\r\nginux: isolated address-space test failed\r\n");
     }

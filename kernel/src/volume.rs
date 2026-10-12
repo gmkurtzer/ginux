@@ -21,7 +21,7 @@ const DIGEST_SIZE: usize = 32;
 const RESERVED_OFFSET: usize = 64;
 
 pub(crate) trait BlockDevice {
-    fn read_sector(&self, sector: usize, output: &mut [u8; SECTOR_SIZE]) -> bool;
+    fn read_sector(&mut self, sector: usize, output: &mut [u8; SECTOR_SIZE]) -> bool;
     fn write_sector(&mut self, sector: usize, input: &[u8; SECTOR_SIZE]) -> bool;
     fn flush(&mut self) -> bool;
 }
@@ -63,7 +63,7 @@ pub(crate) fn commit<D: BlockDevice>(
         .ok_or(CommitError::Device)
 }
 
-pub(crate) fn recover<D: BlockDevice>(device: &D) -> Option<Record> {
+pub(crate) fn recover<D: BlockDevice>(device: &mut D) -> Option<Record> {
     recover_with_slot(device)
         .ok()
         .flatten()
@@ -133,7 +133,7 @@ fn scan_error(error: ScanError) -> CommitError {
     }
 }
 
-fn recover_with_slot<D: BlockDevice>(device: &D) -> Result<Option<(usize, Record)>, ScanError> {
+fn recover_with_slot<D: BlockDevice>(device: &mut D) -> Result<Option<(usize, Record)>, ScanError> {
     let mut sector = [0_u8; SECTOR_SIZE];
     let mut selected: Option<(usize, Record)> = None;
     for slot in 0..SLOT_COUNT {
@@ -261,18 +261,18 @@ pub(crate) fn install_live() -> bool {
     unsafe {
         core::ptr::addr_of_mut!(LIVE_DEVICE).write(MaybeUninit::new(MemoryBlockDevice::new()));
     }
-    live_device().is_some_and(|device| recover(device).is_none())
+    live_device_mut().is_some_and(|device| recover(device).is_none())
 }
 
 pub(crate) fn live_generation() -> Result<u64, LiveError> {
-    let device = live_device().ok_or(LiveError::Device)?;
+    let device = live_device_mut().ok_or(LiveError::Device)?;
     recover_with_slot(device)
         .map_err(live_scan_error)
         .map(|record| record.map_or(0, |(_, record)| record.generation))
 }
 
 pub(crate) fn read_live(expected_generation: u64, output: &mut [u8]) -> Result<usize, LiveError> {
-    let device = live_device().ok_or(LiveError::Device)?;
+    let device = live_device_mut().ok_or(LiveError::Device)?;
     let record = recover_with_slot(device)
         .map_err(live_scan_error)?
         .map(|(_, record)| record)
@@ -312,13 +312,6 @@ fn live_scan_error(error: ScanError) -> LiveError {
     }
 }
 
-fn live_device() -> Option<&'static MemoryBlockDevice> {
-    if !LIVE_INSTALLED.load(Ordering::Acquire) {
-        return None;
-    }
-    Some(unsafe { &*core::ptr::addr_of!(LIVE_DEVICE).cast::<MemoryBlockDevice>() })
-}
-
 fn live_device_mut() -> Option<&'static mut MemoryBlockDevice> {
     if !LIVE_INSTALLED.load(Ordering::Acquire) {
         return None;
@@ -340,7 +333,7 @@ impl MemoryBlockDevice {
 }
 
 impl BlockDevice for MemoryBlockDevice {
-    fn read_sector(&self, sector: usize, output: &mut [u8; SECTOR_SIZE]) -> bool {
+    fn read_sector(&mut self, sector: usize, output: &mut [u8; SECTOR_SIZE]) -> bool {
         let Some(source) = self.pending.get(sector) else {
             return false;
         };
@@ -385,7 +378,7 @@ pub(crate) fn verify_contract() -> bool {
             return false;
         }
         device.crash();
-        let Some(recovered) = recover(&device) else {
+        let Some(recovered) = recover(&mut device) else {
             return false;
         };
         let expected = if stage == CommitStage::FinalFlush {
@@ -426,7 +419,7 @@ fn verify_rejections(baseline: MemoryBlockDevice) -> bool {
         let mut device = two_generations;
         device.durable[1][offset] ^= 1;
         device.crash();
-        if recover(&device).is_none_or(|record| {
+        if recover(&mut device).is_none_or(|record| {
             record.generation != 1 || record.payload() != b"volume-generation-one"
         }) {
             return false;
@@ -440,7 +433,7 @@ fn verify_rejections(baseline: MemoryBlockDevice) -> bool {
         device.durable[1][COMMIT_OFFSET..COMMIT_OFFSET + committed_marker_bytes]
             .copy_from_slice(&committed[COMMIT_OFFSET..COMMIT_OFFSET + committed_marker_bytes]);
         device.crash();
-        let Some(record) = recover(&device) else {
+        let Some(record) = recover(&mut device) else {
             return false;
         };
         let expected_generation = if committed_marker_bytes == 8 { 2 } else { 1 };
@@ -463,6 +456,6 @@ fn verify_rejections(baseline: MemoryBlockDevice) -> bool {
     let (_, right) = encode(7, b"right");
     ambiguous.pending = [left, right];
     ambiguous.flush()
-        && recover(&ambiguous).is_none()
+        && recover(&mut ambiguous).is_none()
         && commit(&mut ambiguous, b"must-not-overwrite") == Err(CommitError::Corrupt)
 }

@@ -1,15 +1,15 @@
 # Persistent Volume Record v0
 
-**Status:** Two-slot format and recovery algorithm verified against an in-memory
-block-device model during every QEMU boot and exposed through a bounded ring-3
-service contract. No physical or virtual block-device backend is connected yet.
+**Status:** Two-slot format and recovery algorithm verified against both the
+in-memory fault model and a flushed virtio-blk backend across two QEMU boots.
+The ring-3 service path still uses the in-memory backend.
 
 ## Purpose
 
 This contract is the first M6 persistent-storage primitive. It defines how one
 bounded value becomes durable without overwriting the last committed value.
 It is a block format and ordering contract for a future isolated storage
-service, not a filesystem or a claim of machine-reboot persistence.
+service, not a filesystem.
 
 ## Device contract
 
@@ -69,8 +69,8 @@ available.
 
 ## Boot proof
 
-The kernel reference backend separates pending writes from durable sectors.
-The boot proof creates generation one and crashes independent device copies
+The in-memory reference backend separates pending writes from durable sectors.
+Its boot proof creates generation one and crashes independent device copies
 before the prepared write, after the prepared write, after the first flush,
 after the commit write, and after the final flush. Each recovery returns
 exactly the old or new complete payload required above.
@@ -78,17 +78,26 @@ exactly the old or new complete payload required above.
 The proof also checks every partial commit-marker length, corruption in each
 header class, the digest, reserved bytes, and payload, fallback from a corrupt
 new slot to the old slot, oversized payload rejection, generation exhaustion,
-and equal-generation ambiguity. The automated QEMU gate requires all three
-volume validation markers before accepting the boot.
+and equal-generation ambiguity.
+
+A second proof binds the same `BlockDevice` contract to the modern virtio-blk
+queue. The automated gate creates a fresh 1 MiB raw disk, boots once to commit
+generation one into sectors zero and one, and boots a second VM with the same
+disk. The recovery boot must return generation one and the exact payload
+without taking the initialization path. Both boots must complete device reset,
+bus-master revocation, DMA scrubbing, and the normal kernel success marker. See
+[Virtio-backed Persistent Volume v0](virtio-volume-v0.md).
 
 ## Deliberate limits
 
-- The reference backend is volatile memory and does not survive QEMU restart.
+- The capability-separated ring-3 service still uses volatile kernel memory;
+  only the bootstrap proof is bound to virtio-blk.
 - The format holds one value of at most 440 bytes; it has no allocation,
   filesystem, journal, names, snapshots, or concurrency.
 - Control ABI v4 operation 18 exposes a bounded 64-byte capability-separated
   service path; there is no Linux block-device exposure.
-- There is no virtio-blk, NVMe, DMA, interrupt, or hardware queue backend.
+- There is no NVMe backend, interrupt-driven completion, isolated storage
+  service, or IOMMU confinement.
 - SHA-256 is an integrity checksum here, not a signature or MAC.
 - Throughput, p99 latency, endurance, discard, barriers beyond flush, and
   multi-sector atomicity remain M6 work.

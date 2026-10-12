@@ -5,8 +5,9 @@
 ## Purpose
 
 This contract performs the first real block-device transaction: one read of
-sector zero from the deterministic 1 MiB QEMU disk. It proves queue mechanics
-and DMA lease lifecycle without modifying persistent media.
+reserved sector two from the deterministic 1 MiB QEMU disk. Sectors zero and
+one are reserved for the persistent-volume record. The probe proves queue
+mechanics and DMA lease lifecycle without modifying its target sector.
 
 ## MMIO and device geometry
 
@@ -27,7 +28,7 @@ kernel-owned 4 KiB lease. The page contains:
 - eight 16-byte descriptor slots at offset `0x000`;
 - the available ring at `0x100`;
 - the used ring at `0x200`;
-- a 16-byte read request for sector zero at `0x400`;
+- a 16-byte read request for sector two at `0x400`;
 - a 512-byte device-writable data buffer at `0x600`; and
 - a one-byte device-writable status at `0x900`.
 
@@ -62,7 +63,8 @@ confinement is **not** proven while bus mastering is enabled. An IOMMU domain
 must bind the device to its owned queue/data frames before untrusted physical
 hardware or an isolated userspace driver may use this path.
 
-The implementation polls synchronously with interrupts disabled. It supports
-one queue, one in-flight read, no write request, no flush request, no timeout
-recovery beyond device reset, and no userspace block-service API. It does not
-yet connect the persistent-volume record to the disk.
+The probe polls synchronously with interrupts disabled and permits one in-flight
+request. The reusable queue added on top of this layout supports bounded reads,
+writes, and flushes for the persistent-volume proof, but still has no interrupt
+completion, cancellation, userspace block-service API, or timeout recovery
+beyond device reset. See [Virtio-backed Persistent Volume v0](virtio-volume-v0.md).

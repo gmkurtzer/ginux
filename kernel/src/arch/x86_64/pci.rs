@@ -3,6 +3,7 @@ use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{compiler_fence, Ordering};
 
 use super::paging::MmioMapping;
+use crate::volume;
 
 const CONFIG_ADDRESS_PORT: u16 = 0x0cf8;
 const CONFIG_DATA_PORT: u16 = 0x0cfc;
@@ -154,6 +155,31 @@ pub(crate) struct VirtioBlockRead {
     pub(crate) used_length: u32,
 }
 
+pub(crate) struct VirtioBlockBackend {
+    device: VirtioBlockDevice,
+    common: usize,
+    notification: usize,
+    dma_physical: u64,
+    dma_virtual: usize,
+    capacity_sectors: u64,
+    queue_size: u16,
+    available_index: u16,
+    used_index: u16,
+    active: bool,
+}
+
+enum BlockOperation<'a> {
+    Read {
+        sector: u64,
+        output: &'a mut [u8; DATA_LENGTH],
+    },
+    Write {
+        sector: u64,
+        input: &'a [u8; DATA_LENGTH],
+    },
+    Flush,
+}
+
 #[derive(Clone, Copy)]
 struct Region {
     bar_address: u64,
@@ -271,11 +297,12 @@ pub(crate) fn initialize_without_dma(
 /// `dma_virtual` must be a writable direct-map alias of the complete physical
 /// page at `dma_physical`, and that page must remain exclusively owned until
 /// this function returns.
-pub(crate) unsafe fn read_zero_sector(
+pub(crate) unsafe fn read_blank_sector(
     device: VirtioBlockDevice,
     mapping: MmioMapping,
     dma_physical: u64,
     dma_virtual: usize,
+    sector: u64,
 ) -> Option<VirtioBlockRead> {
     if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
         || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
@@ -307,7 +334,7 @@ pub(crate) unsafe fn read_zero_sector(
             return None;
         }
         let capacity_sectors = read_capacity(common, device_configuration)?;
-        if capacity_sectors == 0 {
+        if capacity_sectors == 0 || sector >= capacity_sectors {
             return None;
         }
 
@@ -334,7 +361,7 @@ pub(crate) unsafe fn read_zero_sector(
             return None;
         }
 
-        prepare_read_request(dma_physical, dma_virtual);
+        prepare_read_request(dma_physical, dma_virtual, sector);
         write_common_u64(common, COMMON_QUEUE_DESC, dma_physical + DESC_OFFSET as u64);
         write_common_u64(
             common,
@@ -399,6 +426,230 @@ pub(crate) unsafe fn read_zero_sector(
         return None;
     }
     result
+}
+
+impl VirtioBlockBackend {
+    /// Activates queue zero over one exclusively owned DMA page.
+    ///
+    /// # Safety
+    ///
+    /// The DMA addresses must satisfy the same ownership and alias contract as
+    /// [`read_blank_sector`] and remain live until `finish` succeeds.
+    pub(crate) unsafe fn start(
+        device: VirtioBlockDevice,
+        mapping: MmioMapping,
+        dma_physical: u64,
+        dma_virtual: usize,
+    ) -> Option<Self> {
+        if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+            || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+            || dma_physical.checked_add(DMA_PAGE_SIZE as u64).is_none()
+        {
+            return None;
+        }
+        let (common_physical, common_length) = device.common_region()?;
+        if common_length < COMMON_QUEUE_DEVICE + size_of::<u64>() {
+            return None;
+        }
+        let common = mapping.address(common_physical, common_length)?;
+        let (notify_physical, notify_length) = device.notify_region()?;
+        let (device_physical, device_length) = device.device_region()?;
+        if device_length < size_of::<u64>() {
+            return None;
+        }
+        let device_configuration = mapping.address(device_physical, device_length)?;
+        if common % align_of::<u64>() != 0 || device_configuration % align_of::<u64>() != 0 {
+            return None;
+        }
+        if !set_pci_command(device, false) {
+            return None;
+        }
+
+        let started = (|| {
+            negotiate(common)?;
+            let capacity_sectors = read_capacity(common, device_configuration)?;
+            if capacity_sectors == 0 {
+                return None;
+            }
+            write_common_u16(common, COMMON_QUEUE_SELECT, 0);
+            let queue_size = select_queue_size(read_common_u16(common, COMMON_QUEUE_SIZE))?;
+            write_common_u16(common, COMMON_QUEUE_SIZE, queue_size);
+            if read_common_u16(common, COMMON_QUEUE_SIZE) != queue_size {
+                return None;
+            }
+            let notify_offset = notification_byte_offset(
+                read_common_u16(common, COMMON_QUEUE_NOTIFY_OFF),
+                device.notify_multiplier,
+                notify_length,
+            )?;
+            let notification = mapping.address(
+                notify_physical.checked_add(notify_offset as u64)?,
+                size_of::<u16>(),
+            )?;
+            if notification % align_of::<u16>() != 0 {
+                return None;
+            }
+
+            unsafe { core::ptr::write_bytes(dma_virtual as *mut u8, 0, DMA_PAGE_SIZE) };
+            write_common_u64(common, COMMON_QUEUE_DESC, dma_physical + DESC_OFFSET as u64);
+            write_common_u64(
+                common,
+                COMMON_QUEUE_DRIVER,
+                dma_physical + AVAIL_OFFSET as u64,
+            );
+            write_common_u64(
+                common,
+                COMMON_QUEUE_DEVICE,
+                dma_physical + USED_OFFSET as u64,
+            );
+            write_common_u16(common, COMMON_QUEUE_ENABLE, 1);
+            if read_common_u16(common, COMMON_QUEUE_ENABLE) != 1 {
+                return None;
+            }
+            write_common_u8(
+                common,
+                COMMON_DEVICE_STATUS,
+                STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK,
+            );
+            if read_common_u8(common, COMMON_DEVICE_STATUS) & STATUS_DRIVER_OK == 0
+                || !set_pci_command(device, true)
+            {
+                return None;
+            }
+            Some(Self {
+                device,
+                common,
+                notification,
+                dma_physical,
+                dma_virtual,
+                capacity_sectors,
+                queue_size,
+                available_index: 0,
+                used_index: 0,
+                active: true,
+            })
+        })();
+
+        if started.is_none() {
+            let _ = set_pci_command(device, false);
+            let _ = reset(common);
+        }
+        started
+    }
+
+    pub(crate) fn capacity_sectors(&self) -> u64 {
+        self.capacity_sectors
+    }
+
+    pub(crate) fn finish(&mut self) -> bool {
+        if !self.active {
+            return false;
+        }
+        let disabled = set_pci_command(self.device, false);
+        let reset_complete = reset(self.common).is_some();
+        let safe = disabled && reset_complete && bus_master_is_disabled(self.device);
+        if safe {
+            self.active = false;
+        }
+        safe
+    }
+
+    fn submit(&mut self, operation: BlockOperation<'_>) -> bool {
+        if !self.active {
+            return false;
+        }
+        let (request_type, sector, data_length, device_writes, expected_used) = match &operation {
+            BlockOperation::Read { sector, .. } => (0_u32, *sector, DATA_LENGTH, true, 513_u32),
+            BlockOperation::Write { sector, .. } => (1_u32, *sector, DATA_LENGTH, false, 1_u32),
+            BlockOperation::Flush => (4_u32, 0, 0, false, 1_u32),
+        };
+        if data_length != 0 && sector >= self.capacity_sectors {
+            return false;
+        }
+        prepare_operation(
+            self.dma_physical,
+            self.dma_virtual,
+            request_type,
+            sector,
+            data_length,
+            device_writes,
+            match &operation {
+                BlockOperation::Write { input, .. } => Some(*input),
+                _ => None,
+            },
+        );
+
+        let available_slot = usize::from(self.available_index % self.queue_size);
+        let used_slot = usize::from(self.used_index % self.queue_size);
+        if read_dma_u16(self.dma_virtual + USED_OFFSET + 2) != self.used_index {
+            return false;
+        }
+        write_dma_u16(
+            self.dma_virtual + AVAIL_OFFSET + 4 + available_slot * size_of::<u16>(),
+            0,
+        );
+        compiler_fence(Ordering::SeqCst);
+        let expected_available = self.available_index.wrapping_add(1);
+        write_dma_u16(self.dma_virtual + AVAIL_OFFSET + 2, expected_available);
+        self.available_index = expected_available;
+        write_mmio_u16(self.notification, 0);
+
+        let expected_used_index = self.used_index.wrapping_add(1);
+        let mut completed = false;
+        for _ in 0..QUEUE_POLL_LIMIT {
+            compiler_fence(Ordering::SeqCst);
+            if read_common_u8(self.common, COMMON_DEVICE_STATUS)
+                & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED)
+                != 0
+            {
+                return false;
+            }
+            if read_dma_u16(self.dma_virtual + USED_OFFSET + 2) == expected_used_index {
+                completed = true;
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        compiler_fence(Ordering::SeqCst);
+        let used_element = self.dma_virtual + USED_OFFSET + 4 + used_slot * 8;
+        if !completed
+            || read_dma_u32(used_element) != 0
+            || read_dma_u32(used_element + 4) != expected_used
+            || read_dma_u8(self.dma_virtual + STATUS_OFFSET) != 0
+            || (data_length != 0
+                && (read_dma_u8(self.dma_virtual + DATA_OFFSET - 1) != 0x3c
+                    || read_dma_u8(self.dma_virtual + DATA_OFFSET + DATA_LENGTH) != 0xc3))
+        {
+            return false;
+        }
+        self.used_index = expected_used_index;
+        if let BlockOperation::Read { output, .. } = operation {
+            for (offset, byte) in output.iter_mut().enumerate() {
+                *byte = read_dma_u8(self.dma_virtual + DATA_OFFSET + offset);
+            }
+        }
+        true
+    }
+}
+
+impl volume::BlockDevice for VirtioBlockBackend {
+    fn read_sector(&mut self, sector: usize, output: &mut [u8; DATA_LENGTH]) -> bool {
+        let Ok(sector) = u64::try_from(sector) else {
+            return false;
+        };
+        self.submit(BlockOperation::Read { sector, output })
+    }
+
+    fn write_sector(&mut self, sector: usize, input: &[u8; DATA_LENGTH]) -> bool {
+        let Ok(sector) = u64::try_from(sector) else {
+            return false;
+        };
+        self.submit(BlockOperation::Write { sector, input })
+    }
+
+    fn flush(&mut self) -> bool {
+        self.submit(BlockOperation::Flush)
+    }
 }
 
 fn negotiate(common: usize) -> Option<VirtioBlockInitialization> {
@@ -537,7 +788,7 @@ fn read_capacity(common: usize, device_configuration: usize) -> Option<u64> {
     None
 }
 
-fn prepare_read_request(dma_physical: u64, dma_virtual: usize) {
+fn prepare_read_request(dma_physical: u64, dma_virtual: usize, sector: u64) {
     unsafe { core::ptr::write_bytes(dma_virtual as *mut u8, 0, DMA_PAGE_SIZE) };
     write_dma_u64(
         dma_virtual + DESC_OFFSET,
@@ -565,7 +816,7 @@ fn prepare_read_request(dma_physical: u64, dma_virtual: usize) {
 
     write_dma_u32(dma_virtual + REQUEST_OFFSET, 0);
     write_dma_u32(dma_virtual + REQUEST_OFFSET + 4, 0);
-    write_dma_u64(dma_virtual + REQUEST_OFFSET + 8, 0);
+    write_dma_u64(dma_virtual + REQUEST_OFFSET + 8, sector);
     unsafe {
         core::ptr::write_bytes((dma_virtual + DATA_OFFSET) as *mut u8, 0xa5, DATA_LENGTH);
     }
@@ -576,6 +827,70 @@ fn prepare_read_request(dma_physical: u64, dma_virtual: usize) {
     write_dma_u16(dma_virtual + AVAIL_OFFSET, 0);
     write_dma_u16(dma_virtual + AVAIL_OFFSET + 2, 1);
     write_dma_u16(dma_virtual + AVAIL_OFFSET + 4, 0);
+    compiler_fence(Ordering::SeqCst);
+}
+
+fn prepare_operation(
+    dma_physical: u64,
+    dma_virtual: usize,
+    request_type: u32,
+    sector: u64,
+    data_length: usize,
+    device_writes: bool,
+    input: Option<&[u8; DATA_LENGTH]>,
+) {
+    unsafe {
+        core::ptr::write_bytes((dma_virtual + DESC_OFFSET) as *mut u8, 0, 3 * 16);
+        core::ptr::write_bytes((dma_virtual + REQUEST_OFFSET) as *mut u8, 0, 16);
+    }
+    write_dma_u32(dma_virtual + REQUEST_OFFSET, request_type);
+    write_dma_u64(dma_virtual + REQUEST_OFFSET + 8, sector);
+    write_dma_u64(
+        dma_virtual + DESC_OFFSET,
+        dma_physical + REQUEST_OFFSET as u64,
+    );
+    write_dma_u32(dma_virtual + DESC_OFFSET + 8, 16);
+    write_dma_u16(dma_virtual + DESC_OFFSET + 12, DESC_NEXT);
+    write_dma_u16(dma_virtual + DESC_OFFSET + 14, 1);
+
+    if data_length != 0 {
+        write_dma_u64(
+            dma_virtual + DESC_OFFSET + 16,
+            dma_physical + DATA_OFFSET as u64,
+        );
+        write_dma_u32(dma_virtual + DESC_OFFSET + 24, data_length as u32);
+        write_dma_u16(
+            dma_virtual + DESC_OFFSET + 28,
+            DESC_NEXT | if device_writes { DESC_WRITE } else { 0 },
+        );
+        write_dma_u16(dma_virtual + DESC_OFFSET + 30, 2);
+        write_dma_u64(
+            dma_virtual + DESC_OFFSET + 32,
+            dma_physical + STATUS_OFFSET as u64,
+        );
+        write_dma_u32(dma_virtual + DESC_OFFSET + 40, 1);
+        write_dma_u16(dma_virtual + DESC_OFFSET + 44, DESC_WRITE);
+        if let Some(input) = input {
+            for (offset, byte) in input.iter().copied().enumerate() {
+                write_dma_u8(dma_virtual + DATA_OFFSET + offset, byte);
+            }
+        } else {
+            unsafe {
+                core::ptr::write_bytes((dma_virtual + DATA_OFFSET) as *mut u8, 0xa5, DATA_LENGTH);
+            }
+        }
+        write_dma_u8(dma_virtual + DATA_OFFSET - 1, 0x3c);
+        write_dma_u8(dma_virtual + DATA_OFFSET + DATA_LENGTH, 0xc3);
+        write_dma_u8(dma_virtual + STATUS_OFFSET, 0xff);
+    } else {
+        write_dma_u64(
+            dma_virtual + DESC_OFFSET + 16,
+            dma_physical + STATUS_OFFSET as u64,
+        );
+        write_dma_u32(dma_virtual + DESC_OFFSET + 24, 1);
+        write_dma_u16(dma_virtual + DESC_OFFSET + 28, DESC_WRITE);
+        write_dma_u8(dma_virtual + STATUS_OFFSET, 0xff);
+    }
     compiler_fence(Ordering::SeqCst);
 }
 

@@ -7,17 +7,15 @@ record. It preserves the older generation while preparing and flushing an
 inactive slot, writes the commit marker last, and accepts the new generation
 only after the final flush. Every QEMU boot proves recovery at all five commit
 stages, rejects partial commit markers and corrupt records, falls back to the
-older valid slot, and fails closed on generation exhaustion or ambiguity. The
-current backend models durable versus pending sectors in memory; it is not yet
-connected to virtio-blk and therefore does not claim persistence across a
-machine restart. See
+older valid slot, and fails closed on generation exhaustion or ambiguity. See
 [Persistent Volume Record v0](specs/kernel/persistent-volume-v0.md).
 Control ABI v4 operation 18 exposes the live reference volume through signed
 object 6. A write-only ring-3 service commits generation one and is then
 faulted; its authority and address space are retired while the volume remains.
 A fresh read-only service recovers the exact payload, cannot mutate it, and
 also loses its attenuated handle at exit. This proves service-restart
-persistence and authority separation, not host reboot persistence. See
+persistence and authority separation; that live service path still uses its
+in-memory reference backend. See
 [Persistent Volume Service v0](specs/kernel/volume-service-v0.md).
 The next M6 layer attaches a deterministic 1 MiB modern virtio-blk function
 and performs bounded, read-only PCI configuration discovery. Every boot
@@ -31,11 +29,16 @@ resets the device, accepts only modern virtio plus flush support, confirms one
 or more queues, and returns the device to reset without setting `DRIVER_OK` or
 providing DMA memory. See
 [Virtio Block Initialization v0](specs/kernel/virtio-block-init-v0.md).
-The first real device transaction uses one generation-owned 4 KiB DMA lease
-for a bounded split ring and reads the deterministic blank sector zero. It
-validates capacity, completion length, status, and buffer guard bytes, then
-revokes bus mastering, resets the device, and scrubs the lease before release.
-This QEMU proof has no IOMMU confinement and performs no disk writes. See
+The real device path uses one generation-owned 4 KiB DMA lease for a bounded
+split ring. It first reads reserved blank sector two, validating capacity,
+completion length, status, and buffer guard bytes. The same queue then supports
+bounded sector reads, writes, and flushes and binds sectors zero and one to the
+persistent-volume record. The automated gate creates a fresh disk, initializes
+generation one, boots a second VM against the same image, and recovers the exact
+record without rewriting it. Teardown revokes bus mastering, resets the device,
+and scrubs the lease before release. This trusted-QEMU bootstrap proof has no
+IOMMU confinement and does not yet place the device path in an isolated
+service. See [Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md) and
 [Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded

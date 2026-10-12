@@ -4,6 +4,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 output_file="$(mktemp -t ginux-boot.XXXXXX)"
+reboot_output_file="$(mktemp -t ginux-reboot.XXXXXX)"
+volume_image="$(mktemp -t ginux-volume.XXXXXX)"
 qemu_pid=""
 
 cleanup() {
@@ -11,40 +13,87 @@ cleanup() {
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
     fi
-    rm -f "$output_file"
+    rm -f "$output_file" "$reboot_output_file" "$volume_image"
 }
 trap cleanup EXIT
 
-"$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
-qemu_pid=$!
+dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
 
-for _ in {1..30}; do
-    if ! kill -0 "$qemu_pid" 2>/dev/null; then
-        break
+run_boot() {
+    local boot_output="$1"
+    local boot_name="$2"
+
+    GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
+    qemu_pid=$!
+
+    for _ in {1..30}; do
+        if ! kill -0 "$qemu_pid" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    if kill -0 "$qemu_pid" 2>/dev/null; then
+        kill "$qemu_pid" 2>/dev/null || true
+        wait "$qemu_pid" 2>/dev/null || true
+        qemu_pid=""
+        cat "$boot_output"
+        echo "Boot test failed: $boot_name QEMU boot did not finish within 30 seconds." >&2
+        exit 1
     fi
-    sleep 1
-done
 
-if kill -0 "$qemu_pid" 2>/dev/null; then
-    kill "$qemu_pid" 2>/dev/null || true
-    wait "$qemu_pid" 2>/dev/null || true
+    if wait "$qemu_pid"; then
+        qemu_status=0
+    else
+        qemu_status=$?
+    fi
     qemu_pid=""
-    cat "$output_file"
-    echo "Boot test failed: QEMU did not finish within 30 seconds." >&2
-    exit 1
-fi
 
-if wait "$qemu_pid"; then
-    qemu_status=0
-else
-    qemu_status=$?
-fi
-qemu_pid=""
+    if [[ "$qemu_status" -ne 0 ]]; then
+        cat "$boot_output"
+        echo "Boot test failed: $boot_name QEMU boot exited with $qemu_status; expected 0." >&2
+        exit 1
+    fi
+}
+
+run_boot "$output_file" "initial"
 
 cat "$output_file"
 
 if ! grep -q '^GINUX_KERNEL_OK' "$output_file"; then
     echo "Boot test failed: the post-firmware kernel marker was not emitted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
+    ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
+    ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||
+    ! grep -q '^ginux: persistent virtio device reset and bus mastering revoked' "$output_file"; then
+    echo "Boot test failed: the first boot did not durably initialize volume generation one." >&2
+    exit 1
+fi
+
+if grep -q '^ginux: disk-backed volume recovered after reboot' "$output_file"; then
+    echo "Boot test failed: a fresh volume was reported as a reboot recovery." >&2
+    exit 1
+fi
+
+run_boot "$reboot_output_file" "recovery"
+
+if ! grep -q '^GINUX_KERNEL_OK' "$reboot_output_file" ||
+    ! grep -q '^ginux: disk-backed volume generation: 1' "$reboot_output_file" ||
+    ! grep -q '^ginux: disk-backed volume recovered after reboot' "$reboot_output_file" ||
+    ! grep -q '^ginux: persistent virtio device reset and bus mastering revoked' "$reboot_output_file" ||
+    ! grep -q '^ginux: virtio DMA frame scrubbed and released' "$reboot_output_file"; then
+    cat "$reboot_output_file"
+    echo "Boot test failed: the second boot did not recover durable volume generation one." >&2
+    exit 1
+fi
+
+if grep -q '^ginux: disk-backed volume initialized and flushed' "$reboot_output_file" ||
+    grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$reboot_output_file"; then
+    cat "$reboot_output_file"
+    echo "Boot test failed: the recovery boot rewrote the volume or emitted a panic." >&2
     exit 1
 fi
 
@@ -573,7 +622,7 @@ if ! grep -q '^ginux: malformed virtio queue geometry rejected' "$output_file"; 
     exit 1
 fi
 
-if ! grep -q '^ginux: bounded virtio sector zero read completed' "$output_file"; then
+if ! grep -q '^ginux: bounded blank virtio sector read completed' "$output_file"; then
     echo "Boot test failed: the bounded virtio sector read did not complete." >&2
     exit 1
 fi

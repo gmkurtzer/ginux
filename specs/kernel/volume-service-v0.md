@@ -62,5 +62,7 @@ prepare/flush/commit/final-flush sequence before returning the new generation.
   queueing, sharing, encryption, filesystem, or Linux block-device exposure.
 - The kernel boot proof delegates object 6 from the signed control-plane root;
   the general userspace orchestration path does not yet create that service.
-- virtio-blk, NVMe, DMA, interrupts, real flushes, reboot recovery, and
-  performance measurements remain unimplemented.
+- The separate kernel-bootstrap proof provides virtio-blk DMA, real flushes,
+  and reboot recovery, but this ring-3 service is not yet connected to it.
+  NVMe, interrupt completion, and performance measurements remain
+  unimplemented.
