@@ -633,6 +633,21 @@ if ! grep -q '^ginux: Linux fork child return context derived' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux process contexts staged on native scheduler' "$output_file"; then
+    echo "Boot test failed: Linux process contexts were not staged on the native scheduler." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: scheduled Linux process roots matched ownership' "$output_file"; then
+    echo "Boot test failed: scheduled Linux roots did not match process ownership." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: stale Linux process scheduler bindings rejected' "$output_file"; then
+    echo "Boot test failed: stale Linux scheduler bindings were not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux private page copy validated' "$output_file"; then
     echo "Boot test failed: bounded Linux private page copying was not validated." >&2
     exit 1

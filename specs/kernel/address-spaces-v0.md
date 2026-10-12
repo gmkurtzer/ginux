@@ -210,9 +210,11 @@ or permission, copies a complete parent page, clones the hierarchy, validates
 the resulting child inventory, and publishes the whole child bundle in one
 `Preparing`-to-`Running` transition. The same transition installs a context
 derived from the recorded parent, with a mapped executable RIP, mapped writable
-stack, admitted FS base, safe flags, and a zero fork return value. This proof
-does not activate the child root, snapshot the running Linux mapping registry,
-or admit that context to the scheduler.
+stack, admitted FS base, safe flags, and a zero fork return value. PID 1 and the
+child are admitted to the native scheduler, selected under their exact recorded
+roots, and yielded in both directions before their scheduler bindings are
+retired. This proof does not activate the child root in CR3 or snapshot the
+running Linux mapping registry.
 
 The bounded process table now retains an allocator-issued resource bundle
 rather than a raw physical root. A bundle contains four through six hierarchy
@@ -224,7 +226,7 @@ recorded bundle, moves the process to a non-runnable intermediate state, and
 refuses zombie publication while any generation in that bundle remains in the
 live-frame ledger. One prevalidated teardown scrubs and releases the full
 bundle before the corresponding zombie is published. Capturing the live Linux
-mapping registry and admitting the recorded child context to the scheduler
+mapping registry and performing ring-3 dispatch under the recorded child root
 remain future work.
 
 The current measured payload additionally proves capability enforcement: a

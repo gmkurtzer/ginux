@@ -456,6 +456,68 @@ impl UserContext {
     }
 }
 
+pub(crate) fn process_user_context(
+    general: [u64; 15],
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    address_space_root: u64,
+    fs_base: u64,
+) -> Option<ProcessSchedulerContext> {
+    let [rax, rbx, rcx, rdx, rsi, rdi, rbp, r8, r9, r10, r11, r12, r13, r14, r15] = general;
+    let context = UserContext {
+        rax,
+        rbx,
+        rcx,
+        rdx,
+        rsi,
+        rdi,
+        rbp,
+        r8,
+        r9,
+        r10,
+        r11,
+        r12,
+        r13,
+        r14,
+        r15,
+        rip,
+        rsp,
+        rflags,
+        address_space_root,
+        fs_base,
+    };
+    context
+        .is_valid()
+        .then_some(ProcessSchedulerContext(context))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ProcessSchedulerContext(UserContext);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ProcessThreadHandle(ThreadId);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ScheduledProcess {
+    handle: ProcessThreadHandle,
+    context: ProcessSchedulerContext,
+}
+
+impl ScheduledProcess {
+    pub(crate) const fn handle(self) -> ProcessThreadHandle {
+        self.handle
+    }
+
+    pub(crate) const fn context(self) -> ProcessSchedulerContext {
+        self.context
+    }
+}
+
+pub(crate) struct ProcessScheduler {
+    scheduler: Scheduler,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Scheduled {
     id: ThreadId,
@@ -657,6 +719,22 @@ impl Scheduler {
         self.schedule_next()
     }
 
+    fn retire_process(&mut self, id: ThreadId) -> bool {
+        let Some(thread) = self.thread(id).copied() else {
+            return false;
+        };
+        if !matches!(thread.state, State::Ready | State::Running)
+            || thread.state == State::Running && self.current != Some(id)
+        {
+            return false;
+        }
+        self.threads[usize::from(id.slot)] = None;
+        if self.current == Some(id) {
+            self.current = None;
+        }
+        true
+    }
+
     fn remove_ready_domain(&mut self, domain: u64) -> bool {
         let mut slot = None;
         for (index, thread) in self.threads.iter().enumerate() {
@@ -709,6 +787,50 @@ impl Scheduler {
             .get_mut(usize::from(id.slot))?
             .as_mut()
             .filter(|thread| thread.id == id)
+    }
+}
+
+impl ProcessScheduler {
+    pub(crate) const fn new() -> Self {
+        Self {
+            scheduler: Scheduler::new(),
+        }
+    }
+
+    pub(crate) fn admit(
+        &mut self,
+        domain: u64,
+        context: ProcessSchedulerContext,
+    ) -> Option<ProcessThreadHandle> {
+        self.scheduler
+            .create(domain, context.0)
+            .map(ProcessThreadHandle)
+    }
+
+    pub(crate) fn schedule_next(&mut self) -> Option<ScheduledProcess> {
+        self.scheduler
+            .schedule_next()
+            .map(|scheduled| ScheduledProcess {
+                handle: ProcessThreadHandle(scheduled.id),
+                context: ProcessSchedulerContext(scheduled.context),
+            })
+    }
+
+    pub(crate) fn yield_current(
+        &mut self,
+        handle: ProcessThreadHandle,
+        context: ProcessSchedulerContext,
+    ) -> Option<ScheduledProcess> {
+        self.scheduler
+            .yield_current(handle.0, context.0)
+            .map(|scheduled| ScheduledProcess {
+                handle: ProcessThreadHandle(scheduled.id),
+                context: ProcessSchedulerContext(scheduled.context),
+            })
+    }
+
+    pub(crate) fn retire(&mut self, handle: ProcessThreadHandle) -> bool {
+        self.scheduler.retire_process(handle.0)
     }
 }
 

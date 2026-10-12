@@ -1254,7 +1254,10 @@ parent, performs both operations, revalidates the resulting child hierarchy,
 derives a child register/TLS context with `RAX = 0`, and atomically publishes
 the context and child bundle. Context publication requires its RIP, stack, FS
 base, and privilege flags to agree with the recorded mappings. It is not yet
-attached to the live syscall runtime and does not make the child schedulable.
+attached to the live syscall runtime. A synthetic proof admits the parent and
+child contexts to the native scheduler, selects both under their exact roots,
+and retires their generation-tagged bindings, but it does not dispatch the
+child to ring 3 or expose process-style creation through this syscall ABI.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;

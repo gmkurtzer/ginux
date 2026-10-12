@@ -57,7 +57,19 @@ single-running-thread state, exit selection, idle behavior, slot reuse, domain
 ownership, stale-ID rejection, invalid-context rejection, and preservation of a
 modified register context and distinct FS bases across another thread's run and
 exit. The current native payloads use FS base zero; Linux scheduler integration
-with the nonzero static-TLS execution contexts remains a separate milestone.
+with the live static-TLS runtime remains a separate milestone.
+
+The bounded process proof now converts a process-owned context into this same
+scheduler representation using the exact generation-checked root recorded in
+its address-space bundle. It admits PID 1 and one eagerly cloned child under a
+synthetic container domain, rejects domain zero and duplicate admission,
+selects both contexts through normal round-robin yield, and matches their full
+register, root, stack, flags, and FS state. A process record retains the exact
+scheduler thread identity and cannot begin address-space teardown until that
+binding is withdrawn. Withdrawal handles an exact ready or running identity;
+the proof rejects reuse of the retired child identity. This does not yet enter
+ring 3 under the synthetic child root or attach the live Linux PID 1 runtime to
+the native scheduler.
 
 Scheduler capacity does not grant permission to create a thread. Runtime
 creation first reserves a slot from the generation-checked owning domain; exit

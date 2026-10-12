@@ -1,6 +1,6 @@
 use core::mem::size_of;
 
-use crate::{address_space, arch::x86_64::cpu, memory};
+use crate::{address_space, arch::x86_64::cpu, memory, scheduler};
 
 const PROCESS_LIMIT: usize = 4;
 const PROCESS_HIERARCHY_LIMIT: usize = 6;
@@ -85,6 +85,21 @@ impl ProcessExecutionContext {
         child.general[PROCESS_RAX_INDEX] = 0;
         child
     }
+
+    fn scheduler_context(
+        self,
+        address_space: ProcessAddressSpace,
+    ) -> Option<scheduler::ProcessSchedulerContext> {
+        self.is_valid(address_space).then_some(())?;
+        scheduler::process_user_context(
+            self.general,
+            self.rip,
+            self.rsp,
+            self.rflags,
+            address_space.root().address(),
+            self.fs_base,
+        )
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -135,6 +150,10 @@ impl ProcessAddressSpace {
 
     fn hierarchy(&self) -> &[memory::FrameLease] {
         &self.hierarchy[..usize::from(self.hierarchy_count)]
+    }
+
+    fn root(self) -> memory::FrameLease {
+        self.hierarchy[0]
     }
 
     fn mappings(&self) -> &[cpu::LinuxActiveImageMapping] {
@@ -196,6 +215,7 @@ struct Process {
     address_space: Option<ProcessAddressSpace>,
     retiring_address_space: Option<ProcessAddressSpace>,
     context: Option<ProcessExecutionContext>,
+    scheduler_thread: Option<scheduler::ProcessThreadHandle>,
     state: ProcessState,
 }
 
@@ -284,12 +304,70 @@ impl ProcessTable {
             || process.address_space.is_some()
             || process.retiring_address_space.is_some()
             || process.context.is_some()
+            || process.scheduler_thread.is_some()
         {
             return false;
         }
         process.address_space = Some(address_space);
         process.context = Some(context);
         process.state = ProcessState::Running;
+        true
+    }
+
+    fn admit_to_scheduler(
+        &mut self,
+        handle: ProcessHandle,
+        run_queue: &mut scheduler::ProcessScheduler,
+        domain: u64,
+    ) -> bool {
+        let Some(process) = self.process(handle).copied() else {
+            return false;
+        };
+        let (Some(address_space), Some(context)) = (process.address_space, process.context) else {
+            return false;
+        };
+        if process.state != ProcessState::Running || process.scheduler_thread.is_some() {
+            return false;
+        }
+        let Some(scheduler_context) = context.scheduler_context(address_space) else {
+            return false;
+        };
+        let Some(thread) = run_queue.admit(domain, scheduler_context) else {
+            return false;
+        };
+        let Some(process) = self.process_mut(handle) else {
+            let _ = run_queue.retire(thread);
+            return false;
+        };
+        if process.state != ProcessState::Running || process.scheduler_thread.is_some() {
+            let _ = run_queue.retire(thread);
+            return false;
+        }
+        process.scheduler_thread = Some(thread);
+        true
+    }
+
+    fn withdraw_from_scheduler(
+        &mut self,
+        handle: ProcessHandle,
+        run_queue: &mut scheduler::ProcessScheduler,
+    ) -> bool {
+        let Some(thread) = self
+            .process(handle)
+            .and_then(|process| process.scheduler_thread)
+        else {
+            return false;
+        };
+        if !run_queue.retire(thread) {
+            return false;
+        }
+        let Some(process) = self.process_mut(handle) else {
+            return false;
+        };
+        if process.scheduler_thread != Some(thread) {
+            return false;
+        }
+        process.scheduler_thread = None;
         true
     }
 
@@ -418,6 +496,7 @@ impl ProcessTable {
             || process.address_space.is_some()
             || process.retiring_address_space.is_some()
             || process.context.is_some()
+            || process.scheduler_thread.is_some()
         {
             return false;
         }
@@ -435,6 +514,7 @@ impl ProcessTable {
             || process.address_space != Some(expected_space)
             || process.retiring_address_space.is_some()
             || process.context.is_none()
+            || process.scheduler_thread.is_some()
             || !expected_space.is_owned()
         {
             return None;
@@ -453,6 +533,7 @@ impl ProcessTable {
         if process.state != ProcessState::Exiting
             || process.address_space.is_some()
             || process.context.is_some()
+            || process.scheduler_thread.is_some()
         {
             return false;
         }
@@ -508,6 +589,7 @@ impl ProcessTable {
             address_space,
             retiring_address_space: None,
             context,
+            scheduler_thread: None,
             state,
         });
         Some(handle)
@@ -639,6 +721,16 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(init) = table.create_init(init_space, init_context) else {
         return false;
     };
+    let Some(init_scheduler_context) = init_context.scheduler_context(init_space) else {
+        return false;
+    };
+    let mut run_queue = scheduler::ProcessScheduler::new();
+    if table.admit_to_scheduler(init, &mut run_queue, 0)
+        || !table.admit_to_scheduler(init, &mut run_queue, 1)
+        || table.admit_to_scheduler(init, &mut run_queue, 1)
+    {
+        return false;
+    }
     let Some(rejected_child) = table.prepare_fork(init) else {
         return false;
     };
@@ -746,6 +838,48 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     if child_context != init_context.fork_child()
         || child_context.general[PROCESS_RAX_INDEX] != 0
         || table.process(init).and_then(|process| process.context) != Some(init_context)
+    {
+        return false;
+    }
+    let Some(child_scheduler_context) = child_context.scheduler_context(first_space) else {
+        return false;
+    };
+    if !table.admit_to_scheduler(first_child, &mut run_queue, 1)
+        || table.admit_to_scheduler(first_child, &mut run_queue, 1)
+    {
+        return false;
+    }
+    let (Some(init_thread), Some(child_thread)) = (
+        table
+            .process(init)
+            .and_then(|process| process.scheduler_thread),
+        table
+            .process(first_child)
+            .and_then(|process| process.scheduler_thread),
+    ) else {
+        return false;
+    };
+    let Some(initial) = run_queue.schedule_next() else {
+        return false;
+    };
+    let Some(selected_child) = run_queue.yield_current(init_thread, init_scheduler_context) else {
+        return false;
+    };
+    let Some(resumed_parent) = run_queue.yield_current(child_thread, child_scheduler_context)
+    else {
+        return false;
+    };
+    if initial.handle() != init_thread
+        || initial.context() != init_scheduler_context
+        || selected_child.handle() != child_thread
+        || selected_child.context() != child_scheduler_context
+        || resumed_parent.handle() != init_thread
+        || resumed_parent.context() != init_scheduler_context
+        || table.begin_exit(first_child, first_space).is_some()
+        || !table.withdraw_from_scheduler(first_child, &mut run_queue)
+        || !table.withdraw_from_scheduler(init, &mut run_queue)
+        || run_queue.retire(child_thread)
+        || table.withdraw_from_scheduler(first_child, &mut run_queue)
     {
         return false;
     }

@@ -69,6 +69,24 @@ the context in the same transition that publishes the cloned address space.
 The parent context remains unchanged. Beginning exit removes the context before
 the process can become a zombie.
 
+## Native scheduler admission
+
+A running process may be admitted to the existing native scheduler using only
+its recorded address-space root and saved context. Admission first revalidates
+the complete bundle and context, rejects domain zero and a duplicate binding,
+then records the scheduler's generation-tagged thread identity in the process
+record. If record attachment fails, the newly created scheduler entry is
+retired. Process exit is refused until the exact scheduler binding has been
+withdrawn, so a runnable context cannot retain a root after teardown begins.
+
+The boot proof admits PID 1 and its eagerly cloned child into the real native
+scheduler state machine under one synthetic container domain. It selects PID 1,
+yields to the child while matching the child's root, all saved registers, zero
+fork return, stack, flags, and FS base, then yields back to the unchanged parent
+context. It withdraws the ready child and running parent by their exact thread
+identities and proves the retired child identity cannot be used again. This is
+scheduler-state integration, not ring-3 dispatch of the synthetic child.
+
 ## Exit and wait ordering
 
 A running process cannot become a zombie while it still owns address-space
@@ -133,13 +151,13 @@ both roots retain their own mappings and contents. It then scrubs and releases
 all twelve frames and requires the allocator count to return to its starting
 value.
 
-This now supplies the ownership and address-space publication operation needed
-by a future eager fork. The process bundle retains and cross-checks its virtual
-address, frame, and permission inventory, and the synthetic hierarchy clone is
-published through the process table. It does not yet snapshot the running
-Linux workload's mapping registry, admit the saved child context to the
-scheduler, activate the child CR3, or expose the operation through the Linux
-ABI.
+This now supplies the ownership, publication, and scheduler-staging operations
+needed by a future eager fork. The process bundle retains and cross-checks its
+virtual address, frame, and permission inventory, the synthetic hierarchy clone
+is published through the process table, and its saved context is selected by
+the native scheduler under the child root. It does not yet snapshot the running
+Linux workload's mapping registry, activate the child CR3 for ring-3 execution,
+or expose the operation through the Linux ABI.
 
 ## Deliberate limits
 

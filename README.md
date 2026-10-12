@@ -311,8 +311,11 @@ independent roots and reclaims all twelve temporary frames. The process proof
 now uses that operation to copy PID 1's two private pages, construct and
 revalidate the child's mapping inventory, and atomically publish the cloned
 bundle with a parent-derived execution context whose fork return value is zero;
-child mutation leaves the parent unchanged. It is not yet attached to the
-running Linux workload or admitted to the scheduler, so the minimal system
+child mutation leaves the parent unchanged. PID 1 and that child are then
+admitted to the real native scheduler, selected under their exact roots, and
+yielded in both directions before their generation-tagged bindings are retired.
+The transaction is not yet attached to the running Linux workload or dispatched
+to ring 3 under the child CR3, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).
