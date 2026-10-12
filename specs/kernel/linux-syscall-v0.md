@@ -1253,7 +1253,10 @@ The live exit paths additionally translate the real syscall entry frame into
 the process model's complete register order and admit it with the snapshot as
 parentless PID 1. A canonical FS base is preserved even when unmapped, matching
 Linux `arch_prctl` behavior; page access still requires an ordinary mapping.
-The validated record is not yet retained across syscalls.
+The validated PID 1 record is retained in non-stack kernel storage and refreshed
+from the exact address-space and return context at every leader syscall entry.
+Cleanup requires multiple successful refreshes and refuses any child or
+partially retiring record. No process-style creation syscall consumes it yet.
 In particular, the exact bounded `clone` below remains thread-only and `fork`,
 process-style `clone`, and `wait4` remain unsupported.
 The process model's eager-copy helper can duplicate up to 41

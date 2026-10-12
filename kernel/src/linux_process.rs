@@ -1,4 +1,7 @@
-use core::mem::size_of;
+use core::{
+    mem::{size_of, MaybeUninit},
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
+};
 
 use crate::{address_space, arch::x86_64::cpu, memory, scheduler};
 
@@ -14,6 +17,9 @@ const USER: u64 = 1 << 2;
 const NO_EXECUTE: u64 = 1 << 63;
 const TEST_USER_ADDRESS: usize = 1usize << 39;
 const PROCESS_RAX_INDEX: usize = 0;
+static LIVE_PROCESS_TABLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
+static LIVE_PROCESS_REFRESH_COUNT: AtomicU32 = AtomicU32::new(0);
+static mut LIVE_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
 const PROCESS_CHILD_PROGRAM: [u8; 42] = [
     0x48, 0x85, 0xc0, // test rax, rax
     0x75, 0x23, // jne failure
@@ -295,6 +301,35 @@ impl ProcessTable {
             return None;
         }
         self.allocate(Some(parent), None, None, ProcessState::Preparing)
+    }
+
+    fn refresh_init(
+        &mut self,
+        address_space: ProcessAddressSpace,
+        context: ProcessExecutionContext,
+    ) -> bool {
+        if !address_space.is_valid()
+            || !context.is_valid(address_space)
+            || self.processes.iter().flatten().count() != 1
+        {
+            return false;
+        }
+        let Some(init) = self.init else {
+            return false;
+        };
+        let Some(process) = self.process_mut(init) else {
+            return false;
+        };
+        if process.parent.is_some()
+            || process.retiring_address_space.is_some()
+            || process.scheduler_thread.is_some()
+            || process.state != ProcessState::Running
+        {
+            return false;
+        }
+        process.address_space = Some(address_space);
+        process.context = Some(context);
+        true
     }
 
     fn commit_fork(
@@ -1004,7 +1039,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }
 
-pub(crate) fn verify_live_init_admission(
+pub(crate) fn install_live_process_registry(
     snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
     general: [u64; 15],
     rip: u64,
@@ -1012,6 +1047,9 @@ pub(crate) fn verify_live_init_admission(
     rflags: u64,
     fs_base: u64,
 ) -> bool {
+    if LIVE_PROCESS_TABLE_INITIALIZED.load(Ordering::Acquire) {
+        return false;
+    }
     let Some(address_space) = ProcessAddressSpace::new(snapshot.hierarchy(), snapshot.mappings())
     else {
         return false;
@@ -1025,30 +1063,89 @@ pub(crate) fn verify_live_init_admission(
     };
     let mut invalid = context;
     invalid.rip = 0;
-    if invalid.is_valid(address_space) {
+    if invalid.is_valid(address_space) || !context.is_valid(address_space) {
         return false;
     }
-    if !context.is_valid(address_space) {
+    let table = core::ptr::addr_of_mut!(LIVE_PROCESS_TABLE).cast::<ProcessTable>();
+    unsafe {
+        let processes = core::ptr::addr_of_mut!((*table).processes).cast::<Option<Process>>();
+        let generations = core::ptr::addr_of_mut!((*table).generations).cast::<u32>();
+        for index in 0..PROCESS_LIMIT {
+            processes.add(index).write(None);
+            generations.add(index).write(0);
+        }
+        core::ptr::addr_of_mut!((*table).next_pid).write(1);
+        core::ptr::addr_of_mut!((*table).init).write(None);
+    }
+    let table = unsafe { &mut *table };
+    if table.create_init(address_space, context).is_none() {
         return false;
     }
-    let init = Process {
-        handle: ProcessHandle {
-            slot: 0,
-            generation: 1,
-            pid: 1,
-        },
-        parent: None,
-        address_space: Some(address_space),
-        retiring_address_space: None,
-        context: Some(context),
-        scheduler_thread: None,
-        state: ProcessState::Running,
+    LIVE_PROCESS_REFRESH_COUNT.store(0, Ordering::Release);
+    LIVE_PROCESS_TABLE_INITIALIZED.store(true, Ordering::Release);
+    true
+}
+
+pub(crate) fn refresh_live_process_registry(
+    snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
+    general: [u64; 15],
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    fs_base: u64,
+) -> bool {
+    let Some(table) = live_process_table_mut() else {
+        return false;
     };
-    init.handle.pid == 1
-        && init.parent.is_none()
-        && init.address_space == Some(address_space)
-        && init.context == Some(context)
-        && init.state == ProcessState::Running
+    let Some(address_space) = ProcessAddressSpace::new(snapshot.hierarchy(), snapshot.mappings())
+    else {
+        return false;
+    };
+    let refreshed = table.refresh_init(
+        address_space,
+        ProcessExecutionContext {
+            general,
+            rip,
+            rsp,
+            rflags,
+            fs_base,
+        },
+    );
+    if refreshed {
+        LIVE_PROCESS_REFRESH_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+    refreshed
+}
+
+pub(crate) fn finish_live_process_registry() -> bool {
+    if !LIVE_PROCESS_TABLE_INITIALIZED.load(Ordering::Acquire) {
+        return true;
+    }
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let valid = table.init.is_some()
+        && LIVE_PROCESS_REFRESH_COUNT.load(Ordering::Acquire) >= 2
+        && table.processes.iter().flatten().count() == 1
+        && table.processes.iter().flatten().all(|process| {
+            process.parent.is_none()
+                && process.state == ProcessState::Running
+                && process.retiring_address_space.is_none()
+                && process.scheduler_thread.is_none()
+        });
+    if !valid {
+        return false;
+    }
+    LIVE_PROCESS_TABLE_INITIALIZED.store(false, Ordering::Release);
+    LIVE_PROCESS_REFRESH_COUNT.store(0, Ordering::Release);
+    true
+}
+
+fn live_process_table_mut() -> Option<&'static mut ProcessTable> {
+    if !LIVE_PROCESS_TABLE_INITIALIZED.load(Ordering::Acquire) {
+        return None;
+    }
+    Some(unsafe { &mut *core::ptr::addr_of_mut!(LIVE_PROCESS_TABLE).cast::<ProcessTable>() })
 }
 
 fn scrub_candidate_resources(

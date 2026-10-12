@@ -1939,22 +1939,9 @@ fn verify_live_linux_process_snapshot_contract(
     !adversarial.is_valid()
 }
 
-fn record_live_linux_process_snapshot(context: LinuxUserContext) -> bool {
-    let valid = live_linux_process_address_space_snapshot().is_some_and(|snapshot| {
-        if !verify_live_linux_process_snapshot_contract(&snapshot) {
-            return false;
-        }
-        linux_process::verify_live_init_admission(
-            &snapshot,
-            context
-                .registers
-                .process_general(context.rax, context.rip, context.rflags),
-            context.rip,
-            context.rsp,
-            context.rflags,
-            context.fs_base,
-        )
-    });
+fn record_live_linux_process_snapshot() -> bool {
+    let valid = live_linux_process_address_space_snapshot()
+        .is_some_and(|snapshot| verify_live_linux_process_snapshot_contract(&snapshot));
     if !valid {
         serial_write("ginux: Linux process snapshot failed at stage ");
         serial_write_u64(u64::from(
@@ -1962,8 +1949,39 @@ fn record_live_linux_process_snapshot(context: LinuxUserContext) -> bool {
         ));
         serial_write("\r\n");
     }
+    let valid = valid && linux_process::finish_live_process_registry();
     LINUX_PROCESS_SNAPSHOT_VALIDATED.store(valid, Ordering::SeqCst);
     valid
+}
+
+fn refresh_live_linux_process_registry(context: LinuxUserContext) -> bool {
+    let Some(snapshot) = live_linux_process_address_space_snapshot() else {
+        return false;
+    };
+    linux_process::refresh_live_process_registry(
+        &snapshot,
+        context
+            .registers
+            .process_general(context.rax, context.rip, context.rflags),
+        context.rip,
+        context.rsp,
+        context.rflags,
+        context.fs_base,
+    )
+}
+
+fn install_live_linux_process_registry(entry: usize, stack: usize, fs_base: u64) -> bool {
+    let Some(snapshot) = live_linux_process_address_space_snapshot() else {
+        return false;
+    };
+    linux_process::install_live_process_registry(
+        &snapshot,
+        [0; 15],
+        entry as u64,
+        stack as u64,
+        0x202,
+        fs_base,
+    )
 }
 
 fn linux_active_image_writable_index(address: u64) -> Option<usize> {
@@ -4020,7 +4038,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
+    if !install_live_linux_process_registry(execution.entry, execution.stack, active_fs_base()) {
+        let _ = restore_linux_syscall(saved_msrs);
+        let _ = finish_linux_thread_table();
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return LinuxElfResult::FAILED;
+    }
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
+    let live_process_registry_finished = linux_process::finish_live_process_registry();
     let linux_wait_timer_finished = execution.tls_size == 0 || timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let linux_thread_table_released = finish_linux_thread_table();
@@ -5003,6 +5028,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && pending_signal_codes_cleared
         && signal_actions_restored
         && alt_stack_disabled
+        && live_process_registry_finished
         && msrs_restored;
     if !valid {
         serial_write("ginux: Linux final state:");
@@ -5048,6 +5074,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             pending_signal_codes_cleared,
             signal_actions_restored,
             alt_stack_disabled,
+            live_process_registry_finished,
             msrs_restored,
         ] {
             serial_write(" ");
@@ -5412,6 +5439,10 @@ extern "sysv64" fn linux_syscall_handler(
             && !(loader_start..loader_end).contains(&user_rip))
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return LINUX_RETURN_TO_KERNEL;
+    }
+    if current_linux_tid() == Some(1) && !refresh_live_linux_process_registry(syscall_return) {
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;
     }
@@ -6002,7 +6033,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {
-            if !record_live_linux_process_snapshot(syscall_return) {
+            if !record_live_linux_process_snapshot() {
                 return LINUX_ESRCH;
             }
             if ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst) {
@@ -11282,7 +11313,7 @@ fn linux_descriptor_close_live_return(
         return 0;
     }
     if handler == 0 {
-        return linux_terminate_by_default_signal(LINUX_SIGPIPE, caller);
+        return linux_terminate_by_default_signal(LINUX_SIGPIPE);
     }
     let delivered = linux_deliver_signal_to_blocked_wait(
         target,
@@ -12790,8 +12821,8 @@ fn linux_default_signal_terminates(signal: u64) -> bool {
     signal == LINUX_SIGPIPE
 }
 
-fn linux_terminate_by_default_signal(signal: u64, context: LinuxUserContext) -> u64 {
-    if !record_live_linux_process_snapshot(context) {
+fn linux_terminate_by_default_signal(signal: u64) -> u64 {
+    if !record_live_linux_process_snapshot() {
         return LINUX_ESRCH;
     }
     for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
@@ -12858,7 +12889,7 @@ fn linux_kill(
         return if linux_default_signal_terminates(signal)
             && !LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
         {
-            linux_terminate_by_default_signal(signal, interrupted)
+            linux_terminate_by_default_signal(signal)
         } else {
             LINUX_ENOSYS
         };

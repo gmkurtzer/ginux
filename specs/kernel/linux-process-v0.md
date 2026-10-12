@@ -213,8 +213,19 @@ remaining registers, RSP, and FS base come from the same live entry context.
 The model rejects a zero RIP and then admits the complete snapshot and context
 as a running, parentless PID 1 record. This proves the live state has the exact
 shape required by the process model without retaining a large process table on
-the bounded syscall stack. Persistent publication across syscalls is the next
-milestone.
+the bounded syscall stack.
+
+The live PID 1 record is installed into a statically allocated process table
+before ring-3 entry. Every subsequent PID 1 syscall boundary rebuilds the exact
+snapshot, validates the return context, and atomically replaces that record
+before dispatch. This permits an `exec` or mapping operation to make its prior
+record stale only until the next kernel entry, when no process-table consumer
+can run in between. Child-thread syscalls do not overwrite the process leader's
+record. Terminal cleanup requires at least two successful PID 1 refreshes and
+refuses to clear a table containing a child, scheduler binding, retiring
+bundle, or non-running init record. The table is initialized field-by-field in
+static storage so neither construction nor replacement places the four-slot
+table on the bounded kernel stack.
 
 This now supplies the ownership, publication, and scheduler-staging operations
 needed by a future eager fork. The process bundle retains and cross-checks its

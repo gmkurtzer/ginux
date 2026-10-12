@@ -713,6 +713,11 @@ if ! grep -q '^ginux: live Linux PID 1 context admitted to process model' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: live Linux process registry persisted across syscalls' "$output_file"; then
+    echo "Boot test failed: the live Linux process registry did not persist across syscalls." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     echo "Boot test failed: the minimal system init was not planned." >&2
     exit 1

@@ -333,7 +333,11 @@ detached hierarchy frame is rejected. The kernel also converts the live syscall 
 model's complete 15-register context and admits it with the snapshot as PID 1.
 This includes Linux's architectural `RCX` and `R11` syscall clobbers and permits
 a lower-canonical FS base without requiring that it currently be mapped. The
-record is validated but not yet retained across syscalls. The dedicated
+record is installed in non-stack kernel storage before userspace starts and
+refreshed from the exact live snapshot and return context at every PID 1
+syscall boundary. Terminal cleanup requires at least two successful refreshes,
+one parentless running record, and no child, scheduler binding, or retiring
+bundle. The dedicated
 cloned-child/wait proof is not yet attached to the running Linux syscall
 workload, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
