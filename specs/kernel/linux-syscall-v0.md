@@ -102,16 +102,22 @@ retains the explicit `-ENOSYS` boundary. The epoll descriptor participates in
 registration and releases its descriptor.
 `rax = 281` (`__NR_epoll_pwait`) uses the same bounded wait operation after
 validating an optional eight-byte signal mask and its exact signal-set size.
-The temporary mask is not installed and this entry point does not yet enter the
-scheduler-backed wait; invalid sizes return `-EINVAL` and invalid mask ranges
-return `-EFAULT` before examining readiness. An immediately ready event or zero
-timeout behaves like `epoll_wait`, while a call that would block returns
-`-ENOSYS`.
+The mask is sanitized to keep `SIGKILL` and `SIGSTOP` unblocked, installed in
+the caller's per-thread state only while blocked, and restored before readiness
+or timeout makes the caller runnable. Scheduler-handoff rollback restores the
+mask and wait record together. Invalid sizes return `-EINVAL` and invalid mask
+ranges return `-EFAULT` before examining readiness. An immediately ready event
+or zero timeout behaves like `epoll_wait`; otherwise the same runnable-peer and
+output-validation requirements apply. The measured graph proves a positive
+APIC-driven timeout, unchanged output, and restoration of the original mask.
 `rax = 441` (`__NR_epoll_pwait2`) replaces the integer timeout with a null or
 complete 16-byte x86-64 `timespec`. Negative seconds and non-normalized
-nanoseconds return `-EINVAL`; invalid memory returns `-EFAULT`. A zero timespec
-queries immediately, while a nonzero or null timeout that finds no ready event
-retains the explicit `-ENOSYS` blocking boundary.
+nanoseconds return `-EINVAL`; checked conversion overflow also returns
+`-EINVAL`, and invalid memory returns `-EFAULT`. A zero timespec queries
+immediately, while a nonzero or null timeout uses the same scheduler-backed
+masked wait as `epoll_pwait`. Neither masked entry point yet supports
+asynchronous signal interruption, `EINTR`, remaining-time reporting, or syscall
+restart.
 This is a bounded event-notification proof, not a general epoll interest tree.
 The scheduler-backed path has two fixed thread slots and one live registration.
 `rax = 284` (`__NR_eventfd`) and `rax = 290` (`__NR_eventfd2`) allocate one

@@ -414,8 +414,13 @@ millisecond timeout or indefinitely, wakes after relevant descriptor or
 registration changes, and returns zero after an APIC-driven timeout. The
 registration, readiness, and data word remain live while blocked, and the
 output event is revalidated before completion. This remains a fixed two-thread,
-one-registration proof; blocking without a runnable peer returns `ENOSYS`, and
-`epoll_pwait`/`epoll_pwait2` do not yet use the blocking path. A bounded eventfd
+one-registration proof; blocking without a runnable peer returns `ENOSYS`.
+`epoll_pwait` and `epoll_pwait2` use the same scheduler path after validating
+their temporary signal mask, and the latter converts a null or checked
+nanosecond timespec. The mask is installed only while blocked and restored on
+readiness, timeout, or rollback. The measured graph proves an `epoll_pwait`
+APIC timeout and restoration; asynchronous signal interruption and restart
+remain unsupported. A bounded eventfd
 counter provides a signalable source for that epoll path, including
 nonblocking saturation and semaphore reads. With a runnable peer, a blocking
 read on an empty eventfd now sleeps in its scheduler slot until a write makes

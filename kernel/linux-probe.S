@@ -1146,7 +1146,8 @@ valid_interpreter_base:
     xor edi, edi
     mov esi, 0x4050c0
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -1172,7 +1173,8 @@ valid_interpreter_base:
     mov word ptr [0x405da4], 1
     mov word ptr [0x405da6], -1
     mov qword ptr [0x405d80], 1
-    mov r14d, 2
+    push 2
+    pop r14
 linux_clone_repeat:
     mov edi, 0x13d0f00
     mov esi, 0x413000
@@ -1234,7 +1236,8 @@ linux_clone_repeat:
     mov edi, 0x4050c0
     xor esi, esi
     mov rdx, rsp
-    mov r10d, 8
+    push 8
+    pop r10
     mov eax, 128
     syscall
     add rsp, 16
@@ -1284,13 +1287,14 @@ linux_clone_repeat:
     cmp word ptr [0x405da6], 1
     jne failure
     call linux_parent_eventfd_read
-    push 2
-    pop rdi
+    dec edi
     mov esi, 0x405dc0
     push 1
     pop rdx
     mov r10d, edx
-    mov eax, 232
+    mov r9, r8
+    mov r8d, 0x405cd0
+    mov eax, 281
     syscall
     test rax, rax
     jne failure
@@ -1307,6 +1311,7 @@ linux_clone_repeat:
     jne failure
     mov edx, 0x405cc0
     mov r10d, 0x405cd0
+    mov r8, r9
     mov eax, 271
     call syscall_expect_zero
     cmp word ptr [0x405da6], 0
@@ -1324,7 +1329,8 @@ linux_clone_repeat:
     mov edi, 0x4050c0
     xor esi, esi
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     mov eax, 128
     syscall
     cmp rax, 10
@@ -4636,7 +4642,8 @@ resolution_valid:
     sub rsp, 16
     lea rdi, [rip + proc_self_exe]
     mov rsi, rsp
-    mov edx, 16
+    push 16
+    pop rdx
     push 89
     pop rax
     syscall
@@ -4649,11 +4656,13 @@ resolution_valid:
     add rsp, 16
     mov edi, 0x406000
     mov esi, 4096
-    mov edx, 1
+    push 1
+    pop rdx
     push 10
     pop rax
     call syscall_expect_zero
-    mov edi, 42
+    push 42
+    pop rdi
     mov eax, 231
     syscall
 
@@ -4670,7 +4679,8 @@ child_thread_probe:
     xor edi, edi
     xor esi, esi
     mov edx, 0x4050e0
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -4680,7 +4690,8 @@ child_thread_probe:
     pop rdi
     mov esi, 0x4050c0
     xor edx, edx
-    mov r10d, 8
+    push 8
+    pop r10
     push 14
     pop rax
     call syscall_expect_zero
@@ -4705,7 +4716,8 @@ child_thread_probe:
     # The parent blocks in epoll_wait, poll, and ppoll with positive timeouts.
     # Keep this peer in userspace across three APIC ticks so each expiry
     # immediately preempts back to the parent.
-    mov ebx, 3
+    push 3
+    pop rbx
 .Llinux_timeout_spin_next:
     mov ecx, 0x100000
 .Llinux_timeout_spin:
@@ -4903,7 +4915,8 @@ linux_child_eventfd_write_and_yield:
     mov esi, 0x405d80
     push 8
     pop rdx
-    mov ebx, 4
+    push 4
+    pop rbx
 .Llinux_child_eventfd_next:
     push 1
     pop rax

@@ -431,6 +431,9 @@ static LINUX_EVENTFD_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_EPOLL_PWAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_EPOLL_PWAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_EPOLL_PWAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -498,6 +501,7 @@ const LINUX_THREAD_WAIT_POLL: u8 = 4;
 const LINUX_THREAD_WAIT_EPOLL: u8 = 5;
 const LINUX_THREAD_WAIT_EVENTFD_READ: u8 = 6;
 const LINUX_THREAD_WAIT_PPOLL: u8 = 7;
+const LINUX_THREAD_WAIT_EPOLL_PWAIT: u8 = 8;
 const LINUX_SYSCALL_FRAME_REGISTERS: usize = 12;
 static LINUX_THREAD_STATES: [AtomicU8; LINUX_THREAD_LIMIT] =
     [const { AtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
@@ -2331,6 +2335,7 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
             | LINUX_THREAD_WAIT_EPOLL
             | LINUX_THREAD_WAIT_EVENTFD_READ
             | LINUX_THREAD_WAIT_PPOLL
+            | LINUX_THREAD_WAIT_EPOLL_PWAIT
     ) || key == 0
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
         || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_NONE
@@ -3167,6 +3172,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_PPOLL_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_PPOLL_WAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_PPOLL_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_EPOLL_PWAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
+    LINUX_EPOLL_PWAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
+    LINUX_EPOLL_PWAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -3533,6 +3541,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let ppoll_wait_block_count = LINUX_PPOLL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let ppoll_wait_wake_count = LINUX_PPOLL_WAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let ppoll_wait_timeout_count = LINUX_PPOLL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
+    let epoll_pwait_block_count = LINUX_EPOLL_PWAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
+    let epoll_pwait_wake_count = LINUX_EPOLL_PWAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
+    let epoll_pwait_timeout_count = LINUX_EPOLL_PWAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
     let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_block_count = LINUX_SIGNAL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
@@ -3567,14 +3578,17 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && poll_wait_block_count == 2
             && poll_wait_wake_count == 1
             && poll_wait_timeout_count == 1
-            && epoll_wait_block_count == 2
+            && epoll_wait_block_count == 1
             && epoll_wait_wake_count == 1
-            && epoll_wait_timeout_count == 1
+            && epoll_wait_timeout_count == 0
             && eventfd_read_block_count == 1
             && eventfd_read_wake_count == 1
             && ppoll_wait_block_count == 2
             && ppoll_wait_wake_count == 1
             && ppoll_wait_timeout_count == 1
+            && epoll_pwait_block_count == 1
+            && epoll_pwait_wake_count == 0
+            && epoll_pwait_timeout_count == 1
             && signal_wait_block_count == 2
             && signal_wait_wake_count == 1
             && signal_wait_timeout_count == 1)
@@ -3602,14 +3616,17 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             poll_wait_block_count == 2,
             poll_wait_wake_count == 1,
             poll_wait_timeout_count == 1,
-            epoll_wait_block_count == 2,
+            epoll_wait_block_count == 1,
             epoll_wait_wake_count == 1,
-            epoll_wait_timeout_count == 1,
+            epoll_wait_timeout_count == 0,
             eventfd_read_block_count == 1,
             eventfd_read_wake_count == 1,
             ppoll_wait_block_count == 2,
             ppoll_wait_wake_count == 1,
             ppoll_wait_timeout_count == 1,
+            epoll_pwait_block_count == 1,
+            epoll_pwait_wake_count == 0,
+            epoll_pwait_timeout_count == 1,
             signal_wait_block_count == 2,
             signal_wait_wake_count == 1,
             signal_wait_timeout_count == 1,
@@ -3647,6 +3664,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             ppoll_wait_block_count,
             ppoll_wait_wake_count,
             ppoll_wait_timeout_count,
+            epoll_pwait_block_count,
+            epoll_pwait_wake_count,
+            epoll_pwait_timeout_count,
             signal_wait_block_count,
             signal_wait_wake_count,
             signal_wait_timeout_count,
@@ -4281,14 +4301,17 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && poll_wait_block_count == 2
                 && poll_wait_wake_count == 1
                 && poll_wait_timeout_count == 1
-                && epoll_wait_block_count == 2
+                && epoll_wait_block_count == 1
                 && epoll_wait_wake_count == 1
-                && epoll_wait_timeout_count == 1
+                && epoll_wait_timeout_count == 0
                 && eventfd_read_block_count == 1
                 && eventfd_read_wake_count == 1
                 && ppoll_wait_block_count == 2
                 && ppoll_wait_wake_count == 1
                 && ppoll_wait_timeout_count == 1
+                && epoll_pwait_block_count == 1
+                && epoll_pwait_wake_count == 0
+                && epoll_pwait_timeout_count == 1
                 && signal_wait_block_count == 2
                 && signal_wait_wake_count == 1
                 && signal_wait_timeout_count == 1)
@@ -4848,9 +4871,11 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EPOLL_WAIT_SYSCALL => linux_epoll_wait_live_return(
             registers,
             syscall_return,
-            first_argument,
-            buffer,
-            count,
+            LinuxEpollWaitInput {
+                epoll: first_argument,
+                address: buffer,
+                maximum: count,
+            },
             register(0),
         ),
         LINUX_EPOLL_CTL_SYSCALL => linux_epoll_ctl(first_argument, buffer, count, register(0)),
@@ -5118,21 +5143,33 @@ extern "sysv64" fn linux_syscall_handler(
             linux_timerfd_settime(first_argument, buffer, count, register(0))
         }
         LINUX_TIMERFD_GETTIME_SYSCALL => linux_timerfd_gettime(first_argument, buffer),
-        LINUX_EPOLL_PWAIT_SYSCALL => linux_epoll_pwait(
-            first_argument,
-            buffer,
-            count,
+        LINUX_EPOLL_PWAIT_SYSCALL => linux_epoll_pwait_live_return(
+            registers,
+            syscall_return,
+            LinuxEpollWaitInput {
+                epoll: first_argument,
+                address: buffer,
+                maximum: count,
+            },
             register(0),
-            register(2),
-            register(1),
+            LinuxSignalMaskInput {
+                address: register(2),
+                size: register(1),
+            },
         ),
-        LINUX_EPOLL_PWAIT2_SYSCALL => linux_epoll_pwait2(
-            first_argument,
-            buffer,
-            count,
+        LINUX_EPOLL_PWAIT2_SYSCALL => linux_epoll_pwait2_live_return(
+            registers,
+            syscall_return,
+            LinuxEpollWaitInput {
+                epoll: first_argument,
+                address: buffer,
+                maximum: count,
+            },
             register(0),
-            register(2),
-            register(1),
+            LinuxSignalMaskInput {
+                address: register(2),
+                size: register(1),
+            },
         ),
         LINUX_PPOLL_SYSCALL => linux_ppoll_live_return(
             registers,
@@ -8328,17 +8365,12 @@ fn linux_ppoll_live_return(
         };
         Some(duration)
     };
-    let temporary_signal_mask = if signal_mask_address != 0 {
-        if signal_set_size != LINUX_SIGNAL_SET_SIZE {
-            return LINUX_EINVAL;
-        }
-        let mut signal_mask = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
-        if !copy_from_linux_user(signal_mask_address, &mut signal_mask) {
-            return LINUX_EFAULT;
-        }
-        u64::from_ne_bytes(signal_mask) & !LINUX_UNBLOCKABLE_SIGNALS
-    } else {
-        ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst)
+    let temporary_signal_mask = match linux_temporary_signal_mask(LinuxSignalMaskInput {
+        address: signal_mask_address,
+        size: signal_set_size,
+    }) {
+        Ok(mask) => mask,
+        Err(error) => return error,
     };
     linux_poll_wait_live_return(
         output,
@@ -9052,26 +9084,18 @@ fn linux_epoll_event(epoll: u64) -> Result<Option<[u8; 12]>, u64> {
     Ok(Some(event))
 }
 
-fn linux_epoll_wait(epoll: u64, address: u64, maximum: u64, timeout: u64) -> u64 {
-    if maximum != 1 {
-        return LINUX_EINVAL;
-    }
-    let event = match linux_epoll_event(epoll) {
-        Ok(Some(event)) => event,
-        Ok(None) => return if timeout as u32 == 0 { 0 } else { LINUX_ENOSYS },
-        Err(error) => return error,
-    };
-    if copy_to_linux_user(address, &event) {
-        1
-    } else {
-        LINUX_EFAULT
-    }
-}
-
 fn complete_linux_epoll_wait(slot: usize, timed_out: bool) -> bool {
+    let kind = if slot < LINUX_THREAD_LIMIT {
+        LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst)
+    } else {
+        LINUX_THREAD_WAIT_NONE
+    };
     if slot >= LINUX_THREAD_LIMIT
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
-        || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_EPOLL
+        || !matches!(
+            kind,
+            LINUX_THREAD_WAIT_EPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
+        )
     {
         return false;
     }
@@ -9092,11 +9116,27 @@ fn complete_linux_epoll_wait(slot: usize, timed_out: bool) -> bool {
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+    if kind == LINUX_THREAD_WAIT_EPOLL_PWAIT {
+        LINUX_THREAD_SIGNAL_MASKS[slot].store(
+            LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].swap(0, Ordering::SeqCst),
+            Ordering::SeqCst,
+        );
+    }
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
-    if timed_out {
-        LINUX_EPOLL_WAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
-    } else {
-        LINUX_EPOLL_WAIT_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
+    match (kind, timed_out) {
+        (LINUX_THREAD_WAIT_EPOLL, true) => {
+            LINUX_EPOLL_WAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+        (LINUX_THREAD_WAIT_EPOLL, false) => {
+            LINUX_EPOLL_WAIT_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+        (LINUX_THREAD_WAIT_EPOLL_PWAIT, true) => {
+            LINUX_EPOLL_PWAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+        (LINUX_THREAD_WAIT_EPOLL_PWAIT, false) => {
+            LINUX_EPOLL_PWAIT_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+        _ => {}
     }
     true
 }
@@ -9113,31 +9153,68 @@ fn wake_linux_descriptor_waits() -> u32 {
     wake_linux_poll_waits() + wake_linux_epoll_waits() + wake_linux_eventfd_read_waits()
 }
 
-fn linux_epoll_wait_live_return(
-    output: *mut LinuxSyscallFrame,
-    caller: LinuxUserContext,
+#[derive(Clone, Copy)]
+struct LinuxEpollWaitInput {
     epoll: u64,
     address: u64,
     maximum: u64,
+}
+
+#[derive(Clone, Copy)]
+struct LinuxSignalMaskInput {
+    address: u64,
+    size: u64,
+}
+
+fn linux_epoll_wait_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    input: LinuxEpollWaitInput,
     timeout: u64,
 ) -> u64 {
-    if maximum != 1 {
+    let timeout = timeout as u32 as i32;
+    let duration = if timeout < 0 {
+        None
+    } else {
+        let Some(duration) = (timeout as u64).checked_mul(1_000_000) else {
+            return LINUX_EINVAL;
+        };
+        Some(duration)
+    };
+    linux_epoll_wait_duration_live_return(
+        output,
+        caller,
+        input,
+        duration,
+        LINUX_THREAD_WAIT_EPOLL,
+        None,
+    )
+}
+
+fn linux_epoll_wait_duration_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    input: LinuxEpollWaitInput,
+    duration: Option<u64>,
+    wait_kind: u8,
+    temporary_signal_mask: Option<u64>,
+) -> u64 {
+    if input.maximum != 1 {
         return LINUX_EINVAL;
     }
-    let timeout = timeout as u32 as i32;
-    match linux_epoll_event(epoll) {
+    match linux_epoll_event(input.epoll) {
         Ok(Some(event)) => {
-            return if copy_to_linux_user(address, &event) {
+            return if copy_to_linux_user(input.address, &event) {
                 1
             } else {
                 LINUX_EFAULT
             };
         }
-        Ok(None) if timeout == 0 => return 0,
+        Ok(None) if duration == Some(0) => return 0,
         Ok(None) => {}
         Err(error) => return error,
     }
-    if !linux_writable_user_range_contains(address, 12) {
+    if !linux_writable_user_range_contains(input.address, 12) {
         return LINUX_EFAULT;
     }
     let Some(current) = current_linux_thread_handle() else {
@@ -9149,23 +9226,25 @@ fn linux_epoll_wait_live_return(
     let Some(tls) = linux_thread_context(current) else {
         return LINUX_ESRCH;
     };
-    let deadline = if timeout < 0 {
-        0
-    } else {
-        let Some(duration) = (timeout as u64).checked_mul(1_000_000) else {
-            return LINUX_EINVAL;
-        };
+    let deadline = if let Some(duration) = duration {
         let Some(deadline) = linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
         else {
             return LINUX_EINVAL;
         };
         deadline
+    } else {
+        0
     };
     let slot = usize::from(current.slot);
     if !save_linux_thread_return_context(current, caller)
-        || !block_current_linux_thread(LINUX_THREAD_WAIT_EPOLL, address, epoll, deadline)
+        || !block_current_linux_thread(wait_kind, input.address, input.epoll, deadline)
     {
         return LINUX_EINVAL;
+    }
+    let prior_signal_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
+    if let Some(mask) = temporary_signal_mask {
+        LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(prior_signal_mask, Ordering::SeqCst);
+        store_current_linux_signal_mask(mask);
     }
     let mut target_registers = LinuxSyscallFrame::ZERO;
     let mut target_rip = 0;
@@ -9184,9 +9263,13 @@ fn linux_epoll_wait_live_return(
         LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_STATES[slot].store(LINUX_THREAD_RUNNING, Ordering::SeqCst);
         LINUX_CURRENT_THREAD_SLOT.store(current.slot, Ordering::SeqCst);
         let _ = install_linux_tls_context(tls);
+        if temporary_signal_mask.is_some() {
+            store_current_linux_signal_mask(prior_signal_mask);
+        }
         return LINUX_EINVAL;
     }
     let selected = LinuxUserContext {
@@ -9201,40 +9284,67 @@ fn linux_epoll_wait_live_return(
         return LINUX_EINVAL;
     }
     LINUX_LIVE_RETURN_VALIDATED.store(true, Ordering::SeqCst);
-    LINUX_EPOLL_WAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+    if wait_kind == LINUX_THREAD_WAIT_EPOLL_PWAIT {
+        LINUX_EPOLL_PWAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+    } else {
+        LINUX_EPOLL_WAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
     selected.rax
 }
 
-fn linux_epoll_pwait(
-    epoll: u64,
-    address: u64,
-    maximum: u64,
-    timeout: u64,
-    signal_mask_address: u64,
-    signal_set_size: u64,
-) -> u64 {
-    if signal_mask_address != 0 {
-        if signal_set_size != LINUX_SIGNAL_SET_SIZE {
-            return LINUX_EINVAL;
-        }
-        let mut signal_mask = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
-        if !copy_from_linux_user(signal_mask_address, &mut signal_mask) {
-            return LINUX_EFAULT;
-        }
+fn linux_temporary_signal_mask(input: LinuxSignalMaskInput) -> Result<u64, u64> {
+    if input.address == 0 {
+        return Ok(ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst));
     }
-    linux_epoll_wait(epoll, address, maximum, timeout)
+    if input.size != LINUX_SIGNAL_SET_SIZE {
+        return Err(LINUX_EINVAL);
+    }
+    let mut signal_mask = [0_u8; LINUX_SIGNAL_SET_SIZE as usize];
+    if !copy_from_linux_user(input.address, &mut signal_mask) {
+        return Err(LINUX_EFAULT);
+    }
+    Ok(u64::from_ne_bytes(signal_mask) & !LINUX_UNBLOCKABLE_SIGNALS)
 }
 
-fn linux_epoll_pwait2(
-    epoll: u64,
-    address: u64,
-    maximum: u64,
-    timeout_address: u64,
-    signal_mask_address: u64,
-    signal_set_size: u64,
+fn linux_epoll_pwait_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    input: LinuxEpollWaitInput,
+    timeout: u64,
+    signal_mask: LinuxSignalMaskInput,
 ) -> u64 {
-    let waits = if timeout_address == 0 {
-        true
+    let signal_mask = match linux_temporary_signal_mask(signal_mask) {
+        Ok(mask) => mask,
+        Err(error) => return error,
+    };
+    let timeout = timeout as u32 as i32;
+    let duration = if timeout < 0 {
+        None
+    } else {
+        let Some(duration) = (timeout as u64).checked_mul(1_000_000) else {
+            return LINUX_EINVAL;
+        };
+        Some(duration)
+    };
+    linux_epoll_wait_duration_live_return(
+        output,
+        caller,
+        input,
+        duration,
+        LINUX_THREAD_WAIT_EPOLL_PWAIT,
+        Some(signal_mask),
+    )
+}
+
+fn linux_epoll_pwait2_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    input: LinuxEpollWaitInput,
+    timeout_address: u64,
+    signal_mask: LinuxSignalMaskInput,
+) -> u64 {
+    let duration = if timeout_address == 0 {
+        None
     } else {
         let mut timeout = [0_u8; 16];
         if !copy_from_linux_user(timeout_address, &mut timeout) {
@@ -9245,15 +9355,25 @@ fn linux_epoll_pwait2(
         if seconds < 0 || !(0..NANOSECONDS_PER_SECOND as i64).contains(&nanoseconds) {
             return LINUX_EINVAL;
         }
-        seconds != 0 || nanoseconds != 0
+        let Some(duration) = (seconds as u64)
+            .checked_mul(NANOSECONDS_PER_SECOND)
+            .and_then(|seconds| seconds.checked_add(nanoseconds as u64))
+        else {
+            return LINUX_EINVAL;
+        };
+        Some(duration)
     };
-    linux_epoll_pwait(
-        epoll,
-        address,
-        maximum,
-        u64::from(waits),
-        signal_mask_address,
-        signal_set_size,
+    let signal_mask = match linux_temporary_signal_mask(signal_mask) {
+        Ok(mask) => mask,
+        Err(error) => return error,
+    };
+    linux_epoll_wait_duration_live_return(
+        output,
+        caller,
+        input,
+        duration,
+        LINUX_THREAD_WAIT_EPOLL_PWAIT,
+        Some(signal_mask),
     )
 }
 
@@ -10781,7 +10901,10 @@ fn expire_linux_waits() -> u32 {
             }
             continue;
         }
-        if LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) == LINUX_THREAD_WAIT_EPOLL {
+        if matches!(
+            LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst),
+            LINUX_THREAD_WAIT_EPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
+        ) {
             if complete_linux_epoll_wait(slot, true) {
                 expired += 1;
             }
