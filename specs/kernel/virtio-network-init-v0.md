@@ -35,12 +35,18 @@ The accepted bitmap is exactly:
 
 - `VIRTIO_F_VERSION_1` (bit 32);
 - `VIRTIO_F_ACCESS_PLATFORM` (bit 33); and
-- `VIRTIO_NET_F_MAC` (bit 5).
+- `VIRTIO_NET_F_MAC` (bit 5); and
+- `VIRTIO_NET_F_MRG_RXBUF` (bit 15).
 
 Missing any required bit fails closed. After writing both driver-feature words,
 the kernel sets and reads back `FEATURES_OK`. The common configuration must
 report at least two queues for receive and transmit; the deterministic QEMU
 profile currently reports three.
+
+The mergeable-buffer feature fixes the modern network header at 12 bytes and
+requires the device to report the exact number of receive descriptors used;
+the bounded bootstrap receive path publishes only one sufficiently large
+descriptor and accepts only `num_buffers == 1`.
 
 Because `VIRTIO_NET_F_MAC` is accepted, the kernel reads the six-byte MAC from
 the device-configuration page between matching common-configuration generation
@@ -72,7 +78,7 @@ requires both zero device status and zero authority bits.
 
 Boot-time checks remove each required feature independently and require
 selection failure. A zero feature set is also rejected. The accepted bitmap
-must contain no optional feature beyond the three listed above.
+must contain no optional feature beyond the four listed above.
 
 ## Deliberate limits
 

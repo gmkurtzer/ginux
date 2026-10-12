@@ -103,7 +103,7 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: bounded uncached virtio-net notification mapping active' "$output_file" ||
     ! grep -q '^ginux: bounded uncached virtio-net MSI-X mapping active' "$output_file" ||
     ! grep -q '^ginux: virtio-net cacheable alias absent' "$output_file" ||
-    ! grep -q '^ginux: virtio-net accepted features: 12884901920' "$output_file" ||
+    ! grep -q '^ginux: virtio-net accepted features: 12884934688' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues available: 3' "$output_file" ||
     ! grep -q '^ginux: virtio-net receive queue size: 256' "$output_file" ||
     ! grep -q '^ginux: virtio-net transmit queue size: 256' "$output_file" ||
@@ -137,6 +137,13 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net TX payload and guards preserved' "$output_file" ||
     ! grep -q '^ginux: bounded Ethernet probe transmitted' "$output_file" ||
     ! grep -q '^ginux: virtio-net TX route retired before DMA release' "$output_file" ||
+    ! grep -q '^ginux: confined virtio-net RX descriptor published' "$output_file" ||
+    ! grep -q '^ginux: bounded ARP request transmitted' "$output_file" ||
+    ! grep -q '^ginux: exactly one virtio-net RX interrupt delivered' "$output_file" ||
+    ! grep -q '^ginux: virtio-net RX used-ring completion validated' "$output_file" ||
+    ! grep -q '^ginux: QEMU gateway ARP reply validated' "$output_file" ||
+    ! grep -q '^ginux: virtio-net RX payload bounds preserved' "$output_file" ||
+    ! grep -q '^ginux: virtio-net RX/TX routes retired before DMA release' "$output_file" ||
     ! grep -q '^ginux: virtio-net DMA confinement retired cleanly' "$output_file" ||
     ! grep -q '^ginux: virtio-net stable MAC validated: 90520731923542' "$output_file" ||
     ! grep -q '^ginux: virtio-net platform DMA negotiation validated' "$output_file" ||

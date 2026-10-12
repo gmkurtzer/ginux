@@ -40,9 +40,9 @@ The DMAR scope must resolve the network endpoint exactly. See
 After that authority boundary is established, the common-configuration page
 and a read-only device-configuration page are mapped supervisor-only, uncached,
 and non-executable. The kernel resets the device, accepts exactly `VERSION_1`,
-`ACCESS_PLATFORM`, and `MAC`, verifies three available queues, reads the pinned
-MAC through a stable configuration-generation snapshot, and validates the
-receive/transmit queue sizes and notification offsets without mapping the
+`ACCESS_PLATFORM`, `MAC`, and `MRG_RXBUF`, verifies three available queues,
+reads the pinned MAC through a stable configuration-generation snapshot, and
+validates the receive/transmit queue sizes and notification offsets without mapping the
 notification page. Both queues must remain disabled, interrupt-unbound, and
 free of DMA addresses before the device is reset again with all PCI decoding
 disabled.
@@ -82,6 +82,14 @@ MSI-X and bus mastering are then disabled, the device is reset, and the IDT
 gate is retired before VT-d or the DMA lease. This proves device consumption,
 not peer reception. See
 [Virtio Network Transmit v0](specs/kernel/virtio-network-transmit-v0.md).
+The receive proof adds `MRG_RXBUF`, publishes one bounded write-only RX
+descriptor, and sends a padded ARP request to the restricted QEMU gateway. RX
+MSI-X remains masked until the TX completion has been isolated; unmasking
+vector 34 must then deliver exactly one interrupt and one used-ring entry. The
+kernel validates the 12-byte modern header, one-buffer count, exact gateway and
+guest MAC/IP identities, ARP reply fields, length bounds, and canaries before
+retiring both interrupt routes and DMA authority. See
+[Virtio Network Receive v0](specs/kernel/virtio-network-receive-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table

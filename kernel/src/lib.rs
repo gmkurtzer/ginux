@@ -1290,13 +1290,37 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             )
         })
         .flatten();
+    // SAFETY: The transmit proof returned with the function reset and DMA
+    // disabled while the same exact VT-d translation and exclusive page remain
+    // live for this bounded request/reply exchange.
+    let network_receive = network_transmit
+        .is_some()
+        .then(|| unsafe {
+            arch::x86_64::pci::receive_network_arp_reply(
+                virtio_network,
+                virtio_network_common_mmio,
+                virtio_network_notify_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+                virtio_network_dma_frame.address(),
+                virtio_network_dma_virtual,
+            )
+        })
+        .flatten();
     let network_translation_retired = virtio_network_active.finish();
-    if !network_queues_activated
-        || network_transmit.is_none_or(|transmit| transmit.frame_length != 19)
-        || !network_translation_retired
+    if !network_queues_activated {
+        kernel_fail("\r\nginux: virtio-net empty queue activation failed\r\n");
+    }
+    if network_transmit.is_none_or(|transmit| transmit.frame_length != 19) {
+        kernel_fail("\r\nginux: confined virtio-net transmit failed\r\n");
+    }
+    if network_receive.is_none_or(|receive| !(42..=1523).contains(&receive.frame_length)) {
+        kernel_fail("\r\nginux: confined virtio-net receive failed\r\n");
+    }
+    if !network_translation_retired
         || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
     {
-        kernel_fail("\r\nginux: confined virtio-net transmit failed\r\n");
+        kernel_fail("\r\nginux: virtio-net translation retirement failed\r\n");
     }
     serial_write("\r\nginux: virtio-net IOMMU activated before queue authority");
     serial_write("\r\nginux: empty virtio-net RX/TX queues bound to confined DMA");
@@ -1311,6 +1335,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: virtio-net TX payload and guards preserved");
     serial_write("\r\nginux: bounded Ethernet probe transmitted");
     serial_write("\r\nginux: virtio-net TX route retired before DMA release");
+    serial_write("\r\nginux: confined virtio-net RX descriptor published");
+    serial_write("\r\nginux: bounded ARP request transmitted");
+    serial_write("\r\nginux: exactly one virtio-net RX interrupt delivered");
+    serial_write("\r\nginux: virtio-net RX used-ring completion validated");
+    serial_write("\r\nginux: QEMU gateway ARP reply validated");
+    serial_write("\r\nginux: virtio-net RX payload bounds preserved");
+    serial_write("\r\nginux: virtio-net RX/TX routes retired before DMA release");
     if !virtio_network_translation.retire()
         || !memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,

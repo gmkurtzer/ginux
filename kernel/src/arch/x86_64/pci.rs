@@ -75,6 +75,7 @@ const STATUS_FEATURES_OK: u8 = 8;
 const STATUS_DEVICE_NEEDS_RESET: u8 = 64;
 const STATUS_FAILED: u8 = 128;
 const FEATURE_NET_MAC: u64 = 1 << 5;
+const FEATURE_NET_MRG_RXBUF: u64 = 1 << 15;
 const FEATURE_FLUSH: u64 = 1 << 9;
 const FEATURE_VERSION_1: u64 = 1 << 32;
 const FEATURE_ACCESS_PLATFORM: u64 = 1 << 33;
@@ -426,6 +427,11 @@ pub(crate) struct VirtioNetworkInitialization {
 
 #[derive(Clone, Copy)]
 pub(crate) struct VirtioNetworkTransmit {
+    pub(crate) frame_length: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct VirtioNetworkReceive {
     pub(crate) frame_length: u32,
 }
 
@@ -1018,6 +1024,21 @@ extern "sysv64" fn virtio_interrupt_handler(_frame: *mut UserInterruptFrame) {
     unsafe { apic.write(APIC_EOI, 0) };
 }
 
+unsafe fn wait_for_one_virtio_interrupt() -> bool {
+    asm!("sti", options(nomem, nostack));
+    let mut interrupted = false;
+    for _ in 0..QUEUE_POLL_LIMIT {
+        if VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst) {
+            interrupted = true;
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    asm!("cli", options(nomem, nostack));
+    compiler_fence(Ordering::SeqCst);
+    interrupted && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1
+}
+
 pub(crate) fn initialize_without_dma(
     device: VirtioBlockDevice,
     mapping: MmioMapping,
@@ -1237,7 +1258,7 @@ pub(crate) unsafe fn transmit_network_probe(
     dma_physical: u64,
     dma_virtual: usize,
 ) -> Option<VirtioNetworkTransmit> {
-    const HEADER_LENGTH: usize = 10;
+    const HEADER_LENGTH: usize = 12;
     const ETHERNET_FRAME: [u8; 19] = [
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x88, 0xb5, b'G',
         b'I', b'N', b'U', b'X',
@@ -1369,17 +1390,7 @@ pub(crate) unsafe fn transmit_network_probe(
         }
         compiler_fence(Ordering::SeqCst);
         write_mmio_u16(notification, 1);
-        asm!("sti", options(nomem, nostack));
-        let mut interrupted = false;
-        for _ in 0..QUEUE_POLL_LIMIT {
-            if VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst) {
-                interrupted = true;
-                break;
-            }
-            core::hint::spin_loop();
-        }
-        asm!("cli", options(nomem, nostack));
-        compiler_fence(Ordering::SeqCst);
+        let interrupted = wait_for_one_virtio_interrupt();
         let header_unchanged = (0..HEADER_LENGTH)
             .all(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) == 0);
         let frame_unchanged = ETHERNET_FRAME.iter().enumerate().all(|(offset, expected)| {
@@ -1387,7 +1398,6 @@ pub(crate) unsafe fn transmit_network_probe(
         });
         let device_status = read_common_u8(common, COMMON_DEVICE_STATUS);
         (interrupted
-            && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1
             && read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) == 1
             && read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4) == 0
             && device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) == 0
@@ -1426,6 +1436,344 @@ pub(crate) unsafe fn transmit_network_probe(
         && interrupt_retired)
         .then_some(result)
         .flatten()
+}
+
+/// Sends one ARP request and receives the bounded gateway reply through queue 0.
+///
+/// # Safety
+///
+/// The caller must exclusively own the DMA page and have an active IOMMU
+/// translation restricting this function to that page until return.
+pub(crate) unsafe fn receive_network_arp_reply(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    notification_mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    apic: &LocalApic,
+    dma_physical: u64,
+    dma_virtual: usize,
+) -> Option<VirtioNetworkReceive> {
+    const HEADER_LENGTH: usize = 12;
+    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
+    const GUEST_IP: [u8; 4] = [10, 0, 2, 15];
+    const GATEWAY_IP: [u8; 4] = [10, 0, 2, 2];
+    const ARP_REQUEST: [u8; 60] = [
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
+        0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 10, 0, 2, 15,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 10, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0,
+    ];
+    const TX_LENGTH: usize = HEADER_LENGTH + ARP_REQUEST.len();
+    const RX_DESCRIPTOR_LENGTH: usize = NET_BUFFER_LENGTH - 1;
+
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || !network_function_is_disabled(device)
+        || TX_LENGTH >= NET_BUFFER_LENGTH
+    {
+        return None;
+    }
+    let (common_physical, common_length) = device.common_region()?;
+    let common = common_mapping.address(common_physical, common_length)?;
+    let (notify_physical, notify_length) = device.notify_region()?;
+    if !install_virtio_interrupt_at(apic, VIRTIO_NETWORK_RX_VECTOR) {
+        return None;
+    }
+    if !install_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR) {
+        let _ = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_RX_VECTOR);
+        return None;
+    }
+
+    core::ptr::write_bytes(dma_virtual as *mut u8, 0, DMA_PAGE_SIZE);
+    write_config_u16(
+        device.bus,
+        device.device,
+        device.function,
+        PCI_COMMAND,
+        COMMAND_MEMORY_SPACE,
+    );
+    let result = (|| {
+        if network_function_command(device) != COMMAND_MEMORY_SPACE
+            || !program_masked_msix_vector_raw(
+                device.msix_target(),
+                msix_mapping,
+                0,
+                apic.id,
+                VIRTIO_NETWORK_RX_VECTOR,
+            )
+            || !program_masked_msix_vector_raw(
+                device.msix_target(),
+                msix_mapping,
+                1,
+                apic.id,
+                VIRTIO_NETWORK_TX_VECTOR,
+            )
+        {
+            return None;
+        }
+        let initialization = negotiate_network(common)?;
+        if initialization.queue_count < 2 || !set_msix_control_raw(device.msix_target(), true, true)
+        {
+            return None;
+        }
+
+        write_common_u16(common, COMMON_QUEUE_SELECT, 0);
+        validate_network_queue_size(read_common_u16(common, COMMON_QUEUE_SIZE))?;
+        write_common_u16(common, COMMON_QUEUE_SIZE, QUEUE_SIZE);
+        write_common_u16(common, COMMON_QUEUE_MSIX_VECTOR, 0);
+        let receive_notify_offset = notification_byte_offset(
+            read_common_u16(common, COMMON_QUEUE_NOTIFY_OFF),
+            device.notify_multiplier,
+            notify_length,
+        )?;
+        let receive_notification = notification_mapping.address(
+            notify_physical.checked_add(receive_notify_offset as u64)?,
+            size_of::<u16>(),
+        )?;
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DESC,
+            dma_physical + NET_RX_DESC_OFFSET as u64,
+        );
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DRIVER,
+            dma_physical + NET_RX_AVAIL_OFFSET as u64,
+        );
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DEVICE,
+            dma_physical + NET_RX_USED_OFFSET as u64,
+        );
+        write_common_u16(common, COMMON_QUEUE_ENABLE, 1);
+        if read_common_u16(common, COMMON_QUEUE_ENABLE) != 1
+            || read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) != 0
+        {
+            return None;
+        }
+
+        write_common_u16(common, COMMON_QUEUE_SELECT, 1);
+        validate_network_queue_size(read_common_u16(common, COMMON_QUEUE_SIZE))?;
+        write_common_u16(common, COMMON_QUEUE_SIZE, QUEUE_SIZE);
+        write_common_u16(common, COMMON_QUEUE_MSIX_VECTOR, 1);
+        let transmit_notify_offset = notification_byte_offset(
+            read_common_u16(common, COMMON_QUEUE_NOTIFY_OFF),
+            device.notify_multiplier,
+            notify_length,
+        )?;
+        let transmit_notification = notification_mapping.address(
+            notify_physical.checked_add(transmit_notify_offset as u64)?,
+            size_of::<u16>(),
+        )?;
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DESC,
+            dma_physical + NET_TX_DESC_OFFSET as u64,
+        );
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DRIVER,
+            dma_physical + NET_TX_AVAIL_OFFSET as u64,
+        );
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DEVICE,
+            dma_physical + NET_TX_USED_OFFSET as u64,
+        );
+        write_common_u16(common, COMMON_QUEUE_ENABLE, 1);
+        if read_common_u16(common, COMMON_QUEUE_ENABLE) != 1
+            || read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) != 1
+        {
+            return None;
+        }
+
+        write_dma_u64(
+            dma_virtual + NET_RX_DESC_OFFSET,
+            dma_physical + NET_RX_BUFFER_OFFSET as u64,
+        );
+        write_dma_u32(
+            dma_virtual + NET_RX_DESC_OFFSET + 8,
+            RX_DESCRIPTOR_LENGTH as u32,
+        );
+        write_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 12, DESC_WRITE);
+        write_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 14, 0);
+        write_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1, 0x3c);
+        write_dma_u8(
+            dma_virtual + NET_RX_BUFFER_OFFSET + RX_DESCRIPTOR_LENGTH,
+            0xc3,
+        );
+        write_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET, 0);
+        write_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 2, 1);
+        write_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 4, 0);
+
+        write_dma_u64(
+            dma_virtual + NET_TX_DESC_OFFSET,
+            dma_physical + NET_TX_BUFFER_OFFSET as u64,
+        );
+        write_dma_u32(dma_virtual + NET_TX_DESC_OFFSET + 8, TX_LENGTH as u32);
+        write_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 12, 0);
+        write_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 14, 0);
+        for offset in 0..HEADER_LENGTH {
+            write_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset, 0);
+        }
+        for (offset, byte) in ARP_REQUEST.into_iter().enumerate() {
+            write_dma_u8(
+                dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset,
+                byte,
+            );
+        }
+        write_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + TX_LENGTH, 0xa5);
+        write_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET, 0);
+        write_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2, 1);
+        write_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 4, 0);
+
+        compiler_fence(Ordering::SeqCst);
+        write_common_u8(
+            common,
+            COMMON_DEVICE_STATUS,
+            STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK,
+        );
+        let device_status = read_common_u8(common, COMMON_DEVICE_STATUS);
+        if device_status & STATUS_DRIVER_OK == 0
+            || device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) != 0
+        {
+            return None;
+        }
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER,
+        );
+        if network_function_command(device) != COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER {
+            return None;
+        }
+
+        VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+        if !set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, false)
+            || !set_msix_control_raw(device.msix_target(), true, false)
+        {
+            return None;
+        }
+        compiler_fence(Ordering::SeqCst);
+        write_mmio_u16(receive_notification, 0);
+        write_mmio_u16(transmit_notification, 1);
+        let transmit_interrupted = wait_for_one_virtio_interrupt();
+        let transmit_completed = transmit_interrupted
+            && read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) == 1
+            && read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4) == 0
+            && (0..HEADER_LENGTH)
+                .all(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) == 0)
+            && ARP_REQUEST.iter().enumerate().all(|(offset, expected)| {
+                read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset)
+                    == *expected
+            })
+            && read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + TX_LENGTH) == 0xa5;
+        if !transmit_completed
+            || !set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true)
+        {
+            return None;
+        }
+
+        VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+        if !set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 0, false) {
+            return None;
+        }
+        let receive_interrupted = wait_for_one_virtio_interrupt();
+        let receive_length = read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 8);
+        let device_status = read_common_u8(common, COMMON_DEVICE_STATUS);
+        let ring_valid = receive_interrupted
+            && read_dma_u16(dma_virtual + NET_RX_USED_OFFSET + 2) == 1
+            && read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 4) == 0
+            && device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) == 0;
+        let guards_valid = read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1) == 0x3c
+            && read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET + RX_DESCRIPTOR_LENGTH) == 0xc3;
+        let reply_valid = network_arp_reply_is_valid(
+            dma_virtual + NET_RX_BUFFER_OFFSET,
+            receive_length,
+            GUEST_MAC,
+            GATEWAY_MAC,
+            GUEST_IP,
+            GATEWAY_IP,
+        );
+        let valid = ring_valid && guards_valid && reply_valid;
+        valid.then_some(VirtioNetworkReceive {
+            frame_length: receive_length.checked_sub(HEADER_LENGTH as u32)?,
+        })
+    })();
+
+    asm!("cli", options(nomem, nostack));
+    let function_masked = set_msix_control_raw(device.msix_target(), true, true);
+    let receive_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 0, true);
+    let transmit_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
+    let msix_disabled = set_msix_control_raw(device.msix_target(), false, true);
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    let current = network_function_command(device);
+    write_config_u16(
+        device.bus,
+        device.device,
+        device.function,
+        PCI_COMMAND,
+        (current | COMMAND_MEMORY_SPACE) & !(COMMAND_IO_SPACE | COMMAND_BUS_MASTER),
+    );
+    let bus_master_revoked = network_function_command(device) & COMMAND_BUS_MASTER == 0;
+    let reset_complete = reset(common).is_some();
+    let revoked = revoke_network_function(device);
+    let receive_interrupt_retired = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_RX_VECTOR);
+    let transmit_interrupt_retired = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR);
+    let retired = function_masked
+        && receive_masked
+        && transmit_masked
+        && msix_disabled
+        && bus_master_revoked
+        && reset_complete
+        && revoked
+        && receive_interrupt_retired
+        && transmit_interrupt_retired;
+    retired.then_some(result).flatten()
+}
+
+fn network_arp_reply_is_valid(
+    buffer: usize,
+    used_length: u32,
+    guest_mac: [u8; 6],
+    gateway_mac: [u8; 6],
+    guest_ip: [u8; 4],
+    gateway_ip: [u8; 4],
+) -> bool {
+    const HEADER_LENGTH: usize = 12;
+    const ARP_LENGTH: usize = 42;
+    if used_length < (HEADER_LENGTH + ARP_LENGTH) as u32
+        || used_length > (NET_BUFFER_LENGTH - 1) as u32
+        || !(0..10).all(|offset| read_dma_u8(buffer + offset) == 0)
+        || read_dma_u16(buffer + 10) != 1
+    {
+        return false;
+    }
+    let frame = buffer + HEADER_LENGTH;
+    bytes_match(frame, &guest_mac)
+        && bytes_match(frame + 6, &gateway_mac)
+        && bytes_match(frame + 12, &[0x08, 0x06])
+        && bytes_match(
+            frame + 14,
+            &[0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x02],
+        )
+        && bytes_match(frame + 22, &gateway_mac)
+        && bytes_match(frame + 28, &gateway_ip)
+        && bytes_match(frame + 32, &guest_mac)
+        && bytes_match(frame + 38, &guest_ip)
+}
+
+fn bytes_match(address: usize, expected: &[u8]) -> bool {
+    expected
+        .iter()
+        .enumerate()
+        .all(|(offset, byte)| read_dma_u8(address + offset) == *byte)
 }
 
 /// Executes one interrupt-driven read-only DMA request using one caller-owned
@@ -2120,11 +2468,13 @@ pub(crate) fn verify_feature_rejections(offered: u64, accepted: u64) -> bool {
 }
 
 pub(crate) fn verify_network_feature_rejections(offered: u64, accepted: u64) -> bool {
-    accepted == (FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_NET_MAC)
+    accepted
+        == (FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_NET_MAC | FEATURE_NET_MRG_RXBUF)
         && select_network_features(offered) == Some(accepted)
         && select_network_features(offered & !FEATURE_VERSION_1).is_none()
         && select_network_features(offered & !FEATURE_ACCESS_PLATFORM).is_none()
         && select_network_features(offered & !FEATURE_NET_MAC).is_none()
+        && select_network_features(offered & !FEATURE_NET_MRG_RXBUF).is_none()
         && select_network_features(0).is_none()
 }
 
@@ -2153,7 +2503,8 @@ fn select_features(offered: u64) -> Option<u64> {
 }
 
 fn select_network_features(offered: u64) -> Option<u64> {
-    let required = FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_NET_MAC;
+    let required =
+        FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_NET_MAC | FEATURE_NET_MRG_RXBUF;
     (offered & required == required).then_some(required)
 }
 

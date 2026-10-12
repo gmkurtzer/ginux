@@ -16,8 +16,9 @@ MSI-X disabled. The exact VT-d translation for source `00:03.0` and the one
 network DMA page is active before device configuration begins.
 
 Queue 1 is configured with eight entries and MSI-X table entry 1. Descriptor
-zero is device-readable and covers exactly 29 bytes in the TX buffer: a
-zeroed 10-byte virtio-net header followed by this fixed 19-byte Ethernet probe:
+zero is device-readable and covers exactly 31 bytes in the TX buffer: a
+zeroed 12-byte modern virtio-net header followed by this fixed 19-byte Ethernet
+probe:
 
 - broadcast destination `ff:ff:ff:ff:ff:ff`;
 - pinned source `52:54:00:12:34:56`;
@@ -48,7 +49,7 @@ Every failure after gate installation follows the same teardown path.
   descriptor. It does not prove that a peer received the frame.
 - This bootstrap probe is intentionally shorter than a normal padded Ethernet
   frame and is not a general Ethernet interface.
-- No receive buffer, protocol parser, retry, timeout injection, or concurrent
-  request is implemented.
+- This proof does not include a receive buffer, protocol parser, retry, timeout
+  injection, or concurrent request.
 - The interrupt route and queue remain kernel-owned. Delegation to a measured,
   restartable native network service is a later M6 milestone.
