@@ -1,7 +1,7 @@
 # Native Network Service Runtime v0
 
-**Status:** A freestanding x86-64 service artifact is built; device delegation
-and execution are not yet implemented.
+**Status:** A freestanding x86-64 service artifact is authenticated and its
+bounded ELF load plan is accepted; materialization and execution are pending.
 
 ## Purpose
 
@@ -19,11 +19,19 @@ descriptor before reporting a clean `COMPLETED` lifecycle outcome. An
 incompatible scalar or structured ABI fails closed through a driver fault.
 
 The build is part of `make manifest`, `make check`, and the clean `make gate`
-dependency graph. Clippy treats every warning as an error.
+dependency graph. Clippy treats every warning as an error. Manifest generation
+places the artifact at internal path `native/network` in the deterministic
+initramfs, so the signed root-image digest authenticates its exact bytes.
+
+During boot the kernel resolves only that exact path from the published
+read-only root, parses it with the bounded native ELF loader, and requires a
+nonzero executable entry, exactly one read-only, executable, and writable load
+segment, and at least one valid relative relocation. No unmeasured fallback
+artifact is accepted.
 
 ## Deliberate limits
 
-This milestone does not yet place the artifact in the authenticated root,
-materialize it into a W^X domain, execute it, delegate device capabilities,
-map MMIO or DMA, or move packet processing out of the kernel. Each boundary is
-introduced and tested separately in subsequent milestones.
+This milestone does not yet materialize the artifact into a W^X domain,
+execute it, delegate device capabilities, map MMIO or DMA, or move packet
+processing out of the kernel. Each boundary is introduced and tested
+separately in subsequent milestones.

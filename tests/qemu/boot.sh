@@ -160,6 +160,13 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     exit 1
 fi
 
+if ! grep -q '^ginux: measured isolated network service discovered' "$output_file" ||
+    ! grep -q '^ginux: bounded native network PIE load plan accepted' "$output_file" ||
+    ! grep -q '^ginux: native network service relative relocations accepted' "$output_file"; then
+    echo "Boot test failed: the authenticated native network-service image was not accepted." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

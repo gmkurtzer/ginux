@@ -10,6 +10,8 @@ use ginux_native_abi::{
     NATIVE_SERVICE_EXIT_OPERATION,
 };
 
+static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
+
 global_asm!(
     r#"
     .text
@@ -27,7 +29,9 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 
 #[no_mangle]
 extern "C" fn ginux_network_service_main() -> ! {
-    if !native_control_abi_is_compatible(discover_control_abi())
+    let identity = unsafe { core::ptr::read_volatile(&SERVICE_IDENTITY) };
+    if identity != b"GINUX_NETWORK_SERVICE_V0"
+        || !native_control_abi_is_compatible(discover_control_abi())
         || !discover_control_descriptor().is_compatible()
     {
         fail();

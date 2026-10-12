@@ -1522,6 +1522,31 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: native service relative relocations applied\r\n");
     serial_write("ginux: native service W^X address space verified\r\n");
     serial_write("ginux: native service guard pages verified\r\n");
+    let Some(network_service_node) = initramfs::published_regular_file_node(b"native/network")
+    else {
+        kernel_fail("ginux: isolated network service missing\r\n");
+    };
+    let Some(network_service) = initramfs::published_file_by_node(network_service_node) else {
+        kernel_fail("ginux: isolated network service unreadable\r\n");
+    };
+    let Some(network_image) = native_elf::inspect(network_service) else {
+        kernel_fail("ginux: isolated network service ELF invalid\r\n");
+    };
+    if network_image.bytes.len() != network_service.len()
+        || network_image.entry == 0
+        || network_image.segments.iter().flatten().count() != 3
+        || network_image.relocation_count == 0
+        || network_image.relocations[..network_image.relocation_count]
+            .iter()
+            .any(|relocation| {
+                relocation.is_none_or(|relocation| relocation.target == 0 || relocation.addend == 0)
+            })
+    {
+        kernel_fail("ginux: isolated network service load plan incomplete\r\n");
+    }
+    serial_write("ginux: measured isolated network service discovered\r\n");
+    serial_write("ginux: bounded native network PIE load plan accepted\r\n");
+    serial_write("ginux: native network service relative relocations accepted\r\n");
     if !linux_mount::verify_contract() || !linux_mount::install_initial() {
         kernel_fail("ginux: initial Linux mount namespace invalid\r\n");
     }

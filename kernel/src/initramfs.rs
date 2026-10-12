@@ -220,7 +220,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 24
+    archive.entry_count() == 25
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -284,6 +284,9 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive
             .find(b"native/volume")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && archive
+            .find(b"native/network")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive.find(b"missing").is_none()
 }
@@ -793,7 +796,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 24
+    let valid = root.node_count == 25
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -861,6 +864,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root
             .lookup(b"native/volume")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && root
+            .lookup(b"native/network")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root.lookup(b"missing").is_none()
         && root.lookup(b"../init").is_none()

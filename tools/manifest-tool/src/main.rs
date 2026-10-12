@@ -20,6 +20,7 @@ const EXECUTABLE_MAGIC: &[u8; 8] = b"GINXBIN\0";
 const EXECUTABLE_VERSION: u16 = 2;
 const EXECUTABLE_HEADER_SIZE: u16 = 40;
 const EXECUTABLE_MAX_CODE_SIZE: usize = 4096;
+const NETWORK_SERVICE_MAX_SIZE: usize = 64 * 1024;
 const VOLUME_SERVICE_MAX_SIZE: usize = 64 * 1024;
 const ROOT_IMAGE_MAX_SIZE: usize = 48 * 4096;
 const DEVELOPMENT_SEED: [u8; 32] = [
@@ -29,9 +30,9 @@ const DEVELOPMENT_SEED: [u8; 32] = [
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 8 {
+    if arguments.len() != 9 {
         fail(
-            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS VOLUME_SERVICE SYSTEM_PROFILE OUTPUT_RS",
+            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS NETWORK_SERVICE VOLUME_SERVICE SYSTEM_PROFILE OUTPUT_RS",
         );
     }
     let config = fs::read_to_string(&arguments[1]).unwrap_or_else(|error| {
@@ -46,15 +47,24 @@ fn main() {
         fail("control-plane code must contain 1 through 4096 bytes");
     }
     let bundle = wrap_executable(&code, entries);
-    let volume_service = read_root_artifact(Path::new(&arguments[5]));
+    let network_service = read_root_artifact(Path::new(&arguments[5]));
+    if network_service.is_empty() || network_service.len() > NETWORK_SERVICE_MAX_SIZE {
+        fail("network service must contain 1 through 65536 bytes");
+    }
+    let volume_service = read_root_artifact(Path::new(&arguments[6]));
     if volume_service.is_empty() || volume_service.len() > VOLUME_SERVICE_MAX_SIZE {
         fail("volume service must contain 1 through 65536 bytes");
     }
-    let system_profile = fs::read(&arguments[6]).unwrap_or_else(|error| {
-        fail(&format!("cannot read {}: {error}", arguments[6]));
+    let system_profile = fs::read(&arguments[7]).unwrap_or_else(|error| {
+        fail(&format!("cannot read {}: {error}", arguments[7]));
     });
     validate_system_profile(&system_profile);
-    let root_image = build_initramfs(&arguments[4], &volume_service, &system_profile);
+    let root_image = build_initramfs(
+        &arguments[4],
+        &network_service,
+        &volume_service,
+        &system_profile,
+    );
     if root_image.len() > ROOT_IMAGE_MAX_SIZE {
         fail("generated root image exceeds the 48-page publication capacity");
     }
@@ -94,7 +104,7 @@ fn main() {
         &bundle,
         &root_image,
     );
-    let output_path = Path::new(&arguments[7]);
+    let output_path = Path::new(&arguments[8]);
     fs::write(output_path, output).unwrap_or_else(|error| {
         fail(&format!("cannot write {}: {error}", output_path.display()));
     });
@@ -105,7 +115,12 @@ fn main() {
     );
 }
 
-fn build_initramfs(linux_artifacts: &str, volume_service: &[u8], system_profile: &[u8]) -> Vec<u8> {
+fn build_initramfs(
+    linux_artifacts: &str,
+    network_service: &[u8],
+    volume_service: &[u8],
+    system_profile: &[u8],
+) -> Vec<u8> {
     let artifacts = Path::new(linux_artifacts);
     let linux_init = read_root_artifact(&artifacts.join("linux-linked-graph-main.elf"));
     let linux_interpreter = read_root_artifact(&artifacts.join("ld-ginux.so"));
@@ -148,11 +163,12 @@ fn build_initramfs(linux_artifacts: &str, volume_service: &[u8], system_profile:
         (20, "bin/exec-second", linux_exec_second.as_slice()),
         (24, "sbin/init", linux_system_init.as_slice()),
         (25, "native/volume", volume_service),
+        (26, "native/network", network_service),
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
     append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
-    append_newc_entry(&mut archive, 26, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 27, 0, "TRAILER!!!", &[]);
     archive
 }
 
