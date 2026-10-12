@@ -426,8 +426,10 @@ the alternate stack cannot be replaced while active, and proves a premature
 `rt_sigreturn` is rejected without consuming that state, maps the missing page,
 and returns through the restorer. A dedicated `IRETQ` syscall epilogue restores
 all general registers—including `rcx` and `r11`—plus RIP, RSP, RFLAGS, and the
-prior mask before retrying the faulting load. This is synchronous page-fault
-delivery only: pending/asynchronous signals, `SA_SIGINFO`, user-editable
+prior mask before retrying the faulting load. This covers synchronous page-fault
+delivery plus one software-generated path: `kill(1, SIGSEGV)` redirects the
+live syscall return into the same handler and resumes after that syscall. Other
+pending/asynchronous sources, `SA_SIGINFO`, user-editable
 `ucontext`, nested delivery, automatic alternate-stack disarming, and syscall
 restart remain future work.
 The bounded process reports UID, effective UID, GID, and effective GID zero as

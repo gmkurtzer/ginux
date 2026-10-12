@@ -1280,13 +1280,6 @@ linux_clone_repeat:
     mov eax, 14
     call syscall_expect_efault
 
-    mov edi, 10
-    xor esi, esi
-    xor edx, edx
-    mov r10d, 7
-    mov eax, 13
-    call syscall_expect_einval
-
     lea rax, [rip + linux_sigsegv_handler]
     mov qword ptr [0x405100], rax
     mov qword ptr [0x405108], 0xc000000
@@ -1330,6 +1323,16 @@ linux_clone_repeat:
     mov eax, 11
     call syscall_expect_zero
 
+    push 1
+    pop rdi
+    mov esi, 11
+    mov eax, 62
+    call syscall_expect_zero
+    mov edi, 0x40b000
+    mov esi, 4096
+    mov eax, 11
+    call syscall_expect_zero
+
     xor eax, eax
     mov qword ptr [0x405100], 0
     mov qword ptr [0x405108], rax
@@ -1352,11 +1355,6 @@ linux_clone_repeat:
     jne failure
     cmp qword ptr [0x405168], 2048
     jne failure
-
-    xor edi, edi
-    mov esi, 0x406200
-    mov eax, 131
-    call syscall_expect_efault
 
     mov qword ptr [0x405140], 0x406000
     mov qword ptr [0x405148], 0

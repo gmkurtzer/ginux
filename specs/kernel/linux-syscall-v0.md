@@ -732,6 +732,16 @@ load then observes the newly mapped zero page. Nested delivery, pending signals,
 restartable syscalls, and non-page-fault signal sources remain unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
 than entering the native-domain scheduler fault path.
+`rax = 62` (`__NR_kill`) accepts PID 1 or process-group selector 0. Signal zero
+performs an existence check. An unmasked `SIGSEGV` with the same admitted
+handler action constructs the signal frame from the live syscall context,
+redirects the pending `SYSRET` into the handler, and records the architectural
+post-syscall `rcx` and `r11` values. `rt_sigreturn` then resumes at the
+instruction following `kill` with a zero result. The ring-3 proof delivers this
+self-signal after the page-fault delivery and requires exactly two complete
+delivery/return lifecycles. Foreign PIDs return `-ESRCH`, invalid signal numbers
+return `-EINVAL`, and otherwise-valid signals outside this first generated
+profile return `-ENOSYS` instead of pretending to queue them.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE` or a zero-flag stack of at least
 2048 bytes wholly contained in one currently writable probe VMA. Invalid
