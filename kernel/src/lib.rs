@@ -636,6 +636,54 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(exec_second_plan) = linux_elf::measured_static_exec_plan(exec_second) else {
         kernel_fail("ginux: second measured Linux exec target invalid\r\n");
     };
+    let measured_file = |name: &[u8]| {
+        initramfs::published_regular_file_node(name).and_then(initramfs::published_file_by_node)
+    };
+    let Some(dynamic_main) = measured_file(b"linux/init") else {
+        kernel_fail("ginux: measured Linux dynamic main missing\r\n");
+    };
+    let Some(dynamic_interpreter) = measured_file(b"linux/ld-ginux.so") else {
+        kernel_fail("ginux: measured Linux interpreter missing\r\n");
+    };
+    let Some(dynamic_dependency) = measured_file(b"linux/libginux.so") else {
+        kernel_fail("ginux: measured Linux primary dependency missing\r\n");
+    };
+    let Some(dynamic_auxiliary) = measured_file(b"linux/libginux-aux.so") else {
+        kernel_fail("ginux: measured Linux auxiliary dependency missing\r\n");
+    };
+    let Some(dynamic_plan) = linux_elf::measured_interpreted_exec_plan(
+        dynamic_main,
+        dynamic_interpreter,
+        [dynamic_dependency, dynamic_auxiliary],
+    ) else {
+        kernel_fail("ginux: measured Linux interpreted graph invalid\r\n");
+    };
+    if dynamic_plan.process.initial_entry != 0x60_0200
+        || dynamic_plan.process.main_entry != 0x40_0100
+        || dynamic_plan.dependency_bases != [0x61_0000, 0x63_0000]
+        || linux_elf::measured_interpreted_exec_plan(
+            exec_target,
+            dynamic_interpreter,
+            [dynamic_dependency, dynamic_auxiliary],
+        )
+        .is_some()
+        || linux_elf::measured_interpreted_exec_plan(
+            dynamic_main,
+            dynamic_interpreter,
+            [dynamic_auxiliary, dynamic_dependency],
+        )
+        .is_some()
+        || linux_elf::measured_interpreted_exec_plan(
+            dynamic_main,
+            &dynamic_interpreter[..64],
+            [dynamic_dependency, dynamic_auxiliary],
+        )
+        .is_some()
+    {
+        kernel_fail("ginux: measured Linux interpreted graph substitution accepted\r\n");
+    }
+    serial_write("ginux: measured-root Linux interpreted exec graph planned\r\n");
+    serial_write("ginux: measured-root Linux graph substitution rejected\r\n");
     if exec_target == exec_second
         || exec_target_plan.executable.virtual_page == exec_second_plan.executable.virtual_page
         || exec_target_plan.executable.page_count != 1

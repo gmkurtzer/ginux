@@ -78,15 +78,6 @@ const LINKED_DYNAMIC_DEPENDENCY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"),
 const LINKED_DYNAMIC_AUXILIARY: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/libginux-aux.so"));
 const LINKED_DYNAMIC_INTERPRETER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ld-ginux.so"));
-const LINKED_EXEC_TARGET: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/linux-exec-target.elf"));
-const LINKED_EXEC_SECOND: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/linux-exec-second.elf"));
-
-pub(crate) fn runtime_main_bytes() -> &'static [u8] {
-    LINKED_DYNAMIC_GRAPH_MAIN
-}
-
 pub(crate) fn verify_dependency_list_metadata() -> bool {
     const INTERPRETER_PATH: &[u8] = b"/lib64/ld-ginux.so";
     const PRIMARY: &[u8] = b"libginux.so";
@@ -270,26 +261,6 @@ pub(crate) fn verify_dependency_list_metadata() -> bool {
     valid
 }
 
-pub(crate) fn runtime_interpreter_bytes() -> &'static [u8] {
-    LINKED_DYNAMIC_INTERPRETER
-}
-
-pub(crate) fn runtime_dependency_bytes() -> &'static [u8] {
-    LINKED_DYNAMIC_DEPENDENCY
-}
-
-pub(crate) fn runtime_auxiliary_dependency_bytes() -> &'static [u8] {
-    LINKED_DYNAMIC_AUXILIARY
-}
-
-pub(crate) fn runtime_exec_target_bytes() -> &'static [u8] {
-    LINKED_EXEC_TARGET
-}
-
-pub(crate) fn runtime_exec_second_bytes() -> &'static [u8] {
-    LINKED_EXEC_SECOND
-}
-
 pub(crate) fn measured_static_exec_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
     let image = parse(bytes)?;
     let plan = plan(&image)?;
@@ -322,6 +293,42 @@ pub(crate) fn measured_static_exec_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
         && plan.tls.is_none()
         && plan.dynamic_relocations.is_none())
     .then_some(plan)
+}
+
+pub(crate) fn measured_interpreted_exec_plan<'root>(
+    main_bytes: &'root [u8],
+    interpreter_bytes: &'root [u8],
+    dependency_bytes: [&'root [u8]; 2],
+) -> Option<DependencyGraphLoadPlan<'root, 'root, 'root>> {
+    const INTERPRETER_PATH: &[u8] = b"/lib64/ld-ginux.so";
+    const PRIMARY: &[u8] = b"libginux.so";
+    const AUXILIARY: &[u8] = b"libginux-aux.so";
+    let main = parse(main_bytes)?;
+    let interpreter_authority = InterpreterAuthority {
+        path: INTERPRETER_PATH,
+        sha256: crate::crypto::sha256(interpreter_bytes),
+    };
+    let dependency_authorities = [
+        DependencyAuthority {
+            name: PRIMARY,
+            sha256: crate::crypto::sha256(dependency_bytes[0]),
+            load_bias: 0x61_0000,
+        },
+        DependencyAuthority {
+            name: AUXILIARY,
+            sha256: crate::crypto::sha256(dependency_bytes[1]),
+            load_bias: 0x63_0000,
+        },
+    ];
+    plan_authenticated_pie_dependency_graph(
+        &main,
+        0x3f_f000,
+        &interpreter_authority,
+        interpreter_bytes,
+        0x60_0000,
+        &dependency_authorities,
+        dependency_bytes,
+    )
 }
 
 pub(crate) fn verify_tls_template_metadata() -> bool {
@@ -3569,22 +3576,6 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         crate::serial_write_bytes(b"\r\nginux: linked dynamic interpreter parse failed");
         return false;
     };
-    let authority = InterpreterAuthority {
-        path: PATH,
-        sha256: crate::crypto::sha256(interpreter_bytes),
-    };
-    let dependency_authorities = [
-        DependencyAuthority {
-            name: DEPENDENCY,
-            sha256: crate::crypto::sha256(LINKED_DYNAMIC_DEPENDENCY),
-            load_bias: 0x61_0000,
-        },
-        DependencyAuthority {
-            name: AUXILIARY,
-            sha256: crate::crypto::sha256(LINKED_DYNAMIC_AUXILIARY),
-            load_bias: 0x63_0000,
-        },
-    ];
     if main.dynamic_symbol != dependency.dynamic_symbol {
         crate::serial_write_bytes(b"\r\nginux: linked dynamic symbol mismatch");
         return false;
@@ -3624,13 +3615,9 @@ pub(crate) fn verify_mapped_interpreted_plan(protected_start: u64, protected_siz
         crate::serial_write_bytes(b"\r\nginux: linked DSO planning failed");
         return false;
     }
-    let Some(plan) = plan_authenticated_pie_dependency_graph(
-        &main,
-        0x3f_f000,
-        &authority,
+    let Some(plan) = measured_interpreted_exec_plan(
+        LINKED_DYNAMIC_GRAPH_MAIN,
         interpreter_bytes,
-        0x60_0000,
-        &dependency_authorities,
         [LINKED_DYNAMIC_DEPENDENCY, LINKED_DYNAMIC_AUXILIARY],
     ) else {
         crate::serial_write_bytes(b"\r\nginux: linked dynamic dependency plan failed");

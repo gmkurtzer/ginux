@@ -13,7 +13,11 @@ verifies source independence and the complete zero tail, and builds a bounded
 pathname index whose 32-bit offsets resolve only inside the owned image. A
 final indexed copy remains kernel-owned through
 shutdown and is published to the control plane as read-only capability object
-5. Control ABI v3 provides bounded probe, exact-path metadata lookup, file
+5. The kernel plans the interpreted main/interpreter/two-DSO graph directly
+from those authenticated measured-root bytes, binding canonical names,
+SONAMEs, dependency order, digests, and bounded non-overlapping load windows
+without requiring equality to kernel-embedded ELF artifacts. Substituted,
+reordered, and truncated graph members are rejected. Control ABI v3 provides bounded probe, exact-path metadata lookup, file
 reads, and cursor-based direct-child enumeration; the ring-3 proof reads `init`
 and enumerates `dev` while rejecting the wrong capability,
 traversal, and an invalid output range. The Linux syscall profile now resolves

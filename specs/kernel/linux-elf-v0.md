@@ -415,6 +415,16 @@ unused record slots to remain zero. This record supplies the complete old-image
 set required by a later interpreted `execve` transaction; it does not yet make
 dynamic targets executable through `execve`.
 
+The interpreted-exec planner now accepts the main, interpreter, and two DSO
+byte slices selected from the authenticated measured-root index. It parses the
+runtime main and derives per-file digests for the already authenticated graph,
+then binds the canonical interpreter path, ordered dependency names, matching
+SONAMEs, fixed bounded load windows, and non-overlap contract. Kernel-embedded
+artifact equality is not an admission condition. Substituting a static main,
+reversing the DSOs, or truncating the interpreter is rejected. The current
+execution proof consumes this planner, but `execve` installation of an
+interpreted target remains the next transaction milestone.
+
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF
 validator. In particular, file identity, ELF class/machine, segment overlap,

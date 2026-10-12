@@ -250,25 +250,24 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
         && archive
             .find(b"var/lib/version")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"0\n")
-        && archive.find(b"linux/init").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
-        })
-        && archive.find(b"linux/ld-ginux.so").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_interpreter_bytes()
-        })
-        && archive.find(b"linux/libginux.so").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_dependency_bytes()
-        })
-        && archive.find(b"linux/libginux-aux.so").is_some_and(|entry| {
-            entry.mode == 0o100555
-                && entry.data == crate::linux_elf::runtime_auxiliary_dependency_bytes()
-        })
-        && archive.find(b"bin/exec-target").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_exec_target_bytes()
-        })
-        && archive.find(b"bin/exec-second").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_exec_second_bytes()
-        })
+        && archive
+            .find(b"linux/init")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && archive
+            .find(b"linux/ld-ginux.so")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && archive
+            .find(b"linux/libginux.so")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && archive
+            .find(b"linux/libginux-aux.so")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && archive
+            .find(b"bin/exec-target")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && archive
+            .find(b"bin/exec-second")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive.find(b"missing").is_none()
 }
 
@@ -790,25 +789,24 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
         && root
             .lookup(b"var/lib/version")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"0\n")
-        && root.lookup(b"linux/init").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_main_bytes()
-        })
-        && root.lookup(b"linux/ld-ginux.so").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_interpreter_bytes()
-        })
-        && root.lookup(b"linux/libginux.so").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_dependency_bytes()
-        })
-        && root.lookup(b"linux/libginux-aux.so").is_some_and(|entry| {
-            entry.mode == 0o100555
-                && entry.data == crate::linux_elf::runtime_auxiliary_dependency_bytes()
-        })
-        && root.lookup(b"bin/exec-target").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_exec_target_bytes()
-        })
-        && root.lookup(b"bin/exec-second").is_some_and(|entry| {
-            entry.mode == 0o100555 && entry.data == crate::linux_elf::runtime_exec_second_bytes()
-        })
+        && root
+            .lookup(b"linux/init")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && root
+            .lookup(b"linux/ld-ginux.so")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && root
+            .lookup(b"linux/libginux.so")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && root
+            .lookup(b"linux/libginux-aux.so")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && root
+            .lookup(b"bin/exec-target")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && root
+            .lookup(b"bin/exec-second")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root.lookup(b"missing").is_none()
         && root.lookup(b"../init").is_none()
         && root.lookup(b"/init").is_none();

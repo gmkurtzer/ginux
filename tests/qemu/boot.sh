@@ -588,6 +588,12 @@ if ! grep -q '^ginux: measured root published in kernel-owned memory' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: measured-root Linux interpreted exec graph planned' "$output_file" ||
+    ! grep -q '^ginux: measured-root Linux graph substitution rejected' "$output_file"; then
+    echo "Boot test failed: the measured-root interpreted graph was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: multiple measured Linux exec targets planned' "$output_file"; then
     echo "Boot test failed: the measured Linux exec targets were not planned." >&2
     exit 1

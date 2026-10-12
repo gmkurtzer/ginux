@@ -29,8 +29,12 @@ DSO. Two distinct static exec targets are published at their Linux-visible
 measured-root paths `bin/exec-target` and `bin/exec-second`. The hostname is immutable mode `0555` with exact contents
 `ginux\n`; `os-release` is immutable mode `0555` with exact contents
 `NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`; and the nested
-state file contains `ready\n` and the version marker contains `0\n`. The ELF entries must byte-match the authenticated artifacts compiled
-into the kernel's bounded execution plan.
+state file contains `ready\n` and the version marker contains `0\n`. The archive
+layer requires nonempty executable entries but does not compare them with
+kernel-embedded artifact bytes. The signed root-image digest authenticates the
+complete archive; after publication, the ELF planners parse and bind the
+selected measured files to their canonical paths, interpreter name, dependency
+order, SONAMEs, and bounded load layout.
 
 After validation, the current roughly 90 KiB proof image is copied into a
 fixed 32-frame, 128 KiB physically contiguous kernel-owned allocation. The
