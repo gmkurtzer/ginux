@@ -4734,33 +4734,60 @@ pub(crate) fn auxiliary_device_wait_ready(domain_id: u64, request: u64) -> bool 
         )
 }
 
-pub(crate) fn complete_auxiliary_device_wait(domain_id: u64, request: u64) -> bool {
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum AuxiliaryDeviceWaitCompletion {
+    Completed,
+    TimedOut,
+    Cancelled,
+    Failed,
+}
+
+pub(crate) fn complete_auxiliary_device_wait(
+    domain_id: u64,
+    request: u64,
+    notified: bool,
+) -> AuxiliaryDeviceWaitCompletion {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
-        return false;
+        return AuxiliaryDeviceWaitCompletion::Failed;
     };
     let Some(mut teardown) = registered.device_teardown else {
-        return false;
+        return AuxiliaryDeviceWaitCompletion::Failed;
     };
-    let completed = !registered.device_quiesced
-        && teardown.interrupt_request == request
-        && pci::complete_isolated_interrupt_wait(
-            teardown.device,
-            teardown.msix_mapping,
-            domain_id,
-            request,
-        );
-    let Some(next_request) = request.checked_add(1) else {
-        return false;
-    };
-    if !completed || !pci::advance_isolated_interrupt_wait(domain_id, request, next_request) {
-        return false;
+    if registered.device_quiesced || teardown.interrupt_request != request {
+        return AuxiliaryDeviceWaitCompletion::Failed;
     }
-    teardown.interrupt_request = next_request;
-    registered.device_teardown = Some(teardown);
-    true
+    let completion = pci::complete_isolated_interrupt_wait(
+        teardown.device,
+        teardown.msix_mapping,
+        domain_id,
+        request,
+        notified,
+    );
+    match completion {
+        pci::IsolatedInterruptCompletion::Completed => {
+            let Some(next_request) = request.checked_add(1) else {
+                return AuxiliaryDeviceWaitCompletion::Failed;
+            };
+            if !pci::advance_isolated_interrupt_wait(domain_id, request, next_request) {
+                return AuxiliaryDeviceWaitCompletion::Failed;
+            }
+            teardown.interrupt_request = next_request;
+            registered.device_teardown = Some(teardown);
+            AuxiliaryDeviceWaitCompletion::Completed
+        }
+        pci::IsolatedInterruptCompletion::TimedOut if notified => {
+            if quiesce_auxiliary_device_for(domain_id, false) {
+                AuxiliaryDeviceWaitCompletion::Cancelled
+            } else {
+                AuxiliaryDeviceWaitCompletion::Failed
+            }
+        }
+        pci::IsolatedInterruptCompletion::TimedOut => AuxiliaryDeviceWaitCompletion::TimedOut,
+        pci::IsolatedInterruptCompletion::Failed => AuxiliaryDeviceWaitCompletion::Failed,
+    }
 }
 
 pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
@@ -4781,6 +4808,9 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
     let Some(teardown) = registered.device_teardown else {
         return true;
     };
+    if registered.device_quiesced {
+        return true;
+    }
     let AuxiliaryDeviceTeardown {
         device,
         mapping,
@@ -4791,9 +4821,8 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
     let Some(dma_physical) = registered.space.dma_physical() else {
         return false;
     };
-    if registered.device_quiesced
-        || notification_page
-            .is_some_and(|physical| !registered.space.notification_mapping_is_exact(physical))
+    if notification_page
+        .is_some_and(|physical| !registered.space.notification_mapping_is_exact(physical))
         || require_completed_dma
             && !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce_isolated_interrupt(
@@ -5835,7 +5864,15 @@ pub(crate) enum NativeVolumeOutcome {
     Initialized,
     Recovered,
     Rejected,
+    RestartRequired,
     Faulted,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum NativeVolumeMode {
+    Normal,
+    Fault,
+    CancelNotified,
 }
 
 pub(crate) struct NativeVolumeRun {
@@ -5861,7 +5898,7 @@ pub(crate) fn verify_native_volume_service(
         msix_mapping,
         apic,
         restart_identity,
-        false,
+        NativeVolumeMode::Normal,
     )
 }
 
@@ -5882,7 +5919,28 @@ pub(crate) fn verify_native_volume_service_fault(
         msix_mapping,
         apic,
         Some(restart_identity),
-        true,
+        NativeVolumeMode::Fault,
+    )
+}
+
+pub(crate) fn verify_native_volume_service_cancellation(
+    image: &crate::native_elf::NativeImage<'_>,
+    register_physical: u64,
+    device: VirtioBlockDevice,
+    mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+    restart_identity: u64,
+) -> Option<NativeVolumeRun> {
+    verify_native_volume_service_run(
+        image,
+        register_physical,
+        device,
+        mapping,
+        msix_mapping,
+        apic,
+        Some(restart_identity),
+        NativeVolumeMode::CancelNotified,
     )
 }
 
@@ -5895,7 +5953,7 @@ fn verify_native_volume_service_run(
     msix_mapping: paging::MmioMapping,
     apic: &LocalApic,
     restart_identity: Option<u64>,
-    force_fault: bool,
+    mode: NativeVolumeMode,
 ) -> Option<NativeVolumeRun> {
     const DMA_PAGE_INDEX: usize = 11;
     const DEVICE_PAGE_INDEX: usize = 12;
@@ -5964,7 +6022,11 @@ fn verify_native_volume_service_run(
         user_notification as u64,
         user_dma as u64,
         dma_physical,
-        if force_fault { u64::MAX } else { handle },
+        if mode == NativeVolumeMode::Fault {
+            u64::MAX
+        } else {
+            handle
+        },
     )) || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT + 1)
     {
         let _ = space.release();
@@ -5973,8 +6035,11 @@ fn verify_native_volume_service_run(
     let root = space.root;
     let entry = usize::try_from(space.entry).ok()?;
     let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
-    let expected_timeouts =
-        timer::device_wait_timeout_count().checked_add(u64::from(!force_fault))?;
+    let expected_timeouts = timer::device_wait_timeout_count().checked_add(match mode {
+        NativeVolumeMode::Normal => 1,
+        NativeVolumeMode::Fault => 0,
+        NativeVolumeMode::CancelNotified => 2,
+    })?;
     NATIVE_VOLUME_COMPLETION.store(0, Ordering::Release);
     let root_frames = paging::validated_user_root_frames(root);
     if root_frames.as_ref().is_none_or(|frames| {
@@ -6016,6 +6081,12 @@ fn verify_native_volume_service_run(
         crate::serial_write_bytes(b"\r\nginux: native volume interrupt arm failed");
         return None;
     }
+    if mode == NativeVolumeMode::CancelNotified
+        && !pci::force_next_notified_wait_timeout(auxiliary, INTERRUPT_REQUEST)
+    {
+        crate::serial_write_bytes(b"\r\nginux: native volume cancellation injection failed");
+        return None;
+    }
     if !cpu::activate_user_root(root) {
         crate::serial_write_bytes(b"\r\nginux: native volume root activation failed");
         return None;
@@ -6024,7 +6095,7 @@ fn verify_native_volume_service_run(
     let event = domain::take_lifecycle_event();
     let completion = NATIVE_VOLUME_COMPLETION.swap(0, Ordering::AcqRel);
     let exit_status = domain::last_lifecycle_event_detail();
-    let fault = force_fault
+    let fault = (mode == NativeVolumeMode::Fault)
         .then(|| {
             domain::delivered_fault_descriptor().and_then(|descriptor| {
                 let vector = descriptor
@@ -6044,20 +6115,37 @@ fn verify_native_volume_service_run(
             })
         })
         .flatten();
-    let outcome = match (force_fault, exit_status, completion, fault) {
-        (true, Some(0), 0, Some((13, _, Some(0xf4)))) => Some(NativeVolumeOutcome::Faulted),
-        (false, Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED), 1, None) => {
-            Some(NativeVolumeOutcome::Initialized)
+    let outcome = match (mode, exit_status, completion, fault) {
+        (NativeVolumeMode::Fault, Some(0), 0, Some((13, _, Some(0xf4)))) => {
+            Some(NativeVolumeOutcome::Faulted)
         }
-        (false, Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED), 2, None) => {
-            Some(NativeVolumeOutcome::Recovered)
-        }
-        (false, Some(ginux_native_abi::NATIVE_SERVICE_EXIT_REJECTED), 2, None) => {
-            Some(NativeVolumeOutcome::Rejected)
-        }
+        (
+            NativeVolumeMode::CancelNotified,
+            Some(ginux_native_abi::NATIVE_SERVICE_EXIT_RESTART_REQUIRED),
+            0,
+            None,
+        ) => Some(NativeVolumeOutcome::RestartRequired),
+        (
+            NativeVolumeMode::Normal,
+            Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED),
+            1,
+            None,
+        ) => Some(NativeVolumeOutcome::Initialized),
+        (
+            NativeVolumeMode::Normal,
+            Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED),
+            2,
+            None,
+        ) => Some(NativeVolumeOutcome::Recovered),
+        (
+            NativeVolumeMode::Normal,
+            Some(ginux_native_abi::NATIVE_SERVICE_EXIT_REJECTED),
+            2,
+            None,
+        ) => Some(NativeVolumeOutcome::Rejected),
         _ => None,
     };
-    let expected_kind = if force_fault {
+    let expected_kind = if mode == NativeVolumeMode::Fault {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
     } else {
         crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
@@ -6083,7 +6171,7 @@ fn verify_native_volume_service_run(
             )
         && domain::last_lifecycle_event_audit()
             .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary)
-        && domain::last_lifecycle_event_has_fault() == Some(force_fault)
+        && domain::last_lifecycle_event_has_fault() == Some(mode == NativeVolumeMode::Fault)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::take_lifecycle_event().is_none();
     if !valid {

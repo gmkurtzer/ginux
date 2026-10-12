@@ -93,6 +93,15 @@ static VIRTIO_INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 static VIRTIO_INTERRUPT_COUNT: AtomicU8 = AtomicU8::new(0);
 static VIRTIO_INTERRUPT_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static VIRTIO_INTERRUPT_REQUEST: AtomicU64 = AtomicU64::new(0);
+static FORCED_NOTIFIED_TIMEOUT_DOMAIN: AtomicU64 = AtomicU64::new(0);
+static FORCED_NOTIFIED_TIMEOUT_REQUEST: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum IsolatedInterruptCompletion {
+    Completed,
+    TimedOut,
+    Failed,
+}
 
 global_asm!(
     r#"
@@ -569,6 +578,8 @@ fn install_virtio_interrupt(apic: &LocalApic) -> bool {
     VIRTIO_INTERRUPT_DOMAIN.store(0, Ordering::SeqCst);
     VIRTIO_INTERRUPT_REQUEST.store(0, Ordering::SeqCst);
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
+    FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
     cpu::install_interrupt_gate(
         VIRTIO_INTERRUPT_VECTOR,
         ginux_virtio_interrupt_entry as *const () as usize,
@@ -587,6 +598,8 @@ fn retire_virtio_interrupt(apic: &LocalApic) -> bool {
         VIRTIO_INTERRUPT_APIC_MODE.store(0, Ordering::SeqCst);
         VIRTIO_INTERRUPT_DOMAIN.store(0, Ordering::SeqCst);
         VIRTIO_INTERRUPT_REQUEST.store(0, Ordering::SeqCst);
+        FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
+        FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
     }
     cleared
 }
@@ -1304,17 +1317,27 @@ pub(crate) fn complete_isolated_interrupt_wait(
     msix_mapping: MmioMapping,
     domain: u64,
     request: u64,
-) -> bool {
+    notified: bool,
+) -> IsolatedInterruptCompletion {
     if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
         || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
     {
-        return false;
+        return IsolatedInterruptCompletion::Failed;
+    }
+    let force_timeout = notified
+        && FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) == domain
+        && FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) == request;
+    if force_timeout {
+        FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
+        FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
     }
     VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
-    if !timer::arm_device_wait_timer(domain, request)
-        || !set_msix_entry_mask(device, msix_mapping, 0, false)
-        || !set_msix_control(device, true, false)
-    {
+    let interrupt_configured = if force_timeout {
+        set_msix_entry_mask(device, msix_mapping, 0, true) && set_msix_control(device, true, true)
+    } else {
+        set_msix_entry_mask(device, msix_mapping, 0, false) && set_msix_control(device, true, false)
+    };
+    if !timer::arm_device_wait_timer(domain, request) || !interrupt_configured {
         VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
         let _ = timer::finish_device_wait_timer(domain, request);
         let _ = scheduler::wake_device_completion(
@@ -1323,7 +1346,7 @@ pub(crate) fn complete_isolated_interrupt_wait(
             request,
             u64::MAX - 2,
         );
-        return false;
+        return IsolatedInterruptCompletion::Failed;
     }
     while !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
         && !timer::device_wait_timed_out(domain, request)
@@ -1336,13 +1359,32 @@ pub(crate) fn complete_isolated_interrupt_wait(
     let entry_masked = set_msix_entry_mask(device, msix_mapping, 0, true);
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
     let Some(timed_out) = timer::finish_device_wait_timer(domain, request) else {
-        return false;
+        return IsolatedInterruptCompletion::Failed;
     };
-    function_masked
-        && entry_masked
-        && !timed_out
-        && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1
-        && scheduler::current_domain() == Some(domain)
+    if !function_masked || !entry_masked || scheduler::current_domain() != Some(domain) {
+        IsolatedInterruptCompletion::Failed
+    } else if timed_out {
+        IsolatedInterruptCompletion::TimedOut
+    } else if VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1 {
+        IsolatedInterruptCompletion::Completed
+    } else {
+        IsolatedInterruptCompletion::Failed
+    }
+}
+
+pub(crate) fn force_next_notified_wait_timeout(domain: u64, request: u64) -> bool {
+    if domain == 0
+        || request == 0
+        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+        || FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) != 0
+        || FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) != 0
+    {
+        return false;
+    }
+    FORCED_NOTIFIED_TIMEOUT_REQUEST.store(request, Ordering::SeqCst);
+    FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(domain, Ordering::SeqCst);
+    true
 }
 
 pub(crate) fn advance_isolated_interrupt_wait(

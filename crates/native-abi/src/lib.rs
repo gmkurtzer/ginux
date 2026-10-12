@@ -7,6 +7,12 @@ pub const NATIVE_SERVICE_FEATURE_VIRTIO_BLOCK: u32 = 1 << 0;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
+pub const NATIVE_SERVICE_EXIT_RESTART_REQUIRED: u8 = 2;
+pub const NATIVE_BLOCK_WAIT_OPERATION: u64 = 19;
+pub const NATIVE_BLOCK_WAIT_PREPARED: u64 = 1;
+pub const NATIVE_BLOCK_WAIT_NOTIFIED: u64 = 2;
+pub const NATIVE_BLOCK_WAIT_FAILED: u64 = u64::MAX - 2;
+pub const NATIVE_BLOCK_WAIT_CANCELLED: u64 = u64::MAX - 5;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -102,6 +108,11 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_SERVICE_EXIT_OPERATION UINT64_C(2)"));
         assert!(header.contains("GINUX_NATIVE_SERVICE_EXIT_COMPLETED UINT8_C(0)"));
         assert!(header.contains("GINUX_NATIVE_SERVICE_EXIT_REJECTED UINT8_C(1)"));
+        assert!(header.contains("GINUX_NATIVE_SERVICE_EXIT_RESTART_REQUIRED UINT8_C(2)"));
+        assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_OPERATION UINT64_C(19)"));
+        assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_PREPARED UINT64_C(1)"));
+        assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_NOTIFIED UINT64_C(2)"));
+        assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_CANCELLED (UINT64_MAX - UINT64_C(5))"));
     }
 
     #[test]

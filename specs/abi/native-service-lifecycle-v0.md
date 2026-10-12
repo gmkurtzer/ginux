@@ -13,8 +13,10 @@ calling context. Values above 255 are rejected without terminating it.
 Status 0 is `COMPLETED`: the service completed its requested work and its
 service-specific outputs determine whether it initialized or recovered state.
 Status 1 is `REJECTED`: authenticated input or persistent state was invalid and
-the service deliberately left it unchanged. Statuses 2 through 255 are
-reserved and must not be assigned without a later contract revision.
+the service deliberately left it unchanged. Status 2 is `RESTART_REQUIRED`:
+the kernel safely cancelled an ambiguous device operation, and the current
+generation must not reuse its device state. Statuses 3 through 255 are reserved
+and must not be assigned without a later contract revision.
 
 The kernel emits lifecycle kind 5 (`AUXILIARY_EXITED`) with the exact status,
 stable service identity, and retiring domain generation. It revokes the
@@ -30,6 +32,18 @@ device, and scrubs DMA without trusting queue state or a completed request. A
 service must not encode a successful result in a deliberate fault. The volume
 proof starts a fresh generation only after fault retirement is complete and
 requires stable service identity with freshly delegated authority and DMA.
+
+## Block-wait cancellation
+
+Native block wait operation 19 has two commands. `PREPARED` command 1 waits on
+a published request that has not been notified; a timeout returns `FAILED` and
+does not consume its generation, so the service may notify and retry it.
+`NOTIFIED` command 2 declares that the device may have observed the request. A
+successful interrupt returns zero. A timeout masks MSI-X, revokes bus
+mastering, resets the device, retires the interrupt route, scrubs the ambiguous
+DMA state, and returns `CANCELLED`; that request generation can never be
+retried. The service must then exit with `RESTART_REQUIRED`. A fresh domain
+generation reinitializes the reset device with a new DMA lease.
 
 ## Sources and compatibility
 

@@ -8,15 +8,14 @@ use core::{
 };
 
 use ginux_native_abi::{
-    NativeServiceBootV0, NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
-    NATIVE_SERVICE_EXIT_REJECTED,
+    NativeServiceBootV0, NATIVE_BLOCK_WAIT_CANCELLED, NATIVE_BLOCK_WAIT_FAILED,
+    NATIVE_BLOCK_WAIT_NOTIFIED, NATIVE_BLOCK_WAIT_OPERATION, NATIVE_BLOCK_WAIT_PREPARED,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 use ginux_volume_format::SECTOR_SIZE;
 use ginux_volume_service::{commit, recover_with_slot, BlockDevice, CommitError, ScanError};
 
-const BLOCK_WAIT_OPERATION: u64 = 19;
-const BLOCK_WAIT_COMMAND: u64 = 1;
-const BLOCK_WAIT_FAILED: u64 = u64::MAX - 2;
 const QUEUE_SIZE: u16 = 8;
 const DESC_NEXT: u16 = 1;
 const DESC_WRITE: u16 = 2;
@@ -246,16 +245,24 @@ impl VirtioBlock {
             write_u16(self.dma + AVAIL_OFFSET + 2, self.available);
         }
         if self.request == 1
-            && (wait(self.capability, 2) != BLOCK_WAIT_FAILED
-                || wait(self.capability, self.request) != BLOCK_WAIT_FAILED)
+            && (wait(self.capability, NATIVE_BLOCK_WAIT_PREPARED, 2) != NATIVE_BLOCK_WAIT_FAILED
+                || wait(self.capability, NATIVE_BLOCK_WAIT_PREPARED, self.request)
+                    != NATIVE_BLOCK_WAIT_FAILED)
         {
             return false;
         }
         unsafe { write_u16(self.notification, 0) };
-        if wait(self.capability, self.request) != 0 {
+        let wait_result = wait(self.capability, NATIVE_BLOCK_WAIT_NOTIFIED, self.request);
+        if wait_result == NATIVE_BLOCK_WAIT_CANCELLED {
+            exit(NATIVE_SERVICE_EXIT_RESTART_REQUIRED);
+        }
+        if wait_result != 0 {
             return false;
         }
-        if self.request == 1 && wait(self.capability, self.request) != BLOCK_WAIT_FAILED {
+        if self.request == 1
+            && wait(self.capability, NATIVE_BLOCK_WAIT_NOTIFIED, self.request)
+                != NATIVE_BLOCK_WAIT_FAILED
+        {
             return false;
         }
         self.request = self.request.checked_add(1).unwrap_or(0);
@@ -307,14 +314,14 @@ impl BlockDevice for VirtioBlock {
     }
 }
 
-fn wait(capability: u64, request: u64) -> u64 {
-    let mut result = BLOCK_WAIT_OPERATION;
+fn wait(capability: u64, command: u64, request: u64) -> u64 {
+    let mut result = NATIVE_BLOCK_WAIT_OPERATION;
     unsafe {
         asm!(
             "int 0x80",
             inlateout("rax") result,
             in("rdi") capability,
-            in("rsi") BLOCK_WAIT_COMMAND,
+            in("rsi") command,
             in("rdx") request,
             options(nostack),
         );

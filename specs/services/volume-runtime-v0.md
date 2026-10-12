@@ -56,7 +56,7 @@ publishes its available entry without notifying the device, and proves a real
 queue zero, retries that same generation successfully, and rejects a duplicate
 wait after completion. Every subsequent submission publishes a monotonically
 advancing available index, notifies queue zero, and blocks through control ABI
-v4 operation 19 using the exact next request generation. Used ID, used length,
+v4 operation 19 command 2 using the exact next request generation. Used ID, used length,
 status, and device status are validated before returning to the shared volume
 engine.
 
@@ -96,6 +96,13 @@ fresh capability table, address space, and DMA lease. That post-fault
 generation must recover the exact record or preserve fail-closed rejection,
 then cleanly retire while the kernel continues booting.
 
+A separate cancellation generation repeats the initial prepared-request
+timeout, notifies that request, and has its MSI-X delivery deliberately withheld
+until the APIC deadline. Because the request was notified, the kernel consumes
+the attempt, resets the device, returns `CANCELLED`, and accepts only the
+service's `RESTART_REQUIRED` exit. A fresh post-cancellation generation must
+recover the exact record or preserve corruption rejection before clean exit.
+
 ## Deliberate limits
 
 - The compiled service is the sole live write-capable ring-3 virtio runtime;
@@ -104,5 +111,6 @@ then cleanly retire while the kernel continues booting.
   single virtio-block bit requires a later specified ABI version.
 - One queue, one DMA page, one outstanding request, and one object-7 device are
   supported. There is no IOMMU domain or concurrent request path.
-- Cancellation after notification and late completion after timeout are not
-  handled yet.
+- Notified timeout recovery is reset-and-restart only. In-place queue recovery,
+  selective descriptor cancellation, and concurrent late completions are not
+  supported.

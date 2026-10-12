@@ -38,20 +38,24 @@ split-ring addresses, binds MSI-X entry zero, enables the queue, and sets
 serialized read, write, and flush requests to reserved sectors four and five.
 
 Control ABI v4 operation 19 accepts only the service's object-7 handle and exact
-next request generation. The kernel independently checks the active queue,
+next request generation. Command 1 is a retryable pre-notification wait;
+command 2 declares possible device observation and therefore requires reset on
+timeout. The kernel independently checks the active queue,
 feature state, bus mastering, queue-to-lease binding, domain generation, and
 request generation before blocking. Its private MSI-X vector wakes only that
 saved service context. A calibrated APIC one-shot bounds a missing interrupt.
 
 ## Revocation and failure
 
-The runtime deliberately faults only after transaction success. The stop-only
-path revokes object 7 and runs the registered device hook while the service
-root and DMA lease still exist. That hook masks and disables MSI-X, validates
-the binding, revokes bus mastering, resets the device, retires the interrupt
-route, and validates stable completion state. Only then may the kernel restore
-its root, scrub and release all owned frames, retire the domain, and publish
-the fault. Address-space release fails closed if device quiescence is absent.
+The normal runtime exits through lifecycle ABI v0 after transaction success.
+The stop-only path revokes object 7 and runs the registered device hook while
+the service root and DMA lease still exist. That hook masks and disables MSI-X,
+validates the binding, revokes bus mastering, resets the device, retires the
+interrupt route, and validates stable completion state. A genuine fault or
+notified timeout performs the same hardware isolation without trusting DMA
+completion. Only then may the kernel restore its root, scrub and release all
+owned frames, retire the domain, and publish lifecycle state. Address-space
+release fails closed if device quiescence is absent.
 
 ## Deliberate limits
 

@@ -134,6 +134,8 @@ if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboo
     ! grep -q '^ginux: replacement native volume resources retired cleanly' "$reboot_output_file" ||
     ! grep -q '^ginux: compiled native volume service fault contained' "$reboot_output_file" ||
     ! grep -q '^ginux: post-fault native volume service recovered exact record' "$reboot_output_file" ||
+    ! grep -q '^ginux: notified native volume timeout cancelled safely' "$reboot_output_file" ||
+    ! grep -q '^ginux: post-cancellation native volume recovered exact record' "$reboot_output_file" ||
     grep -q '^ginux: native volume record initialized and flushed' "$reboot_output_file"; then
     cat "$reboot_output_file"
     echo "Boot test failed: compiled native volume service did not recover its record." >&2
@@ -156,6 +158,8 @@ if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume resources retired cleanly' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: compiled native volume service fault contained' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: post-fault native volume service preserved rejection' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: notified native volume timeout cancelled safely' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: post-cancellation native volume preserved rejection' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native volume service exited cleanly and device quiesced' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: retired DMA lease scrubbed and released' "$native_corrupt_output_file"; then
     cat "$native_corrupt_output_file"
@@ -3253,6 +3257,15 @@ if ! grep -q '^ginux: compiled native volume service fault contained' "$output_f
     ! grep -q '^ginux: post-fault native volume service recovered exact record' "$output_file" ||
     ! grep -q '^ginux: post-fault native volume resources retired cleanly' "$output_file"; then
     echo "Boot test failed: an incomplete native device-service request was not contained." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: notified native volume timeout cancelled safely' "$output_file" ||
+    ! grep -q '^ginux: cancelled native volume request generation retired' "$output_file" ||
+    ! grep -q '^ginux: post-cancellation native volume generation started' "$output_file" ||
+    ! grep -q '^ginux: post-cancellation native volume recovered exact record' "$output_file" ||
+    ! grep -q '^ginux: post-cancellation native resources retired cleanly' "$output_file"; then
+    echo "Boot test failed: notified request cancellation did not recover in a fresh generation." >&2
     exit 1
 fi
 

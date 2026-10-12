@@ -401,7 +401,9 @@ after constructing an exact three-descriptor sector-two read chain. It
 publishes descriptor head zero by advancing the available index to one. The
 kernel maps the distinct page containing queue zero's validated notification
 register. Operation 19 requires that same domain's `WRITE` handle in `RDI`.
-Command 1 in `RSI` accepts a nonzero request generation in `RDX`. The kernel
+Commands 1 and 2 in `RSI` accept a nonzero request generation in `RDX`. Command
+1 declares a prepared but not yet notified request; command 2 declares that the
+device may already have observed it. The kernel
 requires the registered device, active queue, queue-zero MSI-X selection, DMA
 lease, caller generation, and request generation to match before saving the
 ring-3 context as blocked. It then unmasks kernel-owned MSI-X vector 33 and
@@ -411,9 +413,13 @@ binding returns `UINT64_MAX - 2` without blocking. The service validates the
 exact blank-sector completion before faulting. Every admitted wait arms a
 calibrated 100 ms local-APIC one-shot; timeout wakes the saved call with
 `UINT64_MAX - 2`, while a valid device interrupt cancels the timer before
-return. Timeout does not consume the request generation: the live proof
+return. A command-1 timeout does not consume the request generation: the live proof
 withholds generation one's notification, requires timer delivery, then notifies
-and retries generation one successfully. This proves one bounded read
+and retries generation one with command 2 successfully. A command-2 timeout is
+not retryable: the kernel masks and disables MSI-X, revokes bus mastering,
+resets the device, retires the route, and returns `UINT64_MAX - 5`. The service
+exits with native lifecycle `RESTART_REQUIRED`, and only a fresh domain with a
+new DMA lease may resume work. This proves one bounded read
 followed by exact generation advances, a second bounded read, and a
 write/flush/read-back transaction through the same queue. Only one request may
 be outstanding; consumed state is cleared

@@ -1743,6 +1743,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         address_space::NativeVolumeOutcome::Rejected => {
             serial_write("\r\nginux: corrupt native volume media rejected without modification");
         }
+        address_space::NativeVolumeOutcome::RestartRequired => {
+            kernel_fail("\r\nginux: normal native volume run requested restart\r\n");
+        }
         address_space::NativeVolumeOutcome::Faulted => {
             kernel_fail("\r\nginux: normal native volume run reported a fault\r\n");
         }
@@ -1770,6 +1773,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     address_space::NativeVolumeOutcome::Rejected => {
                         address_space::NativeVolumeOutcome::Rejected
                     }
+                    address_space::NativeVolumeOutcome::RestartRequired => {
+                        address_space::NativeVolumeOutcome::RestartRequired
+                    }
                     address_space::NativeVolumeOutcome::Faulted => {
                         address_space::NativeVolumeOutcome::Faulted
                     }
@@ -1794,6 +1800,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         address_space::NativeVolumeOutcome::Rejected => {
             "\r\nginux: replacement native volume service repeated fail-closed rejection"
+        }
+        address_space::NativeVolumeOutcome::RestartRequired => {
+            "\r\nginux: replacement native volume service requested restart unexpectedly"
         }
         address_space::NativeVolumeOutcome::Faulted => {
             "\r\nginux: replacement native volume service faulted unexpectedly"
@@ -1853,6 +1862,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     address_space::NativeVolumeOutcome::Rejected => {
                         address_space::NativeVolumeOutcome::Rejected
                     }
+                    address_space::NativeVolumeOutcome::RestartRequired => {
+                        address_space::NativeVolumeOutcome::RestartRequired
+                    }
                     address_space::NativeVolumeOutcome::Faulted => {
                         address_space::NativeVolumeOutcome::Faulted
                     }
@@ -1865,6 +1877,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         serial_write_u64(u64::from(recovered_after_fault_quiesced));
         kernel_fail("\r\nginux: post-fault native volume recovery invariant failed\r\n");
     }
+    let Some(recovered_after_fault) = recovered_after_fault else {
+        kernel_fail("\r\nginux: post-fault native volume outcome unavailable\r\n");
+    };
     serial_write("\r\nginux: post-fault native volume generation started");
     serial_write("\r\nginux: native volume identity survived actual driver fault");
     serial_write(match native_volume_outcome {
@@ -1875,11 +1890,106 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         address_space::NativeVolumeOutcome::Rejected => {
             "\r\nginux: post-fault native volume service preserved rejection"
         }
+        address_space::NativeVolumeOutcome::RestartRequired => {
+            "\r\nginux: post-fault native volume service requested restart unexpectedly"
+        }
         address_space::NativeVolumeOutcome::Faulted => {
             "\r\nginux: post-fault native volume service faulted unexpectedly"
         }
     });
     serial_write("\r\nginux: post-fault native volume resources retired cleanly");
+    let cancelled_volume_run = address_space::verify_native_volume_service_cancellation(
+        &volume_image,
+        virtio_status_physical,
+        virtio_block,
+        virtio_mmio,
+        virtio_msix_mmio,
+        &local_apic,
+        native_volume_run.service_identity,
+    );
+    let cancelled_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    let cancelled_volume_valid = cancelled_volume_run.as_ref().is_some_and(|cancelled| {
+        cancelled.domain != native_volume_run.domain
+            && cancelled.domain != replacement_volume_run.domain
+            && cancelled.domain != faulted_volume_run.domain
+            && cancelled.domain != recovered_after_fault.domain
+            && cancelled.service_identity == native_volume_run.service_identity
+            && cancelled.outcome == address_space::NativeVolumeOutcome::RestartRequired
+    });
+    if !cancelled_volume_valid || !cancelled_volume_quiesced {
+        serial_write("\r\nginux: cancelled native volume valid/quiesced: ");
+        serial_write_u64(u64::from(cancelled_volume_valid));
+        serial_write(" ");
+        serial_write_u64(u64::from(cancelled_volume_quiesced));
+        kernel_fail("\r\nginux: native volume cancellation invariant failed\r\n");
+    }
+    let Some(cancelled_volume_run) = cancelled_volume_run else {
+        kernel_fail("\r\nginux: cancelled native volume outcome unavailable\r\n");
+    };
+    serial_write("\r\nginux: notified native volume timeout cancelled safely");
+    serial_write("\r\nginux: cancelled native volume request generation retired");
+    let recovered_after_cancellation = address_space::verify_native_volume_service(
+        &volume_image,
+        virtio_status_physical,
+        virtio_block,
+        virtio_mmio,
+        virtio_msix_mmio,
+        &local_apic,
+        Some(native_volume_run.service_identity),
+    );
+    let recovered_after_cancellation_quiesced =
+        arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    let recovered_after_cancellation_valid =
+        recovered_after_cancellation
+            .as_ref()
+            .is_some_and(|recovered| {
+                recovered.domain != native_volume_run.domain
+                    && recovered.domain != replacement_volume_run.domain
+                    && recovered.domain != faulted_volume_run.domain
+                    && recovered.domain != recovered_after_fault.domain
+                    && recovered.domain != cancelled_volume_run.domain
+                    && recovered.service_identity == native_volume_run.service_identity
+                    && recovered.outcome
+                        == match native_volume_outcome {
+                            address_space::NativeVolumeOutcome::Initialized
+                            | address_space::NativeVolumeOutcome::Recovered => {
+                                address_space::NativeVolumeOutcome::Recovered
+                            }
+                            address_space::NativeVolumeOutcome::Rejected => {
+                                address_space::NativeVolumeOutcome::Rejected
+                            }
+                            address_space::NativeVolumeOutcome::RestartRequired => {
+                                address_space::NativeVolumeOutcome::RestartRequired
+                            }
+                            address_space::NativeVolumeOutcome::Faulted => {
+                                address_space::NativeVolumeOutcome::Faulted
+                            }
+                        }
+            });
+    if !recovered_after_cancellation_valid || !recovered_after_cancellation_quiesced {
+        serial_write("\r\nginux: post-cancellation native volume valid/quiesced: ");
+        serial_write_u64(u64::from(recovered_after_cancellation_valid));
+        serial_write(" ");
+        serial_write_u64(u64::from(recovered_after_cancellation_quiesced));
+        kernel_fail("\r\nginux: post-cancellation native volume invariant failed\r\n");
+    }
+    serial_write("\r\nginux: post-cancellation native volume generation started");
+    serial_write(match native_volume_outcome {
+        address_space::NativeVolumeOutcome::Initialized
+        | address_space::NativeVolumeOutcome::Recovered => {
+            "\r\nginux: post-cancellation native volume recovered exact record"
+        }
+        address_space::NativeVolumeOutcome::Rejected => {
+            "\r\nginux: post-cancellation native volume preserved rejection"
+        }
+        address_space::NativeVolumeOutcome::RestartRequired => {
+            "\r\nginux: post-cancellation native volume requested restart unexpectedly"
+        }
+        address_space::NativeVolumeOutcome::Faulted => {
+            "\r\nginux: post-cancellation native volume faulted unexpectedly"
+        }
+    });
+    serial_write("\r\nginux: post-cancellation native resources retired cleanly");
     serial_write("\r\nginux: native volume write-only grant exercised in ring 3");
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
     serial_write("\r\nginux: isolated virtio queue geometry configured with owned DMA");

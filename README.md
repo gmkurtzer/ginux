@@ -97,7 +97,10 @@ panicking the kernel. A separate compiled-volume-service run is denied by an
 invalid opaque handle after queue notification and proves an incomplete
 device request can be reset, revoked, and scrubbed without a kernel panic. A
 fresh generation with the same logical identity then recovers the exact record
-or preserves corruption rejection using newly delegated resources. The
+or preserves corruption rejection using newly delegated resources. A separate
+notified-request timeout proves ambiguous DMA is cancelled by device reset and
+cannot reuse its request generation; the service exits `RESTART_REQUIRED` and
+another fresh generation recovers from persistent state. The
 volume service's first successful request
 also proves stale-generation rejection, live timeout without generation
 consumption, successful same-generation retry, and consumed-generation replay

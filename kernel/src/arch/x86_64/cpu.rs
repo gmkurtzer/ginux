@@ -14298,8 +14298,12 @@ fn block_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFr
     };
     let command = frame.first_argument();
     let request = frame.second_argument();
-    if command != control_abi::BLOCK_DEVICE_WAIT
-        || request == 0
+    let notified = match command {
+        control_abi::BLOCK_DEVICE_WAIT => false,
+        control_abi::BLOCK_DEVICE_WAIT_NOTIFIED => true,
+        _ => return u64::MAX - 2,
+    };
+    if request == 0
         || !domain::handle_permits(
             caller_domain,
             capability,
@@ -14324,16 +14328,21 @@ fn block_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFr
     ) {
         return u64::MAX - 2;
     }
-    if address_space::complete_auxiliary_device_wait(caller_domain, request) {
-        0
-    } else {
-        let _ = scheduler::wake_device_completion(
-            caller_domain,
-            control_abi::BLOCK_DEVICE_OBJECT,
-            request,
-            u64::MAX - 2,
-        );
-        u64::MAX - 2
+    match address_space::complete_auxiliary_device_wait(caller_domain, request, notified) {
+        address_space::AuxiliaryDeviceWaitCompletion::Completed => 0,
+        address_space::AuxiliaryDeviceWaitCompletion::Cancelled => {
+            control_abi::BLOCK_DEVICE_RESULT_CANCELLED
+        }
+        address_space::AuxiliaryDeviceWaitCompletion::TimedOut => u64::MAX - 2,
+        address_space::AuxiliaryDeviceWaitCompletion::Failed => {
+            let _ = scheduler::wake_device_completion(
+                caller_domain,
+                control_abi::BLOCK_DEVICE_OBJECT,
+                request,
+                u64::MAX - 2,
+            );
+            u64::MAX - 2
+        }
     }
 }
 
