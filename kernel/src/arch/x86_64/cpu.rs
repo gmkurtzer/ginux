@@ -194,6 +194,7 @@ const LINUX_ENODEV: u64 = u64::MAX - 18;
 const LINUX_ENOTDIR: u64 = u64::MAX - 19;
 const LINUX_EISDIR: u64 = u64::MAX - 20;
 const LINUX_ENOMEM: u64 = u64::MAX - 11;
+const LINUX_ENOSPC: u64 = u64::MAX - 27;
 const LINUX_ESPIPE: u64 = u64::MAX - 28;
 const LINUX_EMFILE: u64 = u64::MAX - 23;
 const LINUX_EINVAL: u64 = u64::MAX - 21;
@@ -269,6 +270,9 @@ const LINUX_FILE_PROC_STATUS: u16 = LINUX_FILE_MASK;
 const LINUX_PROC_PID1_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS;
 const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
+const LINUX_TMP_FILE_NODE: u16 = 0xff00;
+const LINUX_FILE_TMP_SCRATCH: u16 = LINUX_FILE_MASK | LINUX_TMP_FILE_NODE;
+const LINUX_TMP_FILE_CAPACITY: usize = 64;
 const LINUX_PROC_PID1_STATUS: &[u8] = b"Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 32;
@@ -670,6 +674,9 @@ static ELF_PROBE_PIPE_WRITE_FLAGS: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_LENGTH: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_BUFFER: [AtomicU8; LINUX_PIPE_CAPACITY] =
     [const { AtomicU8::new(0) }; LINUX_PIPE_CAPACITY];
+static ELF_PROBE_TMP_FILE_LENGTH: AtomicU8 = AtomicU8::new(0);
+static ELF_PROBE_TMP_FILE: [AtomicU8; LINUX_TMP_FILE_CAPACITY] =
+    [const { AtomicU8::new(0) }; LINUX_TMP_FILE_CAPACITY];
 static ELF_PROBE_DESCRIPTOR_OFFSETS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
@@ -3419,6 +3426,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     for byte in &ELF_PROBE_PIPE_BUFFER {
         byte.store(0, Ordering::SeqCst);
     }
+    let _ = linux_clear_tmp_file();
     for cursor in &ELF_PROBE_DESCRIPTOR_OFFSETS {
         cursor.store(0, Ordering::SeqCst);
     }
@@ -4977,7 +4985,7 @@ extern "sysv64" fn linux_syscall_handler(
             let device = linux_device_descriptor(first_argument);
             if device & LINUX_DEVICE_CONSOLE != 0 {
                 LINUX_ESPIPE
-            } else if linux_regular_file(device).is_some() {
+            } else if linux_regular_file(device).is_some() || linux_tmp_file(device) {
                 linux_regular_file_seek(first_argument, device, buffer, count)
             } else if device & LINUX_DEVICE_DIRECTORY != 0 {
                 if buffer == 0 && count == 0 {
@@ -5514,6 +5522,7 @@ extern "sysv64" fn linux_syscall_handler(
                 if current_linux_clear_child_tid() != Some(0)
                     || current_linux_robust_list() != Some(0)
                     || !linux_close_all_descriptors()
+                    || !linux_clear_tmp_file()
                     || !retire_current_linux_thread()
                 {
                     return LINUX_ESRCH;
@@ -5537,6 +5546,7 @@ extern "sysv64" fn linux_syscall_handler(
                 || !set_current_linux_clear_child_tid(0)
                 || !set_current_linux_robust_list(0)
                 || !linux_close_all_descriptors()
+                || !linux_clear_tmp_file()
             {
                 return LINUX_ESRCH;
             }
@@ -7050,6 +7060,9 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     if path == b"/proc/1/status" {
         return Some(LINUX_FILE_PROC_STATUS);
     }
+    if path == b"/tmp/ginux-ready" {
+        return Some(LINUX_FILE_TMP_SCRATCH);
+    }
     let (kind, root_name) = match path {
         b"/init" => (LINUX_FILE_INIT, b"linux/init" as &[u8]),
         b"/lib64/ld-ginux.so" => (LINUX_FILE_INTERPRETER, b"linux/ld-ginux.so" as &[u8]),
@@ -7097,6 +7110,9 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     }
     if path == b"proc/1/status" {
         return Some(LINUX_FILE_PROC_STATUS);
+    }
+    if path == b"tmp/ginux-ready" {
+        return Some(LINUX_FILE_TMP_SCRATCH);
     }
     if let Some(node) = initramfs::published_directory_node(path) {
         return Some(LINUX_ROOT_MEASURED_DIRECTORY | (u16::from(node) << LINUX_ROOT_NODE_SHIFT));
@@ -8142,7 +8158,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
     if kind & LINUX_DEVICE_DIRECTORY == 0 && flags & LINUX_O_DIRECTORY != 0 {
         return LINUX_ENOTDIR;
     }
-    if kind & LINUX_FILE_MASK != 0 && access != 0 {
+    if kind & LINUX_FILE_MASK != 0 && access != 0 && !linux_tmp_file(kind) {
         return LINUX_EACCES;
     }
     let state = kind | (access + 1) as u16;
@@ -8215,7 +8231,9 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         Err(error) => return error,
     };
     if let Some(kind) = relative_kind {
-        let denied = if kind & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS
+        let denied = if linux_tmp_file(kind) {
+            mode & 1 != 0
+        } else if kind & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS
             && kind & LINUX_ROOT_NODE_MASK == 0
         {
             mode & 3 != 0
@@ -8229,7 +8247,9 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         path if linux_root_directory_kind(path).is_some() => true,
         path if linux_runtime_file_kind(path).is_some() => {
             let kind = linux_runtime_file_kind(path).unwrap_or(0);
-            let denied = if kind & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS
+            let denied = if linux_tmp_file(kind) {
+                mode & 1 != 0
+            } else if kind & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS
                 && kind & LINUX_ROOT_NODE_MASK == 0
             {
                 mode & 3 != 0
@@ -8275,7 +8295,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
             linux_regular_file_inode(kind).unwrap_or(0),
             0,
             linux_regular_file_mode(kind),
-            linux_regular_file(kind).map_or(0, |file| file.len() as u64),
+            linux_file_size(kind),
         ),
         (None, b"/dev/null") => (1_u64, 3_u32, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
         (None, b"/dev/zero") => (2, 5, LINUX_STAT_CHARACTER_DEVICE_MODE, 0),
@@ -8292,7 +8312,7 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
                 linux_regular_file_inode(kind).unwrap_or(0),
                 0,
                 linux_regular_file_mode(kind),
-                linux_regular_file(kind).map_or(0, |file| file.len() as u64),
+                linux_file_size(kind),
             ),
             None => return LINUX_ENOENT,
         },
@@ -8326,6 +8346,9 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_tmp_file(device) {
+        return linux_tmp_read(descriptor, device, address, count);
+    }
     if let Some(file) = linux_regular_file(device) {
         if device & 3 != LINUX_DESCRIPTOR_INPUT {
             return LINUX_EBADF;
@@ -10300,6 +10323,9 @@ fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_tmp_file(device) {
+        return linux_tmp_write(descriptor, device, address, count);
+    }
     let access = device & 3;
     if access == LINUX_DESCRIPTOR_OUTPUT || access == 3 {
         if device & LINUX_DEVICE_CONSOLE != 0 {
@@ -10317,6 +10343,9 @@ fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_tmp_file(device) {
+        return LINUX_ENOSYS;
+    }
     let access = device & 3;
     if access != LINUX_DESCRIPTOR_INPUT
         && access != 3
@@ -10422,6 +10451,9 @@ fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
         return result;
     }
     let device = linux_device_descriptor(descriptor);
+    if linux_tmp_file(device) {
+        return LINUX_ENOSYS;
+    }
     let access = device & 3;
     let writable_device = device != 0 && (access == LINUX_DESCRIPTOR_OUTPUT || access == 3);
     let serial = u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_OUTPUT
@@ -10481,12 +10513,21 @@ fn linux_device_descriptor(descriptor: u64) -> u16 {
         .unwrap_or(0)
 }
 
+fn linux_tmp_file(state: u16) -> bool {
+    state & LINUX_DEVICE_DIRECTORY == 0
+        && state & LINUX_FILE_MASK == LINUX_FILE_MASK
+        && state & LINUX_ROOT_NODE_MASK == LINUX_TMP_FILE_NODE
+}
+
 fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
     if state & LINUX_DEVICE_DIRECTORY != 0 {
         return None;
     }
     if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
         return Some(LINUX_PROC_PID1_STATUS);
+    }
+    if linux_tmp_file(state) {
+        return None;
     }
     let node = ((state & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT) as u8;
     if node != 0 {
@@ -10501,6 +10542,9 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
     }
     if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
         return Some(17);
+    }
+    if linux_tmp_file(state) {
+        return Some(18);
     }
     match state & LINUX_FILE_MASK {
         LINUX_FILE_INIT => Some(5),
@@ -10520,7 +10564,7 @@ fn linux_regular_file_seek(descriptor: u64, state: u16, offset: u64, whence: u64
     let base = match whence {
         0 => 0_i128,
         1 => i128::from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst)),
-        2 => linux_regular_file(state).map_or(0, |file| file.len() as i128),
+        2 => i128::from(linux_file_size(state)),
         _ => return LINUX_EINVAL,
     };
     let next = base + i128::from(offset as i64);
@@ -10529,6 +10573,78 @@ fn linux_regular_file_seek(descriptor: u64, state: u16, offset: u64, whence: u64
     };
     linux_descriptor_offset(descriptor).store(next, Ordering::SeqCst);
     next
+}
+
+fn linux_tmp_read(descriptor: u64, state: u16, address: u64, count: u64) -> u64 {
+    if state & 3 != LINUX_DESCRIPTOR_INPUT && state & 3 != 3 {
+        return LINUX_EBADF;
+    }
+    let Ok(start) = usize::try_from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst))
+    else {
+        return 0;
+    };
+    let length = usize::from(ELF_PROBE_TMP_FILE_LENGTH.load(Ordering::SeqCst));
+    if start >= length || count == 0 {
+        return 0;
+    }
+    let requested = usize::try_from(count).unwrap_or(usize::MAX);
+    let end = start.saturating_add(requested).min(length);
+    let mut output = [0_u8; LINUX_TMP_FILE_CAPACITY];
+    for (destination, source) in output[..end - start]
+        .iter_mut()
+        .zip(&ELF_PROBE_TMP_FILE[start..end])
+    {
+        *destination = source.load(Ordering::SeqCst);
+    }
+    if !copy_to_linux_user(address, &output[..end - start]) {
+        return LINUX_EFAULT;
+    }
+    linux_descriptor_offset(descriptor).store(end as u64, Ordering::SeqCst);
+    (end - start) as u64
+}
+
+fn linux_tmp_write(descriptor: u64, state: u16, address: u64, count: u64) -> u64 {
+    if state & 3 != LINUX_DESCRIPTOR_OUTPUT && state & 3 != 3 {
+        return LINUX_EBADF;
+    }
+    let Ok(start) = usize::try_from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst))
+    else {
+        return LINUX_EINVAL;
+    };
+    let Ok(length) = usize::try_from(count) else {
+        return LINUX_EINVAL;
+    };
+    let Some(end) = start.checked_add(length) else {
+        return LINUX_EINVAL;
+    };
+    if end > LINUX_TMP_FILE_CAPACITY {
+        return LINUX_ENOSPC;
+    }
+    if length == 0 {
+        return 0;
+    }
+    let mut input = [0_u8; LINUX_TMP_FILE_CAPACITY];
+    if !copy_from_linux_user(address, &mut input[..length]) {
+        return LINUX_EFAULT;
+    }
+    for (destination, source) in ELF_PROBE_TMP_FILE[start..end].iter().zip(&input[..length]) {
+        destination.store(*source, Ordering::SeqCst);
+    }
+    let prior = usize::from(ELF_PROBE_TMP_FILE_LENGTH.load(Ordering::SeqCst));
+    ELF_PROBE_TMP_FILE_LENGTH.store(prior.max(end) as u8, Ordering::SeqCst);
+    linux_descriptor_offset(descriptor).store(end as u64, Ordering::SeqCst);
+    count
+}
+
+fn linux_clear_tmp_file() -> bool {
+    ELF_PROBE_TMP_FILE_LENGTH.store(0, Ordering::SeqCst);
+    for byte in &ELF_PROBE_TMP_FILE {
+        byte.store(0, Ordering::SeqCst);
+    }
+    ELF_PROBE_TMP_FILE_LENGTH.load(Ordering::SeqCst) == 0
+        && ELF_PROBE_TMP_FILE
+            .iter()
+            .all(|byte| byte.load(Ordering::SeqCst) == 0)
 }
 
 fn linux_descriptor_offset(descriptor: u64) -> &'static AtomicU64 {
@@ -10973,15 +11089,17 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 }
             }
         }
-        if directory == b"proc" || directory == b"proc/1" {
+        if directory == b"proc" || directory == b"proc/1" || directory == b"tmp" {
             if cursor > 1 {
                 return LINUX_EINVAL;
             }
             if cursor == 0 {
                 let (inode, kind, name) = if directory == b"proc" {
                     (16, 4, &b"1"[..])
-                } else {
+                } else if directory == b"proc/1" {
                     (17, 8, &b"status"[..])
+                } else {
+                    (18, 8, &b"ginux-ready"[..])
                 };
                 if !append_linux_dirent(&mut entries, &mut used, inode, 3, kind, name) {
                     return LINUX_EINVAL;
@@ -11160,17 +11278,28 @@ fn linux_regular_file_stat(state: u16) -> [u8; LINUX_STAT_SIZE] {
         linux_regular_file_mode(state),
         linux_regular_file_inode(state).unwrap_or(0),
     );
-    let size = linux_regular_file(state).map_or(0, |file| file.len() as u64);
+    let size = linux_file_size(state);
     stat[48..56].copy_from_slice(&size.to_ne_bytes());
     stat[64..72].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
     stat
 }
 
 fn linux_regular_file_mode(state: u16) -> u32 {
-    if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+    if linux_tmp_file(state) {
+        0o100600
+    } else if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0
+    {
         0o100444
     } else {
         LINUX_STAT_REGULAR_MODE
+    }
+}
+
+fn linux_file_size(state: u16) -> u64 {
+    if linux_tmp_file(state) {
+        u64::from(ELF_PROBE_TMP_FILE_LENGTH.load(Ordering::SeqCst))
+    } else {
+        linux_regular_file(state).map_or(0, |file| file.len() as u64)
     }
 }
 

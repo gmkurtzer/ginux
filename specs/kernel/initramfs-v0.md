@@ -93,10 +93,13 @@ Linux `/` directory enumerates nine direct measured children in archive order.
 Its fixed 256-byte staging buffer returns the first eight children through
 `bin` on one page and the explicit `sbin` directory on a second cursor page.
 Measured directory descriptors use their own bounded node
-selectors to recover names from the index. The measured `sys` and `tmp` nodes
-are empty. The measured `proc` node anchors a synthetic bounded `1/status`
+selectors to recover names from the index. The measured `sys` node is empty.
+The measured `proc` node anchors a synthetic bounded `1/status`
 runtime view; it does not add mutable bytes to the authenticated archive. The
 PID 1 proof enumerates both synthetic directories and reads the status record.
+The measured `tmp` node similarly anchors a kernel-owned, 64-byte
+`ginux-ready` scratch file whose contents are outside the signed archive and
+are scrubbed at process teardown.
 The proof also opens and enumerates the
 otherwise unlisted `var` node, then opens its indexed `lib` child relative to
 the live descriptor. `dev`

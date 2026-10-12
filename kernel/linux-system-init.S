@@ -94,6 +94,86 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    mov edi, -100
+    lea rsi, [rip + .Ltmp_path]
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 80
+    mov eax, 217
+    syscall
+    cmp rax, 80
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 67], 0x756e6967
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 71], 0x65722d78
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 75], 0x00796461
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Ltmp_file_path]
+    mov edx, 1
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Ltmp_payload]
+    mov edx, 6
+    mov eax, 1
+    syscall
+    cmp rax, 6
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Ltmp_file_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 6
+    xor eax, eax
+    syscall
+    cmp rax, 6
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 0x64616572
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus + 4], 0x0a79
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r8
+    lea rsi, [rip + .Ltmp_marker]
+    mov edx, 12
+    mov eax, 1
+    syscall
+    cmp rax, 12
+    jne .Lfailure
+
     mov rdi, r8
     lea rsi, [rip + .Lready]
     mov edx, 21
@@ -130,5 +210,13 @@ ginux_linux_system_init:
     .asciz "/proc"
 .Lpid1_path:
     .asciz "/proc/1"
+.Ltmp_path:
+    .asciz "/tmp"
+.Ltmp_file_path:
+    .asciz "/tmp/ginux-ready"
+.Ltmp_payload:
+    .ascii "ready\n"
+.Ltmp_marker:
+    .ascii "TMPFS_READY\n"
 .Lstatus:
     .space 80

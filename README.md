@@ -18,7 +18,9 @@ identity, opens `/dev/console`, emits `GINUX_SYSTEM_INIT_V0`, and exits cleanly
 while final process teardown closes all inherited descriptors. Before
 readiness it enumerates `/proc` and `/proc/1`, then reads a bounded read-only
 `/proc/1/status` view containing its exact name, running state, PID 1, and
-parent PID 0. The kernel
+parent PID 0. It also enumerates `/tmp`, writes and rereads `ready\n` through a
+bounded 64-byte `ginux-ready` scratch file, and relies on final teardown to
+scrub that backing store. The kernel
 copies the root into a zeroed, contiguous 32-frame allocation,
 verifies source independence and the complete zero tail, and builds a bounded
 pathname index whose 32-bit offsets resolve only inside the owned image. A
@@ -45,7 +47,8 @@ selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open
 without per-directory kernel identities; `dev`
 retains its synthetic device entries. The measured `proc` node is populated by
 the bounded synthetic PID 1 directory and status record; it is not yet a
-general procfs. A
+general procfs. The measured `tmp` node similarly exposes one bounded mutable
+`ginux-ready` file; it is not yet a mounted tmpfs. A
 bounded index-driven contract resolves any direct measured regular child below
 an open measured directory; `motd` proves the syscall layer needs no
 per-filename case. Normalized multi-component paths are bounded and `lib` is

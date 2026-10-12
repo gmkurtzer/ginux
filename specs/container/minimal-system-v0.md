@@ -23,13 +23,17 @@ Before readiness, PID 1 enumerates `/proc` and `/proc/1`, reads the immutable
 bounded `/proc/1/status` snapshot, and publishes its exact `init`, running,
 PID 1, and parent PID 0 fields to the console. This moves procfs to `partial`;
 general process enumeration and lifecycle updates remain absent.
+PID 1 also enumerates the measured `/tmp` anchor, writes `ready\n` to the
+bounded kernel-owned `ginux-ready` scratch file, closes and reopens it, and
+validates the exact bytes. Process exit scrubs the complete 64-byte backing
+store. This moves tmpfs to `partial`; it is not a mounted general tmpfs.
 
 This execution gate deliberately does not claim M5 completion. The immutable
 root publishes an explicit `/sbin` directory containing the exact `init` node,
 and bounded root enumeration reaches it through a second cursor page. PID 1 is
 currently a bounded readiness-and-exit workload, not a persistent supervisor
-or interactive console owner. Process creation/reaping, a mount namespace,
-tmpfs, a complete procfs, and a complete user-namespace contract remain
+or interactive console owner. Process creation/reaping, a mount namespace, a
+general tmpfs, a complete procfs, and a complete user-namespace contract remain
 explicit gaps in the matrix.
 
 Build the exact candidate root and signed development image with:
