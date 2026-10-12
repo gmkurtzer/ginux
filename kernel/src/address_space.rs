@@ -8,7 +8,7 @@ use crate::{
     arch::x86_64::{
         apic::LocalApic,
         cpu, iommu, paging,
-        pci::{self, VirtioBlockDevice},
+        pci::{self, VirtioBlockDevice, VirtioNetworkDevice, VirtioNetworkInitialization},
         timer::{self, LocalApicCalibration},
     },
     domain, ipc, memory, network, scheduler, volume,
@@ -4330,6 +4330,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_network_boot_info(&self, info: ginux_native_abi::NativeNetworkBootV0) -> bool {
+        if !info.is_valid_virtio_network() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeNetworkBootV0>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn release(self) -> bool {
         let dma = self.dma_frame;
         memory::scrub_and_release_frames(self.owner, &self.frames)
@@ -4534,6 +4549,155 @@ pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeIma
         }
     }
     valid
+}
+
+pub(crate) fn verify_native_network_bootstrap(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+) -> bool {
+    const DMA_PAGE_INDEX: usize = 11;
+    const COMMON_PAGE_INDEX: usize = 12;
+    const NOTIFICATION_PAGE_INDEX: usize = 13;
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let common_page = common_physical & ADDRESS_MASK;
+    let Ok(common_offset) = usize::try_from(common_physical - common_page) else {
+        return false;
+    };
+    if common_offset
+        .checked_add(common_length)
+        .is_none_or(|end| end > PAGE_SIZE)
+    {
+        return false;
+    }
+    let receive_page = initialization.receive_notification & ADDRESS_MASK;
+    let transmit_page = initialization.transmit_notification & ADDRESS_MASK;
+    if receive_page != transmit_page
+        || initialization.receive_notification == initialization.transmit_notification
+        || !iommu_profile.matches_source(device.bus, device.device, device.function)
+        || !iommu_profile.is_inactive()
+        || !pci::network_function_is_disabled(device)
+        || !pci::network_msix_is_disabled(device)
+    {
+        return false;
+    }
+    let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
+        3,
+        crate::control_abi::NETWORK_DEVICE_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        return false;
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let Some(mut space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+        return false;
+    };
+    if !space.layout_is_valid(image)
+        || !space.relocations_are_valid(image)
+        || !space.map_uncached_device_page(COMMON_PAGE_INDEX, common_page)
+        || !space.map_uncached_device_page(NOTIFICATION_PAGE_INDEX, receive_page)
+    {
+        let _ = space.release();
+        return false;
+    }
+    let Some((dma_virtual, dma_physical)) = space.map_owned_dma_page(DMA_PAGE_INDEX) else {
+        let _ = space.release();
+        return false;
+    };
+    let user_common = USER_TEST_ADDRESS + COMMON_PAGE_INDEX * PAGE_SIZE + common_offset;
+    let Ok(receive_offset) = usize::try_from(initialization.receive_notification - receive_page)
+    else {
+        let _ = space.release();
+        return false;
+    };
+    let Ok(transmit_offset) = usize::try_from(initialization.transmit_notification - transmit_page)
+    else {
+        let _ = space.release();
+        return false;
+    };
+    if receive_offset + size_of::<u16>() > PAGE_SIZE
+        || transmit_offset + size_of::<u16>() > PAGE_SIZE
+    {
+        let _ = space.release();
+        return false;
+    }
+    let user_receive = USER_TEST_ADDRESS + NOTIFICATION_PAGE_INDEX * PAGE_SIZE + receive_offset;
+    let user_transmit = USER_TEST_ADDRESS + NOTIFICATION_PAGE_INDEX * PAGE_SIZE + transmit_offset;
+    let mac = initialization
+        .mac
+        .into_iter()
+        .fold(0_u64, |value, byte| (value << 8) | u64::from(byte));
+    if !space.write_network_boot_info(ginux_native_abi::NativeNetworkBootV0::virtio_network(
+        user_common as u64,
+        user_receive as u64,
+        user_transmit as u64,
+        dma_virtual as u64,
+        dma_physical,
+        handle,
+        mac,
+    )) || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT + 1)
+    {
+        let _ = space.release();
+        return false;
+    }
+    let root = space.root;
+    let Ok(entry) = usize::try_from(space.entry) else {
+        let _ = space.release();
+        return false;
+    };
+    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
+    let root_frames = paging::validated_user_root_frames(root);
+    if root_frames.as_ref().is_none_or(|frames| {
+        frames.base().len() != 4 + space.image_pages + 3
+            || frames.dma() != Some(dma_physical)
+            || !memory::frame_addresses_owned_by(owner, frames.base())
+    }) {
+        let _ = space.release();
+        return false;
+    }
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space))
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && !domain::handle_permits(
+            auxiliary,
+            handle,
+            crate::control_abi::NETWORK_DEVICE_OBJECT,
+            crate::capability::Rights::READ,
+        )
+        && event
+            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED))
+        && domain::last_lifecycle_event_audit().is_some_and(|(kind, audited, _)| {
+            kind == crate::control_abi::LIFECYCLE_AUXILIARY_EXITED && audited == auxiliary
+        })
+        && domain::last_lifecycle_event_detail()
+            == Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED)
+        && domain::last_lifecycle_event_has_fault() == Some(false)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none()
+        && iommu_profile.is_inactive()
+        && pci::network_function_is_disabled(device)
+        && pci::network_msix_is_disabled(device)
 }
 
 pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {

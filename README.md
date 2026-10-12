@@ -107,8 +107,10 @@ pages, and complete retirement. The measured entry also executes at ring 3 in
 a fresh domain with no boot capabilities, negotiates control ABI v4, exits
 through lifecycle ABI v0, and leaves no domain frames live. It has not yet
 received device authority. A separate fixed 80-byte network bootstrap contract
-now freezes the common configuration, RX/TX notifications, DMA identity,
-generation capability, and MAC fields before kernel delivery is implemented.
+freezes the common configuration, RX/TX notifications, DMA identity,
+generation capability, and MAC fields. A second service generation validates
+that record and its read-only logical network capability while PCI decoding,
+bus mastering, MSI-X, and VT-d remain disabled, then retires every owned frame.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

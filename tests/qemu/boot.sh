@@ -181,6 +181,15 @@ if ! grep -q '^ginux: compiled native network service executed in ring 3' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: native network bootstrap ABI v0 validated in ring 3' "$output_file" ||
+    ! grep -q '^ginux: native network read capability exercised in ring 3' "$output_file" ||
+    ! grep -q '^ginux: native network DMA lease remained device-inaccessible' "$output_file" ||
+    ! grep -q '^ginux: native network MMIO remained PCI-disabled' "$output_file" ||
+    ! grep -q '^ginux: native network bootstrap resources retired cleanly' "$output_file"; then
+    echo "Boot test failed: the native network bootstrap was not safely delegated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

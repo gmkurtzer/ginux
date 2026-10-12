@@ -1,7 +1,7 @@
 # Native Network Service Bootstrap ABI v0
 
-**Status:** The shared Rust definition and independent C11 layout consumer are
-verified; kernel delivery and service consumption are separate milestones.
+**Status:** The shared Rust definition, independent C11 layout consumer, kernel
+delivery, and measured ring-3 service validation are verified.
 
 ## Entry contract
 
@@ -45,6 +45,9 @@ MSI-X table, IDT, APIC, IOMMU-table, or kernel pointer.
 freezes every field offset and the total size through an independent
 freestanding C11 consumer.
 
-ABI v0 is exact-version only. This contract does not itself grant or activate
-the device, map memory, bind interrupts, or define packet-queue contents. Those
-operations require separate generation-bound kernel checks and QEMU proofs.
+ABI v0 is exact-version only. The first delivery proof maps the common and
+notification pages and allocates one DMA page, but keeps PCI memory decoding,
+bus mastering, MSI-X, and VT-d disabled. The service exercises only its
+read-only logical network capability and exits; teardown revokes the capability
+and scrubs every owned frame. Device activation, interrupts, and packet-queue
+contents require separate generation-bound kernel checks and QEMU proofs.

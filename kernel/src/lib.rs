@@ -2833,6 +2833,19 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: native network service started without boot capabilities");
     serial_write("\r\nginux: native network service exited through lifecycle ABI v0");
     serial_write("\r\nginux: native network service address space retired cleanly");
+    if !address_space::verify_native_network_bootstrap(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+    ) {
+        kernel_fail("\r\nginux: native network bootstrap invariant failed\r\n");
+    }
+    serial_write("\r\nginux: native network bootstrap ABI v0 validated in ring 3");
+    serial_write("\r\nginux: native network read capability exercised in ring 3");
+    serial_write("\r\nginux: native network DMA lease remained device-inaccessible");
+    serial_write("\r\nginux: native network MMIO remained PCI-disabled");
+    serial_write("\r\nginux: native network bootstrap resources retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

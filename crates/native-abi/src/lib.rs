@@ -17,6 +17,9 @@ pub const NATIVE_BLOCK_WAIT_PREPARED: u64 = 1;
 pub const NATIVE_BLOCK_WAIT_NOTIFIED: u64 = 2;
 pub const NATIVE_BLOCK_WAIT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_BLOCK_WAIT_CANCELLED: u64 = u64::MAX - 5;
+pub const NATIVE_NETWORK_DEVICE_OPERATION: u64 = 16;
+pub const NATIVE_NETWORK_DEVICE_PROBE: u64 = 0;
+pub const NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD: u64 = 0x0000_0001_05dc_0009;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -239,6 +242,10 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_PREPARED UINT64_C(1)"));
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_NOTIFIED UINT64_C(2)"));
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_CANCELLED (UINT64_MAX - UINT64_C(5))"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_OPERATION UINT64_C(16)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_PROBE UINT64_C(0)"));
+        assert!(header
+            .contains("GINUX_NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD UINT64_C(0x0000000105dc0009)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_DISCOVERY_OPERATION UINT64_C(0)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_ABI_VERSION UINT16_C(4)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_REQUIRED_FEATURES UINT16_C(1041)"));

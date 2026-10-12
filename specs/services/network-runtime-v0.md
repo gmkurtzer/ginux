@@ -49,11 +49,15 @@ The next boundary is specified independently by
 Its fixed record separates the network service from the existing block-service
 bootstrap ABI and names both queue notification registers, one DMA window, the
 opaque generation capability, and the pinned MAC without exposing PCI, MSI-X,
-APIC, or IOMMU internals. This revision defines and verifies the record but does
-not yet deliver it to the running service.
+APIC, or IOMMU internals. A second fresh service generation receives and
+validates that record, exercises only its read-only logical network-device
+probe, and exits cleanly. Its common and notification mappings remain inert
+because PCI decoding is disabled; its owned DMA page remains inaccessible to
+the device because VT-d and bus mastering are disabled. Teardown revokes the
+capability and scrubs the bootstrap, image, stack, page-table, and DMA frames.
 
 ## Deliberate limits
 
-This milestone does not yet delegate device capabilities, map MMIO or DMA, or
-move packet processing out of the kernel. Each boundary is introduced and
-tested separately in subsequent milestones.
+This milestone does not activate VT-d, PCI decoding, bus mastering, MSI-X, or
+packet queues, and it does not move packet processing out of the kernel. Each
+boundary is introduced and tested separately in subsequent milestones.
