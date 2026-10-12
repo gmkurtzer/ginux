@@ -132,3 +132,23 @@ quarantine between retirement and successful transfer. Adoption clears that
 record only after the allocator proves zero frames remain under the failed
 generation and exactly seven belong to the replacement. A normally exiting
 replacement enters the same quarantine until final address-space release.
+
+## Native auxiliary replacement
+
+The native volume proof separately exercises restart of a stop-only auxiliary
+service after complete teardown rather than transferring its old address
+space. The manager accepts the prior logical service identity only when its
+registry slot is empty, its generation still matches the identity ledger, and
+no frame-owner quarantine remains. It creates a distinct domain generation
+with a fresh capability table derived from the control plane's still-valid
+object-7 root. The measured PIE, stack, bootstrap page, DMA lease, and page
+tables are newly allocated and validated.
+
+The replacement reconfigures the reset virtio device and recovers the durable
+record. On corrupt media it independently repeats fail-closed rejection. Its
+terminal fault again retires the interrupt route, device grant, capability,
+address space, and DMA lease. The gate requires distinct domain generations,
+one stable service identity, and zero remaining frames after both runs. This
+auxiliary restart proof is currently one explicit bootstrap replacement; it
+does not yet define backoff, a general restart budget, or health policy for
+native drivers.

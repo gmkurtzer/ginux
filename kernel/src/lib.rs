@@ -1706,15 +1706,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
     serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
     serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
-    let native_volume_outcome = address_space::verify_native_volume_service(
+    let native_volume_run = address_space::verify_native_volume_service(
         &volume_image,
         virtio_status_physical,
         virtio_block,
         virtio_mmio,
         virtio_msix_mmio,
         &local_apic,
+        None,
     );
-    let native_volume_valid = native_volume_outcome.is_some();
+    let native_volume_valid = native_volume_run.is_some();
     let native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
     if !native_volume_valid || !native_volume_quiesced {
         serial_write("\r\nginux: native volume valid/quiesced: ");
@@ -1723,9 +1724,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         serial_write_u64(u64::from(native_volume_quiesced));
         kernel_fail("\r\nginux: compiled native volume service invariant failed\r\n");
     }
-    let Some(native_volume_outcome) = native_volume_outcome else {
+    let Some(native_volume_run) = native_volume_run else {
         kernel_fail("\r\nginux: native volume outcome unavailable\r\n");
     };
+    let native_volume_outcome = native_volume_run.outcome;
     serial_write("\r\nginux: compiled native volume service executed in ring 3");
     serial_write("\r\nginux: native volume service owned virtio request sequence");
     match native_volume_outcome {
@@ -1741,6 +1743,49 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
     }
     serial_write("\r\nginux: native volume service fault contained and device quiesced");
+    let replacement_volume_run = address_space::verify_native_volume_service(
+        &volume_image,
+        virtio_status_physical,
+        virtio_block,
+        virtio_mmio,
+        virtio_msix_mmio,
+        &local_apic,
+        Some(native_volume_run.service_identity),
+    );
+    let replacement_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    let replacement_volume_valid = replacement_volume_run.is_some_and(|replacement| {
+        replacement.domain != native_volume_run.domain
+            && replacement.service_identity == native_volume_run.service_identity
+            && replacement.outcome
+                == match native_volume_outcome {
+                    address_space::NativeVolumeOutcome::Initialized
+                    | address_space::NativeVolumeOutcome::Recovered => {
+                        address_space::NativeVolumeOutcome::Recovered
+                    }
+                    address_space::NativeVolumeOutcome::Rejected => {
+                        address_space::NativeVolumeOutcome::Rejected
+                    }
+                }
+    });
+    if !replacement_volume_valid || !replacement_volume_quiesced {
+        serial_write("\r\nginux: replacement native volume valid/quiesced: ");
+        serial_write_u64(u64::from(replacement_volume_valid));
+        serial_write(" ");
+        serial_write_u64(u64::from(replacement_volume_quiesced));
+        kernel_fail("\r\nginux: replacement native volume service invariant failed\r\n");
+    }
+    serial_write("\r\nginux: replacement native volume domain generation started");
+    serial_write("\r\nginux: native volume service identity survived replacement");
+    serial_write(match native_volume_outcome {
+        address_space::NativeVolumeOutcome::Initialized
+        | address_space::NativeVolumeOutcome::Recovered => {
+            "\r\nginux: replacement native volume service recovered exact record"
+        }
+        address_space::NativeVolumeOutcome::Rejected => {
+            "\r\nginux: replacement native volume service repeated fail-closed rejection"
+        }
+    });
+    serial_write("\r\nginux: replacement native volume resources retired cleanly");
     serial_write("\r\nginux: native volume write-only grant exercised in ring 3");
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
     serial_write("\r\nginux: isolated virtio queue geometry configured with owned DMA");

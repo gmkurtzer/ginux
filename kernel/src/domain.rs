@@ -403,6 +403,23 @@ impl Manager {
         Some(id)
     }
 
+    fn restart_auxiliary_service_with_delegations(
+        &mut self,
+        service: ServiceId,
+        grants: &[DelegationGrant],
+    ) -> Option<DomainId> {
+        let identity_slot = self.service_identity_slot(service)?;
+        let registry_slot = identity_slot.checked_sub(1)?;
+        if self.auxiliary_service_ids.get(registry_slot)?.is_some()
+            || self.quarantined_frame_owners[identity_slot].is_some()
+        {
+            return None;
+        }
+        let id = self.construct_service_domain(grants, Role::AuxiliaryService, service)?;
+        self.auxiliary_service_ids[registry_slot] = Some(id);
+        Some(id)
+    }
+
     fn construct_service_domain(
         &mut self,
         grants: &[DelegationGrant],
@@ -966,6 +983,34 @@ pub(crate) fn initialize_boot_auxiliary_service(
     .then_some(encode_id(id))
 }
 
+pub(crate) fn initialize_boot_auxiliary_service_restart(
+    root_index: usize,
+    object: u64,
+    rights: Rights,
+    service_raw: u64,
+) -> Option<u64> {
+    let service = decode_service_id(service_raw)?;
+    let manager = global_manager_mut()?;
+    let control = manager.domain(manager.control_plane_id?)?;
+    let source = control.boot_roots.get(root_index).copied().flatten()?;
+    let id = manager.restart_auxiliary_service_with_delegations(
+        service,
+        &[DelegationGrant {
+            source,
+            object,
+            rights,
+        }],
+    )?;
+    let domain = manager.domain(id)?;
+    (domain.role == Role::AuxiliaryService
+        && domain.service == Some(service)
+        && domain.state == State::Ready
+        && domain.thread_limit == 0
+        && domain.boot_root_count == 1
+        && domain.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
 pub(crate) fn auxiliary_boot_handle(domain_raw: u64, root_index: usize) -> Option<u64> {
     let id = decode_id(domain_raw)?;
     let domain = global_manager()?.domain(id)?;
@@ -1455,15 +1500,20 @@ fn verify_auxiliary_fault_policy_invariants_inner() -> Option<bool> {
     {
         return Some(false);
     }
-    let replacement = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
-        source: console_source,
-        object: 2,
-        rights: Rights::WRITE,
-    }])?;
+    let replacement = manager.restart_auxiliary_service_with_delegations(
+        identity,
+        &[DelegationGrant {
+            source: console_source,
+            object: 2,
+            rights: Rights::WRITE,
+        }],
+    )?;
     let replacement_handle = manager.domain(replacement)?.boot_roots[0]?;
     manager.lifecycle_events.next_sequence = u64::MAX;
     Some(
         !manager.retire_faulted_auxiliary_service(replacement, fault)
+            && replacement != auxiliary
+            && manager.domain(replacement)?.service == Some(identity)
             && manager.domain(replacement)?.state == State::Stopping
             && manager.domain(replacement)?.terminal_fault == Some(fault)
             && !manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
@@ -2477,6 +2527,20 @@ const fn decode_id(raw: u64) -> Option<DomainId> {
         generation: (raw >> 16) as u32,
     };
     if id.generation == 0 || id.slot as usize >= MAX_DOMAINS {
+        return None;
+    }
+    Some(id)
+}
+
+const fn decode_service_id(raw: u64) -> Option<ServiceId> {
+    if raw >> 48 != 0 {
+        return None;
+    }
+    let id = ServiceId {
+        slot: raw as u16,
+        generation: (raw >> 16) as u32,
+    };
+    if id.generation == 0 || id.slot as usize >= MAX_SERVICE_IDENTITIES {
         return None;
     }
     Some(id)

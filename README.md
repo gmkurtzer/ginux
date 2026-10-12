@@ -91,7 +91,12 @@ deliberate terminal fault drives mandatory interrupt, device, capability,
 address-space, and DMA cleanup without panicking the kernel. Its first request
 also proves stale-generation rejection, live timeout without generation
 consumption, successful same-generation retry, and consumed-generation replay
-rejection. See
+rejection. After teardown, the kernel creates a fresh domain generation with
+the same logical service identity and newly delegated object-7 handle, reloads
+the measured PIE into newly owned frames, rearms the device path, and requires
+the replacement to recover the exact record. Corrupt media must be rejected
+again by the replacement. Both generations finish with zero owned frames and
+no live device authority. See
 [Isolated Volume Runtime v0](specs/services/volume-runtime-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded

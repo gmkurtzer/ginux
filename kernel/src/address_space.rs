@@ -5825,6 +5825,12 @@ pub(crate) enum NativeVolumeOutcome {
     Rejected,
 }
 
+pub(crate) struct NativeVolumeRun {
+    pub(crate) outcome: NativeVolumeOutcome,
+    pub(crate) domain: u64,
+    pub(crate) service_identity: u64,
+}
+
 pub(crate) fn verify_native_volume_service(
     image: &crate::native_elf::NativeImage<'_>,
     register_physical: u64,
@@ -5832,7 +5838,8 @@ pub(crate) fn verify_native_volume_service(
     mapping: paging::MmioMapping,
     msix_mapping: paging::MmioMapping,
     apic: &LocalApic,
-) -> Option<NativeVolumeOutcome> {
+    restart_identity: Option<u64>,
+) -> Option<NativeVolumeRun> {
     const DMA_PAGE_INDEX: usize = 11;
     const DEVICE_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -5860,11 +5867,20 @@ pub(crate) fn verify_native_volume_service(
         .checked_add(NOTIFICATION_PAGE_INDEX * PAGE_SIZE)?
         .checked_add(notification_offset)?;
 
-    let auxiliary = domain::initialize_boot_auxiliary_service(
-        6,
-        crate::control_abi::BLOCK_DEVICE_OBJECT,
-        crate::capability::Rights::WRITE,
-    )?;
+    let auxiliary = if let Some(service) = restart_identity {
+        domain::initialize_boot_auxiliary_service_restart(
+            6,
+            crate::control_abi::BLOCK_DEVICE_OBJECT,
+            crate::capability::Rights::WRITE,
+            service,
+        )?
+    } else {
+        domain::initialize_boot_auxiliary_service(
+            6,
+            crate::control_abi::BLOCK_DEVICE_OBJECT,
+            crate::capability::Rights::WRITE,
+        )?
+    };
     let (Some(handle), Some(identity), Some(owner)) = (
         domain::auxiliary_boot_handle(auxiliary, 0),
         domain::domain_service_identity(auxiliary),
@@ -6017,7 +6033,11 @@ pub(crate) fn verify_native_volume_service(
             }
         }
     }
-    valid.then_some(outcome).flatten()
+    valid.then_some(NativeVolumeRun {
+        outcome: outcome?,
+        domain: auxiliary,
+        service_identity: identity,
+    })
 }
 
 struct WxAddressSpace {

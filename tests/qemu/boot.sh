@@ -93,6 +93,10 @@ fi
 if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native volume service owned virtio request sequence' "$output_file" ||
     ! grep -q '^ginux: native volume record initialized and flushed' "$output_file" ||
+    ! grep -q '^ginux: replacement native volume domain generation started' "$output_file" ||
+    ! grep -q '^ginux: native volume service identity survived replacement' "$output_file" ||
+    ! grep -q '^ginux: replacement native volume service recovered exact record' "$output_file" ||
+    ! grep -q '^ginux: replacement native volume resources retired cleanly' "$output_file" ||
     grep -q '^ginux: native volume record recovered after reboot' "$output_file"; then
     cat "$output_file"
     echo "Boot test failed: compiled native volume service did not initialize its record." >&2
@@ -120,6 +124,10 @@ fi
 
 if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboot_output_file" ||
     ! grep -q '^ginux: native volume record recovered after reboot' "$reboot_output_file" ||
+    ! grep -q '^ginux: replacement native volume domain generation started' "$reboot_output_file" ||
+    ! grep -q '^ginux: native volume service identity survived replacement' "$reboot_output_file" ||
+    ! grep -q '^ginux: replacement native volume service recovered exact record' "$reboot_output_file" ||
+    ! grep -q '^ginux: replacement native volume resources retired cleanly' "$reboot_output_file" ||
     grep -q '^ginux: native volume record initialized and flushed' "$reboot_output_file"; then
     cat "$reboot_output_file"
     echo "Boot test failed: compiled native volume service did not recover its record." >&2
@@ -134,6 +142,10 @@ run_boot "$native_corrupt_output_file" "native-volume corruption" "$native_corru
 if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: disk-backed volume recovered after reboot' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: corrupt native volume media rejected without modification' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: replacement native volume domain generation started' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: native volume service identity survived replacement' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: replacement native volume service repeated fail-closed rejection' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: replacement native volume resources retired cleanly' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native volume service fault contained and device quiesced' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: faulted DMA lease scrubbed and released' "$native_corrupt_output_file"; then
     cat "$native_corrupt_output_file"

@@ -71,6 +71,16 @@ sector four, requires rejection without a write or kernel panic, verifies the
 disk checksum is unchanged, and still requires complete device and DMA
 teardown.
 
+After the first domain is fully retired, the supervisor starts the same
+measured artifact under a fresh domain generation while preserving its logical
+service identity. The restart constructor refuses a live registry slot or a
+remaining frame quarantine, creates a fresh capability table from the control
+plane's original authority, and allocates a new address space and DMA lease.
+The replacement must recover the exact record after initialization or repeat
+the same fail-closed rejection on corrupt media. Its second terminal fault must
+again leave the device reset, authority revoked, and every owned frame scrubbed
+and released.
+
 ## Deliberate limits
 
 - The compiled service is the sole live write-capable ring-3 virtio runtime;
