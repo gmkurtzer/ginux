@@ -392,6 +392,16 @@ if ! grep -Eq '^ginux: first IOMMU device scopes: [1-9][0-9]*' "$output_file" ||
     exit 1
 fi
 
+if ! grep -q '^ginux: inactive IOMMU root/context hierarchy constructed' "$output_file" ||
+    ! grep -Eq '^ginux: inactive IOMMU root table address: [1-9][0-9]*' "$output_file" ||
+    ! grep -q '^ginux: one-page identity DMA translation encoded exactly' "$output_file" ||
+    ! grep -q '^ginux: invalid inactive IOMMU translations rejected' "$output_file" ||
+    ! grep -q '^ginux: IOMMU hardware state unchanged after table construction' "$output_file" ||
+    ! grep -q '^ginux: inactive IOMMU translation frames scrubbed and released' "$output_file"; then
+    echo "Boot test failed: inactive IOMMU translation hierarchy lifecycle did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: ACPI tables use higher-half direct map' "$output_file"; then
     echo "Boot test failed: ACPI table access did not use the direct map." >&2
     exit 1

@@ -40,6 +40,10 @@ endpoint scopes, nonzero reserved or PCI enumeration fields, unknown scope
 types, and out-of-range device/function components. This proves which remapping
 unit must eventually own the device; it does not turn translation on.
 
+The next [Inactive IOMMU Translation Hierarchy v0](iommu-translation-v0.md)
+contract constructs and retires an exact in-memory table image while retaining
+this revision's read-only hardware-register boundary.
+
 ## Deliberate limits
 
 This contract does not resolve multi-hop bridge scopes, allocate or install

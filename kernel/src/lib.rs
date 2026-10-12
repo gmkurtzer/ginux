@@ -763,6 +763,30 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[virtio_dma_frame]) {
         kernel_fail("\r\nginux: virtio DMA frame ownership invalid\r\n");
     }
+    let Some(iommu_translation) = arch::x86_64::iommu::build_inactive_translation(
+        iommu_capabilities,
+        virtio_block.bus,
+        virtio_block.device,
+        virtio_block.function,
+        virtio_dma_frame,
+    ) else {
+        kernel_fail("\r\nginux: inactive IOMMU translation construction failed\r\n");
+    };
+    if !iommu_translation.is_exact(virtio_dma_frame)
+        || !arch::x86_64::iommu::verify_inactive_translation_rejections(
+            iommu_capabilities,
+            virtio_dma_frame,
+        )
+        || arch::x86_64::iommu::probe(platform.first_iommu_register_base, iommu_mmio).is_none()
+    {
+        kernel_fail("\r\nginux: inactive IOMMU translation invariant failed\r\n");
+    }
+    serial_write("\r\nginux: inactive IOMMU root/context hierarchy constructed");
+    serial_write("\r\nginux: inactive IOMMU root table address: ");
+    serial_write_u64(iommu_translation.root_table_address());
+    serial_write("\r\nginux: one-page identity DMA translation encoded exactly");
+    serial_write("\r\nginux: invalid inactive IOMMU translations rejected");
+    serial_write("\r\nginux: IOMMU hardware state unchanged after table construction");
     let Some(virtio_dma_virtual) = virtio_dma_frame.direct_map_address() else {
         kernel_fail("\r\nginux: virtio DMA frame is outside direct map\r\n");
     };
@@ -823,6 +847,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: persistent virtio backend teardown failed\r\n");
     }
     serial_write("\r\nginux: persistent virtio device reset and bus mastering revoked");
+    if !iommu_translation.retire() {
+        kernel_fail("\r\nginux: inactive IOMMU translation retirement failed\r\n");
+    }
+    serial_write("\r\nginux: inactive IOMMU translation frames scrubbed and released");
     if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[virtio_dma_frame])
         || memory::any_frame_lease_live(&[virtio_dma_frame])
     {

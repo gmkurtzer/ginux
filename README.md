@@ -67,6 +67,7 @@ covering every PCI device, the kernel validates every bounded DMAR device scope
 and requires an exact endpoint scope for the discovered virtio-blk source ID.
 It does not yet program a DMA domain. See
 [IOMMU Register Probe v0](specs/kernel/iommu-v0.md),
+[Inactive IOMMU Translation Hierarchy v0](specs/kernel/iommu-translation-v0.md),
 [Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md), and
 [Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
 The device boundary delegates manifest object 7 and attenuates it into
