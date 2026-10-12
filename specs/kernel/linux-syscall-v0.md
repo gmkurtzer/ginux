@@ -511,12 +511,13 @@ be ready, converts the duration to a checked monotonic deadline, stores that
 deadline in a typed sleep wait, and selects the peer. The first Linux syscall or
 scheduling boundary at or after expiry can clear the wait. Independently, a
 periodic local-APIC tick clears an expired wait in interrupt context and marks
-the sleeper ready with zero; the running peer selects it at its next cooperative
-scheduling boundary. The optional remainder range is prevalidated but remains untouched
+the sleeper ready with zero. It saves the interrupted peer's complete integer,
+instruction, stack, flags, and FS-base context and dispatches the sleeper before
+returning to ring 3. The optional remainder range is prevalidated but remains untouched
 on successful expiry. Invalid request or remainder ranges return `-EFAULT`,
 invalid fields or deadline overflow return `-EINVAL`, and a positive sleep with
-no runnable peer returns `-ENOSYS`. Timer-driven preemptive dispatch,
-interruption, remainder reporting, absolute sleeps, and `clock_nanosleep`
+no runnable peer returns `-ENOSYS`. Interruption, remainder reporting, absolute
+sleeps, and `clock_nanosleep`
 remain unsupported.
 The same two calls accept `CLOCK_PROCESS_CPUTIME_ID` and
 `CLOCK_THREAD_CPUTIME_ID`. In this proof the process has one thread, never
@@ -865,7 +866,7 @@ converted to a checked monotonic deadline and stored with the typed wait. At
 the first Linux syscall or scheduling boundary at or after that deadline, the
 kernel clears the wait and makes the saved context ready with `-EAGAIN`. A
 periodic local-APIC tick performs the same transition independently in interrupt
-context; it does not yet preempt the running peer to dispatch the waiter.
+context and preemptively dispatches the waiter after saving the running peer.
 Interruption by nonmatching signals and general signal wait queues remain unsupported. The measured
 runtime proves every immediate rejection, pending `SIGUSR1`/`SI_USER`
 consumption, empty polling, mask cleanup, a positive-timeout wake, and a
@@ -1035,14 +1036,14 @@ bounded lifecycle. A valid zero relative timespec returns `-ETIMEDOUT`
 immediately. A positive relative timespec is converted to a checked monotonic
 deadline in the typed wait record; the first Linux syscall or scheduling
 boundary at or after expiry clears that record and makes the waiter ready with
-`-ETIMEDOUT`. A periodic local-APIC tick can perform that transition in interrupt
-context, while actual peer dispatch remains cooperative. The proof blocks the child and explicitly wakes it, expires a
+`-ETIMEDOUT`. A periodic local-APIC tick can perform that transition and dispatch
+the waiter in interrupt context. The proof blocks the child and explicitly wakes it, expires a
 parent timed wait, then blocks the parent before child clear-child-TID performs
 the final wake after zeroing the word. Explicitly woken waits return zero. A
 matching wait with no other ready thread returns `-ENOSYS` instead of
 deadlocking. Invalid operations, alignment, or timespec fields return
-`-EINVAL`, and invalid word or timeout ranges return `-EFAULT`. Timer-driven
-preemptive dispatch, bitsets, requeueing, priority inheritance,
+`-EINVAL`, and invalid word or timeout ranges return `-EFAULT`. Bitsets,
+requeueing, priority inheritance,
 multiple waiters, and cross-process keys remain undefined.
 
 `rax = 10` (`__NR_mprotect`) supports an irreversible transition on either the

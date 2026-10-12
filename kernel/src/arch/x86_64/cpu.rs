@@ -11,7 +11,9 @@ use crate::{
     address_space,
     capability::Rights,
     control_abi, domain, initramfs, ipc, memory, network, scheduler,
-    scheduler::{RuntimeAction, UserFaultContext, UserFaultFrame, UserTrapFrame},
+    scheduler::{
+        RuntimeAction, UserFaultContext, UserFaultFrame, UserInterruptFrame, UserTrapFrame,
+    },
     serial_write, serial_write_u64,
 };
 
@@ -417,6 +419,7 @@ static LINUX_FUTEX_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SLEEP_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SLEEP_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_TIMER_WAIT_EXPIRY_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_TIMER_WAIT_PREEMPTION_COUNT: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -504,6 +507,10 @@ static LINUX_THREAD_RSPS: [AtomicU64; LINUX_THREAD_LIMIT] =
 static LINUX_THREAD_RFLAGS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_RAXS: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RCXS: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_R11S: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_REGISTERS: [[AtomicU64; LINUX_SYSCALL_FRAME_REGISTERS]; LINUX_THREAD_LIMIT] =
     [const { [const { AtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS] }; LINUX_THREAD_LIMIT];
@@ -2016,6 +2023,8 @@ fn construct_linux_clone_context(
     LINUX_THREAD_RSPS[slot].store(child.rsp, Ordering::SeqCst);
     LINUX_THREAD_RFLAGS[slot].store(child.rflags, Ordering::SeqCst);
     LINUX_THREAD_RAXS[slot].store(child.rax, Ordering::SeqCst);
+    LINUX_THREAD_RCXS[slot].store(child.rip, Ordering::SeqCst);
+    LINUX_THREAD_R11S[slot].store(child.rflags, Ordering::SeqCst);
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(request.child_tid, Ordering::SeqCst);
     Some(LinuxCloneResult {
         parent_rax: u64::from(handle.tid),
@@ -2106,6 +2115,8 @@ fn save_linux_thread_return_context(handle: LinuxThreadHandle, context: LinuxUse
     LINUX_THREAD_RSPS[slot].store(context.rsp, Ordering::SeqCst);
     LINUX_THREAD_RFLAGS[slot].store(context.rflags, Ordering::SeqCst);
     LINUX_THREAD_RAXS[slot].store(context.rax, Ordering::SeqCst);
+    LINUX_THREAD_RCXS[slot].store(context.rip, Ordering::SeqCst);
+    LINUX_THREAD_R11S[slot].store(context.rflags, Ordering::SeqCst);
     true
 }
 
@@ -2215,6 +2226,8 @@ fn clear_linux_thread_execution(slot: usize) {
     LINUX_THREAD_RSPS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RFLAGS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_RAXS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_RCXS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_R11S[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(0, Ordering::SeqCst);
 }
 
@@ -2364,6 +2377,12 @@ fn finish_linux_thread_table() -> bool {
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_RAXS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_RCXS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_R11S
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_REGISTERS.iter().all(|registers| {
@@ -3064,6 +3083,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_SLEEP_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_SLEEP_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_TIMER_WAIT_EXPIRY_COUNT.store(0, Ordering::SeqCst);
+    LINUX_TIMER_WAIT_PREEMPTION_COUNT.store(0, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -3418,6 +3438,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let sleep_block_count = LINUX_SLEEP_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let sleep_wake_count = LINUX_SLEEP_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let timer_wait_expiry_count = LINUX_TIMER_WAIT_EXPIRY_COUNT.swap(0, Ordering::SeqCst);
+    let timer_wait_preemption_count = LINUX_TIMER_WAIT_PREEMPTION_COUNT.swap(0, Ordering::SeqCst);
     let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_block_count = LINUX_SIGNAL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
@@ -3437,7 +3458,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && first_child_tid != 0
             && clone_reuse_validated
             && child_gettid_count == 2
-            && yield_switch_count == 9
+            && yield_switch_count == 6
             && clone_busy_rejection_count == 2
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
@@ -3447,7 +3468,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && futex_wait_timeout_count == 1
             && sleep_block_count == 1
             && sleep_wake_count == 1
-            && timer_wait_expiry_count == 1
+            && timer_wait_expiry_count == 3
+            && timer_wait_preemption_count == 3
             && signal_wait_block_count == 2
             && signal_wait_wake_count == 1
             && signal_wait_timeout_count == 1)
@@ -3460,7 +3482,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             first_child_tid != 0,
             clone_reuse_validated,
             child_gettid_count == 2,
-            yield_switch_count == 9,
+            yield_switch_count == 6,
             clone_busy_rejection_count == 2,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
@@ -3470,7 +3492,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             futex_wait_timeout_count == 1,
             sleep_block_count == 1,
             sleep_wake_count == 1,
-            timer_wait_expiry_count == 1,
+            timer_wait_expiry_count == 3,
+            timer_wait_preemption_count == 3,
             signal_wait_block_count == 2,
             signal_wait_wake_count == 1,
             signal_wait_timeout_count == 1,
@@ -3496,6 +3519,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             sleep_block_count,
             sleep_wake_count,
             timer_wait_expiry_count,
+            timer_wait_preemption_count,
             signal_wait_block_count,
             signal_wait_wake_count,
             signal_wait_timeout_count,
@@ -4115,7 +4139,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && first_child_tid != 0
                 && clone_reuse_validated
                 && child_gettid_count == 2
-                && yield_switch_count == 9
+                && yield_switch_count == 6
                 && clone_busy_rejection_count == 2
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
@@ -4125,7 +4149,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && futex_wait_timeout_count == 1
                 && sleep_block_count == 1
                 && sleep_wake_count == 1
-                && timer_wait_expiry_count == 1
+                && timer_wait_expiry_count == 3
+                && timer_wait_preemption_count == 3
                 && signal_wait_block_count == 2
                 && signal_wait_wake_count == 1
                 && signal_wait_timeout_count == 1)
@@ -10121,11 +10146,91 @@ fn expire_linux_waits() -> u32 {
     expired
 }
 
-pub(crate) fn expire_linux_waits_from_timer() {
-    let expired = expire_linux_waits();
-    if expired != 0 {
-        LINUX_TIMER_WAIT_EXPIRY_COUNT.fetch_add(expired, Ordering::SeqCst);
+fn save_linux_interrupt_context(
+    handle: LinuxThreadHandle,
+    context: UserFaultContext,
+    fs_base: u64,
+) -> bool {
+    let saved = LinuxUserContext {
+        registers: LinuxSyscallFrame {
+            r15: context.r15,
+            r14: context.r14,
+            r13: context.r13,
+            r12: context.r12,
+            rbp: context.rbp,
+            rbx: context.rbx,
+            r10: context.r10,
+            r9: context.r9,
+            r8: context.r8,
+            rdx: context.rdx,
+            rsi: context.rsi,
+            rdi: context.rdi,
+        },
+        rip: context.rip,
+        rsp: context.rsp,
+        rflags: context.rflags,
+        rax: context.rax,
+        fs_base,
+    };
+    if !save_linux_thread_return_context(handle, saved) {
+        return false;
     }
+    let slot = usize::from(handle.slot);
+    LINUX_THREAD_RCXS[slot].store(context.rcx, Ordering::SeqCst);
+    LINUX_THREAD_R11S[slot].store(context.r11, Ordering::SeqCst);
+    true
+}
+
+fn linux_interrupt_context(handle: LinuxThreadHandle) -> Option<UserFaultContext> {
+    let slot = usize::from(handle.slot);
+    let saved = linux_thread_return_context(handle)?;
+    Some(UserFaultContext {
+        r15: saved.registers.r15,
+        r14: saved.registers.r14,
+        r13: saved.registers.r13,
+        r12: saved.registers.r12,
+        r11: LINUX_THREAD_R11S[slot].load(Ordering::SeqCst),
+        r10: saved.registers.r10,
+        r9: saved.registers.r9,
+        r8: saved.registers.r8,
+        rbp: saved.registers.rbp,
+        rdi: saved.registers.rdi,
+        rsi: saved.registers.rsi,
+        rdx: saved.registers.rdx,
+        rcx: LINUX_THREAD_RCXS[slot].load(Ordering::SeqCst),
+        rbx: saved.registers.rbx,
+        rax: saved.rax,
+        rip: saved.rip,
+        rflags: saved.rflags,
+        rsp: saved.rsp,
+    })
+}
+
+pub(crate) fn expire_linux_waits_from_timer(frame: &mut UserInterruptFrame) {
+    let expired = expire_linux_waits();
+    if expired == 0 {
+        return;
+    }
+    LINUX_TIMER_WAIT_EXPIRY_COUNT.fetch_add(expired, Ordering::SeqCst);
+    let (Some(current), Some(target), Some(interrupted)) = (
+        current_linux_thread_handle(),
+        ready_linux_thread_handle(),
+        frame.user_context(USER_CODE_SELECTOR, USER_DATA_SELECTOR),
+    ) else {
+        return;
+    };
+    let Some(target_context) = linux_interrupt_context(target) else {
+        return;
+    };
+    let mut restored = *frame;
+    if !restored.restore_user_context(target_context, USER_CODE_SELECTOR, USER_DATA_SELECTOR)
+        || !save_linux_interrupt_context(current, interrupted, active_fs_base())
+        || !switch_linux_thread(target)
+    {
+        return;
+    }
+    *frame = restored;
+    LINUX_TIMER_WAIT_PREEMPTION_COUNT.fetch_add(1, Ordering::SeqCst);
 }
 
 fn linux_executable_user_address(address: u64) -> bool {

@@ -235,6 +235,64 @@ pub(crate) struct UserInterruptFrame {
 }
 
 impl UserInterruptFrame {
+    pub(crate) fn user_context(
+        &self,
+        code_selector: u16,
+        data_selector: u16,
+    ) -> Option<UserFaultContext> {
+        self.selectors_match(code_selector, data_selector)
+            .then_some(UserFaultContext {
+                r15: self.r15,
+                r14: self.r14,
+                r13: self.r13,
+                r12: self.r12,
+                r11: self.r11,
+                r10: self.r10,
+                r9: self.r9,
+                r8: self.r8,
+                rbp: self.rbp,
+                rdi: self.rdi,
+                rsi: self.rsi,
+                rdx: self.rdx,
+                rcx: self.rcx,
+                rbx: self.rbx,
+                rax: self.rax,
+                rip: self.rip,
+                rflags: self.rflags,
+                rsp: self.rsp,
+            })
+    }
+
+    pub(crate) fn restore_user_context(
+        &mut self,
+        context: UserFaultContext,
+        code_selector: u16,
+        data_selector: u16,
+    ) -> bool {
+        if !self.selectors_match(code_selector, data_selector) {
+            return false;
+        }
+        self.r15 = context.r15;
+        self.r14 = context.r14;
+        self.r13 = context.r13;
+        self.r12 = context.r12;
+        self.r11 = context.r11;
+        self.r10 = context.r10;
+        self.r9 = context.r9;
+        self.r8 = context.r8;
+        self.rbp = context.rbp;
+        self.rdi = context.rdi;
+        self.rsi = context.rsi;
+        self.rdx = context.rdx;
+        self.rcx = context.rcx;
+        self.rbx = context.rbx;
+        self.rax = context.rax;
+        self.rip = context.rip;
+        self.rflags = context.rflags;
+        self.rsp = context.rsp;
+        true
+    }
+
     fn selectors_match(&self, code_selector: u16, data_selector: u16) -> bool {
         self.cs == u64::from(code_selector) && self.ss == u64::from(data_selector)
     }

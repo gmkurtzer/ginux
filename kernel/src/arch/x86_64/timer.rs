@@ -471,7 +471,9 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     // and the handler runs with exclusive bootstrap-processor APIC ownership.
     unsafe { apic.write(APIC_EOI, 0) };
     if LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst) {
-        cpu::expire_linux_waits_from_timer();
+        if let Some(frame) = unsafe { frame.as_mut() } {
+            cpu::expire_linux_waits_from_timer(frame);
+        }
         let reload = LINUX_WAIT_TIMER_RELOAD.load(Ordering::SeqCst);
         if reload != 0 && LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst) {
             // SAFETY: the Linux execution phase owns this one-shot timer.
