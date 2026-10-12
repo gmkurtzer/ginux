@@ -411,6 +411,10 @@ struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
+static PROCESS_CHILD_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static PROCESS_CHILD_PROBE_VALID: AtomicBool = AtomicBool::new(false);
+static PROCESS_CHILD_EXPECTED_REGISTERS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
+static PROCESS_CHILD_EXPECTED_FS_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_TERMINATION_SIGNAL: AtomicU32 = AtomicU32::new(0);
@@ -951,7 +955,22 @@ ginux_process_user_enter:
     push 0x202
     push {user_code}
     push rdi
-    xor eax, eax
+    mov rax, rdx
+    mov rbx, [rax + 8]
+    mov rcx, [rax + 16]
+    mov rdx, [rax + 24]
+    mov rsi, [rax + 32]
+    mov rdi, [rax + 40]
+    mov rbp, [rax + 48]
+    mov r8, [rax + 56]
+    mov r9, [rax + 64]
+    mov r10, [rax + 72]
+    mov r11, [rax + 80]
+    mov r12, [rax + 88]
+    mov r13, [rax + 96]
+    mov r14, [rax + 104]
+    mov r15, [rax + 112]
+    mov rax, [rax]
     iretq
 
     .global ginux_syscall_entry
@@ -1121,7 +1140,7 @@ extern "sysv64" {
         service_identity: u64,
         root_handle: u64,
     );
-    fn ginux_process_user_enter(entry: usize, stack: usize);
+    fn ginux_process_user_enter(entry: usize, stack: usize, general: *const u64);
 }
 
 pub(crate) fn install() -> bool {
@@ -1254,13 +1273,19 @@ pub(crate) unsafe fn with_supervisor_user_access<T>(operation: impl FnOnce() -> 
     result
 }
 
-pub(crate) fn execute_linux_process_child(entry: usize, stack: usize, fs_base: u64) -> bool {
+pub(crate) fn execute_linux_process_child(
+    entry: usize,
+    stack: usize,
+    fs_base: u64,
+    general: [u64; 15],
+) -> bool {
     if entry == 0
         || entry >= 1 << 47
         || stack == 0
         || stack >= 1 << 47
         || !stack.is_multiple_of(16)
         || fs_base >= 1 << 47
+        || general[0] != 0
         || scheduler::current_domain().is_some()
         || !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
         || !user_interrupt_surface_is_minimal()
@@ -1273,15 +1298,24 @@ pub(crate) fn execute_linux_process_child(entry: usize, stack: usize, fs_base: u
         unsafe { write_msr(FS_BASE_MSR, saved_fs) };
         return false;
     }
+    for (expected, value) in PROCESS_CHILD_EXPECTED_REGISTERS.iter().zip(general) {
+        expected.store(value, Ordering::SeqCst);
+    }
+    PROCESS_CHILD_EXPECTED_FS_BASE.store(fs_base, Ordering::SeqCst);
+    PROCESS_CHILD_PROBE_VALID.store(false, Ordering::SeqCst);
+    PROCESS_CHILD_PROBE_ACTIVE.store(true, Ordering::SeqCst);
     // SAFETY: The caller has activated a root containing the validated RX
     // entry, writable stack, supervisor kernel mappings, and TSS stack. The
-    // process entry stub fixes RAX at the Linux fork-child return value. Its
-    // INT 0x80 reaches the installed user gate, which returns directly to the
-    // saved kernel stack because no global native scheduler runtime is active.
-    unsafe { ginux_process_user_enter(entry, stack) };
+    // process entry stub installs the complete saved general-register array,
+    // including the validated Linux fork-child RAX value. Its INT 0x80 reaches
+    // the installed user gate, which returns directly to the saved kernel stack
+    // because no global native scheduler runtime is active.
+    unsafe { ginux_process_user_enter(entry, stack, general.as_ptr()) };
     let child_fs_preserved = active_fs_base() == fs_base;
+    let register_frame_valid = !PROCESS_CHILD_PROBE_ACTIVE.swap(false, Ordering::SeqCst)
+        && PROCESS_CHILD_PROBE_VALID.swap(false, Ordering::SeqCst);
     unsafe { write_msr(FS_BASE_MSR, saved_fs) };
-    child_fs_preserved && active_fs_base() == saved_fs
+    child_fs_preserved && register_frame_valid && active_fs_base() == saved_fs
 }
 
 pub(crate) fn verify_user_syscall(
@@ -4918,6 +4952,20 @@ extern "sysv64" fn breakpoint_handler() {
 }
 
 extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    if PROCESS_CHILD_PROBE_ACTIVE.swap(false, Ordering::SeqCst) {
+        let valid = (!frame.is_null())
+            .then(|| unsafe { &*frame })
+            .is_some_and(|frame| {
+                frame
+                    .process_general_registers(number)
+                    .into_iter()
+                    .zip(&PROCESS_CHILD_EXPECTED_REGISTERS)
+                    .all(|(observed, expected)| observed == expected.load(Ordering::SeqCst))
+                    && active_fs_base() == PROCESS_CHILD_EXPECTED_FS_BASE.load(Ordering::SeqCst)
+            });
+        PROCESS_CHILD_PROBE_VALID.store(valid, Ordering::SeqCst);
+        return u64::MAX;
+    }
     let Some(caller_domain) = scheduler::current_domain() else {
         return u64::MAX;
     };

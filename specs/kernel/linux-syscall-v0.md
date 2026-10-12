@@ -1259,9 +1259,9 @@ child contexts to the native scheduler, selects both under their exact roots,
 loads and restores the child's CR3 in kernel mode, and retires their
 generation-tagged bindings. The selected child also executes a bounded ring-3
 payload that checks `RAX = 0`, writes through FS into private memory, and
-returns through the user gate. The entry stub does not restore the other
-fourteen saved general registers, and process-style creation remains unavailable
-through this syscall ABI.
+returns through the user gate. The entry stub restores all fifteen general
+registers and the gate captures and compares the complete frame. Process-style
+creation remains unavailable through this syscall ABI.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;

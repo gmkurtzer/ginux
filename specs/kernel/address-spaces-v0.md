@@ -222,8 +222,9 @@ the switch. The selected child then enters ring 3 at its recorded RIP and RSP,
 observes a zero fork return, writes through its recorded FS base to its private
 RW/NX page, and returns through the user gate. The kernel restores both FS and
 the prior CR3, and the parent page remains unchanged. This proof does not
-snapshot the running Linux mapping registry or install the child's remaining
-saved general registers.
+snapshot the running Linux mapping registry. The entry stub installs all
+fifteen general registers and the return gate captures and compares the
+complete frame with the recorded child context.
 
 The bounded process table now retains an allocator-issued resource bundle
 rather than a raw physical root. A bundle contains four through six hierarchy
@@ -235,8 +236,8 @@ recorded bundle, moves the process to a non-runnable intermediate state, and
 refuses zombie publication while any generation in that bundle remains in the
 live-frame ledger. One prevalidated teardown scrubs and releases the full
 bundle before the corresponding zombie is published. Capturing the live Linux
-mapping registry and performing a complete saved-register return under the
-recorded child root remain future work.
+mapping registry and connecting this complete saved-register return to the live
+Linux ABI remain future work.
 
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate

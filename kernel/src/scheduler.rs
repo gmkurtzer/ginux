@@ -376,6 +376,13 @@ impl UserFaultFrame {
 }
 
 impl UserTrapFrame {
+    pub(crate) fn process_general_registers(&self, rax: u64) -> [u64; 15] {
+        [
+            rax, self.rbx, self.rcx, self.rdx, self.rsi, self.rdi, self.rbp, self.r8, self.r9,
+            self.r10, self.r11, self.r12, self.r13, self.r14, self.r15,
+        ]
+    }
+
     pub(crate) fn first_argument(&self) -> u64 {
         self.rsi
     }

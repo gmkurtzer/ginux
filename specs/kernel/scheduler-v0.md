@@ -72,9 +72,10 @@ selected, its validated root is installed in CR3 and then replaced with the
 exact prior root, proving the scheduler-selected address space is safe for
 kernel execution. The synthetic child then enters ring 3 with its selected RIP,
 RSP, RFLAGS, zero fork return, and FS base, writes its private page, and returns
-through the user gate. The dedicated proof entry does not yet restore the other
-fourteen general registers or attach the live Linux PID 1 runtime to the native
-scheduler.
+through the user gate. The dedicated entry restores all fifteen general
+registers; the gate captures the complete frame and requires it to equal the
+recorded child context. The live Linux PID 1 runtime is not yet attached to
+this process scheduler path.
 
 Scheduler capacity does not grant permission to create a thread. Runtime
 creation first reserves a slot from the generation-checked owning domain; exit

@@ -673,6 +673,11 @@ if ! grep -q '^ginux: Linux process child FS isolation executed' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: complete Linux process register frame executed' "$output_file"; then
+    echo "Boot test failed: the complete Linux process register frame was not executed." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux private page copy validated' "$output_file"; then
     echo "Boot test failed: bounded Linux private page copying was not validated." >&2
     exit 1

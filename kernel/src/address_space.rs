@@ -3044,6 +3044,7 @@ pub(crate) fn execute_linux_process_child(
     entry: u64,
     stack: u64,
     fs_base: u64,
+    general: [u64; 15],
 ) -> bool {
     let previous = current_root();
     let (Ok(entry), Ok(stack)) = (usize::try_from(entry), usize::try_from(stack)) else {
@@ -3054,7 +3055,7 @@ pub(crate) fn execute_linux_process_child(
     }
     unsafe { activate(root.address()) };
     let selected = current_root() == root.address();
-    let executed = selected && cpu::execute_linux_process_child(entry, stack, fs_base);
+    let executed = selected && cpu::execute_linux_process_child(entry, stack, fs_base, general);
     unsafe { activate(previous) };
     selected && executed && current_root() == previous
 }
