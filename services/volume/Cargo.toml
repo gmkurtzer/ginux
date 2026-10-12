@@ -1,0 +1,15 @@
+[package]
+name = "ginux-volume-service-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "ginux-volume-service-runtime"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ginux-volume-format = { path = "../../crates/volume-format" }
+ginux-volume-service = { path = "../../crates/volume-service" }

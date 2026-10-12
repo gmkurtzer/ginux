@@ -4,6 +4,7 @@ members = [
     "crates/volume-format",
     "crates/volume-service",
     "kernel",
+    "services/volume",
     "tools/manifest-tool",
 ]
 resolver = "2"

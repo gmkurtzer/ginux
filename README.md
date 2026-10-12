@@ -106,6 +106,12 @@ unimplemented. See
 [Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md), plus
 [Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md)
 and [Isolated Virtio Durability v0](specs/kernel/isolated-virtio-durability-v0.md).
+The same format and transaction crates now build into a freestanding
+`x86_64-unknown-none` Rust service that owns queue negotiation, descriptor
+construction, notification, and generation-bound waits. It is not loaded yet;
+the next step is mapping and relocating its static PIE segments into the native
+service domain. See
+[Isolated Volume Runtime v0](specs/services/volume-runtime-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed

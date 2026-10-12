@@ -8,12 +8,13 @@ ESP_DIR := build/esp
 EFI_DESTINATION := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 LINUX_PROBE := build/linux-probe.elf
 LINUX_DYNAMIC_DIR := build/linux-dynamic
+VOLUME_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-volume-service-runtime
 INITRAMFS := build/initramfs-v0.cpio
 SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image linux-probe build run test check fmt gate clean
+.PHONY: help doctor manifest system-image linux-probe volume-service build run test check fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -22,6 +23,7 @@ help:
 	@echo "  make manifest Regenerate the signed development boot inputs"
 	@echo "  make system-image Build the pinned minimal system-container candidate"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
+	@echo "  make volume-service Build the freestanding isolated volume service"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build and boot Ginux in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
@@ -55,6 +57,11 @@ linux-probe:
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-system-init.elf"
 	@echo "Built $(LINUX_PROBE) and $(LINUX_DYNAMIC_DIR)"
 
+volume-service:
+	@cargo build --package ginux-volume-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
+	@test -f "$(VOLUME_SERVICE)"
+	@echo "Built $(VOLUME_SERVICE)"
+
 build: manifest
 	@echo "Building Ginux for $(TARGET) ($(PROFILE))"
 	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
@@ -75,6 +82,7 @@ check: manifest
 	@cargo test --package ginux-volume-format
 	@cargo clippy --package ginux-volume-service -- -D warnings
 	@cargo test --package ginux-volume-service
+	@cargo clippy --package ginux-volume-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-manifest-tool -- -D warnings
 
 fmt: manifest
@@ -84,6 +92,7 @@ gate:
 	@$(MAKE) fmt
 	@$(MAKE) clean
 	@$(MAKE) check
+	@$(MAKE) volume-service
 	@$(MAKE) test
 	@git diff --check
 	@echo "Clean build and QEMU test gate passed"

@@ -146,6 +146,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-volume-service-runtime"
+version = "0.1.0"
+dependencies = [
+ "ginux-volume-format",
+ "ginux-volume-service",
+]
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
