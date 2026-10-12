@@ -867,6 +867,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: monotonic Linux clone TIDs validated\r\n");
     serial_write("ginux: live Linux child TIDs matched published words\r\n");
     serial_write("ginux: live Linux child FS self pointers validated\r\n");
+    serial_write("ginux: per-thread Linux signal masks isolated\r\n");
     serial_write("ginux: bidirectional Linux sched_yield switching validated\r\n");
     serial_write("ginux: occupied Linux clone capacity rejected live\r\n");
     serial_write("ginux: live Linux clone failures rolled back transactionally\r\n");

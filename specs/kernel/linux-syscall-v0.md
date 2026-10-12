@@ -736,8 +736,14 @@ Another valid `write` copies an embedded payload from the declared RX segment,
 while `uname` copy-out to that segment returns `-EFAULT`. Copy direction thus
 respects VMA permissions rather than treating every mapped page as writable.
 `rax = 14` (`__NR_rt_sigprocmask`) maintains one eight-byte x86-64 Linux signal
-mask for the sole thread. It supports `SIG_BLOCK`, `SIG_UNBLOCK`, `SIG_SETMASK`,
-and a null-set query; `SIGKILL` and `SIGSTOP` are always cleared. The kernel
+mask per bounded thread. It supports `SIG_BLOCK`, `SIG_UNBLOCK`, `SIG_SETMASK`,
+and a null-set query; `SIGKILL` and `SIGSTOP` are always cleared. `clone`
+snapshots the parent's mask into the new generation-tagged thread slot. Every
+cooperative or blocking context switch saves the outgoing active mask and
+installs the selected thread's mask; retirement clears it before slot reuse.
+The ring-3 proof has each sequential child observe the parent's blocked
+`SIGUSR1`, unblock it locally, and then verifies that the resumed parent still
+reports its original mask. The kernel
 validates the set size and every complete input/output range before mutation,
 so `-EINVAL` and `-EFAULT` leave the prior mask intact. The bounded synchronous
 delivery path temporarily adds the delivered signal unless `SA_NODEFER` is

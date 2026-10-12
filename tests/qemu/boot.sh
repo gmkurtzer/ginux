@@ -1559,6 +1559,11 @@ if ! grep -q '^ginux: Linux single-thread signal mask validated' "$output_file";
     exit 1
 fi
 
+if ! grep -q '^ginux: per-thread Linux signal masks isolated' "$output_file"; then
+    echo "Boot test failed: Linux per-thread signal masks were not isolated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux bounded signal actions validated' "$output_file"; then
     echo "Boot test failed: Linux bounded signal actions were not validated." >&2
     exit 1

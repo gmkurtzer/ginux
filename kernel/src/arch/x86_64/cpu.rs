@@ -529,6 +529,8 @@ static LINUX_THREAD_CLEAR_CHILD_TIDS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_ROBUST_LISTS: [AtomicU64; LINUX_THREAD_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SIGNAL_MASKS: [AtomicU64; LINUX_THREAD_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_WAIT_KINDS: [AtomicU8; LINUX_THREAD_LIMIT] =
     [const { AtomicU8::new(LINUX_THREAD_WAIT_NONE) }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_WAIT_KEYS: [AtomicU64; LINUX_THREAD_LIMIT] =
@@ -1941,6 +1943,10 @@ fn reserve_linux_thread(
         .checked_add(1)?;
     let tid = LINUX_NEXT_TID.load(Ordering::SeqCst);
     let next_tid = tid.checked_add(1)?;
+    let inherited_signal_mask = current_linux_thread_slot().map_or_else(
+        || ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst),
+        |current| LINUX_THREAD_SIGNAL_MASKS[current].load(Ordering::SeqCst),
+    );
     LINUX_THREAD_GENERATIONS[slot].store(generation, Ordering::SeqCst);
     LINUX_THREAD_TIDS[slot].store(tid, Ordering::SeqCst);
     LINUX_THREAD_POINTERS[slot].store(context.thread_pointer as u64, Ordering::SeqCst);
@@ -1950,6 +1956,7 @@ fn reserve_linux_thread(
     LINUX_THREAD_STACK_SIZES[slot].store(stack_size as u64, Ordering::SeqCst);
     LINUX_THREAD_CLEAR_CHILD_TIDS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_SIGNAL_MASKS[slot].store(inherited_signal_mask, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
@@ -2175,8 +2182,16 @@ fn switch_linux_thread(handle: LinuxThreadHandle) -> bool {
         {
             return false;
         }
+        LINUX_THREAD_SIGNAL_MASKS[prior].store(
+            ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst),
+            Ordering::SeqCst,
+        );
         LINUX_THREAD_STATES[prior].store(LINUX_THREAD_READY, Ordering::SeqCst);
     }
+    ELF_PROBE_SIGNAL_MASK.store(
+        LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst),
+        Ordering::SeqCst,
+    );
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_RUNNING, Ordering::SeqCst);
     LINUX_CURRENT_THREAD_SLOT.store(handle.slot, Ordering::SeqCst);
     true
@@ -2226,6 +2241,7 @@ fn clear_linux_thread_slot(slot: usize) {
     LINUX_THREAD_STACK_SIZES[slot].store(0, Ordering::SeqCst);
     clear_linux_thread_execution(slot);
     LINUX_THREAD_ROBUST_LISTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
@@ -2257,6 +2273,13 @@ fn current_linux_thread_slot() -> Option<usize> {
     (slot < LINUX_THREAD_LIMIT
         && LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_RUNNING)
         .then_some(slot)
+}
+
+fn store_current_linux_signal_mask(mask: u64) {
+    ELF_PROBE_SIGNAL_MASK.store(mask, Ordering::SeqCst);
+    if let Some(slot) = current_linux_thread_slot() {
+        LINUX_THREAD_SIGNAL_MASKS[slot].store(mask, Ordering::SeqCst);
+    }
 }
 
 fn linux_thread_handle(slot: usize) -> Option<LinuxThreadHandle> {
@@ -2420,6 +2443,9 @@ fn finish_linux_thread_table() -> bool {
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_ROBUST_LISTS
+            .iter()
+            .all(|value| value.load(Ordering::SeqCst) == 0)
+        && LINUX_THREAD_SIGNAL_MASKS
             .iter()
             .all(|value| value.load(Ordering::SeqCst) == 0)
         && LINUX_THREAD_WAIT_KINDS
@@ -3280,7 +3306,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
-    ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
+    store_current_linux_signal_mask(0);
     ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
     for signal in 0..LINUX_SIGNAL_COUNT {
@@ -10449,7 +10475,7 @@ fn linux_rt_sigprocmask(how: u64, set: u64, old_set: u64, set_size: u64) -> u64 
     if old_set != 0 && !copy_to_linux_user(old_set, &current.to_ne_bytes()) {
         return LINUX_EFAULT;
     }
-    ELF_PROBE_SIGNAL_MASK.store(next, Ordering::SeqCst);
+    store_current_linux_signal_mask(next);
     0
 }
 
@@ -10975,7 +11001,7 @@ fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: 
     } else {
         0
     };
-    ELF_PROBE_SIGNAL_MASK.store(old_mask | action_mask | automatic_mask, Ordering::SeqCst);
+    store_current_linux_signal_mask(old_mask | action_mask | automatic_mask);
     if flags & LINUX_SA_RESETHAND != 0 {
         ELF_PROBE_SIGNAL_HANDLERS[index].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_FLAGS[index].store(0, Ordering::SeqCst);
@@ -11281,7 +11307,7 @@ fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64) -> u64 {
     // SAFETY: this serialized return consumes the sole active record before
     // checking whether another unblocked pending signal should replace it.
     unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO) };
-    ELF_PROBE_SIGNAL_MASK.store(restored.signal_mask, Ordering::SeqCst);
+    store_current_linux_signal_mask(restored.signal_mask);
     ELF_PROBE_ALT_STACK_POINTER.store(context.alt_stack_pointer, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_SIZE.store(context.alt_stack_size, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(context.alt_stack_flags, Ordering::SeqCst);
@@ -11307,7 +11333,7 @@ fn abort_linux_signal() {
         // SAFETY: the active context is exclusively owned by this serialized
         // Linux execution while interrupts remain disabled.
         let context = unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() };
-        ELF_PROBE_SIGNAL_MASK.store(context.signal_mask, Ordering::SeqCst);
+        store_current_linux_signal_mask(context.signal_mask);
         ELF_PROBE_ALT_STACK_POINTER.store(context.alt_stack_pointer, Ordering::SeqCst);
         ELF_PROBE_ALT_STACK_SIZE.store(context.alt_stack_size, Ordering::SeqCst);
         ELF_PROBE_ALT_STACK_FLAGS.store(context.alt_stack_flags, Ordering::SeqCst);

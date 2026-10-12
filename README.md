@@ -236,7 +236,11 @@ Both words receive the monotonically allocated child TID before either thread
 returns to ring 3; the parent receives that same value, while the child resumes
 after the syscall with `rax = 0`. Each child immediately requires its live
 `gettid()` result to match the published child-TID word and requires `FS:[0]`
-to contain its own sibling TLS/TCB pointer. The parent first yields to the
+to contain its own sibling TLS/TCB pointer. Signal masks are also thread-owned:
+each clone snapshots the parent's current mask, context switches save and
+restore the active thread's mask with its scheduler slot, and retirement clears
+that state. Each measured child proves it inherited blocked `SIGUSR1`, unblocks
+it independently, and leaves the parent's blocked mask unchanged. The parent first yields to the
 child; the child yields back, and the resumed parent yields to the same child
 again. While that child is ready, a second live `clone` attempt returns
 `EAGAIN` without replacing it. All three cooperative switches return zero in their resumed contexts.
