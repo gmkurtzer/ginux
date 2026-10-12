@@ -44,17 +44,28 @@ endpoints report requested `POLLOUT`, readable devices report requested
 `POLLIN`, unknown nonnegative descriptors report `POLLNVAL`, and negative
 descriptors are ignored. An invalid table returns `-EFAULT`, and more than four
 records returns `-EINVAL`. A zero timeout performs an immediate query; any
-ready descriptor also returns immediately regardless of timeout. A query with
-no ready descriptors and a nonzero or infinite timeout returns `-ENOSYS`
-without changing the table because scheduler-backed descriptor wait queues do
-not exist yet.
+ready descriptor also returns immediately regardless of timeout. With one
+through four descriptors, no immediate readiness, and another runnable thread,
+a positive signed 32-bit millisecond timeout or negative infinite timeout
+blocks the caller in its generation-tagged scheduler slot. The wait snapshots
+only each descriptor number and requested-event word; descriptor state remains
+live. Eventfd writes, pipe reads and writes, endpoint closure, and periodic
+timerfd readiness checks recompute all returned-event words and make the waiter
+ready when at least one is nonzero. A positive deadline instead atomically
+copies zero `revents` words, returns zero, and can preempt the running peer
+directly from the local-APIC interrupt. The complete output table is
+revalidated on completion; a revoked output range resumes with `-EFAULT`.
+Blocking with no runnable peer, or with zero descriptors, retains the explicit
+`-ENOSYS` boundary. This is a two-slot, fixed-snapshot proof rather than a
+general descriptor wait queue.
 `rax = 271` (`__NR_ppoll`) uses the same bounded readiness engine. A null
 timeout means an infinite wait request; otherwise the complete 16-byte x86-64
 `timespec` must contain nonnegative seconds and normalized nanoseconds. An
 optional eight-byte signal mask and exact signal-set size are validated before
-the query, but no persistent mask change occurs because this implementation
-never blocks. Zero timeouts and immediately ready descriptors behave like
-`poll`; a call that would wait returns `-ENOSYS`. Invalid timespecs or mask
+the query, but no persistent mask change occurs and this entry point does not
+yet enter the scheduler-backed `poll` wait. Zero timeouts and immediately ready
+descriptors behave like `poll`; a call that would wait returns `-ENOSYS`.
+Invalid timespecs or mask
 sizes return `-EINVAL`, invalid input ranges return `-EFAULT`, and the timeout
 is not rewritten.
 `rax = 291` (`__NR_epoll_create1`) allocates one process-local epoll instance

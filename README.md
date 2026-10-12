@@ -390,13 +390,17 @@ console `write` copy-in and `uname` copy-out operations, and validating a
 256 validated bytes on descriptor 1 and preserve exact byte content. Bounded
 `writev` atomically validates and assembles up to four vectors under the same
 aggregate limit before emitting any bytes. Bounded `poll` atomically reports
-immediate console and device readiness across four descriptors; a call that
-would wait returns `ENOSYS` until descriptor wait queues exist. `ppoll` adds
-validated timespec and temporary signal-mask inputs without pretending to
-sleep. A single bounded epoll instance can register one console or device
-descriptor, report immediate level-triggered readiness, and preserve packed
-64-bit user data; waits that would block use the same explicit `ENOSYS`
-boundary. A bounded eventfd counter provides a signalable source for that
+immediate console and device readiness across four descriptors. With one to
+four descriptors and a runnable peer, it also blocks in the scheduler for a
+signed millisecond timeout or indefinitely, wakes after relevant eventfd,
+pipe, close, or timerfd state changes, and returns zero after an APIC-driven
+timeout. This is a fixed two-thread proof, not a general wait-queue facility;
+zero-descriptor sleeps and blocking without a runnable peer return `ENOSYS`.
+`ppoll` adds validated timespec and temporary signal-mask inputs but does not
+yet use the blocking path. A single bounded epoll instance can register one
+console or device descriptor, report immediate level-triggered readiness, and
+preserve packed 64-bit user data; waits that would block use the same explicit
+`ENOSYS` boundary. A bounded eventfd counter provides a signalable source for that
 epoll path, including nonblocking saturation and semaphore reads. A bounded
 monotonic timerfd adds one-shot and periodic clock-driven readiness with
 relative or absolute arming. One bounded nonblocking pipe pair provides a
