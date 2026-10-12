@@ -396,6 +396,16 @@ MAP_FIXED_NOREPLACE` requests. The last writable page is later sealed
 read-only/NX by the admitted GNU RELRO transition. A repeated header request
 returns `-EEXIST`, and a W+X text request returns `-EINVAL`.
 
+The initially installed interpreter pages seed a bounded process-owned active
+image record. Each admitted main or dependency `mmap` appends its page only
+after the page-table install succeeds; capacity exhaustion rolls the mapping
+back and scrubs its unpublished lease. Final validation reconstructs the exact
+interpreter, main, and load-biased dependency page set from authenticated
+contracts, requires every recorded address exactly once, and requires all
+unused record slots to remain zero. This record supplies the complete old-image
+set required by a later interpreted `execve` transaction; it does not yet make
+dynamic targets executable through `execve`.
+
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF
 validator. In particular, file identity, ELF class/machine, segment overlap,

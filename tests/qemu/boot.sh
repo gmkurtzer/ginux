@@ -1176,6 +1176,11 @@ if ! grep -q '^ginux: userspace Linux dependency segments mapped' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: complete interpreted Linux image ownership tracked' "$output_file"; then
+    echo "Boot test failed: interpreted image mapping ownership was incomplete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: userspace Linux dependency bias selected' "$output_file"; then
     echo "Boot test failed: the userspace Linux interpreter did not select the dependency bias." >&2
     exit 1

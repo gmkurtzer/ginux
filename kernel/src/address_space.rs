@@ -61,7 +61,7 @@ pub(crate) fn verify_linux_elf_mapping(
     let first = plan.executable;
     let header = plan.read_only;
     let second = plan.writable;
-    let mut initial_image_addresses = [0_usize; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut initial_image_addresses = [0_usize; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
     let mut initial_image_count = 0;
     for segment in [header, Some(first), Some(second)].into_iter().flatten() {
         for page in 0..segment.page_count {
@@ -585,7 +585,7 @@ pub(crate) fn verify_linux_elf_mapping(
             {
                 mapping.frame = frame;
             }
-            let initial_image_u64: [u64; cpu::LINUX_EXEC_MAPPING_LIMIT] =
+            let initial_image_u64: [u64; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
                 core::array::from_fn(|index| initial_image_addresses[index] as u64);
             let exec_rollback_valid = activated
                 && verify_current_linux_image_rollback(
@@ -626,6 +626,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     dependency_base_min: [0; 2],
                     dependency_base_end: [0; 2],
                     dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
+                    exec_expected: true,
                     initial_image_count,
                     initial_image_addresses,
                 })
@@ -665,6 +666,7 @@ pub(crate) fn verify_linux_elf_mapping(
             let executed = execution_result.valid
                 && execution_result.exec_replaced
                 && execution_result.exec_node == exec_node
+                && execution_result.active_image_mapping_count == exec_mapping_count
                 && exec_mappings_valid;
             let mapping_removed = table_entries.add(mmap_indexes[3]).read() == 0
                 && table_entries.add(mmap_tail_indexes[3]).read() == 0;
@@ -1494,6 +1496,26 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 file_mapping(main_rw, 0)?,
                 file_mapping(main_rw, 1)?,
             ];
+            let mut initial_image_addresses = [0_usize; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+            let mut initial_image_count = 0;
+            for segment in [
+                plan.interpreter.read_only,
+                Some(interpreter_rx),
+                Some(interpreter_rw),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                for page in 0..segment.page_count {
+                    let address = segment
+                        .virtual_page
+                        .checked_add((page * PAGE_SIZE) as u64)
+                        .and_then(|address| usize::try_from(address).ok())?;
+                    let slot = initial_image_addresses.get_mut(initial_image_count)?;
+                    *slot = address;
+                    initial_image_count += 1;
+                }
+            }
             let execution_result = if observed {
                 cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
@@ -1527,15 +1549,24 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_base_min: dependency_base_min.map(|base| base as usize),
                     dependency_base_end: dependency_base_end.map(|base| base as usize),
                     dependency_mappings,
-                    initial_image_count: 0,
-                    initial_image_addresses: [0; cpu::LINUX_EXEC_MAPPING_LIMIT],
+                    exec_expected: false,
+                    initial_image_count,
+                    initial_image_addresses,
                 })
             } else {
                 cpu::LinuxElfResult::FAILED
             };
             main_frames = execution_result.main_frames;
             dependency_frames = execution_result.dependency_frames;
-            let executed = observed && execution_result.valid;
+            let expected_active_image_count = initial_image_count
+                + main_mappings
+                    .iter()
+                    .filter(|mapping| mapping.address != 0)
+                    .count()
+                + dependency_mapping_count.iter().sum::<usize>();
+            let executed = observed
+                && execution_result.valid
+                && execution_result.active_image_mapping_count == expected_active_image_count;
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
             let tls_runtime_valid = executed
@@ -2069,7 +2100,7 @@ fn verify_current_linux_image_rollback(
     clear_addresses: &[u64],
 ) -> bool {
     let mut mapping_entries = [0_u64; cpu::LINUX_EXEC_MAPPING_LIMIT];
-    let mut clear_entries = [0_u64; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut clear_entries = [0_u64; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
     for (index, mapping) in mappings.iter().enumerate() {
         let Some(entry) = current_linux_leaf(mapping.address as u64) else {
             return false;
@@ -2101,7 +2132,7 @@ fn replace_current_linux_image_inner(
     if mappings.is_empty()
         || mappings.len() > cpu::LINUX_EXEC_MAPPING_LIMIT
         || clear_addresses.is_empty()
-        || clear_addresses.len() > cpu::LINUX_EXEC_MAPPING_LIMIT
+        || clear_addresses.len() > cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
         || mappings.iter().enumerate().any(|(index, mapping)| {
             mapping.address == 0
                 || !(mapping.address as u64).is_multiple_of(PAGE_SIZE as u64)
@@ -2121,9 +2152,9 @@ fn replace_current_linux_image_inner(
         return false;
     }
     let mut old_mapping_entries = [0_u64; cpu::LINUX_EXEC_MAPPING_LIMIT];
-    let mut old_clear_entries = [0_u64; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut old_clear_entries = [0_u64; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
     let mut mapping_entries = [core::ptr::null_mut(); cpu::LINUX_EXEC_MAPPING_LIMIT];
-    let mut clear_entries = [core::ptr::null_mut(); cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut clear_entries = [core::ptr::null_mut(); cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
     for (index, mapping) in mappings.iter().enumerate() {
         let Some(entry) = current_linux_leaf(mapping.address as u64) else {
             return false;

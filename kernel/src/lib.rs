@@ -805,6 +805,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: userspace Linux main segments mapped\r\n");
     serial_write("ginux: userspace Linux DT_NEEDED path resolved\r\n");
     serial_write("ginux: userspace Linux dependency segments mapped\r\n");
+    serial_write("ginux: complete interpreted Linux image ownership tracked\r\n");
     serial_write("ginux: userspace Linux dependency bias selected\r\n");
     serial_write("ginux: Linux dependency frames allocated on demand\r\n");
     serial_write("ginux: Linux executable frames allocated on demand\r\n");

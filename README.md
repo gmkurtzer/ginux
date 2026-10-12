@@ -309,7 +309,11 @@ rather than an embedded main entry address. The kernel installs only the interpr
 this stage; it authenticates and plans the main and both dependencies and reserves
 only the address-space infrastructure and interpreter frames initially. Main
 and dependency payload frames are allocated only when their authenticated mmap
-requests arrive. All three images' content and leaves are installed by userspace,
+requests arrive. Each successful authenticated mapping atomically joins the
+process's bounded active-image record alongside the initially installed
+interpreter pages. Teardown requires that record to contain the complete
+interpreter, main, and two-DSO page set with no duplicates or trailing state.
+All three userspace-loaded images' content and leaves are installed by userspace,
 and every executable-page lease is scrubbed and released after the process
 root is deactivated.
 Linker-private metadata remains mapped but outside the probe's bounded
