@@ -698,6 +698,9 @@ for marker in \
     'interpreted Linux TLS leases replaced atomically' \
     'old interpreted Linux TLS leases retired at exec' \
     'replacement Linux TLS leases reclaimed' \
+    'interpreted Linux sibling stack replaced atomically' \
+    'old interpreted Linux sibling stack lease retired at exec' \
+    'replacement Linux sibling stack lease reclaimed' \
     'canonical interpreted Linux executable identity validated'; do
     if ! grep -q "^ginux: ${marker}" "$output_file"; then
         echo "Boot test failed: ${marker}." >&2

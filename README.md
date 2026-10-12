@@ -67,7 +67,8 @@ lease is reclaimed after the process root becomes inactive. Interpreted replacem
 interpreter first, lets it remap the authenticated main and both DSOs, reapplies
 RELRO, pre-materializes fresh primary and sibling TLS leases from the complete
 authenticated templates in the same transaction, restores FS to the fresh
-primary mapping, and retires the
+primary mapping, replaces the guarded sibling stack with a fresh zeroed RW/NX
+lease while preserving both guard pages, and retires the
 complete old interpreter/main/DSO graph. The archive
 is not yet a general mount or a system-container image.
 

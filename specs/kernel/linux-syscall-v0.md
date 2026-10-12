@@ -413,15 +413,18 @@ inactive. Static exec also resets the break but retains its heap frame in this
 version. Fresh primary and sibling TLS frames are fully materialized from the
 authenticated templates before commit and replace both exact old leases in the
 same transaction. The initial FS base is restored against the fresh primary
-mapping, while ignored signal dispositions are preserved from the observed
+mapping. The guarded sibling stack is replaced by a fresh zeroed RW/NX lease in
+the same transaction; both adjacent guard leaves stay unmapped, the old exact
+lease is retired at commit, and the replacement is reclaimed after the process
+root is inactive. Ignored signal dispositions are preserved from the observed
 pre-exec set, caught dispositions are cleared, and RELRO is applied again.
 The replacement main emits the kernel-observed `DYNEXEC` completion by exiting
 with status 42. Other dynamic targets, general dependency resolution,
 shebangs, and arbitrary interpreted argument or environment vectors are
-outside this version. The process page-table root and preallocated sibling
-stack remain allocated across this transaction. Replacing the heap outside the
-interpreted profile, plus the page-table and sibling-stack leases, is a later
-lifecycle milestone.
+outside this version. The process page-table hierarchy and inactive
+preallocated anonymous-mapping backing frames remain allocated across this
+transaction. Replacing the heap outside the interpreted profile and those
+retained leases are later lifecycle milestones.
 
 `rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
 or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath

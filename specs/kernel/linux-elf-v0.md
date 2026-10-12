@@ -435,7 +435,9 @@ reconstructs the complete active-image record. Fresh initial and sibling TLS
 frames are materialized from all three authenticated templates before commit
 and their RW/NX leaves replace the exact old generations in the same atomic
 transaction. The initial FS base is restored against the fresh primary mapping
-before interpreter entry. RELRO is reapplied before
+before interpreter entry. A fresh zeroed RW/NX sibling-stack frame also
+replaces the exact old lease in that transaction while its lower and upper
+guard leaves remain unmapped. RELRO is reapplied before
 the replacement main exits. Admission is currently limited to `/init`, one
 argument, one environment entry, one live thread, the fixed two-DSO graph, and
 the existing bounded load windows. The internal `linux/init` node is exposed as
@@ -452,7 +454,8 @@ frame in this version, while interpreted exec replaces it.
 The fresh TLS leaves, authenticated contents, TCB self-pointers, and FS context
 are revalidated after execution. Both old TLS leases must be retired, and both
 replacement leases are scrubbed and reclaimed only after the process root is
-inactive.
+inactive. The old sibling-stack lease is likewise scrubbed at commit, and its
+replacement is validated and reclaimed only after the root is inactive.
 
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF
