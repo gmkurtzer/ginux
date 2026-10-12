@@ -5316,7 +5316,8 @@ pub(crate) fn verify_ring3_read_only_device_grant(
 
 pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool {
     const DEVICE_PAGE_INDEX: usize = 5;
-    const SUCCESS_FAULT_OFFSET: u64 = 20;
+    const DEVICE_STATUS_OFFSET: usize = 0x14;
+    const SUCCESS_FAULT_OFFSET: u64 = 94;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5330,15 +5331,34 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
     let Some(user_register) = user_register else {
         return false;
     };
+    let Some(user_common) = user_register.checked_sub(DEVICE_STATUS_OFFSET) else {
+        return false;
+    };
+    if user_common & (PAGE_SIZE - 1) != 0 {
+        return false;
+    }
     let mut program = [
-        0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rax, register
-        0xc6, 0x00, 0x01, // mov byte ptr [rax], ACKNOWLEDGE
-        0x80, 0x38, 0x01, // cmp byte ptr [rax], ACKNOWLEDGE
-        0x74, 0x02, // je success
-        0x0f, 0x0b, // failed readback
+        0x48, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rdi, common
+        0xc6, 0x47, 0x14, 0x01, // status = ACKNOWLEDGE
+        0xc6, 0x47, 0x14, 0x03, // status = ACKNOWLEDGE | DRIVER
+        0xc7, 0x07, 0, 0, 0, 0, // select offered-feature low word
+        0x8b, 0x47, 0x04, // read offered-feature low word
+        0xa9, 0x00, 0x02, 0, 0, // require VIRTIO_BLK_F_FLUSH
+        0x75, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0xc7, 0x07, 0x01, 0, 0, 0, // select offered-feature high word
+        0x8b, 0x47, 0x04, // read offered-feature high word
+        0xa9, 0x01, 0, 0, 0, // require VIRTIO_F_VERSION_1
+        0x75, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0xc7, 0x47, 0x08, 0, 0, 0, 0, // select driver-feature low word
+        0xc7, 0x47, 0x0c, 0x00, 0x02, 0, 0, // accept FLUSH
+        0xc7, 0x47, 0x08, 0x01, 0, 0, 0, // select driver-feature high word
+        0xc7, 0x47, 0x0c, 0x01, 0, 0, 0, // accept VERSION_1
+        0xc6, 0x47, 0x14, 0x0b, // status = ACKNOWLEDGE | DRIVER | FEATURES_OK
+        0xf6, 0x47, 0x14, 0x08, // require FEATURES_OK to remain set
+        0x75, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x0f, 0x0b, // success: deliberate service fault
     ];
-    program[2..10].copy_from_slice(&(user_register as u64).to_le_bytes());
+    program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
 
     let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
         6,

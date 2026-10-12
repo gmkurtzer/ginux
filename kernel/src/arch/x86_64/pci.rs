@@ -781,6 +781,28 @@ pub(crate) fn device_is_reset(device: VirtioBlockDevice, mapping: MmioMapping) -
     read_common_u8(common, COMMON_DEVICE_STATUS) == 0
 }
 
+pub(crate) fn device_features_are_selected(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+) -> bool {
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = mapping.address(common_physical, common_length) else {
+        return false;
+    };
+    if read_common_u8(common, COMMON_DEVICE_STATUS)
+        != STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK
+    {
+        return false;
+    }
+    write_common_u32(common, COMMON_DRIVER_FEATURE_SELECT, 0);
+    let low = read_common_u32(common, COMMON_DRIVER_FEATURE);
+    write_common_u32(common, COMMON_DRIVER_FEATURE_SELECT, 1);
+    let high = read_common_u32(common, COMMON_DRIVER_FEATURE);
+    u64::from(low) | (u64::from(high) << 32) == FEATURE_VERSION_1 | FEATURE_FLUSH
+}
+
 pub(crate) fn quiesce(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {
     let Some((common_physical, common_length)) = device.common_region() else {
         return false;

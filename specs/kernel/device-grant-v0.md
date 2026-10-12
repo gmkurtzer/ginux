@@ -42,24 +42,31 @@ table also removes the external MMIO mapping; the MMIO page itself is never
 treated as allocator-owned memory. After retirement the kernel rechecks that
 the virtio device is reset and PCI bus mastering is disabled.
 
-The write-only control service starts from that reset state, writes
-`ACKNOWLEDGE` to device status, and reads the byte back directly. It then takes
-a deliberate invalid-opcode fault. The same stop-only path revokes its exact
-object-7 handle, destroys its mapping, clears and releases all seven owned
-frames, and publishes the fault. Regardless of whether that verification
-succeeds, the kernel's following quiesce operation first disables PCI bus
-mastering, resets device status to zero, and confirms both conditions before
-continuing. The service never owns a virtqueue or DMA frame, so its status
-mutation cannot initiate data transfer.
+The write-only capability holder starts from that reset state. Its x86 mapping
+is necessarily read/write because the architecture has no write-only PTE. The
+service sets `ACKNOWLEDGE|DRIVER`, reads both device-feature words, and requires
+`VIRTIO_BLK_F_FLUSH` plus `VIRTIO_F_VERSION_1`. It publishes exactly those two
+driver features, sets `FEATURES_OK`, and requires the device to retain that
+bit. The kernel independently reads back the exact selected features and status
+after the service takes a deliberate invalid-opcode fault.
+
+The stop-only path revokes the exact object-7 handle, destroys its mapping,
+clears and releases all seven owned frames, and publishes the fault. Regardless
+of whether verification succeeds, the kernel's following quiesce operation
+first disables PCI bus mastering, resets device status to zero, and confirms
+both conditions before continuing. The service never sets `DRIVER_OK`, selects
+a queue, owns a virtqueue, or receives a DMA frame, so negotiation cannot
+initiate data transfer.
 
 ## Deliberate limits
 
 - These are bounded observation/control proofs, not a block driver or storage
   service.
 - Page-granular mapping exposes the complete 4 KiB common-configuration page;
-  the write-only proof voluntarily touches only device status. Notification
-  registers, ISR, device configuration, PCI configuration, and port I/O are
-  unavailable.
+  capability attenuation is write-only, but the writable x86 leaf is also
+  readable. The proof touches only feature-selection, feature-value, and device
+  status fields. Notification registers, ISR, device configuration, PCI
+  configuration, and port I/O are unavailable.
 - No DMA frame, interrupt, queue, or IOMMU domain is delegated.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable

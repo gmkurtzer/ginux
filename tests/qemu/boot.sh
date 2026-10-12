@@ -716,6 +716,11 @@ if ! grep -q '^ginux: write-only virtio control grant exercised in ring 3' "$out
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio feature negotiation completed' "$output_file"; then
+    echo "Boot test failed: the isolated control service did not negotiate virtio features." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; then
     echo "Boot test failed: the faulted virtio control service retained authority." >&2
     exit 1

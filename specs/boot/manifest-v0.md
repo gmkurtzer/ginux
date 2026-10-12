@@ -34,7 +34,8 @@ read/write access to the bounded persistent-volume reference service; its
 rights can be attenuated independently for writer and reader domains.
 Object 7 grants read/write authority for the discovered block device. The
 kernel attenuates it into separate read-only observation and write-only control
-domains. Both receive only the common-configuration MMIO page; neither receives
+domains. The latter's writable x86 leaf is necessarily readable even though
+its capability lacks `READ`. Both receive only the common-configuration MMIO page; neither receives
 a virtqueue, DMA frame, interrupt, or PCI-configuration authority.
 The bundle and root-image ranges in handoff v4 must exactly match their
 recorded sizes and digests. Only verified bundle bytes are copied into the

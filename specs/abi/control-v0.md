@@ -388,8 +388,10 @@ Object 7 is reserved by this v4 authority envelope for a block-device grant.
 It has no control-call operation yet: the kernel consumes its attenuated
 `READ` authority while constructing a read-only ring-3 MMIO mapping and its
 separate attenuated `WRITE` authority while constructing a writable control
-mapping. The latter proves status mutation followed by fault revocation and
-kernel quiescence, but receives no DMA or queue authority. A usable device
+mapping. On x86 that leaf is also readable; the service uses it to select
+exactly `VIRTIO_BLK_F_FLUSH|VIRTIO_F_VERSION_1` and complete `FEATURES_OK`.
+This proves feature negotiation followed by fault revocation and kernel
+quiescence, but receives no DMA or queue authority. A usable device
 driver still requires a later, separately specified contract rather than an
 implicit extension of operation 18.
 Each charged entry first acquires a bounded in-flight operation reference on

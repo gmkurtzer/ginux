@@ -182,8 +182,9 @@ transitional fixed-layout policy, not a general virtual-memory-area model.
 
 The optional leaf first maps the reset virtio common-configuration page into a
 read-only manifest-authorized auxiliary domain. That observer reads status zero
-and faults on a write. A separate write-only auxiliary receives a writable leaf,
-sets and reads back `ACKNOWLEDGE`, and deliberately faults. Retirement destroys
+and faults on a write. A separate auxiliary with write-only authority receives
+a necessarily read/write x86 leaf, selects `FLUSH|VERSION_1`, completes
+`FEATURES_OK`, and deliberately faults. Retirement destroys
 and scrubs each page-table hierarchy, so both MMIO mappings disappear with
 their exact domain generations. Hardware Dirty is admitted only for the
 explicitly writable leaf. See
