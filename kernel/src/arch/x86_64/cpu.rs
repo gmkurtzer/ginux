@@ -14815,6 +14815,18 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
         {
             apply_network_configuration(argument)
         }
+        control_abi::NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::WRITE,
+                )
+                && address_space::activate_auxiliary_network_empty_queues(caller_domain) =>
+        {
+            0
+        }
         _ => u64::MAX - 2,
     }
 }

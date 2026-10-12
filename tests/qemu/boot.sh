@@ -214,6 +214,16 @@ if ! grep -q '^ginux: faulted native network generation retired active VT-d' "$o
     exit 1
 fi
 
+if ! grep -q '^ginux: native network service configured empty RX/TX queues' "$output_file" ||
+    ! grep -q '^ginux: native network queue layout validated by kernel' "$output_file" ||
+    ! grep -q '^ginux: native network bus mastering authorized by capability' "$output_file" ||
+    ! grep -q '^ginux: native network bus mastering enabled last' "$output_file" ||
+    ! grep -q '^ginux: native network device quiesced before VT-d teardown' "$output_file" ||
+    ! grep -q '^ginux: native network empty-queue generation retired cleanly' "$output_file"; then
+    echo "Boot test failed: native network empty queues were not delegated safely." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

@@ -1,7 +1,7 @@
 # Native Network Service Runtime v0
 
-**Status:** A freestanding x86-64 service artifact executes and exits cleanly
-in a capability-empty native domain; device delegation is pending.
+**Status:** A freestanding x86-64 service configures and activates confined
+empty virtio-net queues in a capability-limited native domain.
 
 ## Purpose
 
@@ -71,8 +71,20 @@ exact VT-d hierarchy is active. Fault teardown disables translation, scrubs all
 six table frames, and releases the DMA page last while PCI authority remains
 disabled.
 
+A further generation receives bootstrap feature `EMPTY_QUEUES`, read/write
+authority on its generation-bound network capability, and PCI memory decoding
+with bus mastering still clear. The service zeros its DMA page, negotiates
+exactly `VERSION_1`, `ACCESS_PLATFORM`, `MAC`, and `MRG_RXBUF`, configures
+eight-entry receive and transmit rings, leaves both available indices zero,
+sets `DRIVER_OK`, and invokes capability command 12. The kernel independently
+requires the active VT-d translation, exact queue addresses, disabled MSI-X,
+empty DMA page, and the expected device state before enabling bus mastering.
+Clean lifecycle exit revokes bus mastering, resets and disables the function,
+then retires VT-d before any service-owned frame is scrubbed.
+
 ## Deliberate limits
 
-This milestone does not enable PCI decoding, bus mastering, MSI-X, or packet
-queues, and it does not move packet processing out of the kernel. Each boundary
-is introduced and tested separately in subsequent milestones.
+This milestone publishes no descriptor, writes no notification register,
+enables no MSI-X route, and transfers no packet. Fault injection after queue
+activation, interrupt delivery, and service-owned packet processing remain
+separate milestones.

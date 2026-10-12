@@ -105,8 +105,8 @@ signed root, its bounded native ELF plan is accepted during boot, and a
 temporary owned address space proves relative relocation, W^X mappings, guard
 pages, and complete retirement. The measured entry also executes at ring 3 in
 a fresh domain with no boot capabilities, negotiates control ABI v4, exits
-through lifecycle ABI v0, and leaves no domain frames live. It has not yet
-received device authority. A separate fixed 80-byte network bootstrap contract
+through lifecycle ABI v0, and leaves no domain frames live. Later generations
+receive narrowly scoped device authority. A separate fixed 80-byte network bootstrap contract
 freezes the common configuration, RX/TX notifications, DMA identity,
 generation capability, and MAC fields. A second service generation validates
 that record and its read-only logical network capability while PCI decoding,
@@ -118,6 +118,12 @@ DMA page while PCI decoding and bus mastering remain disabled; clean exit
 retires and scrubs the translation tables before releasing DMA.
 A faulted translated generation independently proves the same ordering on
 malformed bootstrap rejection.
+A further read/write generation owns common-MMIO queue negotiation and binds
+zeroed eight-entry RX/TX rings inside its sole DMA page. Its capability call
+lets the kernel validate the exact empty layout and active VT-d domain before
+enabling bus mastering last. Clean exit revokes bus mastering, resets and
+disables the NIC, retires translation, and only then scrubs service memory.
+No descriptor, notification, interrupt, or packet is published yet.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

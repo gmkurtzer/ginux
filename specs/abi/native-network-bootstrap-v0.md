@@ -25,7 +25,9 @@ exactly 80 bytes, and uses only fixed-width integers:
 | 64 | 8 | MAC address in the low 48 bits; high 16 bits zero |
 | 72 | 8 | reserved; must be zero |
 
-Feature bit zero is `VIRTIO_NETWORK`; v0 accepts exactly that bit. Every
+Feature bit zero is required `VIRTIO_NETWORK`. Optional bit one is
+`EMPTY_QUEUES`; it requests the generation-bound empty-queue activation
+contract. No other bit is accepted. Every
 address, capability, and MAC field must be nonzero, and the two notification
 addresses must be distinct. A wrong magic, version, size, feature bitmap,
 nonzero reserved field, or nonzero MAC high bits is rejected before device
@@ -65,3 +67,11 @@ A fourth generation combines the malformed reserved field with an already
 active exact translation. Its contained fault must disable and retire VT-d
 before the address-space release path scrubs DMA, proving that rejection remains
 safe after the translation boundary has been crossed.
+
+A fifth generation combines both accepted feature bits. It receives
+read/write network authority and may configure empty queues through common
+MMIO, but it cannot grant the NIC DMA authority directly. Capability command
+12 succeeds only after the kernel validates the exact zeroed DMA page, both
+eight-entry queue bindings, `DRIVER_OK`, disabled MSI-X, and an active exact
+VT-d translation. The kernel then enables bus mastering last. Notification
+register access and packet descriptors are outside this feature.

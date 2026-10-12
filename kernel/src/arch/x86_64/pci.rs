@@ -1253,6 +1253,149 @@ pub(crate) unsafe fn activate_network_queues_without_io(
         && network_function_is_disabled(device)
 }
 
+pub(crate) fn prepare_network_for_isolated_service(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+) -> bool {
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = common_mapping.address(common_physical, common_length) else {
+        return false;
+    };
+    if !network_function_is_disabled(device)
+        || !network_msix_is_disabled(device)
+        || read_common_u8(common, COMMON_DEVICE_STATUS) != 0
+    {
+        return false;
+    }
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            COMMAND_MEMORY_SPACE,
+        );
+    }
+    network_function_command(device)
+        & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+        == COMMAND_MEMORY_SPACE
+}
+
+pub(crate) fn activate_isolated_network_empty_queues(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    dma_physical: u64,
+    dma_virtual: usize,
+) -> bool {
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || !network_msix_is_disabled(device)
+        || network_function_command(device)
+            & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+            != COMMAND_MEMORY_SPACE
+        || !(0..DMA_PAGE_SIZE).all(|offset| read_dma_u8(dma_virtual + offset) == 0)
+        || !network_empty_queues_are_bound(device, common_mapping, dma_physical, false)
+    {
+        return false;
+    }
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER,
+        );
+    }
+    network_function_command(device)
+        & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+        == COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER
+        && network_empty_queues_are_bound(device, common_mapping, dma_physical, true)
+}
+
+pub(crate) fn network_empty_queues_are_bound(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    dma_physical: u64,
+    require_bus_master: bool,
+) -> bool {
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = common_mapping.address(common_physical, common_length) else {
+        return false;
+    };
+    let expected_command = COMMAND_MEMORY_SPACE
+        | if require_bus_master {
+            COMMAND_BUS_MASTER
+        } else {
+            0
+        };
+    if network_function_command(device)
+        & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+        != expected_command
+        || read_common_u8(common, COMMON_DEVICE_STATUS)
+            != STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
+    {
+        return false;
+    }
+    for (queue, descriptor, available, used) in [
+        (
+            0_u16,
+            NET_RX_DESC_OFFSET,
+            NET_RX_AVAIL_OFFSET,
+            NET_RX_USED_OFFSET,
+        ),
+        (
+            1_u16,
+            NET_TX_DESC_OFFSET,
+            NET_TX_AVAIL_OFFSET,
+            NET_TX_USED_OFFSET,
+        ),
+    ] {
+        write_common_u16(common, COMMON_QUEUE_SELECT, queue);
+        if read_common_u16(common, COMMON_QUEUE_SIZE) != QUEUE_SIZE
+            || read_common_u16(common, COMMON_QUEUE_ENABLE) != 1
+            || read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) != u16::MAX
+            || read_common_u64(common, COMMON_QUEUE_DESC) != dma_physical + descriptor as u64
+            || read_common_u64(common, COMMON_QUEUE_DRIVER) != dma_physical + available as u64
+            || read_common_u64(common, COMMON_QUEUE_DEVICE) != dma_physical + used as u64
+        {
+            return false;
+        }
+    }
+    true
+}
+
+pub(crate) fn quiesce_isolated_network(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+) -> bool {
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = common_mapping.address(common_physical, common_length) else {
+        return false;
+    };
+    let current = network_function_command(device);
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            (current | COMMAND_MEMORY_SPACE) & !(COMMAND_IO_SPACE | COMMAND_BUS_MASTER),
+        );
+    }
+    network_function_command(device) & COMMAND_BUS_MASTER == 0
+        && reset(common).is_some()
+        && revoke_network_function(device)
+        && network_function_is_disabled(device)
+        && network_msix_is_disabled(device)
+}
+
 /// Transmits one fixed, bounded Ethernet frame through queue 1.
 ///
 /// # Safety

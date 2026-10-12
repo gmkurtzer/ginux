@@ -8,6 +8,7 @@ pub const NATIVE_NETWORK_BOOT_MAGIC: u64 = 0x3042_4e58_554e_4947;
 pub const NATIVE_NETWORK_BOOT_VERSION: u16 = 0;
 pub const NATIVE_NETWORK_BOOT_SIZE: u16 = 80;
 pub const NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK: u32 = 1 << 0;
+pub const NATIVE_NETWORK_FEATURE_EMPTY_QUEUES: u32 = 1 << 1;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -19,6 +20,7 @@ pub const NATIVE_BLOCK_WAIT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_BLOCK_WAIT_CANCELLED: u64 = u64::MAX - 5;
 pub const NATIVE_NETWORK_DEVICE_OPERATION: u64 = 16;
 pub const NATIVE_NETWORK_DEVICE_PROBE: u64 = 0;
+pub const NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES: u64 = 12;
 pub const NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD: u64 = 0x0000_0001_05dc_0009;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
@@ -174,7 +176,9 @@ impl NativeNetworkBootV0 {
         self.magic == NATIVE_NETWORK_BOOT_MAGIC
             && self.version == NATIVE_NETWORK_BOOT_VERSION
             && self.size == NATIVE_NETWORK_BOOT_SIZE
-            && self.features == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+            && (self.features == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                || self.features
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES)
             && self.common_config_address != 0
             && self.receive_notification_address != 0
             && self.transmit_notification_address != 0
@@ -185,6 +189,10 @@ impl NativeNetworkBootV0 {
             && self.mac_address != 0
             && self.mac_address >> 48 == 0
             && self.reserved == 0
+    }
+
+    pub const fn requests_empty_queues(&self) -> bool {
+        self.features & NATIVE_NETWORK_FEATURE_EMPTY_QUEUES != 0
     }
 }
 
@@ -228,6 +236,7 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_BOOT_VERSION UINT16_C(0)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_BOOT_SIZE UINT16_C(80)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK UINT32_C(1)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_EMPTY_QUEUES UINT32_C(2)"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
     }
 
@@ -244,6 +253,7 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_CANCELLED (UINT64_MAX - UINT64_C(5))"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_OPERATION UINT64_C(16)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_PROBE UINT64_C(0)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES UINT64_C(12)"));
         assert!(header
             .contains("GINUX_NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD UINT64_C(0x0000000105dc0009)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_DISCOVERY_OPERATION UINT64_C(0)"));
@@ -315,6 +325,13 @@ mod tests {
 
         let valid = NativeNetworkBootV0::virtio_network(1, 2, 3, 4, 5, 6, 0x5254_0012_3456);
         assert!(valid.is_valid_virtio_network());
+        assert!(!valid.requests_empty_queues());
+        let active = NativeNetworkBootV0 {
+            features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES,
+            ..valid
+        };
+        assert!(active.is_valid_virtio_network());
+        assert!(active.requests_empty_queues());
         for invalid in [
             NativeNetworkBootV0 { magic: 0, ..valid },
             NativeNetworkBootV0 {
@@ -324,6 +341,10 @@ mod tests {
             NativeNetworkBootV0 { size: 79, ..valid },
             NativeNetworkBootV0 {
                 features: 0,
+                ..valid
+            },
+            NativeNetworkBootV0 {
+                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 2,
                 ..valid
             },
             NativeNetworkBootV0 {

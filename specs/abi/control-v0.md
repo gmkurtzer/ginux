@@ -324,10 +324,17 @@ effective apply publishes all fields and advances the generation once; a valid
 no-op returns the unchanged generation. Serialization and atomic visibility
 currently rely on the single-CPU non-nested call gate and require a locking or
 sequence protocol before concurrent device calls are permitted.
+Write-authorized command 12 requires argument zero and is available only to a
+registered native network generation with a live exact VT-d translation and
+kernel-retained device teardown state. It validates `DRIVER_OK`, disabled
+MSI-X, two exact eight-entry empty queue bindings inside the generation's sole
+zeroed DMA page, and PCI memory decoding without bus mastering. It then enables
+bus mastering and returns zero. The service never receives PCI configuration,
+IOMMU, IDT, or APIC authority.
 Unknown commands, invalid arguments, and
 denial return `UINT64_MAX - 2`. This is a
-device-authorization skeleton only; it exposes no packets, general route table,
-DMA, interrupts, or hardware-backed configuration.
+bounded bootstrap device contract; it exposes no packet completion, general
+route table, interrupt route, or raw platform authority.
 
 Operation 17 is the v3 read-only root call retained by v4 and requires `READ` authority on
 root object 5. `RSI` selects the command and `RDX` supplies its argument.

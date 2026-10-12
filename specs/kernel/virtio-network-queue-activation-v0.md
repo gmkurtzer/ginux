@@ -21,7 +21,10 @@ after their DMA confinement exists, then be quiesced in the reverse order.
 8. Enable PCI bus mastering last.
 
 Both available indices remain zero. No descriptor is published, notification
-register is touched, MSI-X entry is programmed, or packet is transferred.
+register is touched, MSI-X entry is programmed, or packet is transferred. The
+same ordering is now independently exercised by the measured native network
+service: userspace negotiates and binds the queues, while a capability call
+keeps final validation and bus-master authorization in the kernel.
 
 ## Teardown order
 
@@ -34,6 +37,6 @@ and finally scrubs and releases the DMA page. No lease may remain live.
 
 - This proof does not publish an RX buffer or TX descriptor.
 - Interrupt programming, notification, completion validation, packet parsing,
-  fault injection, and service delegation remain subsequent milestones.
+  and activated-service fault injection remain subsequent milestones.
 - Queue depth eight is the bootstrap profile; the device-advertised maximum is
   retained for later tuning.
