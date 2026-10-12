@@ -245,6 +245,7 @@ const LINUX_TIMER_ABSTIME: u64 = 1;
 const LINUX_TFD_NONBLOCK: u64 = 0x800;
 const LINUX_PIPE_CAPACITY: usize = 256;
 const LINUX_PIPE_READV_WAIT_FLAG: u64 = 1 << 63;
+const LINUX_PIPE_WRITEV_WAIT_FLAG: u64 = 1 << 63;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_AT_EMPTY_PATH: u64 = 0x1000;
 const LINUX_TCGETS: u64 = 0x5401;
@@ -3644,7 +3645,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let expected_signal_count = if signal_probe_executed {
         10
     } else if execution.tls_size != 0 {
-        12
+        13
     } else {
         2
     };
@@ -3659,7 +3660,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && first_child_tid != 0
             && clone_reuse_validated
             && child_gettid_count == 2
-            && yield_switch_count == 13
+            && yield_switch_count == 15
             && clone_busy_rejection_count == 2
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
@@ -3686,9 +3687,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && pipe_read_block_count == 3
             && pipe_read_wake_count == 2
             && pipe_read_interrupt_count == 1
-            && pipe_write_block_count == 3
-            && pipe_write_wake_count == 2
-            && pipe_write_interrupt_count == 1
+            && pipe_write_block_count == 6
+            && pipe_write_wake_count == 4
+            && pipe_write_interrupt_count == 2
             && timerfd_read_block_count == 2
             && timerfd_read_wake_count == 1
             && timerfd_read_interrupt_count == 1
@@ -3712,7 +3713,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             first_child_tid != 0,
             clone_reuse_validated,
             child_gettid_count == 2,
-            yield_switch_count == 13,
+            yield_switch_count == 15,
             clone_busy_rejection_count == 2,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
@@ -3739,9 +3740,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             pipe_read_block_count == 3,
             pipe_read_wake_count == 2,
             pipe_read_interrupt_count == 1,
-            pipe_write_block_count == 3,
-            pipe_write_wake_count == 2,
-            pipe_write_interrupt_count == 1,
+            pipe_write_block_count == 6,
+            pipe_write_wake_count == 4,
+            pipe_write_interrupt_count == 2,
             timerfd_read_block_count == 2,
             timerfd_read_wake_count == 1,
             timerfd_read_interrupt_count == 1,
@@ -4427,7 +4428,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && first_child_tid != 0
                 && clone_reuse_validated
                 && child_gettid_count == 2
-                && yield_switch_count == 13
+                && yield_switch_count == 15
                 && clone_busy_rejection_count == 2
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
@@ -4454,9 +4455,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && pipe_read_block_count == 3
                 && pipe_read_wake_count == 2
                 && pipe_read_interrupt_count == 1
-                && pipe_write_block_count == 3
-                && pipe_write_wake_count == 2
-                && pipe_write_interrupt_count == 1
+                && pipe_write_block_count == 6
+                && pipe_write_wake_count == 4
+                && pipe_write_interrupt_count == 2
                 && timerfd_read_block_count == 2
                 && timerfd_read_wake_count == 1
                 && timerfd_read_interrupt_count == 1
@@ -5025,7 +5026,13 @@ extern "sysv64" fn linux_syscall_handler(
             buffer,
             count,
         ),
-        LINUX_WRITEV_SYSCALL => linux_descriptor_writev(first_argument, buffer, count),
+        LINUX_WRITEV_SYSCALL => linux_descriptor_writev_live_return(
+            registers,
+            syscall_return,
+            first_argument,
+            buffer,
+            count,
+        ),
         LINUX_PIPE_SYSCALL => linux_pipe(first_argument, 0),
         LINUX_MINCORE_SYSCALL => linux_mincore(first_argument, buffer, count),
         LINUX_MADVISE_SYSCALL => linux_madvise(first_argument, buffer, count),
@@ -8768,9 +8775,31 @@ fn complete_linux_pipe_write_wait(slot: usize) -> bool {
     }
     let packed = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
     let descriptor = packed & 0xff;
-    let count = packed >> 8;
+    let count = (packed & !LINUX_PIPE_WRITEV_WAIT_FLAG) >> 8;
     let address = LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst);
-    let result = linux_pipe_write(descriptor, address, count).unwrap_or(LINUX_EBADF);
+    let result = if packed & LINUX_PIPE_WRITEV_WAIT_FLAG != 0 {
+        let Ok(vector_count) = usize::try_from(count) else {
+            return false;
+        };
+        if !(1..=LINUX_IOV_LIMIT).contains(&vector_count) {
+            return false;
+        }
+        let mut ranges = [(0_u64, 0_usize); LINUX_IOV_LIMIT];
+        for (index, range) in ranges[..vector_count].iter_mut().enumerate() {
+            let Ok(length) =
+                usize::try_from(LINUX_THREAD_IOV_LENGTHS[slot][index].load(Ordering::SeqCst))
+            else {
+                return false;
+            };
+            *range = (
+                LINUX_THREAD_IOV_ADDRESSES[slot][index].load(Ordering::SeqCst),
+                length,
+            );
+        }
+        linux_pipe_writev_ranges(descriptor, &ranges[..vector_count])
+    } else {
+        linux_pipe_write(descriptor, address, count).unwrap_or(LINUX_EBADF)
+    };
     if result == LINUX_ENOSYS {
         return false;
     }
@@ -8779,6 +8808,7 @@ fn complete_linux_pipe_write_wait(slot: usize) -> bool {
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+    clear_linux_iov_snapshot(slot);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
     LINUX_PIPE_WRITE_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
     true
@@ -8939,6 +8969,32 @@ fn linux_descriptor_write_live_return(
         count << 8 | descriptor,
         0,
         None,
+    )
+}
+
+fn linux_descriptor_writev_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    descriptor: u64,
+    vectors: u64,
+    count: u64,
+) -> u64 {
+    let immediate = linux_descriptor_writev(descriptor, vectors, count);
+    if immediate != LINUX_ENOSYS || !linux_pipe_write_descriptor(descriptor) {
+        return immediate;
+    }
+    let (ranges, vector_count) = match linux_writev_ranges(vectors, count) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return error,
+    };
+    linux_blocking_descriptor_io_live_return(
+        output,
+        caller,
+        LINUX_THREAD_WAIT_PIPE_WRITE,
+        vectors,
+        LINUX_PIPE_WRITEV_WAIT_FLAG | (vector_count as u64) << 8 | descriptor,
+        0,
+        Some(&ranges[..vector_count]),
     )
 }
 
@@ -9347,47 +9403,90 @@ fn linux_pipe_writev(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
     if !linux_pipe_write_descriptor(descriptor) {
         return None;
     }
-    if ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
-        return Some(LINUX_EPIPE);
-    }
+    let (ranges, vector_count) = match linux_writev_ranges(vectors, count) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return Some(error),
+    };
+    Some(linux_pipe_writev_ranges(
+        descriptor,
+        &ranges[..vector_count],
+    ))
+}
+
+fn linux_writev_ranges(
+    vectors: u64,
+    count: u64,
+) -> Result<([(u64, usize); LINUX_IOV_LIMIT], usize), u64> {
     let Ok(vector_count) = usize::try_from(count) else {
-        return Some(LINUX_EINVAL);
+        return Err(LINUX_EINVAL);
     };
     if !(1..=LINUX_IOV_LIMIT).contains(&vector_count) {
-        return Some(LINUX_EINVAL);
+        return Err(LINUX_EINVAL);
     }
     let mut table = [0_u8; LINUX_IOV_LIMIT * 16];
     if !copy_from_linux_user(vectors, &mut table[..vector_count * 16]) {
-        return Some(LINUX_EFAULT);
+        return Err(LINUX_EFAULT);
     }
-    let mut input = [0_u8; LINUX_PIPE_CAPACITY];
+    let mut ranges = [(0_u64, 0_usize); LINUX_IOV_LIMIT];
     let mut total = 0_usize;
-    for vector in table[..vector_count * 16].as_chunks::<16>().0 {
+    for (index, vector) in table[..vector_count * 16]
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .enumerate()
+    {
         let address = u64::from_ne_bytes(vector[..8].try_into().unwrap());
         let length = u64::from_ne_bytes(vector[8..].try_into().unwrap());
         let Ok(length) = usize::try_from(length) else {
-            return Some(LINUX_EINVAL);
+            return Err(LINUX_EINVAL);
         };
         let Some(end) = total.checked_add(length) else {
-            return Some(LINUX_EINVAL);
+            return Err(LINUX_EINVAL);
         };
         if length == 0 || end > LINUX_PIPE_CAPACITY {
-            return Some(LINUX_EINVAL);
+            return Err(LINUX_EINVAL);
         }
-        if !copy_from_linux_user(address, &mut input[total..end]) {
-            return Some(LINUX_EFAULT);
+        if !linux_readable_user_range_contains(address, length) {
+            return Err(LINUX_EFAULT);
+        }
+        ranges[index] = (address, length);
+        total = end;
+    }
+    Ok((ranges, vector_count))
+}
+
+fn linux_pipe_writev_ranges(descriptor: u64, ranges: &[(u64, usize)]) -> u64 {
+    if !linux_pipe_write_descriptor(descriptor) {
+        return LINUX_EBADF;
+    }
+    if ELF_PROBE_PIPE_READ_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
+        return LINUX_EPIPE;
+    }
+    let mut total = 0_usize;
+    for (_, length) in ranges.iter().copied() {
+        let Some(end) = total.checked_add(length) else {
+            return LINUX_EINVAL;
+        };
+        if length == 0 || end > LINUX_PIPE_CAPACITY {
+            return LINUX_EINVAL;
         }
         total = end;
     }
     let current = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) as usize;
     if total > LINUX_PIPE_CAPACITY - current {
-        return Some(
-            if ELF_PROBE_PIPE_WRITE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
-                LINUX_EAGAIN
-            } else {
-                LINUX_ENOSYS
-            },
-        );
+        return if ELF_PROBE_PIPE_WRITE_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+            LINUX_EAGAIN
+        } else {
+            LINUX_ENOSYS
+        };
+    }
+    let mut input = [0_u8; LINUX_PIPE_CAPACITY];
+    let mut copied = 0;
+    for (address, length) in ranges.iter().copied() {
+        if !copy_from_linux_user(address, &mut input[copied..copied + length]) {
+            return LINUX_EFAULT;
+        }
+        copied += length;
     }
     for (target, source) in ELF_PROBE_PIPE_BUFFER[current..current + total]
         .iter()
@@ -9397,7 +9496,7 @@ fn linux_pipe_writev(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
     }
     ELF_PROBE_PIPE_LENGTH.store((current + total) as u32, Ordering::SeqCst);
     wake_linux_descriptor_waits();
-    Some(total as u64)
+    total as u64
 }
 
 fn linux_pipe_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
@@ -12067,7 +12166,10 @@ fn linux_interrupt_blocked_wait(
     if matches!(wait_kind, LINUX_THREAD_WAIT_POLL | LINUX_THREAD_WAIT_PPOLL) {
         clear_linux_poll_snapshot(slot);
     }
-    if wait_kind == LINUX_THREAD_WAIT_PIPE_READ {
+    if matches!(
+        wait_kind,
+        LINUX_THREAD_WAIT_PIPE_READ | LINUX_THREAD_WAIT_PIPE_WRITE
+    ) {
         clear_linux_iov_snapshot(slot);
     }
     // SAFETY: the switch above made the target the sole running Linux thread,

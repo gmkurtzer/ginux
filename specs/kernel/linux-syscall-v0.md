@@ -203,15 +203,17 @@ eight-byte user array. The pipe has a fixed 256-byte FIFO. `pipe2` accepts
 output memory returns `-EFAULT` without allocating, and an existing pipe or
 fewer than two free slots returns `-EMFILE`. Writes of one through 256 bytes
 are all-or-nothing: invalid input leaves the FIFO unchanged, insufficient
-capacity returns `-EAGAIN` in nonblocking mode. A blocking scalar write with a
-runnable peer stores its input address, bounded count, and descriptor in a
-typed scheduler wait. The input range is revalidated and copied atomically
-only when enough capacity becomes available. A reader that frees insufficient
-capacity leaves the writer asleep; closing the reader wakes it with `-EPIPE`.
-An admitted caught signal may cancel the wait with `-EINTR` without changing
-the input or FIFO, and retry may complete normally. Blocking without a
-runnable peer retains `-ENOSYS`; saturated vectored writes do not yet enter a
-scheduler wait. Larger writes return `-EINVAL`. One proof write spans the final
+capacity returns `-EAGAIN` in nonblocking mode. A blocking scalar or vectored
+write with a runnable peer stores its bounded request in a typed scheduler
+wait. `writev` retains a kernel-owned snapshot of up to four input ranges; a
+userspace change to the iovec table while blocked cannot redirect completion.
+Every snapshotted range is revalidated and all input is gathered before the
+FIFO changes. Copy and enqueue occur atomically only when the complete request
+fits. A reader that frees insufficient capacity leaves the writer asleep;
+closing the reader wakes it with `-EPIPE`. An admitted caught signal may cancel
+either wait with `-EINTR` without changing the input or FIFO, and retry may
+complete normally. Blocking without a runnable peer retains `-ENOSYS`. Larger
+writes return `-EINVAL`. One proof write spans the final
 byte of the linked main's RX area and the first byte of its adjacent RW area;
 the pipe is closed and recreated before the FIFO lifecycle continues. Reads
 return up to the requested

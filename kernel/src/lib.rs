@@ -1098,6 +1098,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux scheduler-backed pipe readv validated\r\n");
     serial_write("ginux: Linux signal-interrupted pipe reads validated\r\n");
     serial_write("ginux: Linux scheduler-backed pipe writes validated\r\n");
+    serial_write("ginux: Linux scheduler-backed pipe writev validated\r\n");
+    serial_write("ginux: Linux pipe writev snapshot isolation validated\r\n");
     serial_write("ginux: Linux signal-interrupted pipe writes validated\r\n");
     serial_write("ginux: Linux scheduler-backed timerfd reads validated\r\n");
     serial_write("ginux: Linux signal-interrupted timerfd reads validated\r\n");

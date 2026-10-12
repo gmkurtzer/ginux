@@ -835,16 +835,19 @@ valid_interpreter_base:
     pop rax
     call syscall_expect_zero
     mov edi, 0x40c000
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
     mov esi, 8192
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -852,39 +855,48 @@ valid_interpreter_base:
     mov qword ptr [0x40c000], 8
     mov edi, 0x40c000
     mov esi, 4096
-    mov edx, 1
-    mov eax, 10
+    push 1
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40b000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_zero
     cmp dword ptr [0x40b000], 0x756e6947
     require_equal
     mov edi, 0x40c000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
     cmp qword ptr [0x40c000], 8
     require_equal
     mov edi, 0x40b000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40c000
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
     mov esi, 4096
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
     xor edi, edi
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40c000
     require_equal
@@ -895,52 +907,67 @@ valid_interpreter_base:
     mov edi, 0x40b000
     mov esi, 8192
     mov edx, 0x40594a
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
     require_equal
     cmp byte ptr [0x40594b], 1
     require_equal
-    mov edx, 4
-    mov eax, 28
+    push 4
+    pop rdx
+    push 28
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 0
     require_equal
     cmp qword ptr [0x40c000], 0
     require_equal
-    mov edx, 1
-    mov eax, 10
+    push 1
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40b000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
     mov edi, 0x40c000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
     mov edi, 0x40b000
     mov esi, 8192
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x40b000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
     mov esi, 0x40c000
-    mov eax, 1
+    push 1
+    pop rax
     call syscall_expect_efault
 
     # Fill the complete four-page scratch window, split its permissions,
     # create holes, and prove first-fit allocation does not cross them.
     xor edi, edi
     mov esi, 16384
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -951,24 +978,30 @@ valid_interpreter_base:
 
     mov edi, 0x40c000
     mov esi, 8192
-    mov edx, 1
-    mov eax, 10
+    push 1
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40c000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40e000
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
     mov esi, 4096
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40c000
     require_equal
@@ -976,11 +1009,13 @@ valid_interpreter_base:
 
     xor edi, edi
     mov esi, 8192
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, -12
     require_equal
@@ -991,26 +1026,32 @@ valid_interpreter_base:
     mov r10d, 0x100022
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40e000
     require_equal
-    mov edx, 1
+    push 1
+    pop rdx
     mov r10d, 0x32
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40e000
     require_equal
     mov edi, 0x40e000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
     mov r10d, 0x100022
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, -17
     require_equal
     mov edi, 0x40f000
-    mov eax, 9
+    push 9
+    pop rax
     call syscall_expect_einval
 
     mov edi, 0x40c000
@@ -1019,7 +1060,8 @@ valid_interpreter_base:
     mov r10d, 0x32
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40c000
     require_equal
@@ -1031,7 +1073,8 @@ valid_interpreter_base:
     mov edi, 0x40b000
     mov esi, 16384
     mov edx, 0x40594a
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
     require_equal
@@ -1044,8 +1087,10 @@ valid_interpreter_base:
 
     mov edi, 0x40c000
     mov esi, 8192
-    mov edx, 3
-    mov eax, 10
+    push 3
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x40c000], 0
     require_equal
@@ -1054,67 +1099,88 @@ valid_interpreter_base:
 
     mov edi, 0x40b000
     mov esi, 16384
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x40b000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
     mov esi, 0x40c000
-    mov eax, 1
+    push 1
+    pop rax
     call syscall_expect_efault
     mov esi, 0x40d000
-    mov eax, 1
+    push 1
+    pop rax
     call syscall_expect_efault
     mov esi, 0x40e000
-    mov eax, 1
+    push 1
+    pop rax
     call syscall_expect_efault
 
     mov edi, 0x40d000
-    mov esi, 1
-    mov edx, 3
+    push 1
+    pop rsi
+    push 3
+    pop rdx
     mov r10d, 0x32
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40d000
     require_equal
     cmp qword ptr [0x40d000], 0
     require_equal
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     # Linux rounds every nonzero scratch length up to a page.
     xor edi, edi
-    mov esi, 1
-    mov edx, 3
+    push 1
+    pop rsi
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
     mov qword ptr [0x40b000], 17
     mov edi, 0x40b000
-    mov esi, 1
-    mov eax, 11
+    push 1
+    pop rsi
+    push 11
+    pop rax
     call syscall_expect_zero
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x40b000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
 
     xor edi, edi
     mov esi, 4097
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     require_equal
@@ -1125,15 +1191,18 @@ valid_interpreter_base:
     mov edi, 0x40b000
     mov esi, 4097
     mov edx, 0x40594a
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
     require_equal
     cmp byte ptr [0x40594b], 1
     require_equal
     mov edi, 0x40c000
-    mov esi, 1
-    mov edx, 1
+    push 1
+    pop rsi
+    push 1
+    pop rdx
     push 10
     pop rax
     call syscall_expect_zero
@@ -1145,7 +1214,8 @@ valid_interpreter_base:
 
     xor edi, edi
     mov esi, 16385
-    mov edx, 3
+    push 3
+    pop rdx
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
@@ -1166,17 +1236,21 @@ valid_interpreter_base:
     syscall
     cmp rax, 0x40b000
     require_equal
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x40b000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
     mov byte ptr [0x40594a], 1
     mov byte ptr [0x40594b], 1
     mov edi, 0x40b000
     mov esi, 8192
     mov edx, 0x40594a
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 0
     require_equal
@@ -1184,9 +1258,12 @@ valid_interpreter_base:
     require_equal
 
     mov edi, 0x40b000
-    mov esi, 1
-    mov edx, 3
-    mov eax, 10
+    push 1
+    pop rsi
+    push 3
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 0
     require_equal
@@ -1195,7 +1272,8 @@ valid_interpreter_base:
     mov edi, 0x40b000
     mov esi, 8192
     mov edx, 0x40594a
-    mov eax, 27
+    push 27
+    pop rax
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
     require_equal
@@ -1203,9 +1281,12 @@ valid_interpreter_base:
     require_equal
 
     mov edi, 0x40c000
-    mov esi, 1
-    mov edx, 1
-    mov eax, 10
+    push 1
+    pop rsi
+    push 1
+    pop rdx
+    push 10
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x40c000], 0
     require_equal
@@ -1214,12 +1295,15 @@ valid_interpreter_base:
     pop rax
     call syscall_expect_efault
     mov edi, 0x40b000
-    mov esi, 1
-    mov edx, 1
+    push 1
+    pop rsi
+    push 1
+    pop rdx
     push 10
     pop rax
     call syscall_expect_zero
-    mov edx, 3
+    push 3
+    pop rdx
     push 10
     pop rax
     call syscall_expect_einval
@@ -1571,6 +1655,48 @@ linux_clone_repeat:
     pop rax
     call syscall_expect_one
     push 1
+    pop rax
+    syscall
+    cmp rax, -32
+    require_equal
+    push 3
+    pop rax
+    call syscall_expect_zero
+    # Repeat the saturated-write lifecycle through writev. The child mutates
+    # the shared iovec table while the retry sleeps; completion must consume
+    # the kernel snapshot, not the redirected userspace metadata.
+    mov edi, 0x405e80
+    push 22
+    pop rax
+    call syscall_expect_zero
+    push 3
+    pop rdi
+    mov esi, 0x405e00
+    mov edx, 256
+    push 1
+    pop rax
+    call syscall_expect_256
+    mov word ptr [0x405eb0], 0x5756
+    lea rsi, [rip + blocked_pipe_writev]
+    push 2
+    pop rdx
+    push 20
+    pop rax
+    syscall
+    cmp rax, -4
+    require_equal
+    cmp word ptr [0x405eb0], 0x5756
+    require_equal
+    push 20
+    pop rax
+    call syscall_expect_two
+    cmp byte ptr [rip + blocked_pipe_writev + 8], 0
+    require_equal
+    cmp byte ptr [rip + blocked_pipe_writev + 24], 0
+    require_equal
+    mov byte ptr [rip + blocked_pipe_writev + 8], 1
+    mov byte ptr [rip + blocked_pipe_writev + 24], 1
+    push 20
     pop rax
     syscall
     cmp rax, -32
@@ -2679,26 +2805,32 @@ linux_child_joined:
     cmp qword ptr [0x405d90], 5
     require_equal
 
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 0x405d20
-    mov edx, 1
+    push 1
+    pop rdx
     xor r10d, r10d
     mov eax, 232
     call syscall_expect_zero
 
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x405d90
-    mov edx, 8
+    push 8
+    pop rdx
     xor eax, eax
     call syscall_expect_eagain
 
     mov qword ptr [0x405d80], -1
     mov esi, 0x405d80
-    mov edx, 7
+    push 7
+    pop rdx
     push 1
     pop rax
     call syscall_expect_einval
-    mov edx, 8
+    push 8
+    pop rdx
     push 1
     pop rax
     call syscall_expect_einval
@@ -2712,7 +2844,8 @@ linux_child_joined:
     mov word ptr [0x405da4], 4
     mov word ptr [0x405da6], -1
     mov edi, 0x405da0
-    mov esi, 1
+    push 1
+    pop rsi
     xor edx, edx
     push 7
     pop rax
@@ -2721,9 +2854,11 @@ linux_child_joined:
     require_equal
 
     mov qword ptr [0x405d80], 1
-    mov edi, 3
+    push 3
+    pop rdi
     mov esi, 0x405d80
-    mov edx, 8
+    push 8
+    pop rdx
     push 1
     pop rax
     call syscall_expect_eagain
@@ -2734,9 +2869,12 @@ linux_child_joined:
     cmp qword ptr [0x405d90], -2
     require_equal
 
-    mov edi, 2
-    mov esi, 2
-    mov edx, 3
+    push 2
+    pop rdi
+    push 2
+    pop rsi
+    push 3
+    pop rdx
     xor r10d, r10d
     mov eax, 233
     call syscall_expect_zero
@@ -2747,31 +2885,39 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
 
-    mov edi, 2
-    mov esi, 1
-    mov edx, 2
+    push 2
+    pop rdi
+    push 1
+    pop rsi
+    push 2
+    pop rdx
     mov r10d, 0x405d00
     mov eax, 233
     call syscall_expect_einval
 
-    mov edx, 99
+    push 99
+    pop rdx
     mov eax, 233
     call syscall_expect_ebadf
 
-    mov esi, 99
-    mov edx, 1
+    push 99
+    pop rsi
+    push 1
+    pop rdx
     mov eax, 233
     call syscall_expect_einval
 
     mov dword ptr [0x405d00], 0x80000000
-    mov esi, 1
+    push 1
+    pop rsi
     mov eax, 233
     call syscall_expect_einval
 
     mov dword ptr [0x405d00], 4
     movabs rax, 0x1122334455667788
     mov qword ptr [0x405d04], rax
-    mov edi, 2
+    push 2
+    pop rdi
     mov esi, 1
     mov edx, 1
     mov r10d, 0x4061fc
@@ -5090,6 +5236,31 @@ child_thread_probe:
     push 12
     pop rdx
     call linux_child_signal_parent
+    # Interrupt the first writev, then prove the retry uses its kernel-owned
+    # iovec snapshot after both userspace lengths are changed to zero.
+    mov byte ptr [rip + blocked_pipe_writev + 8], 0
+    mov byte ptr [rip + blocked_pipe_writev + 24], 0
+    push 2
+    pop rdi
+    mov esi, 0x405eb8
+    push 2
+    pop rdx
+    xor eax, eax
+    call syscall_expect_two
+    push 24
+    pop rax
+    call syscall_expect_zero
+    push 2
+    pop rdi
+    push 3
+    pop rax
+    call syscall_expect_zero
+    push 24
+    pop rax
+    call syscall_expect_zero
+    push 12
+    pop rdx
+    call linux_child_signal_parent
     mov ecx, 0x100000
 .Llinux_timerfd_read_spin:
     pause
@@ -5579,6 +5750,11 @@ ginux_main_init_state:
 blocked_pipe_readv:
     .quad 0x405eb0
     .quad 1
+blocked_pipe_writev:
+    .quad 0x405eb0
+    .quad 1
+    .quad 0x405eb1
+    .quad 1
 #endif
 #endif
 
@@ -5601,7 +5777,7 @@ ginux_main_tls_zero:
 .section .bss
 .balign 8
 #ifdef GINUX_GRAPH
-    .space 4048
+    .space 4016
 #else
     .space 4088
 #endif

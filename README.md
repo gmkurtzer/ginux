@@ -465,12 +465,14 @@ the userspace iovec table while asleep cannot redirect the copy. An admitted
 caught signal may interrupt either wait with `EINTR` without
 changing the output or FIFO; retrying the same read can then complete normally.
 The measured graph proves both wake paths, the scalar interruption/retry path,
-and readv snapshot isolation. A saturated blocking scalar write also sleeps
-while a peer is runnable. It revalidates and atomically copies its input only
-after enough capacity becomes available, returns `EINTR` without changing the
-FIFO when interrupted, and wakes with `EPIPE` if the reader closes. The
-measured graph proves interruption, capacity wake, and reader-close wake;
-scheduler-backed `writev` remains unsupported. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
+and readv snapshot isolation. A saturated blocking scalar or vectored write
+also sleeps while a peer is runnable. It revalidates and atomically copies its
+input only after enough capacity becomes available, returns `EINTR` without
+changing the FIFO when interrupted, and wakes with `EPIPE` if the reader
+closes. A blocked `writev` retains a kernel-owned snapshot of up to four
+iovecs, so later userspace table mutations cannot redirect its input. The
+measured graph proves both write forms across interruption, capacity wake, and
+reader-close wake, including writev snapshot isolation. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
 retires either initial console descriptor. Bounded `dup` reuses the lowest closed slot and preserves whether
 the console endpoint is input or output; `dup2` provides exact-slot replacement.
 `fcntl(F_GETFD/F_GETFL)` exposes the bounded descriptor and endpoint flags. It also
