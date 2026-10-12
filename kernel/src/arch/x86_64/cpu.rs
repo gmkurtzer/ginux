@@ -4225,23 +4225,25 @@ extern "sysv64" fn linux_syscall_handler(
                     }
                 }
             }
-            if let Some(index) = linux_mmap_covering_area_index(first_argument, buffer) {
-                let mapping_pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
-                let mapping_address =
-                    ELF_PROBE_MMAP.load(Ordering::SeqCst) + (index * PAGE_SIZE) as u64;
-                let protected_pages = (buffer / PAGE_SIZE as u64) as usize;
-                let protected_slot = index
-                    + usize::try_from((first_argument - mapping_address) / PAGE_SIZE as u64)
-                        .unwrap_or(2);
-                if ELF_PROBE_MMAP_WRITABLE[index].load(Ordering::SeqCst)
-                    && address_space::protect_current_linux_pages_read_only(
-                        first_argument,
-                        &[
-                            linux_mmap_slot_frame(protected_slot),
-                            linux_mmap_slot_frame(protected_slot + 1),
-                        ][..protected_pages],
-                    )
-                {
+            if let Some((protected_slot, protected_pages)) =
+                linux_mmap_range_slots(first_argument, buffer)
+            {
+                let areas: [Option<usize>; 2] = core::array::from_fn(|offset| {
+                    (offset < protected_pages)
+                        .then(|| linux_mmap_slot_area_index(protected_slot + offset))
+                        .flatten()
+                });
+                if areas[..protected_pages].iter().all(|area| {
+                    area.is_some_and(|index| ELF_PROBE_MMAP_WRITABLE[index].load(Ordering::SeqCst))
+                }) && address_space::protect_current_linux_pages_read_only(
+                    first_argument,
+                    &[
+                        linux_mmap_slot_frame(protected_slot),
+                        linux_mmap_slot_frame(protected_slot + 1),
+                    ][..protected_pages],
+                ) {
+                    let index = areas[0].unwrap_or_else(|| unreachable!());
+                    let mapping_pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
                     if mapping_pages == 2 && protected_pages == 1 {
                         let file = ELF_PROBE_MMAP_FILE[index].load(Ordering::SeqCst);
                         ELF_PROBE_MMAP_PAGES[index].store(1, Ordering::SeqCst);
@@ -4252,7 +4254,9 @@ extern "sysv64" fn linux_syscall_handler(
                             .store(protected_slot != index + 1, Ordering::SeqCst);
                         ELF_PROBE_MMAP_FILE[index + 1].store(file, Ordering::SeqCst);
                     } else {
-                        ELF_PROBE_MMAP_WRITABLE[index].store(false, Ordering::SeqCst);
+                        for index in areas[..protected_pages].iter().flatten() {
+                            ELF_PROBE_MMAP_WRITABLE[*index].store(false, Ordering::SeqCst);
+                        }
                     }
                     return 0;
                 }
@@ -5125,23 +5129,30 @@ fn linux_mmap_slot_frame(slot: usize) -> u64 {
 }
 
 fn linux_mmap_slot_occupied(slot: usize) -> bool {
+    linux_mmap_slot_area_index(slot).is_some()
+}
+
+fn linux_mmap_slot_area_index(slot: usize) -> Option<usize> {
     if slot >= 2 {
-        return true;
+        return None;
     }
-    (0..2).any(|start| {
-        let pages = usize::from(ELF_PROBE_MMAP_PAGES[start].load(Ordering::SeqCst));
-        pages > 2 - start || pages != 0 && (start..start + pages).contains(&slot)
+    (0..2).find(|start| {
+        let pages = usize::from(ELF_PROBE_MMAP_PAGES[*start].load(Ordering::SeqCst));
+        pages != 0 && pages <= 2 - *start && (*start..*start + pages).contains(&slot)
     })
 }
 
-fn linux_mmap_area_index(address: u64, length: u64) -> Option<usize> {
+fn linux_mmap_range_slots(address: u64, length: u64) -> Option<(usize, usize)> {
     let base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
-    (0..2).find(|index| {
-        let pages = ELF_PROBE_MMAP_PAGES[*index].load(Ordering::SeqCst);
-        pages != 0
-            && address == base + (*index * PAGE_SIZE) as u64
-            && length == u64::from(pages) * PAGE_SIZE as u64
-    })
+    if !address.is_multiple_of(PAGE_SIZE as u64)
+        || address < base
+        || !matches!(length, length if length == PAGE_SIZE as u64 || length == 2 * PAGE_SIZE as u64)
+    {
+        return None;
+    }
+    let start = usize::try_from((address - base) / PAGE_SIZE as u64).ok()?;
+    let pages = usize::try_from(length / PAGE_SIZE as u64).ok()?;
+    (start < 2 && start.checked_add(pages).is_some_and(|end| end <= 2)).then_some((start, pages))
 }
 
 fn linux_mmap_covering_area_index(address: u64, length: u64) -> Option<usize> {
@@ -5152,20 +5163,6 @@ fn linux_mmap_covering_area_index(address: u64, length: u64) -> Option<usize> {
         let area_start = base + (*index * PAGE_SIZE) as u64;
         let area_end = area_start + u64::from(pages) * PAGE_SIZE as u64;
         pages != 0 && address >= area_start && end <= area_end
-    })
-}
-
-fn linux_mmap_range_overlaps_area(address: u64, length: u64) -> bool {
-    let base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
-    (0..2).any(|index| {
-        let pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
-        pages != 0
-            && linux_ranges_overlap(
-                address,
-                length as usize,
-                base + (index * PAGE_SIZE) as u64,
-                usize::from(pages) * PAGE_SIZE,
-            )
     })
 }
 
@@ -5446,21 +5443,27 @@ fn linux_mmap_fixed_file(
 
 fn linux_munmap(address: u64, length: u64) -> u64 {
     let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
-    if !address.is_multiple_of(PAGE_SIZE as u64)
-        || address < mapping
-        || !matches!(length, length if length == PAGE_SIZE as u64 || length == 2 * PAGE_SIZE as u64)
-        || address
-            .checked_add(length)
-            .is_none_or(|end| end > mapping + 2 * PAGE_SIZE as u64)
-    {
+    let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {
         return LINUX_EINVAL;
-    }
+    };
     let Some(index) = linux_mmap_covering_area_index(address, length) else {
-        return if linux_mmap_range_overlaps_area(address, length) {
-            LINUX_EINVAL
-        } else {
-            0
-        };
+        for slot in start_slot..start_slot + range_pages {
+            let Some(area) = linux_mmap_slot_area_index(slot) else {
+                continue;
+            };
+            if ELF_PROBE_MMAP_PAGES[area].load(Ordering::SeqCst) != 1
+                || !address_space::unmap_current_linux_page(
+                    mapping + (slot * PAGE_SIZE) as u64,
+                    linux_mmap_slot_frame(slot),
+                )
+            {
+                return LINUX_EINVAL;
+            }
+            ELF_PROBE_MMAP_PAGES[area].store(0, Ordering::SeqCst);
+            ELF_PROBE_MMAP_WRITABLE[area].store(false, Ordering::SeqCst);
+            ELF_PROBE_MMAP_FILE[area].store(0, Ordering::SeqCst);
+        }
+        return 0;
     };
     let pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
     let area_address = mapping + (index * PAGE_SIZE) as u64;
@@ -5497,48 +5500,41 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
 }
 
 fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
-    let Some(index) = linux_mmap_area_index(address, length) else {
+    let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {
         return LINUX_EINVAL;
     };
-    let pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
-    if ELF_PROBE_MMAP_FILE[index].load(Ordering::SeqCst) != 0 || advice != LINUX_MADV_DONTNEED {
-        return LINUX_EINVAL;
-    }
-    let frame = linux_mmap_slot_frame(index);
-    if !address_space::zero_current_linux_page(address, frame) {
-        return LINUX_EINVAL;
-    }
-    if pages == 2
-        && !address_space::zero_current_linux_page(
-            address + PAGE_SIZE as u64,
-            linux_mmap_slot_frame(index + 1),
-        )
+    let areas: [Option<usize>; 2] = core::array::from_fn(|offset| {
+        (offset < range_pages)
+            .then(|| linux_mmap_slot_area_index(start_slot + offset))
+            .flatten()
+    });
+    if advice != LINUX_MADV_DONTNEED
+        || areas[..range_pages].iter().any(|area| {
+            area.is_none_or(|index| ELF_PROBE_MMAP_FILE[index].load(Ordering::SeqCst) != 0)
+        })
     {
         return LINUX_EINVAL;
+    }
+    for offset in 0..range_pages {
+        if !address_space::zero_current_linux_page(
+            address + (offset * PAGE_SIZE) as u64,
+            linux_mmap_slot_frame(start_slot + offset),
+        ) {
+            return LINUX_EINVAL;
+        }
     }
     0
 }
 
 fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {
-    let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst);
-    if !address.is_multiple_of(PAGE_SIZE as u64)
-        || address < mapping
-        || !matches!(length, length if length == PAGE_SIZE as u64 || length == 2 * PAGE_SIZE as u64)
-        || address
-            .checked_add(length)
-            .is_none_or(|end| end > mapping + 2 * PAGE_SIZE as u64)
-    {
+    let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {
         return LINUX_EINVAL;
-    }
-    let Some(index) = linux_mmap_area_index(address, length) else {
-        return if linux_mmap_range_overlaps_area(address, length) {
-            LINUX_EINVAL
-        } else {
-            LINUX_ENOMEM
-        };
     };
-    let pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
-    if !copy_to_linux_user(vector, &[1, 1][..usize::from(pages)]) {
+    if (start_slot..start_slot + range_pages).any(|slot| linux_mmap_slot_area_index(slot).is_none())
+    {
+        return LINUX_ENOMEM;
+    }
+    if !copy_to_linux_user(vector, &[1, 1][..range_pages]) {
         return LINUX_EFAULT;
     }
     0

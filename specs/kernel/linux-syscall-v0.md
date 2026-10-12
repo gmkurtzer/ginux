@@ -606,9 +606,10 @@ page-aligned head or tail page of a two-page area. It clears the selected
 hardware leaves, invalidates their TLB entries, and scrubs the physical frames
 before reuse. A partial removal splits or truncates the registry record while
 preserving the remaining page's write and immutable-file attributes. Repeating
-a supported exact unmap succeeds; a range spanning two independent areas is
-rejected. The anonymous proof keeps two one-page areas active, queries and
-removes the second independently, and proves the first remains intact. It then
+a supported exact unmap succeeds. A two-page range can remove two independent
+adjacent areas or an active page beside an already-unmapped hole. The anonymous
+proof keeps two one-page areas active, queries and removes the second
+independently, and proves the first remains intact. It then
 removes both the head and tail of separate two-page areas and validates the
 surviving area's residency, access, and contents. It also crosses a two-page
 area boundary with syscall copy-out, while the file proof maps the complete two-page interpreter,
@@ -620,19 +621,21 @@ mappings outside the admitted executable pages, partial ranges, arbitrary
 files, demand paging, and mapping growth are unsupported. Fixed placement is
 available only for the seven admitted main pages and two admitted dependency
 pages described above.
-`rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for one exact active
-anonymous area. Immutable-file mappings reject advice with `-EINVAL`. For an
-anonymous area it validates that every leaf still maps its allocator-owned
-frame, then zeros the frames through the supervisor direct map without changing
-their present, user, NX, or writable state. The proof also discards a sealed
-one-page read-only mapping, observes zeroes from ring 3, and unmaps it normally.
-Other advice, ranges, or inactive mappings return `-EINVAL` without changing
-the contents. There is no paging policy, reclamation queue, or lazy refill.
-`rax = 27` (`__NR_mincore`) accepts either kind of exact active area and
-atomically writes one resident byte per page to a fully validated vector. It returns
-`-ENOMEM` after unmap. Misaligned, partial, or different ranges return
-`-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only the fixed window,
-not arbitrary page-table state or reclaim information.
+`rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for a fully mapped
+one- or two-page anonymous range. The range may cross two adjacent registry
+records. Immutable-file mappings reject advice with `-EINVAL`. For an anonymous
+range it validates that every leaf still maps its allocator-owned frame, then
+zeros the frames through the supervisor direct map without changing their
+present, user, NX, or writable state. The proof also discards a sealed one-page
+read-only mapping, observes zeroes from ring 3, and unmaps it normally. Other
+advice, ranges, or inactive mappings return `-EINVAL` without changing the
+contents. There is no paging policy, reclamation queue, or lazy refill.
+`rax = 27` (`__NR_mincore`) accepts either kind of fully mapped one- or two-page
+range, including a range crossing adjacent registry records, and atomically
+writes one resident byte per page to a fully validated vector. It returns
+`-ENOMEM` when any requested page is unmapped. Misaligned or out-of-window
+ranges return `-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only
+the fixed window, not arbitrary page-table state or reclaim information.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x407000`,
 grow within one separately owned zero-filled RW/NX page, write through that
 mapping, and shrink the break. A request beyond `0x408000` follows Linux syscall
@@ -828,8 +831,9 @@ one-page entries and preserves the other page's write permission and file-kind
 metadata. The RELRO seal lasts for the process lifetime; an anonymous seal
 lasts until unmap, and a later mapping starts from freshly scrubbed RW/NX
 frames. The normalized range must be present and page-aligned, and the only
-accepted protection is `PROT_READ`. Ranges spanning independent entries and
-all other requests return `-EINVAL`. Before changing any page, the kernel
+accepted protection is `PROT_READ`. A two-page range can span two independent
+adjacent writable entries; holes, mixed read-only entries, and all other
+requests return `-EINVAL`. Before changing any page, the kernel
 validates ownership and writable/NX permissions for every leaf. It then clears
 every selected writable bit and invalidates every selected translation before
 resuming userspace. The probe confirms that copy-in remains available while

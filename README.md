@@ -453,7 +453,10 @@ modify the mapping, and unmap scrubs every payload frame. The runtime proof
 keeps two one-page areas live simultaneously, queries and removes the second,
 and verifies that the first remains usable. Removing either the head or tail
 page of a two-page area preserves the other page as an independent one-page
-area with the original access and immutable-file attributes.
+area with the original access and immutable-file attributes. `mprotect`,
+`madvise`, `mincore`, and `munmap` walk both entries when a two-page request
+crosses two adjacent one-page areas, so range behavior no longer depends on
+whether the registry contains one record or two.
 General mapping placement, shared file mappings, writable mappings outside the
 exact authenticated main/dependency data pages, and arbitrary filesystem-backed
 mappings are not implemented.

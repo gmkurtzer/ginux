@@ -1688,6 +1688,11 @@ if ! grep -q '^ginux: bounded Linux mmap protection splitting validated' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: adjacent Linux mmap range operations validated' "$output_file"; then
+    echo "Boot test failed: adjacent Linux mmap range operations were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux anonymous mapping discard validated' "$output_file"; then
     echo "Boot test failed: Linux anonymous mapping discard was not validated." >&2
     exit 1
