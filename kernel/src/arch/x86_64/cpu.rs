@@ -156,6 +156,7 @@ const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
+const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
 const LINUX_EPOLL_PWAIT2_SYSCALL: u64 = 441;
@@ -2549,14 +2550,9 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     for offset in &ELF_PROBE_DESCRIPTOR_OFFSETS {
         offsets_reset &= offset.swap(0, Ordering::SeqCst) == 0;
     }
-    let expected_cwd = if exec_replaced {
-        linux_root_directory_kind(b"/bin").unwrap_or(0)
-    } else {
-        LINUX_ROOT_DIRECTORY
-    };
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == expected_cwd
+        && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
         && devices_closed
         && ELF_PROBE_EPOLL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EPOLL_TARGET.swap(u64::MAX, Ordering::SeqCst) == u64::MAX
@@ -3337,6 +3333,9 @@ extern "sysv64" fn linux_syscall_handler(
         }
         LINUX_CLONE_SYSCALL => linux_clone_thread(saved_registers, user_rip, user_rflags),
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
+        LINUX_EXECVEAT_SYSCALL => {
+            linux_execveat(first_argument, buffer, count, register(0), register(2))
+        }
         LINUX_GETPID_SYSCALL => 1,
         LINUX_GETTID_SYSCALL => {
             let Some(tid) = current_linux_tid() else {
@@ -4666,7 +4665,7 @@ fn linux_exec_vector(address: u64, require_nonempty: bool) -> Result<([u64; 8], 
     Err(LINUX_E2BIG)
 }
 
-fn linux_exec_root_node(path: &[u8]) -> Result<u8, u64> {
+fn linux_exec_root_node(directory: u64, path: &[u8]) -> Result<u8, u64> {
     let mut root_name = [0_u8; 64];
     let root_name_length = if let Some(absolute) = path.strip_prefix(b"/") {
         if !linux_normalized_relative_path(absolute) {
@@ -4681,8 +4680,19 @@ fn linux_exec_root_node(path: &[u8]) -> Result<u8, u64> {
         if !linux_normalized_relative_path(path) {
             return Err(LINUX_ENOENT);
         }
-        let cwd = ELF_PROBE_CWD.load(Ordering::SeqCst);
-        let Some(directory) = linux_measured_directory_path(cwd) else {
+        let directory_state = if directory as u32 == LINUX_AT_FDCWD {
+            ELF_PROBE_CWD.load(Ordering::SeqCst)
+        } else {
+            let state = linux_device_descriptor(directory);
+            if state == 0 {
+                return Err(LINUX_EBADF);
+            }
+            if state & LINUX_DEVICE_DIRECTORY == 0 {
+                return Err(LINUX_ENOTDIR);
+            }
+            state & !3
+        };
+        let Some(directory) = linux_measured_directory_path(directory_state) else {
             return Err(LINUX_ENOENT);
         };
         let separator = usize::from(!directory.is_empty());
@@ -4714,6 +4724,38 @@ fn linux_exec_root_node(path: &[u8]) -> Result<u8, u64> {
 }
 
 fn linux_execve(path_address: u64, arguments_address: u64, environment_address: u64) -> u64 {
+    linux_execve_at(
+        u64::from(LINUX_AT_FDCWD),
+        path_address,
+        arguments_address,
+        environment_address,
+    )
+}
+
+fn linux_execveat(
+    directory: u64,
+    path_address: u64,
+    arguments_address: u64,
+    environment_address: u64,
+    flags: u64,
+) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    linux_execve_at(
+        directory,
+        path_address,
+        arguments_address,
+        environment_address,
+    )
+}
+
+fn linux_execve_at(
+    directory: u64,
+    path_address: u64,
+    arguments_address: u64,
+    environment_address: u64,
+) -> u64 {
     if current_linux_tid() != Some(1)
         || LINUX_THREAD_STATES
             .iter()
@@ -4729,7 +4771,7 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
         Ok(length) => length,
         Err(error) => return error,
     };
-    let exec_node = match linux_exec_root_node(&path[..path_length]) {
+    let exec_node = match linux_exec_root_node(directory, &path[..path_length]) {
         Ok(node) => node,
         Err(error) => return error,
     };

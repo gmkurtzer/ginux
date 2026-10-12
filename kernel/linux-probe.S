@@ -3440,14 +3440,45 @@ resolution_valid:
     cmp byte ptr [rsp + 148], 't'
     jne failure
 
-    lea rdi, [rip + exec_directory_path]
+    mov edi, 99
+    lea rsi, [rip + exec_mode]
+    mov rdx, rsp
+    lea r10, [rsp + 24]
+    xor r8d, r8d
+    mov eax, 322
+    call syscall_expect_ebadf
+
+    mov edi, 2
+    mov eax, 322
+    syscall
+    cmp rax, -20
+    jne failure
+
+    mov edi, -100
+    mov r8d, 1
+    mov eax, 322
+    call syscall_expect_einval
+
+    mov edi, 3
+    mov eax, 3
+    call syscall_expect_zero
+
+    mov edi, -100
+    lea rsi, [rip + exec_directory_path]
+    mov edx, 0x10000
+    mov eax, 257
+    call syscall_expect_three
+
+    lea rdi, [rip + exec_root_path]
     mov eax, 80
     call syscall_expect_zero
 
-    lea rdi, [rip + exec_mode]
-    mov rsi, rsp
-    lea rdx, [rsp + 24]
-    mov eax, 59
+    mov edi, 3
+    lea rsi, [rip + exec_mode]
+    mov rdx, rsp
+    lea r10, [rsp + 24]
+    xor r8d, r8d
+    mov eax, 322
     syscall
     jmp failure
 #else
@@ -3587,6 +3618,8 @@ missing_exec_path:
     .asciz "/bin/missing"
 exec_directory_path:
     .asciz "/bin"
+exec_root_path:
+    .asciz "/"
 invalid_exec_path:
     .asciz "/init"
 exec_zero_path:

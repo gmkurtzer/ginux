@@ -372,12 +372,22 @@ survive. Caught signal dispositions reset to default, ignored dispositions
 remain ignored, the alternate signal stack becomes disabled, the signal mask
 and `no_new_privs` remain unchanged, and the process name becomes
 `exec-target`. The canonical measured-root node is retained as process state,
-so `/proc/self/exe` reports `/bin/exec-target` even when the successful call used
-the relative name `exec-target` from `/bin`. The replacement validates each of these transitions, reopens
+so `/proc/self/exe` reports `/bin/exec-target` independently of the accepted
+pathname form. The replacement validates each of these transitions, reopens
 `/dev/console`, validates its complete initial stack, emits `EXEC_OK`, closes
 all surviving proof descriptors, and exits with status 42. General ELF
 loading, dynamic targets, shebangs, and arbitrary argument or environment
 vectors are outside this version.
+
+`rax = 322` (`__NR_execveat`) enters the same transaction and accepts only
+flags zero. An absolute path ignores `dirfd`; a relative path resolves beneath
+`AT_FDCWD` or an open measured-root directory descriptor. Unknown descriptors
+return `-EBADF`, non-directory descriptors return `-ENOTDIR`, and nonzero flags
+return `-EINVAL` before image state changes. The proof closes an ordinary
+descriptor, reopens `/bin` in that slot, restores cwd to `/`, and successfully
+executes relative `exec-target` through the directory descriptor. Empty-path,
+`AT_EMPTY_PATH`, and `AT_SYMLINK_NOFOLLOW` behavior remain unsupported.
+
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable
 limits for `RLIMIT_STACK` and `RLIMIT_NOFILE`. The stack soft and hard limits
 are one page, matching the bounded mapped stack; the descriptor limits are 4,
@@ -797,7 +807,7 @@ bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,
 `set_tid_address`, bounded robust-list registration/query, the exact bounded
-`clone`, `exit`, and `exit_group` calls. `clone` requires
+`clone`, `execve`, `execveat`, `exit`, and `exit_group` calls. `clone` requires
 `CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID`,
 the fixed sibling stack and TLS resources, and distinct writable aligned parent-
 and child-TID words. It publishes the TID to both words and returns it to the
