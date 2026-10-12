@@ -676,6 +676,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: runtime-selected Linux exec plans committed\r\n");
     serial_write("ginux: variable-page Linux exec images committed\r\n");
     serial_write("ginux: Linux active image ownership transitioned\r\n");
+    serial_write("ginux: generation-bound Linux image ownership verified\r\n");
     serial_write("ginux: Linux replacement frames allocated on demand\r\n");
     serial_write("ginux: Linux replacement frame generations reclaimed\r\n");
     if !linux_elf::verify_load_plan() {

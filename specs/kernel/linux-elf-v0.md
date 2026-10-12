@@ -397,7 +397,8 @@ read-only/NX by the admitted GNU RELRO transition. A repeated header request
 returns `-EEXIST`, and a W+X text request returns `-EINVAL`.
 
 The initially installed interpreter pages seed a bounded process-owned active
-image record. Each admitted main or dependency `mmap` appends its page only
+image record. Each entry binds the virtual address, exact generation-tagged
+physical-frame lease, and W^X flags. Each admitted main or dependency `mmap` appends its page only
 after the page-table install succeeds; capacity exhaustion rolls the mapping
 back and scrubs its unpublished lease. Final validation reconstructs the exact
 interpreter, main, and load-biased dependency page set from authenticated

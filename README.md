@@ -311,7 +311,8 @@ only the address-space infrastructure and interpreter frames initially. Main
 and dependency payload frames are allocated only when their authenticated mmap
 requests arrive. Each successful authenticated mapping atomically joins the
 process's bounded active-image record alongside the initially installed
-interpreter pages. Teardown requires that record to contain the complete
+interpreter pages. Each entry binds its address, exact frame generation, and
+W^X permissions. Teardown requires that record to contain the complete
 interpreter, main, and two-DSO page set with no duplicates or trailing state.
 All three userspace-loaded images' content and leaves are installed by userspace,
 and every executable-page lease is scrubbed and released after the process
@@ -439,8 +440,9 @@ selection is neither compiled-byte nor fixed-address identity: the second image
 uses an independent header, two-page text segment, and data base. The profile
 allows one header page, up to five executable pages, up to two writable pages,
 and at most eight pages in total. The active mapping list is process runtime
-state: a successful transaction replaces it with the selected plan, while a
-failure retains the old list. The profile also allows up to eight
+state and binds each virtual page to its generation-tagged physical-frame lease
+and W^X permissions. A successful transaction replaces it with the selected
+plan, while a failure retains the old list. The profile also allows up to eight
 63-byte `argv` strings, eight equivalent
 `envp` strings, and one live thread. Rejected path, pointer, count, string, and
 aggregate-stack cases leave the original image

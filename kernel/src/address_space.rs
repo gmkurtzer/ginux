@@ -600,6 +600,25 @@ pub(crate) fn verify_linux_elf_mapping(
                         (segment.virtual_address as *const u8).read_volatile() == segment.bytes[0]
                     })
             });
+            let mut initial_image_mappings =
+                [cpu::LinuxActiveImageMapping::EMPTY; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+            for (index, address) in initial_image_addresses[..initial_image_count]
+                .iter()
+                .enumerate()
+            {
+                let entry = current_linux_leaf(*address as u64)?.read();
+                let frame_address = entry & ADDRESS_MASK;
+                let frame = frames
+                    .iter()
+                    .copied()
+                    .find(|frame| frame.address() == frame_address)?;
+                initial_image_mappings[index] = cpu::LinuxActiveImageMapping {
+                    address: *address,
+                    frame,
+                    writable: entry & WRITABLE != 0,
+                    executable: entry & NO_EXECUTE == 0,
+                };
+            }
             let execution_result = if exec_rollback_valid && observed {
                 cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
@@ -628,7 +647,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
                     exec_expected: true,
                     initial_image_count,
-                    initial_image_addresses,
+                    initial_image_mappings,
                 })
             } else {
                 cpu::LinuxElfResult::FAILED
@@ -1516,6 +1535,25 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     initial_image_count += 1;
                 }
             }
+            let mut initial_image_mappings =
+                [cpu::LinuxActiveImageMapping::EMPTY; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+            for (index, address) in initial_image_addresses[..initial_image_count]
+                .iter()
+                .enumerate()
+            {
+                let entry = current_linux_leaf(*address as u64)?.read();
+                let frame_address = entry & ADDRESS_MASK;
+                let frame = frames
+                    .iter()
+                    .copied()
+                    .find(|frame| frame.address() == frame_address)?;
+                initial_image_mappings[index] = cpu::LinuxActiveImageMapping {
+                    address: *address,
+                    frame,
+                    writable: entry & WRITABLE != 0,
+                    executable: entry & NO_EXECUTE == 0,
+                };
+            }
             let execution_result = if observed {
                 cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
@@ -1551,7 +1589,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_mappings,
                     exec_expected: false,
                     initial_image_count,
-                    initial_image_addresses,
+                    initial_image_mappings,
                 })
             } else {
                 cpu::LinuxElfResult::FAILED

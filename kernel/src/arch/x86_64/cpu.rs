@@ -399,6 +399,12 @@ static ELF_PROBE_EXEC_MAPPING_FLAGS: [AtomicU8; LINUX_EXEC_MAPPING_LIMIT] =
     [const { AtomicU8::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
 static ELF_PROBE_ACTIVE_IMAGE_ADDRESSES: [AtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
     [const { AtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_ACTIVE_IMAGE_FRAMES: [AtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { AtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_ACTIVE_IMAGE_GENERATIONS: [AtomicU32; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { AtomicU32::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_ACTIVE_IMAGE_FLAGS: [AtomicU8; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { AtomicU8::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
 static ELF_PROBE_ACTIVE_IMAGE_COUNT: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_TLS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_TLS_SIZE: AtomicU64 = AtomicU64::new(0);
@@ -1162,7 +1168,24 @@ pub(crate) struct LinuxElfExecution {
         [[LinuxRelativeFileMapping; LINUX_DEPENDENCY_MAPPING_COUNT]; LINUX_DEPENDENCY_COUNT],
     pub(crate) exec_expected: bool,
     pub(crate) initial_image_count: usize,
-    pub(crate) initial_image_addresses: [usize; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT],
+    pub(crate) initial_image_mappings: [LinuxActiveImageMapping; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT],
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct LinuxActiveImageMapping {
+    pub(crate) address: usize,
+    pub(crate) frame: memory::FrameLease,
+    pub(crate) writable: bool,
+    pub(crate) executable: bool,
+}
+
+impl LinuxActiveImageMapping {
+    pub(crate) const EMPTY: Self = Self {
+        address: 0,
+        frame: memory::FrameLease::EMPTY,
+        writable: false,
+        executable: false,
+    };
 }
 
 #[derive(Clone, Copy)]
@@ -1220,8 +1243,17 @@ pub(crate) fn linux_exec_mapping_plan(
     Some((mappings, mapping_count))
 }
 
-fn append_linux_active_image_mapping(address: u64) -> bool {
-    if address == 0 || !address.is_multiple_of(PAGE_SIZE as u64) {
+fn append_linux_active_image_mapping(
+    address: u64,
+    frame: memory::FrameLease,
+    writable: bool,
+    executable: bool,
+) -> bool {
+    if address == 0
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || writable && executable
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
         return false;
     }
     let count = usize::from(ELF_PROBE_ACTIVE_IMAGE_COUNT.load(Ordering::SeqCst));
@@ -1229,11 +1261,23 @@ fn append_linux_active_image_mapping(address: u64) -> bool {
         || ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[..count]
             .iter()
             .any(|candidate| candidate.load(Ordering::SeqCst) == address)
+        || ELF_PROBE_ACTIVE_IMAGE_FRAMES[..count]
+            .iter()
+            .any(|candidate| candidate.load(Ordering::SeqCst) == frame.address())
         || ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[count].load(Ordering::SeqCst) != 0
+        || ELF_PROBE_ACTIVE_IMAGE_FRAMES[count].load(Ordering::SeqCst) != 0
+        || ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[count].load(Ordering::SeqCst) != 0
+        || ELF_PROBE_ACTIVE_IMAGE_FLAGS[count].load(Ordering::SeqCst) != 0
     {
         return false;
     }
     ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[count].store(address, Ordering::SeqCst);
+    ELF_PROBE_ACTIVE_IMAGE_FRAMES[count].store(frame.address(), Ordering::SeqCst);
+    ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[count].store(frame.generation(), Ordering::SeqCst);
+    ELF_PROBE_ACTIVE_IMAGE_FLAGS[count].store(
+        u8::from(writable) | (u8::from(executable) << 1),
+        Ordering::SeqCst,
+    );
     ELF_PROBE_ACTIVE_IMAGE_COUNT.store((count + 1) as u8, Ordering::SeqCst);
     true
 }
@@ -1924,24 +1968,28 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     };
     let initial_image_valid = if execution.initial_image_count == 0 {
         execution
-            .initial_image_addresses
+            .initial_image_mappings
             .iter()
-            .all(|address| *address == 0)
+            .all(|mapping| *mapping == LinuxActiveImageMapping::EMPTY)
     } else {
         (1..=LINUX_ACTIVE_IMAGE_MAPPING_LIMIT).contains(&execution.initial_image_count)
-            && execution.initial_image_addresses[..execution.initial_image_count]
+            && execution.initial_image_mappings[..execution.initial_image_count]
                 .iter()
                 .enumerate()
-                .all(|(index, address)| {
-                    *address != 0
-                        && address.is_multiple_of(PAGE_SIZE)
-                        && execution.initial_image_addresses[..index]
+                .all(|(index, mapping)| {
+                    mapping.address != 0
+                        && mapping.address.is_multiple_of(PAGE_SIZE)
+                        && !(mapping.writable && mapping.executable)
+                        && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                        && execution.initial_image_mappings[..index]
                             .iter()
-                            .all(|prior| prior != address)
+                            .all(|prior| {
+                                prior.address != mapping.address && prior.frame != mapping.frame
+                            })
                 })
-            && execution.initial_image_addresses[execution.initial_image_count..]
+            && execution.initial_image_mappings[execution.initial_image_count..]
                 .iter()
-                .all(|address| *address == 0)
+                .all(|mapping| *mapping == LinuxActiveImageMapping::EMPTY)
     };
     if !initial_image_valid || execution.exec_expected && execution.initial_image_count == 0 {
         return LinuxElfResult::FAILED;
@@ -2231,11 +2279,15 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         ELF_PROBE_EXEC_MAPPING_GENERATIONS[index].store(0, Ordering::SeqCst);
         ELF_PROBE_EXEC_MAPPING_FLAGS[index].store(0, Ordering::SeqCst);
     }
-    for (state, address) in ELF_PROBE_ACTIVE_IMAGE_ADDRESSES
-        .iter()
-        .zip(execution.initial_image_addresses)
-    {
-        state.store(address as u64, Ordering::SeqCst);
+    for (index, mapping) in execution.initial_image_mappings.into_iter().enumerate() {
+        ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[index].store(mapping.address as u64, Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_FRAMES[index].store(mapping.frame.address(), Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index]
+            .store(mapping.frame.generation(), Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].store(
+            u8::from(mapping.writable) | (u8::from(mapping.executable) << 1),
+            Ordering::SeqCst,
+        );
     }
     ELF_PROBE_ACTIVE_IMAGE_COUNT.store(execution.initial_image_count as u8, Ordering::SeqCst);
     ELF_PROBE_RELRO.store(execution.relro as u64, Ordering::SeqCst);
@@ -2895,40 +2947,75 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         core::array::from_fn(|index| {
             ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[index].swap(0, Ordering::SeqCst)
         });
+    let active_image_frames: [Option<memory::FrameLease>; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+        core::array::from_fn(|index| {
+            memory::FrameLease::from_parts(
+                ELF_PROBE_ACTIVE_IMAGE_FRAMES[index].swap(0, Ordering::SeqCst),
+                ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index].swap(0, Ordering::SeqCst),
+            )
+        });
+    let active_image_flags: [u8; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+        core::array::from_fn(|index| ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].swap(0, Ordering::SeqCst));
     let active_image_state_valid = if let Some((mappings, mapping_count)) = selected_exec_mappings {
         active_image_count == mapping_count
             && active_image_addresses[..mapping_count]
                 .iter()
+                .zip(&active_image_frames[..mapping_count])
+                .zip(&active_image_flags[..mapping_count])
                 .zip(&mappings[..mapping_count])
-                .all(|(address, mapping)| *address == mapping.address as u64)
+                .enumerate()
+                .all(|(index, (((address, frame), flags), mapping))| {
+                    *address == mapping.address as u64
+                        && *frame == exec_frames[index]
+                        && *flags
+                            == u8::from(mapping.writable) | (u8::from(mapping.executable) << 1)
+                })
             && active_image_addresses[mapping_count..]
                 .iter()
                 .all(|address| *address == 0)
+            && active_image_frames[mapping_count..]
+                .iter()
+                .all(Option::is_none)
+            && active_image_flags[mapping_count..]
+                .iter()
+                .all(|flags| *flags == 0)
     } else {
-        let mut expected = [0_u64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+        let mut expected = [LinuxActiveImageMapping::EMPTY; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
         let mut expected_count = execution.initial_image_count;
-        for (output, address) in expected
+        for (output, mapping) in expected
             .iter_mut()
-            .zip(&execution.initial_image_addresses[..execution.initial_image_count])
+            .zip(&execution.initial_image_mappings[..execution.initial_image_count])
         {
-            *output = *address as u64;
+            *output = *mapping;
         }
-        let mut append = |address: u64| {
-            if address == 0
+        let mut append = |mapping: LinuxActiveImageMapping| {
+            if mapping == LinuxActiveImageMapping::EMPTY
                 || expected_count == expected.len()
-                || expected[..expected_count].contains(&address)
+                || expected[..expected_count]
+                    .iter()
+                    .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
             {
                 return false;
             }
-            expected[expected_count] = address;
+            expected[expected_count] = mapping;
             expected_count += 1;
             true
         };
         let main_complete = execution
             .main_mappings
             .iter()
-            .filter(|mapping| mapping.address != 0)
-            .all(|mapping| append(mapping.address as u64));
+            .enumerate()
+            .filter(|(_, mapping)| mapping.address != 0)
+            .all(|(index, mapping)| {
+                main_frames[index].is_some_and(|frame| {
+                    append(LinuxActiveImageMapping {
+                        address: mapping.address,
+                        frame,
+                        writable: mapping.writable,
+                        executable: mapping.executable,
+                    })
+                })
+            });
         let dependencies_complete =
             execution
                 .dependency_mappings
@@ -2937,22 +3024,48 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
                 .all(|(dependency, mappings)| {
                     mappings
                         .iter()
-                        .filter(|mapping| mapping.file_size != 0)
-                        .all(|mapping| {
+                        .enumerate()
+                        .filter(|(_, mapping)| mapping.file_size != 0)
+                        .all(|(index, mapping)| {
                             observed_dependency_bases[dependency]
                                 .checked_add(mapping.relative_address as u64)
-                                .is_some_and(&mut append)
+                                .and_then(|address| usize::try_from(address).ok())
+                                .zip(dependency_frames[dependency][index])
+                                .is_some_and(|(address, frame)| {
+                                    append(LinuxActiveImageMapping {
+                                        address,
+                                        frame,
+                                        writable: mapping.writable,
+                                        executable: mapping.executable,
+                                    })
+                                })
                         })
                 });
         main_complete
             && dependencies_complete
             && active_image_count == expected_count
-            && active_image_addresses[..active_image_count]
-                .iter()
-                .all(|address| expected[..expected_count].contains(address))
+            && (0..active_image_count).all(|index| {
+                let flags = active_image_flags[index];
+                flags & !3 == 0
+                    && flags != 3
+                    && active_image_frames[index].is_some_and(|frame| {
+                        expected[..expected_count].contains(&LinuxActiveImageMapping {
+                            address: active_image_addresses[index] as usize,
+                            frame,
+                            writable: flags & 1 != 0,
+                            executable: flags & 2 != 0,
+                        })
+                    })
+            })
             && active_image_addresses[active_image_count..]
                 .iter()
                 .all(|address| *address == 0)
+            && active_image_frames[active_image_count..]
+                .iter()
+                .all(Option::is_none)
+            && active_image_flags[active_image_count..]
+                .iter()
+                .all(|flags| *flags == 0)
     };
     let exec_contract_state_valid = exec_image_contract_valid && active_image_state_valid;
     let tls_state_valid = ELF_PROBE_TLS.swap(0, Ordering::SeqCst) == execution.tls as u64
@@ -4509,7 +4622,7 @@ fn linux_mmap_fixed_file(
         }
         return LINUX_EEXIST;
     }
-    if !append_linux_active_image_mapping(address) {
+    if !append_linux_active_image_mapping(address, lease, writable, executable) {
         let unmapped = address_space::unmap_current_linux_page(address, frame);
         let scrubbed = unmapped && address_space::prepare_linux_frame(frame, &[]);
         if scrubbed {
@@ -5211,9 +5324,18 @@ fn linux_execve_at(
             Ordering::SeqCst,
         );
         ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[index].store(mapping.address as u64, Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].store(
+            u8::from(mapping.writable) | (u8::from(mapping.executable) << 1),
+            Ordering::SeqCst,
+        );
     }
-    for address in &ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[mapping_count..] {
-        address.store(0, Ordering::SeqCst);
+    for index in mapping_count..LINUX_ACTIVE_IMAGE_MAPPING_LIMIT {
+        ELF_PROBE_ACTIVE_IMAGE_ADDRESSES[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_FRAMES[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].store(0, Ordering::SeqCst);
     }
     ELF_PROBE_ACTIVE_IMAGE_COUNT.store(mapping_count as u8, Ordering::SeqCst);
     ELF_PROBE_EXEC_REPLACED.store(true, Ordering::SeqCst);

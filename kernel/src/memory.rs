@@ -49,6 +49,11 @@ impl FrameOwner {
 }
 
 impl FrameLease {
+    pub(crate) const EMPTY: Self = Self {
+        address: 0,
+        generation: 0,
+    };
+
     pub(crate) const fn address(self) -> u64 {
         self.address
     }

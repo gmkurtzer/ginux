@@ -693,6 +693,7 @@ for marker in \
     'runtime-selected Linux exec plans committed' \
     'variable-page Linux exec images committed' \
     'Linux active image ownership transitioned' \
+    'generation-bound Linux image ownership verified' \
     'Linux replacement frames allocated on demand' \
     'Linux replacement frame generations reclaimed'; do
     if ! grep -q "^ginux: $marker" "$output_file"; then
