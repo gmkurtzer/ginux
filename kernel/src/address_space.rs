@@ -1,7 +1,7 @@
 use core::{
     arch::{asm, global_asm},
     mem::size_of,
-    sync::atomic::{AtomicU8, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
 };
 
 use crate::{
@@ -54,6 +54,8 @@ const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 static mut AUXILIARY_ADDRESS_SPACES: [Option<RegisteredAuxiliaryAddressSpace>;
     domain::MAX_AUXILIARY_SERVICES] = [const { None }; domain::MAX_AUXILIARY_SERVICES];
 static NATIVE_VOLUME_COMPLETION: AtomicU8 = AtomicU8::new(0);
+static LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN: AtomicU64 = AtomicU64::new(0);
+static LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn verify_linux_elf_mapping(
     plan: &crate::linux_elf::LoadPlan<'_>,
@@ -4821,6 +4823,13 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
     let Some(dma_physical) = registered.space.dma_physical() else {
         return false;
     };
+    if !require_completed_dma {
+        LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.store(
+            pci::device_active_queue_is_bound(device, mapping, dma_physical),
+            Ordering::Release,
+        );
+        LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.store(domain_id, Ordering::Release);
+    }
     if notification_page
         .is_some_and(|physical| !registered.space.notification_mapping_is_exact(physical))
         || require_completed_dma
@@ -4838,6 +4847,11 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
     }
     registered.device_quiesced = true;
     true
+}
+
+fn unsafe_device_quiesce_was_active(domain_id: u64) -> Option<bool> {
+    (LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.load(Ordering::Acquire) == domain_id)
+        .then(|| LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.load(Ordering::Acquire))
 }
 
 pub(crate) fn activate_kernel_root_for_auxiliary(domain_id: u64) -> bool {
@@ -5865,12 +5879,14 @@ pub(crate) enum NativeVolumeOutcome {
     Recovered,
     Rejected,
     RestartRequired,
+    IncompatibleAbi,
     Faulted,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum NativeVolumeMode {
     Normal,
+    IncompatibleAbi,
     Fault,
     CancelNotified,
 }
@@ -5920,6 +5936,27 @@ pub(crate) fn verify_native_volume_service_fault(
         apic,
         Some(restart_identity),
         NativeVolumeMode::Fault,
+    )
+}
+
+pub(crate) fn verify_native_volume_service_incompatible_abi(
+    image: &crate::native_elf::NativeImage<'_>,
+    register_physical: u64,
+    device: VirtioBlockDevice,
+    mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+    restart_identity: u64,
+) -> Option<NativeVolumeRun> {
+    verify_native_volume_service_run(
+        image,
+        register_physical,
+        device,
+        mapping,
+        msix_mapping,
+        apic,
+        Some(restart_identity),
+        NativeVolumeMode::IncompatibleAbi,
     )
 }
 
@@ -6037,7 +6074,7 @@ fn verify_native_volume_service_run(
     let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
     let expected_timeouts = timer::device_wait_timeout_count().checked_add(match mode {
         NativeVolumeMode::Normal => 1,
-        NativeVolumeMode::Fault => 0,
+        NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::Fault => 0,
         NativeVolumeMode::CancelNotified => 2,
     })?;
     NATIVE_VOLUME_COMPLETION.store(0, Ordering::Release);
@@ -6081,6 +6118,16 @@ fn verify_native_volume_service_run(
         crate::serial_write_bytes(b"\r\nginux: native volume interrupt arm failed");
         return None;
     }
+    if mode == NativeVolumeMode::IncompatibleAbi
+        && !cpu::force_next_control_discovery(
+            auxiliary,
+            (u64::from(ginux_native_abi::NATIVE_CONTROL_ABI_VERSION - 1) << 16)
+                | u64::from(ginux_native_abi::NATIVE_CONTROL_REQUIRED_FEATURES),
+        )
+    {
+        crate::serial_write_bytes(b"\r\nginux: native control ABI mismatch injection failed");
+        return None;
+    }
     if mode == NativeVolumeMode::CancelNotified
         && !pci::force_next_notified_wait_timeout(auxiliary, INTERRUPT_REQUEST)
     {
@@ -6095,27 +6142,33 @@ fn verify_native_volume_service_run(
     let event = domain::take_lifecycle_event();
     let completion = NATIVE_VOLUME_COMPLETION.swap(0, Ordering::AcqRel);
     let exit_status = domain::last_lifecycle_event_detail();
-    let fault = (mode == NativeVolumeMode::Fault)
-        .then(|| {
-            domain::delivered_fault_descriptor().and_then(|descriptor| {
-                let vector = descriptor
-                    .get(6..8)
-                    .and_then(|bytes| bytes.try_into().ok())
-                    .map(u16::from_le_bytes)?;
-                let instruction = descriptor
-                    .get(32..40)
-                    .and_then(|bytes| bytes.try_into().ok())
-                    .map(u64::from_le_bytes)?;
-                let relative = instruction.checked_sub(USER_TEST_ADDRESS as u64)?;
-                image.address_is_executable(relative).then_some((
-                    vector,
-                    instruction,
-                    image.byte_at_virtual(relative),
-                ))
-            })
+    let fault = matches!(
+        mode,
+        NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::Fault
+    )
+    .then(|| {
+        domain::delivered_fault_descriptor().and_then(|descriptor| {
+            let vector = descriptor
+                .get(6..8)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u16::from_le_bytes)?;
+            let instruction = descriptor
+                .get(32..40)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u64::from_le_bytes)?;
+            let relative = instruction.checked_sub(USER_TEST_ADDRESS as u64)?;
+            image.address_is_executable(relative).then_some((
+                vector,
+                instruction,
+                image.byte_at_virtual(relative),
+            ))
         })
-        .flatten();
+    })
+    .flatten();
     let outcome = match (mode, exit_status, completion, fault) {
+        (NativeVolumeMode::IncompatibleAbi, Some(0), 0, Some((13, _, Some(0xf4)))) => {
+            Some(NativeVolumeOutcome::IncompatibleAbi)
+        }
         (NativeVolumeMode::Fault, Some(0), 0, Some((13, _, Some(0xf4)))) => {
             Some(NativeVolumeOutcome::Faulted)
         }
@@ -6145,7 +6198,10 @@ fn verify_native_volume_service_run(
         ) => Some(NativeVolumeOutcome::Rejected),
         _ => None,
     };
-    let expected_kind = if mode == NativeVolumeMode::Fault {
+    let expected_kind = if matches!(
+        mode,
+        NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::Fault
+    ) {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
     } else {
         crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
@@ -6171,7 +6227,18 @@ fn verify_native_volume_service_run(
             )
         && domain::last_lifecycle_event_audit()
             .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary)
-        && domain::last_lifecycle_event_has_fault() == Some(mode == NativeVolumeMode::Fault)
+        && domain::last_lifecycle_event_has_fault()
+            == Some(matches!(
+                mode,
+                NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::Fault
+            ))
+        && match mode {
+            NativeVolumeMode::IncompatibleAbi => {
+                unsafe_device_quiesce_was_active(auxiliary) == Some(false)
+            }
+            NativeVolumeMode::Fault => unsafe_device_quiesce_was_active(auxiliary) == Some(true),
+            NativeVolumeMode::Normal | NativeVolumeMode::CancelNotified => true,
+        }
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::take_lifecycle_event().is_none();
     if !valid {

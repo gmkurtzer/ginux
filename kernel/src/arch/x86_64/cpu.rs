@@ -470,6 +470,8 @@ struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
+static CONTROL_DISCOVERY_OVERRIDE_DOMAIN: AtomicU64 = AtomicU64::new(0);
+static CONTROL_DISCOVERY_OVERRIDE_WORD: AtomicU64 = AtomicU64::new(0);
 const PROCESS_CHILD_PROBE_IDLE: u8 = 0;
 const PROCESS_CHILD_PROBE_EXPECT_CONTEXT: u8 = 1;
 const PROCESS_CHILD_PROBE_EXPECT_EXIT: u8 = 2;
@@ -14223,6 +14225,19 @@ fn copy_to_linux_user(address: u64, input: &[u8]) -> bool {
     true
 }
 
+pub(crate) fn force_next_control_discovery(domain_id: u64, discovery_word: u64) -> bool {
+    if domain_id == 0
+        || CONTROL_DISCOVERY_OVERRIDE_DOMAIN
+            .compare_exchange(0, u64::MAX, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+    {
+        return false;
+    }
+    CONTROL_DISCOVERY_OVERRIDE_WORD.store(discovery_word, Ordering::Release);
+    CONTROL_DISCOVERY_OVERRIDE_DOMAIN.store(domain_id, Ordering::Release);
+    true
+}
+
 fn dispatch_charged_call(
     number: u64,
     capability: u64,
@@ -14230,7 +14245,16 @@ fn dispatch_charged_call(
     frame: *mut UserTrapFrame,
 ) -> u64 {
     match number {
-        0 => control_abi::DISCOVERY_WORD,
+        0 => {
+            if CONTROL_DISCOVERY_OVERRIDE_DOMAIN
+                .compare_exchange(caller_domain, 0, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                CONTROL_DISCOVERY_OVERRIDE_WORD.load(Ordering::Acquire)
+            } else {
+                control_abi::DISCOVERY_WORD
+            }
+        }
         1 => {
             if domain::handle_permits(caller_domain, capability, 1, Rights::READ) {
                 SYSCALL_STATE.fetch_or(2, Ordering::SeqCst);

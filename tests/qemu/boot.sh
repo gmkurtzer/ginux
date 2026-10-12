@@ -98,6 +98,8 @@ if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$outpu
     ! grep -q '^ginux: native volume service identity survived replacement' "$output_file" ||
     ! grep -q '^ginux: replacement native volume service recovered exact record' "$output_file" ||
     ! grep -q '^ginux: replacement native volume resources retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: incompatible native service ABI rejected before device activation' "$output_file" ||
+    ! grep -q '^ginux: compatible native service recovered after ABI rejection' "$output_file" ||
     grep -q '^ginux: native volume record recovered after reboot' "$output_file"; then
     cat "$output_file"
     echo "Boot test failed: compiled native volume service did not initialize its record." >&2
@@ -133,6 +135,8 @@ if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboo
     ! grep -q '^ginux: native volume service identity survived replacement' "$reboot_output_file" ||
     ! grep -q '^ginux: replacement native volume service recovered exact record' "$reboot_output_file" ||
     ! grep -q '^ginux: replacement native volume resources retired cleanly' "$reboot_output_file" ||
+    ! grep -q '^ginux: incompatible native service ABI rejected before device activation' "$reboot_output_file" ||
+    ! grep -q '^ginux: compatible native service recovered after ABI rejection' "$reboot_output_file" ||
     ! grep -q '^ginux: compiled native volume service fault contained' "$reboot_output_file" ||
     ! grep -q '^ginux: post-fault native volume service recovered exact record' "$reboot_output_file" ||
     ! grep -q '^ginux: notified native volume timeout cancelled safely' "$reboot_output_file" ||
@@ -158,6 +162,8 @@ if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native volume service identity survived replacement' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume service repeated fail-closed rejection' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume resources retired cleanly' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: incompatible native service ABI rejected before device activation' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: compatible native service recovered after ABI rejection' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: compiled native volume service fault contained' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: post-fault native volume service preserved rejection' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: notified native volume timeout cancelled safely' "$native_corrupt_output_file" ||
@@ -3260,6 +3266,13 @@ if ! grep -q '^ginux: compiled native volume service fault contained' "$output_f
     ! grep -q '^ginux: post-fault native volume service recovered exact record' "$output_file" ||
     ! grep -q '^ginux: post-fault native volume resources retired cleanly' "$output_file"; then
     echo "Boot test failed: an incomplete native device-service request was not contained." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: incompatible native service ABI rejected before device activation' "$output_file" ||
+    ! grep -q '^ginux: incompatible native service generation retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: compatible native service recovered after ABI rejection' "$output_file"; then
+    echo "Boot test failed: incompatible native control ABI did not fail closed and recover." >&2
     exit 1
 fi
 

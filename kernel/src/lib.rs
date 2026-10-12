@@ -1747,6 +1747,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         address_space::NativeVolumeOutcome::RestartRequired => {
             kernel_fail("\r\nginux: normal native volume run requested restart\r\n");
         }
+        address_space::NativeVolumeOutcome::IncompatibleAbi => {
+            kernel_fail("\r\nginux: normal native volume run rejected its ABI\r\n");
+        }
         address_space::NativeVolumeOutcome::Faulted => {
             kernel_fail("\r\nginux: normal native volume run reported a fault\r\n");
         }
@@ -1777,6 +1780,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     address_space::NativeVolumeOutcome::RestartRequired => {
                         address_space::NativeVolumeOutcome::RestartRequired
                     }
+                    address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                        address_space::NativeVolumeOutcome::IncompatibleAbi
+                    }
                     address_space::NativeVolumeOutcome::Faulted => {
                         address_space::NativeVolumeOutcome::Faulted
                     }
@@ -1805,11 +1811,94 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         address_space::NativeVolumeOutcome::RestartRequired => {
             "\r\nginux: replacement native volume service requested restart unexpectedly"
         }
+        address_space::NativeVolumeOutcome::IncompatibleAbi => {
+            "\r\nginux: replacement native volume service rejected its ABI unexpectedly"
+        }
         address_space::NativeVolumeOutcome::Faulted => {
             "\r\nginux: replacement native volume service faulted unexpectedly"
         }
     });
     serial_write("\r\nginux: replacement native volume resources retired cleanly");
+    let incompatible_volume_run = address_space::verify_native_volume_service_incompatible_abi(
+        &volume_image,
+        virtio_status_physical,
+        virtio_block,
+        virtio_mmio,
+        virtio_msix_mmio,
+        &local_apic,
+        native_volume_run.service_identity,
+    );
+    let incompatible_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    let incompatible_volume_valid = incompatible_volume_run
+        .as_ref()
+        .is_some_and(|incompatible| {
+            incompatible.domain != native_volume_run.domain
+                && incompatible.domain != replacement_volume_run.domain
+                && incompatible.service_identity == native_volume_run.service_identity
+                && incompatible.outcome == address_space::NativeVolumeOutcome::IncompatibleAbi
+        });
+    if !incompatible_volume_valid || !incompatible_volume_quiesced {
+        serial_write("\r\nginux: incompatible native volume valid/quiesced: ");
+        serial_write_u64(u64::from(incompatible_volume_valid));
+        serial_write(" ");
+        serial_write_u64(u64::from(incompatible_volume_quiesced));
+        kernel_fail("\r\nginux: incompatible native volume ABI invariant failed\r\n");
+    }
+    let Some(incompatible_volume_run) = incompatible_volume_run else {
+        kernel_fail("\r\nginux: incompatible native volume outcome unavailable\r\n");
+    };
+    serial_write("\r\nginux: incompatible native service ABI rejected before device activation");
+    serial_write("\r\nginux: incompatible native service generation retired cleanly");
+    let recovered_after_incompatible = address_space::verify_native_volume_service(
+        &volume_image,
+        virtio_status_physical,
+        virtio_block,
+        virtio_mmio,
+        virtio_msix_mmio,
+        &local_apic,
+        Some(native_volume_run.service_identity),
+    );
+    let recovered_after_incompatible_quiesced =
+        arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    let recovered_after_incompatible_valid =
+        recovered_after_incompatible
+            .as_ref()
+            .is_some_and(|recovered| {
+                recovered.domain != native_volume_run.domain
+                    && recovered.domain != replacement_volume_run.domain
+                    && recovered.domain != incompatible_volume_run.domain
+                    && recovered.service_identity == native_volume_run.service_identity
+                    && recovered.outcome
+                        == match native_volume_outcome {
+                            address_space::NativeVolumeOutcome::Initialized
+                            | address_space::NativeVolumeOutcome::Recovered => {
+                                address_space::NativeVolumeOutcome::Recovered
+                            }
+                            address_space::NativeVolumeOutcome::Rejected => {
+                                address_space::NativeVolumeOutcome::Rejected
+                            }
+                            address_space::NativeVolumeOutcome::RestartRequired => {
+                                address_space::NativeVolumeOutcome::RestartRequired
+                            }
+                            address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                                address_space::NativeVolumeOutcome::IncompatibleAbi
+                            }
+                            address_space::NativeVolumeOutcome::Faulted => {
+                                address_space::NativeVolumeOutcome::Faulted
+                            }
+                        }
+            });
+    if !recovered_after_incompatible_valid || !recovered_after_incompatible_quiesced {
+        serial_write("\r\nginux: post-ABI-rejection native volume valid/quiesced: ");
+        serial_write_u64(u64::from(recovered_after_incompatible_valid));
+        serial_write(" ");
+        serial_write_u64(u64::from(recovered_after_incompatible_quiesced));
+        kernel_fail("\r\nginux: post-ABI-rejection recovery invariant failed\r\n");
+    }
+    let Some(recovered_after_incompatible) = recovered_after_incompatible else {
+        kernel_fail("\r\nginux: post-ABI-rejection outcome unavailable\r\n");
+    };
+    serial_write("\r\nginux: compatible native service recovered after ABI rejection");
     let faulted_volume_run = address_space::verify_native_volume_service_fault(
         &volume_image,
         virtio_status_physical,
@@ -1823,6 +1912,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let faulted_volume_valid = faulted_volume_run.as_ref().is_some_and(|faulted| {
         faulted.domain != native_volume_run.domain
             && faulted.domain != replacement_volume_run.domain
+            && faulted.domain != incompatible_volume_run.domain
+            && faulted.domain != recovered_after_incompatible.domain
             && faulted.service_identity == native_volume_run.service_identity
             && faulted.outcome == address_space::NativeVolumeOutcome::Faulted
     });
@@ -1866,6 +1957,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     address_space::NativeVolumeOutcome::RestartRequired => {
                         address_space::NativeVolumeOutcome::RestartRequired
                     }
+                    address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                        address_space::NativeVolumeOutcome::IncompatibleAbi
+                    }
                     address_space::NativeVolumeOutcome::Faulted => {
                         address_space::NativeVolumeOutcome::Faulted
                     }
@@ -1893,6 +1987,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         address_space::NativeVolumeOutcome::RestartRequired => {
             "\r\nginux: post-fault native volume service requested restart unexpectedly"
+        }
+        address_space::NativeVolumeOutcome::IncompatibleAbi => {
+            "\r\nginux: post-fault native volume service rejected its ABI unexpectedly"
         }
         address_space::NativeVolumeOutcome::Faulted => {
             "\r\nginux: post-fault native volume service faulted unexpectedly"
@@ -1962,6 +2059,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                             address_space::NativeVolumeOutcome::RestartRequired => {
                                 address_space::NativeVolumeOutcome::RestartRequired
                             }
+                            address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                                address_space::NativeVolumeOutcome::IncompatibleAbi
+                            }
                             address_space::NativeVolumeOutcome::Faulted => {
                                 address_space::NativeVolumeOutcome::Faulted
                             }
@@ -1985,6 +2085,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         address_space::NativeVolumeOutcome::RestartRequired => {
             "\r\nginux: post-cancellation native volume requested restart unexpectedly"
+        }
+        address_space::NativeVolumeOutcome::IncompatibleAbi => {
+            "\r\nginux: post-cancellation native volume rejected its ABI unexpectedly"
         }
         address_space::NativeVolumeOutcome::Faulted => {
             "\r\nginux: post-cancellation native volume faulted unexpectedly"

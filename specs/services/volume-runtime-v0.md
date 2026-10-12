@@ -87,15 +87,19 @@ plane's original authority, and allocates a new address space and DMA lease.
 The replacement must recover the exact record after initialization or repeat
 the same fail-closed rejection on corrupt media. Its second clean exit must
 again leave the device reset, authority revoked, and every owned frame scrubbed
-and released. An independent stop-only auxiliary still executes a genuine
+and released. A separate generation receives an intentionally older control
+ABI discovery version. It executes the compiled service's fatal path before
+device activation; the kernel verifies the queue was inactive, contains the
+fault, revokes all resources, and starts a compatible generation that recovers
+the exact record or preserves corruption rejection. An independent stop-only auxiliary still executes a genuine
 invalid-opcode fault on every ordinary QEMU boot, proving that fault lifecycle
-metadata and containment remain distinct from clean completion. A third run of
+metadata and containment remain distinct from clean completion. A later run of
 the compiled service receives a structurally valid but intentionally invalid
 opaque device handle. It configures and notifies its queue, cannot authorize
 the wait, and executes its real fatal `HLT` path. The kernel accepts only the
 measured `HLT` fault, quiesces the device without assuming a completed request,
 scrubs the incomplete DMA page, and revokes authority. Only after complete
-retirement, it starts a fourth generation with the same logical identity but a
+retirement, it starts another generation with the same logical identity but a
 fresh capability table, address space, and DMA lease. That post-fault
 generation must recover the exact record or preserve fail-closed rejection,
 then cleanly retire while the kernel continues booting.
