@@ -306,11 +306,8 @@ ginux_linux_interpreter:
     push rbx
     mov rsi, qword ptr fs:[0]
     sub rsi, 16
-    mov edi, 1
-    mov edx, 8
-    mov eax, 1
-    syscall
-    cmp rax, 8
+    movabs rax, 0x0a214b4f5f534c54
+    cmp qword ptr [rsi], rax
     jne .Linvalid_dynamic
     mov rax, qword ptr [rsp + 32]
     mov rcx, qword ptr [rax]

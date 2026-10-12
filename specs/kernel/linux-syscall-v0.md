@@ -349,8 +349,8 @@ installs the interpreter needed to bootstrap ring 3; that interpreter installs
 the main and both dependencies' admitted segments through the fixed mapping
 contract below.
 
-`rax = 59` (`__NR_execve`) provides one bounded replacement transition for the
-single-threaded static proof process. Absolute and current-directory-relative
+`rax = 59` (`__NR_execve`) provides bounded replacement transitions for the
+single-threaded proof process. Absolute and current-directory-relative
 normalized paths resolve through the retained measured-root index. The selected
 node must be an executable regular file and must match the admitted static ELF
 profile. The independently built `bin/exec-target` and `bin/exec-second`
@@ -392,9 +392,26 @@ process state, so `/proc/self/exe` reports `/bin/exec-target` or
 `/bin/exec-second` independently of the accepted pathname form. Each
 replacement validates these transitions, reopens `/dev/console`, validates its
 complete initial stack, emits its distinct proof marker, closes
-all surviving proof descriptors, and exits with status 42. General ELF
-loading, dynamic targets, shebangs, and arbitrary argument or environment
-vectors are outside this version.
+all surviving proof descriptors, and exits with status 42.
+
+The same syscall admits one interpreted target: Linux-visible `/init`, backed
+by measured-root `linux/init`. It requires exactly one argument and one
+environment entry, authenticates the fixed interpreter/main/two-DSO graph,
+atomically installs fresh interpreter pages, and retires the complete previous
+graph with exact generation-tagged leases. It then resets the main and DSO
+mapping contracts so the replacement interpreter can install the authenticated
+main and dependencies again. Both preallocated TLS pages are zeroed and
+rematerialized from the authenticated templates, the initial FS base is
+restored, ignored signal dispositions are preserved from the observed
+pre-exec set, caught dispositions are cleared, and RELRO is applied again.
+The replacement main emits the kernel-observed `DYNEXEC` completion by exiting
+with status 42. Other dynamic targets, general dependency resolution,
+shebangs, and arbitrary interpreted argument or environment vectors are
+outside this version. The process page-table root, heap, primary stack frame,
+preallocated sibling stack, and TLS frame leases remain allocated across this
+transaction; TLS contents are fully reconstructed, while only the bounded
+512-byte initial-stack region is rebuilt. Replacing those ancillary frame
+leases is a later lifecycle milestone.
 
 `rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
 or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath

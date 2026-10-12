@@ -131,11 +131,12 @@ This is deliberately a bounded static profile, not a general ELF loader.
 `execve` resolves absolute or current-directory-relative normalized paths
 through the retained measured-root index, requires an executable regular node,
 and admits either fixture because both independently satisfy that profile. The
-profile admits one read-only header page, one to five executable pages, one or
+static-target branch admits one read-only header page, one to five executable pages, one or
 two writable pages, at most eight pages total, one live thread,
 up to eight bounded argument strings, up to eight bounded environment strings,
-and a 512-byte replacement stack image. It does not yet support an interpreter,
-dependencies, shebangs, unbounded vectors, or dynamic exec targets. The second
+and a 512-byte replacement stack image. It does not support an interpreter,
+dependencies, shebangs, or unbounded vectors; the separately bounded
+interpreted `/init` transaction is described below. The second
 fixture deliberately crosses an executable-page boundary, proving that mapping,
 materialization, publication, teardown, and frame reclamation use the runtime
 page count rather than a fixed three-frame shape. Before each live execution,
@@ -412,8 +413,7 @@ back and scrubs its unpublished lease. Final validation reconstructs the exact
 interpreter, main, and load-biased dependency page set from authenticated
 contracts, requires every recorded address exactly once, and requires all
 unused record slots to remain zero. This record supplies the complete old-image
-set required by a later interpreted `execve` transaction; it does not yet make
-dynamic targets executable through `execve`.
+set consumed by the interpreted `execve` transaction.
 
 The interpreted-exec planner now accepts the main, interpreter, and two DSO
 byte slices selected from the authenticated measured-root index. It parses the
@@ -421,9 +421,17 @@ runtime main and derives per-file digests for the already authenticated graph,
 then binds the canonical interpreter path, ordered dependency names, matching
 SONAMEs, fixed bounded load windows, and non-overlap contract. Kernel-embedded
 artifact equality is not an admission condition. Substituting a static main,
-reversing the DSOs, or truncating the interpreter is rejected. The current
-execution proof consumes this planner, but `execve` installation of an
-interpreted target remains the next transaction milestone.
+reversing the DSOs, or truncating the interpreter is rejected. `execve("/init")`
+consumes this exact plan: it atomically installs fresh interpreter pages,
+publishes them as the new active-image seed, retires every old interpreter,
+main, and dependency lease, and resets the userspace mapping contracts. The
+replacement interpreter then maps the same authenticated main and two DSOs and
+reconstructs the complete active-image record. Initial and sibling TLS pages
+are rematerialized in place from all three authenticated templates, and the
+initial FS base is restored before interpreter entry. RELRO is reapplied before
+the replacement main exits. Admission is currently limited to `/init`, one
+argument, one environment entry, one live thread, the fixed two-DSO graph, and
+the existing bounded load windows.
 
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF
@@ -448,8 +456,9 @@ LLD resolves them to `-16` and `-8` without adding a dynamic relocation type.
 Only the live static-block-plus-TCB extent is added to the syscall-copy
 contract. The kernel verifies that the exact extent is admitted and one-byte
 underflow and overflow ranges are rejected. Before invoking the preinitializer,
-the userspace interpreter proves the readable path with `write(1, TP - 16, 8)`,
-which emits the initialized `TLS_OK!` template.
+the userspace interpreter compares the eight initialized bytes at `TP - 16`
+with `TLS_OK!\n`. It does not require an inherited output descriptor, which may
+correctly have been closed by `FD_CLOEXEC` during replacement.
 On exit, the prior supervisor FS base is restored and the owned
 TLS frame is zeroed and released; the live-frame count must return to its
 pre-execution value. The later bounded `arch_prctl(ARCH_SET_FS)` proof may

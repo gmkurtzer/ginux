@@ -669,16 +669,30 @@ if ! grep -q '^ginux: toolchain-linked static Linux ELF executed' "$output_file"
     exit 1
 fi
 
-if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 2 ]]; then
-    echo "Boot test failed: measured Linux exec replacement did not complete twice." >&2
+if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 3 ]]; then
+    echo "Boot test failed: measured Linux exec replacement did not complete three times." >&2
     exit 1
 fi
 
 if [[ "$(grep -c '^EXEC_OK' "$output_file")" -ne 1 ]] ||
-    [[ "$(grep -c '^SECOND!' "$output_file")" -ne 1 ]]; then
-    echo "Boot test failed: both measured replacement Linux images did not execute." >&2
+    [[ "$(grep -c '^SECOND!' "$output_file")" -ne 1 ]] ||
+    [[ "$(grep -c '^DYNEXEC' "$output_file")" -ne 1 ]]; then
+    echo "Boot test failed: all measured replacement Linux images did not execute." >&2
     exit 1
 fi
+
+for marker in \
+    'measured-root interpreted Linux exec admitted' \
+    'interpreted Linux exec image committed' \
+    'measured-root interpreted Linux exec committed' \
+    'interpreted Linux exec graph remapped' \
+    'complete interpreted Linux graph retired at exec' \
+    'interpreted Linux TLS state rematerialized'; do
+    if ! grep -q "^ginux: ${marker}" "$output_file"; then
+        echo "Boot test failed: ${marker}." >&2
+        exit 1
+    fi
+done
 
 for marker in \
     'bounded Linux exec rejection preserved live image' \
@@ -822,8 +836,8 @@ if ! grep -q '^ginux: linker-resolved Linux TLS symbols executed' "$output_file"
     exit 1
 fi
 
-if ! grep -q '^TLS_OK!$' "$output_file"; then
-    echo "Boot test failed: userspace could not write directly from initial TLS." >&2
+if ! grep -q '^ginux: interpreted Linux TLS state rematerialized' "$output_file"; then
+    echo "Boot test failed: interpreted exec did not rematerialize Linux TLS state." >&2
     exit 1
 fi
 

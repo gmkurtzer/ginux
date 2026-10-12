@@ -42,8 +42,8 @@ The publication index now admits 64 nodes and is exercised beyond its original
 and `/lib64/*` paths map to internal measured-root entries, while
 `/bin/exec-target` and `/bin/exec-second` are direct measured-root nodes. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
-single-threaded `execve` proof atomically replaces two independent static workloads with the
-selected measured executable, rebuilds bounded argument and environment vectors
+single-threaded `execve` proof atomically replaces two independent static workloads and
+the running interpreted `/init` graph with the selected measured executable, rebuilds bounded argument and environment vectors
 on a fresh 512-byte initial stack, and allocates and materializes up to eight
 measured ELF pages only during the transaction. It derives entry and W^X mappings from that
 runtime selection instead of a boot-predeclared target template, replaces the
@@ -55,7 +55,10 @@ name, and exits without reviving the old program. Stale-generation retirement
 and a second release are rejected without mutation, while RELRO permission
 changes remain synchronized with the active-image record. Generation-tagged replacement
 frames are scrubbed and released after the process root becomes inactive, with
-the prior live-frame count restored. The archive
+the prior live-frame count restored. Interpreted replacement installs the measured
+interpreter first, lets it remap the authenticated main and both DSOs, reapplies
+RELRO, reconstructs both preallocated TLS images and FS state, and retires the
+complete old interpreter/main/DSO graph. The archive
 is not yet a general mount or a system-container image.
 
 The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. A separate isolated service probes and configures link, IPv4, default-gateway, and one static-route record through the first manifest-authorized network-device contract in control ABI v2; a monotonic generation makes effective configuration changes observable and rejects stale whole-state applies. Distinct read-only and write-only services prove that observation and mutation authority can be delegated independently, and a faulted network service is retired without losing mediated state or panicking the kernel. Packet I/O and a general route table remain deliberately unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
@@ -110,8 +113,8 @@ through `R_X86_64_TPOFF32`; LLD resolves both offsets without adding a dynamic
 relocation class, proving the toolchain layout matches the loader. Teardown
 scrubs and releases the TLS frame and restores the supervisor's prior FS base.
 The kernel admits only the live static-block-plus-TCB extent to syscall copy
-validation; the interpreter writes the initialized `TLS_OK!` value directly
-from FS-relative storage before invoking the preinitializer, while one-byte
+validation; the interpreter compares the initialized `TLS_OK!` value directly
+through FS-relative storage before invoking the preinitializer, while one-byte
 underflow and overflow ranges are rejected internally.
 Each DSO names its hidden TLS template through one toolchain-emitted
 `R_X86_64_GOTTPOFF` object reference. LLD converts that reference into a
@@ -466,7 +469,13 @@ measured-root executable identity.
 The proof also closes only `FD_CLOEXEC` descriptors, preserves an ordinary
 descriptor, resets caught signals while retaining an ignored disposition,
 disables the alternate signal stack, and derives the bounded process name from
-the selected measured node's basename.
+the selected measured node's basename. The interpreted `/init` proof accepts
+exactly `argv = ["/init", NULL]` and one environment entry, installs the
+authenticated interpreter pages atomically, resets the main/DSO mapping
+contracts, rematerializes initial and sibling TLS pages from authenticated
+templates, restores the initial FS base, and executes the replacement main
+after both DSOs have been mapped and relocated. This remains one fixed graph,
+not a general dynamic-linker contract.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.
 Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and

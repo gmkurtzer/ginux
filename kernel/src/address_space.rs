@@ -1213,6 +1213,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let kernel_root_physical = current_root();
     let mut main_frames = [None; 8];
     let mut dependency_frames = [[None; 8]; 2];
+    let mut exec_frames = [None; cpu::LINUX_EXEC_MAPPING_LIMIT];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [
@@ -1612,7 +1613,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_base_min: dependency_base_min.map(|base| base as usize),
                     dependency_base_end: dependency_base_end.map(|base| base as usize),
                     dependency_mappings,
-                    exec_expected: false,
+                    exec_expected: true,
                     initial_image_count,
                     initial_image_mappings,
                 })
@@ -1621,6 +1622,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             };
             main_frames = execution_result.main_frames;
             dependency_frames = execution_result.dependency_frames;
+            exec_frames = execution_result.exec_frames;
             let expected_active_image_count = initial_image_count
                 + main_mappings
                     .iter()
@@ -1950,9 +1952,13 @@ pub(crate) fn verify_interpreted_elf_mapping(
         }
     })()
     .unwrap_or(false);
-    let cleared = frames
-        .iter()
-        .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
+    let cleared = frames.iter().all(|frame| unsafe {
+        if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame]) {
+            zero_frame(frame.address()).is_some()
+        } else {
+            frame_is_zero(frame.address())
+        }
+    });
     let sibling_resources_scrubbed = cleared
         && unsafe { frame_is_zero(sibling_tls_page) }
         && unsafe { frame_is_zero(sibling_stack_page) };
@@ -1965,8 +1971,20 @@ pub(crate) fn verify_interpreted_elf_mapping(
         .iter()
         .flatten()
         .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
-    let frames_released =
-        sibling_resources_scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, frames);
+    let mut exec_frames_released = true;
+    for frame in exec_frames.into_iter().flatten() {
+        exec_frames_released &= prepare_linux_frame(frame.address(), &[])
+            && memory::release_frames(memory::FrameOwner::KERNEL, [frame]);
+    }
+    let mut original_frames_released = sibling_resources_scrubbed;
+    if sibling_resources_scrubbed {
+        for frame in frames {
+            if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame]) {
+                original_frames_released &=
+                    memory::release_frames(memory::FrameOwner::KERNEL, [frame]);
+            }
+        }
+    }
     let mut dependency_frames_released = dependency_cleared;
     if dependency_cleared {
         for frame in dependency_frames.into_iter().flatten().flatten() {
@@ -1983,7 +2001,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let frame_count_restored =
         memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(kernel_frames_before);
     valid
-        && frames_released
+        && original_frames_released
+        && exec_frames_released
         && main_frames_released
         && dependency_frames_released
         && frame_count_restored
@@ -2149,6 +2168,86 @@ pub(crate) fn map_current_linux_file_page(
         return false;
     }
     map_current_linux_page_with_permissions(address, frame, writable, executable)
+}
+
+fn current_linux_tls_frames<'main, 'interpreter, 'dependency>(
+    dependency_plan: &crate::linux_elf::DependencyGraphLoadPlan<'main, 'interpreter, 'dependency>,
+    thread_pointers: [u64; 2],
+) -> Option<(
+    crate::linux_elf::StaticTlsLayout,
+    crate::linux_elf::TlsTemplate<'main>,
+    [crate::linux_elf::TlsTemplate<'dependency>; 2],
+    [u64; 2],
+)> {
+    let main = dependency_plan.process.main.tls?;
+    let dependencies = [
+        dependency_plan.dependencies[0].tls?,
+        dependency_plan.dependencies[1].tls?,
+    ];
+    let layout = crate::linux_elf::plan_static_tls_layout(
+        main,
+        dependencies,
+        LINUX_TLS_THREAD_POINTER_OFFSET,
+        LINUX_TLS_TCB_SIZE,
+        PAGE_SIZE,
+    )?;
+    let mut frames = [0_u64; 2];
+    for (index, thread_pointer) in thread_pointers.into_iter().enumerate() {
+        let page = thread_pointer & !(PAGE_SIZE as u64 - 1);
+        if thread_pointer != page.checked_add(layout.thread_pointer_offset as u64)? {
+            return None;
+        }
+        let entry = unsafe { current_linux_leaf(page)?.read() };
+        if entry & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+            != PRESENT | WRITABLE | USER | NO_EXECUTE
+        {
+            return None;
+        }
+        frames[index] = entry & ADDRESS_MASK;
+        if !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[frames[index]])
+            || mapped_frame::<u8>(frames[index]).is_none()
+        {
+            return None;
+        }
+    }
+    if frames[0] == frames[1] {
+        return None;
+    }
+    Some((layout, main, dependencies, frames))
+}
+
+pub(crate) fn current_linux_tls_rematerializable(
+    dependency_plan: &crate::linux_elf::DependencyGraphLoadPlan<'_, '_, '_>,
+    thread_pointers: [u64; 2],
+) -> bool {
+    current_linux_tls_frames(dependency_plan, thread_pointers).is_some()
+}
+
+pub(crate) fn rematerialize_current_linux_tls(
+    dependency_plan: &crate::linux_elf::DependencyGraphLoadPlan<'_, '_, '_>,
+    thread_pointers: [u64; 2],
+) -> bool {
+    let Some((layout, main, dependencies, frames)) =
+        current_linux_tls_frames(dependency_plan, thread_pointers)
+    else {
+        return false;
+    };
+    for (frame, thread_pointer) in frames.into_iter().zip(thread_pointers) {
+        let Some(page) = mapped_frame::<u8>(frame) else {
+            return false;
+        };
+        let page = unsafe { &mut *(page as *mut [u8; PAGE_SIZE]) };
+        if !crate::linux_elf::materialize_static_tls_page(
+            layout,
+            main,
+            dependencies,
+            thread_pointer,
+            page,
+        ) {
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) fn replace_current_linux_image(

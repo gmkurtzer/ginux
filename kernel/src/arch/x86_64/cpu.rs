@@ -254,6 +254,7 @@ pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 32;
 const LINUX_EXEC_VECTOR_LIMIT: usize = 8;
 const LINUX_EXEC_STRING_LIMIT: usize = 64;
 const LINUX_EXEC_STACK_SIZE: usize = 512;
+const LINUX_PLATFORM: &[u8] = b"x86_64\0";
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
 const LINUX_F_SETFD: u64 = 2;
@@ -537,6 +538,7 @@ static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_SIGNAL_MASK: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_EXEC_IGNORED_SIGNALS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_SIGNAL_HANDLERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
     [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
 static ELF_PROBE_SIGNAL_FLAGS: [AtomicU64; LINUX_SIGNAL_COUNT] =
@@ -1217,17 +1219,19 @@ impl LinuxExecMapping {
 pub(crate) fn linux_exec_mapping_plan(
     plan: &crate::linux_elf::LoadPlan<'_>,
 ) -> Option<([LinuxExecMapping; LINUX_EXEC_MAPPING_LIMIT], usize)> {
-    let header = plan.read_only?;
-    let segments = [header, plan.executable, plan.writable];
-    let mapping_count = segments.iter().try_fold(0_usize, |count, segment| {
-        count.checked_add(segment.page_count)
-    })?;
+    let segments = [plan.read_only, Some(plan.executable), Some(plan.writable)];
+    let mapping_count = segments
+        .iter()
+        .flatten()
+        .try_fold(0_usize, |count, segment| {
+            count.checked_add(segment.page_count)
+        })?;
     if !(3..=LINUX_EXEC_MAPPING_LIMIT).contains(&mapping_count) {
         return None;
     }
     let mut mappings = [LinuxExecMapping::EMPTY; LINUX_EXEC_MAPPING_LIMIT];
     let mut index = 0;
-    for segment in segments {
+    for segment in segments.into_iter().flatten() {
         for page in 0..segment.page_count {
             let address = segment
                 .virtual_page
@@ -2484,6 +2488,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
+    ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
     for signal in 0..LINUX_SIGNAL_COUNT {
         ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_FLAGS[signal].store(0, Ordering::SeqCst);
@@ -2621,12 +2626,30 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let exec_replaced = ELF_PROBE_EXEC_REPLACED.swap(false, Ordering::SeqCst);
     let exec_node = ELF_PROBE_EXEC_NODE.swap(0, Ordering::SeqCst);
-    let selected_exec_plan = if exec_replaced {
+    let selected_static_exec_plan = if exec_replaced {
         initramfs::published_file_by_node(exec_node)
             .and_then(crate::linux_elf::measured_static_exec_plan)
     } else {
         None
     };
+    let selected_interpreted_exec_plan = if exec_replaced
+        && selected_static_exec_plan.is_none()
+        && initramfs::published_file_name_by_node(exec_node) == Some(b"linux/init")
+    {
+        linux_measured_interpreted_exec_plan()
+    } else {
+        None
+    };
+    let selected_exec_plan = selected_static_exec_plan.as_ref().or_else(|| {
+        selected_interpreted_exec_plan
+            .as_ref()
+            .map(|plan| &plan.process.interpreter)
+    });
+    let selected_runtime_plan = selected_static_exec_plan.as_ref().or_else(|| {
+        selected_interpreted_exec_plan
+            .as_ref()
+            .map(|plan| &plan.process.main)
+    });
     let selected_exec_mappings = selected_exec_plan
         .as_ref()
         .and_then(|plan| linux_exec_mapping_plan(plan));
@@ -2908,13 +2931,15 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     };
     let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
     let signal_mask_restored = ELF_PROBE_SIGNAL_MASK.swap(0, Ordering::SeqCst) == 0;
-    let signal_actions_restored = (0..LINUX_SIGNAL_COUNT).all(|signal| {
-        let expected_handler = u64::from(exec_replaced && signal == 11);
-        ELF_PROBE_SIGNAL_HANDLERS[signal].swap(0, Ordering::SeqCst) == expected_handler
-            && ELF_PROBE_SIGNAL_FLAGS[signal].swap(0, Ordering::SeqCst) == 0
-            && ELF_PROBE_SIGNAL_RESTORERS[signal].swap(0, Ordering::SeqCst) == 0
-            && ELF_PROBE_SIGNAL_ACTION_MASKS[signal].swap(0, Ordering::SeqCst) == 0
-    });
+    let ignored_signals = ELF_PROBE_EXEC_IGNORED_SIGNALS.swap(0, Ordering::SeqCst);
+    let signal_actions_restored = (exec_replaced || ignored_signals == 0)
+        && (0..LINUX_SIGNAL_COUNT).all(|signal| {
+            let expected_handler = (ignored_signals >> signal) & 1;
+            ELF_PROBE_SIGNAL_HANDLERS[signal].swap(0, Ordering::SeqCst) == expected_handler
+                && ELF_PROBE_SIGNAL_FLAGS[signal].swap(0, Ordering::SeqCst) == 0
+                && ELF_PROBE_SIGNAL_RESTORERS[signal].swap(0, Ordering::SeqCst) == 0
+                && ELF_PROBE_SIGNAL_ACTION_MASKS[signal].swap(0, Ordering::SeqCst) == 0
+        });
     let alt_stack_disabled = ELF_PROBE_ALT_STACK_POINTER.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_ALT_STACK_SIZE.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_ALT_STACK_FLAGS.swap(LINUX_SS_DISABLE, Ordering::SeqCst) == LINUX_SS_DISABLE;
@@ -2938,28 +2963,28 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     };
     ELF_PROBE_STACK.store(0, Ordering::SeqCst);
     let expected_code = if exec_replaced {
-        selected_exec_plan
+        selected_runtime_plan
             .as_ref()
             .map_or(0, |plan| plan.executable.virtual_page as usize)
     } else {
         execution.code
     };
     let expected_code_size = if exec_replaced {
-        selected_exec_plan
+        selected_runtime_plan
             .as_ref()
             .map_or(0, |plan| plan.executable.page_count * PAGE_SIZE)
     } else {
         execution.code_size
     };
     let expected_data = if exec_replaced {
-        selected_exec_plan
+        selected_runtime_plan
             .as_ref()
             .map_or(0, |plan| plan.writable.virtual_page as usize)
     } else {
         execution.data
     };
     let expected_data_size = if exec_replaced {
-        selected_exec_plan
+        selected_runtime_plan
             .as_ref()
             .map_or(0, |plan| plan.writable.page_count * PAGE_SIZE)
     } else {
@@ -2970,13 +2995,17 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         && ELF_PROBE_CODE_SIZE.swap(0, Ordering::SeqCst) == expected_code_size as u64
         && ELF_PROBE_LOADER_CODE_BASE.swap(0, Ordering::SeqCst)
             == if exec_replaced {
-                0
+                selected_interpreted_exec_plan
+                    .as_ref()
+                    .map_or(0, |plan| plan.process.interpreter.executable.virtual_page)
             } else {
                 execution.loader_code as u64
             }
         && ELF_PROBE_LOADER_CODE_SIZE.swap(0, Ordering::SeqCst)
             == if exec_replaced {
-                0
+                selected_interpreted_exec_plan.as_ref().map_or(0, |plan| {
+                    (plan.process.interpreter.executable.page_count * PAGE_SIZE) as u64
+                })
             } else {
                 execution.loader_code_size as u64
             }
@@ -3061,121 +3090,113 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         core::array::from_fn(|index| {
             ELF_PROBE_RETIRED_IMAGE_FLAGS[index].swap(0, Ordering::SeqCst)
         });
-    let active_image_state_valid = if let Some((mappings, mapping_count)) = selected_exec_mappings {
-        active_image_count == mapping_count
-            && active_image_addresses[..mapping_count]
-                .iter()
-                .zip(&active_image_frames[..mapping_count])
-                .zip(&active_image_flags[..mapping_count])
-                .zip(&mappings[..mapping_count])
-                .enumerate()
-                .all(|(index, (((address, frame), flags), mapping))| {
-                    *address == mapping.address as u64
-                        && *frame == exec_frames[index]
-                        && *flags
-                            == u8::from(mapping.writable) | (u8::from(mapping.executable) << 1)
-                })
-            && active_image_addresses[mapping_count..]
-                .iter()
-                .all(|address| *address == 0)
-            && active_image_frames[mapping_count..]
-                .iter()
-                .all(Option::is_none)
-            && active_image_flags[mapping_count..]
-                .iter()
-                .all(|flags| *flags == 0)
-    } else {
-        let mut expected = [LinuxActiveImageMapping::EMPTY; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-        let mut expected_count = execution.initial_image_count;
-        for (output, mapping) in expected
-            .iter_mut()
-            .zip(&execution.initial_image_mappings[..execution.initial_image_count])
-        {
-            *output = *mapping;
-            if mapping.address as u64 == protected_page {
-                output.writable = false;
-            }
-        }
-        let mut append = |mapping: LinuxActiveImageMapping| {
-            if mapping == LinuxActiveImageMapping::EMPTY
-                || expected_count == expected.len()
-                || expected[..expected_count]
-                    .iter()
-                    .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
-            {
-                return false;
-            }
-            expected[expected_count] = mapping;
-            expected_count += 1;
-            true
-        };
-        let main_complete = execution
-            .main_mappings
+    let mut expected_active = [LinuxActiveImageMapping::EMPTY; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+    let mut expected_active_count = 0;
+    let active_seed_complete = if let Some((mappings, mapping_count)) = selected_exec_mappings {
+        mappings[..mapping_count]
             .iter()
             .enumerate()
-            .filter(|(_, mapping)| mapping.address != 0)
             .all(|(index, mapping)| {
-                main_frames[index].is_some_and(|frame| {
-                    append(LinuxActiveImageMapping {
+                exec_frames[index].is_some_and(|frame| {
+                    expected_active[index] = LinuxActiveImageMapping {
                         address: mapping.address,
                         frame,
-                        writable: mapping.writable && mapping.address as u64 != protected_page,
+                        writable: mapping.writable,
                         executable: mapping.executable,
+                    };
+                    expected_active_count += 1;
+                    true
+                })
+            })
+    } else {
+        for mapping in &execution.initial_image_mappings[..execution.initial_image_count] {
+            expected_active[expected_active_count] = LinuxActiveImageMapping {
+                writable: mapping.writable && mapping.address as u64 != protected_page,
+                ..*mapping
+            };
+            expected_active_count += 1;
+        }
+        true
+    };
+    let mut append_active = |mapping: LinuxActiveImageMapping| {
+        if mapping == LinuxActiveImageMapping::EMPTY
+            || expected_active_count == expected_active.len()
+            || expected_active[..expected_active_count]
+                .iter()
+                .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
+        {
+            return false;
+        }
+        expected_active[expected_active_count] = mapping;
+        expected_active_count += 1;
+        true
+    };
+    let main_complete = execution
+        .main_mappings
+        .iter()
+        .enumerate()
+        .filter(|(_, mapping)| mapping.address != 0)
+        .all(|(index, mapping)| {
+            main_frames[index].is_some_and(|frame| {
+                append_active(LinuxActiveImageMapping {
+                    address: mapping.address,
+                    frame,
+                    writable: mapping.writable && mapping.address as u64 != protected_page,
+                    executable: mapping.executable,
+                })
+            })
+        });
+    let dependencies_complete =
+        execution
+            .dependency_mappings
+            .iter()
+            .enumerate()
+            .all(|(dependency, mappings)| {
+                mappings
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, mapping)| mapping.file_size != 0)
+                    .all(|(index, mapping)| {
+                        observed_dependency_bases[dependency]
+                            .checked_add(mapping.relative_address as u64)
+                            .and_then(|address| usize::try_from(address).ok())
+                            .zip(dependency_frames[dependency][index])
+                            .is_some_and(|(address, frame)| {
+                                append_active(LinuxActiveImageMapping {
+                                    address,
+                                    frame,
+                                    writable: mapping.writable && address as u64 != protected_page,
+                                    executable: mapping.executable,
+                                })
+                            })
+                    })
+            });
+    let active_image_state_valid = active_seed_complete
+        && main_complete
+        && dependencies_complete
+        && active_image_count == expected_active_count
+        && (0..active_image_count).all(|index| {
+            let flags = active_image_flags[index];
+            flags & !3 == 0
+                && flags != 3
+                && active_image_frames[index].is_some_and(|frame| {
+                    expected_active[..expected_active_count].contains(&LinuxActiveImageMapping {
+                        address: active_image_addresses[index] as usize,
+                        frame,
+                        writable: flags & 1 != 0,
+                        executable: flags & 2 != 0,
                     })
                 })
-            });
-        let dependencies_complete =
-            execution
-                .dependency_mappings
-                .iter()
-                .enumerate()
-                .all(|(dependency, mappings)| {
-                    mappings
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, mapping)| mapping.file_size != 0)
-                        .all(|(index, mapping)| {
-                            observed_dependency_bases[dependency]
-                                .checked_add(mapping.relative_address as u64)
-                                .and_then(|address| usize::try_from(address).ok())
-                                .zip(dependency_frames[dependency][index])
-                                .is_some_and(|(address, frame)| {
-                                    append(LinuxActiveImageMapping {
-                                        address,
-                                        frame,
-                                        writable: mapping.writable
-                                            && address as u64 != protected_page,
-                                        executable: mapping.executable,
-                                    })
-                                })
-                        })
-                });
-        main_complete
-            && dependencies_complete
-            && active_image_count == expected_count
-            && (0..active_image_count).all(|index| {
-                let flags = active_image_flags[index];
-                flags & !3 == 0
-                    && flags != 3
-                    && active_image_frames[index].is_some_and(|frame| {
-                        expected[..expected_count].contains(&LinuxActiveImageMapping {
-                            address: active_image_addresses[index] as usize,
-                            frame,
-                            writable: flags & 1 != 0,
-                            executable: flags & 2 != 0,
-                        })
-                    })
-            })
-            && active_image_addresses[active_image_count..]
-                .iter()
-                .all(|address| *address == 0)
-            && active_image_frames[active_image_count..]
-                .iter()
-                .all(Option::is_none)
-            && active_image_flags[active_image_count..]
-                .iter()
-                .all(|flags| *flags == 0)
-    };
+        })
+        && active_image_addresses[active_image_count..]
+            .iter()
+            .all(|address| *address == 0)
+        && active_image_frames[active_image_count..]
+            .iter()
+            .all(Option::is_none)
+        && active_image_flags[active_image_count..]
+            .iter()
+            .all(|flags| *flags == 0);
     let exec_contract_state_valid = exec_image_contract_valid && active_image_state_valid;
     let mut retired_image_leases = [memory::FrameLease::EMPTY; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
     for (output, frame) in retired_image_leases
@@ -3292,6 +3313,46 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         && signal_actions_restored
         && alt_stack_disabled
         && msrs_restored;
+    if !valid {
+        serial_write("ginux: Linux final state:");
+        for state in [
+            inactive,
+            completed,
+            exec_replaced == execution.exec_expected,
+            live_return_validated,
+            child_tid_cleared,
+            robust_list_cleared,
+            protected_page == execution.relro as u64,
+            heap_written,
+            umask_restored,
+            descriptor_state_valid,
+            clock_state_valid,
+            mmap_state_valid,
+            main_mapping_contract_valid,
+            dependency_mappings_valid,
+            runtime_image_state_valid,
+            exec_contract_state_valid,
+            exec_frame_state_valid,
+            old_image_retirement_valid,
+            tls_state_valid,
+            sibling_thread_resources_cleared,
+            tls_copy_bounds_valid,
+            tls_context_switch_valid,
+            linux_clone_publication_valid,
+            linux_thread_table_released,
+            process_name_restored,
+            executable_identity_restored,
+            no_new_privileges_enforced,
+            signal_mask_restored,
+            signal_actions_restored,
+            alt_stack_disabled,
+            msrs_restored,
+        ] {
+            serial_write(" ");
+            serial_write_u64(u64::from(state));
+        }
+        serial_write("\r\n");
+    }
     LinuxElfResult {
         valid,
         exec_replaced,
@@ -4089,6 +4150,12 @@ extern "sysv64" fn linux_syscall_handler(
                     || !retire_current_linux_thread()
                 {
                     return LINUX_ESRCH;
+                }
+                if initramfs::published_file_name_by_node(
+                    ELF_PROBE_EXEC_NODE.load(Ordering::SeqCst),
+                ) == Some(b"linux/init")
+                {
+                    serial_write("DYNEXEC\r\n");
                 }
                 ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
                 ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
@@ -5162,7 +5229,10 @@ fn linux_exec_root_node(directory: u64, path: &[u8]) -> Result<u8, u64> {
         destination[directory.len() + separator..].copy_from_slice(path);
         length
     };
-    let root_name = &root_name[..root_name_length];
+    let root_name = match &root_name[..root_name_length] {
+        b"init" => b"linux/init" as &[u8],
+        name => name,
+    };
     let Some((mode, _)) = initramfs::published_lookup(root_name) else {
         return Err(LINUX_ENOENT);
     };
@@ -5215,6 +5285,18 @@ fn linux_exec_process_name(node: u8) -> Option<[u64; 2]> {
         u64::from_ne_bytes(bytes[..8].try_into().ok()?),
         u64::from_ne_bytes(bytes[8..].try_into().ok()?),
     ])
+}
+
+fn linux_measured_interpreted_exec_plan(
+) -> Option<crate::linux_elf::DependencyGraphLoadPlan<'static, 'static, 'static>> {
+    let file = |name: &[u8]| {
+        initramfs::published_regular_file_node(name).and_then(initramfs::published_file_by_node)
+    };
+    crate::linux_elf::measured_interpreted_exec_plan(
+        file(b"linux/init")?,
+        file(b"linux/ld-ginux.so")?,
+        [file(b"linux/libginux.so")?, file(b"linux/libginux-aux.so")?],
+    )
 }
 
 fn release_linux_exec_frames(
@@ -5296,12 +5378,27 @@ fn linux_execve_at(
     let Some(exec_bytes) = initramfs::published_file_by_node(exec_node) else {
         return LINUX_ENOENT;
     };
-    let Some(exec_plan) = crate::linux_elf::measured_static_exec_plan(exec_bytes) else {
+    let static_exec_plan = crate::linux_elf::measured_static_exec_plan(exec_bytes);
+    let interpreted_exec_plan = if static_exec_plan.is_none()
+        && initramfs::published_file_name_by_node(exec_node) == Some(b"linux/init")
+    {
+        linux_measured_interpreted_exec_plan()
+    } else {
+        None
+    };
+    let Some(exec_plan) = static_exec_plan.as_ref().or_else(|| {
+        interpreted_exec_plan
+            .as_ref()
+            .map(|plan| &plan.process.interpreter)
+    }) else {
         return LINUX_ENOEXEC;
     };
     let Some(process_name) = linux_exec_process_name(exec_node) else {
         return LINUX_ENOEXEC;
     };
+    if interpreted_exec_plan.is_some() {
+        serial_write("ginux: measured-root interpreted Linux exec admitted\r\n");
+    }
     let (argument_pointers, argument_count) = match linux_exec_vector(arguments_address, true) {
         Ok(vector) => vector,
         Err(error) => return error,
@@ -5322,17 +5419,44 @@ fn linux_execve_at(
     let Some((active_image_mappings, active_image_count)) = linux_active_image_mappings() else {
         return LINUX_ENOEXEC;
     };
-    let entry = exec_plan.entry;
-    let Some((mapping_templates, mapping_count)) = linux_exec_mapping_plan(&exec_plan) else {
+    let startup = interpreted_exec_plan.as_ref().map_or_else(
+        || crate::linux_elf::static_startup(exec_plan),
+        |plan| crate::linux_elf::interpreted_startup(&plan.process),
+    );
+    let entry = startup.initial_entry;
+    let Some((mapping_templates, mapping_count)) = linux_exec_mapping_plan(exec_plan) else {
         return LINUX_ENOEXEC;
     };
     let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
     let new_stack = stack_base + PAGE_SIZE as u64 - LINUX_EXEC_STACK_SIZE as u64;
     let mut stack_image = [0_u8; LINUX_EXEC_STACK_SIZE];
-    let table_words = 1 + argument_count + 1 + environment_count + 1 + 2;
+    let interpreted = interpreted_exec_plan.is_some();
+    if interpreted && (argument_count != 1 || environment_count != 1) {
+        return LINUX_E2BIG;
+    }
+    let interpreted_tls = if let Some(plan) = interpreted_exec_plan.as_ref() {
+        let Some(initial) = current_linux_thread_handle().and_then(linux_thread_context) else {
+            return LINUX_ESRCH;
+        };
+        let sibling = ELF_PROBE_SIBLING_FS_BASE.load(Ordering::SeqCst);
+        let thread_pointers = [initial.thread_pointer as u64, sibling];
+        if sibling == 0 || !address_space::current_linux_tls_rematerializable(plan, thread_pointers)
+        {
+            return LINUX_ENOEXEC;
+        }
+        Some((initial, thread_pointers))
+    } else {
+        None
+    };
+    let table_words = if interpreted {
+        5 + crate::linux_elf::AUXILIARY_VECTOR_WORDS
+    } else {
+        1 + argument_count + 1 + environment_count + 1 + 2
+    };
     let mut string_offset = table_words * size_of::<u64>();
     stack_image[..8].copy_from_slice(&(argument_count as u64).to_ne_bytes());
     let mut string = [0_u8; LINUX_EXEC_STRING_LIMIT];
+    let mut argument_zero_address = 0;
     for (index, pointer) in argument_pointers[..argument_count].iter().enumerate() {
         string.fill(0);
         let length = match copy_linux_c_string(*pointer, &mut string) {
@@ -5350,6 +5474,9 @@ fn linux_execve_at(
         let word = 1 + index;
         stack_image[word * 8..word * 8 + 8]
             .copy_from_slice(&(new_stack + string_offset as u64).to_ne_bytes());
+        if index == 0 {
+            argument_zero_address = new_stack + string_offset as u64;
+        }
         string_offset = end;
     }
     let environment_word = 1 + argument_count + 1;
@@ -5373,15 +5500,36 @@ fn linux_execve_at(
         string_offset = end;
     }
     let auxiliary_word = environment_word + environment_count + 1;
-    stack_image[auxiliary_word * 8..auxiliary_word * 8 + 16].fill(0);
+    if interpreted {
+        let platform_offset = string_offset;
+        let Some(platform_end) = platform_offset.checked_add(LINUX_PLATFORM.len()) else {
+            return LINUX_E2BIG;
+        };
+        let Some(output) = stack_image.get_mut(platform_offset..platform_end) else {
+            return LINUX_E2BIG;
+        };
+        output.copy_from_slice(LINUX_PLATFORM);
+        let mut auxiliary = crate::linux_elf::auxiliary_vector(
+            startup,
+            argument_zero_address,
+            new_stack + platform_offset as u64,
+        );
+        auxiliary[33] = 1;
+        for (index, value) in auxiliary.into_iter().enumerate() {
+            let word = auxiliary_word + index;
+            stack_image[word * 8..word * 8 + 8].copy_from_slice(&value.to_ne_bytes());
+        }
+    } else {
+        stack_image[auxiliary_word * 8..auxiliary_word * 8 + 16].fill(0);
+    }
     let mut exec_frames = [None; LINUX_EXEC_MAPPING_LIMIT];
     let segments = [
-        exec_plan.read_only.unwrap(),
-        exec_plan.executable,
-        exec_plan.writable,
+        exec_plan.read_only,
+        Some(exec_plan.executable),
+        Some(exec_plan.writable),
     ];
     let mut mapping_index = 0;
-    for segment in segments {
+    for segment in segments.into_iter().flatten() {
         for page in 0..segment.page_count {
             let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
                 let _ = release_linux_exec_frames(&mut exec_frames);
@@ -5442,6 +5590,20 @@ fn linux_execve_at(
         let _ = release_linux_exec_frames(&mut exec_frames);
         return LINUX_ENOMEM;
     }
+    if let Some((initial, thread_pointers)) = interpreted_tls {
+        if !address_space::rematerialize_current_linux_tls(
+            interpreted_exec_plan
+                .as_ref()
+                .unwrap_or_else(|| unreachable!()),
+            thread_pointers,
+        ) || !install_linux_tls_context(initial)
+        {
+            return LINUX_ENOMEM;
+        }
+    }
+    if interpreted {
+        serial_write("ginux: interpreted Linux exec image committed\r\n");
+    }
     for (index, mapping) in active_image_mappings[..active_image_count]
         .iter()
         .enumerate()
@@ -5456,11 +5618,32 @@ fn linux_execve_at(
         );
     }
     ELF_PROBE_RETIRED_IMAGE_COUNT.store(active_image_count as u8, Ordering::SeqCst);
+    if interpreted {
+        ELF_PROBE_MAIN_MAPPINGS.store(0, Ordering::SeqCst);
+        for index in 0..LINUX_MAIN_MAPPING_COUNT {
+            ELF_PROBE_MAIN_FRAMES[index].store(0, Ordering::SeqCst);
+            ELF_PROBE_MAIN_GENERATIONS[index].store(0, Ordering::SeqCst);
+        }
+        for dependency in 0..LINUX_DEPENDENCY_COUNT {
+            ELF_PROBE_DEPENDENCY_MAPPINGS[dependency].store(0, Ordering::SeqCst);
+            ELF_PROBE_DEPENDENCY_SELECTED_BASE[dependency].store(0, Ordering::SeqCst);
+            for index in 0..LINUX_DEPENDENCY_MAPPING_COUNT {
+                let state = dependency * LINUX_DEPENDENCY_MAPPING_COUNT + index;
+                ELF_PROBE_DEPENDENCY_FRAMES[state].store(0, Ordering::SeqCst);
+                ELF_PROBE_DEPENDENCY_GENERATIONS[state].store(0, Ordering::SeqCst);
+            }
+        }
+        ELF_PROBE_READ_ONLY_DATA_PAGE.store(0, Ordering::SeqCst);
+    }
     for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
         if close_on_exec & (1 << descriptor) != 0 {
             let _ = linux_descriptor_close(descriptor);
         }
     }
+    let ignored_signals = (0..LINUX_SIGNAL_COUNT).fold(0_u64, |mask, signal| {
+        mask | (u64::from(ELF_PROBE_SIGNAL_HANDLERS[signal].load(Ordering::SeqCst) == 1) << signal)
+    });
+    ELF_PROBE_EXEC_IGNORED_SIGNALS.store(ignored_signals, Ordering::SeqCst);
     for signal in 0..LINUX_SIGNAL_COUNT {
         if ELF_PROBE_SIGNAL_HANDLERS[signal].load(Ordering::SeqCst) != 1 {
             ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
@@ -5476,20 +5659,43 @@ fn linux_execve_at(
     ELF_PROBE_PROCESS_NAME_HIGH.store(process_name[1], Ordering::SeqCst);
     ELF_PROBE_EXITED_CLEAR_CHILD_TID.store(clear_child_tid, Ordering::SeqCst);
     ELF_PROBE_EXITED_ROBUST_LIST.store(robust_list, Ordering::SeqCst);
-    ELF_PROBE_CODE_BASE.store(exec_plan.executable.virtual_page, Ordering::SeqCst);
+    let runtime_plan = interpreted_exec_plan
+        .as_ref()
+        .map_or(exec_plan, |plan| &plan.process.main);
+    ELF_PROBE_CODE_BASE.store(runtime_plan.executable.virtual_page, Ordering::SeqCst);
     ELF_PROBE_CODE_SIZE.store(
-        (exec_plan.executable.page_count * PAGE_SIZE) as u64,
+        (runtime_plan.executable.page_count * PAGE_SIZE) as u64,
         Ordering::SeqCst,
     );
-    ELF_PROBE_LOADER_CODE_BASE.store(0, Ordering::SeqCst);
-    ELF_PROBE_LOADER_CODE_SIZE.store(0, Ordering::SeqCst);
-    ELF_PROBE_DATA.store(exec_plan.writable.virtual_page, Ordering::SeqCst);
+    ELF_PROBE_LOADER_CODE_BASE.store(
+        if interpreted {
+            exec_plan.executable.virtual_page
+        } else {
+            0
+        },
+        Ordering::SeqCst,
+    );
+    ELF_PROBE_LOADER_CODE_SIZE.store(
+        if interpreted {
+            (exec_plan.executable.page_count * PAGE_SIZE) as u64
+        } else {
+            0
+        },
+        Ordering::SeqCst,
+    );
+    ELF_PROBE_DATA.store(runtime_plan.writable.virtual_page, Ordering::SeqCst);
     ELF_PROBE_DATA_SIZE.store(
-        (exec_plan.writable.page_count * PAGE_SIZE) as u64,
+        (runtime_plan.writable.page_count * PAGE_SIZE) as u64,
         Ordering::SeqCst,
     );
-    ELF_PROBE_RELRO.store(0, Ordering::SeqCst);
-    ELF_PROBE_RELRO_SIZE.store(0, Ordering::SeqCst);
+    ELF_PROBE_RELRO.store(
+        runtime_plan.relro.map_or(0, |relro| relro.virtual_address),
+        Ordering::SeqCst,
+    );
+    ELF_PROBE_RELRO_SIZE.store(
+        runtime_plan.relro.map_or(0, |relro| relro.memory_size),
+        Ordering::SeqCst,
+    );
     unsafe {
         LINUX_USER_RIP = entry;
         LINUX_USER_RSP = new_stack;
@@ -8707,6 +8913,17 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         0
     };
     let fault_metadata = frame.metadata(fault_address);
+    if fault_domain.is_none() && ELF_PROBE_ACTIVE.load(Ordering::SeqCst) {
+        serial_write("ginux: Linux user fault vector/error/address/rip:");
+        serial_write_u64(fault_metadata.vector);
+        serial_write(" ");
+        serial_write_u64(fault_metadata.error);
+        serial_write(" ");
+        serial_write_u64(fault_metadata.address);
+        serial_write(" ");
+        serial_write_u64(fault_metadata.instruction);
+        serial_write("\r\n");
+    }
     let action = scheduler::fault_runtime(
         frame,
         fault_address,

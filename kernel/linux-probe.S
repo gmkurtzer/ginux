@@ -13,6 +13,8 @@ ginux_linux_probe:
     movabs rax, 0x4e49414d54494e49
     cmp qword ptr [rip + ginux_main_init_state], rax
     jne failure
+    cmp qword ptr [rsp + 304], 1
+    je .Ldynamic_exec_complete
 #else
     mov rax, qword ptr [rip + ginux_dependency_symbol@GOTPCREL]
     test rax, rax
@@ -3509,6 +3511,20 @@ resolution_valid:
     mov eax, 322
     syscall
     jmp failure
+#elif defined(GINUX_GRAPH)
+    sub rsp, 64
+    lea rax, [rip + .Ldynamic_exec_path]
+    mov qword ptr [rsp], rax
+    mov qword ptr [rsp + 8], 0
+    lea rax, [rip + .Ldynamic_exec_environment]
+    mov qword ptr [rsp + 16], rax
+    mov qword ptr [rsp + 24], 0
+    lea rdi, [rip + .Ldynamic_exec_path]
+    mov rsi, rsp
+    lea rdx, [rsp + 16]
+    mov eax, 59
+    syscall
+    jmp failure
 #else
     mov edi, 42
     mov eax, 231
@@ -3516,6 +3532,16 @@ resolution_valid:
 #endif
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+.Ldynamic_exec_complete:
+    mov edi, 0x406000
+    mov esi, 4096
+    mov edx, 1
+    mov eax, 10
+    call syscall_expect_zero
+    mov edi, 42
+    mov eax, 231
+    syscall
+
 child_thread_probe:
     mov eax, 186
     syscall
@@ -3661,7 +3687,7 @@ exec_root_path:
 empty_exec_path:
     .byte 0
 invalid_exec_path:
-    .asciz "/init"
+    .asciz "/etc/hostname"
 exec_zero_path:
     .asciz "/dev/zero"
 exec_null_path:
@@ -3799,6 +3825,12 @@ proc_self_exe:
 #ifdef GINUX_LINKED
 auxiliary_dependency_path:
     .asciz "/lib64/libginux-aux.so"
+#endif
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+.Ldynamic_exec_path:
+    .asciz "/init"
+.Ldynamic_exec_environment:
+    .asciz "GINUX=1"
 #endif
 
 .section .data
