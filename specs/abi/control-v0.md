@@ -386,9 +386,12 @@ loses its capability. The current backend is volatile kernel memory, so this
 proves persistence across isolated service failure rather than VM restart.
 Object 7 is reserved by this v4 authority envelope for a block-device grant.
 It has no control-call operation yet: the kernel consumes its attenuated
-`READ` authority while constructing the first read-only ring-3 MMIO mapping.
-Writable device control and DMA require a later, separately specified driver
-contract rather than an implicit extension of operation 18.
+`READ` authority while constructing a read-only ring-3 MMIO mapping and its
+separate attenuated `WRITE` authority while constructing a writable control
+mapping. The latter proves status mutation followed by fault revocation and
+kernel quiescence, but receives no DMA or queue authority. A usable device
+driver still requires a later, separately specified contract rather than an
+implicit extension of operation 18.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler

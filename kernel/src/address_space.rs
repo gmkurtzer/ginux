@@ -5251,7 +5251,7 @@ pub(crate) fn verify_ring3_read_only_device_grant(
         return false;
     };
     if !space.permissions_are_valid(kernel_root)
-        || !space.map_read_only_uncached_page(DEVICE_PAGE_INDEX, page)
+        || !space.map_uncached_device_page(DEVICE_PAGE_INDEX, page, false)
     {
         let _ = space.release();
         return false;
@@ -5301,6 +5301,137 @@ pub(crate) fn verify_ring3_read_only_device_grant(
     if !valid {
         crate::serial_write_bytes(b"\r\nginux: device grant event: ");
         crate::serial_write_u64(event.unwrap_or(u64::MAX));
+        if let Some(descriptor) = domain::delivered_fault_descriptor() {
+            for range in [6..8, 16..24, 24..32, 32..40] {
+                let mut bytes = [0_u8; 8];
+                let length = range.len();
+                bytes[..length].copy_from_slice(&descriptor[range]);
+                crate::serial_write_bytes(b" ");
+                crate::serial_write_u64(u64::from_le_bytes(bytes));
+            }
+        }
+    }
+    valid
+}
+
+pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool {
+    const DEVICE_PAGE_INDEX: usize = 5;
+    const SUCCESS_FAULT_OFFSET: u64 = 20;
+    let page = register_physical & ADDRESS_MASK;
+    let offset = register_physical
+        .checked_sub(page)
+        .unwrap_or(PAGE_SIZE as u64);
+    if offset >= PAGE_SIZE as u64 {
+        return false;
+    }
+    let user_register = USER_TEST_ADDRESS
+        .checked_add(DEVICE_PAGE_INDEX * PAGE_SIZE)
+        .and_then(|page| page.checked_add(offset as usize));
+    let Some(user_register) = user_register else {
+        return false;
+    };
+    let mut program = [
+        0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rax, register
+        0xc6, 0x00, 0x01, // mov byte ptr [rax], ACKNOWLEDGE
+        0x80, 0x38, 0x01, // cmp byte ptr [rax], ACKNOWLEDGE
+        0x74, 0x02, // je success
+        0x0f, 0x0b, // failed readback
+        0x0f, 0x0b, // success: deliberate service fault
+    ];
+    program[2..10].copy_from_slice(&(user_register as u64).to_le_bytes());
+
+    let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
+        6,
+        crate::control_abi::BLOCK_DEVICE_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) else {
+        return false;
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    if !domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::BLOCK_DEVICE_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) || domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::BLOCK_DEVICE_OBJECT,
+        crate::capability::Rights::READ,
+    ) {
+        return false;
+    }
+    let kernel_root = current_root();
+    let Some(mut space) = WxAddressSpace::new(kernel_root, owner) else {
+        return false;
+    };
+    if !space.permissions_are_valid(kernel_root)
+        || !space.map_uncached_device_page(DEVICE_PAGE_INDEX, page, true)
+    {
+        let _ = space.release();
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in program.iter().enumerate() {
+            space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let root = space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(auxiliary, space)
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_auxiliary(entry, stack, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    let valid = current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && !domain::handle_permits(
+            auxiliary,
+            handle,
+            crate::control_abi::BLOCK_DEVICE_OBJECT,
+            crate::capability::Rights::WRITE,
+        )
+        && event
+            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
+        && domain::last_lifecycle_event_audit().is_some_and(|(kind, audited, _)| {
+            kind == crate::control_abi::LIFECYCLE_AUXILIARY_FAULT && audited == auxiliary
+        })
+        && domain::last_lifecycle_event_detail() == Some(0)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::delivered_fault_matches(
+            auxiliary,
+            domain::FaultMetadata {
+                vector: 6,
+                error: 0,
+                address: 0,
+                instruction: USER_TEST_ADDRESS as u64 + SUCCESS_FAULT_OFFSET,
+            },
+        )
+        && domain::take_lifecycle_event().is_none();
+    if !valid {
+        crate::serial_write_bytes(b"\r\nginux: writable device grant event: ");
+        crate::serial_write_u64(event.unwrap_or(u64::MAX));
+        crate::serial_write_bytes(b" current/roots/frames/retired: ");
+        crate::serial_write_u64(scheduler::current_domain().unwrap_or(u64::MAX));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(registered_auxiliary_address_space_count() as u64);
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(memory::owner_live_frame_count(owner).unwrap_or(usize::MAX) as u64);
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(u64::from(domain::domain_is_retired(auxiliary)));
         if let Some(descriptor) = domain::delivered_fault_descriptor() {
             for range in [6..8, 16..24, 24..32, 32..40] {
                 let mut bytes = [0_u8; 8];
@@ -5418,7 +5549,7 @@ impl WxAddressSpace {
         }
     }
 
-    fn map_read_only_uncached_page(&mut self, index: usize, physical: u64) -> bool {
+    fn map_uncached_device_page(&mut self, index: usize, physical: u64, writable: bool) -> bool {
         if index >= ENTRY_COUNT
             || !physical.is_multiple_of(PAGE_SIZE as u64)
             || physical & !ADDRESS_MASK != 0
@@ -5439,7 +5570,11 @@ impl WxAddressSpace {
                 return false;
             };
             let entry = table.add(index);
-            let expected = physical | PRESENT | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
+            let mut expected =
+                physical | PRESENT | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
+            if writable {
+                expected |= WRITABLE;
+            }
             if entry.read() != 0 {
                 return false;
             }

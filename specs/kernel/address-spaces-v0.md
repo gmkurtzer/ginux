@@ -163,8 +163,8 @@ entry one must be a present writable user hierarchy, and all other entries must
 be absent. Validation follows the user hierarchy through the direct map and
 requires exactly one non-large PDPT entry, one non-large directory entry, and
 the fixed code/guard/stack/guard/stack leaf layout with W^X permissions. One
-additional fixed leaf may name a read-only, non-executable, write-through,
-cache-disabled device page above the 4 GiB allocator ceiling. It is not included
+additional fixed leaf may name a read-only or writable, non-executable,
+write-through, cache-disabled device page above the 4 GiB allocator ceiling. It is not included
 in the owned-frame list and cannot alias domain RAM; every later leaf remains
 absent. All seven allocator-owned page-table and payload frames must be
 distinct, nonzero, and below 4 GiB. The hardware readback still has to
@@ -180,12 +180,14 @@ interior byte of one of the two writable, non-executable stack pages. Guard
 pages and the one-past-end address above a stack are rejected. This is a
 transitional fixed-layout policy, not a general virtual-memory-area model.
 
-The first use of the optional leaf maps the reset virtio common-configuration
-page into a manifest-authorized auxiliary domain. The domain reads device
-status zero, then faults with a user write-protection violation when it attempts
-to set the byte. Retirement destroys and scrubs its page tables, so the MMIO
-mapping disappears with the exact domain generation. See
-[Read-only Block-device Grant v0](device-grant-v0.md).
+The optional leaf first maps the reset virtio common-configuration page into a
+read-only manifest-authorized auxiliary domain. That observer reads status zero
+and faults on a write. A separate write-only auxiliary receives a writable leaf,
+sets and reads back `ACKNOWLEDGE`, and deliberately faults. Retirement destroys
+and scrubs each page-table hierarchy, so both MMIO mappings disappear with
+their exact domain generations. Hardware Dirty is admitted only for the
+explicitly writable leaf. See
+[Block-device Control Grant v0](device-grant-v0.md).
 
 The one bounded service restart retains the service address space and immutable
 code mapping, but not its writable stack contents. While the failed service CR3

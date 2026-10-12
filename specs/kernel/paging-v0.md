@@ -116,9 +116,11 @@ This map is intentionally transitional:
 - The transition relies on the initial x86-64 UEFI environment using identity-addressable physical pointers before a virtual-address-map transition.
 
 Untrusted code executes only in domain roots where the shared identity, direct,
-and kernel MMIO mappings are supervisor-only. One device-observer proof root
-adds a separate fixed read-only, NX, cache-disabled user mapping of the reset
-virtio status page; the root is destroyed on service retirement. Later paging
+and kernel MMIO mappings are supervisor-only. Device-grant proof roots may add
+one separate fixed NX, cache-disabled user mapping of the virtio common page.
+The observer mapping is read-only; the control mapping is writable, and root
+validation admits a hardware Dirty bit only for that writable leaf. Each root
+is destroyed on service retirement. Later paging
 revisions must replace the firmware shutdown dependency, generalize explicit
 MMIO ownership and unmapping, and define permissions for dynamically loaded
 kernel modules.

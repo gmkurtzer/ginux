@@ -781,6 +781,19 @@ pub(crate) fn device_is_reset(device: VirtioBlockDevice, mapping: MmioMapping) -
     read_common_u8(common, COMMON_DEVICE_STATUS) == 0
 }
 
+pub(crate) fn quiesce(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = mapping.address(common_physical, common_length) else {
+        return false;
+    };
+    set_pci_command(device, false)
+        && reset(common).is_some()
+        && bus_master_is_disabled(device)
+        && device_is_reset(device, mapping)
+}
+
 fn read_capacity(common: usize, device_configuration: usize) -> Option<u64> {
     for _ in 0..8 {
         let before = read_common_u8(common, COMMON_CONFIG_GENERATION);

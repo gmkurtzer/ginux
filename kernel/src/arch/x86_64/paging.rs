@@ -13,6 +13,7 @@ const USER: u64 = 1 << 2;
 const WRITE_THROUGH: u64 = 1 << 3;
 const ACCESSED: u64 = 1 << 5;
 const CACHE_DISABLE: u64 = 1 << 4;
+const DIRTY: u64 = 1 << 6;
 const LARGE_PAGE: u64 = 1 << 7;
 const NO_EXECUTE: u64 = 1 << 63;
 const ADDRESS_MASK: usize = 0x000f_ffff_ffff_f000;
@@ -125,8 +126,9 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<[u64; 7]> {
     let device_valid = device == 0
         || (device_address >= INITIAL_IDENTITY_LIMIT as u64
             && device & device_flags == device_flags
-            && device & (WRITABLE | LARGE_PAGE) == 0
-            && device & !(ADDRESS_MASK as u64 | device_flags | ACCESSED) == 0);
+            && device & LARGE_PAGE == 0
+            && (device & DIRTY == 0 || device & WRITABLE != 0)
+            && device & !(ADDRESS_MASK as u64 | device_flags | WRITABLE | ACCESSED | DIRTY) == 0);
     let frames = [
         root,
         pdpt_address,

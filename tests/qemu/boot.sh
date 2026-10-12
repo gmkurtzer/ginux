@@ -711,6 +711,21 @@ if ! grep -q '^ginux: observed virtio device remained reset and DMA-disabled' "$
     exit 1
 fi
 
+if ! grep -q '^ginux: write-only virtio control grant exercised in ring 3' "$output_file"; then
+    echo "Boot test failed: the isolated control service did not mutate virtio status." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; then
+    echo "Boot test failed: the faulted virtio control service retained authority." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: faulted virtio control device quiesced without DMA' "$output_file"; then
+    echo "Boot test failed: the faulted virtio control service left its device active." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated address space active' "$output_file"; then
     echo "Boot test failed: isolated address-space activation failed." >&2
     exit 1

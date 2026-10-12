@@ -15210,13 +15210,23 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             ServiceRestartSetup::RollbackFailed => return u64::MAX,
         }
     }
-    if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly)
-        && (!domain::begin_auxiliary_runtime_fault(fault_domain, fault_metadata)
-            || !address_space::activate_kernel_root_for_auxiliary(fault_domain)
-            || !address_space::release_auxiliary_address_space(fault_domain)
-            || !domain::retire_stopped_auxiliary_service(fault_domain))
-    {
-        return u64::MAX;
+    if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly) {
+        if !domain::begin_auxiliary_runtime_fault(fault_domain, fault_metadata) {
+            serial_write("ginux: auxiliary fault transition failed\r\n");
+            return u64::MAX;
+        }
+        if !address_space::activate_kernel_root_for_auxiliary(fault_domain) {
+            serial_write("ginux: auxiliary kernel-root restoration failed\r\n");
+            return u64::MAX;
+        }
+        if !address_space::release_auxiliary_address_space(fault_domain) {
+            serial_write("ginux: auxiliary address-space release failed\r\n");
+            return u64::MAX;
+        }
+        if !domain::retire_stopped_auxiliary_service(fault_domain) {
+            serial_write("ginux: auxiliary retirement failed\r\n");
+            return u64::MAX;
+        }
     }
     resume_action(action)
 }

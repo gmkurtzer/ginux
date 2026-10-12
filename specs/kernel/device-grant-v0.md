@@ -1,28 +1,31 @@
-# Read-only Block-device Grant v0
+# Block-device Control Grant v0
 
-**Status:** Hardware-observation and revocation boundary verified in QEMU.
+**Status:** Read-only observation and write-only control boundaries verified in QEMU.
 
 ## Purpose
 
 This contract is the first step from a kernel-owned virtio bootstrap path to an
-isolated storage-driver domain. It delegates bounded authority to a ring-3
-observer and exposes one real MMIO page without allowing the observer to change
-device state. It deliberately does not delegate queues or DMA yet.
+isolated storage-driver domain. It separately delegates bounded observation and
+control authority to ring-3 services and exposes one real MMIO page. It
+deliberately does not delegate queues or DMA yet.
 
 ## Authority and mapping
 
-The signed development manifest grants the control plane object 7 with `READ`
-authority. The kernel attenuates that root into a fresh stop-only auxiliary
-domain. Only an exact generation-tagged handle for object 7 authorizes the
-mapping decision; process ancestry and possession of another device or volume
-handle do not.
+The signed development manifest grants the control plane object 7 with
+`READ|WRITE` authority. The kernel attenuates that root into distinct fresh
+stop-only auxiliary domains: the observer receives only `READ`, while the
+control service receives only `WRITE`. Only an exact generation-tagged handle
+for object 7 authorizes either mapping decision; process ancestry and
+possession of another device or volume handle do not.
 
 The service receives one fixed leaf at `USER_TEST_ADDRESS + 5 * 4096`. It maps
 the physical page containing the modern virtio common-configuration status
-byte. The leaf is user-accessible, read-only, non-executable, write-through,
-and cache-disabled. The page must be above the 4 GiB allocator ceiling, so it
-cannot alias any allocator-owned page-table, code, or stack frame. No other
-unmodeled user leaf is admitted.
+byte. The observer's leaf is read-only; the control service's leaf is writable.
+Both are user-accessible, non-executable, write-through, and cache-disabled.
+The page must be above the 4 GiB allocator ceiling, so it cannot alias any
+allocator-owned page-table, code, or stack frame. No other unmodeled user leaf
+is admitted. Root validation accepts the hardware Accessed bit and accepts the
+Dirty bit only when the device leaf was explicitly writable.
 
 ## Hardware proof and revocation
 
@@ -39,12 +42,25 @@ table also removes the external MMIO mapping; the MMIO page itself is never
 treated as allocator-owned memory. After retirement the kernel rechecks that
 the virtio device is reset and PCI bus mastering is disabled.
 
+The write-only control service starts from that reset state, writes
+`ACKNOWLEDGE` to device status, and reads the byte back directly. It then takes
+a deliberate invalid-opcode fault. The same stop-only path revokes its exact
+object-7 handle, destroys its mapping, clears and releases all seven owned
+frames, and publishes the fault. Regardless of whether that verification
+succeeds, the kernel's following quiesce operation first disables PCI bus
+mastering, resets device status to zero, and confirms both conditions before
+continuing. The service never owns a virtqueue or DMA frame, so its status
+mutation cannot initiate data transfer.
+
 ## Deliberate limits
 
-- This is a read-only observer, not a block driver or storage service.
-- Common configuration outside the mapped page, notification registers, ISR,
-  device configuration, PCI configuration, and port I/O are unavailable.
-- No writable MMIO, DMA frame, interrupt, queue, or IOMMU domain is delegated.
+- These are bounded observation/control proofs, not a block driver or storage
+  service.
+- Page-granular mapping exposes the complete 4 KiB common-configuration page;
+  the write-only proof voluntarily touches only device status. Notification
+  registers, ISR, device configuration, PCI configuration, and port I/O are
+  unavailable.
+- No DMA frame, interrupt, queue, or IOMMU domain is delegated.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.
