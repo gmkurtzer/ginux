@@ -1,4 +1,9 @@
 .intel_syntax noprefix
+.macro require_equal
+    je 991f
+    ud2
+991:
+.endm
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
 #define GINUX_PRIOR_SIGNAL_MASK 0x600
 #define GINUX_BLOCKED_SIGNAL_MASK 0x602
@@ -1236,7 +1241,7 @@ linux_clone_repeat:
     syscall
     add rsp, 16
     test rax, rax
-    jne failure
+    require_equal
     push 1
     push 0
     mov rdi, r8
@@ -1247,7 +1252,7 @@ linux_clone_repeat:
     syscall
     add rsp, 16
     cmp rax, -110
-    jne failure
+    require_equal
     push 1
     push 0
     mov edi, 0x4050c0
@@ -1259,7 +1264,7 @@ linux_clone_repeat:
     syscall
     add rsp, 16
     cmp rax, -11
-    jne failure
+    require_equal
     push 2
     pop rdi
     mov esi, 0x405dc0
@@ -1269,13 +1274,13 @@ linux_clone_repeat:
     mov eax, 232
     syscall
     dec eax
-    jne failure
+    require_equal
     cmp dword ptr [0x405dc0], 1
-    jne failure
+    require_equal
     cmp dword ptr [0x405dc4], 0x55667788
-    jne failure
+    require_equal
     cmp dword ptr [0x405dc8], 0x11223344
-    jne failure
+    require_equal
     call linux_parent_eventfd_read
     mov edi, 0x405da0
     push 1
@@ -1285,13 +1290,13 @@ linux_clone_repeat:
     pop rax
     syscall
     cmp rax, 1
-    jne failure
+    require_equal
     cmp word ptr [0x405da6], 1
-    jne failure
+    require_equal
     call linux_parent_eventfd_read
     call linux_parent_eventfd_read
     cmp qword ptr [0x405d80], 1
-    jne failure
+    require_equal
     mov word ptr [0x405da6], -1
     mov edi, 0x405da0
     push 1
@@ -1303,21 +1308,29 @@ linux_clone_repeat:
     mov eax, 271
     syscall
     cmp rax, -4
-    jne failure
+    require_equal
     cmp word ptr [0x405da6], -1
-    jne failure
+    require_equal
+    push -4
     push 2
     pop rdi
-    mov esi, 0x405dc0
+    mov rsi, rsp
     push 1
     pop rdx
-    mov r10d, edx
     mov r9, r8
     mov r8d, 0x405cd0
+    or r10d, -1
+    mov eax, 281
+    syscall
+    cmp qword ptr [rsp], rax
+    require_equal
+    pop rcx
+    mov esi, 0x405dc0
+    mov r10d, edx
     mov eax, 281
     syscall
     test rax, rax
-    jne failure
+    require_equal
     mov edi, 0x405da0
     push 1
     pop rsi
@@ -1326,16 +1339,16 @@ linux_clone_repeat:
     pop rax
     syscall
     test rax, rax
-    jne failure
+    require_equal
     cmp word ptr [0x405da6], 0
-    jne failure
+    require_equal
     mov edx, 0x405cc0
     mov r10d, 0x405cd0
     mov r8, r9
     mov eax, 271
     call syscall_expect_zero
     cmp word ptr [0x405da6], 0
-    jne failure
+    require_equal
     push 3
     pop rdi
     push 3
@@ -4968,6 +4981,8 @@ linux_child_eventfd_write_and_yield:
     pop rsi
     push 11
     pop rdx
+    mov eax, 234
+    call syscall_expect_zero
     mov eax, 234
     call syscall_expect_zero
     ret

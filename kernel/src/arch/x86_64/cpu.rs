@@ -3570,7 +3570,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let expected_signal_count = if signal_probe_executed {
         10
     } else if execution.tls_size != 0 {
-        4
+        5
     } else {
         2
     };
@@ -3608,10 +3608,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && ppoll_wait_block_count == 2
             && ppoll_wait_wake_count == 0
             && ppoll_wait_timeout_count == 1
-            && epoll_pwait_block_count == 1
+            && epoll_pwait_block_count == 2
             && epoll_pwait_wake_count == 0
             && epoll_pwait_timeout_count == 1
-            && masked_wait_interrupt_count == 1
+            && masked_wait_interrupt_count == 2
             && signal_wait_block_count == 3
             && signal_wait_wake_count == 1
             && signal_wait_timeout_count == 1
@@ -3648,10 +3648,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             ppoll_wait_block_count == 2,
             ppoll_wait_wake_count == 0,
             ppoll_wait_timeout_count == 1,
-            epoll_pwait_block_count == 1,
+            epoll_pwait_block_count == 2,
             epoll_pwait_wake_count == 0,
             epoll_pwait_timeout_count == 1,
-            masked_wait_interrupt_count == 1,
+            masked_wait_interrupt_count == 2,
             signal_wait_block_count == 3,
             signal_wait_wake_count == 1,
             signal_wait_timeout_count == 1,
@@ -4337,10 +4337,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && ppoll_wait_block_count == 2
                 && ppoll_wait_wake_count == 0
                 && ppoll_wait_timeout_count == 1
-                && epoll_pwait_block_count == 1
+                && epoll_pwait_block_count == 2
                 && epoll_pwait_wake_count == 0
                 && epoll_pwait_timeout_count == 1
-                && masked_wait_interrupt_count == 1
+                && masked_wait_interrupt_count == 2
                 && signal_wait_block_count == 3
                 && signal_wait_wake_count == 1
                 && signal_wait_timeout_count == 1
