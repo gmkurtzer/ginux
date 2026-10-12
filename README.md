@@ -54,9 +54,10 @@ offsets as the descriptor, available, and used-ring addresses. After the kernel
 arms PCI bus mastering, the service enables queue zero and sets `DRIVER_OK`, but
 first constructs an exact three-descriptor sector-two read chain. It leaves the
 available and used indices at zero and sends no notification. On fault, the
-registered device hook validates the active-idle binding and every byte of the
-prepared-but-unpublished DMA layout, disables bus mastering, and resets the
-device before the page is scrubbed and released; release is rejected
+registered device hook validates the active-idle binding, disables bus
+mastering, resets the device, and only then validates every byte of the now-stable
+prepared-but-unpublished DMA layout before the page is scrubbed and released;
+release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
 owned frames. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and

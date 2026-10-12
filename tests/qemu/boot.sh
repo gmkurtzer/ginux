@@ -752,6 +752,11 @@ if ! grep -q '^ginux: isolated virtio request remained unpublished' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: virtio DMA validation followed hardware quiescence' "$output_file"; then
+    echo "Boot test failed: virtio DMA state was not validated after hardware quiescence." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: fault path quiesced device before DMA release' "$output_file"; then
     echo "Boot test failed: device teardown did not precede DMA lease release." >&2
     exit 1

@@ -1628,6 +1628,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated virtio read descriptors prepared in ring 3");
     serial_write("\r\nginux: isolated virtio request remained unpublished");
     serial_write("\r\nginux: faulted virtio control service revoked");
+    serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
     serial_write("\r\nginux: fault path quiesced device before DMA release");
     serial_write("\r\nginux: faulted DMA lease scrubbed and released");
     serial_write("\r\nginux: faulted virtio control device quiesced without submission");

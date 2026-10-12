@@ -4350,9 +4350,9 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
         return false;
     };
     if registered.device_quiesced
-        || !unsafe { dma_page_has_prepared_read(dma_physical) }
         || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce(device, mapping)
+        || !unsafe { dma_page_has_prepared_read(dma_physical) }
     {
         return false;
     }

@@ -56,8 +56,9 @@ mastering, the service enables queue zero, sets `DRIVER_OK`, confirms the bit,
 constructs an exact three-descriptor sector-two read chain, and takes a
 deliberate invalid-opcode fault. It leaves the available and used indices at
 zero and sends no notification. The fault hook independently reads back the
-exact active queue and address-to-lease binding, then checks every byte of the
-prepared-but-unpublished DMA layout before quiescence.
+exact active queue and address-to-lease binding, disables bus mastering, resets
+the device, and then checks every byte of the stable
+prepared-but-unpublished DMA layout.
 
 The stop-only path first revokes the exact object-7 handle. Its registered
 device hook validates the expected features and queue-to-lease binding, disables

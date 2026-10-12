@@ -36,14 +36,17 @@ layout: three chained descriptors reference a 16-byte request header, a
 arms PCI bus mastering, then the service enables queue zero and sets
 `DRIVER_OK`. It leaves the available and used indices at zero and cannot map the
 notification region, so the prepared chain is not submitted. The fault hook
-checks every byte in the page against that exact layout. Any changed address,
-length, flag, chain index, request field, ring index, buffer byte, or status byte
-prevents teardown from claiming the no-submission proof.
+first validates the active binding, disables PCI bus mastering, and resets the
+device. It then checks every byte in the now-stable page against that exact
+layout. Any changed address, length, flag, chain index, request field, ring
+index, buffer byte, or status byte prevents teardown from claiming the
+no-submission proof.
 
 The service then deliberately faults. Stop-only teardown revokes object 7 and
 invokes the device hook while the service root and lease are still intact. The
 hook revalidates exact feature and queue-address state, disables PCI bus
-mastering, resets the device, and records quiescence. Only then does teardown
+mastering, resets the device, validates the stable DMA contents, and records
+quiescence. Only then does teardown
 restore the kernel root, zero all eight owned frames, release their exact
 generation-tagged leases, and retire the domain. Registry release rejects a
 bound device whose quiescence record is absent. The gate reads the former DMA
