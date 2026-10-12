@@ -208,9 +208,11 @@ frames. A second process-table proof records the exact virtual address, frame
 lease, and W^X state for every private leaf. It rejects a substituted address
 or permission, copies a complete parent page, clones the hierarchy, validates
 the resulting child inventory, and publishes the whole child bundle in one
-`Preparing`-to-`Running` transition. This proof does not activate the child
-root, snapshot the running Linux mapping registry, or install a schedulable
-execution context.
+`Preparing`-to-`Running` transition. The same transition installs a context
+derived from the recorded parent, with a mapped executable RIP, mapped writable
+stack, admitted FS base, safe flags, and a zero fork return value. This proof
+does not activate the child root, snapshot the running Linux mapping registry,
+or admit that context to the scheduler.
 
 The bounded process table now retains an allocator-issued resource bundle
 rather than a raw physical root. A bundle contains four through six hierarchy
@@ -222,7 +224,8 @@ recorded bundle, moves the process to a non-runnable intermediate state, and
 refuses zombie publication while any generation in that bundle remains in the
 live-frame ledger. One prevalidated teardown scrubs and releases the full
 bundle before the corresponding zombie is published. Capturing the live Linux
-mapping registry and attaching a child CPU context remain future work.
+mapping registry and admitting the recorded child context to the scheduler
+remain future work.
 
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate

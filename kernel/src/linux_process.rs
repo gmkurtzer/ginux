@@ -13,6 +13,7 @@ const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
 const NO_EXECUTE: u64 = 1 << 63;
 const TEST_USER_ADDRESS: usize = 1usize << 39;
+const PROCESS_RAX_INDEX: usize = 0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ProcessHandle {
@@ -27,6 +28,63 @@ enum ProcessState {
     Running,
     Exiting,
     Zombie { status: u8 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProcessExecutionContext {
+    general: [u64; 15],
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    fs_base: u64,
+}
+
+impl ProcessExecutionContext {
+    fn is_valid(self, address_space: ProcessAddressSpace) -> bool {
+        const REQUIRED_RFLAGS: u64 = (1 << 1) | (1 << 9);
+        const FORBIDDEN_RFLAGS: u64 = (3 << 12) | (1 << 14) | (1 << 17);
+        if self.rip == 0
+            || self.rip >= 1 << 47
+            || self.rsp == 0
+            || self.rsp >= 1 << 47
+            || self.fs_base >= 1 << 47
+            || self.rflags & REQUIRED_RFLAGS != REQUIRED_RFLAGS
+            || self.rflags & FORBIDDEN_RFLAGS != 0
+        {
+            return false;
+        }
+        let contains = |mapping: &cpu::LinuxActiveImageMapping, address: u64| {
+            u64::try_from(mapping.address).ok().is_some_and(|start| {
+                start
+                    .checked_add(PAGE_SIZE as u64)
+                    .is_some_and(|end| address >= start && address < end)
+            })
+        };
+        let executable = address_space
+            .mappings()
+            .iter()
+            .any(|mapping| mapping.executable && contains(mapping, self.rip));
+        let writable_stack = address_space.mappings().iter().any(|mapping| {
+            u64::try_from(mapping.address).ok().is_some_and(|start| {
+                mapping.writable
+                    && start
+                        .checked_add(PAGE_SIZE as u64)
+                        .is_some_and(|end| self.rsp > start && self.rsp <= end)
+            })
+        });
+        let fs_valid = self.fs_base == 0
+            || address_space
+                .mappings()
+                .iter()
+                .any(|mapping| contains(mapping, self.fs_base));
+        executable && writable_stack && fs_valid
+    }
+
+    fn fork_child(self) -> Self {
+        let mut child = self;
+        child.general[PROCESS_RAX_INDEX] = 0;
+        child
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -137,6 +195,7 @@ struct Process {
     parent: Option<ProcessHandle>,
     address_space: Option<ProcessAddressSpace>,
     retiring_address_space: Option<ProcessAddressSpace>,
+    context: Option<ProcessExecutionContext>,
     state: ProcessState,
 }
 
@@ -163,11 +222,24 @@ impl ProcessTable {
         }
     }
 
-    fn create_init(&mut self, address_space: ProcessAddressSpace) -> Option<ProcessHandle> {
-        if self.init.is_some() || self.next_pid != 1 || !address_space.is_valid() {
+    fn create_init(
+        &mut self,
+        address_space: ProcessAddressSpace,
+        context: ProcessExecutionContext,
+    ) -> Option<ProcessHandle> {
+        if self.init.is_some()
+            || self.next_pid != 1
+            || !address_space.is_valid()
+            || !context.is_valid(address_space)
+        {
             return None;
         }
-        let handle = self.allocate(None, Some(address_space), ProcessState::Running)?;
+        let handle = self.allocate(
+            None,
+            Some(address_space),
+            Some(context),
+            ProcessState::Running,
+        )?;
         if handle.pid != 1 {
             return None;
         }
@@ -176,14 +248,24 @@ impl ProcessTable {
     }
 
     fn prepare_fork(&mut self, parent: ProcessHandle) -> Option<ProcessHandle> {
-        if self.process(parent)?.state != ProcessState::Running {
+        let parent_process = self.process(parent)?;
+        if parent_process.state != ProcessState::Running
+            || parent_process.address_space.is_none()
+            || parent_process.context.is_none()
+        {
             return None;
         }
-        self.allocate(Some(parent), None, ProcessState::Preparing)
+        self.allocate(Some(parent), None, None, ProcessState::Preparing)
     }
 
-    fn commit_fork(&mut self, handle: ProcessHandle, address_space: ProcessAddressSpace) -> bool {
+    fn commit_fork(
+        &mut self,
+        handle: ProcessHandle,
+        address_space: ProcessAddressSpace,
+        context: ProcessExecutionContext,
+    ) -> bool {
         if !address_space.is_valid()
+            || !context.is_valid(address_space)
             || self.processes.iter().flatten().any(|process| {
                 process
                     .address_space
@@ -201,10 +283,12 @@ impl ProcessTable {
         if process.state != ProcessState::Preparing
             || process.address_space.is_some()
             || process.retiring_address_space.is_some()
+            || process.context.is_some()
         {
             return false;
         }
         process.address_space = Some(address_space);
+        process.context = Some(context);
         process.state = ProcessState::Running;
         true
     }
@@ -232,6 +316,10 @@ impl ProcessTable {
             return false;
         };
         let Some(parent_space) = parent.address_space else {
+            let _ = self.abort_fork(handle);
+            return false;
+        };
+        let Some(parent_context) = parent.context else {
             let _ = self.abort_fork(handle);
             return false;
         };
@@ -277,7 +365,7 @@ impl ProcessTable {
             None
         };
         if let Some(child_space) = child_space {
-            if self.commit_fork(handle, child_space) {
+            if self.commit_fork(handle, child_space, parent_context.fork_child()) {
                 return true;
             }
         }
@@ -329,6 +417,7 @@ impl ProcessTable {
         if process.state != ProcessState::Preparing
             || process.address_space.is_some()
             || process.retiring_address_space.is_some()
+            || process.context.is_some()
         {
             return false;
         }
@@ -345,12 +434,14 @@ impl ProcessTable {
         if process.state != ProcessState::Running
             || process.address_space != Some(expected_space)
             || process.retiring_address_space.is_some()
+            || process.context.is_none()
             || !expected_space.is_owned()
         {
             return None;
         }
         process.address_space = None;
         process.retiring_address_space = Some(expected_space);
+        process.context = None;
         process.state = ProcessState::Exiting;
         Some(expected_space)
     }
@@ -359,7 +450,10 @@ impl ProcessTable {
         let Some(process) = self.process_mut(handle) else {
             return false;
         };
-        if process.state != ProcessState::Exiting || process.address_space.is_some() {
+        if process.state != ProcessState::Exiting
+            || process.address_space.is_some()
+            || process.context.is_some()
+        {
             return false;
         }
         let Some(retiring) = process.retiring_address_space else {
@@ -395,6 +489,7 @@ impl ProcessTable {
         &mut self,
         parent: Option<ProcessHandle>,
         address_space: Option<ProcessAddressSpace>,
+        context: Option<ProcessExecutionContext>,
         state: ProcessState,
     ) -> Option<ProcessHandle> {
         let slot = self.processes.iter().position(Option::is_none)?;
@@ -412,6 +507,7 @@ impl ProcessTable {
             parent,
             address_space,
             retiring_address_space: None,
+            context,
             state,
         });
         Some(handle)
@@ -433,12 +529,13 @@ impl ProcessTable {
 }
 
 fn test_mapping(
+    address: usize,
     frame: memory::FrameLease,
     writable: bool,
     executable: bool,
 ) -> cpu::LinuxActiveImageMapping {
     cpu::LinuxActiveImageMapping {
-        address: TEST_USER_ADDRESS,
+        address,
         frame,
         writable,
         executable,
@@ -447,9 +544,9 @@ fn test_mapping(
 
 fn write_test_hierarchy(
     hierarchy: &[memory::FrameLease],
-    mapping: cpu::LinuxActiveImageMapping,
+    mappings: &[cpu::LinuxActiveImageMapping],
 ) -> bool {
-    if hierarchy.len() != 4 {
+    if hierarchy.len() != 4 || mappings.is_empty() {
         return false;
     }
     let mut tables = [core::ptr::null_mut::<u64>(); 4];
@@ -460,110 +557,157 @@ fn write_test_hierarchy(
         *table = address as *mut u64;
         unsafe { core::ptr::write_bytes(*table, 0, PAGE_SIZE / size_of::<u64>()) };
     }
-    let indexes = [
-        (mapping.address >> 39) & 0x1ff,
-        (mapping.address >> 30) & 0x1ff,
-        (mapping.address >> 21) & 0x1ff,
-        (mapping.address >> 12) & 0x1ff,
-    ];
     let branch_flags = PRESENT | WRITABLE | USER;
-    unsafe {
-        tables[0]
-            .add(indexes[0])
-            .write(hierarchy[1].address() | branch_flags);
-        tables[1]
-            .add(indexes[1])
-            .write(hierarchy[2].address() | branch_flags);
-        tables[2]
-            .add(indexes[2])
-            .write(hierarchy[3].address() | branch_flags);
-        tables[3].add(indexes[3]).write(
-            mapping.frame.address()
-                | PRESENT
-                | USER
-                | if mapping.writable { WRITABLE } else { 0 }
-                | if mapping.executable { 0 } else { NO_EXECUTE },
-        );
+    for mapping in mappings {
+        let indexes = [
+            (mapping.address >> 39) & 0x1ff,
+            (mapping.address >> 30) & 0x1ff,
+            (mapping.address >> 21) & 0x1ff,
+            (mapping.address >> 12) & 0x1ff,
+        ];
+        unsafe {
+            tables[0]
+                .add(indexes[0])
+                .write(hierarchy[1].address() | branch_flags);
+            tables[1]
+                .add(indexes[1])
+                .write(hierarchy[2].address() | branch_flags);
+            tables[2]
+                .add(indexes[2])
+                .write(hierarchy[3].address() | branch_flags);
+            tables[3].add(indexes[3]).write(
+                mapping.frame.address()
+                    | PRESENT
+                    | USER
+                    | if mapping.writable { WRITABLE } else { 0 }
+                    | if mapping.executable { 0 } else { NO_EXECUTE },
+            );
+        }
     }
     true
+}
+
+fn test_context() -> ProcessExecutionContext {
+    ProcessExecutionContext {
+        general: [0x55; 15],
+        rip: TEST_USER_ADDRESS as u64,
+        rsp: (TEST_USER_ADDRESS + 2 * PAGE_SIZE) as u64,
+        rflags: (1 << 1) | (1 << 9),
+        fs_base: (TEST_USER_ADDRESS + PAGE_SIZE) as u64,
+    }
 }
 
 pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
     };
-    let Some(frames) = memory::allocate_frames::<15>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<18>(memory::FrameOwner::KERNEL) else {
         return false;
     };
-    let init_mapping = [test_mapping(frames[4], false, true)];
-    if !write_test_hierarchy(&frames[0..4], init_mapping[0]) {
+    let init_mappings = [
+        test_mapping(TEST_USER_ADDRESS, frames[4], false, true),
+        test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[5], true, false),
+    ];
+    if !write_test_hierarchy(&frames[0..4], &init_mappings) {
         return false;
     }
-    let Some(init_space) = ProcessAddressSpace::new(&frames[0..4], &init_mapping) else {
+    let Some(init_space) = ProcessAddressSpace::new(&frames[0..4], &init_mappings) else {
         return false;
     };
+    let init_context = test_context();
     let mut table = ProcessTable::new();
-    let Some(init) = table.create_init(init_space) else {
+    let mut invalid_context = init_context;
+    invalid_context.rip = (TEST_USER_ADDRESS + PAGE_SIZE) as u64;
+    if table.create_init(init_space, invalid_context).is_some() {
+        return false;
+    }
+    invalid_context = init_context;
+    invalid_context.rsp = (TEST_USER_ADDRESS + PAGE_SIZE) as u64;
+    if table.create_init(init_space, invalid_context).is_some() {
+        return false;
+    }
+    invalid_context = init_context;
+    invalid_context.rflags |= 3 << 12;
+    if table.create_init(init_space, invalid_context).is_some() {
+        return false;
+    }
+    invalid_context = init_context;
+    invalid_context.fs_base = (TEST_USER_ADDRESS + 3 * PAGE_SIZE) as u64;
+    if table.create_init(init_space, invalid_context).is_some() {
+        return false;
+    }
+    let Some(init) = table.create_init(init_space, init_context) else {
         return false;
     };
     let Some(rejected_child) = table.prepare_fork(init) else {
         return false;
     };
-    let shared_page_mapping = [test_mapping(frames[4], false, true)];
-    if !write_test_hierarchy(&frames[5..9], shared_page_mapping[0]) {
+    let shared_page_mappings = [
+        test_mapping(TEST_USER_ADDRESS, frames[4], false, true),
+        test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[11], true, false),
+    ];
+    if !write_test_hierarchy(&frames[6..10], &shared_page_mappings) {
         return false;
     }
-    let Some(shared_page_space) = ProcessAddressSpace::new(&frames[5..9], &shared_page_mapping)
+    let Some(shared_page_space) = ProcessAddressSpace::new(&frames[6..10], &shared_page_mappings)
     else {
         return false;
     };
-    if table.commit_fork(rejected_child, shared_page_space) {
+    if table.commit_fork(rejected_child, shared_page_space, init_context.fork_child()) {
         return false;
     }
-    let first_mapping = [test_mapping(frames[9], false, true)];
-    let second_mapping = [test_mapping(frames[14], false, true)];
-    if !write_test_hierarchy(&frames[5..9], first_mapping[0])
-        || !write_test_hierarchy(&frames[10..14], second_mapping[0])
+    let first_mappings = [
+        test_mapping(TEST_USER_ADDRESS, frames[10], false, true),
+        test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[11], true, false),
+    ];
+    let second_mappings = [
+        test_mapping(TEST_USER_ADDRESS, frames[16], false, true),
+        test_mapping(TEST_USER_ADDRESS + PAGE_SIZE, frames[17], true, false),
+    ];
+    if !write_test_hierarchy(&frames[6..10], &first_mappings)
+        || !write_test_hierarchy(&frames[12..16], &second_mappings)
     {
         return false;
     }
-    let wrong_permission = [test_mapping(frames[9], true, false)];
-    let mut wrong_address = first_mapping;
-    wrong_address[0].address += PAGE_SIZE;
-    if ProcessAddressSpace::new(&frames[5..9], &wrong_permission).is_some()
-        || ProcessAddressSpace::new(&frames[5..9], &wrong_address).is_some()
+    let mut wrong_permission = first_mappings;
+    wrong_permission[0].writable = true;
+    wrong_permission[0].executable = false;
+    let mut wrong_address = first_mappings;
+    wrong_address[0].address += 2 * PAGE_SIZE;
+    if ProcessAddressSpace::new(&frames[6..10], &wrong_permission).is_some()
+        || ProcessAddressSpace::new(&frames[6..10], &wrong_address).is_some()
     {
         return false;
     }
     let (Some(first_space), Some(second_space)) = (
-        ProcessAddressSpace::new(&frames[5..9], &first_mapping),
-        ProcessAddressSpace::new(&frames[10..14], &second_mapping),
+        ProcessAddressSpace::new(&frames[6..10], &first_mappings),
+        ProcessAddressSpace::new(&frames[12..16], &second_mappings),
     ) else {
         return false;
     };
-    let Some(stale_generation) = frames[5].generation().checked_add(1) else {
+    let Some(stale_generation) = frames[6].generation().checked_add(1) else {
         return false;
     };
-    let Some(stale_root) = memory::FrameLease::from_parts(frames[5].address(), stale_generation)
+    let Some(stale_root) = memory::FrameLease::from_parts(frames[6].address(), stale_generation)
     else {
         return false;
     };
     let mut stale_hierarchy: [memory::FrameLease; 4] =
-        core::array::from_fn(|index| frames[5 + index]);
+        core::array::from_fn(|index| frames[6 + index]);
     stale_hierarchy[0] = stale_root;
-    let stale_space = ProcessAddressSpace::new(&stale_hierarchy, &first_mapping);
+    let stale_space = ProcessAddressSpace::new(&stale_hierarchy, &first_mappings);
     let mut stale_expected = first_space;
     stale_expected.hierarchy[0] = stale_root;
     if init.pid != 1
         || rejected_child.pid != 2
-        || table.create_init(first_space).is_some()
-        || table.commit_fork(rejected_child, init_space)
+        || table.create_init(first_space, init_context).is_some()
+        || table.commit_fork(rejected_child, init_space, init_context.fork_child())
         || stale_space.is_some()
         || table.wait(init, rejected_child.pid).is_some()
         || table.exit(rejected_child, 1)
-        || table.commit_cloned_fork(rejected_child, &frames[0..4], &frames[4..5])
+        || table.commit_cloned_fork(rejected_child, &frames[0..4], &frames[4..6])
         || !init_space.is_valid()
-        || table.commit_fork(rejected_child, first_space)
+        || table.commit_fork(rejected_child, first_space, init_context.fork_child())
         || table.abort_fork(rejected_child)
     {
         return false;
@@ -573,7 +717,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     };
     let (Some(parent_page), Some(child_page)) = (
         frames[4].direct_map_address(),
-        frames[9].direct_map_address(),
+        frames[10].direct_map_address(),
     ) else {
         return false;
     };
@@ -582,14 +726,26 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         (parent_page as *mut u8).add(PAGE_SIZE - 1).write(0x32);
     }
     if first_child.pid != 3
-        || !table.commit_cloned_fork(first_child, &frames[5..9], &frames[9..10])
+        || !table.commit_cloned_fork(first_child, &frames[6..10], &frames[10..12])
         || unsafe { (child_page as *const u8).read() } != 0x31
         || unsafe { (child_page as *const u8).add(PAGE_SIZE - 1).read() } != 0x32
-        || table.commit_fork(first_child, second_space)
+        || table.commit_fork(first_child, second_space, init_context.fork_child())
         || table.wait(init, first_child.pid).is_some()
         || table.exit(first_child, 42)
         || table.begin_exit(first_child, second_space).is_some()
         || table.begin_exit(first_child, stale_expected).is_some()
+    {
+        return false;
+    }
+    let Some(child_context) = table
+        .process(first_child)
+        .and_then(|process| process.context)
+    else {
+        return false;
+    };
+    if child_context != init_context.fork_child()
+        || child_context.general[PROCESS_RAX_INDEX] != 0
+        || table.process(init).and_then(|process| process.context) != Some(init_context)
     {
         return false;
     }
@@ -622,8 +778,9 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         || second_child.generation <= first_child.generation
         || second_child.pid != 4
         || table.begin_exit(first_child, second_space).is_some()
-        || table.commit_fork(second_child, first_space)
-        || !table.commit_fork(second_child, second_space)
+        || table.commit_fork(second_child, first_space, init_context.fork_child())
+        || table.commit_fork(second_child, second_space, invalid_context)
+        || !table.commit_fork(second_child, second_space, init_context.fork_child())
     {
         return false;
     }

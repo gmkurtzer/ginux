@@ -52,6 +52,23 @@ A rejection before exclusive admission leaves the caller's proposed leases
 untouched while still removing the reservation; in particular, an overlapping
 input can never cause the live owner's frames to be scrubbed.
 
+## Execution context publication
+
+Every `Running` process owns one saved userspace execution context together
+with its address-space bundle. Publication requires lower-canonical nonzero RIP
+and RSP, interrupt-enabled reserved-safe RFLAGS with no I/O privilege, nested
+task, or virtual-8086 bits, and a lower-canonical FS base. RIP must fall inside
+an executable recorded page. RSP must fall above the base and no later than the
+end of a writable recorded page, permitting the ordinary initial stack pointer
+at the page boundary. A nonzero FS base must fall inside a recorded page.
+
+Eager child publication copies the recorded parent's complete general-register,
+RIP, RSP, RFLAGS, and FS state rather than accepting caller-substituted state.
+It sets the child's `RAX` to zero for Linux fork-return semantics and attaches
+the context in the same transition that publishes the cloned address space.
+The parent context remains unchanged. Beginning exit removes the context before
+the process can become a zombie.
+
 ## Exit and wait ordering
 
 A running process cannot become a zombie while it still owns address-space
@@ -67,18 +84,22 @@ Waiting for a running child or an unrelated process has no effect. Reaping
 removes the complete record and makes its slot reusable; the next occupant has
 a new generation and PID.
 
-The boot verifier allocates three real five-frame address spaces, constructs
+The boot verifier allocates three real six-frame address spaces, each with an
+RX code page and RW/NX stack/TLS page, constructs
 PID 1, and reserves PID 2. It rejects a stale hierarchy lease, a completely
 aliased bundle, a unique-root bundle that aliases PID 1's payload page, and
 inventories with substituted virtual addresses or permissions. It proves the
 unpublished child cannot exit or be reaped, rejects an eager-clone request that
 reuses PID 1's exact frames without releasing them, removes the reservation,
-and rejects its stale handle. It then prepares PID 3 and uses the eager transaction to copy
-its parent's complete page, clone the hierarchy, validate the child inventory,
-and publish the record. The proof compares both ends of the copied page and
-mutates the child while requiring the parent to remain unchanged. It also
+and rejects its stale handle. It rejects contexts with a non-executable RIP,
+an invalid stack position, privileged flags, or an unrecorded FS base. It then
+prepares PID 3 and uses the eager transaction to copy both parent pages, clone
+the hierarchy, validate the child inventory, derive `RAX = 0`, and publish the
+address space and context together. The proof compares both ends of the copied
+code page, mutates the child while requiring the parent to remain unchanged,
+and requires the parent's original return register to remain intact. It also
 proves both premature detach and zombie publication are denied, releases one
-lease, proves the four survivors still block zombie publication, then scrubs
+lease, proves the five survivors still block zombie publication, then scrubs
 and releases the rest, publishes status 42, and reaps it through PID 1.
 Finally, it reuses the same slot for PID 4, rejects the already released PID 3
 bundle, exercises normal whole-bundle teardown with status 7, retires PID 1's
@@ -116,8 +137,9 @@ This now supplies the ownership and address-space publication operation needed
 by a future eager fork. The process bundle retains and cross-checks its virtual
 address, frame, and permission inventory, and the synthetic hierarchy clone is
 published through the process table. It does not yet snapshot the running
-Linux workload's mapping registry, install a child register/TLS execution
-context, activate the child CR3, or expose the operation through the Linux ABI.
+Linux workload's mapping registry, admit the saved child context to the
+scheduler, activate the child CR3, or expose the operation through the Linux
+ABI.
 
 ## Deliberate limits
 

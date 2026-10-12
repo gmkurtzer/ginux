@@ -623,6 +623,16 @@ if ! grep -q '^ginux: cloned Linux child resources published atomically' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: address-space-bound Linux process contexts validated' "$output_file"; then
+    echo "Boot test failed: Linux process contexts were not bound to their mappings." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux fork child return context derived' "$output_file"; then
+    echo "Boot test failed: the Linux fork child return context was not derived." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux private page copy validated' "$output_file"; then
     echo "Boot test failed: bounded Linux private page copying was not validated." >&2
     exit 1

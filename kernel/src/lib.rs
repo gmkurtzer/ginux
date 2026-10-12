@@ -637,6 +637,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux process mapping inventory validated\r\n");
     serial_write("ginux: transactional Linux child publication validated\r\n");
     serial_write("ginux: cloned Linux child resources published atomically\r\n");
+    serial_write("ginux: address-space-bound Linux process contexts validated\r\n");
+    serial_write("ginux: Linux fork child return context derived\r\n");
     if !linux_process::verify_private_page_copy_contract() {
         kernel_fail("ginux: bounded Linux private page copy invalid\r\n");
     }

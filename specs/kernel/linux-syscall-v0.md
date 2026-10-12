@@ -1251,8 +1251,10 @@ copies and rewires four through six generation-checked page-table frames, and
 maps each private child page with the parent's W^X permissions. The internal
 fork transaction obtains that inventory from the prepared child's recorded
 parent, performs both operations, revalidates the resulting child hierarchy,
-and atomically publishes the child bundle. It is not yet attached to the live
-syscall runtime and does not make the child schedulable.
+derives a child register/TLS context with `RAX = 0`, and atomically publishes
+the context and child bundle. Context publication requires its RIP, stack, FS
+base, and privilege flags to agree with the recorded mappings. It is not yet
+attached to the live syscall runtime and does not make the child schedulable.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;
