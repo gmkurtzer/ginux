@@ -1016,12 +1016,18 @@ readable `FUTEX_WAIT` and `FUTEX_WAIT_PRIVATE` compare one 32-bit word and retur
 ready, a match saves the current frame, records the wait address in that
 generation-tagged slot, marks it blocked, and selects the peer. `FUTEX_WAKE`
 and `FUTEX_WAKE_PRIVATE` move up to the requested number of exact address
-matches back to ready state. The proof blocks the child and explicitly wakes
-it, then blocks the parent before child clear-child-TID performs the second wake
-after zeroing the word. Both resumed waits return zero. A matching wait with no
-other ready thread returns `-ENOSYS` instead of
-deadlocking. Invalid operations or alignment return `-EINVAL`, and an invalid
-word returns `-EFAULT`. Timeouts, bitsets, requeueing, priority inheritance,
+matches back to ready state. A null timeout waits indefinitely within this
+bounded lifecycle. A valid zero relative timespec returns `-ETIMEDOUT`
+immediately. A positive relative timespec is converted to a checked monotonic
+deadline in the typed wait record; the first Linux syscall or scheduling
+boundary at or after expiry clears that record and makes the waiter ready with
+`-ETIMEDOUT`. The proof blocks the child and explicitly wakes it, expires a
+parent timed wait, then blocks the parent before child clear-child-TID performs
+the final wake after zeroing the word. Explicitly woken waits return zero. A
+matching wait with no other ready thread returns `-ENOSYS` instead of
+deadlocking. Invalid operations, alignment, or timespec fields return
+`-EINVAL`, and invalid word or timeout ranges return `-EFAULT`. Independent
+APIC-driven Linux timeout interrupts, bitsets, requeueing, priority inheritance,
 multiple waiters, and cross-process keys remain undefined.
 
 `rax = 10` (`__NR_mprotect`) supports an irreversible transition on either the

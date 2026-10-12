@@ -1161,6 +1161,17 @@ linux_clone_repeat:
     jne linux_parent_futex_wait
     push 1
     push 0
+    mov rdi, r8
+    xor esi, esi
+    mov edx, ebx
+    mov r10, rsp
+    mov eax, 202
+    syscall
+    add rsp, 16
+    cmp rax, -110
+    jne failure
+    push 1
+    push 0
     mov edi, 0x4050c0
     xor esi, esi
     mov rdx, rsp
@@ -1180,6 +1191,7 @@ linux_parent_futex_wait:
     mov rdi, r8
     xor esi, esi
     mov edx, ebx
+    xor r10d, r10d
     mov eax, 202
     call syscall_expect_zero
 linux_child_joined:
@@ -1336,14 +1348,16 @@ linux_child_joined:
     mov esi, 0x405100
     xor edx, edx
     mov r10d, 8
-    mov eax, 13
+    push 13
+    pop rax
     call syscall_expect_einval
 
     mov edi, 11
     mov esi, 0x405100
     mov edx, 0x405120
     mov r10d, 8
-    mov eax, 13
+    push 13
+    pop rax
     call syscall_expect_zero
 
     cmp qword ptr [0x405120], 0
@@ -1366,17 +1380,20 @@ linux_child_joined:
     jne failure
     mov edi, 0x40b000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     push 1
     pop rdi
     mov esi, 11
-    mov eax, 62
+    push 62
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40b000
     mov esi, 4096
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor eax, eax
@@ -1388,7 +1405,8 @@ linux_child_joined:
     mov esi, 0x405100
     xor edx, edx
     mov r10d, 8
-    mov eax, 13
+    push 13
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
@@ -1431,7 +1449,8 @@ linux_child_joined:
     mov edi, 1
     mov esi, 0x405000
     mov edx, 8
-    mov eax, 1
+    push 1
+    pop rax
     call syscall_expect_eight
 
     mov edi, 0x1002
@@ -1462,17 +1481,20 @@ linux_child_joined:
 
     mov edi, 0x405020
     mov esi, 1
-    mov eax, 79
+    push 79
+    pop rax
     syscall
     cmp rax, -34
     jne failure
     mov edi, 0x406200
     mov esi, 2
-    mov eax, 79
+    push 79
+    pop rax
     call syscall_expect_efault
     mov edi, 0x405020
     mov esi, 2
-    mov eax, 79
+    push 79
+    pop rax
     call syscall_expect_two
     cmp word ptr [0x405020], 0x002f
     jne failure
@@ -1480,22 +1502,26 @@ linux_child_joined:
     lea rdi, [rip + proc_self_exe]
     mov esi, 0x405040
     xor edx, edx
-    mov eax, 89
+    push 89
+    pop rax
     call syscall_expect_einval
     mov edi, 0x40a000
     mov esi, 0x405040
     mov edx, 5
-    mov eax, 89
+    push 89
+    pop rax
     call syscall_expect_efault
     lea rdi, [rip + proc_self_exe]
     mov esi, 0x406200
     mov edx, 5
-    mov eax, 89
+    push 89
+    pop rax
     call syscall_expect_efault
     lea rdi, [rip + proc_self_exe]
     mov esi, 0x405040
     mov edx, 5
-    mov eax, 89
+    push 89
+    pop rax
     call syscall_expect_five
     cmp dword ptr [0x405040], 0x696e692f
     jne failure
@@ -1535,41 +1561,48 @@ linux_child_joined:
     call syscall_expect_efault
 
     mov edi, 0x3f
-    mov eax, 95
+    push 95
+    pop rax
     syscall
     cmp rax, 0x12
     jne failure
     mov edi, 0x29c
-    mov eax, 95
+    push 95
+    pop rax
     syscall
     cmp rax, 0x3f
     jne failure
     mov edi, 0x12
-    mov eax, 95
+    push 95
+    pop rax
     syscall
     cmp rax, 0x9c
     jne failure
 
     mov edi, 0x406200
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
 
     mov edi, 0x405000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_zero
     cmp dword ptr [rdi], 0x756e6947
     jne failure
 
     mov edi, 2
     mov esi, 0x405200
-    mov eax, 5
+    push 5
+    pop rax
     call syscall_expect_ebadf
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x4061c0], rax
     mov edi, 1
     mov esi, 0x4061c0
-    mov eax, 5
+    push 5
+    pop rax
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4061c0], rax
@@ -1577,7 +1610,8 @@ linux_child_joined:
 
     mov edi, 1
     mov esi, 0x405200
-    mov eax, 5
+    push 5
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x405210], 1
     jne failure
@@ -1589,13 +1623,15 @@ linux_child_joined:
     mov edi, 2
     mov esi, 0x5413
     mov edx, 0x405280
-    mov eax, 16
+    push 16
+    pop rax
     call syscall_expect_ebadf
 
     mov edi, 1
     mov esi, 0x5402
     mov edx, 0x405280
-    mov eax, 16
+    push 16
+    pop rax
     syscall
     cmp rax, -25
     jne failure
@@ -4183,10 +4219,13 @@ child_thread_probe:
     mov rdi, rdx
     xor esi, esi
     mov edx, dword ptr [rdi]
+    xor r10d, r10d
     mov eax, 202
     call syscall_expect_zero
     cmp r14d, 2
     jne child_thread_exit
+    mov eax, 24
+    call syscall_expect_zero
     mov eax, 24
     call syscall_expect_zero
     push 1

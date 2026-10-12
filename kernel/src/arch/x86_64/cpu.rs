@@ -196,6 +196,7 @@ const LINUX_ENOTTY: u64 = u64::MAX - 24;
 const LINUX_ERANGE: u64 = u64::MAX - 33;
 const LINUX_ENAMETOOLONG: u64 = u64::MAX - 35;
 const LINUX_ENOSYS: u64 = u64::MAX - 37;
+const LINUX_ETIMEDOUT: u64 = u64::MAX - 109;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
 const LINUX_PROT_READ: u64 = 1;
@@ -411,6 +412,7 @@ static LINUX_CLONE_TID_FAULT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_EXPLICIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_EXIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_FUTEX_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -2257,7 +2259,6 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
         || LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst) != 0
         || LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst) != 0
         || LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst) != 0
-        || (kind == LINUX_THREAD_WAIT_FUTEX && deadline != 0)
     {
         return false;
     }
@@ -3052,6 +3053,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_FUTEX_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_EXPLICIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_FUTEX_EXIT_WAKE_COUNT.store(0, Ordering::SeqCst);
+    LINUX_FUTEX_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -3394,6 +3396,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let futex_wait_block_count = LINUX_FUTEX_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let futex_explicit_wake_count = LINUX_FUTEX_EXPLICIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let futex_exit_wake_count = LINUX_FUTEX_EXIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
+    let futex_wait_timeout_count = LINUX_FUTEX_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
     let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_block_count = LINUX_SIGNAL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
@@ -3413,13 +3416,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && first_child_tid != 0
             && clone_reuse_validated
             && child_gettid_count == 2
-            && yield_switch_count == 7
+            && yield_switch_count == 8
             && clone_busy_rejection_count == 2
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
-            && futex_wait_block_count == 3
+            && futex_wait_block_count == 4
             && futex_explicit_wake_count == 2
             && futex_exit_wake_count == 1
+            && futex_wait_timeout_count == 1
             && signal_wait_block_count == 2
             && signal_wait_wake_count == 1
             && signal_wait_timeout_count == 1)
@@ -3432,13 +3436,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             first_child_tid != 0,
             clone_reuse_validated,
             child_gettid_count == 2,
-            yield_switch_count == 7,
+            yield_switch_count == 8,
             clone_busy_rejection_count == 2,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
-            futex_wait_block_count == 3,
+            futex_wait_block_count == 4,
             futex_explicit_wake_count == 2,
             futex_exit_wake_count == 1,
+            futex_wait_timeout_count == 1,
             signal_wait_block_count == 2,
             signal_wait_wake_count == 1,
             signal_wait_timeout_count == 1,
@@ -3460,6 +3465,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             futex_wait_block_count,
             futex_explicit_wake_count,
             futex_exit_wake_count,
+            futex_wait_timeout_count,
             signal_wait_block_count,
             signal_wait_wake_count,
             signal_wait_timeout_count,
@@ -4079,13 +4085,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && first_child_tid != 0
                 && clone_reuse_validated
                 && child_gettid_count == 2
-                && yield_switch_count == 7
+                && yield_switch_count == 8
                 && clone_busy_rejection_count == 2
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
-                && futex_wait_block_count == 3
+                && futex_wait_block_count == 4
                 && futex_explicit_wake_count == 2
                 && futex_exit_wake_count == 1
+                && futex_wait_timeout_count == 1
                 && signal_wait_block_count == 2
                 && signal_wait_wake_count == 1
                 && signal_wait_timeout_count == 1)
@@ -4494,7 +4501,7 @@ extern "sysv64" fn linux_syscall_handler(
     if current_linux_tid() == Some(1) && LINUX_CHILD_EXIT_COUNT.load(Ordering::SeqCst) != 0 {
         LINUX_PARENT_RESUMED.store(true, Ordering::SeqCst);
     }
-    expire_linux_signal_waits();
+    expire_linux_waits();
     match number {
         LINUX_READ_SYSCALL => linux_descriptor_read(first_argument, buffer, count),
         LINUX_PREAD64_SYSCALL => {
@@ -4939,6 +4946,7 @@ extern "sysv64" fn linux_syscall_handler(
             first_argument,
             buffer,
             count,
+            register(0),
         ),
         LINUX_PRLIMIT64_SYSCALL => {
             if !matches!(first_argument, 0 | 1) {
@@ -5425,6 +5433,7 @@ fn linux_futex_live_return(
     address: u64,
     operation: u64,
     value: u64,
+    timeout: u64,
 ) -> u64 {
     if !address.is_multiple_of(size_of::<u32>() as u64) {
         return LINUX_EINVAL;
@@ -5447,8 +5456,28 @@ fn linux_futex_live_return(
             let Some(tls) = linux_thread_context(current) else {
                 return LINUX_ESRCH;
             };
+            let deadline = if timeout == 0 {
+                0
+            } else {
+                let mut timeout_bytes = [0_u8; 16];
+                if !copy_from_linux_user(timeout, &mut timeout_bytes) {
+                    return LINUX_EFAULT;
+                }
+                let Some(duration) = linux_timespec_nanoseconds(&timeout_bytes) else {
+                    return LINUX_EINVAL;
+                };
+                if duration == 0 {
+                    return LINUX_ETIMEDOUT;
+                }
+                let Some(deadline) =
+                    linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
+                else {
+                    return LINUX_EINVAL;
+                };
+                deadline
+            };
             if !save_linux_thread_return_context(current, caller)
-                || !block_current_linux_thread(LINUX_THREAD_WAIT_FUTEX, address, 0, 0)
+                || !block_current_linux_thread(LINUX_THREAD_WAIT_FUTEX, address, 0, deadline)
             {
                 return LINUX_EINVAL;
             }
@@ -9947,7 +9976,7 @@ fn wake_linux_signal_wait(signal: u64, signal_code: i32) -> bool {
     false
 }
 
-fn expire_linux_signal_waits() {
+fn expire_linux_waits() {
     let Some(now) = linux_elapsed_nanoseconds() else {
         return;
     };
@@ -9956,17 +9985,21 @@ fn expire_linux_signal_waits() {
         if deadline == 0
             || now < deadline
             || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
-            || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_SIGNAL
         {
             continue;
         }
-        LINUX_THREAD_RAXS[slot].store(LINUX_EAGAIN, Ordering::SeqCst);
+        let (result, counter) = match LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) {
+            LINUX_THREAD_WAIT_FUTEX => (LINUX_ETIMEDOUT, &LINUX_FUTEX_WAIT_TIMEOUT_COUNT),
+            LINUX_THREAD_WAIT_SIGNAL => (LINUX_EAGAIN, &LINUX_SIGNAL_WAIT_TIMEOUT_COUNT),
+            _ => continue,
+        };
+        LINUX_THREAD_RAXS[slot].store(result, Ordering::SeqCst);
         LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
         LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
-        LINUX_SIGNAL_WAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
+        counter.fetch_add(1, Ordering::SeqCst);
     }
 }
 

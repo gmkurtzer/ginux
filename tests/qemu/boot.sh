@@ -1666,8 +1666,8 @@ if ! grep -q '^ginux: Linux robust-list registration validated' "$output_file"; 
     exit 1
 fi
 
-if ! grep -q '^ginux: bounded Linux futex boundary validated' "$output_file"; then
-    echo "Boot test failed: the bounded Linux futex boundary was not validated." >&2
+if ! grep -q '^ginux: Linux scheduler-backed timed futex wait validated' "$output_file"; then
+    echo "Boot test failed: the scheduler-backed timed Linux futex wait was not validated." >&2
     exit 1
 fi
 

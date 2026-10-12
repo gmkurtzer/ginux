@@ -255,7 +255,7 @@ retire and the main RELRO page is sealed, a parent-TID write into that page
 returns `EFAULT`; final teardown proves the failed transaction leaked no slot.
 Occupied capacity returns `EAGAIN` without mutating the live slot. This remains a fixed
 two-slot, two-sequential-child proof without arbitrary allocation, more than
-one live child, preemption, futex timeouts, multiple waiters, requeue
+one live child, asynchronous preemption, multiple waiters, requeue
 operations, or a general scheduler.
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
@@ -494,8 +494,11 @@ Bounded `set_robust_list` and `get_robust_list` calls retain and report one
 and discard the registration during exit. A bounded matching futex wait may
 block either of the two threads only while its peer is ready. Explicit wake
 restores the blocked child; child exit clears its registered word and restores
-the blocked parent. Mismatches return `EAGAIN`, and a matching wait without
-another runnable thread returns `ENOSYS`. General futex queues, timeouts, and
+the blocked parent. An optional relative timeout uses the same typed monotonic
+deadline state as signal waits: zero returns `ETIMEDOUT` immediately, while a
+positive duration wakes at the next Linux syscall or scheduling boundary after
+expiry. Mismatches return `EAGAIN`, and a matching wait without another runnable
+thread returns `ENOSYS`. General futex queues, asynchronous timer wakeups, and
 robust futex recovery are not implemented.
 Bounded `mprotect` can activate a complete `PROT_NONE` scratch range as fresh
 zeroed read-only/NX or RW/NX pages, or irreversibly seal the page named by the
