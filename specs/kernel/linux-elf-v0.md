@@ -455,6 +455,12 @@ contract as initial static entry. Their fresh stack carries target-specific
 conservative hardware masks, and `AT_NULL`. Both independently linked static
 targets validate every pair and dereference `AT_EXECFN` and `AT_PLATFORM` in
 ring 3 before making a syscall.
+The interpreted replacement main likewise validates all eighteen ordered
+pairs before completing. It requires the dynamic main's program headers and
+entry, interpreter base `0x600000`, `AT_EXECFN` naming `/init`, platform
+`x86_64`, container-local credentials, conservative capability masks,
+`AT_HWCAP2 = 1` as the bounded replacement discriminator, and the final
+`AT_NULL` pair.
 Post-exit validation requires the stack leaf to name the fresh lease, rejects
 the retired generation even if its physical address has since been reused, and
 reclaims the replacement stack only after the process page-table root is

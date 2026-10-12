@@ -38,7 +38,85 @@ ginux_linux_probe:
     jmp failure
 .Lentry_hardware_capability_two:
     cmp qword ptr [rax + 8], 1
-    je .Ldynamic_exec_complete
+    jne .Linitial_graph_entry
+    cmp qword ptr [rax - 256], 3
+    jne failure
+    cmp qword ptr [rax - 248], 0x3ff040
+    jne failure
+    cmp qword ptr [rax - 240], 4
+    jne failure
+    cmp qword ptr [rax - 232], 56
+    jne failure
+    cmp qword ptr [rax - 224], 5
+    jne failure
+    cmp qword ptr [rax - 216], 9
+    jne failure
+    cmp qword ptr [rax - 208], 6
+    jne failure
+    cmp qword ptr [rax - 200], 4096
+    jne failure
+    cmp qword ptr [rax - 192], 7
+    jne failure
+    cmp qword ptr [rax - 184], 0x600000
+    jne failure
+    cmp qword ptr [rax - 176], 8
+    jne failure
+    cmp qword ptr [rax - 168], 0
+    jne failure
+    cmp qword ptr [rax - 160], 11
+    jne failure
+    cmp qword ptr [rax - 152], 0
+    jne failure
+    cmp qword ptr [rax - 144], 12
+    jne failure
+    cmp qword ptr [rax - 136], 0
+    jne failure
+    cmp qword ptr [rax - 128], 13
+    jne failure
+    cmp qword ptr [rax - 120], 0
+    jne failure
+    cmp qword ptr [rax - 112], 14
+    jne failure
+    cmp qword ptr [rax - 104], 0
+    jne failure
+    cmp qword ptr [rax - 96], 23
+    jne failure
+    cmp qword ptr [rax - 88], 0
+    jne failure
+    cmp qword ptr [rax - 80], 31
+    jne failure
+    mov rdx, qword ptr [rax - 72]
+    cmp dword ptr [rdx], 0x696e692f
+    jne failure
+    cmp word ptr [rdx + 4], 0x74
+    jne failure
+    cmp qword ptr [rax - 64], 9
+    jne failure
+    cmp qword ptr [rax - 56], 0x400100
+    jne failure
+    cmp qword ptr [rax - 48], 17
+    jne failure
+    cmp qword ptr [rax - 40], 100
+    jne failure
+    cmp qword ptr [rax - 32], 15
+    jne failure
+    mov rdx, qword ptr [rax - 24]
+    cmp dword ptr [rdx], 0x5f363878
+    jne failure
+    cmp word ptr [rdx + 4], 0x3436
+    jne failure
+    cmp byte ptr [rdx + 6], 0
+    jne failure
+    cmp qword ptr [rax - 16], 16
+    jne failure
+    cmp qword ptr [rax - 8], 0
+    jne failure
+    cmp qword ptr [rax + 16], 0
+    jne failure
+    cmp qword ptr [rax + 24], 0
+    jne failure
+    jmp .Ldynamic_exec_complete
+.Linitial_graph_entry:
 #else
     mov rax, qword ptr [rip + ginux_dependency_symbol@GOTPCREL]
     test rax, rax

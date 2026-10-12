@@ -412,7 +412,11 @@ graph with exact generation-tagged leases. It then resets the main and DSO
 mapping contracts so the replacement interpreter can install the authenticated
 main and dependencies again. Both static and interpreted exec pre-materialize
 the complete bounded stack in a fresh zeroed RW/NX frame and replace the old
-primary-stack leaf in the rollback-capable image transaction. Commit requires
+primary-stack leaf in the rollback-capable image transaction.
+The replacement main validates every ordered auxiliary-vector pair, including
+its dynamic program headers, entry, interpreter base, executable name,
+platform, credentials, clock tick, conservative hardware masks, and terminator.
+Commit requires
 the old stack's exact live generation and permissions, then
 scrubs and releases that lease; teardown reclaims the replacement stack after
 the process root is inactive. The same commit installs a fresh zero-filled

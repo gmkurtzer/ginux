@@ -45,7 +45,8 @@ main/interpreter/two-DSO graph executes from those retained bytes. A bounded
 single-threaded `execve` proof atomically replaces two independent static workloads and
 the running interpreted `/init` graph with the selected measured executable, rebuilds up to eight bounded argument and eight environment entries
 plus a deterministic Linux auxiliary vector in a 512-byte initial-stack image,
-and allocates and materializes up to eight
+and validates every auxiliary pair in ring 3 for both static and interpreted
+replacement. It allocates and materializes up to eight
 measured ELF pages only during the transaction. It derives entry and W^X mappings from that
 runtime selection instead of a boot-predeclared target template, replaces the
 runtime-owned active-image record, removes the old image pages, scrubs and
