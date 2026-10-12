@@ -176,7 +176,8 @@ does not change the retained working-directory identity. These calls provide
 bounded immutable-root directory state, not a mutable or general VFS.
 `rax = 89` (`__NR_readlink`) recognizes exactly `/proc/self/exe`, copied as a
 bounded NUL-terminated pathname. It returns `/init` without a terminator before
-replacement and `/bin/exec-target` after the bounded `execve` commit. Each
+replacement, remains `/init` after interpreted self-replacement, and reports
+`/bin/exec-target` or `/bin/exec-second` after a static `execve` commit. Each
 rejected exec leaves the original identity visible. A zero output size returns
 `-EINVAL`; invalid pathname or output ranges return `-EFAULT`. Other paths
 return `-ENOENT`. This is not a general procfs.

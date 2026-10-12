@@ -474,7 +474,9 @@ exactly `argv = ["/init", NULL]` and one environment entry, installs the
 authenticated interpreter pages atomically, resets the main/DSO mapping
 contracts, rematerializes initial and sibling TLS pages from authenticated
 templates, restores the initial FS base, and executes the replacement main
-after both DSOs have been mapped and relocated. This remains one fixed graph,
+after both DSOs have been mapped and relocated. The internal measured node
+`linux/init` retains the canonical Linux-visible `/init` identity through
+`/proc/self/exe`. This remains one fixed graph,
 not a general dynamic-linker contract.
 Per-process `umask` state starts at `022`, returns its prior value, and masks
 updates to the nine permission bits.

@@ -431,7 +431,9 @@ are rematerialized in place from all three authenticated templates, and the
 initial FS base is restored before interpreter entry. RELRO is reapplied before
 the replacement main exits. Admission is currently limited to `/init`, one
 argument, one environment entry, one live thread, the fixed two-DSO graph, and
-the existing bounded load windows.
+the existing bounded load windows. The internal `linux/init` node is exposed as
+canonical `/init`; the replacement main validates that `/proc/self/exe`
+returns exactly those five bytes before it can complete.
 
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF

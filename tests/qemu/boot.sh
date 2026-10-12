@@ -687,7 +687,8 @@ for marker in \
     'measured-root interpreted Linux exec committed' \
     'interpreted Linux exec graph remapped' \
     'complete interpreted Linux graph retired at exec' \
-    'interpreted Linux TLS state rematerialized'; do
+    'interpreted Linux TLS state rematerialized' \
+    'canonical interpreted Linux executable identity validated'; do
     if ! grep -q "^ginux: ${marker}" "$output_file"; then
         echo "Boot test failed: ${marker}." >&2
         exit 1

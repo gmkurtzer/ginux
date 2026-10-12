@@ -5016,12 +5016,16 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
         let Some(name) = initramfs::published_file_name_by_node(exec_node) else {
             return LINUX_ESRCH;
         };
-        measured_path[0] = b'/';
-        let Some(destination) = measured_path.get_mut(1..1 + name.len()) else {
-            return LINUX_ENAMETOOLONG;
-        };
-        destination.copy_from_slice(name);
-        &measured_path[..1 + name.len()]
+        if name == b"linux/init" {
+            b"/init" as &[u8]
+        } else {
+            measured_path[0] = b'/';
+            let Some(destination) = measured_path.get_mut(1..1 + name.len()) else {
+                return LINUX_ENAMETOOLONG;
+            };
+            destination.copy_from_slice(name);
+            &measured_path[..1 + name.len()]
+        }
     };
     let output_length = usize::try_from(output_size)
         .unwrap_or(usize::MAX)

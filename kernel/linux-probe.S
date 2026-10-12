@@ -3533,6 +3533,19 @@ resolution_valid:
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
 .Ldynamic_exec_complete:
+    sub rsp, 16
+    lea rdi, [rip + proc_self_exe]
+    mov rsi, rsp
+    mov edx, 16
+    mov eax, 89
+    syscall
+    cmp rax, 5
+    jne failure
+    cmp dword ptr [rsp], 0x696e692f
+    jne failure
+    cmp byte ptr [rsp + 4], 0x74
+    jne failure
+    add rsp, 16
     mov edi, 0x406000
     mov esi, 4096
     mov edx, 1
