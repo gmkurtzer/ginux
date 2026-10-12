@@ -302,6 +302,11 @@ const LINUX_ROOT_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_INTERPRETE
 const LINUX_FILE_MASK: u16 = LINUX_FILE_INIT | LINUX_FILE_INTERPRETER | LINUX_FILE_DEPENDENCY;
 const LINUX_FILE_PROC_STATUS: u16 = LINUX_FILE_MASK;
 const LINUX_PROC_PID1_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS;
+const LINUX_PROC_PID2_DIRECTORY_NODE: u16 = 0xfa00;
+const LINUX_PROC_PID2_DIRECTORY: u16 =
+    LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS | LINUX_PROC_PID2_DIRECTORY_NODE;
+const LINUX_PROC_PID2_STATUS_NODE: u16 = 0xf900;
+const LINUX_FILE_PROC_PID2_STATUS: u16 = LINUX_FILE_MASK | LINUX_PROC_PID2_STATUS_NODE;
 const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
 const LINUX_MOUNTINFO_FILE_NODE: u16 = 0xfe00;
@@ -315,6 +320,10 @@ const LINUX_FILE_PROC_SETGROUPS: u16 = LINUX_FILE_MASK | LINUX_SETGROUPS_FILE_NO
 const LINUX_TMP_FILE_NODE: u16 = 0xff00;
 const LINUX_FILE_TMP_SCRATCH: u16 = LINUX_FILE_MASK | LINUX_TMP_FILE_NODE;
 const LINUX_PROC_PID1_STATUS: &[u8] = b"Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n";
+const LINUX_PROC_PID2_RUNNING_STATUS: &[u8] =
+    b"Name:\tinit\nState:\tR (running)\nPid:\t2\nPPid:\t1\n";
+const LINUX_PROC_PID2_ZOMBIE_STATUS: &[u8] =
+    b"Name:\tinit\nState:\tZ (zombie)\nPid:\t2\nPPid:\t1\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 32;
 pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
@@ -7914,6 +7923,9 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     if path == b"/proc/1/status" {
         return Some(LINUX_FILE_PROC_STATUS);
     }
+    if path == b"/proc/2/status" && linux_process::live_process_status(2).is_some() {
+        return Some(LINUX_FILE_PROC_PID2_STATUS);
+    }
     if path == b"/proc/1/mountinfo" {
         return Some(LINUX_FILE_PROC_MOUNTINFO);
     }
@@ -7962,6 +7974,9 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
         b"/" => Some(LINUX_ROOT_DIRECTORY),
         b"/dev" => Some(LINUX_DEVICE_DIRECTORY),
         b"/proc/1" => Some(LINUX_PROC_PID1_DIRECTORY),
+        b"/proc/2" if linux_process::live_process_status(2).is_some() => {
+            Some(LINUX_PROC_PID2_DIRECTORY)
+        }
         _ => {
             let name = path.strip_prefix(b"/")?;
             let node = initramfs::published_directory_node(name)?;
@@ -7980,8 +7995,14 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     if path == b"proc/1" {
         return Some(LINUX_PROC_PID1_DIRECTORY);
     }
+    if path == b"proc/2" && linux_process::live_process_status(2).is_some() {
+        return Some(LINUX_PROC_PID2_DIRECTORY);
+    }
     if path == b"proc/1/status" {
         return Some(LINUX_FILE_PROC_STATUS);
+    }
+    if path == b"proc/2/status" && linux_process::live_process_status(2).is_some() {
+        return Some(LINUX_FILE_PROC_PID2_STATUS);
     }
     if path == b"proc/1/mountinfo" {
         return Some(LINUX_FILE_PROC_MOUNTINFO);
@@ -8952,7 +8973,11 @@ fn linux_root_directory_inode(kind: u16) -> Option<u64> {
         return Some(11);
     }
     if role == LINUX_PROC_PID1_DIRECTORY {
-        return Some(16);
+        return match kind & LINUX_ROOT_NODE_MASK {
+            0 => Some(16),
+            LINUX_PROC_PID2_DIRECTORY_NODE => Some(23),
+            _ => None,
+        };
     }
     let node = (kind & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT;
     (role == LINUX_ROOT_MEASURED_DIRECTORY && node != 0).then_some(64 + u64::from(node))
@@ -8967,7 +8992,11 @@ fn linux_measured_directory_path(kind: u16) -> Option<&'static [u8]> {
         return Some(b"");
     }
     if role == LINUX_PROC_PID1_DIRECTORY {
-        return Some(b"proc/1");
+        return match kind & LINUX_ROOT_NODE_MASK {
+            0 => Some(b"proc/1"),
+            LINUX_PROC_PID2_DIRECTORY_NODE => Some(b"proc/2"),
+            _ => None,
+        };
     }
     let node = ((kind & LINUX_ROOT_NODE_MASK) >> LINUX_ROOT_NODE_SHIFT) as u8;
     (role == LINUX_ROOT_MEASURED_DIRECTORY)
@@ -11493,6 +11522,7 @@ fn linux_proc_file(state: u16) -> bool {
     matches!(
         kind,
         LINUX_FILE_PROC_STATUS
+            | LINUX_FILE_PROC_PID2_STATUS
             | LINUX_FILE_PROC_MOUNTINFO
             | LINUX_FILE_PROC_UID_MAP
             | LINUX_FILE_PROC_GID_MAP
@@ -11530,6 +11560,16 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
     if state & !3 == LINUX_FILE_PROC_STATUS {
         return Some(LINUX_PROC_PID1_STATUS);
     }
+    if state & !3 == LINUX_FILE_PROC_PID2_STATUS {
+        let status = linux_process::live_process_status(2)?;
+        if status.pid != 2 || status.parent_pid != 1 {
+            return None;
+        }
+        return match status.state {
+            linux_process::LiveProcessState::Running => Some(LINUX_PROC_PID2_RUNNING_STATUS),
+            linux_process::LiveProcessState::Zombie => Some(LINUX_PROC_PID2_ZOMBIE_STATUS),
+        };
+    }
     if linux_tmp_file(state) {
         return None;
     }
@@ -11546,6 +11586,9 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
     }
     if state & !3 == LINUX_FILE_PROC_STATUS {
         return Some(17);
+    }
+    if state & !3 == LINUX_FILE_PROC_PID2_STATUS {
+        return linux_process::live_process_status(2).map(|_| 24);
     }
     if linux_mountinfo_file(state) {
         return Some(19);
@@ -12062,7 +12105,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
         let directory_inode = linux_root_directory_inode(state).unwrap_or(0);
         let parent_inode = if directory.is_empty() {
             directory_inode
-        } else if directory == b"proc/1" {
+        } else if directory == b"proc/1" || directory == b"proc/2" {
             initramfs::published_directory_node(b"proc")
                 .map(|node| 64 + u64::from(node))
                 .unwrap_or(11)
@@ -12116,16 +12159,47 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                     cursor += 1;
                 }
             }
-        } else if directory == b"proc" || directory == b"tmp" {
+        } else if directory == b"proc/2" {
             if cursor > 1 {
                 return LINUX_EINVAL;
             }
             if cursor == 0 {
-                let entry = if directory == b"proc" {
-                    Some((16, 4, &b"1"[..]))
-                } else {
-                    linux_tmpfs::entry().map(|(handle, name)| (linux_tmpfs::inode(handle), 8, name))
-                };
+                if linux_process::live_process_status(2).is_none()
+                    || !append_linux_dirent(&mut entries, &mut used, 24, 3, 8, b"status")
+                {
+                    return LINUX_ENOENT;
+                }
+                cursor = 1;
+            }
+        } else if directory == b"proc" {
+            let child_live = linux_process::live_process_status(2).is_some();
+            let limit = 1 + usize::from(child_live);
+            if cursor > limit {
+                return LINUX_EINVAL;
+            }
+            for (index, inode, name) in [(0_usize, 16_u64, &b"1"[..]), (1_usize, 23_u64, &b"2"[..])]
+            {
+                if cursor == index && (index == 0 || child_live) {
+                    if !append_linux_dirent(
+                        &mut entries,
+                        &mut used,
+                        inode,
+                        (index + 3) as i64,
+                        4,
+                        name,
+                    ) {
+                        return LINUX_EINVAL;
+                    }
+                    cursor += 1;
+                }
+            }
+        } else if directory == b"tmp" {
+            if cursor > 1 {
+                return LINUX_EINVAL;
+            }
+            if cursor == 0 {
+                let entry = linux_tmpfs::entry()
+                    .map(|(handle, name)| (linux_tmpfs::inode(handle), 8, name));
                 if let Some((inode, kind, name)) = entry {
                     if !append_linux_dirent(&mut entries, &mut used, inode, 3, kind, name) {
                         return LINUX_EINVAL;

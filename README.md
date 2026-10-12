@@ -21,7 +21,9 @@ the immutable bounded `/dev`, proves `/dev/null` discard/EOF behavior,
 publishing `DEVFS_READY`. Before
 readiness it enumerates `/proc` and `/proc/1`, then reads a bounded read-only
 `/proc/1/status` view containing its exact name, running state, PID 1, and
-parent PID 0. It also proves `/tmp` starts empty, creates the generation-bound
+parent PID 0. Its forked PID 2 appears dynamically with a zombie status and
+parent PID 1, then disappears from `/proc` after `wait4` reaps it. It also
+proves `/tmp` starts empty, creates the generation-bound
 64-byte `ginux-ready` file, enumerates, writes, rereads, unlinks, and confirms
 removal; unlink or final teardown scrubs the backing store. The kernel installs
 the measured root as the sole

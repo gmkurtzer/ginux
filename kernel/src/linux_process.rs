@@ -272,6 +272,19 @@ pub(crate) struct LiveProcessDispatch {
     pub(crate) fs_base: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LiveProcessState {
+    Running,
+    Zombie,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct LiveProcessStatus {
+    pub(crate) pid: u32,
+    pub(crate) parent_pid: u32,
+    pub(crate) state: LiveProcessState,
+}
+
 struct ProcessTable {
     processes: [Option<Process>; PROCESS_LIMIT],
     generations: [u32; PROCESS_LIMIT],
@@ -1221,6 +1234,22 @@ pub(crate) fn live_process_user_namespace(pid: u32) -> Option<linux_user::UserNa
     let handle = table.handle_by_pid(pid)?;
     let namespace = table.process(handle)?.user_namespace;
     linux_user::credentials(namespace).map(|_| namespace)
+}
+
+pub(crate) fn live_process_status(pid: u32) -> Option<LiveProcessStatus> {
+    let table = live_process_table_mut()?;
+    let handle = table.handle_by_pid(pid)?;
+    let process = table.process(handle)?;
+    let state = match process.state {
+        ProcessState::Running => LiveProcessState::Running,
+        ProcessState::Zombie { .. } => LiveProcessState::Zombie,
+        ProcessState::Preparing | ProcessState::Exiting => return None,
+    };
+    Some(LiveProcessStatus {
+        pid: process.handle.pid,
+        parent_pid: process.parent.map_or(0, |parent| parent.pid),
+        state,
+    })
 }
 
 #[inline(never)]

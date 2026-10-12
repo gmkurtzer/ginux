@@ -21,8 +21,11 @@ line, and exits through `exit_group(42)`. Final process teardown closes both
 the candidate's console descriptor and descriptors inherited across `exec`.
 Before readiness, PID 1 enumerates `/proc` and `/proc/1`, reads the immutable
 bounded `/proc/1/status` snapshot, and publishes its exact `init`, running,
-PID 1, and parent PID 0 fields to the console. This moves procfs to `partial`;
-general process enumeration and lifecycle updates remain absent.
+PID 1, and parent PID 0 fields to the console. After fork returns, the parent
+enumerates PID 2 in `/proc`, enumerates its `status` record, and verifies its
+zombie state, PID 2, and parent PID 1. After `wait4` reaps it, the same pathname
+returns `-ENOENT`. This makes procfs ready for the bounded two-process profile;
+general process metadata and arbitrary process counts remain absent.
 The kernel binds PID 1 to the initial generation-tagged Linux mount namespace.
 Its sole root mount references the live measured-root generation and has fixed
 `ro,nosuid,nodev` flags. PID 1 reads the exact corresponding
@@ -66,14 +69,16 @@ owned PID 2 resumes at the actual post-fork instruction with `RAX = 0`, verifies
 proves invalid `wait4` options and an invalid status pointer do not reap the
 zombie, then receives PID 2 and encoded status `42 << 8`; a repeated wait
 returns `-ECHILD`. This makes `process.fork-wait` ready for the bounded profile.
+PID 1 then publishes `PROCFS_READY`, tying the observable process records to
+the same fork, zombie, wait, and reap lifecycle.
 
 This execution gate deliberately does not claim M5 completion. The immutable
 root publishes an explicit `/sbin` directory containing the exact `init` node,
 and bounded root enumeration reaches it through a second cursor page. PID 1 is
 currently a bounded readiness-and-exit workload, not a persistent supervisor
 or interactive console owner. General process concurrency, mutable or multiple
-mounts, a general tmpfs, a complete procfs, and general user-namespace creation
-and mapping APIs remain explicit gaps in the matrix.
+mounts, a general tmpfs or procfs, and general user-namespace creation and
+mapping APIs remain outside the bounded matrix.
 
 Build the exact candidate root and signed development image with:
 

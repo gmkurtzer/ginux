@@ -745,8 +745,9 @@ if ! grep -q $'^Name:\tinit$' "$output_file" ||
     ! grep -q $'^State:\tR (running)$' "$output_file" ||
     ! grep -q $'^Pid:\t1$' "$output_file" ||
     ! grep -q $'^PPid:\t0$' "$output_file" ||
-    ! grep -q '^ginux: bounded procfs PID 1 status validated' "$output_file"; then
-    echo "Boot test failed: the bounded PID 1 procfs view was not validated." >&2
+    ! grep -q '^ginux: lifecycle-aware bounded procfs validated' "$output_file" ||
+    ! grep -q '^PROCFS_READY$' "$output_file"; then
+    echo "Boot test failed: the lifecycle-aware bounded procfs view was not validated." >&2
     exit 1
 fi
 

@@ -568,6 +568,80 @@ ginux_linux_system_init:
     jz .Lfork_child
 
     mov r12, rax
+
+    mov edi, -100
+    lea rsi, [rip + .Lproc_path]
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 96
+    mov eax, 217
+    syscall
+    cmp rax, 96
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 91], '2'
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Lpid2_path]
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 80
+    mov eax, 217
+    syscall
+    cmp rax, 80
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 67], 0x74617473
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Lpid2_status_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 44
+    xor eax, eax
+    syscall
+    cmp rax, 44
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 18], 'Z'
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 34], '2'
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 42], '1'
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov rdi, r12
     xor esi, esi
     mov edx, 1
@@ -605,6 +679,22 @@ ginux_linux_system_init:
     mov eax, 61
     syscall
     cmp rax, -10
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Lpid2_status_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    cmp rax, -2
+    jne .Lfailure
+
+    mov rdi, r8
+    lea rsi, [rip + .Lprocfs_marker]
+    mov edx, 13
+    mov eax, 1
+    syscall
+    cmp rax, 13
     jne .Lfailure
     jmp .Lfork_complete
 
@@ -684,6 +774,10 @@ ginux_linux_system_init:
     .asciz "/proc"
 .Lpid1_path:
     .asciz "/proc/1"
+.Lpid2_path:
+    .asciz "/proc/2"
+.Lpid2_status_path:
+    .asciz "/proc/2/status"
 .Ltmp_path:
     .asciz "/tmp"
 .Ltmp_file_path:
@@ -694,6 +788,8 @@ ginux_linux_system_init:
     .ascii "TMPFS_READY\n"
 .Ldevfs_marker:
     .ascii "DEVFS_READY\n"
+.Lprocfs_marker:
+    .ascii "PROCFS_READY\n"
 .Luserns_marker:
     .ascii "USERNS_READY\n"
 .Lprivilege_marker:

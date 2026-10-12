@@ -467,8 +467,8 @@ the main and both dependencies' admitted segments through the fixed mapping
 contract below.
 
 The measured `/proc` directory is the immutable mount-point anchor for a
-synthetic bounded PID 1 view. Its `getdents64` result contains `.`, `..`, and
-the directory `1`; `/proc/1` likewise contains `.`, `..`, and the read-only
+synthetic bounded process view. Before fork, its `getdents64` result contains
+`.`, `..`, and the directory `1`; `/proc/1` likewise contains `.`, `..`, and the read-only
 regular files `status`, `mountinfo`, `uid_map`, `gid_map`, and `setgroups`.
 `/proc/1/status` has fixed mode `0444` and exact bytes
 `Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n`. PID 1 enumerates both
@@ -480,8 +480,14 @@ active. The three user-namespace records have the exact contents specified in
 [Linux User Namespace v0](linux-user-namespace-v0.md). Writes, execute access,
 and file mapping are denied for all five records. This is a boot-state identity,
 mount, and namespace snapshot, not general procfs: no other
-PIDs, mutable process state, threads, fd links, sysctl, or post-exit records
-exist.
+While the fork child is a zombie, `/proc` additionally contains directory `2`.
+`/proc/2` contains one read-only `status` file whose exact 44 bytes report
+`init`, `Z (zombie)`, PID 2, and PPID 1. The directory and file resolve only
+while the generation-bound process record exists; successful `wait4` removes
+that record and subsequent lookup returns `-ENOENT`. PID 1 proves appearance,
+content, and removal around the real fork/wait lifecycle. This is not general
+procfs: arbitrary process counts and metadata, threads, fd links, sysctl, and
+retained post-reap records remain absent.
 
 The measured `/tmp` directory anchors one synthetic mutable regular file,
 `/tmp/ginux-ready`. The directory begins empty. Absolute `openat` with
