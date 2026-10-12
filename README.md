@@ -710,6 +710,13 @@ expiry. The same periodic local-APIC tick can instead mark the timed waiter read
 and dispatch it directly from interrupt context. Mismatches return `EAGAIN`, and a matching wait without another runnable
 thread returns `ENOSYS`. General futex queues and robust futex recovery are not
 implemented.
+The measured minimal-system PID 1 additionally exercises the public private
+operation encodings before readiness. `FUTEX_WAIT_PRIVATE` must return
+`EAGAIN` for a mismatched aligned word without changing it, and
+`FUTEX_WAKE_PRIVATE` must return zero when no waiter matches. It then emits
+`FUTEX_READY`. Combined with the dedicated two-thread runtime above, this closes
+the bounded `futex.private` profile row without claiming general Linux futex
+compatibility.
 Bounded `mprotect` can activate a complete `PROT_NONE` scratch range as fresh
 zeroed read-only/NX or RW/NX pages, or irreversibly seal the page named by the
 parsed `PT_GNU_RELRO` range or any complete RW scratch range as read-only/NX.

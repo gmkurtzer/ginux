@@ -673,6 +673,34 @@ ginux_linux_system_init:
     cmp rax, 13
     jne .Lfailure
 
+    lea rdi, [rip + .Lfutex_word]
+    mov esi, 128
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 202
+    syscall
+    cmp rax, -11
+    jne .Lfailure
+    cmp dword ptr [rip + .Lfutex_word], 1
+    jne .Lfailure
+
+    lea rdi, [rip + .Lfutex_word]
+    mov esi, 129
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 202
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov rdi, r8
+    lea rsi, [rip + .Lfutex_marker]
+    mov edx, 12
+    mov eax, 1
+    syscall
+    cmp rax, 12
+    jne .Lfailure
+
     mov eax, 57
     syscall
     test rax, rax
@@ -912,6 +940,11 @@ ginux_linux_system_init:
     .ascii "PROCFS_READY\n"
 .Lsignal_marker:
     .ascii "SIGNAL_READY\n"
+.align 4
+.Lfutex_word:
+    .long 1
+.Lfutex_marker:
+    .ascii "FUTEX_READY\n"
 .align 8
 .Lsignal_set:
     .quad 0

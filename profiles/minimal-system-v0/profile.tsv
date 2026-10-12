@@ -10,7 +10,7 @@ runtime	process.exit-group	ready	PID 1 terminates the bounded process with exit_
 runtime	process.fork-wait	ready	PID 1 forks PID 2 and reaps its exit status through wait4
 runtime	signal.standard	ready	Caught ignored blocked pending synchronous and selected fatal standard signals
 runtime	clock.monotonic	ready	Monotonic time sleep and timer waits
-runtime	futex.private	partial	Bounded private waits wakes and clear-child-TID
+runtime	futex.private	ready	Scheduler-backed private wait wake timeout and clear-child-TID lifecycle
 filesystem	root.read-only	ready	Authenticated indexed newc root is immutable
 filesystem	root.mount	ready	Measured root is installed read-only nodev nosuid in a generation-bound Linux mount namespace
 filesystem	tmpfs.tmp	ready	Generation-safe bounded /tmp file supports create enumerate scalar I/O unlink and scrubbed reuse

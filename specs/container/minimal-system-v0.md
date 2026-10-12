@@ -80,6 +80,16 @@ actions, and publishes `SIGNAL_READY`. Together with the dedicated measured
 signal runtime's caught-handler, `rt_sigreturn`, synchronous-fault, alternate
 stack, ordering, and selected fatal-disposition proofs, this makes
 `signal.standard` ready for the bounded profile.
+Before fork, PID 1 also applies `FUTEX_WAIT_PRIVATE` to an aligned readable word
+whose value differs from the expected value, requires `-EAGAIN`, and proves the
+word remains unchanged. `FUTEX_WAKE_PRIVATE` on the same address with no waiter
+must return zero before PID 1 publishes `FUTEX_READY`. The dedicated measured
+two-thread runtime separately proves real scheduler blocking, exact-address
+explicit wake, relative timeout, and clear-child-TID zero-and-wake at child
+exit. Together these checks make `futex.private` ready for the bounded profile;
+general queues, multiple waiters, cross-process keys, bitsets, requeueing,
+priority inheritance, and robust-list recovery remain outside it. The complete
+contract is recorded in `specs/kernel/linux-futex-v0.md`.
 
 This execution gate deliberately does not claim M5 completion. The immutable
 root publishes an explicit `/sbin` directory containing the exact `init` node,
