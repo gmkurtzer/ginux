@@ -779,9 +779,11 @@ RX versus RW/NX permissions plus exact materialized contents through the direct
 map. An owned page at `0x407000` supplies one zero-filled RW/NX heap page. The
 page at `0x408000` remains an unmapped lower stack guard, and an owned page at
 `0x409000` supplies a RW/NX stack; `0x40a000` remains an upper guard. Four final
-leaves are initially absent at `0x40b000..0x40f000`. A four-page registry
-allocates frames on demand and installs private extents of one through four pages
-for the bounded anonymous or immutable-runtime-file `mmap` lifecycle.
+leaves are initially absent at `0x40b000..0x40f000`. A four-page registry can
+retain virtual-only `PROT_NONE` reservations or allocate frames on demand and
+install private extents of one through four pages for the bounded anonymous or
+immutable-runtime-file `mmap` lifecycle. A reserved range can be activated as
+zeroed R/NX or RW/NX pages without exposing a partially installed range.
 Removing a subrange rebuilds the remaining runs with unchanged access and
 file-kind metadata. Protecting a subrange read-only similarly retains write
 access only on the pages outside it. The bounded range operations walk adjacent

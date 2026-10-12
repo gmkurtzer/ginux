@@ -533,14 +533,18 @@ executable-install profile. The scratch window has four page slots over
 null hint selects the lowest contiguous free run. Alternatively, anonymous
 `MAP_FIXED_NOREPLACE` requires an exact page-aligned free subrange wholly inside
 that window and returns `-EEXIST` without mutation if any selected slot is
-active. Anonymous `MAP_FIXED` accepts the same bounded placement and atomically
-fills holes or replaces active pages with fresh zeroed RW/NX generation leases.
+occupied, including a `PROT_NONE` reservation. Anonymous `MAP_FIXED` accepts
+the same bounded placement and atomically fills holes or reservations, or
+replaces active pages with fresh zeroed RW/NX generation leases.
 It preflights every old leaf and lease before changing the page table, then
 scrubs and releases every displaced lease before returning. Its anonymous form
 otherwise requires a nonzero length that rounds up to no more than four pages,
-`PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`, fd -1, and offset zero,
-and allocates and installs zero-filled
-generation-bound RW/NX frame leases.
+either `PROT_NONE` or `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`,
+fd -1, and offset zero. `PROT_NONE` publishes an occupied virtual reservation
+without allocating a frame or installing a leaf. RW requests allocate and
+install zero-filled generation-bound RW/NX frame leases. The current
+`MAP_FIXED` form requires RW protection; replacing an existing mapping with
+`PROT_NONE` is not implemented.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
 descriptor for `/init`, `/lib64/ld-ginux.so`, `/lib64/libginux.so`, or
 `/lib64/libginux-aux.so`, and a
@@ -610,11 +614,21 @@ are released; the kernel-owned live-frame count must return to its
 pre-execution value. This is bounded userspace-owned loading for two
 preauthenticated images and one fixed dependency window, not ASLR, a general
 executable allocator, or authority to map unauthenticated bytes.
+`rax = 10` (`__NR_mprotect`) activates a complete anonymous `PROT_NONE` range
+as fresh zeroed `PROT_READ` or `PROT_READ | PROT_WRITE` pages after one
+all-leaves-absent preflight. It can also remove write permission from a complete
+RW anonymous range. Activation publishes frame leases only after every new
+page is installed; failure scrubs and releases all provisional leases.
+Read-only-to-writable escalation, transitions from mapped pages back to
+`PROT_NONE`, executable protection, mixed-source transitions, and partial
+transitions spanning reserved plus mapped pages return `-EINVAL`.
 `rax = 11` (`__NR_munmap`) accepts any page-aligned address and nonzero length
 that rounds to a subrange of the four-page scratch window, including mapped
 pages, holes, or both. It clears the selected
 hardware leaves, invalidates their TLB entries, and scrubs the physical frames
-before returning their exact generation leases to the allocator. A partial
+before returning their exact generation leases to the allocator. Reserved
+pages instead require an absent leaf and empty lease slot and are cleared
+without physical work. A partial
 removal rebuilds the registry around the holes while preserving every remaining
 page's write and immutable-file attributes. Repeating a supported exact unmap
 succeeds. A range can remove independent adjacent areas and already-unmapped
@@ -637,17 +651,19 @@ Outside the scratch window, fixed placement is available only for the seven
 admitted main pages and two admitted dependency pages described above.
 `rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for a fully mapped
 nonzero range rounding to one through four anonymous pages. The range may cross adjacent registry
-records. Immutable-file mappings reject advice with `-EINVAL`. For an anonymous
+records. Immutable-file mappings and `PROT_NONE` reservations reject advice
+with `-EINVAL`. For an anonymous
 range it validates that every leaf still maps its allocator-owned frame, then
 zeros the frames through the supervisor direct map without changing their
 present, user, NX, or writable state. The proof also discards a sealed one-page
 read-only mapping, observes zeroes from ring 3, and unmaps it normally. Other
 advice, ranges, or inactive mappings return `-EINVAL` without changing the
 contents. There is no paging policy, reclamation queue, or lazy refill.
-`rax = 27` (`__NR_mincore`) accepts either kind of fully mapped nonzero range
+`rax = 27` (`__NR_mincore`) accepts any fully occupied nonzero scratch range
 rounding to one through four pages, including a range crossing adjacent
 registry records, and atomically
-writes one resident byte per page to a fully validated vector. It returns
+writes one byte per page to a fully validated vector. Present generation-owned
+pages report one; frame-less `PROT_NONE` reservations report zero. It returns
 `-ENOMEM` when any requested page is unmapped. Misaligned or out-of-window
 ranges return `-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only
 the fixed window, not arbitrary page-table state or reclaim information.

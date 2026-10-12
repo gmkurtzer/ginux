@@ -2435,6 +2435,56 @@ pub(crate) fn replace_current_linux_pages(
         })
 }
 
+pub(crate) fn map_current_linux_pages(
+    address: u64,
+    frames: &[memory::FrameLease],
+    writable: bool,
+) -> bool {
+    if !(1..=cpu::LINUX_MMAP_SLOT_COUNT).contains(&frames.len())
+        || address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, frames)
+    {
+        return false;
+    }
+    let mut leaves = [core::ptr::null_mut(); cpu::LINUX_MMAP_SLOT_COUNT];
+    for (index, stored_leaf) in leaves.iter_mut().enumerate().take(frames.len()) {
+        let Some(leaf) = current_linux_leaf(address + (index * PAGE_SIZE) as u64) else {
+            return false;
+        };
+        if unsafe { leaf.read() } != 0 {
+            return false;
+        }
+        *stored_leaf = leaf;
+    }
+    let flags = PRESENT | USER | NO_EXECUTE | if writable { WRITABLE } else { 0 };
+    for (index, frame) in frames.iter().enumerate() {
+        let page = address + (index * PAGE_SIZE) as u64;
+        unsafe {
+            leaves[index].write(frame.address() | flags);
+            asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
+        }
+    }
+    let installed = leaves[..frames.len()]
+        .iter()
+        .zip(frames)
+        .all(|(leaf, frame)| unsafe {
+            leaf.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
+                == frame.address() | flags
+        });
+    if installed {
+        return true;
+    }
+    for (index, leaf) in leaves[..frames.len()].iter().enumerate() {
+        let page = address + (index * PAGE_SIZE) as u64;
+        unsafe {
+            leaf.write(0);
+            asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
+        }
+    }
+    false
+}
+
 pub(crate) fn map_current_linux_page(address: u64, frame: u64) -> bool {
     map_current_linux_page_with_permissions(address, frame, true, false)
 }
@@ -3029,6 +3079,12 @@ pub(crate) fn current_linux_mapping_matches(
         entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
             == frame.address() | flags
     })
+}
+
+pub(crate) fn current_linux_page_absent(address: u64) -> bool {
+    address < 1 << 47
+        && address.is_multiple_of(PAGE_SIZE as u64)
+        && current_linux_leaf(address).is_some_and(|entry| unsafe { entry.read() == 0 })
 }
 
 pub(crate) fn current_root_address() -> u64 {

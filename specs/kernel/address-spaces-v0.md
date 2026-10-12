@@ -41,27 +41,35 @@ policy remain separate milestones.
 
 That Linux proof also reserves four initially absent leaves over
 `0x40b000..0x40f000`. Its bounded anonymous mapping call rounds a nonzero
-length up to one through four pages, validates the resulting RW/NX request,
-and allocates exact generation-bound frames before installing any leaf. The
+length up to one through four pages and admits RW/NX mappings or virtual-only
+`PROT_NONE` reservations. A reservation occupies registry slots while retaining
+zero lease metadata and absent leaves. RW mappings allocate exact
+generation-bound frames before installing any leaf. The
 lowest-free placement policy and exact
 `MAP_FIXED_NOREPLACE` placement share the same overlap preflight; fixed overlap
-returns `EEXIST` before frame allocation. Unmap accepts a page-aligned window
+returns `EEXIST` before frame allocation, including on a reservation. Anonymous
+`MAP_FIXED` can fill a reservation after its absent leaf and empty lease pass
+the same preflight used for holes. Unmap accepts a page-aligned window
 address and nonzero length rounded to the selected subrange,
 clears each occupied leaf, invalidates its local translation, and scrubs and
-releases every selected frame before reuse. While active, mapped subranges can
-be irreversibly sealed read-only after one validation pass; copy permissions
+releases every selected frame before reuse; reserved pages are cleared without
+physical work. A complete reserved range can be activated atomically as fresh
+zeroed R/NX or RW/NX pages. While active, mapped subranges can be irreversibly
+sealed read-only after one validation pass; copy permissions
 change with the hardware
 leaves, and unmap accepts either state. Bounded discard validates the same owned
 leaf and zeros its frame in place, preserving whichever writable state the
 mapping currently has.
-The matching residency query reports each requested page only while it is
-active and does not walk or disclose addresses outside the fixed window. The
+The matching residency query reports mapped pages as resident and frame-less
+reservations as nonresident without walking or disclosing addresses outside
+the fixed window. The
 gate observes all four leaves absent after ring-3 exit. This is a single-core,
 four-page lifecycle, not a general VMA allocator or TLB-shootdown protocol.
 
 Anonymous `MAP_FIXED` replacement allocates and zeroes every fresh frame before
 preflighting the complete selected leaf range. Each old leaf must either be
-absent with no lease or match its exact generation-owned frame and current
+absent with no lease, including a `PROT_NONE` reservation, or match its exact
+generation-owned frame and current
 write state. The kernel then replaces every selected PTE, invalidates the local
 translations, rebuilds the bounded registry, and scrubs and releases the
 displaced leases before returning. No userspace instruction runs during this

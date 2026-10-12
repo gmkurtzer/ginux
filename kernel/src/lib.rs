@@ -989,6 +989,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded anonymous fixed mmap placement validated\r\n");
     serial_write("ginux: bounded anonymous fixed mmap replacement validated\r\n");
     serial_write("ginux: page-rounded Linux mmap lengths validated\r\n");
+    serial_write("ginux: Linux PROT_NONE reservations validated\r\n");
+    serial_write("ginux: Linux PROT_NONE activation validated\r\n");
     serial_write("ginux: Linux mmap frames allocated on demand\r\n");
     serial_write("ginux: Linux mmap frame leases reclaimed\r\n");
     serial_write("ginux: Linux anonymous mapping discard validated\r\n");

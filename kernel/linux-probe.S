@@ -861,7 +861,7 @@ valid_interpreter_base:
 
     mov edi, 0x40e000
     mov esi, 4096
-    mov edx, 3
+    xor edx, edx
     mov r10d, 0x100022
     mov r8, -1
     xor r9d, r9d
@@ -869,7 +869,14 @@ valid_interpreter_base:
     syscall
     cmp rax, 0x40e000
     jne failure
+    mov edx, 3
+    mov r10d, 0x32
+    mov eax, 9
+    syscall
+    cmp rax, 0x40e000
+    jne failure
     mov qword ptr [0x40e000], 16
+    mov r10d, 0x100022
     mov eax, 9
     syscall
     cmp rax, -17
@@ -1012,6 +1019,78 @@ valid_interpreter_base:
     xor r9d, r9d
     mov eax, 9
     call syscall_expect_einval
+
+    # Reserve two virtual pages without frames, activate them independently,
+    # seal the writable page, and release the mixed-protection extent.
+    xor edi, edi
+    mov esi, 8192
+    xor edx, edx
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
+    jne failure
+    mov edi, 1
+    mov esi, 0x40b000
+    mov edx, 8
+    mov eax, 1
+    call syscall_expect_efault
+    mov byte ptr [0x40594a], 1
+    mov byte ptr [0x40594b], 1
+    mov edi, 0x40b000
+    mov esi, 8192
+    mov edx, 0x40594a
+    mov eax, 27
+    call syscall_expect_zero
+    cmp byte ptr [0x40594a], 0
+    jne failure
+    cmp byte ptr [0x40594b], 0
+    jne failure
+
+    mov edi, 0x40b000
+    mov esi, 1
+    mov edx, 3
+    mov eax, 10
+    call syscall_expect_zero
+    cmp qword ptr [0x40b000], 0
+    jne failure
+    mov byte ptr [0x40594a], 0
+    mov byte ptr [0x40594b], 1
+    mov edi, 0x40b000
+    mov esi, 8192
+    mov edx, 0x40594a
+    mov eax, 27
+    call syscall_expect_zero
+    cmp byte ptr [0x40594a], 1
+    jne failure
+    cmp byte ptr [0x40594b], 0
+    jne failure
+
+    mov edi, 0x40c000
+    mov esi, 1
+    mov edx, 1
+    mov eax, 10
+    call syscall_expect_zero
+    cmp qword ptr [0x40c000], 0
+    jne failure
+    mov edi, 0x40c000
+    mov eax, 63
+    call syscall_expect_efault
+    mov edi, 0x40b000
+    mov esi, 1
+    mov edx, 1
+    mov eax, 10
+    call syscall_expect_zero
+    mov edx, 3
+    mov eax, 10
+    call syscall_expect_einval
+
+    mov edi, 0x40b000
+    mov esi, 8192
+    mov eax, 11
+    call syscall_expect_zero
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     xor edi, edi

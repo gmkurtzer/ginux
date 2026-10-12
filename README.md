@@ -432,12 +432,14 @@ restores the blocked child; child exit clears its registered word and restores
 the blocked parent. Mismatches return `EAGAIN`, and a matching wait without
 another runnable thread returns `ENOSYS`. General futex queues, timeouts, and
 robust futex recovery are not implemented.
-Bounded `mprotect` can irreversibly seal the page named by the parsed
-`PT_GNU_RELRO` range or any complete page range in the scratch window as
-read-only/NX. Sealing a subrange rebuilds the bounded registry around it so
-the other pages retain independent write permission. The page-table
-permissions and syscall copy direction change together: reads continue, writes
-fail, and executable permissions are rejected.
+Bounded `mprotect` can activate a complete `PROT_NONE` scratch range as fresh
+zeroed read-only/NX or RW/NX pages, or irreversibly seal the page named by the
+parsed `PT_GNU_RELRO` range or any complete RW scratch range as read-only/NX.
+Changing a subrange rebuilds the bounded registry around it so the other pages
+retain independent protection. The page-table permissions and syscall copy
+direction change together: reads continue after sealing, writes fail, and
+executable permissions are rejected. Read-only pages cannot regain write
+permission, and active pages cannot transition back to `PROT_NONE` yet.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
@@ -445,11 +447,14 @@ A four-page fixed `mmap` registry can install page-aligned private areas of one
 through four pages in its reserved virtual window. Physical frames are allocated
 only when a mapping is admitted. Every nonzero scratch length is rounded up to
 a page consistently across mapping, protection, residency, discard, and unmap;
-a rounded request requiring more than four pages is rejected. Anonymous areas are RW/NX,
+a rounded request requiring more than four pages is rejected. Anonymous areas
+may be RW/NX or virtual-only `PROT_NONE` reservations. Reservations own no
+physical frame, keep their page-table leaves absent, deny syscall copies, and
+remain occupied for placement purposes until activation or unmap. RW/NX areas are
 removed from the hardware page table by exact `munmap`, scrubbed, and proven
 zero on reuse. Bounded `MADV_DONTNEED` also zeros an anonymous area in place
-without widening a sealed read-only area, while `mincore` reports each page
-resident only while its area is active. Any contiguous part of the window can
+without widening a sealed read-only area, while `mincore` reports mapped pages
+resident and `PROT_NONE` reservations nonresident. Any contiguous part of the window can
 instead expose a private read-only/NX copy of an immutable runtime ELF file.
 File offsets must
 be page aligned, partial final pages are zero-filled, syscall copy-out cannot
@@ -463,7 +468,8 @@ fragmented, and finally unmaps the complete sparse window. `mprotect`,
 longer depends on their original allocation boundaries. Anonymous
 `MAP_FIXED_NOREPLACE` can select an exact free subrange inside the window;
 overlap returns `EEXIST` without changing either the existing mappings or frame
-ownership. Anonymous `MAP_FIXED` can atomically fill holes or replace a selected
+ownership. A reservation also counts as overlap. Anonymous `MAP_FIXED` can
+atomically fill holes, reservations, or replace a selected
 subrange after all old and new frame leases and page-table leaves pass one
 preflight. Replacement publishes fresh zeroed RW/NX pages before scrubbing and
 retiring the displaced generation leases.
