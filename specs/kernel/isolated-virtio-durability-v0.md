@@ -4,8 +4,11 @@
 
 ## Contract
 
-After two generation-bound read completions, the isolated object-7 service
-reuses its one owned DMA page and queue head for three more serialized requests:
+The first request reads blank reserved sector two. The second reads reserved
+sector three and accepts exactly one of two complete states: 512 zero bytes on
+a fresh image, or the previously flushed `0x5a` marker. The isolated object-7
+service then reuses its one owned DMA page and queue head for three more
+serialized requests:
 
 1. generation three writes 512 bytes of `0x5a` to reserved sector three;
 2. generation four submits negotiated virtio request type 4 and requires its
@@ -17,6 +20,13 @@ Every operation uses the same capability-checked blocking wait, kernel-owned
 MSI-X vector, and 100 ms APIC timeout. MSI-X remains masked between requests.
 The kernel advances only the exact consumed request generation and rejects
 early, stale, duplicate, or concurrent waits.
+
+The service retains whether request two found a fresh or persisted sector in
+its saved ring-3 context and deliberately faults at one of two exact success
+instructions. The kernel validates that fault metadata after quiescence. The
+automated gate requires the fresh result on its first VM boot and the recovered
+result on its second boot against the same raw image; either result in the wrong
+boot fails the gate.
 
 ## Stable teardown proof
 
@@ -31,8 +41,7 @@ Only then may the page be scrubbed and released.
 - This proves that the isolated service can issue the ordering primitive needed
   by the persistent-volume protocol. It does not yet move the two-slot record,
   checksum, prepare/commit markers, or recovery scan out of the kernel.
-- The same-boot read-back and QEMU flush completion do not independently prove
-  physical-media power-loss behavior. The existing two-boot volume gate proves
-  persistence for the kernel backend; an isolated two-boot gate remains next.
+- QEMU flush completion and two-boot recovery do not independently prove
+  physical-media power-loss behavior on real hardware.
 - Requests are serialized through one descriptor head and one DMA page. There
   is no cancellation, batching, concurrent queue use, or IOMMU domain yet.

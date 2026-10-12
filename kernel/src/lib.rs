@@ -1674,14 +1674,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
     serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
     serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
-    let writable_grant_dma = address_space::verify_ring3_writable_device_grant(
+    let writable_grant_recovered = address_space::verify_ring3_writable_device_grant(
         virtio_status_physical,
         virtio_block,
         virtio_mmio,
         virtio_msix_mmio,
         &local_apic,
     );
-    let writable_grant_valid = writable_grant_dma.is_some();
+    let writable_grant_valid = writable_grant_recovered.is_some();
     let writable_grant_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
     if !writable_grant_valid || !writable_grant_quiesced {
         serial_write("\r\nginux: writable grant/fault-quiesce result: ");
@@ -1707,6 +1707,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated virtio blank-sector read completed in ring 3");
     serial_write("\r\nginux: isolated virtio request generation advanced and reused");
     serial_write("\r\nginux: isolated virtio write flush read-back completed");
+    serial_write(if writable_grant_recovered == Some(true) {
+        "\r\nginux: isolated virtio marker recovered after reboot"
+    } else {
+        "\r\nginux: isolated virtio marker initialized and flushed"
+    });
     serial_write("\r\nginux: faulted virtio control service revoked");
     serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
     serial_write("\r\nginux: fault path quiesced device before DMA release");

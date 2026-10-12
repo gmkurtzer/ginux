@@ -4450,7 +4450,7 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
             domain_id,
             interrupt_request,
         )
-        || !unsafe { dma_page_has_completed_transaction(dma_physical) }
+        || unsafe { dma_page_has_completed_transaction(dma_physical) }.is_none()
     {
         return false;
     }
@@ -5483,13 +5483,14 @@ pub(crate) fn verify_ring3_writable_device_grant(
     mapping: paging::MmioMapping,
     msix_mapping: paging::MmioMapping,
     apic: &LocalApic,
-) -> Option<u64> {
+) -> Option<bool> {
     const DEVICE_PAGE_INDEX: usize = 5;
     const DMA_PAGE_INDEX: usize = 6;
     const NOTIFICATION_PAGE_INDEX: usize = 7;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
     const INTERRUPT_REQUEST: u64 = 1;
-    const SUCCESS_FAULT_OFFSET: u64 = 1162;
+    const RECOVERED_SUCCESS_FAULT_OFFSET: u64 = 1222;
+    const FRESH_SUCCESS_FAULT_OFFSET: u64 = 1224;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5624,6 +5625,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0x31, 0xc0, // compare against zero
         0xf3, 0xae, // repe scasb
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x48, 0xc7, 0x86, 0x08, 0x04, 0, 0, 0x03, 0, 0, 0, // read sector three next
         0xc6, 0x86, 0, 0x09, 0, 0, 0xff, // reset pending status
         0x66, 0xc7, 0x86, 0x06, 0x01, 0, 0, 0, 0, // publish ring slot one
         0x66, 0xc7, 0x86, 0x02, 0x01, 0, 0, 0x02, 0, // publish available index two
@@ -5646,6 +5648,18 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x80, 0xbe, 0, 0x09, 0, 0, 0, // require successful second status
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x45, 0x31, 0xdb, // default to a fresh sector
+        0x48, 0x8d, 0xbe, 0, 0x06, 0, 0, // point at recovered sector data
+        0xb9, 0, 0x02, 0, 0, // scan 512 bytes
+        0x31, 0xc0, // first accept a fresh zero sector
+        0xf3, 0xae, // repe scasb
+        0x74, 0x17, // skip persisted validation when entirely zero
+        0x48, 0x8d, 0xbe, 0, 0x06, 0, 0, // restart at sector data
+        0xb9, 0, 0x02, 0, 0, // scan 512 bytes again
+        0xb0, 0x5a, // otherwise require the persisted marker
+        0xf3, 0xae, // repe scasb
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x41, 0xb3, 0x01, // remember recovery across later calls
         0x49, 0xba, 0, 0, 0, 0, 0, 0, 0, 0, // preserve notification register in R10
         0xc7, 0x86, 0, 0x04, 0, 0, 0x01, 0, 0, 0, // write request type
         0x48, 0xc7, 0x86, 0x08, 0x04, 0, 0, 0x03, 0, 0, 0, // sector three
@@ -5733,7 +5747,10 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0xb0, 0x5a, // require persistent test byte
         0xf3, 0xae, // repe scasb
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
-        0x0f, 0x0b, // success: deliberate service fault
+        0x45, 0x84, 0xdb, // select fresh or recovered success fault
+        0x74, 0x02, // branch to fresh-sector success
+        0x0f, 0x0b, // recovered success: deliberate service fault
+        0x0f, 0x0b, // fresh success: deliberate service fault
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
     program[126..134].copy_from_slice(&(user_dma as u64).to_le_bytes());
@@ -5779,15 +5796,15 @@ pub(crate) fn verify_ring3_writable_device_grant(
     };
     if mapped_dma != user_dma
         || memory::owner_live_frame_count(owner) != Some(8)
-        || unsafe { dma_page_has_completed_transaction(dma_physical) }
+        || unsafe { dma_page_has_completed_transaction(dma_physical) }.is_some()
     {
         let _ = space.release();
         return None;
     }
     program[156..164].copy_from_slice(&dma_physical.to_le_bytes());
     program[429..437].copy_from_slice(&(user_notification as u64).to_le_bytes());
-    program[589..597].copy_from_slice(&(user_notification as u64).to_le_bytes());
-    program[685..693].copy_from_slice(&(user_notification as u64).to_le_bytes());
+    program[600..608].copy_from_slice(&(user_notification as u64).to_le_bytes());
+    program[740..748].copy_from_slice(&(user_notification as u64).to_le_bytes());
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
@@ -5820,6 +5837,24 @@ pub(crate) fn verify_ring3_writable_device_grant(
     }
     cpu::execute_auxiliary(entry, stack, handle, auxiliary, identity);
     let event = domain::take_lifecycle_event();
+    let recovered = domain::delivered_fault_matches(
+        auxiliary,
+        domain::FaultMetadata {
+            vector: 6,
+            error: 0,
+            address: 0,
+            instruction: USER_TEST_ADDRESS as u64 + RECOVERED_SUCCESS_FAULT_OFFSET,
+        },
+    );
+    let fresh = domain::delivered_fault_matches(
+        auxiliary,
+        domain::FaultMetadata {
+            vector: 6,
+            error: 0,
+            address: 0,
+            instruction: USER_TEST_ADDRESS as u64 + FRESH_SUCCESS_FAULT_OFFSET,
+        },
+    );
     let valid = current_root() == kernel_root
         && scheduler::current_domain().is_none()
         && registered_auxiliary_address_space_count() == 0
@@ -5839,15 +5874,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
         })
         && domain::last_lifecycle_event_detail() == Some(0)
         && domain::last_lifecycle_service_identity() == Some(identity)
-        && domain::delivered_fault_matches(
-            auxiliary,
-            domain::FaultMetadata {
-                vector: 6,
-                error: 0,
-                address: 0,
-                instruction: USER_TEST_ADDRESS as u64 + SUCCESS_FAULT_OFFSET,
-            },
-        )
+        && recovered != fresh
         && domain::take_lifecycle_event().is_none();
     if !valid {
         crate::serial_write_bytes(b"\r\nginux: writable device grant event: ");
@@ -5870,7 +5897,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
             }
         }
     }
-    valid.then_some(dma_physical)
+    valid.then_some(recovered)
 }
 
 struct WxAddressSpace {
@@ -6149,39 +6176,44 @@ unsafe fn frame_is_zero(frame: u64) -> bool {
         .is_some_and(|entries| (0..ENTRY_COUNT).all(|index| entries.add(index).read() == 0))
 }
 
-unsafe fn dma_page_has_completed_transaction(frame: u64) -> bool {
-    let Some(bytes) = mapped_frame::<u8>(frame) else {
-        return false;
+unsafe fn dma_page_has_completed_transaction(frame: u64) -> Option<bool> {
+    let bytes = mapped_frame::<u8>(frame)?;
+    let recovered = core::ptr::read_volatile(bytes.add(0x901));
+    if recovered > 1 {
+        return None;
     };
     let descriptor_zero = (frame + VIRTIO_REQUEST_OFFSET as u64).to_le_bytes();
     let descriptor_one = (frame + VIRTIO_DATA_OFFSET as u64).to_le_bytes();
     let descriptor_two = (frame + VIRTIO_STATUS_OFFSET as u64).to_le_bytes();
-    (0..PAGE_SIZE).all(|offset| {
-        let expected = match offset {
-            0..=7 => descriptor_zero[offset],
-            8 => 16,
-            12 | 14 => 1,
-            16..=23 => descriptor_one[offset - 16],
-            25 => 2,
-            28 => 3,
-            30 => 2,
-            32..=39 => descriptor_two[offset - 32],
-            40 => 1,
-            44 => 2,
-            0x102 => 5,
-            0x202 => 5,
-            0x208 => 1,
-            0x209 => 2,
-            0x210 => 1,
-            0x211 => 2,
-            0x218 => 1,
-            0x220 => 1,
-            0x228 => 1,
-            0x229 => 2,
-            0x408 => 3,
-            0x600..=0x7ff => 0x5a,
-            _ => 0,
-        };
-        core::ptr::read_volatile(bytes.add(offset)) == expected
-    })
+    (0..PAGE_SIZE)
+        .all(|offset| {
+            let expected = match offset {
+                0..=7 => descriptor_zero[offset],
+                8 => 16,
+                12 | 14 => 1,
+                16..=23 => descriptor_one[offset - 16],
+                25 => 2,
+                28 => 3,
+                30 => 2,
+                32..=39 => descriptor_two[offset - 32],
+                40 => 1,
+                44 => 2,
+                0x102 => 5,
+                0x202 => 5,
+                0x208 => 1,
+                0x209 => 2,
+                0x210 => 1,
+                0x211 => 2,
+                0x218 => 1,
+                0x220 => 1,
+                0x228 => 1,
+                0x229 => 2,
+                0x408 => 3,
+                0x600..=0x7ff => 0x5a,
+                0x901 => recovered,
+                _ => 0,
+            };
+            core::ptr::read_volatile(bytes.add(offset)) == expected
+        })
+        .then_some(recovered == 1)
 }

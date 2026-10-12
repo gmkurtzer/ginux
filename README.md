@@ -82,7 +82,10 @@ expected request generation, clears only the consumed per-request interrupt
 state, and the same service reuses descriptor head zero for a second
 notify/block/wake cycle. It then writes a fixed pattern to reserved sector
 three, completes a negotiated virtio flush, poisons its DMA buffer, and reads
-the sector back through generations three through five. On its deliberate fault, the
+the sector back through generations three through five. The first automated VM
+boot requires sector three to be fresh; the second VM boot against the same
+image requires the isolated service to recover the previously flushed marker.
+On its deliberate fault, the
 registered device hook masks and disables MSI-X, validates the active binding, disables bus
 mastering, resets the device, retires the temporary interrupt gate, and only then validates every byte of the now-stable
 completed DMA layout before the page is scrubbed and released;

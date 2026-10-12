@@ -85,6 +85,12 @@ if grep -q '^ginux: disk-backed volume recovered after reboot' "$output_file"; t
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio marker initialized and flushed' "$output_file" ||
+    grep -q '^ginux: isolated virtio marker recovered after reboot' "$output_file"; then
+    echo "Boot test failed: a fresh isolated sector was not initialized exactly once." >&2
+    exit 1
+fi
+
 run_boot "$reboot_output_file" "recovery"
 
 if ! grep -q '^GINUX_KERNEL_OK' "$reboot_output_file" ||
@@ -101,6 +107,13 @@ if grep -q '^ginux: disk-backed volume initialized and flushed' "$reboot_output_
     grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$reboot_output_file"; then
     cat "$reboot_output_file"
     echo "Boot test failed: the recovery boot rewrote the volume or emitted a panic." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: isolated virtio marker recovered after reboot' "$reboot_output_file" ||
+    grep -q '^ginux: isolated virtio marker initialized and flushed' "$reboot_output_file"; then
+    cat "$reboot_output_file"
+    echo "Boot test failed: the isolated service did not recover its flushed marker." >&2
     exit 1
 fi
 

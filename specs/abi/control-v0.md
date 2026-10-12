@@ -412,7 +412,9 @@ followed by exact generation advances, a second bounded read, and a
 write/flush/read-back transaction through the same queue. Only one request may
 be outstanding; consumed state is cleared
 while MSI-X remains masked, and overflow fails closed. Fault revocation and
-kernel quiescence follow the fifth completion. The same domain owns one
+kernel quiescence follow the fifth completion. The automated first and second
+boots require distinct fresh-sector and recovered-marker outcomes from the
+isolated service. The same domain owns one
 separately tracked RW/NX DMA page. A domain fault triggers an internal teardown
 obligation: MSI-X mask and disable, device validation, bus-master disable,
 reset, and interrupt-gate retirement must complete before its address space or

@@ -50,6 +50,11 @@ that exact layout. Any changed address, length, flag, chain index, request
 field, ring index, buffer byte, or status byte prevents teardown from accepting
 the completion.
 
+On the first automated boot, the second read requires sector three to be all
+zero. On the recovery boot against the same image, it requires the complete
+previously flushed pattern. Distinct validated fault instructions report the
+fresh and recovered cases without retaining the DMA lease after teardown.
+
 The service then deliberately faults. Stop-only teardown revokes object 7 and
 invokes the device hook while the service root and lease are still intact. The
 hook revalidates exact feature and queue-address state, disables PCI bus
