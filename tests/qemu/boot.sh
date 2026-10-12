@@ -2131,6 +2131,11 @@ if ! grep -q '^ginux: Linux bounded clock resolution validated' "$output_file"; 
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux scheduler-backed nanosleep validated' "$output_file"; then
+    echo "Boot test failed: Linux scheduler-backed nanosleep was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux single-task CPU time validated' "$output_file"; then
     echo "Boot test failed: Linux single-task CPU time was not validated." >&2
     exit 1

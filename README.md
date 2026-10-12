@@ -628,9 +628,13 @@ private TSC epoch, using PIT calibration when CPUID has no frequency data;
 `clock_getres` reports its rounded single-tick resolution. The sole process and
 thread expose that same non-descheduled interval through CPU clocks and
 100-Hz `times` accounting; bounded `getrusage` returns it as user time in a
-fully initialized x86-64 resource-usage structure. The three interval-timer
-classes can be queried and idempotently disarmed; arming remains unsupported
-until asynchronous signal delivery exists.
+fully initialized x86-64 resource-usage structure. Bounded `nanosleep` returns
+immediately for zero or stores a positive relative monotonic deadline while a
+peer is runnable; the next Linux syscall or scheduling boundary after expiry
+resumes it successfully. APIC-driven sleep wakeups, interruption, and remainder
+reporting remain unsupported. The three interval-timer classes can be queried
+and idempotently disarmed; arming remains unsupported until asynchronous signal
+delivery exists.
 The bounded ELF parser and page-image planner also validate checked,
 page-aligned load-bias plans for position-independent `ET_DYN` images. Dynamic
 execution planning binds an exact `PT_INTERP` path to a non-overlapping relocated

@@ -499,12 +499,22 @@ uses a CPUID-reported frequency when available and the PIT-calibrated fallback
 otherwise. Both clocks share a private process epoch, return a normalized
 16-byte x86-64 `timespec`, and cannot move backward during this single-CPU
 proof. Other clock IDs return `-EINVAL`; an invalid output range returns
-`-EFAULT` without changing its valid prefix. Realtime, CPU clocks, sleeping,
-adjustment, and a vDSO remain unsupported.
+`-EFAULT` without changing its valid prefix. Realtime, clock adjustment, and a
+vDSO remain unsupported.
 `rax = 229` (`__NR_clock_getres`) exposes the corresponding single-tick
 resolution, rounded up to a normalized `timespec`. A null result pointer is a
 valid support query. Clock selection and copy errors match `clock_gettime`, and
 the complete result is validated before copy-out.
+`rax = 35` (`__NR_nanosleep`) accepts one normalized relative timespec. A zero
+duration returns immediately. A positive duration requires the peer thread to
+be ready, converts the duration to a checked monotonic deadline, stores that
+deadline in a typed sleep wait, and selects the peer. The first Linux syscall or
+scheduling boundary at or after expiry clears the wait and resumes the sleeper
+with zero. The optional remainder range is prevalidated but remains untouched
+on successful expiry. Invalid request or remainder ranges return `-EFAULT`,
+invalid fields or deadline overflow return `-EINVAL`, and a positive sleep with
+no runnable peer returns `-ENOSYS`. APIC-driven Linux wakeups, interruption,
+remainder reporting, absolute sleeps, and `clock_nanosleep` remain unsupported.
 The same two calls accept `CLOCK_PROCESS_CPUTIME_ID` and
 `CLOCK_THREAD_CPUTIME_ID`. In this proof the process has one thread, never
 deschedules, and owns the processor from its private epoch, so both clocks use
@@ -1095,7 +1105,7 @@ bounded anonymous and immutable-file `mmap`/`munmap` plus bounded
 bounded one-waiter `futex`,
 `sched_yield`, bounded scheduler-policy and priority queries, `sched_getaffinity`, `getcpu`,
 bounded `clock_gettime`/`clock_getres`/`times`/`getrusage`, disabled
-`getitimer`/`setitimer`,
+`getitimer`/`setitimer`, bounded `nanosleep`,
 `arch_prctl(ARCH_SET_FS/ARCH_GET_FS)`,
 credential, supplementary-group, and capability queries, fixed `personality`, bounded `prctl` process names, the bounded process/session
 identity queries above,
