@@ -768,7 +768,10 @@ observational. A malformed frame returns `-EINVAL` without consuming the active
 context, so the handler may repair it and retry. The proof temporarily supplies
 a forbidden non-null FP-state pointer and observes that atomic rejection, then
 restores it to zero, changes saved `rax` and `uc_sigmask`, and observes both
-changes after return. Floating-point/XSAVE restoration, user-edited
+changes after return. After a successful restoration, the kernel checks the
+unblocked pending set before resuming the restored context. A selected next
+signal receives that exact restored context—including user edits—as its
+interrupted state. Floating-point/XSAVE restoration, user-edited
 alternate-stack restoration, nested delivery, restartable syscalls, and other asynchronous signal sources remain
 unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
@@ -813,15 +816,19 @@ and a writable output range, then reports pending signals intersected with the
 current mask. Wrong sizes return `-EINVAL`, and inaccessible output returns
 `-EFAULT` without changing pending state. `rt_sigprocmask` selects the
 lowest-numbered pending standard signal that is no longer masked, redirects
-that syscall's live return into the handler, clears only its pending bit after
-the frame and return context are committed, and
-resumes after `rt_sigprocmask` following `rt_sigreturn`. The measured signal
+that syscall's live return into the handler, and clears only its pending bit
+after the frame and return context are committed. Pending selection is deferred
+while a frame is active. On successful `rt_sigreturn`, another unblocked
+pending signal is selected before the restored userspace instruction can run;
+otherwise execution resumes after `rt_sigprocmask`. The measured signal
 runtime proves the signal remains pending while masked, the prior mask is
 reported during unblock, and both mask and pending state are zero at teardown.
 It also queues `SIGUSR2` before `SIGUSR1`, duplicates `SIGUSR1` through a
 different generator, then proves numeric priority and independent per-signal
-source metadata: `SIGUSR1` retains its first `SI_USER`, followed by `SIGUSR2`
-with `SI_TKILL`. Process/thread selection among multiple runnable threads,
+source metadata: `SIGUSR1` retains its first `SI_USER`, followed immediately by
+`SIGUSR2` with `SI_TKILL`. The first handler edits saved `rax`; the second frame
+and final syscall return both observe that value, proving context continuity
+across the chain. Process/thread selection among multiple runnable threads,
 real-time queue records, and external asynchronous sources remain unsupported.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE`, or a zero-flag or

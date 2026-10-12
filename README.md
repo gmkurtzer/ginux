@@ -444,7 +444,12 @@ standard signals coalesce independently in a pending set. `rt_sigpending`
 reports the blocked subset, and `rt_sigprocmask` delivers the lowest-numbered
 newly unblocked signal while retaining each signal's first source code. The
 measured runtime proves `SIGUSR1` wins over an earlier-queued `SIGUSR2`, and
-that a duplicate does not replace `SI_USER` with `SI_TKILL`. `rt_sigreturn` copies
+that a duplicate does not replace `SI_USER` with `SI_TKILL`. When both become
+unblocked together, the first successful `rt_sigreturn` installs the second
+frame before any original userspace instruction executes; a user-edited return
+register survives through that chain. Pending selection is deferred while a
+frame is active because nested delivery remains outside this profile.
+`rt_sigreturn` copies
 the complete frame back, requires the published selectors, context flags,
 alternate-stack record, null FP-state pointer, and reserved words to remain
 valid, then restores user-edited integer registers, Linux-restorable RFLAGS

@@ -1611,22 +1611,20 @@ impl LinuxSignalContext {
     }
 
     fn from_syscall(
-        registers: LinuxSyscallFrame,
-        rip: u64,
-        rsp: u64,
-        rflags: u64,
+        context: LinuxUserContext,
+        return_registers: (u64, u64),
         signal_frame: (u64, u64),
         signal_mask: u64,
         alt_stack_flags: u32,
     ) -> Self {
         Self {
-            registers,
-            rax: 0,
-            rcx: rip,
-            r11: rflags,
-            rip,
-            rsp,
-            rflags,
+            registers: context.registers,
+            rax: context.rax,
+            rcx: return_registers.0,
+            r11: return_registers.1,
+            rip: context.rip,
+            rsp: context.rsp,
+            rflags: context.rflags,
             signal_stack: signal_frame.0,
             signal_restorer: signal_frame.1,
             signal_mask,
@@ -4413,6 +4411,14 @@ extern "sysv64" fn linux_syscall_handler(
     // SAFETY: the assembly entry stub passes the aligned base of the exact
     // twelve-register frame represented by LinuxSyscallFrame.
     let saved_registers = unsafe { registers.read() };
+    let syscall_return = LinuxUserContext {
+        registers: saved_registers,
+        rip: user_rip,
+        rsp: user_stack,
+        rflags: user_rflags,
+        rax: 0,
+        fs_base: active_fs_base(),
+    };
     let register = |index: usize| saved_registers.argument(index).unwrap_or(0);
     let count = register(3);
     let buffer = register(4);
@@ -4588,13 +4594,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_RT_SIGPROCMASK_SYSCALL => {
             let result = linux_rt_sigprocmask(first_argument, buffer, count, register(0));
             if result == 0 {
-                linux_deliver_pending_signal(
-                    registers,
-                    saved_registers,
-                    user_stack,
-                    user_rip,
-                    user_rflags,
-                )
+                linux_deliver_pending_signal(registers, syscall_return, (user_rip, user_rflags))
             } else {
                 result
             }
@@ -4607,20 +4607,16 @@ extern "sysv64" fn linux_syscall_handler(
             first_argument,
             (buffer, LINUX_SI_USER),
             registers,
-            saved_registers,
-            user_stack,
-            user_rip,
-            user_rflags,
+            syscall_return,
+            (user_rip, user_rflags),
         ),
         LINUX_TGKILL_SYSCALL => match linux_tgkill_identity(first_argument, buffer) {
             Ok(()) => linux_kill(
                 1,
                 (count, LINUX_SI_TKILL),
                 registers,
-                saved_registers,
-                user_stack,
-                user_rip,
-                user_rflags,
+                syscall_return,
+                (user_rip, user_rflags),
             ),
             Err(error) => error,
         },
@@ -4629,10 +4625,8 @@ extern "sysv64" fn linux_syscall_handler(
                 1,
                 (buffer, LINUX_SI_TKILL),
                 registers,
-                saved_registers,
-                user_stack,
-                user_rip,
-                user_rflags,
+                syscall_return,
+                (user_rip, user_rflags),
             ),
             Err(error) => error,
         },
@@ -9901,10 +9895,8 @@ fn linux_kill(
     pid: u64,
     generated: (u64, i32),
     output: *mut LinuxSyscallFrame,
-    registers: LinuxSyscallFrame,
-    user_stack: u64,
-    user_rip: u64,
-    user_rflags: u64,
+    interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
 ) -> u64 {
     let (signal, signal_code) = generated;
     if !matches!(pid, 0 | 1) {
@@ -9956,16 +9948,14 @@ fn linux_kill(
         };
         top
     } else {
-        user_stack
+        interrupted.rsp
     };
     let Some(signal_stack) = linux_signal_stack(stack_top, use_alt_stack) else {
         return LINUX_EFAULT;
     };
     let context = LinuxSignalContext::from_syscall(
-        registers,
-        user_rip,
-        user_stack,
-        user_rflags,
+        interrupted,
+        return_registers,
         (signal_stack, restorer),
         old_mask,
         old_alt_stack_flags,
@@ -9984,7 +9974,7 @@ fn linux_kill(
     if !copy_linux_signal_frame(signal_stack, &signal_frame) {
         return LINUX_EFAULT;
     }
-    let mut handler_registers = registers;
+    let mut handler_registers = interrupted.registers;
     handler_registers.rdi = signal;
     handler_registers.rsi = signal_stack + LINUX_SIGNAL_FRAME_INFO_OFFSET;
     handler_registers.rdx = signal_stack + LINUX_SIGNAL_FRAME_CONTEXT_OFFSET;
@@ -9992,7 +9982,7 @@ fn linux_kill(
         registers: handler_registers,
         rip: handler,
         rsp: signal_stack,
-        rflags: user_rflags & !((1 << 8) | (1 << 10) | (1 << 16)),
+        rflags: interrupted.rflags & !((1 << 8) | (1 << 10) | (1 << 16)),
         rax: 0,
         fs_base: active_fs_base(),
     };
@@ -10043,11 +10033,12 @@ fn linux_tkill_identity(thread: u64) -> Result<(), u64> {
 
 fn linux_deliver_pending_signal(
     output: *mut LinuxSyscallFrame,
-    registers: LinuxSyscallFrame,
-    user_stack: u64,
-    user_rip: u64,
-    user_rflags: u64,
+    interrupted: LinuxUserContext,
+    return_registers: (u64, u64),
 ) -> u64 {
+    if LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {
+        return 0;
+    }
     let standard_signals = (1_u64 << LINUX_STANDARD_SIGNAL_COUNT) - 1;
     let deliverable = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst)
         & !ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst)
@@ -10065,10 +10056,8 @@ fn linux_deliver_pending_signal(
             ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
         ),
         output,
-        registers,
-        user_stack,
-        user_rip,
-        user_rflags,
+        interrupted,
+        return_registers,
     );
     if result == 0 {
         ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
@@ -10193,20 +10182,27 @@ fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64) -> u64 {
     if !write_linux_live_return(output, restored.user) {
         return LINUX_EINVAL;
     }
-    // SAFETY: the dedicated IRETQ epilogue consumes these values before this
-    // serialized syscall entry can be reused.
-    unsafe {
-        LINUX_SIGNAL_RAX = restored.user.rax;
-        LINUX_SIGNAL_RCX = restored.rcx;
-        LINUX_SIGNAL_R11 = restored.r11;
-        core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO);
-    }
+    // SAFETY: this serialized return consumes the sole active record before
+    // checking whether another unblocked pending signal should replace it.
+    unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO) };
     ELF_PROBE_SIGNAL_MASK.store(restored.signal_mask, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_POINTER.store(context.alt_stack_pointer, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_SIZE.store(context.alt_stack_size, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(context.alt_stack_flags, Ordering::SeqCst);
     LINUX_SIGNAL_ACTIVE.store(false, Ordering::SeqCst);
     LINUX_SIGNAL_RETURN_COUNT.fetch_add(1, Ordering::SeqCst);
+    let pending_result =
+        linux_deliver_pending_signal(output, restored.user, (restored.rcx, restored.r11));
+    if pending_result == 0 && LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {
+        return 0;
+    }
+    // SAFETY: the dedicated IRETQ epilogue consumes these values before this
+    // serialized syscall entry can be reused.
+    unsafe {
+        LINUX_SIGNAL_RAX = restored.user.rax;
+        LINUX_SIGNAL_RCX = restored.rcx;
+        LINUX_SIGNAL_R11 = restored.r11;
+    }
     LINUX_RETURN_FROM_SIGNAL
 }
 
