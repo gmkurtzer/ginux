@@ -389,8 +389,9 @@ It has no control-call operation yet: the kernel consumes its attenuated
 `READ` authority while constructing a read-only ring-3 MMIO mapping and its
 separate attenuated `WRITE` authority while constructing a writable control
 mapping. On x86 that leaf is also readable; the service uses it to select
-exactly `VIRTIO_BLK_F_FLUSH|VIRTIO_F_VERSION_1` and complete `FEATURES_OK`.
-This proves feature negotiation followed by fault revocation and kernel
+exactly `VIRTIO_BLK_F_FLUSH|VIRTIO_F_VERSION_1`, complete `FEATURES_OK`, select
+queue zero, and set size eight while leaving it disabled with zero addresses.
+This proves feature and inert queue-geometry control followed by fault revocation and kernel
 quiescence, but receives no DMA or queue authority. A usable device
 driver still requires a later, separately specified contract rather than an
 implicit extension of operation 18.

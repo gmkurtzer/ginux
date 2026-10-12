@@ -48,14 +48,19 @@ service sets `ACKNOWLEDGE|DRIVER`, reads both device-feature words, and requires
 `VIRTIO_BLK_F_FLUSH` plus `VIRTIO_F_VERSION_1`. It publishes exactly those two
 driver features, sets `FEATURES_OK`, and requires the device to retain that
 bit. The kernel independently reads back the exact selected features and status
-after the service takes a deliberate invalid-opcode fault.
+after the service selects queue zero, requires capacity for at least eight
+descriptors, and writes the bounded size eight. It verifies queue enable and
+all three queue addresses remain zero, then takes a deliberate invalid-opcode
+fault. The kernel independently reads back the exact queue selection, size,
+disabled state, and zero addresses.
 
 The stop-only path revokes the exact object-7 handle, destroys its mapping,
 clears and releases all seven owned frames, and publishes the fault. Regardless
 of whether verification succeeds, the kernel's following quiesce operation
 first disables PCI bus mastering, resets device status to zero, and confirms
 both conditions before continuing. The service never sets `DRIVER_OK`, selects
-a queue, owns a virtqueue, or receives a DMA frame, so negotiation cannot
+a queue, writes a queue address, owns a virtqueue, or receives a DMA frame, so
+geometry selection cannot
 initiate data transfer.
 
 ## Deliberate limits
@@ -67,7 +72,7 @@ initiate data transfer.
   readable. The proof touches only feature-selection, feature-value, and device
   status fields. Notification registers, ISR, device configuration, PCI
   configuration, and port I/O are unavailable.
-- No DMA frame, interrupt, queue, or IOMMU domain is delegated.
+- No DMA frame, interrupt, enabled queue, or IOMMU domain is delegated.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.

@@ -721,6 +721,11 @@ if ! grep -q '^ginux: isolated virtio feature negotiation completed' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio queue geometry configured without DMA' "$output_file"; then
+    echo "Boot test failed: isolated queue geometry was not configured safely." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; then
     echo "Boot test failed: the faulted virtio control service retained authority." >&2
     exit 1

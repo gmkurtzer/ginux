@@ -803,6 +803,24 @@ pub(crate) fn device_features_are_selected(
     u64::from(low) | (u64::from(high) << 32) == FEATURE_VERSION_1 | FEATURE_FLUSH
 }
 
+pub(crate) fn device_queue_geometry_is_selected(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+) -> bool {
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = mapping.address(common_physical, common_length) else {
+        return false;
+    };
+    read_common_u16(common, COMMON_QUEUE_SELECT) == 0
+        && read_common_u16(common, COMMON_QUEUE_SIZE) == QUEUE_SIZE
+        && read_common_u16(common, COMMON_QUEUE_ENABLE) == 0
+        && read_common_u64(common, COMMON_QUEUE_DESC) == 0
+        && read_common_u64(common, COMMON_QUEUE_DRIVER) == 0
+        && read_common_u64(common, COMMON_QUEUE_DEVICE) == 0
+}
+
 pub(crate) fn quiesce(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {
     let Some((common_physical, common_length)) = device.common_region() else {
         return false;
@@ -964,6 +982,12 @@ fn read_common_u32(common: usize, offset: usize) -> u32 {
     let value = unsafe { read_volatile((common + offset) as *const u32) };
     compiler_fence(Ordering::SeqCst);
     u32::from_le(value)
+}
+
+fn read_common_u64(common: usize, offset: usize) -> u64 {
+    let low = read_common_u32(common, offset);
+    let high = read_common_u32(common, offset + size_of::<u32>());
+    u64::from(low) | (u64::from(high) << 32)
 }
 
 fn write_common_u8(common: usize, offset: usize, value: u8) {

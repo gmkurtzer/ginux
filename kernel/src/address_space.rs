@@ -5317,7 +5317,7 @@ pub(crate) fn verify_ring3_read_only_device_grant(
 pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool {
     const DEVICE_PAGE_INDEX: usize = 5;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
-    const SUCCESS_FAULT_OFFSET: u64 = 94;
+    const SUCCESS_FAULT_OFFSET: u64 = 124;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5356,6 +5356,12 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
         0xc6, 0x47, 0x14, 0x0b, // status = ACKNOWLEDGE | DRIVER | FEATURES_OK
         0xf6, 0x47, 0x14, 0x08, // require FEATURES_OK to remain set
         0x75, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0xc7, 0x47, 0x16, 0, 0, // select queue zero
+        0x66, 0x83, 0x7f, 0x18, 0x08, // require at least eight descriptors
+        0x73, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0xc7, 0x47, 0x18, 0x08, 0, // select bounded queue size eight
+        0x66, 0x83, 0x7f, 0x1c, 0, // require queue to remain disabled
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x0f, 0x0b, // success: deliberate service fault
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());

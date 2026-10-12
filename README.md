@@ -47,10 +47,12 @@ authority, then attenuates it into separate stop-only ring-3 domains. A
 read-only observer sees reset status and faults on mutation. A control service
 with a write-only capability uses its necessarily read/write x86 leaf to
 require `FLUSH` and `VERSION_1`, publish exactly those features, and complete
-`FEATURES_OK` before deliberately faulting. Each service loses its capability,
-mapping, and owned frames. The kernel independently verifies negotiation, then
-disables PCI bus mastering, resets the device, and verifies both conditions;
-neither service receives a queue or DMA frame or sets `DRIVER_OK`. See
+`FEATURES_OK`, select queue zero, and set its bounded size to eight before
+deliberately faulting. It leaves queue enable and every queue address zero.
+Each service loses its capability, mapping, and owned frames. The kernel
+independently verifies negotiation and inert queue geometry, then disables PCI
+bus mastering, resets the device, and verifies both conditions; neither service
+receives a DMA frame, enables a queue, or sets `DRIVER_OK`. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded

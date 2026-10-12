@@ -1609,18 +1609,27 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         address_space::verify_ring3_writable_device_grant(virtio_status_physical);
     let writable_grant_negotiated =
         arch::x86_64::pci::device_features_are_selected(virtio_block, virtio_mmio);
+    let writable_grant_queue_inert =
+        arch::x86_64::pci::device_queue_geometry_is_selected(virtio_block, virtio_mmio);
     let writable_grant_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-    if !writable_grant_valid || !writable_grant_negotiated || !writable_grant_quiesced {
-        serial_write("\r\nginux: writable grant/negotiation/quiesce result: ");
+    if !writable_grant_valid
+        || !writable_grant_negotiated
+        || !writable_grant_queue_inert
+        || !writable_grant_quiesced
+    {
+        serial_write("\r\nginux: writable grant/negotiation/queue/quiesce result: ");
         serial_write_u64(u64::from(writable_grant_valid));
         serial_write(" ");
         serial_write_u64(u64::from(writable_grant_negotiated));
+        serial_write(" ");
+        serial_write_u64(u64::from(writable_grant_queue_inert));
         serial_write(" ");
         serial_write_u64(u64::from(writable_grant_quiesced));
         kernel_fail("\r\nginux: writable block-device grant invariant failed\r\n");
     }
     serial_write("\r\nginux: write-only virtio control grant exercised in ring 3");
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
+    serial_write("\r\nginux: isolated virtio queue geometry configured without DMA");
     serial_write("\r\nginux: faulted virtio control service revoked");
     serial_write("\r\nginux: faulted virtio control device quiesced without DMA");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
