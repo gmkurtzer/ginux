@@ -67,7 +67,8 @@ zero, while the allocator reports zero frames remaining for the retired owner.
   Page-granular authority currently exposes unrelated bytes in that page.
 - Interrupt routing remains kernel-owned; the service receives only a
   generation-bound wait operation, not interrupt-controller authority.
-- A missing interrupt does not yet have a timer-backed cancellation path.
+- A calibrated 100 ms kernel timer bounds a missing interrupt and wakes the
+  saved request with failure before teardown.
 - There is no IOMMU domain; the trusted-QEMU bootstrap permits bus mastering
   only because the sole queue points at one bounded owned page and synchronous
   fault teardown revokes hardware access before releasing it.

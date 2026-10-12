@@ -42,5 +42,6 @@ generation-bound blocked wait; see
 [Isolated Virtio Interrupt Wait v0](isolated-virtio-interrupt-v0.md). The
 persistent backend still polls its used ring. There is no persistent vector
 allocator, shared-vector demultiplexing, affinity policy, SMP routing, IOMMU
-confinement, timer-backed cancellation, or recovery from a lost or malicious
-interrupt. MSI-X table pages remain kernel-only.
+confinement, or full recovery from a malicious interrupt. The isolated wait
+has a 100 ms local-APIC timeout, while the trusted bootstrap request remains a
+bounded atomic poll. MSI-X table pages remain kernel-only.

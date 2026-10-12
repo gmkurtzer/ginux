@@ -1656,6 +1656,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }
     serial_write("\r\nginux: stop-only auxiliary fault executed and contained");
+    if !unsafe { arch::x86_64::timer::verify_device_wait_timeout_interrupt() } {
+        kernel_fail("\r\nginux: device-wait timeout interrupt invariant failed\r\n");
+    }
+    serial_write("\r\nginux: APIC device-wait timeout delivered");
     let Some(virtio_status_physical) = virtio_block.status_register_physical() else {
         kernel_fail("\r\nginux: virtio status register unavailable\r\n");
     };
@@ -1698,6 +1702,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated virtio queue notified from ring 3");
     serial_write("\r\nginux: isolated virtio service blocked on MSI-X");
     serial_write("\r\nginux: kernel-owned MSI-X woke isolated virtio service");
+    serial_write("\r\nginux: isolated virtio timeout cancelled after MSI-X");
     serial_write("\r\nginux: duplicate isolated virtio wait rejected");
     serial_write("\r\nginux: isolated virtio blank-sector read completed in ring 3");
     serial_write("\r\nginux: faulted virtio control service revoked");

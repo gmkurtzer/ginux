@@ -742,6 +742,11 @@ if ! grep -q '^ginux: observed virtio device remained reset and DMA-disabled' "$
     exit 1
 fi
 
+if ! grep -q '^ginux: APIC device-wait timeout delivered' "$output_file"; then
+    echo "Boot test failed: the device-wait timeout interrupt did not fire." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: write-only virtio control grant exercised in ring 3' "$output_file"; then
     echo "Boot test failed: the isolated control service did not mutate virtio status." >&2
     exit 1
@@ -796,6 +801,11 @@ fi
 if ! grep -q '^ginux: isolated virtio service blocked on MSI-X' "$output_file" ||
     ! grep -q '^ginux: kernel-owned MSI-X woke isolated virtio service' "$output_file"; then
     echo "Boot test failed: MSI-X did not block and wake the isolated virtio service." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: isolated virtio timeout cancelled after MSI-X' "$output_file"; then
+    echo "Boot test failed: successful MSI-X did not cancel its device timeout." >&2
     exit 1
 fi
 

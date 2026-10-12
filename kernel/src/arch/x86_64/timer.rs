@@ -5,7 +5,10 @@ use super::{
     apic::{LocalApic, Mode},
     cpu,
 };
-use crate::scheduler::{self, RuntimeAction, UserInterruptFrame};
+use crate::{
+    control_abi,
+    scheduler::{self, RuntimeAction, UserInterruptFrame},
+};
 
 const CPUID_BASIC_MAX: u32 = 0;
 const CPUID_FEATURES: u32 = 1;
@@ -19,6 +22,8 @@ const HERTZ_PER_MHZ: u64 = 1_000_000;
 const SCHEDULER_PROOF_INITIAL_PREEMPTIONS_PER_SECOND: u64 = 1_000;
 const SCHEDULER_PROOF_RELOAD_PREEMPTIONS_PER_SECOND: u64 = 10_000;
 const LINUX_WAIT_TICKS_PER_SECOND: u64 = 1_000;
+const DEVICE_WAIT_TIMEOUTS_PER_SECOND: u64 = 10;
+const DEVICE_WAIT_TEST_DOMAIN: u64 = u64::MAX;
 const APIC_LVT_TIMER: u32 = 0x320;
 const APIC_INITIAL_COUNT: u32 = 0x380;
 const APIC_CURRENT_COUNT: u32 = 0x390;
@@ -50,6 +55,10 @@ static PREEMPTION_RELOAD: AtomicU32 = AtomicU32::new(0);
 static PREEMPTION_DEFERRED_RELOAD: AtomicU32 = AtomicU32::new(0);
 static LINUX_WAIT_TIMER_ARMED: AtomicBool = AtomicBool::new(false);
 static LINUX_WAIT_TIMER_RELOAD: AtomicU32 = AtomicU32::new(0);
+static DEVICE_WAIT_TIMER_ARMED: AtomicBool = AtomicBool::new(false);
+static DEVICE_WAIT_TIMED_OUT: AtomicBool = AtomicBool::new(false);
+static DEVICE_WAIT_DOMAIN: AtomicU64 = AtomicU64::new(0);
+static DEVICE_WAIT_REQUEST: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 static INTERRUPT_COUNTER_HZ: AtomicU64 = AtomicU64::new(0);
@@ -456,6 +465,96 @@ pub(crate) fn finish_linux_wait_timer() -> bool {
     true
 }
 
+/// Arms a one-shot timeout for a scheduler-blocked device request.
+/// Interrupts remain disabled until the caller enters its idle wait.
+pub(crate) fn arm_device_wait_timer(domain: u64, request: u64) -> bool {
+    let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
+    if domain == 0
+        || request == 0
+        || counter_hz == 0
+        || PREEMPTION_ARMED.load(Ordering::SeqCst)
+        || LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst)
+        || DEVICE_WAIT_TIMER_ARMED.swap(true, Ordering::SeqCst)
+    {
+        DEVICE_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
+        return false;
+    }
+    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    else {
+        DEVICE_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
+        return false;
+    };
+    let initial_count =
+        (counter_hz / DEVICE_WAIT_TIMEOUTS_PER_SECOND).clamp(1, u64::from(u32::MAX)) as u32;
+    DEVICE_WAIT_DOMAIN.store(domain, Ordering::SeqCst);
+    DEVICE_WAIT_REQUEST.store(request, Ordering::SeqCst);
+    DEVICE_WAIT_TIMED_OUT.store(false, Ordering::SeqCst);
+    // SAFETY: the earlier timer proof validated this saved local APIC, and no
+    // scheduler or Linux timer owns it during the isolated service proof.
+    unsafe {
+        apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
+        apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
+        apic.write(APIC_INITIAL_COUNT, initial_count);
+    }
+    true
+}
+
+pub(crate) fn device_wait_timed_out(domain: u64, request: u64) -> bool {
+    DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst) == domain
+        && DEVICE_WAIT_REQUEST.load(Ordering::SeqCst) == request
+        && DEVICE_WAIT_TIMED_OUT.load(Ordering::SeqCst)
+}
+
+/// Stops the device timeout and reports whether it won the interrupt race.
+pub(crate) fn finish_device_wait_timer(domain: u64, request: u64) -> Option<bool> {
+    if DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst) != domain
+        || DEVICE_WAIT_REQUEST.load(Ordering::SeqCst) != request
+    {
+        return None;
+    }
+    let armed = DEVICE_WAIT_TIMER_ARMED.swap(false, Ordering::SeqCst);
+    let timed_out = DEVICE_WAIT_TIMED_OUT.swap(false, Ordering::SeqCst);
+    if !armed && !timed_out {
+        return None;
+    }
+    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let apic = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))?;
+    // SAFETY: the exact device wait owns this one-shot until this call or its
+    // interrupt handler consumes it.
+    unsafe {
+        apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
+        apic.write(APIC_INITIAL_COUNT, 0);
+    }
+    DEVICE_WAIT_DOMAIN.store(0, Ordering::SeqCst);
+    DEVICE_WAIT_REQUEST.store(0, Ordering::SeqCst);
+    Some(timed_out)
+}
+
+/// Proves the device-wait timeout source independently of a real device IRQ.
+pub(crate) unsafe fn verify_device_wait_timeout_interrupt() -> bool {
+    if !arm_device_wait_timer(DEVICE_WAIT_TEST_DOMAIN, 1) {
+        return false;
+    }
+    asm!("sti", options(nomem, nostack));
+    for _ in 0..INTERRUPT_POLL_LIMIT {
+        if device_wait_timed_out(DEVICE_WAIT_TEST_DOMAIN, 1) {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    asm!("cli", options(nomem, nostack));
+    finish_device_wait_timer(DEVICE_WAIT_TEST_DOMAIN, 1) == Some(true)
+}
+
 extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     TIMER_FIRED.store(true, Ordering::SeqCst);
     let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
@@ -470,6 +569,27 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     // SAFETY: The verifier initializes these values before unmasking the timer,
     // and the handler runs with exclusive bootstrap-processor APIC ownership.
     unsafe { apic.write(APIC_EOI, 0) };
+    if DEVICE_WAIT_TIMER_ARMED.swap(false, Ordering::SeqCst) {
+        let domain = DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst);
+        let request = DEVICE_WAIT_REQUEST.load(Ordering::SeqCst);
+        // SAFETY: this one-shot has fired and must be masked before another
+        // owner may program the local timer.
+        unsafe {
+            apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
+            apic.write(APIC_INITIAL_COUNT, 0);
+        }
+        if domain == DEVICE_WAIT_TEST_DOMAIN
+            || scheduler::wake_device_completion(
+                domain,
+                control_abi::BLOCK_DEVICE_OBJECT,
+                request,
+                u64::MAX - 2,
+            )
+        {
+            DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);
+        }
+        return;
+    }
     if LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst) {
         if let Some(frame) = unsafe { frame.as_mut() } {
             cpu::expire_linux_waits_from_timer(frame);

@@ -6,6 +6,7 @@ use super::{
     apic::{LocalApic, Mode},
     cpu,
     paging::MmioMapping,
+    timer,
 };
 use crate::{
     control_abi,
@@ -1310,10 +1311,12 @@ pub(crate) fn complete_isolated_interrupt_wait(
         return false;
     }
     VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
-    if !set_msix_entry_mask(device, msix_mapping, 0, false)
+    if !timer::arm_device_wait_timer(domain, request)
+        || !set_msix_entry_mask(device, msix_mapping, 0, false)
         || !set_msix_control(device, true, false)
     {
         VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+        let _ = timer::finish_device_wait_timer(domain, request);
         let _ = scheduler::wake_device_completion(
             domain,
             control_abi::BLOCK_DEVICE_OBJECT,
@@ -1322,7 +1325,9 @@ pub(crate) fn complete_isolated_interrupt_wait(
         );
         return false;
     }
-    while !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst) {
+    while !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+        && !timer::device_wait_timed_out(domain, request)
+    {
         // STI's interrupt shadow covers the following HLT, so an interrupt
         // cannot be lost between the readiness test and sleeping.
         unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
@@ -1330,8 +1335,12 @@ pub(crate) fn complete_isolated_interrupt_wait(
     let function_masked = set_msix_control(device, true, true);
     let entry_masked = set_msix_entry_mask(device, msix_mapping, 0, true);
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    let Some(timed_out) = timer::finish_device_wait_timer(domain, request) else {
+        return false;
+    };
     function_masked
         && entry_masked
+        && !timed_out
         && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1
         && scheduler::current_domain() == Some(domain)
 }

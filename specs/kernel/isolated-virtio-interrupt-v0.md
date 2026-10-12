@@ -32,6 +32,13 @@ The service then validates used ID zero, length 513, status zero, guard bytes,
 and the blank sector-two payload. The proof rejects request generation two
 before notification and rejects a second wait for consumed generation one.
 
+Every accepted wait also arms the previously calibrated local-APIC timer for a
+100 ms one-shot. The device interrupt cancels and masks that timer before the
+call returns. If the timer wins, its handler wakes the same saved wait with an
+error; the call masks MSI-X before returning the failure. The boot gate
+independently delivers the timeout interrupt and proves its state is consumed,
+then proves the real MSI-X path cancels the pending timeout.
+
 ## Teardown
 
 The service deliberately faults after validation. Its registered teardown hook
@@ -44,9 +51,9 @@ release the DMA page, destroy the service mappings, and retire its authority.
 ## Deliberate limits
 
 - Only request generation one and one outstanding queue-zero read are modeled.
-- A missing device interrupt has no timer-backed cancellation yet; the current
-  deterministic QEMU proof waits in `HLT`. A production contract requires a
-  kernel timer, cancellation result, and recoverable device-reset path.
 - There is no vector allocator, shared-vector demultiplexing, SMP affinity,
   IOMMU domain, reusable request ring, or stable general block-service ABI yet.
+- The gate proves timeout delivery independently and cancellation on the live
+  device-success path; injected live-device timeout and recovery remains a
+  future fault-injection test.
 - Page-granular notification MMIO still exposes unrelated bytes in its page.

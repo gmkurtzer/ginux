@@ -83,8 +83,9 @@ mastering, resets the device, retires the temporary interrupt gate, and only the
 completed DMA layout before the page is scrubbed and released;
 release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
-owned frames. Lost-interrupt timeout/cancellation, reusable requests, and IOMMU
-confinement remain unimplemented. See
+owned frames. A calibrated 100 ms APIC one-shot wakes a request whose device
+interrupt never arrives; successful MSI-X delivery cancels it. Reusable
+requests and IOMMU confinement remain unimplemented. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
 [Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md), plus
 [Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md).

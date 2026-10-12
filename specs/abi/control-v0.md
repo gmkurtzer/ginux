@@ -404,7 +404,10 @@ ring-3 context as blocked. It then unmasks kernel-owned MSI-X vector 33 and
 returns success only after that vector wakes the exact saved wait. A stale
 request, duplicate wait, wrong capability, inactive queue, or mismatched DMA
 binding returns `UINT64_MAX - 2` without blocking. The service validates the
-exact blank-sector completion before faulting. This proves one bounded read
+exact blank-sector completion before faulting. Every admitted wait arms a
+calibrated 100 ms local-APIC one-shot; timeout wakes the saved call with
+`UINT64_MAX - 2`, while a valid device interrupt cancels the timer before
+return. This proves one bounded read
 followed by fault revocation and kernel quiescence. The same domain owns one
 separately tracked RW/NX DMA page. A domain fault triggers an internal teardown
 obligation: MSI-X mask and disable, device validation, bus-master disable,
