@@ -1520,6 +1520,32 @@ pub(crate) fn execute_auxiliary(
     };
 }
 
+pub(crate) fn execute_native_auxiliary(
+    entry: usize,
+    stack: usize,
+    boot_info: u64,
+    capability: u64,
+    domain_id: u64,
+    service_identity: u64,
+) {
+    if !install_current_scheduler_fs_base() {
+        return;
+    }
+    unsafe {
+        ginux_user_enter(
+            entry,
+            stack,
+            boot_info,
+            capability,
+            0,
+            4,
+            domain_id,
+            service_identity,
+            0,
+        )
+    };
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct LinuxFileMapping {
     pub(crate) address: usize,
@@ -15492,13 +15518,11 @@ pub(crate) fn activate_user_root(root: u64) -> bool {
     let Some((instruction, stack)) = scheduler::current_instruction_and_stack() else {
         return false;
     };
-    if !paging::user_context_matches_layout(instruction, stack) {
-        return false;
-    }
     let Some(frames) = paging::validated_user_root_frames(root) else {
         return false;
     };
-    if !memory::frame_addresses_owned_by(owner, frames.base())
+    if !frames.context_matches(instruction, stack)
+        || !memory::frame_addresses_owned_by(owner, frames.base())
         || frames
             .dma()
             .is_some_and(|dma| !memory::frame_addresses_owned_by(owner, &[dma]))

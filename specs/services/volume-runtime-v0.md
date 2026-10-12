@@ -1,8 +1,8 @@
 # Isolated Volume Runtime v0
 
 **Status:** Freestanding x86-64 service artifact builds, is authenticated and
-validated as a bounded native PIE, and is materialized under its final W^X
-permissions; live service execution remains the next milestone.
+validated as a bounded native PIE, materialized under its final W^X permissions,
+and executed on the interrupt-driven virtio path.
 
 ## Artifact
 
@@ -28,8 +28,9 @@ symbol relocations, and out-of-range relocation targets or addends fail closed.
 The loader copies the six-page image into exclusively owned zeroed frames,
 applies the validated relative relocations through the supervisor direct map,
 and then exposes only read-only/NX, RX, and post-relocation read-only/NX pages
-to ring 3. A separate read-only/NX bootstrap page and writable/NX stack sit
-between absent guard pages. The automated boot proof activates this root,
+to ring 3. A separate read-only/NX bootstrap page and bounded two-page
+writable/NX stack are separated from the image and adjacent mappings by absent
+guard pages. The automated boot proof activates this root,
 reads the relocated entrypoint through its userspace address, restores the
 kernel root, and scrubs and releases every temporary frame.
 
@@ -50,7 +51,8 @@ operation 19 using the exact next request generation. Used ID, used length,
 status, and device status are validated before returning to the shared volume
 engine.
 
-Volume slots map to reserved device sectors three and four. On empty media the
+Volume slots map to reserved device sectors four and five, separate from the
+earlier raw durability probe. On empty media the
 shared engine commits generation one containing `ginux-isolated-volume\n` via
 prepare/write/flush/commit/write/flush and recovers it. On existing media it
 accepts only that exact generation and payload. Success deliberately faults so
@@ -58,9 +60,10 @@ the supervisor can exercise the same mandatory device-quiescence path.
 
 ## Deliberate limits
 
-- The artifact is authenticated, parsed, and materialized, but the resulting
-  address space is not yet registered or executed. The existing raw ring-3
-  proof still owns the live virtio path.
+- The compiled service is now registered and executed after the earlier raw
+  ring-3 timeout/retry proof. The raw proof remains temporarily to preserve its
+  deliberate timeout and duplicate-generation coverage; the compiled runtime
+  owns a separate complete volume transaction and two-boot recovery sequence.
 - `BootInfo` is an internal bootstrap structure, not the stable driver ABI.
 - One queue, one DMA page, one outstanding request, and one object-7 device are
   supported. There is no IOMMU domain or concurrent request path.

@@ -1819,8 +1819,11 @@ fn address_space_root_is_owned(domain_raw: u64, root: u64) -> bool {
     let Some(frames) = crate::arch::x86_64::paging::validated_user_root_frames(root) else {
         return false;
     };
-    frames.base().len() == crate::address_space::USER_ADDRESS_SPACE_FRAMES
-        && crate::memory::frame_addresses_owned_by(owner, frames.base())
+    matches!(
+        frames.base().len(),
+        crate::address_space::USER_ADDRESS_SPACE_FRAMES
+            | crate::address_space::NATIVE_SERVICE_FRAME_COUNT
+    ) && crate::memory::frame_addresses_owned_by(owner, frames.base())
         && frames
             .dma()
             .is_none_or(|dma| crate::memory::frame_addresses_owned_by(owner, &[dma]))

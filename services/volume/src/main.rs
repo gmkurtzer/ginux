@@ -39,7 +39,7 @@ const STATUS_DRIVER_OK: u8 = 4;
 const STATUS_FEATURES_OK: u8 = 8;
 const FEATURE_FLUSH: u32 = 1 << 9;
 const FEATURE_VERSION_1: u32 = 1;
-const VOLUME_SECTOR_BASE: usize = 3;
+const VOLUME_SECTOR_BASE: usize = 4;
 const PAYLOAD: &[u8] = b"ginux-isolated-volume\n";
 
 #[repr(C)]

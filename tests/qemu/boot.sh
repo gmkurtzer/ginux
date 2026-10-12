@@ -90,6 +90,14 @@ if ! grep -q '^ginux: isolated virtio marker initialized and flushed' "$output_f
     echo "Boot test failed: a fresh isolated sector was not initialized exactly once." >&2
     exit 1
 fi
+if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$output_file" ||
+    ! grep -q '^ginux: native volume service owned virtio request sequence' "$output_file" ||
+    ! grep -q '^ginux: native volume record initialized and flushed' "$output_file" ||
+    grep -q '^ginux: native volume record recovered after reboot' "$output_file"; then
+    cat "$output_file"
+    echo "Boot test failed: compiled native volume service did not initialize its record." >&2
+    exit 1
+fi
 
 run_boot "$reboot_output_file" "recovery"
 
@@ -114,6 +122,13 @@ if ! grep -q '^ginux: isolated virtio marker recovered after reboot' "$reboot_ou
     grep -q '^ginux: isolated virtio marker initialized and flushed' "$reboot_output_file"; then
     cat "$reboot_output_file"
     echo "Boot test failed: the isolated service did not recover its flushed marker." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboot_output_file" ||
+    ! grep -q '^ginux: native volume record recovered after reboot' "$reboot_output_file" ||
+    grep -q '^ginux: native volume record initialized and flushed' "$reboot_output_file"; then
+    cat "$reboot_output_file"
+    echo "Boot test failed: compiled native volume service did not recover its record." >&2
     exit 1
 fi
 

@@ -108,9 +108,16 @@ unimplemented. See
 and [Isolated Virtio Durability v0](specs/kernel/isolated-virtio-durability-v0.md).
 The same format and transaction crates now build into a freestanding
 `x86_64-unknown-none` Rust service that owns queue negotiation, descriptor
-construction, notification, and generation-bound waits. It is not loaded yet;
-the next step is mapping and relocating its static PIE segments into the native
-service domain. See
+construction, notification, and generation-bound waits. The measured service
+is authenticated as a bounded static PIE, relocated into exclusively owned
+W^X pages, and executed in a capability-limited ring-3 domain with a guarded
+stack, read-only bootstrap page, one DMA lease, and only the required virtio
+MMIO pages. A fresh boot commits generation one to reserved sectors four and
+five; a second boot recovers the exact record without rewriting it. Its
+deliberate terminal fault drives mandatory interrupt, device, capability,
+address-space, and DMA cleanup without panicking the kernel. The earlier raw
+ring-3 program remains temporarily for timeout/retry and duplicate-generation
+coverage. See
 [Isolated Volume Runtime v0](specs/services/volume-runtime-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded

@@ -89,6 +89,13 @@ impl NativeImage<'_> {
         })
     }
 
+    pub(crate) fn address_is_executable(&self, address: u64) -> bool {
+        self.segments
+            .iter()
+            .flatten()
+            .any(|segment| segment.flags & PF_EXECUTE != 0 && contains_memory(*segment, address, 1))
+    }
+
     pub(crate) fn materialize_page(&self, page: usize, output: &mut [u8; 4096]) -> bool {
         output.fill(0);
         let page_start = (page as u64).saturating_mul(PAGE_SIZE);

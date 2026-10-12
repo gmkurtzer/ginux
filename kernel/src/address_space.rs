@@ -1,6 +1,7 @@
 use core::{
     arch::{asm, global_asm},
     mem::size_of,
+    sync::atomic::{AtomicU8, Ordering},
 };
 
 use crate::{
@@ -53,6 +54,7 @@ const PAGE_ATTRIBUTE_TABLE: u64 = 1 << 12;
 
 static mut AUXILIARY_ADDRESS_SPACES: [Option<RegisteredAuxiliaryAddressSpace>;
     domain::MAX_AUXILIARY_SERVICES] = [const { None }; domain::MAX_AUXILIARY_SERVICES];
+static NATIVE_VOLUME_COMPLETION: AtomicU8 = AtomicU8::new(0);
 
 pub(crate) fn verify_linux_elf_mapping(
     plan: &crate::linux_elf::LoadPlan<'_>,
@@ -2267,9 +2269,14 @@ pub(crate) fn verify_interpreted_elf_mapping(
 
 struct RegisteredAuxiliaryAddressSpace {
     domain: u64,
-    space: WxAddressSpace,
+    space: AuxiliaryAddressSpace,
     device_teardown: Option<AuxiliaryDeviceTeardown>,
     device_quiesced: bool,
+}
+
+enum AuxiliaryAddressSpace {
+    Wx(WxAddressSpace),
+    Native(NativeServiceAddressSpace),
 }
 
 #[derive(Clone, Copy)]
@@ -4061,9 +4068,9 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 }
 
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 6;
-const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 2;
-const NATIVE_BOOT_INFO_PAGE: usize = 6;
-const NATIVE_STACK_PAGE: usize = 8;
+pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
+const NATIVE_STACK_PAGE: usize = 7;
+const NATIVE_BOOT_INFO_PAGE: usize = 10;
 
 struct NativeServiceAddressSpace {
     kernel_root: u64,
@@ -4071,6 +4078,7 @@ struct NativeServiceAddressSpace {
     frames: [memory::FrameLease; NATIVE_SERVICE_FRAME_COUNT],
     entry: u64,
     owner: memory::FrameOwner,
+    dma_frame: Option<memory::FrameLease>,
 }
 
 impl NativeServiceAddressSpace {
@@ -4121,12 +4129,15 @@ impl NativeServiceAddressSpace {
                 }
                 table
                     .add(NATIVE_BOOT_INFO_PAGE)
-                    .write(addresses[10] | PRESENT | USER | NO_EXECUTE);
-                table.add(NATIVE_BOOT_INFO_PAGE + 1).write(0);
+                    .write(addresses[12] | PRESENT | USER | NO_EXECUTE);
+                table.add(NATIVE_STACK_PAGE - 1).write(0);
                 table
                     .add(NATIVE_STACK_PAGE)
+                    .write(addresses[10] | PRESENT | WRITABLE | USER | NO_EXECUTE);
+                table
+                    .add(NATIVE_STACK_PAGE + 1)
                     .write(addresses[11] | PRESENT | WRITABLE | USER | NO_EXECUTE);
-                table.add(NATIVE_STACK_PAGE + 1).write(0);
+                table.add(NATIVE_STACK_PAGE + 2).write(0);
 
                 for relocation in image.relocations[..image.relocation_count].iter().flatten() {
                     let page = usize::try_from(relocation.target / PAGE_SIZE as u64).ok()?;
@@ -4148,6 +4159,7 @@ impl NativeServiceAddressSpace {
             frames,
             entry: (USER_TEST_ADDRESS as u64).checked_add(image.entry)?,
             owner,
+            dma_frame: None,
         })
     }
 
@@ -4178,8 +4190,8 @@ impl NativeServiceAddressSpace {
                 || root.add(256).read() != kernel.add(256).read()
                 || root.read() & USER != 0
                 || root.add(256).read() & USER != 0
-                || table.add(NATIVE_BOOT_INFO_PAGE + 1).read() != 0
-                || table.add(NATIVE_STACK_PAGE + 1).read() != 0
+                || table.add(NATIVE_STACK_PAGE - 1).read() != 0
+                || table.add(NATIVE_STACK_PAGE + 2).read() != 0
             {
                 return false;
             }
@@ -4194,8 +4206,10 @@ impl NativeServiceAddressSpace {
                 }
             }
             table.add(NATIVE_BOOT_INFO_PAGE).read()
-                == self.frames[10].address() | PRESENT | USER | NO_EXECUTE
+                == self.frames[12].address() | PRESENT | USER | NO_EXECUTE
                 && table.add(NATIVE_STACK_PAGE).read()
+                    == self.frames[10].address() | PRESENT | WRITABLE | USER | NO_EXECUTE
+                && table.add(NATIVE_STACK_PAGE + 1).read()
                     == self.frames[11].address() | PRESENT | WRITABLE | USER | NO_EXECUTE
         }
     }
@@ -4222,8 +4236,164 @@ impl NativeServiceAddressSpace {
             })
     }
 
+    fn table(&self) -> Option<*mut u64> {
+        unsafe {
+            let root = mapped_frame::<u64>(self.root)?;
+            let pdpt = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK)?;
+            let directory = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK)?;
+            mapped_frame::<u64>(directory.read() & ADDRESS_MASK)
+        }
+    }
+
+    fn map_uncached_device_page(&mut self, index: usize, physical: u64) -> bool {
+        if !physical.is_multiple_of(PAGE_SIZE as u64) || physical & !ADDRESS_MASK != 0 {
+            return false;
+        }
+        unsafe {
+            let Some(table) = self.table() else {
+                return false;
+            };
+            let entry = table.add(index);
+            let expected =
+                physical | PRESENT | WRITABLE | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
+            if entry.read() != 0 {
+                return false;
+            }
+            entry.write(expected);
+            entry.read() == expected
+        }
+    }
+
+    fn device_page_mapping_is_exact(&self, index: usize, physical: u64) -> bool {
+        if !physical.is_multiple_of(PAGE_SIZE as u64) || physical & !ADDRESS_MASK != 0 {
+            return false;
+        }
+        unsafe {
+            let Some(table) = self.table() else {
+                return false;
+            };
+            let expected =
+                physical | PRESENT | WRITABLE | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
+            let observed = table.add(index).read();
+            observed & !(ACCESSED | DIRTY) == expected
+        }
+    }
+
+    fn map_owned_dma_page(&mut self, index: usize) -> Option<(usize, u64)> {
+        if self.dma_frame.is_some() {
+            return None;
+        }
+        let [frame] = memory::allocate_frames::<1>(self.owner)?;
+        let physical = frame.address();
+        let mapped = unsafe {
+            let table = self.table()?;
+            let entry = table.add(index);
+            let expected = physical | PRESENT | WRITABLE | USER | NO_EXECUTE;
+            if entry.read() != 0 {
+                false
+            } else {
+                entry.write(expected);
+                entry.read() == expected
+            }
+        };
+        if !mapped {
+            let _ = memory::scrub_and_release_frames(self.owner, &[frame]);
+            return None;
+        }
+        self.dma_frame = Some(frame);
+        Some((USER_TEST_ADDRESS + index * PAGE_SIZE, physical))
+    }
+
+    fn write_boot_info(&self, words: [u64; 5]) -> bool {
+        let Some(page) = mapped_frame::<u64>(self.frames[12].address()) else {
+            return false;
+        };
+        unsafe {
+            for (index, word) in words.into_iter().enumerate() {
+                page.add(index).write(word);
+            }
+        }
+        true
+    }
+
     fn release(self) -> bool {
+        let dma = self.dma_frame;
         memory::scrub_and_release_frames(self.owner, &self.frames)
+            && dma.is_none_or(|frame| memory::scrub_and_release_frames(self.owner, &[frame]))
+    }
+}
+
+impl AuxiliaryAddressSpace {
+    fn root(&self) -> u64 {
+        match self {
+            Self::Wx(space) => space.root,
+            Self::Native(space) => space.root,
+        }
+    }
+
+    fn kernel_root(&self) -> u64 {
+        match self {
+            Self::Wx(space) => space.kernel_root,
+            Self::Native(space) => space.kernel_root,
+        }
+    }
+
+    fn dma_physical(&self) -> Option<u64> {
+        match self {
+            Self::Wx(space) => space.dma_frame.map(memory::FrameLease::address),
+            Self::Native(space) => space.dma_frame.map(memory::FrameLease::address),
+        }
+    }
+
+    fn notification_mapping_is_exact(&self, physical: u64) -> bool {
+        match self {
+            Self::Wx(space) => space.device_page_mapping_is_exact(7, physical, true),
+            Self::Native(space) => space.device_page_mapping_is_exact(13, physical),
+        }
+    }
+
+    fn dma_completion_is_valid(&self) -> bool {
+        let Some(frame) = self.dma_physical() else {
+            return false;
+        };
+        match self {
+            Self::Wx(_) => unsafe { dma_page_has_completed_transaction(frame) }.is_some(),
+            Self::Native(_) => unsafe {
+                let Some(recovered) = native_dma_completion_state(frame) else {
+                    return false;
+                };
+                NATIVE_VOLUME_COMPLETION.store(if recovered { 2 } else { 1 }, Ordering::Release);
+                true
+            },
+        }
+    }
+
+    fn is_releasable(&self) -> bool {
+        match self {
+            Self::Wx(space) => {
+                memory::frames_owned_by(space.owner, &space.frames)
+                    && memory::frame_leases_releasable(space.owner, &space.frames)
+                    && space.dma_frame.is_none_or(|frame| {
+                        memory::frames_owned_by(space.owner, &[frame])
+                            && memory::frame_leases_releasable(space.owner, &[frame])
+                    })
+            }
+            Self::Native(space) => {
+                memory::frames_owned_by(space.owner, &space.frames)
+                    && memory::frame_leases_releasable(space.owner, &space.frames)
+                    && space.dma_frame.is_none_or(|frame| {
+                        memory::frames_owned_by(space.owner, &[frame])
+                            && memory::frame_leases_releasable(space.owner, &[frame])
+                    })
+            }
+        }
+    }
+
+    fn release(self) -> bool {
+        match self {
+            Self::Wx(space) => space.release(),
+            Self::Native(space) => space.release(),
+        }
     }
 }
 
@@ -4433,9 +4603,11 @@ pub(crate) fn initialize_staged_auxiliary_from_current_user(
     let offset = PAGE_SIZE - length;
     // SAFETY: The private stack frame remains owned by this exact staged
     // domain and the bounded range cannot leave that single NX page.
-    let payload = unsafe {
-        core::slice::from_raw_parts_mut(registered.space.first_stack_frame.add(offset), length)
+    let AuxiliaryAddressSpace::Wx(space) = &mut registered.space else {
+        return false;
     };
+    let payload =
+        unsafe { core::slice::from_raw_parts_mut(space.first_stack_frame.add(offset), length) };
     if !copy_from_current_user(source, payload) {
         return false;
     }
@@ -4447,6 +4619,10 @@ pub(crate) fn initialize_staged_auxiliary_from_current_user(
 }
 
 fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bool {
+    register_address_space(domain_id, AuxiliaryAddressSpace::Wx(space))
+}
+
+fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(slot) =
         (0..domain::MAX_AUXILIARY_SERVICES).find(|index| unsafe { (*registry)[*index].is_none() })
@@ -4459,7 +4635,7 @@ fn register_auxiliary_address_space(domain_id: u64, space: WxAddressSpace) -> bo
             .iter()
             .flatten()
             .any(|registered| registered.domain == domain_id)
-    } || !domain::bind_auxiliary_address_space(domain_id, space.root)
+    } || !domain::bind_auxiliary_address_space(domain_id, space.root())
     {
         let _ = space.release();
         return false;
@@ -4487,41 +4663,17 @@ pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
     let Some(registered) = (unsafe { (*registry)[slot].as_ref() }) else {
         return false;
     };
-    let root = registered.space.root;
-    let owner = registered.space.owner;
-    let frames = registered.space.frames;
-    let dma_frame = registered.space.dma_frame;
+    let root = registered.space.root();
     if registered.device_teardown.is_some() && !registered.device_quiesced
-        || !memory::frames_owned_by(owner, &frames)
-        || dma_frame.is_some_and(|frame| !memory::frames_owned_by(owner, &[frame]))
-        || !memory::frame_leases_releasable(owner, &frames)
-        || dma_frame.is_some_and(|frame| !memory::frame_leases_releasable(owner, &[frame]))
+        || !registered.space.is_releasable()
         || !domain::unbind_auxiliary_address_space(domain_id, root)
     {
         return false;
     }
-    unsafe {
-        for frame in &frames {
-            if zero_frame(frame.address()).is_none() {
-                let _ = domain::bind_auxiliary_address_space(domain_id, root);
-                return false;
-            }
-        }
-        if let Some(frame) = dma_frame {
-            if zero_frame(frame.address()).is_none() {
-                return false;
-            }
-        }
-    }
-    if !memory::release_frames(owner, frames)
-        || dma_frame.is_some_and(|frame| !memory::release_frames(owner, [frame]))
-    {
+    let Some(registered) = (unsafe { (*registry)[slot].take() }) else {
         return false;
-    }
-    unsafe {
-        (*registry)[slot] = None;
-    }
-    true
+    };
+    registered.space.release()
 }
 
 pub(crate) fn bind_auxiliary_device_teardown(
@@ -4541,11 +4693,8 @@ pub(crate) fn bind_auxiliary_device_teardown(
     if registered.device_teardown.is_some()
         || registered.device_quiesced
         || interrupt_request == 0
-        || notification_page.is_some_and(|physical| {
-            !registered
-                .space
-                .device_page_mapping_is_exact(7, physical, true)
-        })
+        || notification_page
+            .is_some_and(|physical| !registered.space.notification_mapping_is_exact(physical))
     {
         return false;
     }
@@ -4569,7 +4718,7 @@ pub(crate) fn auxiliary_device_wait_ready(domain_id: u64, request: u64) -> bool 
     let Some(teardown) = registered.device_teardown else {
         return false;
     };
-    let Some(dma_physical) = registered.space.dma_frame.map(memory::FrameLease::address) else {
+    let Some(dma_physical) = registered.space.dma_physical() else {
         return false;
     };
     !registered.device_quiesced
@@ -4629,15 +4778,12 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
         notification_page,
         interrupt_request,
     } = teardown;
-    let Some(dma_physical) = registered.space.dma_frame.map(memory::FrameLease::address) else {
+    let Some(dma_physical) = registered.space.dma_physical() else {
         return false;
     };
     if registered.device_quiesced
-        || notification_page.is_some_and(|physical| {
-            !registered
-                .space
-                .device_page_mapping_is_exact(7, physical, true)
-        })
+        || notification_page
+            .is_some_and(|physical| !registered.space.notification_mapping_is_exact(physical))
         || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce_isolated_interrupt(
             device,
@@ -4646,7 +4792,7 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
             domain_id,
             interrupt_request,
         )
-        || unsafe { dma_page_has_completed_transaction(dma_physical) }.is_none()
+        || !registered.space.dma_completion_is_valid()
     {
         return false;
     }
@@ -4661,13 +4807,13 @@ pub(crate) fn activate_kernel_root_for_auxiliary(domain_id: u64) -> bool {
     else {
         return false;
     };
-    if current_root() != registered.space.root {
+    if current_root() != registered.space.root() {
         return false;
     }
     unsafe {
-        activate(registered.space.kernel_root);
+        activate(registered.space.kernel_root());
     }
-    current_root() == registered.space.kernel_root
+    current_root() == registered.space.kernel_root()
 }
 
 pub(crate) fn verify_ring3_control_plane(
@@ -6106,6 +6252,194 @@ pub(crate) fn verify_ring3_writable_device_grant(
     valid.then_some(recovered)
 }
 
+pub(crate) fn verify_native_volume_service(
+    image: &crate::native_elf::NativeImage<'_>,
+    register_physical: u64,
+    device: VirtioBlockDevice,
+    mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> Option<bool> {
+    const DMA_PAGE_INDEX: usize = 11;
+    const DEVICE_PAGE_INDEX: usize = 12;
+    const NOTIFICATION_PAGE_INDEX: usize = 13;
+    const DEVICE_STATUS_OFFSET: usize = 0x14;
+    const INTERRUPT_REQUEST: u64 = 1;
+    let page = register_physical & ADDRESS_MASK;
+    let offset = usize::try_from(register_physical.checked_sub(page)?).ok()?;
+    if offset >= PAGE_SIZE {
+        return None;
+    }
+    let user_register = USER_TEST_ADDRESS
+        .checked_add(DEVICE_PAGE_INDEX * PAGE_SIZE)?
+        .checked_add(offset)?;
+    let user_common = user_register.checked_sub(DEVICE_STATUS_OFFSET)?;
+    if !user_common.is_multiple_of(PAGE_SIZE) {
+        return None;
+    }
+    let notification_register = pci::queue_zero_notification_register(device, mapping)?;
+    let notification_page = notification_register & ADDRESS_MASK;
+    let notification_offset = usize::try_from(notification_register - notification_page).ok()?;
+    if notification_page == page || notification_offset + size_of::<u16>() > PAGE_SIZE {
+        return None;
+    }
+    let user_notification = USER_TEST_ADDRESS
+        .checked_add(NOTIFICATION_PAGE_INDEX * PAGE_SIZE)?
+        .checked_add(notification_offset)?;
+
+    let auxiliary = domain::initialize_boot_auxiliary_service(
+        6,
+        crate::control_abi::BLOCK_DEVICE_OBJECT,
+        crate::capability::Rights::WRITE,
+    )?;
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return None;
+    };
+    let kernel_root = current_root();
+    let mut space = NativeServiceAddressSpace::new(kernel_root, owner, image)?;
+    if !space.layout_is_valid(image)
+        || !space.map_uncached_device_page(DEVICE_PAGE_INDEX, page)
+        || !space.map_uncached_device_page(NOTIFICATION_PAGE_INDEX, notification_page)
+    {
+        let _ = space.release();
+        return None;
+    }
+    let Some((user_dma, dma_physical)) = space.map_owned_dma_page(DMA_PAGE_INDEX) else {
+        let _ = space.release();
+        return None;
+    };
+    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
+    if !space.write_boot_info([
+        user_common as u64,
+        user_notification as u64,
+        user_dma as u64,
+        dma_physical,
+        handle,
+    ]) || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT + 1)
+    {
+        let _ = space.release();
+        return None;
+    }
+    let root = space.root;
+    let entry = usize::try_from(space.entry).ok()?;
+    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    NATIVE_VOLUME_COMPLETION.store(0, Ordering::Release);
+    let root_frames = paging::validated_user_root_frames(root);
+    if root_frames.as_ref().is_none_or(|frames| {
+        frames.base().len() != NATIVE_SERVICE_FRAME_COUNT
+            || frames.dma() != Some(dma_physical)
+            || !memory::frame_addresses_owned_by(owner, frames.base())
+    }) {
+        crate::serial_write_bytes(b"\r\nginux: native volume root validation failed");
+        let _ = space.release();
+        return None;
+    }
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space)) {
+        crate::serial_write_bytes(b"\r\nginux: native volume registration failed");
+        return None;
+    }
+    if !bind_auxiliary_device_teardown(
+        auxiliary,
+        device,
+        mapping,
+        msix_mapping,
+        Some(notification_page),
+        INTERRUPT_REQUEST,
+    ) {
+        crate::serial_write_bytes(b"\r\nginux: native volume teardown binding failed");
+        return None;
+    }
+    if !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle) {
+        crate::serial_write_bytes(b"\r\nginux: native volume scheduler queue failed");
+        return None;
+    }
+    if !pci::arm_isolated_device_interrupt(
+        device,
+        mapping,
+        msix_mapping,
+        apic,
+        auxiliary,
+        INTERRUPT_REQUEST,
+    ) {
+        crate::serial_write_bytes(b"\r\nginux: native volume interrupt arm failed");
+        return None;
+    }
+    if !cpu::activate_user_root(root) {
+        crate::serial_write_bytes(b"\r\nginux: native volume root activation failed");
+        return None;
+    }
+    cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    let completion = NATIVE_VOLUME_COMPLETION.swap(0, Ordering::AcqRel);
+    let success_fault = domain::delivered_fault_descriptor().is_some_and(|descriptor| {
+        let Some(vector) = descriptor
+            .get(6..8)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+        else {
+            return false;
+        };
+        let Some(instruction) = descriptor
+            .get(32..40)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u64::from_le_bytes)
+        else {
+            return false;
+        };
+        vector == 6
+            && instruction >= USER_TEST_ADDRESS as u64
+            && image.address_is_executable(instruction - USER_TEST_ADDRESS as u64)
+    });
+    let valid = success_fault
+        && matches!(completion, 1 | 2)
+        && current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && unsafe { frame_is_zero(dma_physical) }
+        && domain::domain_is_retired(auxiliary)
+        && !domain::handle_permits(
+            auxiliary,
+            handle,
+            crate::control_abi::BLOCK_DEVICE_OBJECT,
+            crate::capability::Rights::WRITE,
+        )
+        && event
+            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
+        && domain::last_lifecycle_event_detail() == Some(0)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none();
+    if !valid {
+        crate::serial_write_bytes(
+            b"\r\nginux: native volume event/completion/success/roots/frames: ",
+        );
+        for value in [
+            event.unwrap_or(u64::MAX),
+            u64::from(completion),
+            u64::from(success_fault),
+            registered_auxiliary_address_space_count() as u64,
+            memory::owner_live_frame_count(owner).unwrap_or(usize::MAX) as u64,
+        ] {
+            crate::serial_write_u64(value);
+            crate::serial_write_bytes(b" ");
+        }
+        if let Some(descriptor) = domain::delivered_fault_descriptor() {
+            for range in [6..8, 16..24, 24..32, 32..40] {
+                let mut bytes = [0_u8; 8];
+                let length = range.len();
+                bytes[..length].copy_from_slice(&descriptor[range]);
+                crate::serial_write_u64(u64::from_le_bytes(bytes));
+                crate::serial_write_bytes(b" ");
+            }
+        }
+    }
+    valid.then_some(completion == 2)
+}
+
 struct WxAddressSpace {
     kernel_root: u64,
     root: u64,
@@ -6422,4 +6756,34 @@ unsafe fn dma_page_has_completed_transaction(frame: u64) -> Option<bool> {
             core::ptr::read_volatile(bytes.add(offset)) == expected
         })
         .then_some(recovered == 1)
+}
+
+unsafe fn native_dma_completion_state(frame: u64) -> Option<bool> {
+    let bytes = mapped_frame::<u8>(frame)?;
+    let read_u16 = |offset| core::ptr::read_volatile(bytes.add(offset).cast::<u16>());
+    let read_u32 = |offset| core::ptr::read_volatile(bytes.add(offset).cast::<u32>());
+    let read_u64 = |offset| core::ptr::read_volatile(bytes.add(offset).cast::<u64>());
+    let available = read_u16(0x102);
+    let used = read_u16(0x202);
+    if available != used || !matches!(used, 2 | 10) {
+        return None;
+    }
+    let final_slot = usize::from((used - 1) % 8);
+    (read_u64(0) == frame + VIRTIO_REQUEST_OFFSET as u64
+        && read_u32(8) == 16
+        && read_u16(12) == 1
+        && read_u16(14) == 1
+        && read_u64(16) == frame + VIRTIO_DATA_OFFSET as u64
+        && read_u32(24) == 512
+        && read_u16(28) == 3
+        && read_u16(30) == 2
+        && read_u64(32) == frame + VIRTIO_STATUS_OFFSET as u64
+        && read_u32(40) == 1
+        && read_u16(44) == 2
+        && read_u32(VIRTIO_REQUEST_OFFSET) == 0
+        && read_u64(VIRTIO_REQUEST_OFFSET + 8) == 5
+        && read_u32(0x204 + final_slot * 8) == 0
+        && read_u32(0x208 + final_slot * 8) == 513
+        && core::ptr::read_volatile(bytes.add(VIRTIO_STATUS_OFFSET)) == 0)
+        .then_some(used == 2)
 }

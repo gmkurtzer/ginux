@@ -74,17 +74,31 @@ pub(crate) fn verify_user_context_layout_invariants() -> bool {
 }
 
 pub(crate) struct ValidatedUserRootFrames {
-    base: [u64; 7],
+    base: [u64; 13],
+    base_count: usize,
     dma: Option<u64>,
 }
 
 impl ValidatedUserRootFrames {
-    pub(crate) fn base(&self) -> &[u64; 7] {
-        &self.base
+    pub(crate) fn base(&self) -> &[u64] {
+        &self.base[..self.base_count]
     }
 
     pub(crate) fn dma(&self) -> Option<u64> {
         self.dma
+    }
+
+    pub(crate) fn context_matches(&self, instruction: u64, stack: u64) -> bool {
+        if self.base_count == 7 {
+            return user_context_matches_layout(instruction, stack);
+        }
+        let executable_start = USER_REGION_BASE + PAGE_SIZE as u64;
+        let executable_end = USER_REGION_BASE + 5 * PAGE_SIZE as u64;
+        let stack_start = USER_REGION_BASE + 7 * PAGE_SIZE as u64;
+        let stack_end = USER_REGION_BASE + 9 * PAGE_SIZE as u64;
+        (executable_start..executable_end).contains(&instruction)
+            && stack_start < stack
+            && stack <= stack_end
     }
 }
 
@@ -163,7 +177,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             && notification & LARGE_PAGE == 0
             && notification & !(ADDRESS_MASK as u64 | notification_flags | ACCESSED | DIRTY) == 0
             && notification_address != device_address);
-    let frames = [
+    let legacy_frames = [
         root,
         pdpt_address,
         directory_address,
@@ -172,7 +186,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         first_stack_address,
         second_stack_address,
     ];
-    (code & (PRESENT | USER) == (PRESENT | USER)
+    let legacy_valid = code & (PRESENT | USER) == (PRESENT | USER)
         && code & (WRITABLE | NO_EXECUTE | LARGE_PAGE) == 0
         && first_guard == 0
         && first_stack & (PRESENT | WRITABLE | USER | NO_EXECUTE)
@@ -186,17 +200,87 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         && dma_valid
         && notification_valid
         && (8..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
-        && frames
+        && legacy_frames
             .iter()
             .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)
-        && frames
+        && legacy_frames
             .iter()
             .enumerate()
-            .all(|(index, frame)| !frames[index + 1..].contains(frame))
-        && (dma == 0 || !frames.contains(&dma_address)))
+            .all(|(index, frame)| !legacy_frames[index + 1..].contains(frame))
+        && (dma == 0 || !legacy_frames.contains(&dma_address));
+    if legacy_valid {
+        let mut base = [0_u64; 13];
+        base[..legacy_frames.len()].copy_from_slice(&legacy_frames);
+        return Some(ValidatedUserRootFrames {
+            base,
+            base_count: legacy_frames.len(),
+            dma: (dma != 0).then_some(dma_address),
+        });
+    }
+
+    let native_entries: [u64; 14] =
+        core::array::from_fn(|index| unsafe { table.add(index).read() });
+    let owned_flags = PRESENT | USER;
+    let read_only_nx = owned_flags | NO_EXECUTE;
+    let executable = owned_flags;
+    let stack_flags = owned_flags | WRITABLE | NO_EXECUTE;
+    let mmio_flags = stack_flags | WRITE_THROUGH | CACHE_DISABLE;
+    let flags_match = |entry: u64, expected: u64| {
+        entry & !(ACCESSED | DIRTY) == expected && (entry & DIRTY == 0 || expected & WRITABLE != 0)
+    };
+    let native_dma = native_entries[11];
+    let native_dma_address = native_dma & ADDRESS_MASK as u64;
+    let native_frames = [
+        root,
+        pdpt_address,
+        directory_address,
+        table_address,
+        native_entries[0] & ADDRESS_MASK as u64,
+        native_entries[1] & ADDRESS_MASK as u64,
+        native_entries[2] & ADDRESS_MASK as u64,
+        native_entries[3] & ADDRESS_MASK as u64,
+        native_entries[4] & ADDRESS_MASK as u64,
+        native_entries[5] & ADDRESS_MASK as u64,
+        native_entries[7] & ADDRESS_MASK as u64,
+        native_entries[8] & ADDRESS_MASK as u64,
+        native_entries[10] & ADDRESS_MASK as u64,
+    ];
+    (flags_match(native_entries[0], native_frames[4] | read_only_nx)
+        && (1..=4)
+            .all(|index| flags_match(native_entries[index], native_frames[4 + index] | executable))
+        && flags_match(native_entries[5], native_frames[9] | read_only_nx)
+        && native_entries[6] == 0
+        && flags_match(native_entries[7], native_frames[10] | stack_flags)
+        && flags_match(native_entries[8], native_frames[11] | stack_flags)
+        && native_entries[9] == 0
+        && flags_match(native_entries[10], native_frames[12] | read_only_nx)
+        && flags_match(native_dma, native_dma_address | stack_flags)
+        && native_dma_address != 0
+        && native_dma_address < INITIAL_IDENTITY_LIMIT as u64
+        && flags_match(
+            native_entries[12],
+            (native_entries[12] & ADDRESS_MASK as u64) | mmio_flags,
+        )
+        && flags_match(
+            native_entries[13],
+            (native_entries[13] & ADDRESS_MASK as u64) | mmio_flags,
+        )
+        && native_entries[12] & ADDRESS_MASK as u64 >= INITIAL_IDENTITY_LIMIT as u64
+        && native_entries[13] & ADDRESS_MASK as u64 >= INITIAL_IDENTITY_LIMIT as u64
+        && native_entries[12] & ADDRESS_MASK as u64 != native_entries[13] & ADDRESS_MASK as u64
+        && (14..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
+        && native_frames
+            .iter()
+            .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)
+        && native_frames
+            .iter()
+            .enumerate()
+            .all(|(index, frame)| !native_frames[index + 1..].contains(frame))
+        && !native_frames.contains(&native_dma_address))
     .then_some(ValidatedUserRootFrames {
-        base: frames,
-        dma: (dma != 0).then_some(dma_address),
+        base: native_frames,
+        base_count: native_frames.len(),
+        dma: Some(native_dma_address),
     })
 }
 
