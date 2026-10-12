@@ -439,10 +439,14 @@ the same transactional sender/handler handoff returns `EINTR` without changing
 the output or counter. The measured graph then blocks the same read again and
 completes it through a write, proving the descriptor remains live. Blocked
 signals, unsupported dispositions, nested delivery, and syscall restart retain
-their explicit `ENOSYS` boundary. Blocking eventfd writes and blocking reads
-from timerfd also remain unsupported.
-A bounded monotonic timerfd adds one-shot and periodic clock-driven readiness with
-relative or absolute arming. One bounded pipe pair provides a 256-byte FIFO
+their explicit `ENOSYS` boundary. Blocking eventfd writes remain unsupported.
+A bounded monotonic timerfd adds one-shot and periodic clock-driven readiness
+with relative or absolute arming. An unexpired or disarmed blocking read sleeps
+in its scheduler slot while a peer is runnable. Arming and disarming refresh the
+stored deadline; an APIC tick completes an expired read with its accumulated
+count and preempts directly back to the reader. Descriptor closure wakes it with
+`EBADF`. Signal interruption remains unsupported. One bounded pipe pair
+provides a 256-byte FIFO
 with atomic scalar or vectored I/O, poll/epoll readiness, EOF, broken-peer
 behavior, FIFO metadata, and byte-count introspection. An empty blocking scalar
 read sleeps in its scheduler slot while a peer is runnable, then revalidates and

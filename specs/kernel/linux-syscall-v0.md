@@ -158,9 +158,15 @@ the interval and time until the next expiration. Reads require exactly one
 eight-byte result, preserve pending expiration state on `-EFAULT`, return the
 number of accumulated periodic expirations, disarm a consumed one-shot, and
 advance a periodic deadline. A disarmed or unexpired nonblocking read returns
-`-EAGAIN`; a corresponding blocking read returns `-ENOSYS` until descriptor
-wait queues exist. `poll` and epoll expose `POLLIN`/`EPOLLIN` dynamically once
-the monotonic deadline has elapsed. The descriptor also participates in
+`-EAGAIN`. A corresponding blocking read with a runnable peer stores its exact
+eight-byte destination, descriptor, and current deadline in a typed scheduler
+wait. `timerfd_settime` refreshes that deadline after an arm or disarm; descriptor
+closure wakes the read with `-EBADF`. Once the monotonic deadline elapses, the
+periodic APIC handler revalidates the output, consumes the expiration count, and
+preempts directly back to the reader. Blocking without a runnable peer and
+signal interruption retain `-ENOSYS`. `poll` and epoll expose
+`POLLIN`/`EPOLLIN` dynamically once the monotonic deadline has elapsed. The
+descriptor also participates in
 `F_GETFD`, `F_SETFD`, `F_GETFL`, `lseek`, and `close`. The proof creates timerfd
 and epoll together, observes one-shot readiness, verifies failed-read
 non-consumption, consumes periodic and already-expired absolute timers, and

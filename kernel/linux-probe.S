@@ -1421,6 +1421,33 @@ linux_clone_repeat:
     push 3
     pop rax
     call syscall_expect_zero
+    push 1
+    pop rdi
+    xor esi, esi
+    mov eax, 283
+    call syscall_expect_two
+    mov qword ptr [0x405e00], 0
+    mov qword ptr [0x405e08], 0
+    mov qword ptr [0x405e10], 0
+    mov qword ptr [0x405e18], 10000000
+    push 2
+    pop rdi
+    xor esi, esi
+    mov edx, 0x405e00
+    xor r10d, r10d
+    mov eax, 286
+    call syscall_expect_zero
+    mov qword ptr [0x405e60], 0
+    mov esi, 0x405e60
+    push 8
+    pop rdx
+    xor eax, eax
+    call syscall_expect_eight
+    cmp qword ptr [0x405e60], 0
+    je failure
+    push 3
+    pop rax
+    call syscall_expect_zero
     push -4
     mov edi, 0x4050c0
     mov rsi, rsp
@@ -4857,6 +4884,10 @@ child_thread_probe:
     push 24
     pop rax
     call syscall_expect_zero
+    mov ecx, 0x100000
+.Llinux_timerfd_read_spin:
+    pause
+    loop .Llinux_timerfd_read_spin
     push 12
     pop rdx
     push 1
