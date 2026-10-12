@@ -841,6 +841,25 @@ pub(crate) fn arm_isolated_device(device: VirtioBlockDevice, mapping: MmioMappin
         && bus_master_is_enabled(device)
 }
 
+pub(crate) fn queue_zero_notification_register(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+) -> Option<u64> {
+    let (common_physical, common_length) = device.common_region()?;
+    let common = mapping.address(common_physical, common_length)?;
+    let (notify_physical, notify_length) = device.notify_region()?;
+    write_common_u16(common, COMMON_QUEUE_SELECT, 0);
+    let offset = notification_byte_offset(
+        read_common_u16(common, COMMON_QUEUE_NOTIFY_OFF),
+        device.notify_multiplier,
+        notify_length,
+    )?;
+    let register = notify_physical.checked_add(offset as u64)?;
+    (register.is_multiple_of(size_of::<u16>() as u64)
+        && mapping.address(register, size_of::<u16>()).is_some())
+    .then_some(register)
+}
+
 pub(crate) fn quiesce(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {
     let Some((common_physical, common_length)) = device.common_region() else {
         return false;

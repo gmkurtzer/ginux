@@ -34,8 +34,8 @@ layout: three chained descriptors reference a 16-byte request header, a
 512-byte device-write buffer, and a one-byte pending status field. The kernel
 arms PCI bus mastering, then the service enables queue zero and sets
 `DRIVER_OK`. It publishes descriptor head zero by advancing the available index
-to one, but leaves the used index at zero and cannot map the notification
-region. The fault hook
+to one, but leaves the used index at zero and does not write the separately
+mapped notification page. The fault hook
 first validates the active binding, disables PCI bus mastering, and resets the
 device. It then checks every byte in the now-stable page against that exact
 layout. Any changed address, length, flag, chain index, request field, ring
@@ -60,6 +60,8 @@ zero, while the allocator reports zero frames remaining for the retired owner.
 - The physical address is embedded in the bounded bootstrap service and written
   only to the three queue-address registers; no general physical-address ABI is
   exposed.
+- The notification register's containing page is mapped but not written.
+  Page-granular authority currently exposes unrelated bytes in that page.
 - No notification, completion, or interrupt is produced.
 - There is no IOMMU domain; the trusted-QEMU bootstrap permits bus mastering
   only because the sole queue points at one bounded owned page and synchronous

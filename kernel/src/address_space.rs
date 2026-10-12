@@ -32,6 +32,7 @@ const WRITE_THROUGH: u64 = 1 << 3;
 const CACHE_DISABLE: u64 = 1 << 4;
 const LARGE_PAGE: u64 = 1 << 7;
 const ACCESSED: u64 = 1 << 5;
+const DIRTY: u64 = 1 << 6;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const USER_TEST_ADDRESS: usize = 1usize << 39;
 const EXPECTED_SERVICE_FAULT_OFFSET: usize = 197;
@@ -2267,8 +2268,15 @@ pub(crate) fn verify_interpreted_elf_mapping(
 struct RegisteredAuxiliaryAddressSpace {
     domain: u64,
     space: WxAddressSpace,
-    device_teardown: Option<(VirtioBlockDevice, paging::MmioMapping)>,
+    device_teardown: Option<AuxiliaryDeviceTeardown>,
     device_quiesced: bool,
+}
+
+#[derive(Clone, Copy)]
+struct AuxiliaryDeviceTeardown {
+    device: VirtioBlockDevice,
+    mapping: paging::MmioMapping,
+    notification_page: Option<u64>,
 }
 
 pub(crate) fn expected_service_fault_instruction(service_entry_offset: usize) -> Option<u64> {
@@ -4322,6 +4330,7 @@ pub(crate) fn bind_auxiliary_device_teardown(
     domain_id: u64,
     device: VirtioBlockDevice,
     mapping: paging::MmioMapping,
+    notification_page: Option<u64>,
 ) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
@@ -4329,10 +4338,21 @@ pub(crate) fn bind_auxiliary_device_teardown(
     else {
         return false;
     };
-    if registered.device_teardown.is_some() || registered.device_quiesced {
+    if registered.device_teardown.is_some()
+        || registered.device_quiesced
+        || notification_page.is_some_and(|physical| {
+            !registered
+                .space
+                .device_page_mapping_is_exact(7, physical, true)
+        })
+    {
         return false;
     }
-    registered.device_teardown = Some((device, mapping));
+    registered.device_teardown = Some(AuxiliaryDeviceTeardown {
+        device,
+        mapping,
+        notification_page,
+    });
     true
 }
 
@@ -4343,13 +4363,23 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
     else {
         return false;
     };
-    let Some((device, mapping)) = registered.device_teardown else {
+    let Some(teardown) = registered.device_teardown else {
         return true;
     };
+    let AuxiliaryDeviceTeardown {
+        device,
+        mapping,
+        notification_page,
+    } = teardown;
     let Some(dma_physical) = registered.space.dma_frame.map(memory::FrameLease::address) else {
         return false;
     };
     if registered.device_quiesced
+        || notification_page.is_some_and(|physical| {
+            !registered
+                .space
+                .device_page_mapping_is_exact(7, physical, true)
+        })
         || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce(device, mapping)
         || !unsafe { dma_page_has_published_read(dma_physical) }
@@ -5386,6 +5416,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
 ) -> Option<u64> {
     const DEVICE_PAGE_INDEX: usize = 5;
     const DMA_PAGE_INDEX: usize = 6;
+    const NOTIFICATION_PAGE_INDEX: usize = 7;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
     const SUCCESS_FAULT_OFFSET: u64 = 378;
     let page = register_physical & ADDRESS_MASK;
@@ -5401,6 +5432,12 @@ pub(crate) fn verify_ring3_writable_device_grant(
     let user_register = user_register?;
     let user_common = user_register.checked_sub(DEVICE_STATUS_OFFSET)?;
     if user_common & (PAGE_SIZE - 1) != 0 {
+        return None;
+    }
+    let notification_register = pci::queue_zero_notification_register(device, mapping)?;
+    let notification_page = notification_register & ADDRESS_MASK;
+    let notification_offset = notification_register.checked_sub(notification_page)? as usize;
+    if notification_page == page || notification_offset + size_of::<u16>() > PAGE_SIZE {
         return None;
     }
     let user_dma = USER_TEST_ADDRESS + DMA_PAGE_INDEX * PAGE_SIZE;
@@ -5506,6 +5543,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     let mut space = WxAddressSpace::new(kernel_root, owner)?;
     if !space.permissions_are_valid(kernel_root)
         || !space.map_uncached_device_page(DEVICE_PAGE_INDEX, page, true)
+        || !space.map_uncached_device_page(NOTIFICATION_PAGE_INDEX, notification_page, true)
     {
         let _ = space.release();
         return None;
@@ -5531,7 +5569,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     let entry = USER_TEST_ADDRESS;
     let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
     if !register_auxiliary_address_space(auxiliary, space)
-        || !bind_auxiliary_device_teardown(auxiliary, device, mapping)
+        || !bind_auxiliary_device_teardown(auxiliary, device, mapping, Some(notification_page))
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
         || !cpu::activate_user_root(root)
         || !pci::arm_isolated_device(device, mapping)
@@ -5729,7 +5767,37 @@ impl WxAddressSpace {
                 return false;
             }
             entry.write(expected);
-            entry.read() == expected
+            self.device_page_mapping_is_exact(index, physical, writable)
+        }
+    }
+
+    fn device_page_mapping_is_exact(&self, index: usize, physical: u64, writable: bool) -> bool {
+        if index >= ENTRY_COUNT
+            || !physical.is_multiple_of(PAGE_SIZE as u64)
+            || physical & !ADDRESS_MASK != 0
+        {
+            return false;
+        }
+        unsafe {
+            let Some(root) = mapped_frame::<u64>(self.root) else {
+                return false;
+            };
+            let Some(pdpt) = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK) else {
+                return false;
+            };
+            let Some(directory) = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK) else {
+                return false;
+            };
+            let Some(table) = mapped_frame::<u64>(directory.read() & ADDRESS_MASK) else {
+                return false;
+            };
+            let mut expected =
+                physical | PRESENT | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
+            if writable {
+                expected |= WRITABLE;
+            }
+            let observed = table.add(index).read();
+            observed & !(ACCESSED | DIRTY) == expected && (observed & DIRTY == 0 || writable)
         }
     }
 

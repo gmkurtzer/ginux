@@ -752,6 +752,11 @@ if ! grep -q '^ginux: isolated virtio available entry published without notifica
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio notification page mapped but unused' "$output_file"; then
+    echo "Boot test failed: the bounded virtio notification page was not mapped safely." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated virtio request remained incomplete before quiescence' "$output_file"; then
     echo "Boot test failed: the unnotified virtio request changed before quiescence." >&2
     exit 1

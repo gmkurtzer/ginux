@@ -166,8 +166,10 @@ the fixed code/guard/stack/guard/stack leaf layout with W^X permissions. One
 additional fixed leaf may name a read-only or writable, non-executable,
 write-through, cache-disabled device page above the 4 GiB allocator ceiling. It
 is not included in the owned-frame list and cannot alias domain RAM. The next
-leaf may be absent or name one owned RW/NX candidate DMA frame; every later leaf
-remains absent. All seven base allocator-owned page-table and payload frames must be
+leaf may be absent or name one owned RW/NX candidate DMA frame. One final leaf
+may map a distinct writable, non-executable, write-through, cache-disabled MMIO
+page only when the first device leaf exists; every later leaf remains absent.
+All seven base allocator-owned page-table and payload frames must be
 distinct, nonzero, and below 4 GiB. The hardware readback still has to
 match after the load. Before activation, all seven base physical addresses and
 the optional DMA frame must also appear in the allocator's live ledger under the scheduler's exact current
@@ -198,6 +200,13 @@ generation. Unlike external MMIO, it participates in ownership and teardown:
 the fault path clears and releases it with the address space, and the gate
 checks both the zeroed physical page and zero remaining owner frames. See
 [Isolated DMA Lease v0](device-dma-lease-v0.md).
+
+The final optional leaf is bound to the distinct page containing queue zero's
+validated two-byte notification register. Root activation requires its exact
+RW/UC/NX flags and rejects aliasing with the common-configuration page. The
+device teardown record rechecks the exact physical mapping. This remains a
+page-granular bootstrap grant: unrelated bytes in the same MMIO page are not
+yet protected from the service.
 
 A registered device teardown record changes release ordering for that domain.
 The stop-only fault path must validate and quiesce the exact device before

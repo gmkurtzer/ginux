@@ -81,7 +81,10 @@ and performs no notification. The lease lifecycle is specified in
   readable. The proof touches only feature-selection, feature-value, and device
   status fields. Notification registers, ISR, device configuration, PCI
   configuration, and port I/O are unavailable.
-- No notification mapping, completion, interrupt, or IOMMU domain is delegated.
+- One page-granular writable mapping contains queue zero's validated two-byte
+  notification register. The current proof does not write it, but unrelated
+  bytes in that 4 KiB page are not yet sub-page protected.
+- No completion, interrupt, or IOMMU domain is delegated.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.

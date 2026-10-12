@@ -134,11 +134,13 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let second_stack = unsafe { table.add(4).read() };
     let device = unsafe { table.add(5).read() };
     let dma = unsafe { table.add(6).read() };
+    let notification = unsafe { table.add(7).read() };
     let code_address = code & ADDRESS_MASK as u64;
     let first_stack_address = first_stack & ADDRESS_MASK as u64;
     let second_stack_address = second_stack & ADDRESS_MASK as u64;
     let device_address = device & ADDRESS_MASK as u64;
     let dma_address = dma & ADDRESS_MASK as u64;
+    let notification_address = notification & ADDRESS_MASK as u64;
     let device_flags = PRESENT | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
     let device_valid = device == 0
         || (device_address >= INITIAL_IDENTITY_LIMIT as u64
@@ -153,6 +155,14 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             && dma & dma_flags == dma_flags
             && dma & LARGE_PAGE == 0
             && dma & !(ADDRESS_MASK as u64 | dma_flags | ACCESSED | DIRTY) == 0);
+    let notification_flags = PRESENT | WRITABLE | USER | WRITE_THROUGH | CACHE_DISABLE | NO_EXECUTE;
+    let notification_valid = notification == 0
+        || (device != 0
+            && notification_address >= INITIAL_IDENTITY_LIMIT as u64
+            && notification & notification_flags == notification_flags
+            && notification & LARGE_PAGE == 0
+            && notification & !(ADDRESS_MASK as u64 | notification_flags | ACCESSED | DIRTY) == 0
+            && notification_address != device_address);
     let frames = [
         root,
         pdpt_address,
@@ -174,7 +184,8 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         && second_stack & LARGE_PAGE == 0
         && device_valid
         && dma_valid
-        && (7..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
+        && notification_valid
+        && (8..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
         && frames
             .iter()
             .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)
