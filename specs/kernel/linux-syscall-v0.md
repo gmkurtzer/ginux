@@ -437,11 +437,14 @@ opens return `-EISDIR`, and `O_DIRECTORY` against `/etc/hostname` returns
 `-ENOTDIR`.
 
 Opening `/` with `O_DIRECTORY` exposes `.`, `..`, `dev`, `etc`, `proc`, `sys`,
-`tmp`, `var`, and `init`, with the seven non-dot entries obtained from the measured-root
-index in archive order. The complete result is staged in a fixed 256-byte
-kernel buffer before copy-out. Measured directory descriptors retain a bounded
+`tmp`, `var`, `init`, `bin`, and `sbin`, with all non-dot entries obtained from
+the measured-root index in archive order. Each result page is staged in a fixed
+256-byte kernel buffer before copy-out. The first page contains the dots and
+children through `bin`; the retained opaque cursor returns `sbin` on a second
+page. A buffer smaller than the complete next staged page returns `-EINVAL`
+without advancing. Measured directory descriptors retain a bounded
 one-based index selector and recover their path from the same immutable
-64-node index. The current 17-entry image explicitly crosses the former
+64-node index. The current 23-entry image explicitly crosses the former
 16-node publication limit.
 The measured `/proc`, `/sys`, `/tmp`, and `/var` nodes open without individual
 pathname cases. The ring-3 proof enumerates the otherwise unlisted `/var`,

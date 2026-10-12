@@ -2042,6 +2042,11 @@ if ! grep -q '^ginux: measured-root Linux root enumerated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: measured-root Linux root pagination validated' "$output_file"; then
+    echo "Boot test failed: measured-root Linux root pagination was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured-root Linux empty directory opened' "$output_file"; then
     echo "Boot test failed: measured-root Linux empty directory was not opened." >&2
     exit 1

@@ -36,7 +36,8 @@ same read and metadata path as the executable graph. The ring-3 interpreter
 validates exact contents and metadata and proves writable access is denied. It
 also opens `/etc`, enumerates all three measured children, and verifies directory
 metadata, EOF, cursor rewind, and atomic undersized-buffer rejection. The Linux `/` view enumerates every
-direct measured child. Measured directory descriptors also carry index
+direct measured child, including an explicit `/sbin`; the fixed 256-byte
+staging buffer returns `sbin` on a second cursor page. Measured directory descriptors also carry index
 selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open
 without per-directory kernel identities; `dev`
 retains its synthetic device entries. A

@@ -75,7 +75,7 @@ validates mode `0100555` and size 24, and reads its complete contents. It also
 requires denial through the console capability, rejects `../init`, and rejects
 a null output range without mutating the root. Root enumeration returns one
 fully staged metadata-and-name record per call, rejects regular files as
-directories, and reports end of the eight-entry proof root without copying. The
+directories, and reports end of the nine-entry proof root without copying. The
 published allocation remains allocator-owned after the control-plane domain exits.
 
 The bounded Linux syscall profile resolves the four `/etc` regular files
@@ -89,10 +89,12 @@ interpreter also opens `/etc` as an immutable directory and obtains its
 `hostname`, `os-release`, and `motd` children from the retained index through
 `getdents64`. It verifies the `.` and `..` records, file types, exact child names, directory metadata, EOF,
 cursor rewind, and atomic rejection of an undersized output buffer. The
-Linux `/` directory likewise enumerates the eight direct measured children in
-archive order. Measured directory descriptors use their own bounded node
-selectors to recover names from the index. The measured `proc`, `sys`, `tmp`,
-`proc`, `sys`, and `tmp` nodes are empty. The proof opens and enumerates the
+Linux `/` directory enumerates nine direct measured children in archive order.
+Its fixed 256-byte staging buffer returns the first eight children through
+`bin` on one page and the explicit `sbin` directory on a second cursor page.
+Measured directory descriptors use their own bounded node
+selectors to recover names from the index. The measured `proc`, `sys`, and
+`tmp` nodes are empty. The proof opens and enumerates the
 otherwise unlisted `var` node, then opens its indexed `lib` child relative to
 the live descriptor. `dev`
 retains its synthetic device children while its directory node comes from the

@@ -10885,14 +10885,13 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     if state & LINUX_DEVICE_DIRECTORY == 0 {
         return LINUX_ENOTDIR;
     }
-    if linux_descriptor_offset(descriptor).load(Ordering::SeqCst) != 0 {
-        return 0;
-    }
+    let offset = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
     let Ok(capacity) = usize::try_from(count) else {
         return LINUX_EINVAL;
     };
     let mut entries = [0_u8; 256];
     let mut used = 0_usize;
+    let next_offset;
     if let Some(directory) = linux_measured_directory_path(state) {
         let directory_inode = linux_root_directory_inode(state).unwrap_or(0);
         let parent_inode = if directory.is_empty() {
@@ -10900,17 +10899,28 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
         } else {
             11
         };
-        for (inode, next, name) in [
-            (directory_inode, 1_i64, &b"."[..]),
-            (parent_inode, 2, &b".."[..]),
-        ] {
-            if !append_linux_dirent(&mut entries, &mut used, inode, next, 4, name) {
+        let initial = offset == 0;
+        let mut cursor = if initial {
+            0
+        } else {
+            let Some(cursor) = offset
+                .checked_sub(2)
+                .and_then(|cursor| usize::try_from(cursor).ok())
+            else {
                 return LINUX_EINVAL;
+            };
+            cursor
+        };
+        if initial {
+            for (inode, next, name) in [
+                (directory_inode, 1_i64, &b"."[..]),
+                (parent_inode, 2, &b".."[..]),
+            ] {
+                if !append_linux_dirent(&mut entries, &mut used, inode, next, 4, name) {
+                    return LINUX_EINVAL;
+                }
             }
         }
-        let mut cursor = 0;
-        let mut inode = 9_u64;
-        let mut next = 3_i64;
         loop {
             let Some(child) = initramfs::published_next_child(directory, cursor) else {
                 return LINUX_EINVAL;
@@ -10932,16 +10942,44 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 (b"", b"tmp") => 14,
                 (b"", b"init") => 5,
                 (b"etc", b"hostname") => 9,
-                _ => inode,
+                _ => {
+                    let Ok(node) = u64::try_from(child.next_cursor) else {
+                        return LINUX_EINVAL;
+                    };
+                    let Some(inode) = 32_u64.checked_add(node) else {
+                        return LINUX_EINVAL;
+                    };
+                    inode
+                }
+            };
+            let Some(cookie) = child.next_cursor.checked_add(2) else {
+                return LINUX_EINVAL;
+            };
+            let Ok(next) = i64::try_from(cookie) else {
+                return LINUX_EINVAL;
             };
             if !append_linux_dirent(&mut entries, &mut used, child_inode, next, kind, child.name) {
-                return LINUX_EINVAL;
+                if used == 0 {
+                    return LINUX_EINVAL;
+                }
+                break;
             }
             cursor = child.next_cursor;
-            inode += 1;
-            next += 1;
         }
+        if used == 0 {
+            return 0;
+        }
+        let Some(cookie) = cursor.checked_add(2) else {
+            return LINUX_EINVAL;
+        };
+        let Ok(cookie) = u64::try_from(cookie) else {
+            return LINUX_EINVAL;
+        };
+        next_offset = cookie;
     } else {
+        if offset != 0 {
+            return 0;
+        }
         for (inode, next, kind, name) in [
             (4_u64, 1_i64, 4_u8, &b"."[..]),
             (4, 2, 4, &b".."[..]),
@@ -10954,6 +10992,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 return LINUX_EINVAL;
             }
         }
+        next_offset = 1;
     }
     if capacity < used {
         return LINUX_EINVAL;
@@ -10961,7 +11000,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     if !copy_to_linux_user(address, &entries[..used]) {
         return LINUX_EFAULT;
     }
-    linux_descriptor_offset(descriptor).store(1, Ordering::SeqCst);
+    linux_descriptor_offset(descriptor).store(next_offset, Ordering::SeqCst);
     used as u64
 }
 

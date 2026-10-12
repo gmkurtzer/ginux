@@ -1143,11 +1143,11 @@ cd80
 7402
 0f0b
 
-# report end of the eight-entry root without touching the output
+# report end of the nine-entry root without touching the output
 48baa020000080000000
 48c7420800000000
 48c7421000000000
-48c742180d000000
+48c742180e000000
 48bf002f000080000000
 488b3f
 6a03

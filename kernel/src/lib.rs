@@ -1092,6 +1092,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured-root Linux directory enumerated\r\n");
     serial_write("ginux: measured-root Linux directory cursor validated\r\n");
     serial_write("ginux: measured-root Linux root enumerated\r\n");
+    serial_write("ginux: measured-root Linux root pagination validated\r\n");
     serial_write("ginux: measured-root Linux empty directory opened\r\n");
     serial_write("ginux: measured-root Linux dirfd lookup validated\r\n");
     serial_write("ginux: measured-root Linux relative metadata validated\r\n");

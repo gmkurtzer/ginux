@@ -701,12 +701,9 @@ ginux_linux_interpreter:
     cmp dword ptr [rsp + 235], 0x006e6962
     jne .Linvalid_dynamic
 
-    mov edi, 2
-    mov rsi, rsp
-    mov edx, 256
     mov eax, 217
     syscall
-    test rax, rax
+    cmp rax, 24
     jne .Linvalid_dynamic
     mov edi, 2
     mov rsi, rsp

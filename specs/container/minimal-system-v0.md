@@ -20,12 +20,13 @@ the measured `/dev/console`, writes the exact `GINUX_SYSTEM_INIT_V0` readiness
 line, and exits through `exit_group(42)`. Final process teardown closes both
 the candidate's console descriptor and descriptors inherited across `exec`.
 
-This execution gate deliberately does not claim M5 completion. The archive
-carries the exact `sbin/init` node while explicit `/sbin` directory publication
-remains absent. PID 1 is currently a bounded readiness-and-exit workload, not a
-persistent supervisor or interactive console owner. Process creation/reaping,
-a mount namespace, tmpfs, procfs, and a complete user-namespace contract remain
-explicit missing rows in the matrix.
+This execution gate deliberately does not claim M5 completion. The immutable
+root publishes an explicit `/sbin` directory containing the exact `init` node,
+and bounded root enumeration reaches it through a second cursor page. PID 1 is
+currently a bounded readiness-and-exit workload, not a persistent supervisor
+or interactive console owner. Process creation/reaping, a mount namespace,
+tmpfs, procfs, and a complete user-namespace contract remain explicit missing
+rows in the matrix.
 
 Build the exact candidate root and signed development image with:
 

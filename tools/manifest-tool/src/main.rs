@@ -125,6 +125,7 @@ fn build_initramfs(linux_artifacts: &str, system_profile: &[u8]) -> Vec<u8> {
         ),
         (12, 0o100555, "etc/motd", &b"Welcome to Ginux\n"[..]),
         (19, 0o040555, "bin", &b""[..]),
+        (23, 0o040555, "sbin", &b""[..]),
         (22, 0o100444, "etc/ginux-system-profile", system_profile),
     ] {
         append_newc_entry(&mut archive, inode, mode, name, data);
@@ -136,12 +137,12 @@ fn build_initramfs(linux_artifacts: &str, system_profile: &[u8]) -> Vec<u8> {
         (16, "linux/libginux-aux.so", linux_auxiliary.as_slice()),
         (18, "bin/signal-probe", linux_signal_probe.as_slice()),
         (20, "bin/exec-second", linux_exec_second.as_slice()),
-        (23, "sbin/init", linux_system_init.as_slice()),
+        (24, "sbin/init", linux_system_init.as_slice()),
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
     append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
-    append_newc_entry(&mut archive, 24, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 25, 0, "TRAILER!!!", &[]);
     archive
 }
 
