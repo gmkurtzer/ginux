@@ -370,6 +370,15 @@ if ! grep -q '^ginux: ACPI MADT validated' "$output_file"; then
     exit 1
 fi
 
+if ! grep -q '^ginux: ACPI DMAR validated' "$output_file" ||
+    ! grep -q '^ginux: remapping hardware units: 1' "$output_file" ||
+    ! grep -q '^ginux: DMA address width: 48' "$output_file" ||
+    ! grep -q '^ginux: first remapping register base: 4275634176' "$output_file" ||
+    ! grep -q '^ginux: malformed DMAR structures rejected' "$output_file"; then
+    echo "Boot test failed: bounded ACPI DMAR discovery did not complete." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: ACPI tables use higher-half direct map' "$output_file"; then
     echo "Boot test failed: ACPI table access did not use the direct map." >&2
     exit 1

@@ -1116,8 +1116,8 @@ make abi-conformance
 
 ## Virtualization profiles
 
-- **macOS on Apple Silicon:** QEMU x86-64 with TCG. UTM is optional for graphical inspection; the checked-in QEMU runner is authoritative.
-- **Linux on x86-64:** QEMU x86-64 with KVM when `/dev/kvm` is available, falling back to TCG otherwise.
+- **macOS on Apple Silicon:** QEMU x86-64 with TCG and the Q35 Intel IOMMU exposed. UTM is optional for graphical inspection; the checked-in QEMU runner is authoritative.
+- **Linux on x86-64:** QEMU x86-64 with the same Q35 Intel IOMMU profile and KVM when `/dev/kvm` is available, falling back to TCG otherwise.
 
 Override discovery when necessary:
 

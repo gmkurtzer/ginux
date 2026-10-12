@@ -4,7 +4,8 @@
 
 Starting from the validated UEFI RSDP, the kernel prefers the XSDT when
 available and otherwise uses the RSDT. It bounds and checksums the root table,
-then locates and validates the Multiple APIC Description Table (MADT).
+then locates and validates exactly one Multiple APIC Description Table (MADT)
+and one DMA Remapping Table (DMAR).
 
 The MADT parser records:
 
@@ -23,5 +24,21 @@ checked. Unknown entry types are skipped by their validated length.
 In xAPIC mode, the MADT local-APIC address must agree with the enabled base in
 `IA32_APIC_BASE` before the kernel accesses APIC MMIO.
 
+The Q35 profile includes QEMU's Intel IOMMU with interrupt remapping disabled.
+The DMAR parser requires a 32- through 64-bit host address width, reserved-zero
+fixed fields, and at least one segment-zero DMA-remapping hardware unit. Every
+remapping structure has a bounded nonzero length. Each hardware-unit record
+has known flags, a reserved-zero byte, a nonzero page-aligned register base
+inside the 4 GiB direct-map aperture, and bounded device scopes whose PCI paths
+are pairs of bytes. The kernel records the number of units, address width,
+first register base, and whether the first unit uses the include-all flag.
+Unknown remapping-structure types are skipped only after their length is
+validated. Synthetic zero-length, truncated, zero-base, unknown-flag, trailing,
+and malformed-scope records must all be rejected during every boot.
+
 This revision does not retain ACPI-reclaimable pages, enumerate interrupt-source
 overrides, initialize secondary processors, access an I/O APIC, or execute AML.
+It also does not map IOMMU registers, install root/context/second-level tables,
+enable translation, invalidate caches, handle faults, or confine DMA. Device
+DMA therefore remains unisolated until later milestones program the validated
+unit; this milestone is discovery only.

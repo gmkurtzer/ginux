@@ -383,6 +383,21 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(u64::from(platform.first_io_apic_address));
     serial_write("\r\nginux: first I/O APIC GSI base: ");
     serial_write_u64(u64::from(platform.first_io_apic_gsi));
+    serial_write("\r\nginux: ACPI DMAR validated");
+    serial_write("\r\nginux: remapping hardware units: ");
+    serial_write_usize(platform.iommu_units);
+    serial_write("\r\nginux: DMA address width: ");
+    serial_write_u64(u64::from(platform.iommu_host_address_width));
+    serial_write("\r\nginux: first remapping register base: ");
+    serial_write_u64(platform.first_iommu_register_base);
+    serial_write("\r\nginux: first remapping unit includes all PCI devices: ");
+    serial_write_u64(u64::from(platform.first_iommu_include_all));
+    if !arch::x86_64::acpi::verify_malformed_dmar_rejected(
+        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+    ) {
+        kernel_fail("\r\nginux: ACPI DMAR validation invariant failed\r\n");
+    }
+    serial_write("\r\nginux: malformed DMAR structures rejected");
     serial_write("\r\n");
     serial_write("ginux: ACPI tables use higher-half direct map\r\n");
 

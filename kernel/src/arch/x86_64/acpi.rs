@@ -4,6 +4,10 @@ use super::paging;
 
 const SDT_HEADER_SIZE: usize = 36;
 const MADT_FIXED_SIZE: usize = 44;
+const DMAR_FIXED_SIZE: usize = 48;
+const DMAR_STRUCTURE_HEADER_SIZE: usize = 4;
+const DMAR_DRHD_SIZE: usize = 16;
+const DMAR_DEVICE_SCOPE_MIN_SIZE: usize = 8;
 const MAX_TABLE_SIZE: usize = 1024 * 1024;
 const MAX_ROOT_ENTRIES: usize = 4096;
 const MADT_ENABLED: u32 = 1;
@@ -16,6 +20,10 @@ pub(crate) struct PlatformInfo {
     pub(crate) local_apic_address: u64,
     pub(crate) first_io_apic_address: u32,
     pub(crate) first_io_apic_gsi: u32,
+    pub(crate) iommu_units: usize,
+    pub(crate) iommu_host_address_width: u8,
+    pub(crate) first_iommu_register_base: u64,
+    pub(crate) first_iommu_include_all: bool,
 }
 
 pub(crate) fn discover(rsdp: *const u8, mapped_limit: usize) -> Option<PlatformInfo> {
@@ -42,6 +50,8 @@ pub(crate) fn discover(rsdp: *const u8, mapped_limit: usize) -> Option<PlatformI
         return None;
     }
 
+    let mut platform = None;
+    let mut iommu = None;
     for index in 0..payload_size / entry_size {
         let entry = root_address.checked_add(SDT_HEADER_SIZE + index * entry_size)?;
         let entry = mapped_bytes(entry, entry_size, mapped_limit)?;
@@ -53,10 +63,25 @@ pub(crate) fn discover(rsdp: *const u8, mapped_limit: usize) -> Option<PlatformI
             }
         };
         if signature_at(table_address, b"APIC", mapped_limit) {
-            return parse_madt(table_address, mapped_limit);
+            if platform.is_some() {
+                return None;
+            }
+            platform = parse_madt(table_address, mapped_limit);
+        } else if signature_at(table_address, b"DMAR", mapped_limit) {
+            if iommu.is_some() {
+                return None;
+            }
+            iommu = parse_dmar(table_address, mapped_limit);
         }
     }
-    None
+    let (Some(mut platform), Some(iommu)) = (platform, iommu) else {
+        return None;
+    };
+    platform.iommu_units = iommu.units;
+    platform.iommu_host_address_width = iommu.host_address_width;
+    platform.first_iommu_register_base = iommu.first_register_base;
+    platform.first_iommu_include_all = iommu.first_include_all;
+    Some(platform)
 }
 
 struct ValidatedSdt {
@@ -103,6 +128,10 @@ fn parse_madt(address: usize, mapped_limit: usize) -> Option<PlatformInfo> {
         local_apic_address: unsafe { u64::from(read_unaligned(table.bytes.add(36).cast::<u32>())) },
         first_io_apic_address: 0,
         first_io_apic_gsi: 0,
+        iommu_units: 0,
+        iommu_host_address_width: 0,
+        first_iommu_register_base: 0,
+        first_iommu_include_all: false,
     };
 
     let mut offset = MADT_FIXED_SIZE;
@@ -149,6 +178,149 @@ fn parse_madt(address: usize, mapped_limit: usize) -> Option<PlatformInfo> {
 
     (info.enabled_processors != 0 && info.io_apics != 0 && info.local_apic_address != 0)
         .then_some(info)
+}
+
+#[derive(Clone, Copy)]
+struct IommuInfo {
+    units: usize,
+    host_address_width: u8,
+    first_register_base: u64,
+    first_include_all: bool,
+}
+
+fn parse_dmar(address: usize, mapped_limit: usize) -> Option<IommuInfo> {
+    let table = validate_sdt(address, b"DMAR", mapped_limit)?;
+    if table.length < DMAR_FIXED_SIZE {
+        return None;
+    }
+    let host_address_width = unsafe { table.bytes.add(36).read().checked_add(1)? };
+    let flags = unsafe { table.bytes.add(37).read() };
+    if !(32..=64).contains(&host_address_width)
+        || flags & !0x07 != 0
+        || (38..DMAR_FIXED_SIZE).any(|offset| unsafe { table.bytes.add(offset).read() != 0 })
+    {
+        return None;
+    }
+    let structures = unsafe { table.bytes.add(DMAR_FIXED_SIZE) };
+    parse_dmar_structures(
+        structures,
+        table.length - DMAR_FIXED_SIZE,
+        host_address_width,
+        mapped_limit,
+    )
+}
+
+fn parse_dmar_structures(
+    bytes: *const u8,
+    length: usize,
+    host_address_width: u8,
+    mapped_limit: usize,
+) -> Option<IommuInfo> {
+    let mut offset = 0;
+    let mut units = 0_usize;
+    let mut first_register_base = 0_u64;
+    let mut first_include_all = false;
+    while offset < length {
+        if length - offset < DMAR_STRUCTURE_HEADER_SIZE {
+            return None;
+        }
+        let structure = unsafe { bytes.add(offset) };
+        let kind = unsafe { read_unaligned(structure.cast::<u16>()) };
+        let structure_length =
+            usize::from(unsafe { read_unaligned(structure.add(2).cast::<u16>()) });
+        if structure_length < DMAR_STRUCTURE_HEADER_SIZE || structure_length > length - offset {
+            return None;
+        }
+        if kind == 0 {
+            if structure_length < DMAR_DRHD_SIZE {
+                return None;
+            }
+            let flags = unsafe { structure.add(4).read() };
+            let reserved = unsafe { structure.add(5).read() };
+            let segment = unsafe { read_unaligned(structure.add(6).cast::<u16>()) };
+            let register_base = unsafe { read_unaligned(structure.add(8).cast::<u64>()) };
+            if flags & !1 != 0
+                || reserved != 0
+                || segment != 0
+                || register_base == 0
+                || !register_base.is_multiple_of(4096)
+                || !range_is_mapped(usize::try_from(register_base).ok()?, 4096, mapped_limit)
+                || !validate_dmar_device_scopes(
+                    unsafe { structure.add(DMAR_DRHD_SIZE) },
+                    structure_length - DMAR_DRHD_SIZE,
+                )
+            {
+                return None;
+            }
+            units = units.checked_add(1)?;
+            if units == 1 {
+                first_register_base = register_base;
+                first_include_all = flags & 1 != 0;
+            }
+        }
+        offset += structure_length;
+    }
+    (offset == length && units != 0 && first_register_base != 0).then_some(IommuInfo {
+        units,
+        host_address_width,
+        first_register_base,
+        first_include_all,
+    })
+}
+
+fn validate_dmar_device_scopes(bytes: *const u8, length: usize) -> bool {
+    let mut offset = 0;
+    while offset < length {
+        if length - offset < 2 {
+            return false;
+        }
+        let scope_length = usize::from(unsafe { bytes.add(offset + 1).read() });
+        if scope_length < DMAR_DEVICE_SCOPE_MIN_SIZE
+            || scope_length > length - offset
+            || !(scope_length - 6).is_multiple_of(2)
+        {
+            return false;
+        }
+        offset += scope_length;
+    }
+    offset == length
+}
+
+pub(crate) fn verify_malformed_dmar_rejected(mapped_limit: usize) -> bool {
+    let mut valid = [0_u8; DMAR_DRHD_SIZE];
+    valid[2..4].copy_from_slice(&(DMAR_DRHD_SIZE as u16).to_le_bytes());
+    valid[4] = 1;
+    valid[8..16].copy_from_slice(&0xfed9_0000_u64.to_le_bytes());
+    if parse_dmar_structures(valid.as_ptr(), valid.len(), 48, mapped_limit).is_none() {
+        return false;
+    }
+    let mut zero_length = valid;
+    zero_length[2..4].copy_from_slice(&0_u16.to_le_bytes());
+    let mut short_drhd = valid;
+    short_drhd[2..4].copy_from_slice(&8_u16.to_le_bytes());
+    let mut zero_base = valid;
+    zero_base[8..16].fill(0);
+    let mut unknown_flags = valid;
+    unknown_flags[4] = 0x80;
+    let mut trailing = [0_u8; DMAR_DRHD_SIZE + 1];
+    trailing[..DMAR_DRHD_SIZE].copy_from_slice(&valid);
+    let mut bad_scope = [0_u8; DMAR_DRHD_SIZE + DMAR_DEVICE_SCOPE_MIN_SIZE];
+    bad_scope[..DMAR_DRHD_SIZE].copy_from_slice(&valid);
+    let bad_scope_length = bad_scope.len() as u16;
+    bad_scope[2..4].copy_from_slice(&bad_scope_length.to_le_bytes());
+    bad_scope[4] = 0;
+    bad_scope[DMAR_DRHD_SIZE + 1] = 7;
+    let rejected = [
+        zero_length.as_slice(),
+        short_drhd.as_slice(),
+        zero_base.as_slice(),
+        unknown_flags.as_slice(),
+        trailing.as_slice(),
+        bad_scope.as_slice(),
+    ]
+    .into_iter()
+    .all(|bytes| parse_dmar_structures(bytes.as_ptr(), bytes.len(), 48, mapped_limit).is_none());
+    rejected
 }
 
 fn range_is_mapped(address: usize, length: usize, mapped_limit: usize) -> bool {

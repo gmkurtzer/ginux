@@ -21,6 +21,13 @@ check_command rustc
 check_command "${CLANG:-clang}"
 check_command qemu-system-x86_64
 
+if qemu="$(find_qemu 2>/dev/null)" && "$qemu" -device intel-iommu,help >/dev/null 2>&1; then
+    printf 'ok   %-24s %s\n' 'Q35 Intel IOMMU' 'available'
+else
+    printf 'MISS %-24s required\n' 'Q35 Intel IOMMU'
+    failed=1
+fi
+
 if ovmf_code="$(find_ovmf_code 2>/dev/null)"; then
     printf 'ok   %-24s %s\n' 'OVMF code' "$ovmf_code"
 else
