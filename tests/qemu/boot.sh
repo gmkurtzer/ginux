@@ -130,6 +130,13 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net bus mastering enabled last' "$output_file" ||
     ! grep -q '^ginux: empty virtio-net queues quiesced without notification' "$output_file" ||
     ! grep -q '^ginux: virtio-net bus mastering revoked before IOMMU teardown' "$output_file" ||
+    ! grep -q '^ginux: confined virtio-net TX descriptor published' "$output_file" ||
+    ! grep -q '^ginux: virtio-net TX queue notified' "$output_file" ||
+    ! grep -q '^ginux: exactly one virtio-net TX interrupt delivered' "$output_file" ||
+    ! grep -q '^ginux: virtio-net TX used-ring completion validated' "$output_file" ||
+    ! grep -q '^ginux: virtio-net TX payload and guards preserved' "$output_file" ||
+    ! grep -q '^ginux: bounded Ethernet probe transmitted' "$output_file" ||
+    ! grep -q '^ginux: virtio-net TX route retired before DMA release' "$output_file" ||
     ! grep -q '^ginux: virtio-net DMA confinement retired cleanly' "$output_file" ||
     ! grep -q '^ginux: virtio-net stable MAC validated: 90520731923542' "$output_file" ||
     ! grep -q '^ginux: virtio-net platform DMA negotiation validated' "$output_file" ||

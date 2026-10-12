@@ -425,6 +425,11 @@ pub(crate) struct VirtioNetworkInitialization {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) struct VirtioNetworkTransmit {
+    pub(crate) frame_length: u32,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct VirtioBlockRead {
     pub(crate) capacity_sectors: u64,
     pub(crate) used_length: u32,
@@ -878,10 +883,14 @@ fn network_msix_vectors_match(
 }
 
 fn set_msix_control(device: VirtioBlockDevice, enabled: bool, function_masked: bool) -> bool {
-    let Some(offset) = device.msix.capability_offset.checked_add(2) else {
+    set_msix_control_raw(device.msix_target(), enabled, function_masked)
+}
+
+fn set_msix_control_raw(target: MsixTarget, enabled: bool, function_masked: bool) -> bool {
+    let Some(offset) = target.capability.capability_offset.checked_add(2) else {
         return false;
     };
-    let current = unsafe { read_config_u16(device.bus, device.device, device.function, offset) };
+    let current = unsafe { read_config_u16(target.bus, target.device, target.function, offset) };
     let desired = (current & !(MSIX_ENABLE | MSIX_FUNCTION_MASK))
         | if enabled { MSIX_ENABLE } else { 0 }
         | if function_masked {
@@ -890,9 +899,9 @@ fn set_msix_control(device: VirtioBlockDevice, enabled: bool, function_masked: b
             0
         };
     unsafe {
-        write_config_u16(device.bus, device.device, device.function, offset, desired);
+        write_config_u16(target.bus, target.device, target.function, offset, desired);
     }
-    (unsafe { read_config_u16(device.bus, device.device, device.function, offset) }) == desired
+    (unsafe { read_config_u16(target.bus, target.device, target.function, offset) }) == desired
 }
 
 fn set_msix_entry_mask(
@@ -901,10 +910,22 @@ fn set_msix_entry_mask(
     index: u16,
     masked: bool,
 ) -> bool {
-    if index >= device.msix.vector_count {
+    set_msix_entry_mask_raw(device.msix_target(), mapping, index, masked)
+}
+
+fn set_msix_entry_mask_raw(
+    target: MsixTarget,
+    mapping: MmioMapping,
+    index: u16,
+    masked: bool,
+) -> bool {
+    let msix = target.capability;
+    if index >= msix.vector_count {
         return false;
     }
-    let Some((table, table_length)) = device.msix_table_region() else {
+    let Some((table, table_length)) =
+        region_bounds(msix.table_bar_address, msix.table_offset, msix.table_length)
+    else {
         return false;
     };
     let Some(offset) = usize::from(index).checked_mul(MSIX_TABLE_ENTRY_SIZE as usize) else {
@@ -927,6 +948,10 @@ fn set_msix_entry_mask(
 }
 
 fn install_virtio_interrupt(apic: &LocalApic) -> bool {
+    install_virtio_interrupt_at(apic, VIRTIO_INTERRUPT_VECTOR)
+}
+
+fn install_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
     VIRTIO_INTERRUPT_APIC_BASE.store(apic.physical_base, Ordering::SeqCst);
     VIRTIO_INTERRUPT_APIC_MODE.store(
         if apic.mode == Mode::X2Apic { 1 } else { 0 },
@@ -939,19 +964,18 @@ fn install_virtio_interrupt(apic: &LocalApic) -> bool {
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
     FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
     FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
-    cpu::install_interrupt_gate(
-        VIRTIO_INTERRUPT_VECTOR,
-        ginux_virtio_interrupt_entry as *const () as usize,
-    )
+    cpu::install_interrupt_gate(vector, ginux_virtio_interrupt_entry as *const () as usize)
 }
 
 fn retire_virtio_interrupt(apic: &LocalApic) -> bool {
-    if VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
-        || !apic.vector_is_idle(VIRTIO_INTERRUPT_VECTOR)
-    {
+    retire_virtio_interrupt_at(apic, VIRTIO_INTERRUPT_VECTOR)
+}
+
+fn retire_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
+    if VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst) || !apic.vector_is_idle(vector) {
         return false;
     }
-    let cleared = cpu::clear_interrupt_gate(VIRTIO_INTERRUPT_VECTOR);
+    let cleared = cpu::clear_interrupt_gate(vector);
     if cleared {
         VIRTIO_INTERRUPT_APIC_BASE.store(0, Ordering::SeqCst);
         VIRTIO_INTERRUPT_APIC_MODE.store(0, Ordering::SeqCst);
@@ -1196,6 +1220,212 @@ pub(crate) unsafe fn activate_network_queues_without_io(
         && reset_complete
         && revoke_network_function(device)
         && network_function_is_disabled(device)
+}
+
+/// Transmits one fixed, bounded Ethernet frame through queue 1.
+///
+/// # Safety
+///
+/// The caller must exclusively own the DMA page and have an active IOMMU
+/// translation restricting this function to that page until return.
+pub(crate) unsafe fn transmit_network_probe(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    notification_mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    apic: &LocalApic,
+    dma_physical: u64,
+    dma_virtual: usize,
+) -> Option<VirtioNetworkTransmit> {
+    const HEADER_LENGTH: usize = 10;
+    const ETHERNET_FRAME: [u8; 19] = [
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x88, 0xb5, b'G',
+        b'I', b'N', b'U', b'X',
+    ];
+    const PAYLOAD_LENGTH: usize = HEADER_LENGTH + ETHERNET_FRAME.len();
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || !network_function_is_disabled(device)
+        || PAYLOAD_LENGTH >= NET_BUFFER_LENGTH
+    {
+        return None;
+    }
+    let (common_physical, common_length) = device.common_region()?;
+    let common = common_mapping.address(common_physical, common_length)?;
+    let (notify_physical, notify_length) = device.notify_region()?;
+    if !install_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR) {
+        return None;
+    }
+    core::ptr::write_bytes(dma_virtual as *mut u8, 0, DMA_PAGE_SIZE);
+    write_config_u16(
+        device.bus,
+        device.device,
+        device.function,
+        PCI_COMMAND,
+        COMMAND_MEMORY_SPACE,
+    );
+    let result = (|| {
+        if network_function_command(device) != COMMAND_MEMORY_SPACE
+            || !program_masked_msix_vector_raw(
+                device.msix_target(),
+                msix_mapping,
+                1,
+                apic.id,
+                VIRTIO_NETWORK_TX_VECTOR,
+            )
+        {
+            return None;
+        }
+        let initialization = negotiate_network(common)?;
+        if initialization.queue_count < 2 || !set_msix_control_raw(device.msix_target(), true, true)
+        {
+            return None;
+        }
+        write_common_u16(common, COMMON_QUEUE_SELECT, 1);
+        validate_network_queue_size(read_common_u16(common, COMMON_QUEUE_SIZE))?;
+        write_common_u16(common, COMMON_QUEUE_SIZE, QUEUE_SIZE);
+        write_common_u16(common, COMMON_QUEUE_MSIX_VECTOR, 1);
+        let notify_offset = notification_byte_offset(
+            read_common_u16(common, COMMON_QUEUE_NOTIFY_OFF),
+            device.notify_multiplier,
+            notify_length,
+        )?;
+        let notification = notification_mapping.address(
+            notify_physical.checked_add(notify_offset as u64)?,
+            size_of::<u16>(),
+        )?;
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DESC,
+            dma_physical + NET_TX_DESC_OFFSET as u64,
+        );
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DRIVER,
+            dma_physical + NET_TX_AVAIL_OFFSET as u64,
+        );
+        write_common_u64(
+            common,
+            COMMON_QUEUE_DEVICE,
+            dma_physical + NET_TX_USED_OFFSET as u64,
+        );
+
+        write_dma_u64(
+            dma_virtual + NET_TX_DESC_OFFSET,
+            dma_physical + NET_TX_BUFFER_OFFSET as u64,
+        );
+        write_dma_u32(dma_virtual + NET_TX_DESC_OFFSET + 8, PAYLOAD_LENGTH as u32);
+        write_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 12, 0);
+        write_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 14, 0);
+        for offset in 0..HEADER_LENGTH {
+            write_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset, 0);
+        }
+        for (offset, byte) in ETHERNET_FRAME.into_iter().enumerate() {
+            write_dma_u8(
+                dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset,
+                byte,
+            );
+        }
+        write_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET - 1, 0x3c);
+        write_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + PAYLOAD_LENGTH, 0xc3);
+        write_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET, 0);
+        write_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2, 1);
+        write_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 4, 0);
+        compiler_fence(Ordering::SeqCst);
+        write_common_u16(common, COMMON_QUEUE_ENABLE, 1);
+        if read_common_u16(common, COMMON_QUEUE_ENABLE) != 1
+            || read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) != 1
+        {
+            return None;
+        }
+        write_common_u8(
+            common,
+            COMMON_DEVICE_STATUS,
+            STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK,
+        );
+        let device_status = read_common_u8(common, COMMON_DEVICE_STATUS);
+        if device_status & STATUS_DRIVER_OK == 0
+            || device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) != 0
+        {
+            return None;
+        }
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER,
+        );
+        if network_function_command(device) != COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER {
+            return None;
+        }
+        VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+        if !set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, false)
+            || !set_msix_control_raw(device.msix_target(), true, false)
+        {
+            return None;
+        }
+        compiler_fence(Ordering::SeqCst);
+        write_mmio_u16(notification, 1);
+        asm!("sti", options(nomem, nostack));
+        let mut interrupted = false;
+        for _ in 0..QUEUE_POLL_LIMIT {
+            if VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst) {
+                interrupted = true;
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        asm!("cli", options(nomem, nostack));
+        compiler_fence(Ordering::SeqCst);
+        let header_unchanged = (0..HEADER_LENGTH)
+            .all(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) == 0);
+        let frame_unchanged = ETHERNET_FRAME.iter().enumerate().all(|(offset, expected)| {
+            read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset) == *expected
+        });
+        let device_status = read_common_u8(common, COMMON_DEVICE_STATUS);
+        (interrupted
+            && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1
+            && read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) == 1
+            && read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4) == 0
+            && device_status & (STATUS_DEVICE_NEEDS_RESET | STATUS_FAILED) == 0
+            && header_unchanged
+            && frame_unchanged
+            && read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET - 1) == 0x3c
+            && read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + PAYLOAD_LENGTH) == 0xc3)
+            .then_some(VirtioNetworkTransmit {
+                frame_length: ETHERNET_FRAME.len() as u32,
+            })
+    })();
+
+    asm!("cli", options(nomem, nostack));
+    let function_masked = set_msix_control_raw(device.msix_target(), true, true);
+    let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
+    let msix_disabled = set_msix_control_raw(device.msix_target(), false, true);
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    let current = network_function_command(device);
+    write_config_u16(
+        device.bus,
+        device.device,
+        device.function,
+        PCI_COMMAND,
+        (current | COMMAND_MEMORY_SPACE) & !(COMMAND_IO_SPACE | COMMAND_BUS_MASTER),
+    );
+    let bus_master_revoked = network_function_command(device) & COMMAND_BUS_MASTER == 0;
+    let reset_complete = reset(common).is_some();
+    let revoked = revoke_network_function(device);
+    let interrupt_retired = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR);
+    (function_masked
+        && entry_masked
+        && msix_disabled
+        && bus_master_revoked
+        && reset_complete
+        && revoked
+        && interrupt_retired)
+        .then_some(result)
+        .flatten()
 }
 
 /// Executes one interrupt-driven read-only DMA request using one caller-owned

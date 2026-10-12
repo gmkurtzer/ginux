@@ -72,6 +72,16 @@ both entries remain masked and MSI-X remains globally disabled. Invalid table
 indices and reserved vectors are rejected without mutation; temporary PCI
 memory decoding is revoked immediately after readback. See
 [Virtio Network Masked MSI-X v0](specs/kernel/virtio-network-msix-v0.md).
+With the exact VT-d translation active, the kernel now binds TX queue 1 to
+MSI-X vector 35 and publishes one device-readable descriptor containing a
+zeroed virtio-net header and a fixed broadcast Ethernet probe. Bus mastering
+is enabled last and the queue is notified only after the interrupt route is
+live. Success requires exactly one interrupt and used-ring completion, the
+expected descriptor ID, an unchanged payload, and intact boundary canaries.
+MSI-X and bus mastering are then disabled, the device is reset, and the IDT
+gate is retired before VT-d or the DMA lease. This proves device consumption,
+not peer reception. See
+[Virtio Network Transmit v0](specs/kernel/virtio-network-transmit-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table

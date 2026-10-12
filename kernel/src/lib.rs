@@ -1273,12 +1273,30 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 virtio_network_dma_virtual,
             )
         };
+    // SAFETY: The same exclusive page and exact source translation remain
+    // live. The empty-queue proof returned only after resetting the device and
+    // revoking bus mastering, so the one-shot transmit can safely reconfigure
+    // the function before the IOMMU translation is retired below.
+    let network_transmit = network_queues_activated
+        .then(|| unsafe {
+            arch::x86_64::pci::transmit_network_probe(
+                virtio_network,
+                virtio_network_common_mmio,
+                virtio_network_notify_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+                virtio_network_dma_frame.address(),
+                virtio_network_dma_virtual,
+            )
+        })
+        .flatten();
     let network_translation_retired = virtio_network_active.finish();
     if !network_queues_activated
+        || network_transmit.is_none_or(|transmit| transmit.frame_length != 19)
         || !network_translation_retired
         || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
     {
-        kernel_fail("\r\nginux: virtio-net empty queue activation failed\r\n");
+        kernel_fail("\r\nginux: confined virtio-net transmit failed\r\n");
     }
     serial_write("\r\nginux: virtio-net IOMMU activated before queue authority");
     serial_write("\r\nginux: empty virtio-net RX/TX queues bound to confined DMA");
@@ -1286,6 +1304,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: virtio-net bus mastering enabled last");
     serial_write("\r\nginux: empty virtio-net queues quiesced without notification");
     serial_write("\r\nginux: virtio-net bus mastering revoked before IOMMU teardown");
+    serial_write("\r\nginux: confined virtio-net TX descriptor published");
+    serial_write("\r\nginux: virtio-net TX queue notified");
+    serial_write("\r\nginux: exactly one virtio-net TX interrupt delivered");
+    serial_write("\r\nginux: virtio-net TX used-ring completion validated");
+    serial_write("\r\nginux: virtio-net TX payload and guards preserved");
+    serial_write("\r\nginux: bounded Ethernet probe transmitted");
+    serial_write("\r\nginux: virtio-net TX route retired before DMA release");
     if !virtio_network_translation.retire()
         || !memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
