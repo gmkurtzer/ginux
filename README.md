@@ -113,6 +113,9 @@ that record and its read-only logical network capability while PCI decoding,
 bus mastering, MSI-X, and VT-d remain disabled, then retires every owned frame.
 A malformed-reserved-field generation is separately contained and retired
 before device activation.
+Another fresh generation receives an exact active VT-d hierarchy for its sole
+DMA page while PCI decoding and bus mastering remain disabled; clean exit
+retires and scrubs the translation tables before releasing DMA.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

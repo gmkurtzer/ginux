@@ -4561,7 +4561,7 @@ pub(crate) fn verify_native_network_bootstrap(
     initialization: VirtioNetworkInitialization,
     iommu_profile: iommu::DeviceTranslationProfile,
 ) -> bool {
-    verify_native_network_bootstrap_run(image, device, initialization, iommu_profile, false)
+    verify_native_network_bootstrap_run(image, device, initialization, iommu_profile, false, false)
 }
 
 pub(crate) fn verify_native_network_bootstrap_rejection(
@@ -4570,7 +4570,16 @@ pub(crate) fn verify_native_network_bootstrap_rejection(
     initialization: VirtioNetworkInitialization,
     iommu_profile: iommu::DeviceTranslationProfile,
 ) -> bool {
-    verify_native_network_bootstrap_run(image, device, initialization, iommu_profile, true)
+    verify_native_network_bootstrap_run(image, device, initialization, iommu_profile, true, false)
+}
+
+pub(crate) fn verify_native_network_dma_confinement(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+) -> bool {
+    verify_native_network_bootstrap_run(image, device, initialization, iommu_profile, false, true)
 }
 
 fn verify_native_network_bootstrap_run(
@@ -4579,6 +4588,7 @@ fn verify_native_network_bootstrap_run(
     initialization: VirtioNetworkInitialization,
     iommu_profile: iommu::DeviceTranslationProfile,
     reject_reserved: bool,
+    activate_iommu: bool,
 ) -> bool {
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
@@ -4699,7 +4709,13 @@ fn verify_native_network_bootstrap_run(
         let _ = space.release();
         return false;
     }
-    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space))
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space)) {
+        return false;
+    }
+    let iommu_evidence = activate_iommu
+        .then(|| bind_auxiliary_network_iommu_translation(auxiliary, iommu_profile, device))
+        .flatten();
+    if activate_iommu && iommu_evidence.is_none()
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
         || !cpu::activate_user_root(root)
     {
@@ -4731,6 +4747,7 @@ fn verify_native_network_bootstrap_run(
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::take_lifecycle_event().is_none()
         && iommu_profile.is_inactive()
+        && iommu_evidence.is_none_or(iommu::TranslationEvidence::is_retired)
         && pci::network_function_is_disabled(device)
         && pci::network_msix_is_disabled(device)
 }
@@ -5016,6 +5033,30 @@ pub(crate) fn bind_auxiliary_iommu_translation(
             teardown.device.device,
             teardown.device.function,
         )
+    {
+        return None;
+    }
+    let translation = profile.activate(dma_frame)?;
+    let evidence = translation.evidence();
+    registered.iommu_translation = Some(translation);
+    Some(evidence)
+}
+
+fn bind_auxiliary_network_iommu_translation(
+    domain_id: u64,
+    profile: iommu::DeviceTranslationProfile,
+    device: VirtioNetworkDevice,
+) -> Option<iommu::TranslationEvidence> {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registered = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)?;
+    let dma_frame = registered.space.dma_lease()?;
+    if registered.device_teardown.is_some()
+        || registered.iommu_translation.is_some()
+        || registered.device_quiesced
+        || !profile.matches_source(device.bus, device.device, device.function)
+        || !pci::network_function_is_disabled(device)
+        || !pci::network_msix_is_disabled(device)
     {
         return None;
     }

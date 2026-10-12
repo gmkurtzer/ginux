@@ -61,8 +61,14 @@ accessing MMIO or probing the capability; the kernel contains the fault,
 restores its root, revokes the capability, and scrubs all resources while PCI
 and VT-d remain inactive.
 
+A third valid generation activates an exact VT-d hierarchy for its sole DMA
+page before ring-3 entry. PCI decoding, bus mastering, queues, and MSI-X remain
+disabled, so the service still cannot initiate device access. Clean exit first
+disables and retires the translation hierarchy and then scrubs the DMA page;
+the QEMU gate requires both leases to be gone afterward.
+
 ## Deliberate limits
 
-This milestone does not activate VT-d, PCI decoding, bus mastering, MSI-X, or
-packet queues, and it does not move packet processing out of the kernel. Each
-boundary is introduced and tested separately in subsequent milestones.
+This milestone does not enable PCI decoding, bus mastering, MSI-X, or packet
+queues, and it does not move packet processing out of the kernel. Each boundary
+is introduced and tested separately in subsequent milestones.

@@ -198,6 +198,15 @@ if ! grep -q '^ginux: malformed native network bootstrap rejected in ring 3' "$o
     exit 1
 fi
 
+if ! grep -q '^ginux: native network generation received exact VT-d domain' "$output_file" ||
+    ! grep -q '^ginux: native network VT-d activated before PCI authority' "$output_file" ||
+    ! grep -q '^ginux: native network bus mastering remained disabled' "$output_file" ||
+    ! grep -q '^ginux: native network VT-d retired before DMA release' "$output_file" ||
+    ! grep -q '^ginux: native network translation tables scrubbed cleanly' "$output_file"; then
+    echo "Boot test failed: native network VT-d confinement did not retire safely." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

@@ -54,3 +54,10 @@ field, faults before device activation, and undergoes the same capability,
 address-space, and DMA retirement. Device activation, interrupts, and
 packet-queue contents require separate generation-bound kernel checks and QEMU
 proofs.
+
+A third generation receives a fresh six-frame VT-d hierarchy that encodes only
+the network source identity and its generation-owned DMA page. Translation is
+activated before ring-3 entry while PCI decoding, bus mastering, and MSI-X stay
+disabled. Clean lifecycle exit disables translation, invalidates the hardware
+caches, scrubs the translation tables, and only then scrubs and releases the
+DMA page. The service still performs no packet I/O in this proof.
