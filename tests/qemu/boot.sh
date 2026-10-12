@@ -708,6 +708,11 @@ if ! grep -q '^ginux: incomplete Linux process snapshots rejected' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: live Linux PID 1 context admitted to process model' "$output_file"; then
+    echo "Boot test failed: live Linux PID 1 was not admitted to the process model." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     echo "Boot test failed: the minimal system init was not planned." >&2
     exit 1

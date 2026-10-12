@@ -329,8 +329,13 @@ primary and sibling TLS, sibling stack, and bounded `mmap` registries into at
 most 41 generation-checked mapping records, then requires a complete page-table
 walk to find exactly those user leaves with the recorded W^X permissions. A
 missing mapping, altered permission, stale root generation, or nonempty
-detached hierarchy frame is rejected. The dedicated cloned-child/wait proof is
-not yet attached to the running Linux syscall workload, so the minimal system
+detached hierarchy frame is rejected. The kernel also converts the live syscall frame into the process
+model's complete 15-register context and admits it with the snapshot as PID 1.
+This includes Linux's architectural `RCX` and `R11` syscall clobbers and permits
+a lower-canonical FS base without requiring that it currently be mapped. The
+record is validated but not yet retained across syscalls. The dedicated
+cloned-child/wait proof is not yet attached to the running Linux syscall
+workload, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).

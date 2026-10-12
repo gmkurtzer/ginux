@@ -55,6 +55,10 @@ struct ProcessExecutionContext {
 
 impl ProcessExecutionContext {
     fn is_valid(self, address_space: ProcessAddressSpace) -> bool {
+        self.validation_error(address_space).is_none()
+    }
+
+    fn validation_error(self, address_space: ProcessAddressSpace) -> Option<u8> {
         const REQUIRED_RFLAGS: u64 = (1 << 1) | (1 << 9);
         const FORBIDDEN_RFLAGS: u64 = (3 << 12) | (1 << 14) | (1 << 17);
         if self.rip == 0
@@ -65,7 +69,7 @@ impl ProcessExecutionContext {
             || self.rflags & REQUIRED_RFLAGS != REQUIRED_RFLAGS
             || self.rflags & FORBIDDEN_RFLAGS != 0
         {
-            return false;
+            return Some(1);
         }
         let contains = |mapping: &cpu::LinuxActiveImageMapping, address: u64| {
             u64::try_from(mapping.address).ok().is_some_and(|start| {
@@ -86,12 +90,13 @@ impl ProcessExecutionContext {
                         .is_some_and(|end| self.rsp > start && self.rsp <= end)
             })
         });
-        let fs_valid = self.fs_base == 0
-            || address_space
-                .mappings()
-                .iter()
-                .any(|mapping| contains(mapping, self.fs_base));
-        executable && writable_stack && fs_valid
+        if !executable {
+            Some(2)
+        } else if !writable_stack {
+            Some(3)
+        } else {
+            None
+        }
     }
 
     fn fork_child(self) -> Self {
@@ -743,7 +748,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     }
     invalid_context = init_context;
-    invalid_context.fs_base = (TEST_USER_ADDRESS + 3 * PAGE_SIZE) as u64;
+    invalid_context.fs_base = 1 << 47;
     if table.create_init(init_space, invalid_context).is_some() {
         return false;
     }
@@ -997,6 +1002,53 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     init_resources.scrub_and_release()
         && table.exit(init, 0)
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
+}
+
+pub(crate) fn verify_live_init_admission(
+    snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
+    general: [u64; 15],
+    rip: u64,
+    rsp: u64,
+    rflags: u64,
+    fs_base: u64,
+) -> bool {
+    let Some(address_space) = ProcessAddressSpace::new(snapshot.hierarchy(), snapshot.mappings())
+    else {
+        return false;
+    };
+    let context = ProcessExecutionContext {
+        general,
+        rip,
+        rsp,
+        rflags,
+        fs_base,
+    };
+    let mut invalid = context;
+    invalid.rip = 0;
+    if invalid.is_valid(address_space) {
+        return false;
+    }
+    if !context.is_valid(address_space) {
+        return false;
+    }
+    let init = Process {
+        handle: ProcessHandle {
+            slot: 0,
+            generation: 1,
+            pid: 1,
+        },
+        parent: None,
+        address_space: Some(address_space),
+        retiring_address_space: None,
+        context: Some(context),
+        scheduler_thread: None,
+        state: ProcessState::Running,
+    };
+    init.handle.pid == 1
+        && init.parent.is_none()
+        && init.address_space == Some(address_space)
+        && init.context == Some(context)
+        && init.state == ProcessState::Running
 }
 
 fn scrub_candidate_resources(

@@ -10,7 +10,7 @@ use super::{paging, timer};
 use crate::{
     address_space,
     capability::Rights,
-    control_abi, domain, initramfs, ipc, memory, network, scheduler,
+    control_abi, domain, initramfs, ipc, linux_process, memory, network, scheduler,
     scheduler::{
         RuntimeAction, UserFaultContext, UserFaultFrame, UserInterruptFrame, UserTrapFrame,
     },
@@ -1905,35 +1905,56 @@ pub(crate) fn live_linux_process_address_space_snapshot() -> Option<LinuxProcess
     valid.then_some(snapshot)
 }
 
-fn verify_live_linux_process_snapshot_contract() -> bool {
-    let Some(snapshot) = live_linux_process_address_space_snapshot() else {
+fn verify_live_linux_process_snapshot_contract(
+    snapshot: &LinuxProcessAddressSpaceSnapshot,
+) -> bool {
+    if !snapshot.is_valid() {
         return false;
-    };
-    let mut omitted = snapshot;
-    omitted.mapping_count = omitted.mapping_count.saturating_sub(1);
-    let mut overflow = snapshot;
-    overflow.mapping_count = overflow.mappings.len() + 1;
-    let mut altered_permission = snapshot;
-    altered_permission.mappings[0].writable = !altered_permission.mappings[0].writable;
-    let mut stale_root = snapshot;
-    let Some(stale_generation) = stale_root.hierarchy[0].generation().checked_add(1) else {
+    }
+    let mut adversarial = *snapshot;
+    adversarial.mapping_count = adversarial.mapping_count.saturating_sub(1);
+    if adversarial.is_valid() {
+        return false;
+    }
+    adversarial = *snapshot;
+    adversarial.mapping_count = adversarial.mappings.len() + 1;
+    if adversarial.is_valid() {
+        return false;
+    }
+    adversarial = *snapshot;
+    adversarial.mappings[0].writable = !adversarial.mappings[0].writable;
+    if adversarial.is_valid() {
+        return false;
+    }
+    adversarial = *snapshot;
+    let Some(stale_generation) = adversarial.hierarchy[0].generation().checked_add(1) else {
         return false;
     };
     let Some(stale_lease) =
-        memory::FrameLease::from_parts(stale_root.hierarchy[0].address(), stale_generation)
+        memory::FrameLease::from_parts(adversarial.hierarchy[0].address(), stale_generation)
     else {
         return false;
     };
-    stale_root.hierarchy[0] = stale_lease;
-    snapshot.is_valid()
-        && !omitted.is_valid()
-        && !overflow.is_valid()
-        && !altered_permission.is_valid()
-        && !stale_root.is_valid()
+    adversarial.hierarchy[0] = stale_lease;
+    !adversarial.is_valid()
 }
 
-fn record_live_linux_process_snapshot() -> bool {
-    let valid = verify_live_linux_process_snapshot_contract();
+fn record_live_linux_process_snapshot(context: LinuxUserContext) -> bool {
+    let valid = live_linux_process_address_space_snapshot().is_some_and(|snapshot| {
+        if !verify_live_linux_process_snapshot_contract(&snapshot) {
+            return false;
+        }
+        linux_process::verify_live_init_admission(
+            &snapshot,
+            context
+                .registers
+                .process_general(context.rax, context.rip, context.rflags),
+            context.rip,
+            context.rsp,
+            context.rflags,
+            context.fs_base,
+        )
+    });
     if !valid {
         serial_write("ginux: Linux process snapshot failed at stage ");
         serial_write_u64(u64::from(
@@ -2034,6 +2055,13 @@ impl LinuxSyscallFrame {
 
     fn argument(self, index: usize) -> Option<u64> {
         self.into_array().get(index.checked_add(6)?).copied()
+    }
+
+    fn process_general(self, rax: u64, rcx: u64, r11: u64) -> [u64; 15] {
+        [
+            rax, self.rbx, rcx, self.rdx, self.rsi, self.rdi, self.rbp, self.r8, self.r9, self.r10,
+            r11, self.r12, self.r13, self.r14, self.r15,
+        ]
     }
 }
 
@@ -5974,7 +6002,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {
-            if !record_live_linux_process_snapshot() {
+            if !record_live_linux_process_snapshot(syscall_return) {
                 return LINUX_ESRCH;
             }
             if ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst) {
@@ -11254,7 +11282,7 @@ fn linux_descriptor_close_live_return(
         return 0;
     }
     if handler == 0 {
-        return linux_terminate_by_default_signal(LINUX_SIGPIPE);
+        return linux_terminate_by_default_signal(LINUX_SIGPIPE, caller);
     }
     let delivered = linux_deliver_signal_to_blocked_wait(
         target,
@@ -12762,8 +12790,8 @@ fn linux_default_signal_terminates(signal: u64) -> bool {
     signal == LINUX_SIGPIPE
 }
 
-fn linux_terminate_by_default_signal(signal: u64) -> u64 {
-    if !record_live_linux_process_snapshot() {
+fn linux_terminate_by_default_signal(signal: u64, context: LinuxUserContext) -> u64 {
+    if !record_live_linux_process_snapshot(context) {
         return LINUX_ESRCH;
     }
     for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
@@ -12830,7 +12858,7 @@ fn linux_kill(
         return if linux_default_signal_terminates(signal)
             && !LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
         {
-            linux_terminate_by_default_signal(signal)
+            linux_terminate_by_default_signal(signal, interrupted)
         } else {
             LINUX_ENOSYS
         };

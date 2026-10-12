@@ -1249,6 +1249,11 @@ live runtime now snapshots and completely validates its generation-bound image,
 stack, heap, TLS, sibling-stack, and `mmap` ownership before normal exit, but it
 does not yet publish a child process from that snapshot. The synthetic process
 exit proof itself does not dispatch through the live Linux runtime.
+The live exit paths additionally translate the real syscall entry frame into
+the process model's complete register order and admit it with the snapshot as
+parentless PID 1. A canonical FS base is preserved even when unmapped, matching
+Linux `arch_prctl` behavior; page access still requires an ordinary mapping.
+The validated record is not yet retained across syscalls.
 In particular, the exact bounded `clone` below remains thread-only and `fork`,
 process-style `clone`, and `wait4` remain unsupported.
 The process model's eager-copy helper can duplicate up to 41

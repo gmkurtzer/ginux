@@ -60,7 +60,9 @@ and RSP, interrupt-enabled reserved-safe RFLAGS with no I/O privilege, nested
 task, or virtual-8086 bits, and a lower-canonical FS base. RIP must fall inside
 an executable recorded page. RSP must fall above the base and no later than the
 end of a writable recorded page, permitting the ordinary initial stack pointer
-at the page boundary. A nonzero FS base must fall inside a recorded page.
+at the page boundary. FS base must be lower-canonical but need not be mapped;
+Linux permits an unmapped thread pointer, and dereferencing it remains subject
+to the ordinary page tables.
 
 Eager child publication copies the recorded parent's complete general-register,
 RIP, RSP, RFLAGS, and FS state rather than accepting caller-substituted state.
@@ -135,7 +137,7 @@ inventories with substituted virtual addresses or permissions. It proves the
 unpublished child cannot exit or be reaped, rejects an eager-clone request that
 reuses PID 1's exact frames without releasing them, removes the reservation,
 and rejects its stale handle. It rejects contexts with a non-executable RIP,
-an invalid stack position, privileged flags, or an unrecorded FS base. It then
+an invalid stack position, privileged flags, or a noncanonical FS base. It then
 prepares PID 3 and uses the eager transaction to copy both parent pages, clone
 the hierarchy, validate the child inventory, derive `RAX = 0`, and publish the
 address space and context together. The proof compares both ends of the copied
@@ -203,6 +205,16 @@ generation, and supplies an out-of-range mapping count, requiring all four
 variants to fail. This snapshot is the source
 inventory needed by the next live process-clone transaction; it is not yet
 published as a second process record.
+
+The exit and default-signal paths also convert the actual syscall frame into
+the process model's 15-register order. `RAX` carries the selected syscall
+result while `RCX` and `R11` carry the architectural return RIP and flags; the
+remaining registers, RSP, and FS base come from the same live entry context.
+The model rejects a zero RIP and then admits the complete snapshot and context
+as a running, parentless PID 1 record. This proves the live state has the exact
+shape required by the process model without retaining a large process table on
+the bounded syscall stack. Persistent publication across syscalls is the next
+milestone.
 
 This now supplies the ownership, publication, and scheduler-staging operations
 needed by a future eager fork. The process bundle retains and cross-checks its
