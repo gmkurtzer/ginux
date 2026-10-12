@@ -1235,7 +1235,7 @@ The separate bounded process-lifecycle contract records generation-checked
 process identities, parentage, exclusive address-space-root ownership,
 two-phase child publication, exit-to-zombie ordering, and parent-only reap.
 Each running record holds an allocator-issued bundle of four through six
-hierarchy leases and one through sixteen private-page mapping records. Each
+hierarchy leases and one through 41 private-page mapping records. Each
 record binds a virtual address, generation-checked frame, and W^X permissions;
 a complete page-table walk must match the exact inventory. Publication rejects
 metadata substitutions and any cross-process frame overlap. Exit enters a
@@ -1244,11 +1244,14 @@ no longer tracks any lease in the exact detached bundle. It is currently an
 internal boot-verified model and is not reachable through this syscall profile.
 Its dedicated proof gate now resumes the cloned child after validating its
 complete saved frame, captures a subsequent ring-3 syscall number 60 and status
-42, and uses that captured status for zombie publication and parent wait. This
-does not dispatch the call through the live Linux runtime.
+42, and uses that captured status for zombie publication and parent wait. The
+live runtime now snapshots and completely validates its generation-bound image,
+stack, heap, TLS, sibling-stack, and `mmap` ownership before normal exit, but it
+does not yet publish a child process from that snapshot. The synthetic process
+exit proof itself does not dispatch through the live Linux runtime.
 In particular, the exact bounded `clone` below remains thread-only and `fork`,
 process-style `clone`, and `wait4` remain unsupported.
-The process model's eager-copy helper can duplicate up to sixteen
+The process model's eager-copy helper can duplicate up to 41
 generation-checked private physical pages without aliasing. Its companion
 hierarchy transaction requires a complete bounded inventory of user leaves,
 copies and rewires four through six generation-checked page-table frames, and

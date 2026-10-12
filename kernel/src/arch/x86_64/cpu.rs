@@ -276,6 +276,12 @@ const LINUX_TMP_FILE_CAPACITY: usize = 64;
 const LINUX_PROC_PID1_STATUS: &[u8] = b"Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 32;
+pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
+    + 1 // primary stack
+    + 1 // heap
+    + 2 // primary and sibling TLS
+    + 1 // sibling stack
+    + LINUX_MMAP_SLOT_COUNT;
 const LINUX_EXEC_VECTOR_LIMIT: usize = 8;
 const LINUX_EXEC_STRING_LIMIT: usize = 64;
 const LINUX_EXEC_STACK_SIZE: usize = 512;
@@ -428,6 +434,8 @@ static ELF_PROBE_EXEC_NODE: AtomicU8 = AtomicU8::new(0);
 static LINUX_LIVE_RETURN_VALIDATED: AtomicBool = AtomicBool::new(false);
 static LINUX_CHILD_EXIT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PARENT_RESUMED: AtomicBool = AtomicBool::new(false);
+static LINUX_PROCESS_SNAPSHOT_VALIDATED: AtomicBool = AtomicBool::new(false);
+static LINUX_PROCESS_SNAPSHOT_STAGE: AtomicU8 = AtomicU8::new(0);
 static LINUX_CLONE_DISPATCH_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FIRST_CHILD_TID: AtomicU32 = AtomicU32::new(0);
 static LINUX_CLONE_REUSE_VALIDATED: AtomicBool = AtomicBool::new(false);
@@ -1498,6 +1506,39 @@ impl LinuxActiveImageMapping {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) struct LinuxProcessAddressSpaceSnapshot {
+    hierarchy: [memory::FrameLease; 6],
+    hierarchy_count: usize,
+    mappings: [LinuxActiveImageMapping; LINUX_PROCESS_MAPPING_LIMIT],
+    mapping_count: usize,
+}
+
+impl LinuxProcessAddressSpaceSnapshot {
+    pub(crate) fn hierarchy(&self) -> &[memory::FrameLease] {
+        &self.hierarchy[..self.hierarchy_count]
+    }
+
+    pub(crate) fn mappings(&self) -> &[LinuxActiveImageMapping] {
+        &self.mappings[..self.mapping_count]
+    }
+
+    fn is_valid(&self) -> bool {
+        self.hierarchy_count <= self.hierarchy.len()
+            && self.mapping_count <= self.mappings.len()
+            && self.hierarchy[self.hierarchy_count..]
+                .iter()
+                .all(|frame| *frame == memory::FrameLease::EMPTY)
+            && self.mappings[self.mapping_count..]
+                .iter()
+                .all(|mapping| *mapping == LinuxActiveImageMapping::EMPTY)
+            && address_space::validate_linux_process_address_space(
+                self.hierarchy(),
+                self.mappings(),
+            )
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct LinuxExecMapping {
     pub(crate) address: usize,
     pub(crate) frame: u64,
@@ -1637,6 +1678,271 @@ fn linux_active_image_mappings() -> Option<(
         return None;
     }
     Some((mappings, count))
+}
+
+fn append_linux_process_snapshot_mapping(
+    mappings: &mut [LinuxActiveImageMapping; LINUX_PROCESS_MAPPING_LIMIT],
+    count: &mut usize,
+    mapping: LinuxActiveImageMapping,
+) -> bool {
+    if *count >= mappings.len()
+        || mapping.address == 0
+        || !mapping.address.is_multiple_of(PAGE_SIZE)
+        || mapping.writable && mapping.executable
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+        || mappings[..*count]
+            .iter()
+            .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
+        || !address_space::current_linux_mapping_matches(
+            mapping.address as u64,
+            mapping.frame,
+            mapping.writable,
+            mapping.executable,
+        )
+    {
+        return false;
+    }
+    mappings[*count] = mapping;
+    *count += 1;
+    true
+}
+
+pub(crate) fn live_linux_process_address_space_snapshot() -> Option<LinuxProcessAddressSpaceSnapshot>
+{
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(1, Ordering::SeqCst);
+    if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst) || current_linux_thread_handle().is_none() {
+        return None;
+    }
+    let mut hierarchy = [memory::FrameLease::EMPTY; 6];
+    let mut hierarchy_count = 0;
+    let mut hierarchy_ended = false;
+    for index in 0..hierarchy.len() {
+        let address = ELF_PROBE_PAGE_TABLE_FRAMES[index].load(Ordering::SeqCst);
+        let generation = ELF_PROBE_PAGE_TABLE_GENERATIONS[index].load(Ordering::SeqCst);
+        match memory::FrameLease::from_parts(address, generation) {
+            Some(frame) if !hierarchy_ended => {
+                hierarchy[index] = frame;
+                hierarchy_count += 1;
+            }
+            None if address == 0 && generation == 0 => hierarchy_ended = true,
+            _ => return None,
+        }
+    }
+    if !(5..=6).contains(&hierarchy_count)
+        || hierarchy[0].address() != address_space::current_root_address()
+    {
+        return None;
+    }
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(2, Ordering::SeqCst);
+
+    let (active, active_count) = linux_active_image_mappings()?;
+    let mut mappings = [LinuxActiveImageMapping::EMPTY; LINUX_PROCESS_MAPPING_LIMIT];
+    let mut mapping_count = 0;
+    for (index, mapping) in active[..active_count].iter().copied().enumerate() {
+        LINUX_PROCESS_SNAPSHOT_STAGE.store(30 + index as u8, Ordering::SeqCst);
+        if !append_linux_process_snapshot_mapping(&mut mappings, &mut mapping_count, mapping) {
+            return None;
+        }
+    }
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(3, Ordering::SeqCst);
+
+    let stack_address =
+        usize::try_from(ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1)).ok()?;
+    let stack_frame = memory::FrameLease::from_parts(
+        ELF_PROBE_STACK_FRAME.load(Ordering::SeqCst),
+        ELF_PROBE_STACK_GENERATION.load(Ordering::SeqCst),
+    )?;
+    if !append_linux_process_snapshot_mapping(
+        &mut mappings,
+        &mut mapping_count,
+        LinuxActiveImageMapping {
+            address: stack_address,
+            frame: stack_frame,
+            writable: true,
+            executable: false,
+        },
+    ) {
+        return None;
+    }
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(4, Ordering::SeqCst);
+
+    let heap_address = usize::try_from(
+        ELF_PROBE_BRK_LIMIT
+            .load(Ordering::SeqCst)
+            .checked_sub(PAGE_SIZE as u64)?,
+    )
+    .ok()?;
+    let heap_frame = memory::FrameLease::from_parts(
+        ELF_PROBE_HEAP_FRAME.load(Ordering::SeqCst),
+        ELF_PROBE_HEAP_GENERATION.load(Ordering::SeqCst),
+    )?;
+    if !append_linux_process_snapshot_mapping(
+        &mut mappings,
+        &mut mapping_count,
+        LinuxActiveImageMapping {
+            address: heap_address,
+            frame: heap_frame,
+            writable: true,
+            executable: false,
+        },
+    ) {
+        return None;
+    }
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(5, Ordering::SeqCst);
+
+    let tls_addresses = [
+        ELF_PROBE_TLS.load(Ordering::SeqCst),
+        ELF_PROBE_SIBLING_TLS.load(Ordering::SeqCst),
+    ];
+    for (index, address) in tls_addresses.into_iter().enumerate() {
+        let frame_address = ELF_PROBE_TLS_FRAMES[index].load(Ordering::SeqCst);
+        let generation = ELF_PROBE_TLS_GENERATIONS[index].load(Ordering::SeqCst);
+        if address == 0 {
+            if frame_address != 0 || generation != 0 {
+                return None;
+            }
+            continue;
+        }
+        let frame = memory::FrameLease::from_parts(frame_address, generation)?;
+        if !append_linux_process_snapshot_mapping(
+            &mut mappings,
+            &mut mapping_count,
+            LinuxActiveImageMapping {
+                address: usize::try_from(address & !(PAGE_SIZE as u64 - 1)).ok()?,
+                frame,
+                writable: true,
+                executable: false,
+            },
+        ) {
+            return None;
+        }
+    }
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(6, Ordering::SeqCst);
+
+    let sibling_stack = ELF_PROBE_SIBLING_STACK.load(Ordering::SeqCst);
+    let sibling_stack_frame = ELF_PROBE_SIBLING_STACK_FRAME.load(Ordering::SeqCst);
+    let sibling_stack_generation = ELF_PROBE_SIBLING_STACK_GENERATION.load(Ordering::SeqCst);
+    if sibling_stack == 0 {
+        if sibling_stack_frame != 0 || sibling_stack_generation != 0 {
+            return None;
+        }
+    } else if !append_linux_process_snapshot_mapping(
+        &mut mappings,
+        &mut mapping_count,
+        LinuxActiveImageMapping {
+            address: usize::try_from(sibling_stack).ok()?,
+            frame: memory::FrameLease::from_parts(sibling_stack_frame, sibling_stack_generation)?,
+            writable: true,
+            executable: false,
+        },
+    ) {
+        return None;
+    }
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(7, Ordering::SeqCst);
+
+    let mmap_base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+    for (slot, generation_cell) in ELF_PROBE_MMAP_GENERATIONS.iter().enumerate() {
+        let area = linux_mmap_slot_area_index(slot);
+        let frame_address = linux_mmap_slot_frame(slot);
+        let generation = generation_cell.load(Ordering::SeqCst);
+        let Some(area) = area else {
+            if frame_address != 0 || generation != 0 {
+                return None;
+            }
+            continue;
+        };
+        let protection = u64::from(ELF_PROBE_MMAP_PROTECTION[area].load(Ordering::SeqCst));
+        let address = mmap_base.checked_add((slot * PAGE_SIZE) as u64)?;
+        if protection == 0 {
+            if frame_address != 0
+                || generation != 0
+                || !address_space::current_linux_page_absent(address)
+            {
+                return None;
+            }
+            continue;
+        }
+        if protection & !(LINUX_PROT_READ | LINUX_PROT_WRITE) != 0
+            || !append_linux_process_snapshot_mapping(
+                &mut mappings,
+                &mut mapping_count,
+                LinuxActiveImageMapping {
+                    address: usize::try_from(address).ok()?,
+                    frame: memory::FrameLease::from_parts(frame_address, generation)?,
+                    writable: protection & LINUX_PROT_WRITE != 0,
+                    executable: false,
+                },
+            )
+        {
+            return None;
+        }
+    }
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(8, Ordering::SeqCst);
+
+    let snapshot = LinuxProcessAddressSpaceSnapshot {
+        hierarchy,
+        hierarchy_count,
+        mappings,
+        mapping_count,
+    };
+    let valid = snapshot.is_valid();
+    if !valid {
+        serial_write("ginux: Linux process snapshot expected/observed hierarchy/leaves ");
+        serial_write_u64(snapshot.hierarchy_count as u64);
+        serial_write(" ");
+        serial_write_u64(snapshot.mapping_count as u64);
+        if let Some((hierarchy, leaves)) =
+            address_space::current_linux_process_user_tree_counts(snapshot.hierarchy())
+        {
+            serial_write(" ");
+            serial_write_u64(hierarchy as u64);
+            serial_write(" ");
+            serial_write_u64(leaves as u64);
+        }
+        serial_write("\r\n");
+    }
+    LINUX_PROCESS_SNAPSHOT_STAGE.store(if valid { 9 } else { 8 }, Ordering::SeqCst);
+    valid.then_some(snapshot)
+}
+
+fn verify_live_linux_process_snapshot_contract() -> bool {
+    let Some(snapshot) = live_linux_process_address_space_snapshot() else {
+        return false;
+    };
+    let mut omitted = snapshot;
+    omitted.mapping_count = omitted.mapping_count.saturating_sub(1);
+    let mut overflow = snapshot;
+    overflow.mapping_count = overflow.mappings.len() + 1;
+    let mut altered_permission = snapshot;
+    altered_permission.mappings[0].writable = !altered_permission.mappings[0].writable;
+    let mut stale_root = snapshot;
+    let Some(stale_generation) = stale_root.hierarchy[0].generation().checked_add(1) else {
+        return false;
+    };
+    let Some(stale_lease) =
+        memory::FrameLease::from_parts(stale_root.hierarchy[0].address(), stale_generation)
+    else {
+        return false;
+    };
+    stale_root.hierarchy[0] = stale_lease;
+    snapshot.is_valid()
+        && !omitted.is_valid()
+        && !overflow.is_valid()
+        && !altered_permission.is_valid()
+        && !stale_root.is_valid()
+}
+
+fn record_live_linux_process_snapshot() -> bool {
+    let valid = verify_live_linux_process_snapshot_contract();
+    if !valid {
+        serial_write("ginux: Linux process snapshot failed at stage ");
+        serial_write_u64(u64::from(
+            LINUX_PROCESS_SNAPSHOT_STAGE.load(Ordering::SeqCst),
+        ));
+        serial_write("\r\n");
+    }
+    LINUX_PROCESS_SNAPSHOT_VALIDATED.store(valid, Ordering::SeqCst);
+    valid
 }
 
 fn linux_active_image_writable_index(address: u64) -> Option<usize> {
@@ -3337,6 +3643,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_LIVE_RETURN_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CHILD_EXIT_COUNT.store(0, Ordering::SeqCst);
     LINUX_PARENT_RESUMED.store(false, Ordering::SeqCst);
+    LINUX_PROCESS_SNAPSHOT_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CLONE_DISPATCH_COUNT.store(0, Ordering::SeqCst);
     LINUX_FIRST_CHILD_TID.store(0, Ordering::SeqCst);
     LINUX_CLONE_REUSE_VALIDATED.store(false, Ordering::SeqCst);
@@ -3725,6 +4032,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let live_return_validated = LINUX_LIVE_RETURN_VALIDATED.swap(false, Ordering::SeqCst);
     let child_exit_count = LINUX_CHILD_EXIT_COUNT.swap(0, Ordering::SeqCst);
     let parent_resumed = LINUX_PARENT_RESUMED.swap(false, Ordering::SeqCst);
+    let process_snapshot_validated = LINUX_PROCESS_SNAPSHOT_VALIDATED.swap(false, Ordering::SeqCst);
     let clone_dispatch_count = LINUX_CLONE_DISPATCH_COUNT.swap(0, Ordering::SeqCst);
     let first_child_tid = LINUX_FIRST_CHILD_TID.swap(0, Ordering::SeqCst);
     let clone_reuse_validated = LINUX_CLONE_REUSE_VALIDATED.swap(false, Ordering::SeqCst);
@@ -4576,6 +4884,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && completed
         && exec_replaced == execution.exec_expected
         && live_return_validated
+        && process_snapshot_validated
         && (execution.tls_size == 0
             || child_exit_count == 2
                 && parent_resumed
@@ -4674,6 +4983,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             completed,
             exec_replaced == execution.exec_expected,
             live_return_validated,
+            process_snapshot_validated,
             child_tid_cleared,
             robust_list_cleared,
             protected_page == execution.relro as u64,
@@ -5664,6 +5974,9 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS =>
         {
+            if !record_live_linux_process_snapshot() {
+                return LINUX_ESRCH;
+            }
             if ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst) {
                 if current_linux_clear_child_tid() != Some(0)
                     || current_linux_robust_list() != Some(0)
@@ -12450,6 +12763,9 @@ fn linux_default_signal_terminates(signal: u64) -> bool {
 }
 
 fn linux_terminate_by_default_signal(signal: u64) -> u64 {
+    if !record_live_linux_process_snapshot() {
+        return LINUX_ESRCH;
+    }
     for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
         let _ = linux_descriptor_close(descriptor);
     }

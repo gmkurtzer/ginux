@@ -4,7 +4,7 @@ use crate::{address_space, arch::x86_64::cpu, memory, scheduler};
 
 const PROCESS_LIMIT: usize = 4;
 const PROCESS_HIERARCHY_LIMIT: usize = 6;
-const PROCESS_PRIVATE_PAGE_LIMIT: usize = 16;
+const PROCESS_PRIVATE_PAGE_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
 const PROCESS_LEASE_LIMIT: usize = PROCESS_HIERARCHY_LIMIT + PROCESS_PRIVATE_PAGE_LIMIT;
 const PAGE_SIZE: usize = 4096;
 const FORK_PRIVATE_PAGE_LIMIT: usize = 2;

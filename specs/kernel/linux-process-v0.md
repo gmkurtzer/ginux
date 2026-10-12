@@ -20,7 +20,7 @@ The first record is PID 1 and has no parent. PID 1 can be created only once.
 Every later record names a live parent. Child creation first reserves a
 `Preparing` record with no address-space bundle. That record cannot exit, become
 a zombie, or be observed through wait. Commit requires a bundle containing
-four through six hierarchy leases and one through sixteen private-page mapping
+four through six hierarchy leases and one through 41 private-page mapping
 records. Each mapping binds one aligned lower-half virtual address, its
 generation-checked frame lease, and writable/executable permission. All leases
 must remain live under the kernel bootstrap owner and pairwise distinct. A
@@ -152,7 +152,7 @@ bundle, and requires the allocator count to return to its starting value.
 ## Private page copy primitive
 
 The v0 fork preparation path also has a bounded eager-copy primitive for one
-through sixteen private process pages. Before copying any byte, it validates
+through 41 private process pages. Before copying any byte, it validates
 every source and destination frame lease, kernel ownership, direct-map extent,
 equal nonzero counts, and pairwise separation. A stale lease or any aliased
 frame rejects the complete operation without modifying the zeroed destination.
@@ -177,6 +177,33 @@ both roots retain their own mappings and contents. It then scrubs and releases
 all twelve frames and requires the allocator count to return to its starting
 value.
 
+## Live Linux address-space snapshot
+
+Before normal `exit`, `exit_group`, or default-signal termination can dismantle
+the running Linux address space, the kernel constructs one exact ownership
+snapshot. The snapshot contains five or six generation-checked page-table
+leases and up to 41 user mappings: at most 32 active image pages, the primary
+stack, heap, primary and sibling TLS pages, sibling stack, and four bounded
+`mmap` pages. Each populated source registry must contribute its exact virtual
+address, frame generation, and W^X state. Duplicate addresses or frames are
+rejected while the snapshot is assembled.
+
+A complete four-level walk then requires every effective user leaf to appear
+exactly once in the snapshot and every snapshot mapping to resolve to the same
+live frame and permissions. Page-table leases reached through supervisor-only
+intermediate entries remain part of the ownership walk. An owned hierarchy
+lease that is no longer reachable after an exec transition is accepted only
+when every entry in that frame is zero; a detached frame containing stale page
+table state fails validation.
+
+The boot workload exercises this contract for the static, dynamic,
+minimal-system, and interpreted exec paths. It also makes an otherwise valid
+snapshot incomplete, changes one permission, and substitutes a stale root
+generation, and supplies an out-of-range mapping count, requiring all four
+variants to fail. This snapshot is the source
+inventory needed by the next live process-clone transaction; it is not yet
+published as a second process record.
+
 This now supplies the ownership, publication, and scheduler-staging operations
 needed by a future eager fork. The process bundle retains and cross-checks its
 virtual address, frame, and permission inventory, the synthetic hierarchy clone
@@ -184,16 +211,17 @@ is published through the process table, and its saved context is selected by
 the native scheduler under the child root. The child executes a bounded ring-3
 context-and-exit proof under that CR3, and its captured exit status drives the
 existing resource teardown, zombie publication, and parent wait. This dedicated
-proof gate is not the live Linux syscall dispatcher. The proof does not yet
-snapshot the running Linux workload's mapping registry or expose fork/wait
-through the Linux ABI.
+proof gate is not the live Linux syscall dispatcher. The live workload now has
+the complete source snapshot described above, but does not yet clone and
+publish that snapshot or expose fork/wait through the Linux ABI.
 
 ## Deliberate limits
 
 This is an internal ownership contract, not Linux process compatibility yet.
 It is not connected to the syscall dispatcher and does not implement:
 
-- construction of a complete live Linux child address space or copy-on-write;
+- construction of a child address space from the complete live snapshot or
+  copy-on-write;
 - process-style `clone`, `fork`, `vfork`, `wait4`, or `waitid`;
 - descriptor, credential, signal, mount, or namespace inheritance;
 - concurrent process scheduling or process-directed signal delivery;

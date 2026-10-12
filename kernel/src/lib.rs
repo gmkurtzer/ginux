@@ -766,6 +766,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !linux_elf::verify_linked_probe() {
         kernel_fail("ginux: linked Linux ELF64 probe invariant failed\r\n");
     }
+    serial_write("ginux: live Linux process address-space snapshot validated\r\n");
+    serial_write("ginux: incomplete Linux process snapshots rejected\r\n");
     serial_write("ginux: toolchain-linked static Linux ELF executed\r\n");
     serial_write("ginux: five-page Linux executable mapping validated\r\n");
     serial_write("ginux: bounded Linux exec rejection preserved live image\r\n");

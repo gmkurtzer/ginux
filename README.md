@@ -285,7 +285,7 @@ model required before process-style creation is exposed. Internal identities
 bind slot, generation, and monotonic PID; every child has a live recorded
 parent. Creation reserves an invisible `Preparing` record, and only a validated
 distinct generation-checked resource bundle can publish it as running; each
-bundle contains four through six page-table leases and one through sixteen
+bundle contains four through six page-table leases and one through 41
 private-page mapping records. Every record binds its virtual address, frame
 lease, and W^X permissions, and publication requires an exact match with every
 user leaf in the complete hierarchy while rejecting overlap in any frame. Exit
@@ -323,8 +323,14 @@ restored. The entry stub installs all fifteen general registers, and the user
 gate captures and compares the complete frame before resuming ring 3. The child
 then issues `exit(42)`; the gate captures that status, returns to the kernel,
 and the same status drives resource teardown, zombie publication, and the
-parent's wait result. This dedicated proof path is not attached to the running
-Linux syscall workload, so the minimal system
+parent's wait result. The live Linux exit paths now take an exact address-space
+snapshot before teardown. It combines the active image, primary stack, heap,
+primary and sibling TLS, sibling stack, and bounded `mmap` registries into at
+most 41 generation-checked mapping records, then requires a complete page-table
+walk to find exactly those user leaves with the recorded W^X permissions. A
+missing mapping, altered permission, stale root generation, or nonempty
+detached hierarchy frame is rejected. The dedicated cloned-child/wait proof is
+not yet attached to the running Linux syscall workload, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).

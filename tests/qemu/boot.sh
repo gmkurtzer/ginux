@@ -698,6 +698,16 @@ if ! grep -q '^ginux: bounded Linux child hierarchy clone validated' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: live Linux process address-space snapshot validated' "$output_file"; then
+    echo "Boot test failed: the live Linux process address space was not snapshotted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: incomplete Linux process snapshots rejected' "$output_file"; then
+    echo "Boot test failed: incomplete Linux process snapshots were not rejected." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     echo "Boot test failed: the minimal system init was not planned." >&2
     exit 1

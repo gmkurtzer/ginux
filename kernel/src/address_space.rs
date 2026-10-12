@@ -2851,7 +2851,7 @@ pub(crate) fn clone_linux_process_hierarchy(
 ) -> bool {
     if parent_mappings.is_empty()
         || parent_mappings.len() != child_pages.len()
-        || parent_mappings.len() > cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
+        || parent_mappings.len() > cpu::LINUX_PROCESS_MAPPING_LIMIT
         || !(4..=6).contains(&parent_hierarchy.len())
         || parent_hierarchy.len() != child_hierarchy.len()
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, parent_hierarchy)
@@ -2885,18 +2885,19 @@ pub(crate) fn clone_linux_process_hierarchy(
         return false;
     }
     let mut visited_hierarchy = [false; 6];
-    let mut visited_mappings = [false; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+    let mut visited_mappings = [false; cpu::LINUX_PROCESS_MAPPING_LIMIT];
     if !validate_complete_linux_process_user_tree(
         parent_hierarchy[0].address(),
         0,
-        0,
+        (0, true),
         parent_hierarchy,
         parent_mappings,
         &mut visited_hierarchy,
         &mut visited_mappings,
-    ) || visited_hierarchy[..parent_hierarchy.len()]
+    ) || parent_hierarchy
         .iter()
-        .any(|visited| !visited)
+        .zip(visited_hierarchy)
+        .any(|(frame, visited)| !visited && !linux_process_hierarchy_frame_is_empty(*frame))
         || visited_mappings[..parent_mappings.len()]
             .iter()
             .any(|visited| !visited)
@@ -2909,7 +2910,7 @@ pub(crate) fn clone_linux_process_hierarchy(
         frame: 0,
         writable: false,
         executable: false,
-    }; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+    }; cpu::LINUX_PROCESS_MAPPING_LIMIT];
     for ((child, parent), frame) in child_mappings
         .iter_mut()
         .zip(parent_mappings)
@@ -2936,7 +2937,7 @@ pub(crate) fn validate_linux_process_address_space(
     mappings: &[cpu::LinuxActiveImageMapping],
 ) -> bool {
     if mappings.is_empty()
-        || mappings.len() > cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
+        || mappings.len() > cpu::LINUX_PROCESS_MAPPING_LIMIT
         || !(4..=6).contains(&hierarchy.len())
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
         || hierarchy
@@ -2957,21 +2958,105 @@ pub(crate) fn validate_linux_process_address_space(
         return false;
     }
     let mut visited_hierarchy = [false; 6];
-    let mut visited_mappings = [false; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+    let mut visited_mappings = [false; cpu::LINUX_PROCESS_MAPPING_LIMIT];
     validate_complete_linux_process_user_tree(
         hierarchy[0].address(),
         0,
-        0,
+        (0, true),
         hierarchy,
         mappings,
         &mut visited_hierarchy,
         &mut visited_mappings,
-    ) && visited_hierarchy[..hierarchy.len()]
+    ) && hierarchy
         .iter()
-        .all(|visited| *visited)
+        .zip(visited_hierarchy)
+        .all(|(frame, visited)| visited || linux_process_hierarchy_frame_is_empty(*frame))
         && visited_mappings[..mappings.len()]
             .iter()
             .all(|visited| *visited)
+}
+
+fn linux_process_hierarchy_frame_is_empty(frame: memory::FrameLease) -> bool {
+    mapped_frame::<u64>(frame.address()).is_some_and(|entries| {
+        (0..ENTRY_COUNT).all(|index| unsafe { entries.add(index).read() } == 0)
+    })
+}
+
+pub(crate) fn current_linux_process_user_tree_counts(
+    hierarchy: &[memory::FrameLease],
+) -> Option<(usize, usize)> {
+    fn walk(
+        table: u64,
+        level: usize,
+        user_path: bool,
+        hierarchy: &[memory::FrameLease],
+        visited: &mut [bool; 6],
+        leaves: &mut usize,
+    ) -> bool {
+        let Some(hierarchy_index) = hierarchy.iter().position(|frame| frame.address() == table)
+        else {
+            return false;
+        };
+        if level > 3 || visited[hierarchy_index] {
+            return false;
+        }
+        visited[hierarchy_index] = true;
+        let Some(entries) = mapped_frame::<u64>(table) else {
+            return false;
+        };
+        for index in 0..ENTRY_COUNT {
+            let value = unsafe { entries.add(index).read() };
+            if value & PRESENT == 0 {
+                continue;
+            }
+            let child_user_path = user_path && value & USER != 0;
+            if level == 0 && index >= 256 && child_user_path {
+                return false;
+            }
+            if level < 3 {
+                let child_table = value & ADDRESS_MASK;
+                if hierarchy.iter().any(|frame| frame.address() == child_table)
+                    && (value & LARGE_PAGE != 0
+                        || !walk(
+                            child_table,
+                            level + 1,
+                            child_user_path,
+                            hierarchy,
+                            visited,
+                            leaves,
+                        ))
+                {
+                    return false;
+                }
+            } else if child_user_path {
+                *leaves = leaves.saturating_add(1);
+            }
+        }
+        true
+    }
+
+    if !(4..=6).contains(&hierarchy.len()) {
+        return None;
+    }
+    let mut visited = [false; 6];
+    let mut leaves = 0;
+    walk(
+        hierarchy[0].address(),
+        0,
+        true,
+        hierarchy,
+        &mut visited,
+        &mut leaves,
+    )
+    .then(|| {
+        (
+            visited[..hierarchy.len()]
+                .iter()
+                .filter(|seen| **seen)
+                .count(),
+            leaves,
+        )
+    })
 }
 
 pub(crate) fn inherit_linux_process_kernel_mappings(root: memory::FrameLease) -> bool {
@@ -3067,12 +3152,13 @@ pub(crate) fn execute_linux_process_child(
 fn validate_complete_linux_process_user_tree(
     table: u64,
     level: usize,
-    prefix: u64,
+    path: (u64, bool),
     hierarchy: &[memory::FrameLease],
     mappings: &[cpu::LinuxActiveImageMapping],
     visited_hierarchy: &mut [bool; 6],
-    visited_mappings: &mut [bool; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT],
+    visited_mappings: &mut [bool; cpu::LINUX_PROCESS_MAPPING_LIMIT],
 ) -> bool {
+    let (prefix, user_path) = path;
     let Some(hierarchy_index) = hierarchy.iter().position(|frame| frame.address() == table) else {
         return false;
     };
@@ -3086,27 +3172,36 @@ fn validate_complete_linux_process_user_tree(
     let shift = [39_u32, 30, 21, 12][level];
     for index in 0..ENTRY_COUNT {
         let value = unsafe { entries.add(index).read() };
-        if value & (PRESENT | USER) != PRESENT | USER {
+        if value & PRESENT == 0 {
             continue;
         }
-        if level == 0 && index >= 256 {
+        let child_user_path = user_path && value & USER != 0;
+        if level == 0 && index >= 256 && child_user_path {
             return false;
         }
         let address = prefix | (index as u64) << shift;
         if level < 3 {
-            if value & LARGE_PAGE != 0
-                || !validate_complete_linux_process_user_tree(
-                    value & ADDRESS_MASK,
-                    level + 1,
-                    address,
-                    hierarchy,
-                    mappings,
-                    visited_hierarchy,
-                    visited_mappings,
-                )
-            {
+            let child_table = value & ADDRESS_MASK;
+            if hierarchy.iter().any(|frame| frame.address() == child_table) {
+                if value & LARGE_PAGE != 0
+                    || !validate_complete_linux_process_user_tree(
+                        child_table,
+                        level + 1,
+                        (address, child_user_path),
+                        hierarchy,
+                        mappings,
+                        visited_hierarchy,
+                        visited_mappings,
+                    )
+                {
+                    return false;
+                }
+            } else if child_user_path {
                 return false;
             }
+            continue;
+        }
+        if !child_user_path {
             continue;
         }
         let Some(mapping_index) = mappings
