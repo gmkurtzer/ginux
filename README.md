@@ -286,11 +286,14 @@ bind slot, generation, and monotonic PID; every child has a live recorded
 parent. Creation reserves an invisible `Preparing` record, and only a validated
 distinct generation-checked resource bundle can publish it as running; each
 bundle contains four through six page-table leases and one through sixteen
-private-page leases. Publication rejects overlap in any frame. Exit first moves
-the complete bundle to a non-runnable `Exiting` state, and zombie publication
-is denied until one prevalidated operation scrubs and releases every lease.
-Only the live parent can reap it. The QEMU proof uses three real five-frame
-bundles, rejects stale and partial-alias inputs, aborts one reservation, creates
+private-page mapping records. Every record binds its virtual address, frame
+lease, and W^X permissions, and publication requires an exact match with every
+user leaf in the complete hierarchy while rejecting overlap in any frame. Exit
+first moves the complete bundle to a non-runnable `Exiting` state, and zombie
+publication is denied until one prevalidated operation scrubs and releases
+every lease. Only the live parent can reap it. The QEMU proof uses three real
+five-frame address spaces, rejects stale leases, partial aliases, and
+substituted address or permission metadata, aborts one reservation, creates
 and reaps two children through one reused slot, retires PID 1, and restores the
 allocator count. This table is not wired to Linux syscalls and does not yet
 inherit descriptors, credentials, signals, or namespace state.
@@ -302,8 +305,11 @@ live-frame count. A companion transaction walks every user leaf in a bounded
 four-to-six-frame hierarchy, rejects incomplete inventories, copies and
 rewires the page tables, and replaces every parent leaf with its corresponding
 private child frame while preserving W^X. The QEMU proof validates two
-independent roots and reclaims all twelve temporary frames. The transaction is
-not yet attached to the live Linux runtime or a schedulable process, so the minimal system
+independent roots and reclaims all twelve temporary frames. The process proof
+now uses that operation to copy PID 1's complete private page, construct and
+revalidate the child's mapping inventory, and atomically publish the cloned
+bundle; child mutation leaves the parent unchanged. It is not yet attached to
+the running Linux workload or a child CPU context, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).

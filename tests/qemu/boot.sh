@@ -608,8 +608,18 @@ if ! grep -q '^ginux: bounded Linux process resource bundles validated' "$output
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux process mapping inventory validated' "$output_file"; then
+    echo "Boot test failed: Linux process mappings were not matched to their hierarchy." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: transactional Linux child publication validated' "$output_file"; then
     echo "Boot test failed: transactional Linux child publication was not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: cloned Linux child resources published atomically' "$output_file"; then
+    echo "Boot test failed: cloned Linux child resources were not published atomically." >&2
     exit 1
 fi
 

@@ -20,8 +20,12 @@ The first record is PID 1 and has no parent. PID 1 can be created only once.
 Every later record names a live parent. Child creation first reserves a
 `Preparing` record with no address-space bundle. That record cannot exit, become
 a zombie, or be observed through wait. Commit requires a bundle containing
-four through six hierarchy leases and one through sixteen private-page leases,
-all live under the kernel bootstrap owner and pairwise distinct. No lease may
+four through six hierarchy leases and one through sixteen private-page mapping
+records. Each mapping binds one aligned lower-half virtual address, its
+generation-checked frame lease, and writable/executable permission. All leases
+must remain live under the kernel bootstrap owner and pairwise distinct. A
+complete four-level walk must find every recorded user leaf exactly once, find
+no unrecorded user leaf, and match every frame and W^X permission. No lease may
 overlap any running or exiting process bundle. Successful commit atomically
 attaches the entire bundle and changes the record to `Running`; abort removes
 the empty reservation.
@@ -32,7 +36,21 @@ an internal PID, but never publishes that PID as a running process.
 Reservation fails without partial publication when the table is full, the
 parent is absent or not running, or an identity counter is exhausted. Commit
 fails without changing the reservation when any lease is stale, duplicated, or
-physically attached to another process.
+physically attached to another process, or when the mapping inventory differs
+from the supplied page tables.
+
+The eager child-publication transaction obtains the exact parent bundle from
+the prepared record rather than accepting a second caller-provided parent
+inventory. Before its first write it requires distinct, live child hierarchy
+and payload leases that overlap no running or exiting process. It copies every
+recorded private page, clones and rewires the complete hierarchy, substitutes
+the child frames while preserving the parent mapping permissions, reconstructs
+the child inventory, and validates the resulting hierarchy. Only then does it
+publish the child as `Running`. A failure after resource admission scrubs and
+releases the complete child allocation and removes the invisible reservation.
+A rejection before exclusive admission leaves the caller's proposed leases
+untouched while still removing the reservation; in particular, an overlapping
+input can never cause the live owner's frames to be scrubbed.
 
 ## Exit and wait ordering
 
@@ -49,28 +67,33 @@ Waiting for a running child or an unrelated process has no effect. Reaping
 removes the complete record and makes its slot reusable; the next occupant has
 a new generation and PID.
 
-The boot verifier allocates three five-frame bundles, constructs PID 1, and
-reserves PID 2. It rejects a stale hierarchy lease, a completely aliased
-bundle, and a unique-root bundle that aliases PID 1's payload page. It proves
-the unpublished child cannot exit or be reaped, aborts the reservation, and
-rejects its stale handle. It then commits PID 3, proves both premature detach
-and zombie publication are denied, releases one lease, proves the four
-survivors still block zombie publication, then scrubs and releases the rest,
-publishes status 42, and reaps it through PID 1. Finally, it reuses the same
-slot for PID 4, rejects the already released PID 3 bundle, exercises the normal
-whole-bundle teardown with status 7, retires PID 1's bundle, and requires the
-allocator count to return to its starting value.
+The boot verifier allocates three real five-frame address spaces, constructs
+PID 1, and reserves PID 2. It rejects a stale hierarchy lease, a completely
+aliased bundle, a unique-root bundle that aliases PID 1's payload page, and
+inventories with substituted virtual addresses or permissions. It proves the
+unpublished child cannot exit or be reaped, rejects an eager-clone request that
+reuses PID 1's exact frames without releasing them, removes the reservation,
+and rejects its stale handle. It then prepares PID 3 and uses the eager transaction to copy
+its parent's complete page, clone the hierarchy, validate the child inventory,
+and publish the record. The proof compares both ends of the copied page and
+mutates the child while requiring the parent to remain unchanged. It also
+proves both premature detach and zombie publication are denied, releases one
+lease, proves the four survivors still block zombie publication, then scrubs
+and releases the rest, publishes status 42, and reaps it through PID 1.
+Finally, it reuses the same slot for PID 4, rejects the already released PID 3
+bundle, exercises normal whole-bundle teardown with status 7, retires PID 1's
+bundle, and requires the allocator count to return to its starting value.
 
 ## Private page copy primitive
 
-The v0 fork preparation path also has a two-page eager-copy primitive for
-private process memory. Before copying any byte, it validates every source and
-destination frame lease, kernel ownership, direct-map extent, and pairwise
-separation. A stale lease or any aliased frame rejects the complete operation
-without modifying the zeroed destination. A successful copy transfers both
-complete pages. The verifier then mutates the child copy and proves the parent
-page remains unchanged, scrubs and releases both sides, and requires the
-kernel's live-frame count to return to its starting value.
+The v0 fork preparation path also has a bounded eager-copy primitive for one
+through sixteen private process pages. Before copying any byte, it validates
+every source and destination frame lease, kernel ownership, direct-map extent,
+equal nonzero counts, and pairwise separation. A stale lease or any aliased
+frame rejects the complete operation without modifying the zeroed destination.
+Its standalone verifier transfers two complete pages, mutates the child copy,
+proves the parent page remains unchanged, scrubs and releases both sides, and
+requires the kernel's live-frame count to return to its starting value.
 
 The companion hierarchy-clone transaction accepts four through six
 generation-checked parent and child page-table frames. Before writing the child
@@ -89,13 +112,12 @@ both roots retain their own mappings and contents. It then scrubs and releases
 all twelve frames and requires the allocator count to return to its starting
 value.
 
-This is the physical address-space operation needed by a future eager fork. It
-does not yet enumerate the live Linux runtime's complete mapping registry,
-publish the hierarchy clone through the live process table, install a child
-execution context, or activate the child CR3. The process table can retain the
-resulting lease inventory, but its bundle does not yet carry the virtual
-address and permission metadata needed to cross-check those leases against the
-cloned page tables at publication.
+This now supplies the ownership and address-space publication operation needed
+by a future eager fork. The process bundle retains and cross-checks its virtual
+address, frame, and permission inventory, and the synthetic hierarchy clone is
+published through the process table. It does not yet snapshot the running
+Linux workload's mapping registry, install a child register/TLS execution
+context, activate the child CR3, or expose the operation through the Linux ABI.
 
 ## Deliberate limits
 

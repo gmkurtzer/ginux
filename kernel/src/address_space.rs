@@ -2731,7 +2731,7 @@ fn prepare_linux_hierarchy_replacement(
     force_verification_failure: bool,
 ) -> bool {
     if mappings.is_empty()
-        || mappings.len() > cpu::LINUX_EXEC_MAPPING_LIMIT
+        || mappings.len() > cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
         || old_mappings.is_empty()
         || old_mappings.len() > cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
         || mappings.iter().enumerate().any(|(index, mapping)| {
@@ -2850,7 +2850,7 @@ pub(crate) fn clone_linux_process_hierarchy(
 ) -> bool {
     if parent_mappings.is_empty()
         || parent_mappings.len() != child_pages.len()
-        || parent_mappings.len() > cpu::LINUX_EXEC_MAPPING_LIMIT
+        || parent_mappings.len() > cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
         || !(4..=6).contains(&parent_hierarchy.len())
         || parent_hierarchy.len() != child_hierarchy.len()
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, parent_hierarchy)
@@ -2908,7 +2908,7 @@ pub(crate) fn clone_linux_process_hierarchy(
         frame: 0,
         writable: false,
         executable: false,
-    }; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    }; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
     for ((child, parent), frame) in child_mappings
         .iter_mut()
         .zip(parent_mappings)
@@ -2928,6 +2928,49 @@ pub(crate) fn clone_linux_process_hierarchy(
         child_hierarchy,
         false,
     )
+}
+
+pub(crate) fn validate_linux_process_address_space(
+    hierarchy: &[memory::FrameLease],
+    mappings: &[cpu::LinuxActiveImageMapping],
+) -> bool {
+    if mappings.is_empty()
+        || mappings.len() > cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
+        || !(4..=6).contains(&hierarchy.len())
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
+        || hierarchy
+            .iter()
+            .enumerate()
+            .any(|(index, frame)| hierarchy[..index].contains(frame))
+        || mappings.iter().enumerate().any(|(index, mapping)| {
+            mapping.address == 0
+                || !mapping.address.is_multiple_of(PAGE_SIZE)
+                || mapping.writable && mapping.executable
+                || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                || hierarchy.contains(&mapping.frame)
+                || mappings[..index]
+                    .iter()
+                    .any(|prior| prior.address == mapping.address || prior.frame == mapping.frame)
+        })
+    {
+        return false;
+    }
+    let mut visited_hierarchy = [false; 6];
+    let mut visited_mappings = [false; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+    validate_complete_linux_process_user_tree(
+        hierarchy[0].address(),
+        0,
+        0,
+        hierarchy,
+        mappings,
+        &mut visited_hierarchy,
+        &mut visited_mappings,
+    ) && visited_hierarchy[..hierarchy.len()]
+        .iter()
+        .all(|visited| *visited)
+        && visited_mappings[..mappings.len()]
+            .iter()
+            .all(|visited| *visited)
 }
 
 fn validate_complete_linux_process_user_tree(

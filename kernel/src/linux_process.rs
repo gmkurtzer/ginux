@@ -1,4 +1,6 @@
-use crate::memory;
+use core::mem::size_of;
+
+use crate::{address_space, arch::x86_64::cpu, memory};
 
 const PROCESS_LIMIT: usize = 4;
 const PROCESS_HIERARCHY_LIMIT: usize = 6;
@@ -6,6 +8,11 @@ const PROCESS_PRIVATE_PAGE_LIMIT: usize = 16;
 const PROCESS_LEASE_LIMIT: usize = PROCESS_HIERARCHY_LIMIT + PROCESS_PRIVATE_PAGE_LIMIT;
 const PAGE_SIZE: usize = 4096;
 const FORK_PRIVATE_PAGE_LIMIT: usize = 2;
+const PRESENT: u64 = 1 << 0;
+const WRITABLE: u64 = 1 << 1;
+const USER: u64 = 1 << 2;
+const NO_EXECUTE: u64 = 1 << 63;
+const TEST_USER_ADDRESS: usize = 1usize << 39;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ProcessHandle {
@@ -22,51 +29,80 @@ enum ProcessState {
     Zombie { status: u8 },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 struct ProcessAddressSpace {
     hierarchy: [memory::FrameLease; PROCESS_HIERARCHY_LIMIT],
     hierarchy_count: u8,
-    pages: [memory::FrameLease; PROCESS_PRIVATE_PAGE_LIMIT],
-    page_count: u8,
+    mappings: [cpu::LinuxActiveImageMapping; PROCESS_PRIVATE_PAGE_LIMIT],
+    mapping_count: u8,
 }
 
 impl ProcessAddressSpace {
-    fn new(hierarchy: &[memory::FrameLease], pages: &[memory::FrameLease]) -> Option<Self> {
+    fn new(
+        hierarchy: &[memory::FrameLease],
+        mappings: &[cpu::LinuxActiveImageMapping],
+    ) -> Option<Self> {
         if !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
-            || pages.is_empty()
-            || pages.len() > PROCESS_PRIVATE_PAGE_LIMIT
+            || mappings.is_empty()
+            || mappings.len() > PROCESS_PRIVATE_PAGE_LIMIT
             || !memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
-            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, pages)
             || hierarchy
                 .iter()
                 .enumerate()
-                .any(|(index, frame)| hierarchy[..index].contains(frame) || pages.contains(frame))
-            || pages
-                .iter()
-                .enumerate()
-                .any(|(index, frame)| pages[..index].contains(frame))
+                .any(|(index, frame)| hierarchy[..index].contains(frame))
+            || mappings.iter().enumerate().any(|(index, mapping)| {
+                mapping.address == 0
+                    || !mapping.address.is_multiple_of(PAGE_SIZE)
+                    || mapping.writable && mapping.executable
+                    || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                    || hierarchy.contains(&mapping.frame)
+                    || mappings[..index].iter().any(|prior| {
+                        prior.address == mapping.address || prior.frame == mapping.frame
+                    })
+            })
+            || !address_space::validate_linux_process_address_space(hierarchy, mappings)
         {
             return None;
         }
         let mut space = Self {
             hierarchy: [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
             hierarchy_count: u8::try_from(hierarchy.len()).ok()?,
-            pages: [memory::FrameLease::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
-            page_count: u8::try_from(pages.len()).ok()?,
+            mappings: [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
+            mapping_count: u8::try_from(mappings.len()).ok()?,
         };
         space.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
-        space.pages[..pages.len()].copy_from_slice(pages);
+        space.mappings[..mappings.len()].copy_from_slice(mappings);
         Some(space)
+    }
+
+    fn hierarchy(&self) -> &[memory::FrameLease] {
+        &self.hierarchy[..usize::from(self.hierarchy_count)]
+    }
+
+    fn mappings(&self) -> &[cpu::LinuxActiveImageMapping] {
+        &self.mappings[..usize::from(self.mapping_count)]
+    }
+
+    fn is_valid(self) -> bool {
+        self.is_owned()
+            && address_space::validate_linux_process_address_space(
+                self.hierarchy(),
+                self.mappings(),
+            )
     }
 
     fn leases(self) -> ([memory::FrameLease; PROCESS_LEASE_LIMIT], usize) {
         let hierarchy_count = usize::from(self.hierarchy_count);
-        let page_count = usize::from(self.page_count);
+        let mapping_count = usize::from(self.mapping_count);
         let mut leases = [memory::FrameLease::EMPTY; PROCESS_LEASE_LIMIT];
         leases[..hierarchy_count].copy_from_slice(&self.hierarchy[..hierarchy_count]);
-        leases[hierarchy_count..hierarchy_count + page_count]
-            .copy_from_slice(&self.pages[..page_count]);
-        (leases, hierarchy_count + page_count)
+        for (lease, mapping) in leases[hierarchy_count..hierarchy_count + mapping_count]
+            .iter_mut()
+            .zip(&self.mappings[..mapping_count])
+        {
+            *lease = mapping.frame;
+        }
+        (leases, hierarchy_count + mapping_count)
     }
 
     fn is_owned(self) -> bool {
@@ -128,7 +164,7 @@ impl ProcessTable {
     }
 
     fn create_init(&mut self, address_space: ProcessAddressSpace) -> Option<ProcessHandle> {
-        if self.init.is_some() || self.next_pid != 1 || !address_space.is_owned() {
+        if self.init.is_some() || self.next_pid != 1 || !address_space.is_valid() {
             return None;
         }
         let handle = self.allocate(None, Some(address_space), ProcessState::Running)?;
@@ -147,7 +183,7 @@ impl ProcessTable {
     }
 
     fn commit_fork(&mut self, handle: ProcessHandle, address_space: ProcessAddressSpace) -> bool {
-        if !address_space.is_owned()
+        if !address_space.is_valid()
             || self.processes.iter().flatten().any(|process| {
                 process
                     .address_space
@@ -171,6 +207,119 @@ impl ProcessTable {
         process.address_space = Some(address_space);
         process.state = ProcessState::Running;
         true
+    }
+
+    fn commit_cloned_fork(
+        &mut self,
+        handle: ProcessHandle,
+        child_hierarchy: &[memory::FrameLease],
+        child_pages: &[memory::FrameLease],
+    ) -> bool {
+        let Some(preparing) = self.process(handle).copied() else {
+            return false;
+        };
+        if preparing.state != ProcessState::Preparing
+            || preparing.address_space.is_some()
+            || preparing.retiring_address_space.is_some()
+        {
+            return false;
+        }
+        let Some(parent) = preparing
+            .parent
+            .and_then(|parent| self.process(parent).copied())
+        else {
+            let _ = self.abort_fork(handle);
+            return false;
+        };
+        let Some(parent_space) = parent.address_space else {
+            let _ = self.abort_fork(handle);
+            return false;
+        };
+        if parent.state != ProcessState::Running
+            || !parent_space.is_valid()
+            || child_hierarchy.len() != parent_space.hierarchy().len()
+            || child_pages.len() != parent_space.mappings().len()
+            || !self.resources_available(child_hierarchy, child_pages)
+        {
+            let _ = self.abort_fork(handle);
+            return false;
+        }
+
+        let mut child_mappings = [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT];
+        let mut parent_pages = [memory::FrameLease::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT];
+        for ((child, parent), frame) in child_mappings
+            .iter_mut()
+            .zip(parent_space.mappings())
+            .zip(child_pages)
+        {
+            *child = cpu::LinuxActiveImageMapping {
+                address: parent.address,
+                frame: *frame,
+                writable: parent.writable,
+                executable: parent.executable,
+            };
+        }
+        for (frame, mapping) in parent_pages.iter_mut().zip(parent_space.mappings()) {
+            *frame = mapping.frame;
+        }
+        let mapping_count = parent_space.mappings().len();
+        let published = copy_private_pages(&parent_pages[..mapping_count], child_pages);
+        let published = published
+            && address_space::clone_linux_process_hierarchy(
+                parent_space.mappings(),
+                parent_space.hierarchy(),
+                child_hierarchy,
+                child_pages,
+            );
+        let child_space = if published {
+            ProcessAddressSpace::new(child_hierarchy, &child_mappings[..mapping_count])
+        } else {
+            None
+        };
+        if let Some(child_space) = child_space {
+            if self.commit_fork(handle, child_space) {
+                return true;
+            }
+        }
+        let _ = scrub_candidate_resources(child_hierarchy, child_pages);
+        let _ = self.abort_fork(handle);
+        false
+    }
+
+    fn resources_available(
+        &self,
+        hierarchy: &[memory::FrameLease],
+        pages: &[memory::FrameLease],
+    ) -> bool {
+        if !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
+            || pages.is_empty()
+            || pages.len() > PROCESS_PRIVATE_PAGE_LIMIT
+            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
+            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, pages)
+            || hierarchy
+                .iter()
+                .enumerate()
+                .any(|(index, frame)| hierarchy[..index].contains(frame) || pages.contains(frame))
+            || pages
+                .iter()
+                .enumerate()
+                .any(|(index, frame)| pages[..index].contains(frame))
+        {
+            return false;
+        }
+        let overlaps = |space: ProcessAddressSpace| {
+            let (leases, count) = space.leases();
+            leases[..count].iter().any(|lease| {
+                hierarchy
+                    .iter()
+                    .chain(pages)
+                    .any(|candidate| candidate.address() == lease.address())
+            })
+        };
+        !self.processes.iter().flatten().any(|process| {
+            process.address_space.is_some_and(overlaps)
+                || process.retiring_address_space.is_some_and(overlaps)
+        })
     }
 
     fn abort_fork(&mut self, handle: ProcessHandle) -> bool {
@@ -283,6 +432,62 @@ impl ProcessTable {
     }
 }
 
+fn test_mapping(
+    frame: memory::FrameLease,
+    writable: bool,
+    executable: bool,
+) -> cpu::LinuxActiveImageMapping {
+    cpu::LinuxActiveImageMapping {
+        address: TEST_USER_ADDRESS,
+        frame,
+        writable,
+        executable,
+    }
+}
+
+fn write_test_hierarchy(
+    hierarchy: &[memory::FrameLease],
+    mapping: cpu::LinuxActiveImageMapping,
+) -> bool {
+    if hierarchy.len() != 4 {
+        return false;
+    }
+    let mut tables = [core::ptr::null_mut::<u64>(); 4];
+    for (table, frame) in tables.iter_mut().zip(hierarchy) {
+        let Some(address) = frame.direct_map_address() else {
+            return false;
+        };
+        *table = address as *mut u64;
+        unsafe { core::ptr::write_bytes(*table, 0, PAGE_SIZE / size_of::<u64>()) };
+    }
+    let indexes = [
+        (mapping.address >> 39) & 0x1ff,
+        (mapping.address >> 30) & 0x1ff,
+        (mapping.address >> 21) & 0x1ff,
+        (mapping.address >> 12) & 0x1ff,
+    ];
+    let branch_flags = PRESENT | WRITABLE | USER;
+    unsafe {
+        tables[0]
+            .add(indexes[0])
+            .write(hierarchy[1].address() | branch_flags);
+        tables[1]
+            .add(indexes[1])
+            .write(hierarchy[2].address() | branch_flags);
+        tables[2]
+            .add(indexes[2])
+            .write(hierarchy[3].address() | branch_flags);
+        tables[3].add(indexes[3]).write(
+            mapping.frame.address()
+                | PRESENT
+                | USER
+                | if mapping.writable { WRITABLE } else { 0 }
+                | if mapping.executable { 0 } else { NO_EXECUTE },
+        );
+    }
+    true
+}
+
 pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
@@ -290,12 +495,11 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(frames) = memory::allocate_frames::<15>(memory::FrameOwner::KERNEL) else {
         return false;
     };
-    let (Some(init_space), Some(first_space), Some(second_space), Some(shared_page_space)) = (
-        ProcessAddressSpace::new(&frames[0..4], &frames[4..5]),
-        ProcessAddressSpace::new(&frames[5..9], &frames[9..10]),
-        ProcessAddressSpace::new(&frames[10..14], &frames[14..15]),
-        ProcessAddressSpace::new(&frames[5..9], &frames[4..5]),
-    ) else {
+    let init_mapping = [test_mapping(frames[4], false, true)];
+    if !write_test_hierarchy(&frames[0..4], init_mapping[0]) {
+        return false;
+    }
+    let Some(init_space) = ProcessAddressSpace::new(&frames[0..4], &init_mapping) else {
         return false;
     };
     let mut table = ProcessTable::new();
@@ -303,6 +507,38 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     };
     let Some(rejected_child) = table.prepare_fork(init) else {
+        return false;
+    };
+    let shared_page_mapping = [test_mapping(frames[4], false, true)];
+    if !write_test_hierarchy(&frames[5..9], shared_page_mapping[0]) {
+        return false;
+    }
+    let Some(shared_page_space) = ProcessAddressSpace::new(&frames[5..9], &shared_page_mapping)
+    else {
+        return false;
+    };
+    if table.commit_fork(rejected_child, shared_page_space) {
+        return false;
+    }
+    let first_mapping = [test_mapping(frames[9], false, true)];
+    let second_mapping = [test_mapping(frames[14], false, true)];
+    if !write_test_hierarchy(&frames[5..9], first_mapping[0])
+        || !write_test_hierarchy(&frames[10..14], second_mapping[0])
+    {
+        return false;
+    }
+    let wrong_permission = [test_mapping(frames[9], true, false)];
+    let mut wrong_address = first_mapping;
+    wrong_address[0].address += PAGE_SIZE;
+    if ProcessAddressSpace::new(&frames[5..9], &wrong_permission).is_some()
+        || ProcessAddressSpace::new(&frames[5..9], &wrong_address).is_some()
+    {
+        return false;
+    }
+    let (Some(first_space), Some(second_space)) = (
+        ProcessAddressSpace::new(&frames[5..9], &first_mapping),
+        ProcessAddressSpace::new(&frames[10..14], &second_mapping),
+    ) else {
         return false;
     };
     let Some(stale_generation) = frames[5].generation().checked_add(1) else {
@@ -315,18 +551,18 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let mut stale_hierarchy: [memory::FrameLease; 4] =
         core::array::from_fn(|index| frames[5 + index]);
     stale_hierarchy[0] = stale_root;
-    let stale_space = ProcessAddressSpace::new(&stale_hierarchy, &frames[9..10]);
+    let stale_space = ProcessAddressSpace::new(&stale_hierarchy, &first_mapping);
     let mut stale_expected = first_space;
     stale_expected.hierarchy[0] = stale_root;
     if init.pid != 1
         || rejected_child.pid != 2
         || table.create_init(first_space).is_some()
         || table.commit_fork(rejected_child, init_space)
-        || table.commit_fork(rejected_child, shared_page_space)
         || stale_space.is_some()
         || table.wait(init, rejected_child.pid).is_some()
         || table.exit(rejected_child, 1)
-        || !table.abort_fork(rejected_child)
+        || table.commit_cloned_fork(rejected_child, &frames[0..4], &frames[4..5])
+        || !init_space.is_valid()
         || table.commit_fork(rejected_child, first_space)
         || table.abort_fork(rejected_child)
     {
@@ -335,14 +571,30 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(first_child) = table.prepare_fork(init) else {
         return false;
     };
+    let (Some(parent_page), Some(child_page)) = (
+        frames[4].direct_map_address(),
+        frames[9].direct_map_address(),
+    ) else {
+        return false;
+    };
+    unsafe {
+        (parent_page as *mut u8).write(0x31);
+        (parent_page as *mut u8).add(PAGE_SIZE - 1).write(0x32);
+    }
     if first_child.pid != 3
-        || !table.commit_fork(first_child, first_space)
+        || !table.commit_cloned_fork(first_child, &frames[5..9], &frames[9..10])
+        || unsafe { (child_page as *const u8).read() } != 0x31
+        || unsafe { (child_page as *const u8).add(PAGE_SIZE - 1).read() } != 0x32
         || table.commit_fork(first_child, second_space)
         || table.wait(init, first_child.pid).is_some()
         || table.exit(first_child, 42)
         || table.begin_exit(first_child, second_space).is_some()
         || table.begin_exit(first_child, stale_expected).is_some()
     {
+        return false;
+    }
+    unsafe { (child_page as *mut u8).write(0x7f) };
+    if unsafe { (parent_page as *const u8).read() } != 0x31 {
         return false;
     }
     let Some(first_resources) = table.begin_exit(first_child, first_space) else {
@@ -392,11 +644,30 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }
 
-pub(crate) fn copy_private_pages(
-    source: &[memory::FrameLease; FORK_PRIVATE_PAGE_LIMIT],
-    destination: &[memory::FrameLease; FORK_PRIVATE_PAGE_LIMIT],
+fn scrub_candidate_resources(
+    hierarchy: &[memory::FrameLease],
+    pages: &[memory::FrameLease],
 ) -> bool {
-    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, source)
+    if hierarchy.len() + pages.len() > PROCESS_LEASE_LIMIT {
+        return false;
+    }
+    let mut leases = [memory::FrameLease::EMPTY; PROCESS_LEASE_LIMIT];
+    leases[..hierarchy.len()].copy_from_slice(hierarchy);
+    leases[hierarchy.len()..hierarchy.len() + pages.len()].copy_from_slice(pages);
+    memory::scrub_and_release_frames(
+        memory::FrameOwner::KERNEL,
+        &leases[..hierarchy.len() + pages.len()],
+    )
+}
+
+pub(crate) fn copy_private_pages(
+    source: &[memory::FrameLease],
+    destination: &[memory::FrameLease],
+) -> bool {
+    if source.is_empty()
+        || source.len() != destination.len()
+        || source.len() > PROCESS_PRIVATE_PAGE_LIMIT
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, source)
         || !memory::frames_owned_by(memory::FrameOwner::KERNEL, destination)
         || source
             .iter()
@@ -409,8 +680,8 @@ pub(crate) fn copy_private_pages(
     {
         return false;
     }
-    let mut source_addresses = [0_usize; FORK_PRIVATE_PAGE_LIMIT];
-    let mut destination_addresses = [0_usize; FORK_PRIVATE_PAGE_LIMIT];
+    let mut source_addresses = [0_usize; PROCESS_PRIVATE_PAGE_LIMIT];
+    let mut destination_addresses = [0_usize; PROCESS_PRIVATE_PAGE_LIMIT];
     for (((source_frame, destination_frame), source_address), destination_address) in source
         .iter()
         .zip(destination)
@@ -426,8 +697,10 @@ pub(crate) fn copy_private_pages(
         *source_address = source_direct;
         *destination_address = destination_direct;
     }
-    for (source_address, destination_address) in
-        source_addresses.into_iter().zip(destination_addresses)
+    for (source_address, destination_address) in source_addresses[..source.len()]
+        .iter()
+        .copied()
+        .zip(destination_addresses[..destination.len()].iter().copied())
     {
         // SAFETY: all leases and direct-map extents were validated before the
         // first write, and source/destination frames are live and disjoint.

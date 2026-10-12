@@ -1235,19 +1235,24 @@ The separate bounded process-lifecycle contract records generation-checked
 process identities, parentage, exclusive address-space-root ownership,
 two-phase child publication, exit-to-zombie ordering, and parent-only reap.
 Each running record holds an allocator-issued bundle of four through six
-hierarchy leases and one through sixteen private-page leases. Publication
-rejects any cross-process frame overlap. Exit enters a non-runnable intermediate
-state and cannot publish a zombie until the allocator no longer tracks any
-lease in the exact detached bundle. It is currently an internal
-boot-verified model and is not reachable through this syscall profile. In
-particular, the exact bounded `clone` below remains thread-only and `fork`,
+hierarchy leases and one through sixteen private-page mapping records. Each
+record binds a virtual address, generation-checked frame, and W^X permissions;
+a complete page-table walk must match the exact inventory. Publication rejects
+metadata substitutions and any cross-process frame overlap. Exit enters a
+non-runnable intermediate state and cannot publish a zombie until the allocator
+no longer tracks any lease in the exact detached bundle. It is currently an
+internal boot-verified model and is not reachable through this syscall profile.
+In particular, the exact bounded `clone` below remains thread-only and `fork`,
 process-style `clone`, and `wait4` remain unsupported.
-The process model's eager-copy helper can duplicate two generation-checked
-private physical pages without aliasing. Its companion hierarchy transaction
-requires a complete bounded inventory of user leaves, copies and rewires four
-through six generation-checked page-table frames, and maps each private child
-page with the parent's W^X permissions. Neither operation is yet attached to
-the live syscall runtime or makes the child schedulable.
+The process model's eager-copy helper can duplicate up to sixteen
+generation-checked private physical pages without aliasing. Its companion
+hierarchy transaction requires a complete bounded inventory of user leaves,
+copies and rewires four through six generation-checked page-table frames, and
+maps each private child page with the parent's W^X permissions. The internal
+fork transaction obtains that inventory from the prepared child's recorded
+parent, performs both operations, revalidates the resulting child hierarchy,
+and atomically publishes the child bundle. It is not yet attached to the live
+syscall runtime and does not make the child schedulable.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;
