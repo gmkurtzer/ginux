@@ -61,6 +61,81 @@ pub(crate) struct NativeImage<'a> {
     pub(crate) relocation_count: usize,
 }
 
+impl NativeImage<'_> {
+    pub(crate) fn page_count(&self) -> Option<usize> {
+        let mut end = 0;
+        for segment in self.segments.iter().flatten() {
+            end = end.max(segment.virtual_address.checked_add(segment.memory_size)?);
+        }
+        usize::try_from(end.div_ceil(PAGE_SIZE)).ok()
+    }
+
+    pub(crate) fn byte_at_virtual(&self, address: u64) -> Option<u8> {
+        let offset = virtual_to_file(&self.segments, address, 1)?;
+        self.bytes.get(offset).copied()
+    }
+
+    pub(crate) fn page_is_executable(&self, page: usize) -> bool {
+        let address = (page as u64).saturating_mul(PAGE_SIZE);
+        self.segments.iter().flatten().any(|segment| {
+            segment.flags & PF_EXECUTE != 0
+                && address >= segment.virtual_address / PAGE_SIZE * PAGE_SIZE
+                && address
+                    < segment
+                        .virtual_address
+                        .saturating_add(segment.memory_size)
+                        .div_ceil(PAGE_SIZE)
+                        * PAGE_SIZE
+        })
+    }
+
+    pub(crate) fn materialize_page(&self, page: usize, output: &mut [u8; 4096]) -> bool {
+        output.fill(0);
+        let page_start = (page as u64).saturating_mul(PAGE_SIZE);
+        let page_end = page_start.saturating_add(PAGE_SIZE);
+        for segment in self.segments.iter().flatten() {
+            let segment_file_end = segment.virtual_address.saturating_add(segment.file_size);
+            let copy_start = page_start.max(segment.virtual_address);
+            let copy_end = page_end.min(segment_file_end);
+            if copy_start >= copy_end {
+                continue;
+            }
+            let Some(source_start) = copy_start
+                .checked_sub(segment.virtual_address)
+                .and_then(|delta| segment.file_offset.checked_add(delta))
+                .and_then(|offset| usize::try_from(offset).ok())
+            else {
+                return false;
+            };
+            let Some(size) = copy_end
+                .checked_sub(copy_start)
+                .and_then(|size| usize::try_from(size).ok())
+            else {
+                return false;
+            };
+            let Some(destination_start) = copy_start
+                .checked_sub(page_start)
+                .and_then(|offset| usize::try_from(offset).ok())
+            else {
+                return false;
+            };
+            let Some(source) = self
+                .bytes
+                .get(source_start..source_start.saturating_add(size))
+            else {
+                return false;
+            };
+            let Some(destination) =
+                output.get_mut(destination_start..destination_start.saturating_add(size))
+            else {
+                return false;
+            };
+            destination.copy_from_slice(source);
+        }
+        true
+    }
+}
+
 pub(crate) fn inspect(bytes: &[u8]) -> Option<NativeImage<'_>> {
     if !(ELF_HEADER_SIZE..=MAX_FILE_SIZE).contains(&bytes.len())
         || bytes.get(..16)? != b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0"

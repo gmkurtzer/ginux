@@ -948,6 +948,22 @@ if ! grep -q '^ginux: relative-only service relocations accepted' "$output_file"
     echo "Boot test failed: the native service relocation contract was not accepted." >&2
     exit 1
 fi
+if ! grep -q '^ginux: native service segments materialized in owned frames' "$output_file"; then
+    echo "Boot test failed: native service segments were not materialized." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: native service relative relocations applied' "$output_file"; then
+    echo "Boot test failed: native service relocations were not applied." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: native service W\^X address space verified' "$output_file"; then
+    echo "Boot test failed: native service W^X mappings were not verified." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: native service guard pages verified' "$output_file"; then
+    echo "Boot test failed: native service guard pages were not verified." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: bounded newc archive paths validated' "$output_file"; then
     echo "Boot test failed: bounded initramfs paths were not validated." >&2

@@ -1,8 +1,8 @@
 # Isolated Volume Runtime v0
 
-**Status:** Freestanding x86-64 service artifact builds and is authenticated and
-validated as a bounded native PIE; address-space materialization remains the
-next milestone.
+**Status:** Freestanding x86-64 service artifact builds, is authenticated and
+validated as a bounded native PIE, and is materialized under its final W^X
+permissions; live service execution remains the next milestone.
 
 ## Artifact
 
@@ -24,6 +24,14 @@ one RX, and one RW load segment, non-overlapping pages, a non-executable stack,
 full RW `GNU_RELRO`, immediate binding, and at most eight relative-only
 relocations. Unsupported headers, dynamic tags, writable executable mappings,
 symbol relocations, and out-of-range relocation targets or addends fail closed.
+
+The loader copies the six-page image into exclusively owned zeroed frames,
+applies the validated relative relocations through the supervisor direct map,
+and then exposes only read-only/NX, RX, and post-relocation read-only/NX pages
+to ring 3. A separate read-only/NX bootstrap page and writable/NX stack sit
+between absent guard pages. The automated boot proof activates this root,
+reads the relocated entrypoint through its userspace address, restores the
+kernel root, and scrubs and releases every temporary frame.
 
 ## Bootstrap contract
 
@@ -50,9 +58,9 @@ the supervisor can exercise the same mandatory device-quiescence path.
 
 ## Deliberate limits
 
-- The artifact is authenticated and parsed but its segments are not yet
-  materialized, relocated, or executed. The existing raw ring-3 proof still
-  owns the live virtio path.
+- The artifact is authenticated, parsed, and materialized, but the resulting
+  address space is not yet registered or executed. The existing raw ring-3
+  proof still owns the live virtio path.
 - `BootInfo` is an internal bootstrap structure, not the stable driver ABI.
 - One queue, one DMA page, one outstanding request, and one object-7 device are
   supported. There is no IOMMU domain or concurrent request path.

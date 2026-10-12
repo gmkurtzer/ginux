@@ -4060,6 +4060,202 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
     valid && space.release()
 }
 
+const NATIVE_SERVICE_IMAGE_PAGES: usize = 6;
+const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 2;
+const NATIVE_BOOT_INFO_PAGE: usize = 6;
+const NATIVE_STACK_PAGE: usize = 8;
+
+struct NativeServiceAddressSpace {
+    kernel_root: u64,
+    root: u64,
+    frames: [memory::FrameLease; NATIVE_SERVICE_FRAME_COUNT],
+    entry: u64,
+    owner: memory::FrameOwner,
+}
+
+impl NativeServiceAddressSpace {
+    fn new(
+        kernel_root: u64,
+        owner: memory::FrameOwner,
+        image: &crate::native_elf::NativeImage<'_>,
+    ) -> Option<Self> {
+        if image.page_count()? != NATIVE_SERVICE_IMAGE_PAGES {
+            return None;
+        }
+        let frames = memory::allocate_frames::<NATIVE_SERVICE_FRAME_COUNT>(owner)?;
+        let addresses = frames.map(memory::FrameLease::address);
+        if addresses
+            .iter()
+            .any(|address| !address.is_multiple_of(PAGE_SIZE as u64))
+        {
+            let _ = memory::scrub_and_release_frames(owner, &frames);
+            return None;
+        }
+        let root = addresses[0];
+        let result = unsafe {
+            (|| {
+                for frame in &addresses {
+                    zero_frame(*frame)?;
+                }
+                let root_entries = mapped_frame::<u64>(root)?;
+                let kernel_entries = mapped_frame::<u64>(kernel_root)?;
+                root_entries.write(kernel_entries.read());
+                root_entries
+                    .add(1)
+                    .write(addresses[1] | PRESENT | WRITABLE | USER);
+                root_entries.add(256).write(kernel_entries.add(256).read());
+                mapped_frame::<u64>(addresses[1])?.write(addresses[2] | PRESENT | WRITABLE | USER);
+                mapped_frame::<u64>(addresses[2])?.write(addresses[3] | PRESENT | WRITABLE | USER);
+                let table = mapped_frame::<u64>(addresses[3])?;
+                for page in 0..NATIVE_SERVICE_IMAGE_PAGES {
+                    let frame = addresses[4 + page];
+                    let output = &mut *(mapped_frame::<u8>(frame)? as *mut [u8; PAGE_SIZE]);
+                    if !image.materialize_page(page, output) {
+                        return None;
+                    }
+                    let mut flags = PRESENT | USER;
+                    if !image.page_is_executable(page) {
+                        flags |= NO_EXECUTE;
+                    }
+                    table.add(page).write(frame | flags);
+                }
+                table
+                    .add(NATIVE_BOOT_INFO_PAGE)
+                    .write(addresses[10] | PRESENT | USER | NO_EXECUTE);
+                table.add(NATIVE_BOOT_INFO_PAGE + 1).write(0);
+                table
+                    .add(NATIVE_STACK_PAGE)
+                    .write(addresses[11] | PRESENT | WRITABLE | USER | NO_EXECUTE);
+                table.add(NATIVE_STACK_PAGE + 1).write(0);
+
+                for relocation in image.relocations[..image.relocation_count].iter().flatten() {
+                    let page = usize::try_from(relocation.target / PAGE_SIZE as u64).ok()?;
+                    let offset = usize::try_from(relocation.target % PAGE_SIZE as u64).ok()?;
+                    let frame = *addresses.get(4 + page)?;
+                    let target = mapped_frame::<u8>(frame)?.add(offset).cast::<u64>();
+                    target.write((USER_TEST_ADDRESS as u64).checked_add(relocation.addend)?);
+                }
+                Some(())
+            })()
+        };
+        if result.is_none() {
+            let _ = memory::scrub_and_release_frames(owner, &frames);
+            return None;
+        }
+        Some(Self {
+            kernel_root,
+            root,
+            frames,
+            entry: (USER_TEST_ADDRESS as u64).checked_add(image.entry)?,
+            owner,
+        })
+    }
+
+    fn layout_is_valid(&self, image: &crate::native_elf::NativeImage<'_>) -> bool {
+        if self.kernel_root != current_root()
+            || self.entry != USER_TEST_ADDRESS as u64 + image.entry
+            || !memory::frames_owned_by(self.owner, &self.frames)
+        {
+            return false;
+        }
+        unsafe {
+            let Some(root) = mapped_frame::<u64>(self.root) else {
+                return false;
+            };
+            let Some(kernel) = mapped_frame::<u64>(self.kernel_root) else {
+                return false;
+            };
+            let Some(pdpt) = mapped_frame::<u64>(root.add(1).read() & ADDRESS_MASK) else {
+                return false;
+            };
+            let Some(directory) = mapped_frame::<u64>(pdpt.read() & ADDRESS_MASK) else {
+                return false;
+            };
+            let Some(table) = mapped_frame::<u64>(directory.read() & ADDRESS_MASK) else {
+                return false;
+            };
+            if root.read() != kernel.read()
+                || root.add(256).read() != kernel.add(256).read()
+                || root.read() & USER != 0
+                || root.add(256).read() & USER != 0
+                || table.add(NATIVE_BOOT_INFO_PAGE + 1).read() != 0
+                || table.add(NATIVE_STACK_PAGE + 1).read() != 0
+            {
+                return false;
+            }
+            for page in 0..NATIVE_SERVICE_IMAGE_PAGES {
+                let observed = table.add(page).read();
+                let mut expected = self.frames[4 + page].address() | PRESENT | USER;
+                if !image.page_is_executable(page) {
+                    expected |= NO_EXECUTE;
+                }
+                if observed != expected || observed & WRITABLE != 0 {
+                    return false;
+                }
+            }
+            table.add(NATIVE_BOOT_INFO_PAGE).read()
+                == self.frames[10].address() | PRESENT | USER | NO_EXECUTE
+                && table.add(NATIVE_STACK_PAGE).read()
+                    == self.frames[11].address() | PRESENT | WRITABLE | USER | NO_EXECUTE
+        }
+    }
+
+    fn relocations_are_valid(&self, image: &crate::native_elf::NativeImage<'_>) -> bool {
+        image.relocations[..image.relocation_count]
+            .iter()
+            .flatten()
+            .all(|relocation| {
+                let Ok(page) = usize::try_from(relocation.target / PAGE_SIZE as u64) else {
+                    return false;
+                };
+                let Ok(offset) = usize::try_from(relocation.target % PAGE_SIZE as u64) else {
+                    return false;
+                };
+                let Some(frame) = self.frames.get(4 + page) else {
+                    return false;
+                };
+                let Some(mapped) = mapped_frame::<u8>(frame.address()) else {
+                    return false;
+                };
+                let observed = unsafe { mapped.add(offset).cast::<u64>().read() };
+                observed == USER_TEST_ADDRESS as u64 + relocation.addend
+            })
+    }
+
+    fn release(self) -> bool {
+        memory::scrub_and_release_frames(self.owner, &self.frames)
+    }
+}
+
+pub(crate) fn verify_native_service_materialization(
+    image: &crate::native_elf::NativeImage<'_>,
+) -> bool {
+    let kernel_root = current_root();
+    let Some(space) =
+        NativeServiceAddressSpace::new(kernel_root, memory::FrameOwner::KERNEL, image)
+    else {
+        return false;
+    };
+    if !space.layout_is_valid(image) || !space.relocations_are_valid(image) {
+        let _ = space.release();
+        return false;
+    }
+    let Some(expected_entry_byte) = image.byte_at_virtual(image.entry) else {
+        let _ = space.release();
+        return false;
+    };
+    let valid = unsafe {
+        activate(space.root);
+        let activated = current_root() == space.root;
+        let entry_matches = cpu::with_supervisor_user_access(|| {
+            (space.entry as *const u8).read_volatile() == expected_entry_byte
+        });
+        activate(kernel_root);
+        activated && entry_matches && current_root() == kernel_root
+    };
+    valid && space.release()
+}
+
 pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
     let Some(first_auxiliary) =
         domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)
