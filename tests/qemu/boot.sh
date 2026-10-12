@@ -91,6 +91,7 @@ if grep -q '^ginux: disk-backed volume recovered after reboot' "$output_file"; t
 fi
 
 if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$output_file" ||
+    ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$output_file" ||
     ! grep -q '^ginux: native volume service owned virtio request sequence' "$output_file" ||
     ! grep -q '^ginux: native volume record initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: replacement native volume domain generation started' "$output_file" ||
@@ -123,6 +124,7 @@ if grep -q '^ginux: disk-backed volume initialized and flushed' "$reboot_output_
 fi
 
 if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboot_output_file" ||
+    ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$reboot_output_file" ||
     ! grep -q '^ginux: native volume record recovered after reboot' "$reboot_output_file" ||
     ! grep -q '^ginux: replacement native volume domain generation started' "$reboot_output_file" ||
     ! grep -q '^ginux: native volume service identity survived replacement' "$reboot_output_file" ||
@@ -140,6 +142,7 @@ native_corrupt_checksum="$(cksum "$native_corrupt_volume_image")"
 run_boot "$native_corrupt_output_file" "native-volume corruption" "$native_corrupt_volume_image"
 
 if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: disk-backed volume recovered after reboot' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: corrupt native volume media rejected without modification' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume domain generation started' "$native_corrupt_output_file" ||

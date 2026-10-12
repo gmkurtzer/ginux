@@ -36,12 +36,15 @@ kernel root, and scrubs and releases every temporary frame.
 
 ## Bootstrap contract
 
-The entry shim accepts a pointer in `RBX` to a read-only `BootInfo` containing
-the service-visible virtio common-configuration address, queue-notification
-address, owned DMA virtual and physical addresses, and opaque object-7
-capability handle. The eventual native loader must relocate the static PIE,
-map load segments W^X, map that record read-only, and supply only those bounded
-resources.
+The entry shim accepts a pointer in `RBX` to the read-only, fixed 64-byte
+`NativeServiceBootV0` defined by the shared `ginux-native-abi` crate and its C
+binding. Kernel and service both validate its magic, version, size, exact
+`VIRTIO_BLOCK` feature bitmap, nonzero resource fields, and reserved-zero rule.
+It contains the service-visible virtio common-configuration and notification
+addresses, owned DMA virtual and device-visible addresses, and opaque object-7
+capability handle. The loader relocates the static PIE, maps load segments W^X,
+maps the record read-only/NX, and supplies only those bounded resources. See
+[Native Service Bootstrap ABI v0](../abi/native-service-bootstrap-v0.md).
 
 The runtime itself negotiates only `FLUSH` and `VERSION_1`, configures queue
 zero and MSI-X table entry zero, and implements the shared whole-sector trait
@@ -85,7 +88,8 @@ and released.
 
 - The compiled service is the sole live write-capable ring-3 virtio runtime;
   the earlier embedded machine-code durability program has been removed.
-- `BootInfo` is an internal bootstrap structure, not the stable driver ABI.
+- ABI v0 is stable but exact-version only; feature negotiation beyond the
+  single virtio-block bit requires a later specified ABI version.
 - One queue, one DMA page, one outstanding request, and one object-7 device are
   supported. There is no IOMMU domain or concurrent request path.
 - Cancellation after notification and late completion after timeout are not

@@ -81,7 +81,10 @@ construction, notification, and generation-bound waits. The measured service
 is authenticated as a bounded static PIE, relocated into exclusively owned
 W^X pages, and executed in a capability-limited ring-3 domain with a guarded
 stack, read-only bootstrap page, one DMA lease, and only the required virtio
-MMIO pages. A fresh boot commits generation one to reserved sectors four and
+MMIO pages. Kernel and service share the fixed 64-byte native bootstrap ABI v0,
+whose magic, version, size, exact feature bitmap, reserved-zero rule, mapped
+addresses, DMA device address, and opaque capability are independently
+validated. A fresh boot commits generation one to reserved sectors four and
 five; a second boot recovers the exact record without rewriting it. Its
 corruption boot invalidates the committed native slot while preserving the
 kernel reference volume, then requires the service to reject the nonempty
@@ -98,6 +101,8 @@ the replacement to recover the exact record. Corrupt media must be rejected
 again by the replacement. Both generations finish with zero owned frames and
 no live device authority. See
 [Isolated Volume Runtime v0](specs/services/volume-runtime-v0.md).
+The binary contract is defined by
+[Native Service Bootstrap ABI v0](specs/abi/native-service-bootstrap-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed

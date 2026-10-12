@@ -7,6 +7,7 @@ use core::{
     sync::atomic::{compiler_fence, Ordering},
 };
 
+use ginux_native_abi::NativeServiceBootV0;
 use ginux_volume_format::SECTOR_SIZE;
 use ginux_volume_service::{commit, recover_with_slot, BlockDevice, CommitError, ScanError};
 
@@ -43,15 +44,6 @@ const FEATURE_VERSION_1: u32 = 1;
 const VOLUME_SECTOR_BASE: usize = 4;
 const PAYLOAD: &[u8] = b"ginux-isolated-volume\n";
 
-#[repr(C)]
-pub struct BootInfo {
-    common: usize,
-    notification: usize,
-    dma_virtual: usize,
-    dma_physical: u64,
-    capability: u64,
-}
-
 global_asm!(
     r#"
     .text
@@ -69,7 +61,7 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 }
 
 #[no_mangle]
-extern "C" fn ginux_volume_service_main(info: *const BootInfo) -> ! {
+extern "C" fn ginux_volume_service_main(info: *const NativeServiceBootV0) -> ! {
     let Some(info) = (unsafe { info.as_ref() }) else {
         fail();
     };
@@ -112,75 +104,75 @@ enum Operation<'a> {
 }
 
 impl VirtioBlock {
-    unsafe fn start(info: &BootInfo) -> Option<Self> {
-        if info.common == 0
-            || info.notification == 0
-            || info.dma_virtual == 0
-            || !info.dma_virtual.is_multiple_of(4096)
-            || !info.dma_physical.is_multiple_of(4096)
-            || info.capability == 0
+    unsafe fn start(info: &NativeServiceBootV0) -> Option<Self> {
+        let common = usize::try_from(info.common_config_address).ok()?;
+        let notification = usize::try_from(info.queue_notification_address).ok()?;
+        let dma = usize::try_from(info.dma_virtual_address).ok()?;
+        if !info.is_valid_virtio_block()
+            || !dma.is_multiple_of(4096)
+            || !info.dma_device_address.is_multiple_of(4096)
         {
             return None;
         }
-        write_u8(info.common + COMMON_DEVICE_STATUS, 0);
-        write_u8(info.common + COMMON_DEVICE_STATUS, STATUS_ACKNOWLEDGE);
+        write_u8(common + COMMON_DEVICE_STATUS, 0);
+        write_u8(common + COMMON_DEVICE_STATUS, STATUS_ACKNOWLEDGE);
         write_u8(
-            info.common + COMMON_DEVICE_STATUS,
+            common + COMMON_DEVICE_STATUS,
             STATUS_ACKNOWLEDGE | STATUS_DRIVER,
         );
-        write_u32(info.common + COMMON_DEVICE_FEATURE_SELECT, 0);
-        if read_u32(info.common + COMMON_DEVICE_FEATURE) & FEATURE_FLUSH == 0 {
+        write_u32(common + COMMON_DEVICE_FEATURE_SELECT, 0);
+        if read_u32(common + COMMON_DEVICE_FEATURE) & FEATURE_FLUSH == 0 {
             return None;
         }
-        write_u32(info.common + COMMON_DEVICE_FEATURE_SELECT, 1);
-        if read_u32(info.common + COMMON_DEVICE_FEATURE) & FEATURE_VERSION_1 == 0 {
+        write_u32(common + COMMON_DEVICE_FEATURE_SELECT, 1);
+        if read_u32(common + COMMON_DEVICE_FEATURE) & FEATURE_VERSION_1 == 0 {
             return None;
         }
-        write_u32(info.common + COMMON_DRIVER_FEATURE_SELECT, 0);
-        write_u32(info.common + COMMON_DRIVER_FEATURE, FEATURE_FLUSH);
-        write_u32(info.common + COMMON_DRIVER_FEATURE_SELECT, 1);
-        write_u32(info.common + COMMON_DRIVER_FEATURE, FEATURE_VERSION_1);
+        write_u32(common + COMMON_DRIVER_FEATURE_SELECT, 0);
+        write_u32(common + COMMON_DRIVER_FEATURE, FEATURE_FLUSH);
+        write_u32(common + COMMON_DRIVER_FEATURE_SELECT, 1);
+        write_u32(common + COMMON_DRIVER_FEATURE, FEATURE_VERSION_1);
         write_u8(
-            info.common + COMMON_DEVICE_STATUS,
+            common + COMMON_DEVICE_STATUS,
             STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK,
         );
-        if read_u8(info.common + COMMON_DEVICE_STATUS) & STATUS_FEATURES_OK == 0 {
+        if read_u8(common + COMMON_DEVICE_STATUS) & STATUS_FEATURES_OK == 0 {
             return None;
         }
-        write_u16(info.common + COMMON_QUEUE_SELECT, 0);
-        if read_u16(info.common + COMMON_QUEUE_SIZE) < QUEUE_SIZE {
+        write_u16(common + COMMON_QUEUE_SELECT, 0);
+        if read_u16(common + COMMON_QUEUE_SIZE) < QUEUE_SIZE {
             return None;
         }
-        write_u16(info.common + COMMON_QUEUE_SIZE, QUEUE_SIZE);
-        write_u16(info.common + COMMON_QUEUE_MSIX_VECTOR, 0);
+        write_u16(common + COMMON_QUEUE_SIZE, QUEUE_SIZE);
+        write_u16(common + COMMON_QUEUE_MSIX_VECTOR, 0);
         write_u64(
-            info.common + COMMON_QUEUE_DESC,
-            info.dma_physical + DESC_OFFSET as u64,
+            common + COMMON_QUEUE_DESC,
+            info.dma_device_address + DESC_OFFSET as u64,
         );
         write_u64(
-            info.common + COMMON_QUEUE_DRIVER,
-            info.dma_physical + AVAIL_OFFSET as u64,
+            common + COMMON_QUEUE_DRIVER,
+            info.dma_device_address + AVAIL_OFFSET as u64,
         );
         write_u64(
-            info.common + COMMON_QUEUE_DEVICE,
-            info.dma_physical + USED_OFFSET as u64,
+            common + COMMON_QUEUE_DEVICE,
+            info.dma_device_address + USED_OFFSET as u64,
         );
-        write_u16(info.common + COMMON_QUEUE_ENABLE, 1);
+        write_u16(common + COMMON_QUEUE_ENABLE, 1);
         write_u8(
-            info.common + COMMON_DEVICE_STATUS,
+            common + COMMON_DEVICE_STATUS,
             STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK,
         );
-        if read_u16(info.common + COMMON_QUEUE_ENABLE) != 1
-            || read_u8(info.common + COMMON_DEVICE_STATUS) & STATUS_DRIVER_OK == 0
+        if read_u16(common + COMMON_QUEUE_ENABLE) != 1
+            || read_u8(common + COMMON_DEVICE_STATUS) & STATUS_DRIVER_OK == 0
         {
             return None;
         }
         Some(Self {
-            common: info.common,
-            notification: info.notification,
-            dma: info.dma_virtual,
-            dma_physical: info.dma_physical,
-            capability: info.capability,
+            common,
+            notification,
+            dma,
+            dma_physical: info.dma_device_address,
+            capability: info.device_capability,
             available: 0,
             used: 0,
             request: 1,

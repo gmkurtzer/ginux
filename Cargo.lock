@@ -119,6 +119,7 @@ name = "ginux-kernel"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "ginux-native-abi",
  "ginux-volume-format",
  "ginux-volume-service",
 ]
@@ -130,6 +131,10 @@ dependencies = [
  "ed25519-dalek",
  "sha2",
 ]
+
+[[package]]
+name = "ginux-native-abi"
+version = "0.1.0"
 
 [[package]]
 name = "ginux-volume-format"
@@ -149,6 +154,7 @@ dependencies = [
 name = "ginux-volume-service-runtime"
 version = "0.1.0"
 dependencies = [
+ "ginux-native-abi",
  "ginux-volume-format",
  "ginux-volume-service",
 ]

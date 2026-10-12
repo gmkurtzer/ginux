@@ -1729,6 +1729,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     let native_volume_outcome = native_volume_run.outcome;
     serial_write("\r\nginux: compiled native volume service executed in ring 3");
+    serial_write("\r\nginux: native service bootstrap ABI v0 validated in ring 3");
     serial_write("\r\nginux: native volume service owned virtio request sequence");
     match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized => {

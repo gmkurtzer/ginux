@@ -4303,14 +4303,17 @@ impl NativeServiceAddressSpace {
         Some((USER_TEST_ADDRESS + index * PAGE_SIZE, physical))
     }
 
-    fn write_boot_info(&self, words: [u64; 5]) -> bool {
-        let Some(page) = mapped_frame::<u64>(self.frames[12].address()) else {
+    fn write_boot_info(&self, info: ginux_native_abi::NativeServiceBootV0) -> bool {
+        if !info.is_valid_virtio_block() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeServiceBootV0>(self.frames[12].address())
+        else {
             return false;
         };
         unsafe {
-            for (index, word) in words.into_iter().enumerate() {
-                page.add(index).write(word);
-            }
+            page.write(info);
         }
         true
     }
@@ -5902,13 +5905,13 @@ pub(crate) fn verify_native_volume_service(
         return None;
     };
     let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
-    if !space.write_boot_info([
+    if !space.write_boot_info(ginux_native_abi::NativeServiceBootV0::virtio_block(
         user_common as u64,
         user_notification as u64,
         user_dma as u64,
         dma_physical,
         handle,
-    ]) || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT + 1)
+    )) || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT + 1)
     {
         let _ = space.release();
         return None;

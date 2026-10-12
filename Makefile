@@ -78,6 +78,8 @@ test: build
 check: manifest
 	@cargo fmt --all -- --check
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
+	@cargo clippy --package ginux-native-abi -- -D warnings
+	@cargo test --package ginux-native-abi
 	@cargo clippy --package ginux-volume-format -- -D warnings
 	@cargo test --package ginux-volume-format
 	@cargo clippy --package ginux-volume-service -- -D warnings
