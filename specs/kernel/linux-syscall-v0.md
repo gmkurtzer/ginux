@@ -1242,6 +1242,10 @@ metadata substitutions and any cross-process frame overlap. Exit enters a
 non-runnable intermediate state and cannot publish a zombie until the allocator
 no longer tracks any lease in the exact detached bundle. It is currently an
 internal boot-verified model and is not reachable through this syscall profile.
+Its dedicated proof gate now resumes the cloned child after validating its
+complete saved frame, captures a subsequent ring-3 syscall number 60 and status
+42, and uses that captured status for zombie publication and parent wait. This
+does not dispatch the call through the live Linux runtime.
 In particular, the exact bounded `clone` below remains thread-only and `fork`,
 process-style `clone`, and `wait4` remain unsupported.
 The process model's eager-copy helper can duplicate up to sixteen

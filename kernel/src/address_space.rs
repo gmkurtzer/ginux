@@ -3045,19 +3045,23 @@ pub(crate) fn execute_linux_process_child(
     stack: u64,
     fs_base: u64,
     general: [u64; 15],
-) -> bool {
+) -> Option<u8> {
     let previous = current_root();
     let (Ok(entry), Ok(stack)) = (usize::try_from(entry), usize::try_from(stack)) else {
-        return false;
+        return None;
     };
     if !verify_linux_process_root_activation(root) || current_root() != previous {
-        return false;
+        return None;
     }
     unsafe { activate(root.address()) };
     let selected = current_root() == root.address();
-    let executed = selected && cpu::execute_linux_process_child(entry, stack, fs_base, general);
+    let exit_status = selected
+        .then(|| cpu::execute_linux_process_child(entry, stack, fs_base, general))
+        .flatten();
     unsafe { activate(previous) };
-    selected && executed && current_root() == previous
+    (current_root() == previous)
+        .then_some(exit_status)
+        .flatten()
 }
 
 fn validate_complete_linux_process_user_tree(

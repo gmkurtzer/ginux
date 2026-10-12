@@ -105,7 +105,12 @@ both the prior FS base and kernel CR3 to be restored. The dedicated entry stub
 loads all fifteen saved general registers from a fixed kernel-resident array.
 The user gate captures `RAX`, `RBX`, `RCX`, `RDX`, `RSI`, `RDI`, `RBP`, and
 `R8` through `R15` from the interrupt frame and requires every value to match
-the recorded child context before returning.
+the recorded child context before returning zero to ring 3. The child then
+loads Linux syscall number 60 and status 42 and traps again. Only that ordered
+second trap completes execution: the gate checks the syscall number and
+bounded eight-bit status, captures the status, and abandons the user frame to
+return to the kernel verifier. A missing, reordered, malformed, or wider exit
+status cannot complete the probe.
 
 ## Exit and wait ordering
 
@@ -138,7 +143,8 @@ code page, mutates the child while requiring the parent to remain unchanged,
 and requires the parent's original return register to remain intact. It also
 proves both premature detach and zombie publication are denied, releases one
 lease, proves the five survivors still block zombie publication, then scrubs
-and releases the rest, publishes status 42, and reaps it through PID 1.
+and releases the rest, publishes the status 42 captured from the child's
+ring-3 `exit` trap, and reaps that exact status through PID 1.
 Finally, it reuses the same slot for PID 4, rejects the already released PID 3
 bundle, exercises normal whole-bundle teardown with status 7, retires PID 1's
 bundle, and requires the allocator count to return to its starting value.
@@ -176,9 +182,11 @@ needed by a future eager fork. The process bundle retains and cross-checks its
 virtual address, frame, and permission inventory, the synthetic hierarchy clone
 is published through the process table, and its saved context is selected by
 the native scheduler under the child root. The child executes a bounded ring-3
-return proof under that CR3. The proof does not yet snapshot the running Linux
-workload's mapping registry, implement a Linux child exit transition, or expose
-fork/wait through the Linux ABI.
+context-and-exit proof under that CR3, and its captured exit status drives the
+existing resource teardown, zombie publication, and parent wait. This dedicated
+proof gate is not the live Linux syscall dispatcher. The proof does not yet
+snapshot the running Linux workload's mapping registry or expose fork/wait
+through the Linux ABI.
 
 ## Deliberate limits
 

@@ -648,6 +648,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux fork child RAX zero executed\r\n");
     serial_write("ginux: Linux process child FS isolation executed\r\n");
     serial_write("ginux: complete Linux process register frame executed\r\n");
+    serial_write("ginux: Linux process child exit captured from ring 3\r\n");
+    serial_write("ginux: Linux process child exit drove zombie wait status\r\n");
     if !linux_process::verify_private_page_copy_contract() {
         kernel_fail("ginux: bounded Linux private page copy invalid\r\n");
     }

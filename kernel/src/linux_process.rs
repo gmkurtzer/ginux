@@ -14,15 +14,18 @@ const USER: u64 = 1 << 2;
 const NO_EXECUTE: u64 = 1 << 63;
 const TEST_USER_ADDRESS: usize = 1usize << 39;
 const PROCESS_RAX_INDEX: usize = 0;
-const PROCESS_CHILD_PROGRAM: [u8; 30] = [
+const PROCESS_CHILD_PROGRAM: [u8; 42] = [
     0x48, 0x85, 0xc0, // test rax, rax
-    0x75, 0x17, // jne failure
+    0x75, 0x23, // jne failure
     0x48, 0x83, 0xfb, 0x55, // cmp rbx, 0x55
-    0x75, 0x11, // jne failure
+    0x75, 0x1d, // jne failure
     0x49, 0x83, 0xff, 0x55, // cmp r15, 0x55
-    0x75, 0x0b, // jne failure
+    0x75, 0x17, // jne failure
     0x64, 0xc6, 0x04, 0x25, 0, 0, 0, 0, 0x5a, // mov byte ptr fs:[0], 0x5a
-    0xcd, 0x80, // int 0x80
+    0xcd, 0x80, // context-check trap
+    0xb8, 0x3c, 0, 0, 0, // mov eax, 60 (__NR_exit)
+    0xbf, 0x2a, 0, 0, 0, // mov edi, 42
+    0xcd, 0x80, // exit(42)
     0x0f, 0x0b, // failure: ud2
 ];
 
@@ -907,13 +910,19 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     };
     if selected_child.handle() != child_thread
         || selected_child.context() != child_scheduler_context
-        || !address_space::execute_linux_process_child(
-            first_space.root(),
-            child_context.rip,
-            child_context.rsp,
-            child_context.fs_base,
-            child_context.general,
-        )
+    {
+        return false;
+    }
+    let Some(child_exit_status) = address_space::execute_linux_process_child(
+        first_space.root(),
+        child_context.rip,
+        child_context.rsp,
+        child_context.fs_base,
+        child_context.general,
+    ) else {
+        return false;
+    };
+    if child_exit_status != 42
         || unsafe { (child_stack as *const u8).read() } != 0x5a
         || unsafe { (parent_stack as *const u8).read() } != 0
     {
@@ -942,17 +951,21 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     };
     let (first_leases, first_lease_count) = first_resources.leases();
-    if table.exit(first_child, 42)
+    if table.exit(first_child, child_exit_status)
         || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &first_leases[..1])
-        || table.exit(first_child, 42)
+        || table.exit(first_child, child_exit_status)
         || !memory::scrub_and_release_frames(
             memory::FrameOwner::KERNEL,
             &first_leases[1..first_lease_count],
         )
-        || !table.exit(first_child, 42)
+        || !table.exit(first_child, child_exit_status)
         || table.wait(first_child, first_child.pid).is_some()
-        || table.wait(init, first_child.pid) != Some(WaitResult { pid: 3, status: 42 })
-        || table.exit(first_child, 42)
+        || table.wait(init, first_child.pid)
+            != Some(WaitResult {
+                pid: 3,
+                status: child_exit_status,
+            })
+        || table.exit(first_child, child_exit_status)
     {
         return false;
     }

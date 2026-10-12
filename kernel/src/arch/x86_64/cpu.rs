@@ -411,8 +411,13 @@ struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
-static PROCESS_CHILD_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
-static PROCESS_CHILD_PROBE_VALID: AtomicBool = AtomicBool::new(false);
+const PROCESS_CHILD_PROBE_IDLE: u8 = 0;
+const PROCESS_CHILD_PROBE_EXPECT_CONTEXT: u8 = 1;
+const PROCESS_CHILD_PROBE_EXPECT_EXIT: u8 = 2;
+const PROCESS_CHILD_PROBE_COMPLETE: u8 = 3;
+static PROCESS_CHILD_PROBE_STATE: AtomicU8 = AtomicU8::new(PROCESS_CHILD_PROBE_IDLE);
+static PROCESS_CHILD_CONTEXT_VALID: AtomicBool = AtomicBool::new(false);
+static PROCESS_CHILD_EXIT_STATUS: AtomicU8 = AtomicU8::new(0);
 static PROCESS_CHILD_EXPECTED_REGISTERS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
 static PROCESS_CHILD_EXPECTED_FS_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -1278,7 +1283,7 @@ pub(crate) fn execute_linux_process_child(
     stack: usize,
     fs_base: u64,
     general: [u64; 15],
-) -> bool {
+) -> Option<u8> {
     if entry == 0
         || entry >= 1 << 47
         || stack == 0
@@ -1290,32 +1295,50 @@ pub(crate) fn execute_linux_process_child(
         || !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
         || !user_interrupt_surface_is_minimal()
     {
-        return false;
+        return None;
     }
     let saved_fs = active_fs_base();
     unsafe { write_msr(FS_BASE_MSR, fs_base) };
     if active_fs_base() != fs_base {
         unsafe { write_msr(FS_BASE_MSR, saved_fs) };
-        return false;
+        return None;
     }
     for (expected, value) in PROCESS_CHILD_EXPECTED_REGISTERS.iter().zip(general) {
         expected.store(value, Ordering::SeqCst);
     }
     PROCESS_CHILD_EXPECTED_FS_BASE.store(fs_base, Ordering::SeqCst);
-    PROCESS_CHILD_PROBE_VALID.store(false, Ordering::SeqCst);
-    PROCESS_CHILD_PROBE_ACTIVE.store(true, Ordering::SeqCst);
+    PROCESS_CHILD_CONTEXT_VALID.store(false, Ordering::SeqCst);
+    PROCESS_CHILD_EXIT_STATUS.store(0, Ordering::SeqCst);
+    if PROCESS_CHILD_PROBE_STATE
+        .compare_exchange(
+            PROCESS_CHILD_PROBE_IDLE,
+            PROCESS_CHILD_PROBE_EXPECT_CONTEXT,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        unsafe { write_msr(FS_BASE_MSR, saved_fs) };
+        return None;
+    }
     // SAFETY: The caller has activated a root containing the validated RX
     // entry, writable stack, supervisor kernel mappings, and TSS stack. The
     // process entry stub installs the complete saved general-register array,
-    // including the validated Linux fork-child RAX value. Its INT 0x80 reaches
-    // the installed user gate, which returns directly to the saved kernel stack
-    // because no global native scheduler runtime is active.
+    // including the validated Linux fork-child RAX value. The first INT 0x80
+    // validates that frame and returns to ring 3. A subsequent Linux exit(2)
+    // trap captures its status and returns to the saved kernel stack because no
+    // global native scheduler runtime is active.
     unsafe { ginux_process_user_enter(entry, stack, general.as_ptr()) };
     let child_fs_preserved = active_fs_base() == fs_base;
-    let register_frame_valid = !PROCESS_CHILD_PROBE_ACTIVE.swap(false, Ordering::SeqCst)
-        && PROCESS_CHILD_PROBE_VALID.swap(false, Ordering::SeqCst);
+    let probe_state = PROCESS_CHILD_PROBE_STATE.swap(PROCESS_CHILD_PROBE_IDLE, Ordering::SeqCst);
+    let context_valid = PROCESS_CHILD_CONTEXT_VALID.swap(false, Ordering::SeqCst);
+    let exit_status = PROCESS_CHILD_EXIT_STATUS.swap(0, Ordering::SeqCst);
     unsafe { write_msr(FS_BASE_MSR, saved_fs) };
-    child_fs_preserved && register_frame_valid && active_fs_base() == saved_fs
+    (child_fs_preserved
+        && context_valid
+        && probe_state == PROCESS_CHILD_PROBE_COMPLETE
+        && active_fs_base() == saved_fs)
+        .then_some(exit_status)
 }
 
 pub(crate) fn verify_user_syscall(
@@ -4952,19 +4975,46 @@ extern "sysv64" fn breakpoint_handler() {
 }
 
 extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
-    if PROCESS_CHILD_PROBE_ACTIVE.swap(false, Ordering::SeqCst) {
-        let valid = (!frame.is_null())
-            .then(|| unsafe { &*frame })
-            .is_some_and(|frame| {
-                frame
-                    .process_general_registers(number)
-                    .into_iter()
-                    .zip(&PROCESS_CHILD_EXPECTED_REGISTERS)
-                    .all(|(observed, expected)| observed == expected.load(Ordering::SeqCst))
-                    && active_fs_base() == PROCESS_CHILD_EXPECTED_FS_BASE.load(Ordering::SeqCst)
-            });
-        PROCESS_CHILD_PROBE_VALID.store(valid, Ordering::SeqCst);
-        return u64::MAX;
+    match PROCESS_CHILD_PROBE_STATE.load(Ordering::SeqCst) {
+        PROCESS_CHILD_PROBE_EXPECT_CONTEXT => {
+            let valid = (!frame.is_null())
+                .then(|| unsafe { &*frame })
+                .is_some_and(|frame| {
+                    frame
+                        .process_general_registers(number)
+                        .into_iter()
+                        .zip(&PROCESS_CHILD_EXPECTED_REGISTERS)
+                        .all(|(observed, expected)| observed == expected.load(Ordering::SeqCst))
+                        && active_fs_base() == PROCESS_CHILD_EXPECTED_FS_BASE.load(Ordering::SeqCst)
+                });
+            PROCESS_CHILD_CONTEXT_VALID.store(valid, Ordering::SeqCst);
+            PROCESS_CHILD_PROBE_STATE.store(
+                if valid {
+                    PROCESS_CHILD_PROBE_EXPECT_EXIT
+                } else {
+                    PROCESS_CHILD_PROBE_IDLE
+                },
+                Ordering::SeqCst,
+            );
+            return if valid { 0 } else { u64::MAX };
+        }
+        PROCESS_CHILD_PROBE_EXPECT_EXIT => {
+            let exit_status = (!frame.is_null())
+                .then(|| unsafe { &*frame })
+                .filter(|_| {
+                    number == LINUX_EXIT_SYSCALL
+                        && active_fs_base() == PROCESS_CHILD_EXPECTED_FS_BASE.load(Ordering::SeqCst)
+                })
+                .and_then(|frame| u8::try_from(frame.process_general_registers(number)[5]).ok());
+            if let Some(status) = exit_status {
+                PROCESS_CHILD_EXIT_STATUS.store(status, Ordering::SeqCst);
+                PROCESS_CHILD_PROBE_STATE.store(PROCESS_CHILD_PROBE_COMPLETE, Ordering::SeqCst);
+            } else {
+                PROCESS_CHILD_PROBE_STATE.store(PROCESS_CHILD_PROBE_IDLE, Ordering::SeqCst);
+            }
+            return u64::MAX;
+        }
+        _ => {}
     }
     let Some(caller_domain) = scheduler::current_domain() else {
         return u64::MAX;

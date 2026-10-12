@@ -320,8 +320,11 @@ in kernel mode. A bounded child then enters ring 3 under that CR3, requires its
 fork return in `RAX` to be zero, writes through its recorded FS base without
 changing the parent page, and returns through the user gate with FS and CR3
 restored. The entry stub installs all fifteen general registers, and the user
-gate captures and compares the complete frame before returning. The transaction
-is not attached to the running Linux workload, so the minimal system
+gate captures and compares the complete frame before resuming ring 3. The child
+then issues `exit(42)`; the gate captures that status, returns to the kernel,
+and the same status drives resource teardown, zombie publication, and the
+parent's wait result. This dedicated proof path is not attached to the running
+Linux syscall workload, so the minimal system
 profile correctly keeps `process.fork-wait` missing. The exact contract and
 limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).

@@ -678,6 +678,16 @@ if ! grep -q '^ginux: complete Linux process register frame executed' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: Linux process child exit captured from ring 3' "$output_file"; then
+    echo "Boot test failed: the Linux process child exit was not captured from ring 3." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux process child exit drove zombie wait status' "$output_file"; then
+    echo "Boot test failed: the ring-3 child exit did not drive zombie wait status." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: bounded Linux private page copy validated' "$output_file"; then
     echo "Boot test failed: bounded Linux private page copying was not validated." >&2
     exit 1
