@@ -2154,6 +2154,10 @@ if ! grep -q '^ginux: Linux signal-interrupted nanosleep validated' "$output_fil
     echo "Boot test failed: Linux signal-interrupted nanosleep was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux monotonic clock_nanosleep validated' "$output_file"; then
+    echo "Boot test failed: Linux monotonic clock_nanosleep was not validated." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: Linux scheduler-backed ppoll waits validated' "$output_file"; then
     echo "Boot test failed: Linux scheduler-backed ppoll waits were not validated." >&2

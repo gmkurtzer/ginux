@@ -708,9 +708,12 @@ then dispatches the sleeper immediately. A caught standard signal unblocked by
 the sleeper's ordinary mask may interrupt that wait with `EINTR`; a non-null
 remainder pointer receives the normalized unslept relative duration before the
 signal frame commits, while successful expiry leaves it untouched. The measured
-graph proves both interruption and a subsequent APIC-driven expiry. Blocked
-signals, nested delivery, syscall restart, absolute sleeps, and
-`clock_nanosleep` remain unsupported. The three interval-timer classes can be
+graph proves the interruption and a subsequent APIC-driven relative
+`clock_nanosleep` expiry. `clock_nanosleep` accepts `CLOCK_MONOTONIC` in
+relative or `TIMER_ABSTIME` mode; an elapsed absolute deadline returns
+immediately and ignores its remainder pointer. Realtime clocks remain
+unsupported. Blocked signals, nested delivery, and syscall restart remain
+unsupported. The three interval-timer classes can be
 queried and idempotently disarmed; arming remains unsupported until asynchronous
 signal delivery exists.
 The bounded ELF parser and page-image planner also validate checked,

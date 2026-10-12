@@ -600,12 +600,21 @@ receives the current deadline minus monotonic time as a normalized relative
 timespec. The remainder, signal frame, saved contexts, wait record, thread
 states, and live return form one rollback transaction; failure restores the
 prior user bytes and blocked wait. The measured two-thread graph interrupts a
-five-second sleep with targeted `SIGUSR2`, validates the remainder, and then
-completes another sleep through APIC expiry. Invalid request or remainder ranges
-return `-EFAULT`, invalid fields or deadline overflow return `-EINVAL`, and a
-positive sleep with no runnable peer returns `-ENOSYS`. Blocked signals, nested
-delivery, syscall restart, absolute sleeps, and `clock_nanosleep` remain
+five-second sleep with targeted `SIGUSR2` and validates the remainder. Invalid
+request or remainder ranges return `-EFAULT`, invalid fields or deadline
+overflow return `-EINVAL`, and a positive sleep with no runnable peer returns
+`-ENOSYS`. Blocked signals, nested delivery, and syscall restart remain
 unsupported.
+`rax = 230` (`__NR_clock_nanosleep`) accepts `CLOCK_MONOTONIC` with either zero
+flags or `TIMER_ABSTIME`. A relative request uses the same checked deadline,
+scheduler handoff, APIC expiry, signal interruption, and optional remainder
+transaction as `nanosleep`. An absolute request names the private monotonic
+epoch directly; an elapsed deadline returns immediately, while a future
+deadline uses the same sleep wait. Linux ignores the remainder argument for an
+absolute request, including on signal interruption, so Ginux neither validates
+nor writes it. Other clocks or flag bits return `-EINVAL`. The measured graph
+proves a relative APIC expiry and an already elapsed absolute request with an
+invalid ignored remainder pointer. Realtime clocks remain unsupported.
 The same two calls accept `CLOCK_PROCESS_CPUTIME_ID` and
 `CLOCK_THREAD_CPUTIME_ID`. In this proof the process has one thread, never
 deschedules, and owns the processor from its private epoch, so both clocks use

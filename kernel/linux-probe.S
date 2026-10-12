@@ -1252,14 +1252,18 @@ linux_clone_repeat:
     add rsp, 32
     push 1
     push 0
-    mov rdi, rsp
+    mov rdx, rsp
+    push 1
+    pop rdi
     xor esi, esi
-    push 35
-    pop rax
-    syscall
+    xor r10d, r10d
+    mov eax, 230
+    call syscall_expect_zero
+    inc esi
+    or r10d, -1
+    mov al, 230
+    call syscall_expect_zero
     add rsp, 16
-    test rax, rax
-    require_equal
     push 1
     push 0
     mov rdi, r8
@@ -2926,9 +2930,11 @@ linux_child_joined:
     cmp qword ptr [0x405e60], 0
     je failure
 
-    mov edi, 3
+    push 3
+    pop rdi
     mov qword ptr [0x405e08], 0
-    mov esi, 1
+    push 1
+    pop rsi
     mov edx, 0x405e00
     xor r10d, r10d
     mov eax, 286
@@ -2940,17 +2946,22 @@ linux_child_joined:
     cmp qword ptr [0x405e60], 0
     je failure
 
-    mov edi, 2
-    mov esi, 2
-    mov edx, 3
+    push 2
+    pop rdi
+    push 2
+    pop rsi
+    push 3
+    pop rdx
     xor r10d, r10d
     mov eax, 233
     call syscall_expect_zero
-    mov edi, 3
+    push 3
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
-    mov edi, 2
+    push 2
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -2976,7 +2987,8 @@ linux_child_joined:
     cmp dword ptr [0x405e84], 4
     require_equal
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
-    mov edi, 4
+    push 4
+    pop rdi
     mov esi, 0x404fff
     mov edx, 2
     push 1
@@ -4872,8 +4884,8 @@ child_thread_probe:
     call syscall_expect_zero
     cmp r14d, 2
     jne child_thread_exit
-    # Interrupt the parent's first relative sleep before allowing its second
-    # sleep to exercise the ordinary APIC-expiry path.
+    # Interrupt the parent's nanosleep before allowing its relative
+    # clock_nanosleep to exercise the ordinary APIC-expiry path.
     push 12
     pop rdx
     call linux_child_signal_parent

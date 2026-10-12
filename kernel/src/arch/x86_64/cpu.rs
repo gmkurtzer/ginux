@@ -146,6 +146,7 @@ const LINUX_GETDENTS64_SYSCALL: u64 = 217;
 const LINUX_SET_TID_ADDRESS_SYSCALL: u64 = 218;
 const LINUX_CLOCK_GETTIME_SYSCALL: u64 = 228;
 const LINUX_CLOCK_GETRES_SYSCALL: u64 = 229;
+const LINUX_CLOCK_NANOSLEEP_SYSCALL: u64 = 230;
 const LINUX_EXIT_GROUP_SYSCALL: u64 = 231;
 const LINUX_EPOLL_WAIT_SYSCALL: u64 = 232;
 const LINUX_EPOLL_CTL_SYSCALL: u64 = 233;
@@ -240,6 +241,7 @@ const LINUX_EPOLL_SUPPORTED_EVENTS: u32 = (LINUX_POLLIN | LINUX_POLLOUT) as u32;
 const LINUX_EFD_SEMAPHORE: u64 = 1;
 const LINUX_EFD_NONBLOCK: u64 = 0x800;
 const LINUX_TFD_TIMER_ABSTIME: u64 = 1;
+const LINUX_TIMER_ABSTIME: u64 = 1;
 const LINUX_TFD_NONBLOCK: u64 = 0x800;
 const LINUX_PIPE_CAPACITY: usize = 256;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
@@ -4981,6 +4983,14 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_NANOSLEEP_SYSCALL => {
             linux_nanosleep_live_return(registers, syscall_return, first_argument, buffer)
         }
+        LINUX_CLOCK_NANOSLEEP_SYSCALL => linux_clock_nanosleep_live_return(
+            registers,
+            syscall_return,
+            first_argument,
+            buffer,
+            count,
+            register(0),
+        ),
         LINUX_GETITIMER_SYSCALL => linux_getitimer(first_argument, buffer),
         LINUX_SETITIMER_SYSCALL => linux_setitimer(first_argument, buffer, count),
         LINUX_EPOLL_WAIT_SYSCALL => linux_epoll_wait_live_return(
@@ -5793,16 +5803,43 @@ fn linux_nanosleep_live_return(
     request: u64,
     remaining: u64,
 ) -> u64 {
+    linux_clock_nanosleep_live_return(output, caller, LINUX_CLOCK_MONOTONIC, 0, request, remaining)
+}
+
+fn linux_clock_nanosleep_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    clock: u64,
+    flags: u64,
+    request: u64,
+    remaining: u64,
+) -> u64 {
+    if clock != LINUX_CLOCK_MONOTONIC || flags & !LINUX_TIMER_ABSTIME != 0 {
+        return LINUX_EINVAL;
+    }
     let mut request_bytes = [0_u8; 16];
     if !copy_from_linux_user(request, &mut request_bytes) {
         return LINUX_EFAULT;
     }
-    let Some(duration) = linux_timespec_nanoseconds(&request_bytes) else {
+    let Some(requested) = linux_timespec_nanoseconds(&request_bytes) else {
         return LINUX_EINVAL;
     };
-    if duration == 0 {
+    let Some(now) = linux_elapsed_nanoseconds() else {
+        return LINUX_ENOSYS;
+    };
+    let absolute = flags & LINUX_TIMER_ABSTIME != 0;
+    let deadline = if absolute {
+        requested
+    } else {
+        let Some(deadline) = now.checked_add(requested) else {
+            return LINUX_EINVAL;
+        };
+        deadline
+    };
+    if deadline <= now {
         return 0;
     }
+    let remaining = if absolute { 0 } else { remaining };
     if remaining != 0 && !linux_writable_user_range_contains(remaining, 16) {
         return LINUX_EFAULT;
     }
@@ -5814,10 +5851,6 @@ fn linux_nanosleep_live_return(
     };
     let Some(tls) = linux_thread_context(current) else {
         return LINUX_ESRCH;
-    };
-    let Some(deadline) = linux_elapsed_nanoseconds().and_then(|now| now.checked_add(duration))
-    else {
-        return LINUX_EINVAL;
     };
     if !save_linux_thread_return_context(current, caller)
         || !block_current_linux_thread(LINUX_THREAD_WAIT_SLEEP, 1, remaining, deadline)
