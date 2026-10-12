@@ -401,10 +401,10 @@ environment entry, authenticates the fixed interpreter/main/two-DSO graph,
 atomically installs fresh interpreter pages, and retires the complete previous
 graph with exact generation-tagged leases. It then resets the main and DSO
 mapping contracts so the replacement interpreter can install the authenticated
-main and dependencies again. The kernel materializes the complete bounded
-initial stack in a newly allocated zeroed RW/NX frame and replaces the old
-primary-stack leaf in the same rollback-capable transaction as the interpreter.
-Commit requires the old stack's exact live generation and permissions, then
+main and dependencies again. Both static and interpreted exec pre-materialize
+the complete bounded stack in a fresh zeroed RW/NX frame and replace the old
+primary-stack leaf in the rollback-capable image transaction. Commit requires
+the old stack's exact live generation and permissions, then
 scrubs and releases that lease; teardown reclaims the replacement stack after
 the process root is inactive. The same commit installs a fresh zero-filled
 RW/NX heap frame, retires the old exact lease, and resets the process break to

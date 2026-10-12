@@ -55,15 +55,14 @@ name, and exits without reviving the old program. Stale-generation retirement
 and a second release are rejected without mutation, while RELRO permission
 changes remain synchronized with the active-image record. Generation-tagged replacement
 frames are scrubbed and released after the process root becomes inactive, with
-the prior live-frame count restored. The execution contract binds every active
+the prior live-frame count restored. Every successful exec materializes its
+bounded initial stack in a fresh zeroed RW/NX page, replaces the exact old
+stack lease in the rollback-capable image transaction, and reclaims the fresh
+lease after the process root is inactive. The execution contract binds every active
 page-table hierarchy frame to its exact allocator generation, verifies that
 the live CR3 and all admitted Linux ranges traverse only that owned hierarchy,
 and rejects a stale root lease without mutation. Interpreted replacement additionally
-materializes that stack image in a fresh zeroed RW/NX page, replaces the exact
-generation-tagged primary-stack lease in the same rollback-capable page-table
-transaction as the interpreter, and scrubs and releases the old stack lease at
-commit. The replacement stack lease is reclaimed after the process root becomes
-inactive. The same interpreted transaction replaces the bounded heap with a
+replaces the bounded heap with a
 fresh zeroed RW/NX lease, while every successful exec resets the process break
 to the fixed heap base. The old heap is scrubbed at commit and the replacement
 lease is reclaimed after the process root becomes inactive. Interpreted replacement installs the measured

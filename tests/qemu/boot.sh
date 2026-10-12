@@ -690,6 +690,9 @@ for marker in \
     'interpreted Linux exec stack replaced atomically' \
     'old interpreted Linux stack lease retired at exec' \
     'replacement Linux stack lease reclaimed' \
+    'static Linux exec stack replaced atomically' \
+    'old static Linux stack lease retired at exec' \
+    'replacement static Linux stack lease reclaimed' \
     'interpreted Linux exec heap replaced atomically' \
     'old interpreted Linux heap lease retired at exec' \
     'replacement Linux heap lease reclaimed' \

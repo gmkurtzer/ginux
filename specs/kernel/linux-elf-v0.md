@@ -104,9 +104,9 @@ After path, vector, and string validation, the bounded exec transaction derives
 entry and W^X mappings directly from the selected measured plan; the boot
 verifier does not preseed a target identity, entry, or address template. It
 then allocates three generation-tagged kernel frame leases
-and materializes the selected measured bytes into them. It installs those pages
-atomically, retains the existing
-guarded stack, and removes all seven or eight pages belonging to the old image.
+and materializes the selected measured bytes into them. It also materializes a
+fresh zeroed RW/NX initial-stack frame. It installs the image and stack leaves
+atomically and removes all seven or eight pages belonging to the old image.
 Replacement leaves may overlap old leaves or occupy unused leaves; the mapping
 transaction snapshots both sets and binds every old address to its exact live
 frame generation and current W^X permissions. It clears the complete old
@@ -119,8 +119,8 @@ post-exit verifier requires every new R/NX, RX, and RW/NX leaf to name the exact
 published lease, the committed node and variable-size active-image record to
 reproduce the same measured plan, and every removed leaf to be absent. A failed allocation,
 materialization, precondition, or mapping verification scrubs and releases the
-new leases, restores the original stack, thread registrations, and page-table
-entries, and returns an error. Successful teardown runs after the process root
+new leases, preserves the original stack lease, thread registrations, and
+page-table entries, and returns an error. Successful teardown runs after the process root
 is inactive, scrubs every replacement frame, releases its exact generation, and
 requires the allocator's prior live-frame count to be restored.
 An irreversible RELRO transition updates the active-image permission record at
@@ -424,9 +424,9 @@ artifact equality is not an admission condition. Substituting a static main,
 reversing the DSOs, or truncating the interpreter is rejected. `execve("/init")`
 consumes this exact plan: it atomically installs fresh interpreter pages,
 publishes them as the new active-image seed, retires every old interpreter,
-main, and dependency lease, and resets the userspace mapping contracts. It also
-materializes the bounded initial-stack image in a fresh zeroed RW/NX frame and
-replaces the primary stack leaf in that same transaction. The old stack address,
+main, and dependency lease, and resets the userspace mapping contracts. As in
+the static profile, it replaces the primary stack leaf with a fresh zeroed
+RW/NX frame in that same transaction. The old stack address,
 permissions, and exact generation-tagged lease are preconditions of the commit;
 forced verification failure restores both the complete old image and old stack,
 while success scrubs and releases the old stack lease before publication. The
