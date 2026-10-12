@@ -2912,6 +2912,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: faulted native network device reset before VT-d teardown");
     serial_write("\r\nginux: active network fault retired translation before DMA");
     serial_write("\r\nginux: active network fault contained without kernel panic");
+    if !address_space::verify_native_network_transmit_probe(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+    ) {
+        kernel_fail("\r\nginux: native network service transmit failed\r\n");
+    }
+    serial_write("\r\nginux: native network service published bounded TX descriptor");
+    serial_write("\r\nginux: native network service notified transmit queue");
+    serial_write("\r\nginux: native network service polled TX completion");
+    serial_write("\r\nginux: kernel validated native network TX descriptor and payload");
+    serial_write("\r\nginux: native network TX payload guards preserved");
+    serial_write("\r\nginux: native network service transmitted Ethernet probe");
+    serial_write("\r\nginux: native network polled TX generation retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

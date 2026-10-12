@@ -1369,6 +1369,42 @@ pub(crate) fn network_empty_queues_are_bound(
     true
 }
 
+pub(crate) fn network_service_transmit_is_complete(dma_physical: u64, dma_virtual: usize) -> bool {
+    const HEADER_LENGTH: usize = 12;
+    const ETHERNET_FRAME: [u8; 19] = [
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x88, 0xb5, b'G',
+        b'I', b'N', b'U', b'X',
+    ];
+    const PAYLOAD_LENGTH: usize = HEADER_LENGTH + ETHERNET_FRAME.len();
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || read_dma_u64(dma_virtual + NET_TX_DESC_OFFSET)
+            != dma_physical + NET_TX_BUFFER_OFFSET as u64
+        || read_dma_u32(dma_virtual + NET_TX_DESC_OFFSET + 8) != PAYLOAD_LENGTH as u32
+        || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 12) != 0
+        || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 14) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2) != 1
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 4) != 0
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) != 1
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4) != 0
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 8) > PAYLOAD_LENGTH as u32
+        || (0..HEADER_LENGTH)
+            .any(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) != 0)
+        || ETHERNET_FRAME.iter().enumerate().any(|(offset, byte)| {
+            read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset) != *byte
+        })
+        || read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET - 1) != 0x3c
+        || read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + PAYLOAD_LENGTH) != 0xc3
+    {
+        return false;
+    }
+    (1..usize::from(QUEUE_SIZE)).all(|descriptor| {
+        (0..16)
+            .all(|byte| read_dma_u8(dma_virtual + NET_TX_DESC_OFFSET + descriptor * 16 + byte) == 0)
+    })
+}
+
 pub(crate) fn quiesce_isolated_network(
     device: VirtioNetworkDevice,
     common_mapping: MmioMapping,

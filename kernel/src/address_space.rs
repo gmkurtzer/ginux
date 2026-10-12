@@ -2276,6 +2276,7 @@ struct RegisteredAuxiliaryAddressSpace {
     iommu_translation: Option<iommu::DeviceTranslation>,
     device_quiesced: bool,
     fail_network_activation_return: bool,
+    expect_network_transmit: bool,
 }
 
 enum AuxiliaryAddressSpace {
@@ -4571,6 +4572,7 @@ enum NativeNetworkRunMode {
     ConfinedReject,
     Active,
     ActiveFault,
+    Transmit,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4655,6 +4657,23 @@ pub(crate) fn verify_native_network_active_fault_teardown(
     )
 }
 
+pub(crate) fn verify_native_network_transmit_probe(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::Transmit,
+        Some(common_mapping),
+    )
+}
+
 fn verify_native_network_bootstrap_run(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -4672,6 +4691,7 @@ fn verify_native_network_bootstrap_run(
         NativeNetworkRunMode::Inert | NativeNetworkRunMode::RejectBootstrap
     );
     let fail_after_activation = mode == NativeNetworkRunMode::ActiveFault;
+    let transmit_probe = mode == NativeNetworkRunMode::Transmit;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4775,6 +4795,9 @@ fn verify_native_network_bootstrap_run(
         boot.reserved = 1;
     } else if active_mapping.is_some() {
         boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_EMPTY_QUEUES;
+        if transmit_probe {
+            boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE;
+        }
     }
     let boot_written = if reject_reserved {
         !boot.is_valid_virtio_network() && space.write_network_boot_info_raw(boot)
@@ -4812,6 +4835,7 @@ fn verify_native_network_bootstrap_run(
     let active_device_ready = active_mapping.is_none_or(|mapping| {
         bind_auxiliary_network_teardown(auxiliary, device, mapping)
             && (!fail_after_activation || arm_auxiliary_network_activation_fault(auxiliary))
+            && (!transmit_probe || arm_auxiliary_network_transmit_expectation(auxiliary))
             && pci::prepare_network_for_isolated_service(device, mapping)
     });
     if activate_iommu && iommu_evidence.is_none()
@@ -5093,6 +5117,7 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             iommu_translation: None,
             device_quiesced: false,
             fail_network_activation_return: false,
+            expect_network_transmit: false,
         });
     }
     true
@@ -5258,6 +5283,23 @@ fn arm_auxiliary_network_activation_fault(domain_id: u64) -> bool {
     true
 }
 
+fn arm_auxiliary_network_transmit_expectation(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if registered.network_teardown.is_none()
+        || registered.expect_network_transmit
+        || registered.device_quiesced
+    {
+        return false;
+    }
+    registered.expect_network_transmit = true;
+    true
+}
+
 pub(crate) fn bind_auxiliary_device_teardown(
     domain_id: u64,
     device: VirtioBlockDevice,
@@ -5401,20 +5443,25 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
         return false;
     }
     if let Some(teardown) = registered.network_teardown {
-        let Some(dma_physical) = registered.space.dma_physical() else {
+        let Some(dma) = registered.space.dma_lease() else {
+            return false;
+        };
+        let Some(dma_virtual) = dma.direct_map_address() else {
             return false;
         };
         let active = pci::network_empty_queues_are_bound(
             teardown.device,
             teardown.mapping,
-            dma_physical,
+            dma.address(),
             true,
         );
+        let transmit_complete = !registered.expect_network_transmit
+            || pci::network_service_transmit_is_complete(dma.address(), dma_virtual);
         if !require_completed_dma {
             LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.store(active, Ordering::Release);
             LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.store(domain_id, Ordering::Release);
         }
-        if require_completed_dma && !active
+        if require_completed_dma && (!active || !transmit_complete)
             || !pci::quiesce_isolated_network(teardown.device, teardown.mapping)
         {
             return false;

@@ -90,8 +90,17 @@ path and faults at ring 3. Fault handling proves the queues were live, revokes
 bus mastering, resets and disables the function, retires VT-d, and scrubs DMA
 without trusting a clean service exit.
 
+Bootstrap feature `TRANSMIT_PROBE` advances a fresh generation to the first
+service-owned packet operation. After activation, the service builds one
+bounded queue-1 descriptor, publishes available index one, notifies the exact
+transmit register, and polls the used ring with a fixed limit while MSI-X stays
+disabled. The kernel independently validates the complete descriptor, fixed
+Ethernet payload, completion identity, and canaries before ordered teardown.
+See [Native Network Service Transmit v0](network-transmit-v0.md).
+
 ## Deliberate limits
 
-This milestone publishes no descriptor, writes no notification register,
-enables no MSI-X route, and transfers no packet. Interrupt delivery and
-service-owned packet processing remain separate milestones.
+The empty-queue generations publish no descriptor. The transmit generation
+sends only one fixed probe and proves device consumption rather than peer
+reception. Interrupt delivery, receive processing, general packet APIs, and
+container networking remain separate milestones.

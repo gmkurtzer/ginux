@@ -27,7 +27,8 @@ exactly 80 bytes, and uses only fixed-width integers:
 
 Feature bit zero is required `VIRTIO_NETWORK`. Optional bit one is
 `EMPTY_QUEUES`; it requests the generation-bound empty-queue activation
-contract. No other bit is accepted. Every
+contract. Optional bit two is `TRANSMIT_PROBE`, requires bit one, and requests
+one fixed completion-polled transmit. No other combination is accepted. Every
 address, capability, and MAC field must be nonzero, and the two notification
 addresses must be distinct. A wrong magic, version, size, feature bitmap,
 nonzero reserved field, or nonzero MAC high bits is rejected before device
@@ -75,3 +76,9 @@ MMIO, but it cannot grant the NIC DMA authority directly. Capability command
 eight-entry queue bindings, `DRIVER_OK`, disabled MSI-X, and an active exact
 VT-d translation. The kernel then enables bus mastering last. Notification
 register access and packet descriptors are outside this feature.
+
+A sixth generation adds `TRANSMIT_PROBE`. After successful command 12 it may
+publish exactly one bounded queue-1 descriptor, notify the supplied transmit
+register, and poll its used ring. The kernel validates the descriptor, fixed
+payload, completion ID, and guards before clean teardown. MSI-X and receive
+traffic remain outside the feature.

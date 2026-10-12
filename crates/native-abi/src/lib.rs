@@ -9,6 +9,7 @@ pub const NATIVE_NETWORK_BOOT_VERSION: u16 = 0;
 pub const NATIVE_NETWORK_BOOT_SIZE: u16 = 80;
 pub const NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK: u32 = 1 << 0;
 pub const NATIVE_NETWORK_FEATURE_EMPTY_QUEUES: u32 = 1 << 1;
+pub const NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE: u32 = 1 << 2;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -178,7 +179,11 @@ impl NativeNetworkBootV0 {
             && self.size == NATIVE_NETWORK_BOOT_SIZE
             && (self.features == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
                 || self.features
-                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES)
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                || self.features
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                        | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE)
             && self.common_config_address != 0
             && self.receive_notification_address != 0
             && self.transmit_notification_address != 0
@@ -193,6 +198,10 @@ impl NativeNetworkBootV0 {
 
     pub const fn requests_empty_queues(&self) -> bool {
         self.features & NATIVE_NETWORK_FEATURE_EMPTY_QUEUES != 0
+    }
+
+    pub const fn requests_transmit_probe(&self) -> bool {
+        self.features & NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE != 0
     }
 }
 
@@ -237,6 +246,7 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_BOOT_SIZE UINT16_C(80)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK UINT32_C(1)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_EMPTY_QUEUES UINT32_C(2)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE UINT32_C(4)"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
     }
 
@@ -332,6 +342,14 @@ mod tests {
         };
         assert!(active.is_valid_virtio_network());
         assert!(active.requests_empty_queues());
+        assert!(!active.requests_transmit_probe());
+        let transmit = NativeNetworkBootV0 {
+            features: active.features | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE,
+            ..active
+        };
+        assert!(transmit.is_valid_virtio_network());
+        assert!(transmit.requests_empty_queues());
+        assert!(transmit.requests_transmit_probe());
         for invalid in [
             NativeNetworkBootV0 { magic: 0, ..valid },
             NativeNetworkBootV0 {
@@ -344,7 +362,7 @@ mod tests {
                 ..valid
             },
             NativeNetworkBootV0 {
-                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 2,
+                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 3,
                 ..valid
             },
             NativeNetworkBootV0 {

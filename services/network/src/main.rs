@@ -25,6 +25,12 @@ const RX_USED_OFFSET: u64 = 0x100;
 const TX_DESC_OFFSET: u64 = 0x180;
 const TX_AVAIL_OFFSET: u64 = 0x200;
 const TX_USED_OFFSET: u64 = 0x280;
+const TX_BUFFER_OFFSET: u64 = 0xa00;
+const TX_HEADER_LENGTH: usize = 12;
+const TX_FRAME: [u8; 19] = [
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x88, 0xb5, b'G', b'I',
+    b'N', b'U', b'X',
+];
 const COMMON_DEVICE_FEATURE_SELECT: usize = 0x00;
 const COMMON_DEVICE_FEATURE: usize = 0x04;
 const COMMON_DRIVER_FEATURE_SELECT: usize = 0x08;
@@ -47,6 +53,7 @@ const FEATURE_NET_MRG_RXBUF: u32 = 1 << 15;
 const FEATURE_VERSION_1: u32 = 1;
 const FEATURE_ACCESS_PLATFORM: u32 = 1 << 1;
 const RESET_POLL_LIMIT: usize = 100_000;
+const COMPLETION_POLL_LIMIT: usize = 10_000_000;
 
 global_asm!(
     r#"
@@ -89,8 +96,58 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         {
             fail();
         }
+        if info.requests_transmit_probe() && !unsafe { transmit_probe(info) } {
+            fail();
+        }
     }
     exit(NATIVE_SERVICE_EXIT_COMPLETED)
+}
+
+unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> bool {
+    let Ok(dma) = usize::try_from(info.dma_virtual_address) else {
+        return false;
+    };
+    let Ok(notification) = usize::try_from(info.transmit_notification_address) else {
+        return false;
+    };
+    let Ok(common) = usize::try_from(info.common_config_address) else {
+        return false;
+    };
+    let payload_length = TX_HEADER_LENGTH + TX_FRAME.len();
+    write_u64(
+        dma + TX_DESC_OFFSET as usize,
+        info.dma_device_address + TX_BUFFER_OFFSET,
+    );
+    write_u32(dma + TX_DESC_OFFSET as usize + 8, payload_length as u32);
+    write_u16(dma + TX_DESC_OFFSET as usize + 12, 0);
+    write_u16(dma + TX_DESC_OFFSET as usize + 14, 0);
+    for offset in 0..TX_HEADER_LENGTH {
+        write_u8(dma + TX_BUFFER_OFFSET as usize + offset, 0);
+    }
+    for (offset, byte) in TX_FRAME.into_iter().enumerate() {
+        write_u8(
+            dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH + offset,
+            byte,
+        );
+    }
+    write_u8(dma + TX_BUFFER_OFFSET as usize - 1, 0x3c);
+    write_u8(dma + TX_BUFFER_OFFSET as usize + payload_length, 0xc3);
+    write_u16(dma + TX_AVAIL_OFFSET as usize, 0);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 4, 0);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 2, 1);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(notification, 1);
+    for _ in 0..COMPLETION_POLL_LIMIT {
+        if read_u16(dma + TX_USED_OFFSET as usize + 2) == 1 {
+            compiler_fence(Ordering::SeqCst);
+            return read_u32(dma + TX_USED_OFFSET as usize + 4) == 0
+                && read_u8(common + COMMON_DEVICE_STATUS)
+                    == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK;
+        }
+        core::hint::spin_loop();
+    }
+    false
 }
 
 unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {

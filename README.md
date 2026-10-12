@@ -126,7 +126,11 @@ disables the NIC, retires translation, and only then scrubs service memory.
 A separate generation receives a kernel-injected failed activation return only
 after bus mastering is live; the compiled service faults naturally and the
 fault path proves the same device-before-VT-d-before-DMA teardown ordering.
-No descriptor, notification, interrupt, or packet is published yet.
+A subsequent generation publishes one fixed transmit descriptor, notifies
+queue 1, and polls its completion while MSI-X remains disabled. The kernel
+independently validates the descriptor, unchanged payload, used entry, and
+canaries before teardown. This proves device consumption, not peer reception.
+See [Native Network Service Transmit v0](specs/services/network-transmit-v0.md).
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
