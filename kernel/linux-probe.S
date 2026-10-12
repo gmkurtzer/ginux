@@ -1165,6 +1165,9 @@ valid_interpreter_base:
     push 13
     pop rax
     call syscall_expect_zero
+    inc edi
+    mov al, 13
+    call syscall_expect_zero
     xor edi, edi
     mov eax, 291
     call syscall_expect_two
@@ -1343,14 +1346,21 @@ linux_clone_repeat:
     push 3
     pop rax
     call syscall_expect_zero
+    push -4
     mov edi, 0x4050c0
-    xor esi, esi
+    mov rsi, rsp
     xor edx, edx
     push 8
     pop r10
     mov eax, 128
     syscall
-    cmp rax, 10
+    cmp qword ptr [rsp], rax
+    jne failure
+    pop rcx
+    xor esi, esi
+    mov eax, 128
+    syscall
+    cmp eax, 10
     jne failure
     jmp linux_child_joined
 linux_parent_futex_wait:
@@ -4750,8 +4760,13 @@ child_thread_probe:
     push 24
     pop rax
     call syscall_expect_zero
+    push 12
+    pop rdx
     push 1
-    pop rdi
+    pop rsi
+    mov edi, esi
+    mov eax, 234
+    call syscall_expect_zero
     push 10
     pop rsi
     push 62
@@ -4766,8 +4781,6 @@ child_thread_exit:
 #endif
 
 linux_sigsegv_handler:
-    cmp edi, 11
-    jne failure
     cmp dword ptr [rsi + 8], -6
     jne .Llinux_sigsegv_full
     ret
@@ -5002,6 +5015,9 @@ pre_exec_name:
 long_exec_value:
     .ascii "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     .byte 0
+#ifdef GINUX_EXEC_SECOND
+    .space 2
+#endif
 #endif
 
 #ifdef GINUX_LINKED
@@ -5155,7 +5171,6 @@ ginux_linux_initialize:
     ret
 #endif
 
-.balign 8
 readable_payload:
     .ascii "PROBE!!\n"
 proc_self_exe:

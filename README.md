@@ -508,16 +508,24 @@ with no pending match can also suspend one of the two bounded threads while its
 peer is runnable. A matching generated standard signal writes the optional
 information record, installs the signal number as the suspended syscall's
 return value, and makes that thread runnable without invoking its disposition.
+A caught, unblocked standard signal outside the requested set may instead
+interrupt a sibling's wait through `tgkill`. The kernel transactionally saves
+the sender, cancels the typed wait, switches to the waiter's handler, and
+returns `EINTR` through `rt_sigreturn` without consuming a requested signal or
+modifying the optional information record. The measured two-thread graph proves
+that handoff with `SIGUSR2`, then proves that a later matching `SIGUSR1` still
+completes the normal synchronous-wait path.
 A positive timeout stores a checked monotonic deadline in that same wait record;
 the periodic local-APIC tick makes the waiter runnable with `EAGAIN` after the
 deadline, independently of Linux syscall entry, saves the interrupted peer's
 complete integer context, and dispatches the waiter immediately. The measured workload proves both timeout
 and signal handoffs from a futex-blocked child to its signal-waiting parent and
 requires all typed wait state to be reclaimed at exit. Empty zero-time polls
-also return `EAGAIN`. Interruption by nonmatching signals and waits without
-another runnable thread remain outside
-the profile and return `ENOSYS`. Input, timeout, and output failures leave
-pending and thread state unchanged.
+also return `EAGAIN`. Nonmatching signals that are blocked by the target's
+current mask, unsupported dispositions, nested delivery, syscall restart, and
+waits without another runnable thread remain outside the profile and return
+`ENOSYS`. Input, timeout, and output failures leave pending and thread state
+unchanged.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
 Real/effective/saved UID and GID triples are also zero and are copied only

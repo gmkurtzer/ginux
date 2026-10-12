@@ -436,6 +436,7 @@ static LINUX_EPOLL_PWAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_PWAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_PWAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_MASKED_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_SIGNAL_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -3187,6 +3188,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_EPOLL_PWAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_EPOLL_PWAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
     LINUX_MASKED_WAIT_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_SIGNAL_WAIT_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -3557,6 +3559,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let epoll_pwait_wake_count = LINUX_EPOLL_PWAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let epoll_pwait_timeout_count = LINUX_EPOLL_PWAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
     let masked_wait_interrupt_count = LINUX_MASKED_WAIT_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
+    let signal_wait_interrupt_count = LINUX_SIGNAL_WAIT_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
     let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_block_count = LINUX_SIGNAL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
@@ -3567,7 +3570,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let expected_signal_count = if signal_probe_executed {
         10
     } else if execution.tls_size != 0 {
-        3
+        4
     } else {
         2
     };
@@ -3609,9 +3612,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && epoll_pwait_wake_count == 0
             && epoll_pwait_timeout_count == 1
             && masked_wait_interrupt_count == 1
-            && signal_wait_block_count == 2
+            && signal_wait_block_count == 3
             && signal_wait_wake_count == 1
-            && signal_wait_timeout_count == 1)
+            && signal_wait_timeout_count == 1
+            && signal_wait_interrupt_count == 1)
     {
         serial_write("ginux: Linux thread transition state:");
         for state in [
@@ -3648,9 +3652,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             epoll_pwait_wake_count == 0,
             epoll_pwait_timeout_count == 1,
             masked_wait_interrupt_count == 1,
-            signal_wait_block_count == 2,
+            signal_wait_block_count == 3,
             signal_wait_wake_count == 1,
             signal_wait_timeout_count == 1,
+            signal_wait_interrupt_count == 1,
         ] {
             serial_write(" ");
             serial_write_u64(u64::from(state));
@@ -3692,6 +3697,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             signal_wait_block_count,
             signal_wait_wake_count,
             signal_wait_timeout_count,
+            signal_wait_interrupt_count,
         ] {
             serial_write(" ");
             serial_write_u64(u64::from(count));
@@ -4335,9 +4341,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && epoll_pwait_wake_count == 0
                 && epoll_pwait_timeout_count == 1
                 && masked_wait_interrupt_count == 1
-                && signal_wait_block_count == 2
+                && signal_wait_block_count == 3
                 && signal_wait_wake_count == 1
-                && signal_wait_timeout_count == 1)
+                && signal_wait_timeout_count == 1
+                && signal_wait_interrupt_count == 1)
         && child_tid_cleared
         && robust_list_cleared
         && protected_page == execution.relro as u64
@@ -4953,7 +4960,7 @@ extern "sysv64" fn linux_syscall_handler(
                 syscall_return,
                 (user_rip, user_rflags),
             ),
-            Ok(target) => linux_interrupt_masked_wait(
+            Ok(target) => linux_interrupt_blocked_wait(
                 target,
                 (count, LINUX_SI_TKILL),
                 registers,
@@ -11363,7 +11370,7 @@ fn linux_kill(
     0
 }
 
-fn linux_interrupt_masked_wait(
+fn linux_interrupt_blocked_wait(
     target: LinuxThreadHandle,
     generated: (u64, i32),
     output: *mut LinuxSyscallFrame,
@@ -11391,7 +11398,7 @@ fn linux_interrupt_masked_wait(
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
         || !matches!(
             wait_kind,
-            LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
+            LINUX_THREAD_WAIT_SIGNAL | LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
         )
         || output.is_null()
         || LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
@@ -11400,8 +11407,11 @@ fn linux_interrupt_masked_wait(
     }
     let index = signal as usize - 1;
     let signal_bit = 1 << (signal - 1);
-    let temporary_mask = LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst);
-    if temporary_mask & signal_bit != 0 {
+    let wait_mask = LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst);
+    if wait_mask & signal_bit != 0
+        || wait_kind == LINUX_THREAD_WAIT_SIGNAL
+            && LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst) & signal_bit != 0
+    {
         return LINUX_ENOSYS;
     }
     let handler = ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
@@ -11418,7 +11428,11 @@ fn linux_interrupt_masked_wait(
     };
     let saved_interrupted = interrupted;
     interrupted.rax = LINUX_EINTR;
-    let restored_mask = LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].load(Ordering::SeqCst);
+    let restored_mask = if wait_kind == LINUX_THREAD_WAIT_SIGNAL {
+        wait_mask
+    } else {
+        LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].load(Ordering::SeqCst)
+    };
     let old_alt_stack_flags = ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst);
     let use_alt_stack = flags & LINUX_SA_ONSTACK != 0
         && old_alt_stack_flags & (LINUX_SS_DISABLE | LINUX_SS_ONSTACK) == 0;
@@ -11504,7 +11518,7 @@ fn linux_interrupt_masked_wait(
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
     if !switch_linux_thread(target) {
         let _ = save_linux_thread_return_context(target, saved_interrupted);
-        LINUX_THREAD_SIGNAL_MASKS[slot].store(temporary_mask, Ordering::SeqCst);
+        LINUX_THREAD_SIGNAL_MASKS[slot].store(wait_mask, Ordering::SeqCst);
         LINUX_THREAD_STATES[slot].store(LINUX_THREAD_BLOCKED, Ordering::SeqCst);
         let _ = install_linux_tls_context(sender_tls);
         let _ = write_linux_live_return(output, sender_return);
@@ -11515,7 +11529,9 @@ fn linux_interrupt_masked_wait(
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
-    LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
+    if wait_kind != LINUX_THREAD_WAIT_SIGNAL {
+        LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
+    }
     if wait_kind == LINUX_THREAD_WAIT_PPOLL {
         clear_linux_poll_snapshot(slot);
     }
@@ -11534,7 +11550,11 @@ fn linux_interrupt_masked_wait(
     }
     LINUX_SIGNAL_ACTIVE.store(true, Ordering::SeqCst);
     LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
-    LINUX_MASKED_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    if wait_kind == LINUX_THREAD_WAIT_SIGNAL {
+        LINUX_SIGNAL_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    } else {
+        LINUX_MASKED_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
     0
 }
 
