@@ -16,9 +16,10 @@ SECTIONS
 
     . = 0x400100;
     .text : { *(.text) } :text
-    ASSERT(SIZEOF(.text) <= 0xf00, "Linux exec target exceeds its one-page RX profile")
+    ASSERT(SIZEOF(.text) > 0xf00, "Linux signal probe must cross an RX page")
+    ASSERT(SIZEOF(.text) <= 0x1f00, "Linux signal probe exceeds its two-page RX profile")
 
-    . = 0x401000;
+    . = 0x402000;
     .data : { *(.data) } :data
     .bss : { *(.bss) } :data
 

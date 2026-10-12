@@ -687,7 +687,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured-root Linux graph substitution rejected\r\n");
     if signal_probe == exec_second
         || signal_probe_plan.executable.virtual_page == exec_second_plan.executable.virtual_page
-        || signal_probe_plan.executable.page_count != 1
+        || signal_probe_plan.executable.page_count != 2
         || exec_second_plan.executable.page_count != 2
     {
         kernel_fail("ginux: measured Linux exec target invalid\r\n");
@@ -967,6 +967,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux thread-directed signal delivery validated\r\n");
     serial_write("ginux: Linux legacy thread signal delivery validated\r\n");
     serial_write("ginux: Linux pending signal delivery validated\r\n");
+    serial_write("ginux: Linux standard signal queue ordering validated\r\n");
     serial_write("ginux: Linux one-shot signal action validated\r\n");
     serial_write("ginux: Linux rt signal frame ABI validated\r\n");
     serial_write("ginux: Linux mutable signal context validated\r\n");

@@ -41,7 +41,7 @@ The publication index now admits 64 nodes and is exercised beyond its original
 `init` remains a format marker, not PID 1, but the Linux-visible `/init`,
 and `/lib64/*` paths map to internal measured-root entries, while
 `/bin/signal-probe` and `/bin/exec-second` are direct measured-root nodes. The
-first is a dedicated one-page RX signal-runtime profile, leaving the full
+first is a dedicated two-page RX signal-runtime profile, leaving the full
 five-page primary workload unchanged. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
 single-threaded `execve` proof atomically replaces two independent static workloads and
@@ -435,13 +435,16 @@ the alternate stack cannot be replaced while active, and proves a premature
 and returns through the restorer. A dedicated `IRETQ` syscall epilogue restores
 all general registers—including `rcx` and `r11`—plus RIP, RSP, RFLAGS, and the
 prior mask before retrying the faulting load. This covers synchronous page-fault
-delivery plus three software-generated paths: `kill(1, SIGSEGV)`,
-`tkill(1, SIGSEGV)`, and `tgkill(1, 1, SIGSEGV)` redirect the live syscall
-return into the same handler and resume after that syscall. The thread-directed paths reject zero or
-out-of-range identities before distinguishing absent thread groups or threads.
-If this admitted signal is blocked, delivery coalesces into a pending bit;
-`rt_sigpending` reports it and `rt_sigprocmask` delivers it directly when the
-bit is unblocked while retaining the first source code. `rt_sigreturn` copies
+delivery plus `kill`, `tkill`, and `tgkill` generation of explicitly caught
+standard signals 1 through 31. Ignored signals are discarded; unsupported
+default dispositions and real-time generation fail explicitly instead of
+claiming Linux behavior. The thread-directed paths reject zero or out-of-range
+identities before distinguishing absent thread groups or threads. Blocked
+standard signals coalesce independently in a pending set. `rt_sigpending`
+reports the blocked subset, and `rt_sigprocmask` delivers the lowest-numbered
+newly unblocked signal while retaining each signal's first source code. The
+measured runtime proves `SIGUSR1` wins over an earlier-queued `SIGUSR2`, and
+that a duplicate does not replace `SI_USER` with `SI_TKILL`. `rt_sigreturn` copies
 the complete frame back, requires the published selectors, context flags,
 alternate-stack record, null FP-state pointer, and reserved words to remain
 valid, then restores user-edited integer registers, Linux-restorable RFLAGS
@@ -550,8 +553,9 @@ The separate static proofs resolve normalized absolute or current-directory-rela
 `execve` paths through the measured root, then admit any measured regular file
 that satisfies the bounded static ELF execution profile. The two
 independently linked fixtures, `bin/signal-probe` and `bin/exec-second`, prove
-selection is neither compiled-byte nor fixed-address identity: the second image
-uses an independent header, two-page text segment, and data base. The profile
+selection is neither compiled-byte nor fixed-address identity: both use bounded
+two-page text segments, while the second has an independent header and data
+base. The profile
 allows one header page, up to five executable pages, up to two writable pages,
 and at most eight pages in total. The active mapping list is process runtime
 state and binds each virtual page to its generation-tagged physical-frame lease

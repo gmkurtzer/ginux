@@ -94,18 +94,18 @@ Two distinct LLD-produced static images are retained directly under the
 measured-root names `bin/signal-probe` and `bin/exec-second`. The signal image
 provides independent growth space for signal-runtime behavior without changing
 the full five-page primary workload. Each bounded plan has one
-R/NX header page followed by one RX page entered at offset `0x100` and one
-RW/NX page. The first uses `0x3ff000`, `0x400000`, and `0x401000`; the second
-uses `0x40f000`, `0x410000`, and `0x411000`. Boot requires both measured files to match their
+R/NX header page followed by two RX pages entered at offset `0x100` and one
+RW/NX page. The first uses `0x3ff000`, `0x400000..0x402000`, and `0x402000`;
+the second uses `0x40f000`, `0x410000..0x412000`, and `0x412000`. Boot requires both measured files to match their
 build-time artifacts and validates both complete plans before any Linux
 workload runs. Runtime admission does not compare against either compiled byte
-array: it parses the selected measured-root file and requires three consecutive
+array: it parses the selected measured-root file and requires four consecutive
 pages inside `0x3ff000..0x420000`, the fixed entry displacement, role-derived
 protections, and absence of dynamic, TLS, and RELRO metadata.
 After path, vector, and string validation, the bounded exec transaction derives
 entry and W^X mappings directly from the selected measured plan; the boot
 verifier does not preseed a target identity, entry, or address template. It
-then allocates three generation-tagged kernel frame leases
+then allocates four generation-tagged kernel frame leases
 and materializes the selected measured bytes into them. It also materializes a
 fresh zeroed RW/NX initial-stack frame. It installs the image and stack leaves
 atomically and removes all seven or eight pages belonging to the old image.

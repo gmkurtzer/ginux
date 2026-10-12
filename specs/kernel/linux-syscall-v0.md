@@ -360,8 +360,9 @@ node must be an executable regular file and must match the admitted static ELF
 profile. The independently built `bin/signal-probe` and `bin/exec-second`
 fixtures both execute, proving selection is based on the measured bytes and
 profile rather than equality with one kernel-compiled artifact or one virtual
-base. The second fixture uses a distinct four-page layout containing one
-header page, two executable pages, and one writable page. `argv`
+base. Both fixtures use bounded four-page layouts containing one header page,
+two executable pages, and one writable page; the second uses an independent
+virtual base. `argv`
 admits one through eight pointers and `envp` zero
 through eight, each terminated by a null pointer. Each string is limited to 63
 bytes plus its terminator, and the complete rebuilt initial stack is limited to
@@ -704,7 +705,7 @@ record for each of signals 1 through 64. Complete action and old-action ranges
 are validated before state changes; action masks also clear `SIGKILL` and
 `SIGSTOP`. Installing handlers for those two uncatchable signals returns
 `-EINVAL`. Other records remain opaque state unless selected by the bounded
-`SIGSEGV` delivery contract below. The proof exercises default queries,
+synchronous-fault or generated-standard-signal contracts below. The proof exercises default queries,
 normalized registration, fault atomicity, and restoration of every action
 before exit.
 
@@ -726,7 +727,8 @@ stack, complete integer registers and selectors, the prior signal mask in both
 defined locations, zeroed reserved fields, and a null `fpstate` pointer because
 floating-point/XSAVE preservation is not implemented yet. Handler entry sets
 `rdi = 11`, `rsi = &frame.info`, and `rdx = &frame.uc` even when `SA_SIGINFO` is
-clear, and clears DF, RF, and TF as required by the x86 signal ABI before
+clear; generated delivery places its selected signal number in `rdi`. Both
+clear DF, RF, and TF as required by the x86 signal ABI before
 entering through the exception `IRETQ` path. `SA_ONSTACK` selects the registered
 alternate-stack top and publishes `SS_ONSTACK` for an ordinary registration; the syscall gate admits that
 range only while both the flag and active frame agree. The proof handler
@@ -772,50 +774,55 @@ unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
 than entering the native-domain scheduler fault path.
 `rax = 62` (`__NR_kill`) accepts PID 1 or process-group selector 0. Signal zero
-performs an existence check. An unmasked `SIGSEGV` with the same admitted
-handler action constructs the signal frame from the live syscall context,
+performs an existence check. An unmasked, explicitly caught standard signal in
+the range 1 through 31 constructs the signal frame from the live syscall context,
 redirects the pending `SYSRET` into the handler, and records the architectural
 post-syscall `rcx` and `r11` values. `rt_sigreturn` then resumes at the
-instruction following `kill` with a zero result. The ring-3 proof delivers this
-self-signal after the page-fault delivery and requires exactly two complete
-delivery/return lifecycles. Foreign PIDs return `-ESRCH`, invalid signal numbers
-return `-EINVAL`, and otherwise-valid signals outside this first generated
-profile return `-ENOSYS` instead of pretending to queue them.
+instruction following `kill` with a zero result. A disposition of `SIG_IGN`
+discards the signal successfully. Default dispositions and real-time signals
+32 through 64 remain outside this bounded generation profile and return
+`-ENOSYS` instead of pretending to apply Linux termination, stop, continue, or
+queueing semantics. The ring-3 proof covers caught `SIGSEGV` and `SIGUSR1`, an
+inherited ignored `SIGUSR2`, and an unsupported default `SIGTERM`. Foreign PIDs
+return `-ESRCH`, and invalid signal numbers return `-EINVAL`.
 `rax = 200` (`__NR_tkill`) admits positive, in-range container-local TID 1.
 Zero, negative, and out-of-range identities return `-EINVAL`; other valid TIDs
-return `-ESRCH`. Signal zero probes existence, while an admitted unmasked
-`SIGSEGV` uses the same generated-signal and full-context-return path as
+return `-ESRCH`. Signal zero probes existence, while any admitted unmasked
+caught standard signal uses the same generated-signal and full-context-return path as
 `kill`. Although Linux callers should prefer `tgkill`, this bounded legacy
 entry point is retained for compatibility and has no independent delivery
 implementation.
 `rax = 234` (`__NR_tgkill`) admits the positive container-local thread group
 and thread pair `(1, 1)`, including signal zero as an existence query. Zero,
 negative, or out-of-range identities return `-EINVAL`; well-formed foreign
-thread groups or thread IDs return `-ESRCH`. An unmasked admitted `SIGSEGV`
+thread groups or thread IDs return `-ESRCH`. An unmasked admitted caught standard signal
 uses the same live-return delivery path as `kill`, and the dedicated measured
 `/bin/signal-probe` installs a fresh post-`execve` handler, exercises every
 identity class, completes one handler/`rt_sigreturn` lifecycle, then restores
 the default action before exit. It also delivers a fresh page fault under
 `SA_SIGINFO` and validates the exact handler pointers, `SEGV_MAPERR` address,
 trap number, CR2, context flags, disabled alternate-stack record, signal masks,
-and null FP-state pointer. The verifier therefore requires seven exact
+and null FP-state pointer. The verifier therefore requires ten exact
 delivery/return pairs for that measured runtime and two for the other probe
 executions.
-When that admitted caught `SIGSEGV` is blocked, `kill`, `tkill`, or `tgkill` coalesces it
-into one bounded pending bit and returns success without constructing a frame.
+When an admitted caught standard signal is blocked, `kill`, `tkill`, or
+`tgkill` coalesces it into that signal's bounded pending bit and returns success
+without constructing a frame.
 `rax = 127` (`__NR_rt_sigpending`) requires the exact eight-byte signal-set size
 and a writable output range, then reports pending signals intersected with the
 current mask. Wrong sizes return `-EINVAL`, and inaccessible output returns
-`-EFAULT` without changing pending state. Unblocking the bit with
-`rt_sigprocmask` redirects that syscall's live return into the handler, clears
-the pending bit only after the frame and return context are committed, and
+`-EFAULT` without changing pending state. `rt_sigprocmask` selects the
+lowest-numbered pending standard signal that is no longer masked, redirects
+that syscall's live return into the handler, clears only its pending bit after
+the frame and return context are committed, and
 resumes after `rt_sigprocmask` following `rt_sigreturn`. The measured signal
 runtime proves the signal remains pending while masked, the prior mask is
-reported during unblock, exactly one coalesced delivery occurs, and both mask
-and pending state are zero at teardown. The first queued generator's `si_code`
-is retained across coalescing and cleared only with the pending bit. Pending state for other signals,
-process/thread selection among multiple runnable threads, and asynchronous
-sources remain unsupported.
+reported during unblock, and both mask and pending state are zero at teardown.
+It also queues `SIGUSR2` before `SIGUSR1`, duplicates `SIGUSR1` through a
+different generator, then proves numeric priority and independent per-signal
+source metadata: `SIGUSR1` retains its first `SI_USER`, followed by `SIGUSR2`
+with `SI_TKILL`. Process/thread selection among multiple runnable threads,
+real-time queue records, and external asynchronous sources remain unsupported.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE`, or a zero-flag or
 `SS_AUTODISARM` stack of at least

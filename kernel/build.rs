@@ -22,7 +22,7 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-linked-dependency.ld");
     println!("cargo:rerun-if-changed=linux-linked-auxiliary.ld");
     println!("cargo:rerun-if-changed=linux-linked-interpreter.ld");
-    println!("cargo:rerun-if-changed=linux-exec-target.ld");
+    println!("cargo:rerun-if-changed=linux-signal-probe.ld");
     println!("cargo:rerun-if-changed=linux-exec-second.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
@@ -386,9 +386,6 @@ fn main() {
         .expect("failed to link Linux interpreter");
     assert!(status.success(), "LLD failed to link Linux interpreter");
 
-    let exec_target_script =
-        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
-            .join("linux-exec-target.ld");
     let exec_second = output.join("linux-exec-second.elf");
     let exec_second_script =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
@@ -420,6 +417,9 @@ fn main() {
     );
 
     let signal_probe = output.join("linux-signal-probe.elf");
+    let signal_probe_script =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+            .join("linux-signal-probe.ld");
     let mut signal_probe_link = Command::new(&lld);
     signal_probe_link
         .args([
@@ -433,7 +433,7 @@ fn main() {
             "ginux_linux_exec_target",
             "-T",
         ])
-        .arg(&exec_target_script)
+        .arg(&signal_probe_script)
         .arg(&signal_probe_object)
         .arg("-o")
         .arg(&signal_probe);

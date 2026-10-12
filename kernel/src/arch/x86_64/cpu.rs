@@ -290,6 +290,7 @@ const LINUX_MIN_ALT_STACK_SIZE: u64 = 2048;
 const LINUX_SS_DISABLE: u32 = 2;
 const LINUX_SS_AUTODISARM: u32 = 1 << 31;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
+const LINUX_STANDARD_SIGNAL_COUNT: u64 = 31;
 const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SI_USER: i32 = 0;
 const LINUX_SI_TKILL: i32 = -6;
@@ -589,7 +590,8 @@ static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_SIGNAL_MASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNALS: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_PENDING_SIGNAL_CODE: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_PENDING_SIGNAL_CODES: [AtomicU32; LINUX_SIGNAL_COUNT] =
+    [const { AtomicU32::new(0) }; LINUX_SIGNAL_COUNT];
 static ELF_PROBE_EXEC_IGNORED_SIGNALS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_SIGNAL_HANDLERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
     [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
@@ -3168,9 +3170,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
-    ELF_PROBE_PENDING_SIGNAL_CODE.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
     for signal in 0..LINUX_SIGNAL_COUNT {
+        ELF_PROBE_PENDING_SIGNAL_CODES[signal].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_FLAGS[signal].store(0, Ordering::SeqCst);
         ELF_PROBE_SIGNAL_RESTORERS[signal].store(0, Ordering::SeqCst);
@@ -3358,7 +3360,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
-    let expected_signal_count = if signal_probe_executed { 7 } else { 2 };
+    let expected_signal_count = if signal_probe_executed { 10 } else { 2 };
     let signal_lifecycle_valid = !LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst)
         && signal_delivery_count == expected_signal_count
         && signal_return_count == expected_signal_count
@@ -3633,7 +3635,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
     let signal_mask_restored = ELF_PROBE_SIGNAL_MASK.swap(0, Ordering::SeqCst) == 0;
     let pending_signals_cleared = ELF_PROBE_PENDING_SIGNALS.swap(0, Ordering::SeqCst) == 0;
-    let pending_signal_code_cleared = ELF_PROBE_PENDING_SIGNAL_CODE.swap(0, Ordering::SeqCst) == 0;
+    let pending_signal_codes_cleared = ELF_PROBE_PENDING_SIGNAL_CODES
+        .iter()
+        .all(|code| code.swap(0, Ordering::SeqCst) == 0);
     let ignored_signals = ELF_PROBE_EXEC_IGNORED_SIGNALS.swap(0, Ordering::SeqCst);
     let signal_actions_restored = (exec_replaced || ignored_signals == 0)
         && (0..LINUX_SIGNAL_COUNT).all(|signal| {
@@ -4063,7 +4067,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && signal_lifecycle_valid
         && signal_mask_restored
         && pending_signals_cleared
-        && pending_signal_code_cleared
+        && pending_signal_codes_cleared
         && signal_actions_restored
         && alt_stack_disabled
         && msrs_restored;
@@ -4105,7 +4109,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             signal_lifecycle_valid,
             signal_mask_restored,
             pending_signals_cleared,
-            pending_signal_code_cleared,
+            pending_signal_codes_cleared,
             signal_actions_restored,
             alt_stack_disabled,
             msrs_restored,
@@ -9912,7 +9916,7 @@ fn linux_kill(
     if !(1..=LINUX_SIGNAL_COUNT as u64).contains(&signal) {
         return LINUX_EINVAL;
     }
-    if signal != LINUX_SIGSEGV {
+    if signal > LINUX_STANDARD_SIGNAL_COUNT {
         return LINUX_ENOSYS;
     }
     let index = signal as usize - 1;
@@ -9936,7 +9940,7 @@ fn linux_kill(
     }
     if old_mask & signal_bit != 0 {
         if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & signal_bit == 0 {
-            ELF_PROBE_PENDING_SIGNAL_CODE.store(signal_code as u32, Ordering::SeqCst);
+            ELF_PROBE_PENDING_SIGNAL_CODES[index].store(signal_code as u32, Ordering::SeqCst);
         }
         ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
         return 0;
@@ -10044,17 +10048,21 @@ fn linux_deliver_pending_signal(
     user_rip: u64,
     user_rflags: u64,
 ) -> u64 {
-    let signal_bit = 1 << (LINUX_SIGSEGV - 1);
-    if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & signal_bit == 0
-        || ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst) & signal_bit != 0
-    {
+    let standard_signals = (1_u64 << LINUX_STANDARD_SIGNAL_COUNT) - 1;
+    let deliverable = ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst)
+        & !ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst)
+        & standard_signals;
+    if deliverable == 0 {
         return 0;
     }
+    let signal = u64::from(deliverable.trailing_zeros()) + 1;
+    let index = signal as usize - 1;
+    let signal_bit = 1 << (signal - 1);
     let result = linux_kill(
         1,
         (
-            LINUX_SIGSEGV,
-            ELF_PROBE_PENDING_SIGNAL_CODE.load(Ordering::SeqCst) as i32,
+            signal,
+            ELF_PROBE_PENDING_SIGNAL_CODES[index].load(Ordering::SeqCst) as i32,
         ),
         output,
         registers,
@@ -10064,7 +10072,7 @@ fn linux_deliver_pending_signal(
     );
     if result == 0 {
         ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
-        ELF_PROBE_PENDING_SIGNAL_CODE.store(0, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
     }
     result
 }
