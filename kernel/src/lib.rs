@@ -550,6 +550,21 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: virtio MMIO translation bounds verified\r\n");
     serial_write("ginux: bounded uncached MSI-X mapping active\r\n");
     serial_write("ginux: MSI-X cacheable aliases removed\r\n");
+    if !arch::x86_64::pci::verify_msix_programming_rejections(virtio_block, virtio_msix_mmio) {
+        kernel_fail("ginux: invalid MSI-X programming mutated table\r\n");
+    }
+    if !arch::x86_64::pci::program_masked_msix_vector(
+        virtio_block,
+        virtio_msix_mmio,
+        0,
+        local_apic.id,
+        33,
+    ) {
+        kernel_fail("ginux: masked MSI-X vector programming failed\r\n");
+    }
+    serial_write("ginux: invalid MSI-X programming rejected atomically\r\n");
+    serial_write("ginux: kernel-owned MSI-X vector programmed masked\r\n");
+    serial_write("ginux: MSI-X function remained disabled\r\n");
     let Some(virtio_initialization) =
         arch::x86_64::pci::initialize_without_dma(virtio_block, virtio_mmio)
     else {

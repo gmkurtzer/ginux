@@ -24,6 +24,12 @@ const MSIX_OFFSET_MASK: u32 = !MSIX_BIR_MASK;
 const MSIX_TABLE_ENTRY_SIZE: u32 = 16;
 const MSIX_PBA_BITS_PER_ENTRY: u32 = 64;
 const MSIX_PBA_ENTRY_SIZE: u32 = 8;
+const MSIX_VECTOR_MASK: u32 = 1;
+const MSI_ADDRESS_BASE: u32 = 0xfee0_0000;
+const MSI_DESTINATION_SHIFT: u32 = 12;
+const FIRST_DEVICE_VECTOR: u8 = 33;
+const LAST_DEVICE_VECTOR: u8 = 0xef;
+const SYSCALL_VECTOR: u8 = 0x80;
 const VIRTIO_COMMON: u8 = 1;
 const VIRTIO_NOTIFY: u8 = 2;
 const VIRTIO_ISR: u8 = 3;
@@ -337,6 +343,99 @@ pub(crate) fn verify_parser_rejections(device: VirtioBlockDevice) -> bool {
             device.function,
         )
         .is_none()
+}
+
+pub(crate) fn program_masked_msix_vector(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+    index: u16,
+    apic_id: u8,
+    vector: u8,
+) -> bool {
+    if index >= device.msix.vector_count
+        || !(FIRST_DEVICE_VECTOR..=LAST_DEVICE_VECTOR).contains(&vector)
+        || vector == SYSCALL_VECTOR
+    {
+        return false;
+    }
+    let control_offset = match device.msix.capability_offset.checked_add(2) {
+        Some(offset) => offset,
+        None => return false,
+    };
+    if unsafe { read_config_u16(device.bus, device.device, device.function, control_offset) }
+        & MSIX_ENABLE
+        != 0
+    {
+        return false;
+    }
+    let Some((table_physical, table_length)) = device.msix_table_region() else {
+        return false;
+    };
+    let Some(entry_offset) = usize::from(index).checked_mul(MSIX_TABLE_ENTRY_SIZE as usize) else {
+        return false;
+    };
+    let Some(entry_physical) = table_physical.checked_add(entry_offset as u64) else {
+        return false;
+    };
+    if entry_offset
+        .checked_add(MSIX_TABLE_ENTRY_SIZE as usize)
+        .is_none_or(|end| end > table_length)
+    {
+        return false;
+    }
+    let Some(entry) = mapping.address(entry_physical, MSIX_TABLE_ENTRY_SIZE as usize) else {
+        return false;
+    };
+    let message_address = MSI_ADDRESS_BASE | u32::from(apic_id) << MSI_DESTINATION_SHIFT;
+    write_mmio_u32(entry + 12, MSIX_VECTOR_MASK);
+    compiler_fence(Ordering::SeqCst);
+    if read_mmio_u32(entry + 12) & MSIX_VECTOR_MASK == 0 {
+        return false;
+    }
+    write_mmio_u32(entry, message_address);
+    write_mmio_u32(entry + 4, 0);
+    write_mmio_u32(entry + 8, u32::from(vector));
+    compiler_fence(Ordering::SeqCst);
+    read_mmio_u32(entry) == message_address
+        && read_mmio_u32(entry + 4) == 0
+        && read_mmio_u32(entry + 8) == u32::from(vector)
+        && read_mmio_u32(entry + 12) == MSIX_VECTOR_MASK
+        && unsafe { read_config_u16(device.bus, device.device, device.function, control_offset) }
+            & MSIX_ENABLE
+            == 0
+}
+
+pub(crate) fn verify_msix_programming_rejections(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+) -> bool {
+    let Some((table_physical, _)) = device.msix_table_region() else {
+        return false;
+    };
+    let Some(entry) = mapping.address(table_physical, MSIX_TABLE_ENTRY_SIZE as usize) else {
+        return false;
+    };
+    let before = [
+        read_mmio_u32(entry),
+        read_mmio_u32(entry + 4),
+        read_mmio_u32(entry + 8),
+        read_mmio_u32(entry + 12),
+    ];
+    !program_masked_msix_vector(
+        device,
+        mapping,
+        device.msix.vector_count,
+        0,
+        FIRST_DEVICE_VECTOR,
+    ) && !program_masked_msix_vector(device, mapping, 0, 0, 31)
+        && !program_masked_msix_vector(device, mapping, 0, 0, SYSCALL_VECTOR)
+        && before
+            == [
+                read_mmio_u32(entry),
+                read_mmio_u32(entry + 4),
+                read_mmio_u32(entry + 8),
+                read_mmio_u32(entry + 12),
+            ]
 }
 
 pub(crate) fn initialize_without_dma(
@@ -1143,6 +1242,19 @@ fn read_mmio_u64(address: usize) -> u64 {
     let value = unsafe { read_volatile(address as *const u64) };
     compiler_fence(Ordering::SeqCst);
     u64::from_le(value)
+}
+
+fn read_mmio_u32(address: usize) -> u32 {
+    compiler_fence(Ordering::SeqCst);
+    let value = unsafe { read_volatile(address as *const u32) };
+    compiler_fence(Ordering::SeqCst);
+    u32::from_le(value)
+}
+
+fn write_mmio_u32(address: usize, value: u32) {
+    compiler_fence(Ordering::SeqCst);
+    unsafe { write_volatile(address as *mut u32, value.to_le()) };
+    compiler_fence(Ordering::SeqCst);
 }
 
 fn write_mmio_u16(address: usize, value: u16) {

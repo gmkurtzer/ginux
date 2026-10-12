@@ -28,7 +28,9 @@ malformed interrupt metadata without mapping or programming it. See
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table
-is verified on every boot. MSI-X remains disabled and unprogrammed. See
+is verified on every boot. The kernel atomically rejects invalid programming,
+then writes one exact local-APIC message entry while keeping both that entry
+masked and MSI-X disabled. See
 [Virtio MSI-X Mapping v0](specs/kernel/virtio-msix-mapping-v0.md).
 The validated configuration regions are now mapped through a bounded,
 uncached, supervisor-only higher-half window. The kernel forces PCI bus mastering off,

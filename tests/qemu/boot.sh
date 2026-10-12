@@ -437,6 +437,13 @@ if ! grep -q '^ginux: bounded uncached MSI-X mapping active' "$output_file" ||
     exit 1
 fi
 
+if ! grep -q '^ginux: invalid MSI-X programming rejected atomically' "$output_file" ||
+    ! grep -q '^ginux: kernel-owned MSI-X vector programmed masked' "$output_file" ||
+    ! grep -q '^ginux: MSI-X function remained disabled' "$output_file"; then
+    echo "Boot test failed: masked MSI-X programming was not contained." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: virtio MMIO translation bounds verified' "$output_file"; then
     echo "Boot test failed: virtio MMIO translation was not bounded." >&2
     exit 1
