@@ -729,7 +729,7 @@ record, restores the prior mask, and uses a dedicated `IRETQ` syscall epilogue
 to restore all interrupted registers, including `rcx` and `r11`; the retried
 load then observes the newly mapped zero page. Nested delivery, pending signals,
 `SA_SIGINFO`, alternate-stack automatic disarming, user-editable `ucontext`,
-restartable syscalls, and non-page-fault signal sources remain unsupported. A page fault
+restartable syscalls, and other asynchronous signal sources remain unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
 than entering the native-domain scheduler fault path.
 `rax = 62` (`__NR_kill`) accepts PID 1 or process-group selector 0. Signal zero
@@ -742,6 +742,16 @@ self-signal after the page-fault delivery and requires exactly two complete
 delivery/return lifecycles. Foreign PIDs return `-ESRCH`, invalid signal numbers
 return `-EINVAL`, and otherwise-valid signals outside this first generated
 profile return `-ENOSYS` instead of pretending to queue them.
+`rax = 234` (`__NR_tgkill`) admits the positive container-local thread group
+and thread pair `(1, 1)`, including signal zero as an existence query. Zero,
+negative, or out-of-range identities return `-EINVAL`; well-formed foreign
+thread groups or thread IDs return `-ESRCH`. An unmasked admitted `SIGSEGV`
+uses the same live-return delivery path as `kill`, and the dedicated measured
+`/bin/signal-probe` installs a fresh post-`execve` handler, exercises every
+identity class, completes one handler/`rt_sigreturn` lifecycle, then restores
+the default action before exit. The verifier therefore requires three exact
+delivery/return pairs for that measured runtime and two for the other probe
+executions.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE` or a zero-flag stack of at least
 2048 bytes wholly contained in one currently writable probe VMA. Invalid

@@ -1571,6 +1571,10 @@ if ! grep -q '^ginux: Linux self-directed signal delivery validated' "$output_fi
     echo "Boot test failed: Linux self-directed signal delivery was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux thread-directed signal delivery validated' "$output_file"; then
+    echo "Boot test failed: Linux thread-directed signal delivery was not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux alternate signal stack delivery validated' "$output_file"; then
     echo "Boot test failed: Linux alternate signal stack delivery was not validated." >&2
     exit 1

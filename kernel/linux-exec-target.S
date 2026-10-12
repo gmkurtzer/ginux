@@ -207,6 +207,94 @@ ginux_linux_exec_target:
     cmp qword ptr [rip + .Lalt_stack + 16], 0
     jne .Lfailure
 
+#ifdef GINUX_SIGNAL_PROBE
+    lea rax, [rip + .Lsignal_handler]
+    mov qword ptr [rip + .Lsignal_action], rax
+    mov qword ptr [rip + .Lsignal_action + 8], 0x04000000
+    lea rax, [rip + .Lsignal_restorer]
+    mov qword ptr [rip + .Lsignal_action + 16], rax
+    mov qword ptr [rip + .Lsignal_action + 24], 0
+    mov edi, 11
+    lea rsi, [rip + .Lsignal_action]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    xor edi, edi
+    mov esi, 1
+    mov edx, 11
+    mov eax, 234
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, -1
+    mov esi, 1
+    mov edx, 11
+    mov eax, 234
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov edx, 11
+    mov eax, 234
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 2
+    mov esi, 1
+    mov edx, 11
+    mov eax, 234
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 2
+    mov edx, 11
+    mov eax, 234
+    syscall
+    cmp rax, -3
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 1
+    mov edx, 65
+    mov eax, 234
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 1
+    xor edx, edx
+    mov eax, 234
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, 1
+    mov esi, 1
+    mov edx, 11
+    mov eax, 234
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lsignal_count], 1
+    jne .Lfailure
+    mov qword ptr [rip + .Lsignal_action], 0
+    mov qword ptr [rip + .Lsignal_action + 8], 0
+    mov qword ptr [rip + .Lsignal_action + 16], 0
+    mov qword ptr [rip + .Lsignal_action + 24], 0
+    mov edi, 11
+    lea rsi, [rip + .Lsignal_action]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+#endif
+
     mov edi, 16
     lea rsi, [rip + .Lprocess_name]
     mov eax, 157
@@ -295,6 +383,23 @@ ginux_linux_exec_target:
     syscall
     ud2
 
+#ifdef GINUX_SIGNAL_PROBE
+.Lsignal_handler:
+    cmp edi, 11
+    jne .Lfailure
+    test rsi, rsi
+    jne .Lfailure
+    test rdx, rdx
+    jne .Lfailure
+    inc qword ptr [rip + .Lsignal_count]
+    ret
+
+.Lsignal_restorer:
+    mov eax, 15
+    syscall
+    ud2
+#endif
+
 .Lmessage:
 #ifdef GINUX_EXEC_SECOND
     .ascii "SECOND!\n"
@@ -333,5 +438,9 @@ ginux_linux_exec_target:
     .zero 24
 .Lexecutable_path:
     .zero 32
+#ifdef GINUX_SIGNAL_PROBE
+.Lsignal_count:
+    .zero 8
+#endif
 
 .section .note.GNU-stack,"",@progbits

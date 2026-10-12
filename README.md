@@ -429,8 +429,11 @@ the alternate stack cannot be replaced while active, and proves a premature
 and returns through the restorer. A dedicated `IRETQ` syscall epilogue restores
 all general registers—including `rcx` and `r11`—plus RIP, RSP, RFLAGS, and the
 prior mask before retrying the faulting load. This covers synchronous page-fault
-delivery plus one software-generated path: `kill(1, SIGSEGV)` redirects the
-live syscall return into the same handler and resumes after that syscall. Other
+delivery plus two software-generated paths: `kill(1, SIGSEGV)` and
+`tgkill(1, 1, SIGSEGV)` redirect the live syscall return into the same handler
+and resume after that syscall. The thread-directed path rejects zero or
+out-of-range identities before distinguishing absent thread groups or threads.
+Other
 pending/asynchronous sources, `SA_SIGINFO`, user-editable
 `ucontext`, nested delivery, automatic alternate-stack disarming, and syscall
 restart remain future work.

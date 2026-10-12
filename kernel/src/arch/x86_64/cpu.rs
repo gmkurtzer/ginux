@@ -74,6 +74,7 @@ const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_CLONE_SYSCALL: u64 = 56;
 const LINUX_EXECVE_SYSCALL: u64 = 59;
 const LINUX_KILL_SYSCALL: u64 = 62;
+const LINUX_TGKILL_SYSCALL: u64 = 234;
 const LINUX_CLONE_VM: u64 = 0x0000_0100;
 const LINUX_CLONE_FS: u64 = 0x0000_0200;
 const LINUX_CLONE_FILES: u64 = 0x0000_0400;
@@ -3190,9 +3191,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let futex_exit_wake_count = LINUX_FUTEX_EXIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
+    let signal_probe_executed = exec_replaced
+        && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
+    let expected_signal_count = if signal_probe_executed { 3 } else { 2 };
     let signal_lifecycle_valid = !LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst)
-        && signal_delivery_count == 2
-        && signal_return_count == 2
+        && signal_delivery_count == expected_signal_count
+        && signal_return_count == expected_signal_count
         && unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() == LinuxSignalContext::ZERO };
     if execution.tls_size != 0
         && !(child_exit_count == 2
@@ -4421,6 +4425,18 @@ extern "sysv64" fn linux_syscall_handler(
             user_rip,
             user_rflags,
         ),
+        LINUX_TGKILL_SYSCALL => match linux_tgkill_identity(first_argument, buffer) {
+            Ok(()) => linux_kill(
+                1,
+                count,
+                registers,
+                saved_registers,
+                user_stack,
+                user_rip,
+                user_rflags,
+            ),
+            Err(error) => error,
+        },
         LINUX_EXECVEAT_SYSCALL => {
             linux_execveat(first_argument, buffer, count, register(0), register(2))
         }
@@ -9582,6 +9598,20 @@ fn linux_kill(
     LINUX_SIGNAL_ACTIVE.store(true, Ordering::SeqCst);
     LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
     0
+}
+
+fn linux_tgkill_identity(thread_group: u64, thread: u64) -> Result<(), u64> {
+    if thread_group == 0
+        || thread == 0
+        || thread_group > i32::MAX as u64
+        || thread > i32::MAX as u64
+    {
+        return Err(LINUX_EINVAL);
+    }
+    if thread_group != 1 || current_linux_tid().map(u64::from) != Some(thread) {
+        return Err(LINUX_ESRCH);
+    }
+    Ok(())
 }
 
 fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {
