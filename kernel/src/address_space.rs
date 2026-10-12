@@ -200,6 +200,7 @@ pub(crate) fn verify_linux_elf_mapping(
     let mut exec_frames = [None; cpu::LINUX_EXEC_MAPPING_LIMIT];
     let mut exec_stack_frame = None;
     let mut exec_heap_frame = None;
+    let mut exec_mmap_frames = [None; 2];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [root, pdpt, directory, table, header_table] {
@@ -683,6 +684,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 exec_frames[execution_result.exec_mapping_count] = None;
             }
             exec_heap_frame = cpu::take_linux_exec_heap_frame();
+            exec_mmap_frames = cpu::take_linux_exec_mmap_frames();
             let retired_image_frames = execution_result.retired_image_frames;
             let retired_image_valid = execution_result.retired_image_count == initial_image_count
                 && retired_image_frames[..initial_image_count]
@@ -743,6 +745,17 @@ pub(crate) fn verify_linux_elf_mapping(
                     && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frames[14]])
                     && frame_is_zero(frame.address())
             });
+            let exec_mmap_frames_valid =
+                exec_mmap_frames.iter().enumerate().all(|(index, frame)| {
+                    frame.is_some_and(|frame| {
+                        frame != frames[16 + index]
+                            && !memory::frames_owned_by(
+                                memory::FrameOwner::KERNEL,
+                                &[frames[16 + index]],
+                            )
+                            && frame_is_zero(frame.address())
+                    })
+                });
             let executed = execution_result.valid
                 && execution_result.exec_replaced
                 && execution_result.exec_node == exec_node
@@ -750,7 +763,8 @@ pub(crate) fn verify_linux_elf_mapping(
                 && retired_image_valid
                 && exec_mappings_valid
                 && exec_stack_mapping_valid
-                && exec_heap_mapping_valid;
+                && exec_heap_mapping_valid
+                && exec_mmap_frames_valid;
             let mapping_removed = table_entries.add(mmap_indexes[3]).read() == 0
                 && table_entries.add(mmap_tail_indexes[3]).read() == 0;
             activate(kernel_root_physical);
@@ -764,6 +778,7 @@ pub(crate) fn verify_linux_elf_mapping(
             zero_frame(frame.address()).is_some()
         } else if (index == 15 && exec_stack_frame.is_some())
             || (index == 14 && exec_heap_frame.is_some())
+            || ((index == 16 || index == 17) && exec_mmap_frames[index - 16].is_some())
         {
             true
         } else {
@@ -783,6 +798,12 @@ pub(crate) fn verify_linux_elf_mapping(
         prepare_linux_frame(frame.address(), &[])
             && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
     });
+    let exec_mmap_frames_released = exec_mmap_frames.into_iter().all(|frame| {
+        frame.is_some_and(|frame| {
+            prepare_linux_frame(frame.address(), &[])
+                && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
+        })
+    });
     let mut original_frames_released = cleared;
     if cleared {
         for frame in frames {
@@ -797,6 +818,7 @@ pub(crate) fn verify_linux_elf_mapping(
         && exec_released
         && exec_stack_released
         && exec_heap_released
+        && exec_mmap_frames_released
         && original_frames_released;
     released
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(kernel_frames_before)

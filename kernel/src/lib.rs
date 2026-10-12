@@ -820,6 +820,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: interpreted Linux mmap reserves replaced at exec commit\r\n");
     serial_write("ginux: old interpreted Linux mmap reserve leases retired at exec\r\n");
     serial_write("ginux: replacement Linux mmap reserve leases reclaimed\r\n");
+    serial_write("ginux: static Linux mmap reserves replaced at exec commit\r\n");
+    serial_write("ginux: old static Linux mmap reserve leases retired at exec\r\n");
+    serial_write("ginux: replacement static Linux mmap reserve leases reclaimed\r\n");
     serial_write("ginux: interpreted Linux page-table hierarchy replaced atomically\r\n");
     serial_write("ginux: old interpreted Linux page-table leases retired at exec\r\n");
     serial_write("ginux: replacement Linux page-table leases reclaimed\r\n");

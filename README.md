@@ -64,14 +64,17 @@ the live CR3 and all admitted Linux ranges traverse only that owned hierarchy,
 and rejects a stale root lease without mutation. Every successful exec also
 replaces the bounded heap with a fresh zeroed RW/NX lease and resets the process
 break to the fixed heap base. The old heap is scrubbed at commit and the replacement
-lease is reclaimed after the process root becomes inactive. Interpreted replacement installs the measured
+lease is reclaimed after the process root becomes inactive. Every successful
+exec likewise replaces both inactive anonymous-map reserve leases with fresh
+zeroed generation-bound frames, scrubs the exact old leases after image commit,
+and reclaims the replacements after the process root becomes inactive.
+Interpreted replacement installs the measured
 interpreter first, lets it remap the authenticated main and both DSOs, reapplies
 RELRO, pre-materializes fresh primary and sibling TLS leases from the complete
 authenticated templates in the same transaction, restores FS to the fresh
 primary mapping, replaces the guarded sibling stack with a fresh zeroed RW/NX
-lease while preserving both guard pages, replaces both inactive anonymous-map
-reserve leases with fresh zeroed generation-bound frames, and retires the
-complete old interpreter/main/DSO graph. It also clones the complete six-frame
+lease while preserving both guard pages, and retires the complete old
+interpreter/main/DSO graph. It also clones the complete six-frame
 process page-table hierarchy into fresh generation-bound frames, applies and
 verifies the replacement image only in that inactive clone, switches CR3 after
 verification, and then scrubs and retires the old hierarchy. The fresh tables

@@ -710,6 +710,9 @@ for marker in \
     'interpreted Linux mmap reserves replaced at exec commit' \
     'old interpreted Linux mmap reserve leases retired at exec' \
     'replacement Linux mmap reserve leases reclaimed' \
+    'static Linux mmap reserves replaced at exec commit' \
+    'old static Linux mmap reserve leases retired at exec' \
+    'replacement static Linux mmap reserve leases reclaimed' \
     'interpreted Linux page-table hierarchy replaced atomically' \
     'old interpreted Linux page-table leases retired at exec' \
     'replacement Linux page-table leases reclaimed' \

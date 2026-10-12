@@ -3212,8 +3212,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let mmap_not_writable = !ELF_PROBE_MMAP_WRITABLE.swap(false, Ordering::SeqCst);
     let mmap_file_released = ELF_PROBE_MMAP_FILE.swap(0, Ordering::SeqCst) == 0;
     let mmap_address_valid = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64;
-    let mmap_frames_valid =
-        finalize_linux_exec_mmap_frames(execution.mmap_frames, interpreted_exec_replaced);
+    let mmap_frames_valid = finalize_linux_exec_mmap_frames(execution.mmap_frames, exec_replaced);
     let mmap_state_valid = mmap_inactive
         && mmap_not_writable
         && mmap_file_released
@@ -5981,7 +5980,7 @@ fn linux_execve_at(
     {
         return LINUX_ENOEXEC;
     }
-    let old_mmap_frames = if interpreted {
+    let old_mmap_frames = {
         if ELF_PROBE_MMAP_PAGES.load(Ordering::SeqCst) != 0
             || ELF_PROBE_MMAP_WRITABLE.load(Ordering::SeqCst)
             || ELF_PROBE_MMAP_FILE.load(Ordering::SeqCst) != 0
@@ -6012,9 +6011,7 @@ fn linux_execve_at(
         {
             return LINUX_ENOEXEC;
         }
-        Some([first, second])
-    } else {
-        None
+        [first, second]
     };
     if interpreted && (argument_count != 1 || environment_count != 1) {
         return LINUX_E2BIG;
@@ -6328,27 +6325,26 @@ fn linux_execve_at(
         let _ = release_linux_exec_frames(&mut exec_frames);
         return LINUX_ESRCH;
     }
-    let replacement_mmap_frames = if interpreted {
-        let Some(frames) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL) else {
-            let _ = set_current_linux_clear_child_tid(clear_child_tid);
-            let _ = set_current_linux_robust_list(robust_list);
-            let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
-            return LINUX_ENOMEM;
-        };
-        if !frames
-            .iter()
-            .all(|frame| address_space::prepare_linux_frame(frame.address(), &[]))
-        {
-            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &frames);
-            let _ = set_current_linux_clear_child_tid(clear_child_tid);
-            let _ = set_current_linux_robust_list(robust_list);
-            let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
-            return LINUX_ENOMEM;
-        }
-        Some(frames)
-    } else {
-        None
+    let Some(replacement_mmap_frames) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL)
+    else {
+        let _ = set_current_linux_clear_child_tid(clear_child_tid);
+        let _ = set_current_linux_robust_list(robust_list);
+        let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
+        let _ = release_linux_exec_frames(&mut exec_frames);
+        return LINUX_ENOMEM;
     };
+    if !replacement_mmap_frames
+        .iter()
+        .all(|frame| address_space::prepare_linux_frame(frame.address(), &[]))
+    {
+        let _ =
+            memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &replacement_mmap_frames);
+        let _ = set_current_linux_clear_child_tid(clear_child_tid);
+        let _ = set_current_linux_robust_list(robust_list);
+        let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
+        let _ = release_linux_exec_frames(&mut exec_frames);
+        return LINUX_ENOMEM;
+    }
     let image_replaced = if interpreted {
         replace_current_interpreted_linux_image(
             &mappings[..transaction_mapping_count],
@@ -6361,9 +6357,8 @@ fn linux_execve_at(
         )
     };
     if !image_replaced {
-        if let Some(frames) = replacement_mmap_frames {
-            let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &frames);
-        }
+        let _ =
+            memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &replacement_mmap_frames);
         let _ = set_current_linux_clear_child_tid(clear_child_tid);
         let _ = set_current_linux_robust_list(robust_list);
         let _ = copy_to_linux_user(clear_child_tid, &previous_tid);
@@ -6389,16 +6384,14 @@ fn linux_execve_at(
             ELF_PROBE_SIBLING_STACK_FRAME.store(frame.address(), Ordering::SeqCst);
             ELF_PROBE_SIBLING_STACK_GENERATION.store(frame.generation(), Ordering::SeqCst);
         }
-        if let (Some(old_frames), Some(new_frames)) = (old_mmap_frames, replacement_mmap_frames) {
-            ELF_PROBE_MMAP_FRAME.store(new_frames[0].address(), Ordering::SeqCst);
-            ELF_PROBE_MMAP_TAIL_FRAME.store(new_frames[1].address(), Ordering::SeqCst);
-            for (index, frame) in new_frames.into_iter().enumerate() {
-                ELF_PROBE_MMAP_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
-            }
-            if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &old_frames) {
-                return LINUX_ENOMEM;
-            }
-        }
+    }
+    ELF_PROBE_MMAP_FRAME.store(replacement_mmap_frames[0].address(), Ordering::SeqCst);
+    ELF_PROBE_MMAP_TAIL_FRAME.store(replacement_mmap_frames[1].address(), Ordering::SeqCst);
+    for (index, frame) in replacement_mmap_frames.into_iter().enumerate() {
+        ELF_PROBE_MMAP_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
+    }
+    if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &old_mmap_frames) {
+        return LINUX_ENOMEM;
     }
     ELF_PROBE_BRK.store(heap_base, Ordering::SeqCst);
     if let Some((initial, _)) = interpreted_tls {

@@ -424,9 +424,10 @@ outside this version. Interpreted exec replaces the complete process page-table
 hierarchy: it constructs the new image in an inactive six-frame clone, rejects
 forced verification failure and stale root generations without changing live
 CR3, activates the verified clone, and retires the old exact leases. Static
-exec retains its hierarchy. The inactive anonymous-mapping backing frames are replaced
-with fresh zeroed generation-bound leases after the image commit; the old exact
-leases are scrubbed and retired, and teardown reclaims the replacements.
+exec retains its hierarchy. Both exec profiles replace the inactive
+anonymous-mapping backing frames with fresh zeroed generation-bound leases
+after the image commit; the old exact leases are scrubbed and retired, and
+teardown reclaims the replacements.
 Replacing the hierarchy outside the interpreted profile is a later lifecycle
 milestone.
 
