@@ -305,6 +305,7 @@ const LINUX_SIGNAL_FRAME_CONTEXT_OFFSET: u64 = 8;
 const LINUX_SIGNAL_RED_ZONE_SIZE: u64 = 128;
 const LINUX_UC_SIGCONTEXT_SS: u64 = 0x2;
 const LINUX_UC_STRICT_RESTORE_SS: u64 = 0x4;
+const LINUX_SIGNAL_RESTORABLE_RFLAGS: u64 = 0x0005_0dd5;
 const LINUX_SS_ONSTACK: u32 = 1;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
@@ -1625,7 +1626,7 @@ impl LinuxSignalContext {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 #[repr(C)]
 struct LinuxSignalStack {
     pointer: u64,
@@ -1739,6 +1740,13 @@ struct LinuxRtSignalFrame {
     restorer: u64,
     context: LinuxSignalUserContext,
     information: LinuxSignalInformation,
+}
+
+struct LinuxRestoredSignalContext {
+    user: LinuxUserContext,
+    signal_mask: u64,
+    rcx: u64,
+    r11: u64,
 }
 
 const _: [(); 24] = [(); size_of::<LinuxSignalStack>()];
@@ -9793,6 +9801,68 @@ fn copy_linux_signal_frame(address: u64, frame: &LinuxRtSignalFrame) -> bool {
     copy_to_linux_user(address, bytes)
 }
 
+fn copy_linux_signal_frame_from_user(address: u64, frame: &mut LinuxRtSignalFrame) -> bool {
+    // SAFETY: the destination is a fully initialized, repr(C) frame and the
+    // mutable byte view spans exactly that object for bounded copy-in.
+    let bytes = unsafe {
+        core::slice::from_raw_parts_mut(
+            core::ptr::from_mut(frame).cast::<u8>(),
+            size_of::<LinuxRtSignalFrame>(),
+        )
+    };
+    copy_from_linux_user(address, bytes)
+}
+
+fn linux_restored_signal_context(
+    saved: LinuxSignalContext,
+    returned: &LinuxRtSignalFrame,
+) -> Option<LinuxRestoredSignalContext> {
+    let expected = linux_rt_signal_frame(saved, 0, LinuxSignalInformation::ZERO, 0, 0, 0);
+    let context = &returned.context;
+    let machine = &context.machine;
+    if returned.restorer != saved.signal_restorer
+        || context.flags != LINUX_UC_SIGCONTEXT_SS | LINUX_UC_STRICT_RESTORE_SS
+        || context.link != 0
+        || context.stack != expected.context.stack
+        || machine.cs != USER_CODE_SELECTOR
+        || machine.gs != 0
+        || machine.fs != 0
+        || machine.ss != USER_DATA_SELECTOR
+        || machine.fpstate != 0
+        || machine.reserved != [0; 8]
+    {
+        return None;
+    }
+    let restored = LinuxUserContext {
+        registers: LinuxSyscallFrame {
+            r15: machine.r15,
+            r14: machine.r14,
+            r13: machine.r13,
+            r12: machine.r12,
+            rbp: machine.rbp,
+            rbx: machine.rbx,
+            r10: machine.r10,
+            r9: machine.r9,
+            r8: machine.r8,
+            rdx: machine.rdx,
+            rsi: machine.rsi,
+            rdi: machine.rdi,
+        },
+        rip: machine.rip,
+        rsp: machine.rsp,
+        rflags: (saved.rflags & !LINUX_SIGNAL_RESTORABLE_RFLAGS)
+            | (machine.rflags & LINUX_SIGNAL_RESTORABLE_RFLAGS),
+        rax: machine.rax,
+        fs_base: active_fs_base(),
+    };
+    restored.is_valid().then_some(LinuxRestoredSignalContext {
+        user: restored,
+        signal_mask: context.signal_mask & !LINUX_UNBLOCKABLE_SIGNALS,
+        rcx: machine.rcx,
+        r11: machine.r11,
+    })
+}
+
 fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: u64, flags: u64) {
     let action_mask = ELF_PROBE_SIGNAL_ACTION_MASKS[index].load(Ordering::SeqCst);
     let automatic_mask = if flags & LINUX_SA_NODEFER == 0 {
@@ -10077,23 +10147,25 @@ fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64) -> u64 {
     if context.signal_stack.checked_add(8) != Some(user_stack) {
         return LINUX_EINVAL;
     }
-    let mut restorer = [0_u8; 8];
-    if !copy_from_linux_user(context.signal_stack, &mut restorer)
-        || u64::from_ne_bytes(restorer) != context.signal_restorer
-        || !context.user_context().is_valid()
-        || !write_linux_live_return(output, context.user_context())
-    {
+    let mut returned = linux_rt_signal_frame(context, 0, LinuxSignalInformation::ZERO, 0, 0, 0);
+    if !copy_linux_signal_frame_from_user(context.signal_stack, &mut returned) {
+        return LINUX_EINVAL;
+    }
+    let Some(restored) = linux_restored_signal_context(context, &returned) else {
+        return LINUX_EINVAL;
+    };
+    if !write_linux_live_return(output, restored.user) {
         return LINUX_EINVAL;
     }
     // SAFETY: the dedicated IRETQ epilogue consumes these values before this
     // serialized syscall entry can be reused.
     unsafe {
-        LINUX_SIGNAL_RAX = context.rax;
-        LINUX_SIGNAL_RCX = context.rcx;
-        LINUX_SIGNAL_R11 = context.r11;
+        LINUX_SIGNAL_RAX = restored.user.rax;
+        LINUX_SIGNAL_RCX = restored.rcx;
+        LINUX_SIGNAL_R11 = restored.r11;
         core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(LinuxSignalContext::ZERO);
     }
-    ELF_PROBE_SIGNAL_MASK.store(context.signal_mask, Ordering::SeqCst);
+    ELF_PROBE_SIGNAL_MASK.store(restored.signal_mask, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(context.alt_stack_flags, Ordering::SeqCst);
     LINUX_SIGNAL_ACTIVE.store(false, Ordering::SeqCst);
     LINUX_SIGNAL_RETURN_COUNT.fetch_add(1, Ordering::SeqCst);

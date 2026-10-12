@@ -1591,6 +1591,10 @@ if ! grep -q '^ginux: Linux rt signal frame ABI validated' "$output_file"; then
     echo "Boot test failed: Linux rt signal frame ABI was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux mutable signal context validated' "$output_file"; then
+    echo "Boot test failed: Linux mutable signal context was not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux alternate signal stack delivery validated' "$output_file"; then
     echo "Boot test failed: Linux alternate signal stack delivery was not validated." >&2
     exit 1

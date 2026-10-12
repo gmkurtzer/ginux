@@ -421,7 +421,7 @@ ginux_linux_exec_target:
     mov esi, 11
     mov eax, 200
     syscall
-    test rax, rax
+    cmp rax, 0x1234
     jne .Lfailure
     mov qword ptr [rip + .Lsignal_mode], 0
     cmp qword ptr [rip + .Lsignal_count], 5
@@ -451,7 +451,16 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lold_signal_mask], 0
+    cmp qword ptr [rip + .Lold_signal_mask], 0x800
+    jne .Lfailure
+    mov qword ptr [rip + .Lsignal_mask], 0
+    mov edi, 2
+    lea rsi, [rip + .Lsignal_mask]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
     jne .Lfailure
 #endif
 
@@ -590,6 +599,16 @@ ginux_linux_exec_target:
     jne .Lfailure
     cmp qword ptr [rdx + 296], 0
     jne .Lfailure
+    mov qword ptr [rdx + 224], 1
+    add rsp, 8
+    mov eax, 15
+    syscall
+    sub rsp, 8
+    cmp rax, -22
+    jne .Lfailure
+    mov qword ptr [rdx + 224], 0
+    mov qword ptr [rdx + 144], 0x1234
+    mov qword ptr [rdx + 296], 0x800
     mov edi, 99
     xor esi, esi
     lea rdx, [rip + .Lobserved_signal_mask]

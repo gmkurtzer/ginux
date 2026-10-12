@@ -440,9 +440,13 @@ return into the same handler and resume after that syscall. The thread-directed 
 out-of-range identities before distinguishing absent thread groups or threads.
 If this admitted signal is blocked, delivery coalesces into a pending bit;
 `rt_sigpending` reports it and `rt_sigprocmask` delivers it directly when the
-bit is unblocked while retaining the first source code. The kernel-side saved
-context remains authoritative: edits to the published `ucontext` are not yet
-restored. Floating-point/XSAVE state, other asynchronous sources, nested
+bit is unblocked while retaining the first source code. `rt_sigreturn` copies
+the complete frame back, requires the published selectors, context flags,
+alternate-stack record, null FP-state pointer, and reserved words to remain
+valid, then restores user-edited integer registers, Linux-restorable RFLAGS
+bits, and `uc_sigmask` with `SIGKILL` and `SIGSTOP` removed. A malformed frame
+fails without consuming the active context. Floating-point/XSAVE state,
+user-edited alternate-stack restoration, other asynchronous sources, nested
 delivery, automatic alternate-stack disarming, and syscall restart remain
 future work.
 `SA_NODEFER` suppresses the automatic delivered-signal mask bit while retaining

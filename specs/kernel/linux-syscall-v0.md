@@ -753,13 +753,23 @@ an already-defaulted action. Unsupported action-flag bits fail delivery with
 exact post-`ret` stack address with the registered restorer still present at
 the frame base. A premature call returns `-EINVAL` without consuming the frame.
 Successful return clears the kernel
-record, restores the prior mask, and uses a dedicated `IRETQ` syscall epilogue
-to restore all interrupted registers, including `rcx` and `r11`; the retried
-load then observes the newly mapped zero page. The published frame is currently
-observational: return restores the retained kernel snapshot rather than
-accepting user edits to `ucontext`, and no floating-point/XSAVE state is exposed
-or restored. Nested delivery, alternate-stack automatic disarming, restartable
-syscalls, and other asynchronous signal sources remain unsupported. A page fault
+record and uses a dedicated `IRETQ` syscall epilogue. Before committing that
+return, the kernel copies all 440 frame bytes back and requires the restorer,
+`uc_flags`, null link, prior alternate-stack record, CS/SS selectors, zero
+FS/GS selectors, null FP-state pointer, and reserved machine-context words to
+remain valid. It restores all user-edited integer registers, including `rax`,
+`rcx`, and `r11`; applies only Linux's `FIX_EFLAGS` set of arithmetic, tracing,
+direction, resume, and alignment-check flag bits while retaining the protected
+bits from the kernel snapshot; and installs `uc_sigmask` after removing
+`SIGKILL` and `SIGSTOP`. Frame information and trap metadata remain
+observational. A malformed frame returns `-EINVAL` without consuming the active
+context, so the handler may repair it and retry. The proof temporarily supplies
+a forbidden non-null FP-state pointer and observes that atomic rejection, then
+restores it to zero, changes saved `rax` and `uc_sigmask`, and observes both
+changes after return. Floating-point/XSAVE restoration, user-edited
+alternate-stack restoration, nested delivery, automatic alternate-stack
+disarming, restartable syscalls, and other asynchronous signal sources remain
+unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
 than entering the native-domain scheduler fault path.
 `rax = 62` (`__NR_kill`) accepts PID 1 or process-group selector 0. Signal zero
