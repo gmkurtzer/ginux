@@ -375,9 +375,13 @@ selected measured ELF pages, derives their entry and mapping addresses without
 a predeclared per-target template, atomically replaces the authenticated image
 mappings, and never returns to the old program. Allocation or pre-commit
 failure scrubs and releases all new generation-tagged frame leases before
-returning. The process owns a bounded active-image record containing the exact
-old mapping addresses. Commit replaces that record with the new plan only
-after the page-table transaction succeeds; failed transactions preserve it.
+returning. The process owns a bounded active-image record containing each old
+address, exact frame generation, and current W^X permissions. RELRO sealing
+updates that record with the leaf. Commit accepts only matching live leaves,
+replaces them with the new plan, and scrubs and releases every exact old lease
+before publishing success. Failed mapping verification preserves the old
+leaves and ownership; a stale generation and a second release are rejected
+without mutation.
 Descriptors marked
 `FD_CLOEXEC` close only after the mapping commit, while ordinary descriptors
 survive. Caught signal dispositions reset to default, ignored dispositions

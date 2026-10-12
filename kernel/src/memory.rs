@@ -260,18 +260,14 @@ impl FrameAllocator {
         None
     }
 
-    pub(crate) fn release<const N: usize>(
-        &mut self,
-        owner: FrameOwner,
-        frames: [FrameLease; N],
-    ) -> bool {
-        if N == 0
+    fn can_release(&self, owner: FrameOwner, frames: &[FrameLease]) -> bool {
+        if frames.is_empty()
             || self
                 .recycled_count
-                .checked_add(N)
+                .checked_add(frames.len())
                 .is_none_or(|count| count > MAX_RECYCLED_FRAMES)
-            || self.allocated_frames < N as u64
-            || self.live_count < N
+            || self.allocated_frames < frames.len() as u64
+            || self.live_count < frames.len()
         {
             return false;
         }
@@ -293,8 +289,15 @@ impl FrameAllocator {
                 return false;
             }
         }
+        true
+    }
+
+    fn release_slice(&mut self, owner: FrameOwner, frames: &[FrameLease]) -> bool {
+        if !self.can_release(owner, frames) {
+            return false;
+        }
         let mut staged = *self;
-        for frame in frames {
+        for frame in frames.iter().copied() {
             let Some(index) = staged.live_frames[..staged.live_count]
                 .iter()
                 .position(|live| *live == frame)
@@ -309,9 +312,17 @@ impl FrameAllocator {
             staged.recycled[staged.recycled_count] = frame;
             staged.recycled_count += 1;
         }
-        staged.allocated_frames -= N as u64;
+        staged.allocated_frames -= frames.len() as u64;
         *self = staged;
         true
+    }
+
+    pub(crate) fn release<const N: usize>(
+        &mut self,
+        owner: FrameOwner,
+        frames: [FrameLease; N],
+    ) -> bool {
+        self.release_slice(owner, &frames)
     }
 
     fn record_live(&mut self, frame: FrameLease, owner: FrameOwner) -> Option<()> {
@@ -480,6 +491,46 @@ pub(crate) fn release_frames<const N: usize>(owner: FrameOwner, frames: [FrameLe
     unsafe {
         let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
         (*allocator).release(owner, frames)
+    }
+}
+
+pub(crate) fn frame_leases_releasable(owner: FrameOwner, frames: &[FrameLease]) -> bool {
+    if !INITIALIZED.load(Ordering::Acquire) || frames.is_empty() {
+        return false;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        (*allocator).can_release(owner, frames)
+            && frames
+                .iter()
+                .all(|frame| frame.direct_map_address().is_some())
+    }
+}
+
+pub(crate) fn scrub_and_release_frames(owner: FrameOwner, frames: &[FrameLease]) -> bool {
+    if !INITIALIZED.load(Ordering::Acquire) || frames.is_empty() {
+        return false;
+    }
+    // SAFETY: The allocator and direct map are serialized by the same
+    // single-processor bootstrap contract as allocation. All ownership and
+    // release preconditions are checked before any payload is destroyed, so a
+    // stale or duplicate lease cannot scrub a newer allocation.
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        if !(*allocator).can_release(owner, frames)
+            || frames
+                .iter()
+                .any(|frame| frame.direct_map_address().is_none())
+        {
+            return false;
+        }
+        for frame in frames {
+            let Some(address) = frame.direct_map_address() else {
+                return false;
+            };
+            core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE as usize);
+        }
+        (*allocator).release_slice(owner, frames)
     }
 }
 

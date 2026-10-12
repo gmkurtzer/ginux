@@ -694,6 +694,10 @@ for marker in \
     'variable-page Linux exec images committed' \
     'Linux active image ownership transitioned' \
     'generation-bound Linux image ownership verified' \
+    'Linux RELRO ownership permissions synchronized' \
+    'stale Linux image retirement rejected' \
+    'old Linux image leases retired at exec commit' \
+    'Linux image lease double release rejected' \
     'Linux replacement frames allocated on demand' \
     'Linux replacement frame generations reclaimed'; do
     if ! grep -q "^ginux: $marker" "$output_file"; then

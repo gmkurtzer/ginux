@@ -677,6 +677,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: variable-page Linux exec images committed\r\n");
     serial_write("ginux: Linux active image ownership transitioned\r\n");
     serial_write("ginux: generation-bound Linux image ownership verified\r\n");
+    serial_write("ginux: Linux RELRO ownership permissions synchronized\r\n");
+    serial_write("ginux: stale Linux image retirement rejected\r\n");
+    serial_write("ginux: old Linux image leases retired at exec commit\r\n");
+    serial_write("ginux: Linux image lease double release rejected\r\n");
     serial_write("ginux: Linux replacement frames allocated on demand\r\n");
     serial_write("ginux: Linux replacement frame generations reclaimed\r\n");
     if !linux_elf::verify_load_plan() {

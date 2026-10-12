@@ -68,6 +68,13 @@ their first kernel or domain owner. Frame contents are zeroed and the recycle
 proof is performed through a bounds-checked supervisor-only higher-half direct
 map; lease values and page-table entries remain physical addresses.
 
+The exec commit path can submit a bounded runtime-sized slice of exact leases
+for scrub-and-release. It validates the complete batch, including direct-map
+coverage, ownership, generation, uniqueness, and recycle capacity, before
+zeroing any payload. Under the current serialized allocator contract, the
+validated batch is then zeroed and released as one commit. A stale lease or a
+second release attempt fails before memory is changed.
+
 The allocator initializes exactly once and remains live for the kernel lifetime.
 Reinitialization is rejected so no subsystem can reconstruct the UEFI inventory
 and allocate frames that already have owners. Access is serialized only by the

@@ -108,8 +108,13 @@ and materializes the selected measured bytes into them. It installs those pages
 atomically, retains the existing
 guarded stack, and removes all seven or eight pages belonging to the old image.
 Replacement leaves may overlap old leaves or occupy unused leaves; the mapping
-transaction snapshots both sets, clears the complete old image, installs the
-new W^X leaves, and restores every prior entry on verification failure. The
+transaction snapshots both sets and binds every old address to its exact live
+frame generation and current W^X permissions. It clears the complete old
+image, installs the new W^X leaves, and restores every prior entry on
+verification failure. A forged next-generation old lease is rejected before
+mutation. Once the new leaves verify, the same commit scrubs and releases every
+exact old-image lease; a second release attempt is rejected before touching the
+recycled frames. The
 post-exit verifier requires every new R/NX, RX, and RW/NX leaf to name the exact
 published lease, the committed node and variable-size active-image record to
 reproduce the same measured plan, and every removed leaf to be absent. A failed allocation,
@@ -118,6 +123,9 @@ new leases, restores the original stack, thread registrations, and page-table
 entries, and returns an error. Successful teardown runs after the process root
 is inactive, scrubs every replacement frame, releases its exact generation, and
 requires the allocator's prior live-frame count to be restored.
+An irreversible RELRO transition updates the active-image permission record at
+the same boundary, so later replacement validates the live read-only leaf
+rather than its original writable load permission.
 
 This is deliberately a bounded static profile, not a general ELF loader.
 `execve` resolves absolute or current-directory-relative normalized paths

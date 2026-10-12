@@ -43,9 +43,13 @@ selected measured executable, rebuilds bounded argument and environment vectors
 on a fresh 512-byte initial stack, and allocates and materializes up to eight
 measured ELF pages only during the transaction. It derives entry and W^X mappings from that
 runtime selection instead of a boot-predeclared target template, replaces the
-runtime-owned active-image record, removes the old image pages, applies close-on-exec and
+runtime-owned active-image record, removes the old image pages, scrubs and
+releases their exact generation-tagged leases as part of the mapping commit,
+and applies close-on-exec and
 signal/alternate-stack transition rules, installs the replacement process
-name, and exits without reviving the old program. Generation-tagged replacement
+name, and exits without reviving the old program. Stale-generation retirement
+and a second release are rejected without mutation, while RELRO permission
+changes remain synchronized with the active-image record. Generation-tagged replacement
 frames are scrubbed and released after the process root becomes inactive, with
 the prior live-frame count restored. The archive
 is not yet a general mount or a system-container image.
