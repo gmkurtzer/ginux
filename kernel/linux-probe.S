@@ -227,10 +227,13 @@ valid_interpreter_base:
     cmp qword ptr [rsp + 320], 0
     jne failure
 
-    mov edi, 1
+    push 1
+    pop rdi
     lea rsi, [rip + readable_payload]
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_eight
 
     mov edi, 0x400000
@@ -239,34 +242,47 @@ valid_interpreter_base:
 
     movabs rax, 0x0a212145424f5250
     mov qword ptr [rsp - 16], rax
-    mov edi, 1
+    push 1
+    pop rdi
     lea rsi, [rsp - 16]
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_eight
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x409ff9
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_efault
 
     xor edi, edi
     xor esi, esi
     xor edx, edx
-    mov eax, 7
+    push 7
+    pop rax
     call syscall_expect_zero
-    mov edx, 1
-    mov eax, 7
+    push 1
+    pop rdx
+    push 7
+    pop rax
     call syscall_expect_enosys
 
     mov edi, 0x405c80
-    mov esi, 5
+    push 5
+    pop rsi
     xor edx, edx
-    mov eax, 7
+    push 7
+    pop rax
     call syscall_expect_einval
     mov edi, 0x4061fc
-    mov esi, 1
-    mov eax, 7
+    push 1
+    pop rsi
+    push 7
+    pop rax
     call syscall_expect_efault
 
     mov dword ptr [0x405c80], 0
@@ -282,9 +298,11 @@ valid_interpreter_base:
     mov word ptr [0x405c9c], -1
     mov word ptr [0x405c9e], -1
     mov edi, 0x405c80
-    mov esi, 4
+    push 4
+    pop rsi
     mov edx, -1
-    mov eax, 7
+    push 7
+    pop rax
     call syscall_expect_three
     cmp word ptr [0x405c86], 0x10
     jne failure
@@ -299,15 +317,19 @@ valid_interpreter_base:
     mov word ptr [0x405ca4], 0
     mov word ptr [0x405ca6], 0x7777
     mov edi, 0x405ca0
-    mov esi, 1
+    push 1
+    pop rsi
     xor edx, edx
-    mov eax, 7
+    push 7
+    pop rax
     call syscall_expect_zero
     cmp word ptr [0x405ca6], 0
     jne failure
     mov word ptr [0x405ca6], 0x7777
-    mov edx, 1
-    mov eax, 7
+    push 1
+    pop rdx
+    push 7
+    pop rax
     call syscall_expect_enosys
     cmp word ptr [0x405ca6], 0x7777
     jne failure
@@ -328,7 +350,8 @@ valid_interpreter_base:
 
     mov qword ptr [0x405cc8], 0
     mov edi, 0x405ca0
-    mov esi, 1
+    push 1
+    pop rsi
     mov eax, 271
     call syscall_expect_zero
     cmp word ptr [0x405ca6], 0
@@ -343,7 +366,8 @@ valid_interpreter_base:
 
     mov qword ptr [0x405cd0], 0
     mov edi, 0x405c80
-    mov esi, 4
+    push 4
+    pop rsi
     xor edx, edx
     mov r10d, 0x405cd0
     mov r8d, 7
@@ -365,10 +389,13 @@ valid_interpreter_base:
     jne failure
     movabs rax, 0x0a212145424f5250
     mov qword ptr [0x407000], rax
-    mov edi, 1
+    push 1
+    pop rdi
     mov esi, 0x407000
-    mov edx, 8
-    mov eax, 1
+    push 8
+    pop rdx
+    push 1
+    pop rax
     call syscall_expect_eight
     mov edi, 1
     mov esi, 0x407079
@@ -1253,6 +1280,15 @@ linux_clone_repeat:
     pop rdx
     xor eax, eax
     call syscall_expect_eight
+    push 3
+    pop rdi
+    mov esi, 0x405d80
+    push 8
+    pop rdx
+    xor eax, eax
+    call syscall_expect_eight
+    cmp qword ptr [0x405d80], 1
+    jne failure
     push 2
     pop rdi
     mov esi, 0x405dc0
@@ -4603,6 +4639,17 @@ child_thread_probe:
 .Llinux_wait_timer_spin:
     pause
     loop .Llinux_wait_timer_spin
+    push 3
+    pop rdi
+    mov esi, 0x405d80
+    push 8
+    pop rdx
+    push 1
+    pop rax
+    call syscall_expect_eight
+    push 24
+    pop rax
+    call syscall_expect_zero
     push 3
     pop rdi
     mov esi, 0x405d80

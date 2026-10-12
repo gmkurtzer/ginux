@@ -426,6 +426,8 @@ static LINUX_POLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_EVENTFD_READ_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_EVENTFD_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -491,6 +493,7 @@ const LINUX_THREAD_WAIT_SIGNAL: u8 = 2;
 const LINUX_THREAD_WAIT_SLEEP: u8 = 3;
 const LINUX_THREAD_WAIT_POLL: u8 = 4;
 const LINUX_THREAD_WAIT_EPOLL: u8 = 5;
+const LINUX_THREAD_WAIT_EVENTFD_READ: u8 = 6;
 const LINUX_SYSCALL_FRAME_REGISTERS: usize = 12;
 static LINUX_THREAD_STATES: [AtomicU8; LINUX_THREAD_LIMIT] =
     [const { AtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
@@ -2295,6 +2298,7 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
             | LINUX_THREAD_WAIT_SLEEP
             | LINUX_THREAD_WAIT_POLL
             | LINUX_THREAD_WAIT_EPOLL
+            | LINUX_THREAD_WAIT_EVENTFD_READ
     ) || key == 0
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
         || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_NONE
@@ -3120,6 +3124,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_EPOLL_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_EPOLL_WAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_EPOLL_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_EVENTFD_READ_BLOCK_COUNT.store(0, Ordering::SeqCst);
+    LINUX_EVENTFD_READ_WAKE_COUNT.store(0, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -3481,6 +3487,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let epoll_wait_block_count = LINUX_EPOLL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let epoll_wait_wake_count = LINUX_EPOLL_WAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let epoll_wait_timeout_count = LINUX_EPOLL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
+    let eventfd_read_block_count = LINUX_EVENTFD_READ_BLOCK_COUNT.swap(0, Ordering::SeqCst);
+    let eventfd_read_wake_count = LINUX_EVENTFD_READ_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_block_count = LINUX_SIGNAL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
@@ -3500,7 +3508,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && first_child_tid != 0
             && clone_reuse_validated
             && child_gettid_count == 2
-            && yield_switch_count == 8
+            && yield_switch_count == 9
             && clone_busy_rejection_count == 2
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
@@ -3518,6 +3526,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && epoll_wait_block_count == 2
             && epoll_wait_wake_count == 1
             && epoll_wait_timeout_count == 1
+            && eventfd_read_block_count == 1
+            && eventfd_read_wake_count == 1
             && signal_wait_block_count == 2
             && signal_wait_wake_count == 1
             && signal_wait_timeout_count == 1)
@@ -3530,7 +3540,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             first_child_tid != 0,
             clone_reuse_validated,
             child_gettid_count == 2,
-            yield_switch_count == 8,
+            yield_switch_count == 9,
             clone_busy_rejection_count == 2,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
@@ -3548,6 +3558,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             epoll_wait_block_count == 2,
             epoll_wait_wake_count == 1,
             epoll_wait_timeout_count == 1,
+            eventfd_read_block_count == 1,
+            eventfd_read_wake_count == 1,
             signal_wait_block_count == 2,
             signal_wait_wake_count == 1,
             signal_wait_timeout_count == 1,
@@ -3580,6 +3592,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             epoll_wait_block_count,
             epoll_wait_wake_count,
             epoll_wait_timeout_count,
+            eventfd_read_block_count,
+            eventfd_read_wake_count,
             signal_wait_block_count,
             signal_wait_wake_count,
             signal_wait_timeout_count,
@@ -4199,7 +4213,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && first_child_tid != 0
                 && clone_reuse_validated
                 && child_gettid_count == 2
-                && yield_switch_count == 8
+                && yield_switch_count == 9
                 && clone_busy_rejection_count == 2
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
@@ -4217,6 +4231,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && epoll_wait_block_count == 2
                 && epoll_wait_wake_count == 1
                 && epoll_wait_timeout_count == 1
+                && eventfd_read_block_count == 1
+                && eventfd_read_wake_count == 1
                 && signal_wait_block_count == 2
                 && signal_wait_wake_count == 1
                 && signal_wait_timeout_count == 1)
@@ -4629,7 +4645,13 @@ extern "sysv64" fn linux_syscall_handler(
     }
     expire_linux_waits();
     match number {
-        LINUX_READ_SYSCALL => linux_descriptor_read(first_argument, buffer, count),
+        LINUX_READ_SYSCALL => linux_descriptor_read_live_return(
+            registers,
+            syscall_return,
+            first_argument,
+            buffer,
+            count,
+        ),
         LINUX_PREAD64_SYSCALL => {
             linux_regular_file_read_at(first_argument, buffer, count, register(0))
         }
@@ -8298,6 +8320,104 @@ fn linux_eventfd_read(descriptor: u64, address: u64, count: u64) -> Option<u64> 
     Some(8)
 }
 
+fn complete_linux_eventfd_read_wait(slot: usize) -> bool {
+    if slot >= LINUX_THREAD_LIMIT
+        || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
+        || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_EVENTFD_READ
+    {
+        return false;
+    }
+    let descriptor = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
+    let address = LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst);
+    let result = linux_eventfd_read(descriptor, address, 8).unwrap_or(LINUX_EBADF);
+    if result == LINUX_ENOSYS {
+        return false;
+    }
+    LINUX_THREAD_RAXS[slot].store(result, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
+    LINUX_EVENTFD_READ_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
+    true
+}
+
+fn wake_linux_eventfd_read_waits() -> u32 {
+    let mut woken = 0;
+    for slot in 0..LINUX_THREAD_LIMIT {
+        woken += u32::from(complete_linux_eventfd_read_wait(slot));
+    }
+    woken
+}
+
+fn linux_descriptor_read_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    descriptor: u64,
+    address: u64,
+    count: u64,
+) -> u64 {
+    let immediate = linux_descriptor_read(descriptor, address, count);
+    if immediate != LINUX_ENOSYS || !linux_eventfd_descriptor(descriptor) {
+        return immediate;
+    }
+    if count != 8 || !linux_writable_user_range_contains(address, 8) {
+        return LINUX_EFAULT;
+    }
+    let Some(current) = current_linux_thread_handle() else {
+        return LINUX_ESRCH;
+    };
+    let Some(target) = ready_linux_thread_handle() else {
+        return LINUX_ENOSYS;
+    };
+    let Some(tls) = linux_thread_context(current) else {
+        return LINUX_ESRCH;
+    };
+    let slot = usize::from(current.slot);
+    if !save_linux_thread_return_context(current, caller)
+        || !block_current_linux_thread(LINUX_THREAD_WAIT_EVENTFD_READ, address, descriptor, 0)
+    {
+        return LINUX_EINVAL;
+    }
+    let mut target_registers = LinuxSyscallFrame::ZERO;
+    let mut target_rip = 0;
+    let mut target_rsp = 0;
+    let mut target_rflags = 0;
+    let mut target_rax = 0;
+    if !install_linux_thread_return(
+        target,
+        &mut target_registers,
+        &mut target_rip,
+        &mut target_rsp,
+        &mut target_rflags,
+        &mut target_rax,
+    ) {
+        LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
+        LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+        LINUX_THREAD_STATES[slot].store(LINUX_THREAD_RUNNING, Ordering::SeqCst);
+        LINUX_CURRENT_THREAD_SLOT.store(current.slot, Ordering::SeqCst);
+        let _ = install_linux_tls_context(tls);
+        return LINUX_EINVAL;
+    }
+    let selected = LinuxUserContext {
+        registers: target_registers,
+        rip: target_rip,
+        rsp: target_rsp,
+        rflags: target_rflags,
+        rax: target_rax,
+        fs_base: active_fs_base(),
+    };
+    if !write_linux_live_return(output, selected) {
+        return LINUX_EINVAL;
+    }
+    LINUX_LIVE_RETURN_VALIDATED.store(true, Ordering::SeqCst);
+    LINUX_EVENTFD_READ_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+    selected.rax
+}
+
 fn linux_eventfd_write(descriptor: u64, address: u64, count: u64) -> Option<u64> {
     if !linux_eventfd_descriptor(descriptor) {
         return None;
@@ -8885,7 +9005,7 @@ fn wake_linux_epoll_waits() -> u32 {
 }
 
 fn wake_linux_descriptor_waits() -> u32 {
-    wake_linux_poll_waits() + wake_linux_epoll_waits()
+    wake_linux_poll_waits() + wake_linux_epoll_waits() + wake_linux_eventfd_read_waits()
 }
 
 fn linux_epoll_wait_live_return(

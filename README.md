@@ -406,9 +406,13 @@ registration, readiness, and data word remain live while blocked, and the
 output event is revalidated before completion. This remains a fixed two-thread,
 one-registration proof; blocking without a runnable peer returns `ENOSYS`, and
 `epoll_pwait`/`epoll_pwait2` do not yet use the blocking path. A bounded eventfd
-counter provides a signalable source for that
-epoll path, including nonblocking saturation and semaphore reads. A bounded
-monotonic timerfd adds one-shot and periodic clock-driven readiness with
+counter provides a signalable source for that epoll path, including
+nonblocking saturation and semaphore reads. With a runnable peer, a blocking
+read on an empty eventfd now sleeps in its scheduler slot until a write makes
+the counter readable; descriptor closure wakes it with `EBADF`, and its
+eight-byte output is revalidated on completion. Blocking eventfd writes and
+blocking reads from timerfd or pipes retain their explicit `ENOSYS` boundary.
+A bounded monotonic timerfd adds one-shot and periodic clock-driven readiness with
 relative or absolute arming. One bounded nonblocking pipe pair provides a
 256-byte FIFO with atomic scalar or vectored I/O, poll/epoll readiness, EOF,
 broken-peer behavior, FIFO metadata, and byte-count introspection. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
