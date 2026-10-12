@@ -88,7 +88,9 @@ The replacement must recover the exact record after initialization or repeat
 the same fail-closed rejection on corrupt media. Its second clean exit must
 again leave the device reset, authority revoked, and every owned frame scrubbed
 and released. A separate generation receives an intentionally older control
-ABI discovery version. It executes the compiled service's fatal path before
+ABI discovery version. Every compatible generation also copies and validates
+the fixed v4 structured control descriptor before reading bootstrap state. The
+incompatible generation executes the compiled service's fatal path before
 device activation; the kernel verifies the queue was inactive, contains the
 fault, revokes all resources, and starts a compatible generation that recovers
 the exact record or preserves corruption rejection. An independent stop-only auxiliary still executes a genuine

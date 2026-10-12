@@ -84,8 +84,9 @@ stack, read-only bootstrap page, one DMA lease, and only the required virtio
 MMIO pages. Kernel and service share the fixed 64-byte native bootstrap ABI v0,
 whose magic, version, size, exact feature bitmap, reserved-zero rule, mapped
 addresses, DMA device address, and opaque capability are independently
-validated. The compiled service also negotiates control ABI v4 and its required
-capability/fault-containment features before touching MMIO. One live generation
+validated. The compiled service also negotiates control ABI v4 and validates
+its fixed structured descriptor plus required capability/fault-containment
+features before touching MMIO. One live generation
 is deliberately offered an older version and must fault before device activation;
 the kernel retires it and a fresh compatible generation recovers persistent state.
 A fresh boot commits generation one to reserved sectors four and

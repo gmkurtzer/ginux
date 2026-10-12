@@ -7,10 +7,14 @@ volume service under the QEMU gate.
 
 Before touching a delegated device, a native service invokes capability-free
 control operation 0. Bits 16 through 31 of its discovery result must equal
-control ABI version 4; bits 0 and 4 must advertise opaque capabilities and
-fault containment. Unknown feature bits are ignored, while nonzero bits above
+control ABI version 4; bits 0, 4, and 10 must advertise opaque capabilities,
+fault containment, and the structured descriptor. Unknown feature bits are ignored, while nonzero bits above
 31, a different version, or a missing required feature fail closed. The shared
 Rust source provides the canonical validator and negative tests.
+After scalar discovery, the service invokes capability-free operation 10 to
+copy the fixed 16-byte v4 descriptor into writable service memory. It validates
+the size, version, required feature subset, 64-byte console limit, and reserved
+zero field before reading its bootstrap record or touching MMIO.
 The live QEMU proof also returns an older version to one compiled service
 generation. Its fatal path is contained before the virtio queue becomes active;
 the inactive device, capability, address space, and zero DMA lease are retired

@@ -1732,6 +1732,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: native service bootstrap ABI v0 validated in ring 3");
     serial_write("\r\nginux: native service lifecycle ABI v0 clean exit validated in ring 3");
     serial_write("\r\nginux: compiled native service negotiated control ABI v4");
+    serial_write("\r\nginux: compiled native service validated control descriptor v4");
     serial_write("\r\nginux: native volume service owned virtio request sequence");
     match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized => {

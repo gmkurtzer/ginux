@@ -30,6 +30,20 @@ _Static_assert(
     "bootstrap capability offset");
 _Static_assert(offsetof(struct ginux_native_service_boot_v0, reserved) == 56,
                "bootstrap reserved offset");
+_Static_assert(offsetof(struct ginux_native_control_descriptor_v4, size) == 0,
+               "control descriptor size offset");
+_Static_assert(offsetof(struct ginux_native_control_descriptor_v4, version) ==
+                   4,
+               "control descriptor version offset");
+_Static_assert(offsetof(struct ginux_native_control_descriptor_v4, features) ==
+                   6,
+               "control descriptor features offset");
+_Static_assert(offsetof(struct ginux_native_control_descriptor_v4,
+                        max_buffered_console_bytes) == 8,
+               "control descriptor console limit offset");
+_Static_assert(
+    offsetof(struct ginux_native_control_descriptor_v4, reserved) == 12,
+    "control descriptor reserved offset");
 
 #define COMPATIBLE_DISCOVERY                                                   \
     GINUX_NATIVE_CONTROL_DISCOVERY(                                            \
@@ -52,13 +66,15 @@ _Static_assert(!GINUX_NATIVE_CONTROL_ABI_IS_COMPATIBLE(
                "reserved high bits are incompatible");
 
 uint64_t ginux_native_service_v0_consumer(
-    const struct ginux_native_service_boot_v0 *boot, uint64_t discovery) {
+    const struct ginux_native_service_boot_v0 *boot, uint64_t discovery,
+    struct ginux_native_control_descriptor_v4 descriptor) {
     if (boot == NULL || boot->magic != GINUX_NATIVE_SERVICE_BOOT_MAGIC ||
         boot->version != GINUX_NATIVE_SERVICE_BOOT_VERSION ||
         boot->size != GINUX_NATIVE_SERVICE_BOOT_SIZE ||
         boot->features != GINUX_NATIVE_SERVICE_FEATURE_VIRTIO_BLOCK ||
         boot->reserved != 0 ||
-        !GINUX_NATIVE_CONTROL_ABI_IS_COMPATIBLE(discovery)) {
+        !GINUX_NATIVE_CONTROL_ABI_IS_COMPATIBLE(discovery) ||
+        !GINUX_NATIVE_CONTROL_DESCRIPTOR_IS_COMPATIBLE(descriptor)) {
         return UINT64_MAX;
     }
     return boot->device_capability;

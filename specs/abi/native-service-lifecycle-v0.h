@@ -18,7 +18,11 @@
 #define GINUX_NATIVE_CONTROL_ABI_VERSION UINT16_C(4)
 #define GINUX_NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES UINT16_C(1)
 #define GINUX_NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT UINT16_C(16)
-#define GINUX_NATIVE_CONTROL_REQUIRED_FEATURES UINT16_C(17)
+#define GINUX_NATIVE_CONTROL_FEATURE_STRUCTURED_DESCRIPTOR UINT16_C(1024)
+#define GINUX_NATIVE_CONTROL_REQUIRED_FEATURES UINT16_C(1041)
+#define GINUX_NATIVE_CONTROL_DESCRIPTOR_OPERATION UINT64_C(10)
+#define GINUX_NATIVE_CONTROL_DESCRIPTOR_SIZE UINT32_C(16)
+#define GINUX_NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES UINT32_C(64)
 #define GINUX_NATIVE_CONTROL_DISCOVERY(version, features) \
     (((uint64_t)(version) << 16) | (uint64_t)(features))
 #define GINUX_NATIVE_CONTROL_ABI_IS_COMPATIBLE(discovery)                         \
@@ -27,5 +31,25 @@
       GINUX_NATIVE_CONTROL_ABI_VERSION) &&                                        \
      (((uint64_t)(discovery) & GINUX_NATIVE_CONTROL_REQUIRED_FEATURES) ==          \
       GINUX_NATIVE_CONTROL_REQUIRED_FEATURES))
+
+struct ginux_native_control_descriptor_v4 {
+    uint32_t size;
+    uint16_t version;
+    uint16_t features;
+    uint32_t max_buffered_console_bytes;
+    uint32_t reserved;
+};
+
+_Static_assert(sizeof(struct ginux_native_control_descriptor_v4) == 16,
+               "ginux native control descriptor v4 size");
+
+#define GINUX_NATIVE_CONTROL_DESCRIPTOR_IS_COMPATIBLE(descriptor)                \
+    (((descriptor).size == GINUX_NATIVE_CONTROL_DESCRIPTOR_SIZE) &&              \
+     ((descriptor).version == GINUX_NATIVE_CONTROL_ABI_VERSION) &&               \
+     (((descriptor).features & GINUX_NATIVE_CONTROL_REQUIRED_FEATURES) ==        \
+      GINUX_NATIVE_CONTROL_REQUIRED_FEATURES) &&                                 \
+     ((descriptor).max_buffered_console_bytes ==                                 \
+      GINUX_NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES) &&                        \
+     ((descriptor).reserved == 0))
 
 #endif

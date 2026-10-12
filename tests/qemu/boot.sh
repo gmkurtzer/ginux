@@ -92,6 +92,7 @@ fi
 
 if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$output_file" ||
+    ! grep -q '^ginux: compiled native service validated control descriptor v4' "$output_file" ||
     ! grep -q '^ginux: native volume service owned virtio request sequence' "$output_file" ||
     ! grep -q '^ginux: native volume record initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: replacement native volume domain generation started' "$output_file" ||
@@ -129,6 +130,7 @@ if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboo
     ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$reboot_output_file" ||
     ! grep -q '^ginux: native service lifecycle ABI v0 clean exit validated in ring 3' "$reboot_output_file" ||
     ! grep -q '^ginux: compiled native service negotiated control ABI v4' "$reboot_output_file" ||
+    ! grep -q '^ginux: compiled native service validated control descriptor v4' "$reboot_output_file" ||
     ! grep -q '^ginux: native volume service exited cleanly and device quiesced' "$reboot_output_file" ||
     ! grep -q '^ginux: native volume record recovered after reboot' "$reboot_output_file" ||
     ! grep -q '^ginux: replacement native volume domain generation started' "$reboot_output_file" ||
@@ -156,6 +158,7 @@ if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native service lifecycle ABI v0 clean exit validated in ring 3' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: compiled native service negotiated control ABI v4' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: compiled native service validated control descriptor v4' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: disk-backed volume recovered after reboot' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: corrupt native volume media rejected without modification' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume domain generation started' "$native_corrupt_output_file" ||
@@ -3252,6 +3255,7 @@ fi
 if ! grep -q '^ginux: native volume service exited cleanly and device quiesced' "$output_file" ||
     ! grep -q '^ginux: native service lifecycle ABI v0 clean exit validated in ring 3' "$output_file" ||
     ! grep -q '^ginux: compiled native service negotiated control ABI v4' "$output_file" ||
+    ! grep -q '^ginux: compiled native service validated control descriptor v4' "$output_file" ||
     ! grep -q '^ginux: clean exit quiesced device before DMA release' "$output_file" ||
     grep -q '^ginux: native volume service fault contained and device quiesced' "$output_file"; then
     echo "Boot test failed: native service completion was not distinct from a fault." >&2

@@ -17,8 +17,13 @@ pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
 pub const NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT: u16 = 1 << 4;
-pub const NATIVE_CONTROL_REQUIRED_FEATURES: u16 =
-    NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES | NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT;
+pub const NATIVE_CONTROL_FEATURE_STRUCTURED_DESCRIPTOR: u16 = 1 << 10;
+pub const NATIVE_CONTROL_REQUIRED_FEATURES: u16 = NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES
+    | NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT
+    | NATIVE_CONTROL_FEATURE_STRUCTURED_DESCRIPTOR;
+pub const NATIVE_CONTROL_DESCRIPTOR_OPERATION: u64 = 10;
+pub const NATIVE_CONTROL_DESCRIPTOR_SIZE: u32 = 16;
+pub const NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES: u32 = 64;
 
 pub const fn native_control_abi_is_compatible(discovery: u64) -> bool {
     let version = ((discovery >> 16) & u16::MAX as u64) as u16;
@@ -27,6 +32,39 @@ pub const fn native_control_abi_is_compatible(discovery: u64) -> bool {
         && version == NATIVE_CONTROL_ABI_VERSION
         && features & NATIVE_CONTROL_REQUIRED_FEATURES == NATIVE_CONTROL_REQUIRED_FEATURES
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeControlDescriptorV4 {
+    pub size: u32,
+    pub version: u16,
+    pub features: u16,
+    pub max_buffered_console_bytes: u32,
+    pub reserved: u32,
+}
+
+impl NativeControlDescriptorV4 {
+    pub const fn zeroed() -> Self {
+        Self {
+            size: 0,
+            version: 0,
+            features: 0,
+            max_buffered_console_bytes: 0,
+            reserved: 0,
+        }
+    }
+
+    pub const fn is_compatible(&self) -> bool {
+        self.size == NATIVE_CONTROL_DESCRIPTOR_SIZE
+            && self.version == NATIVE_CONTROL_ABI_VERSION
+            && self.features & NATIVE_CONTROL_REQUIRED_FEATURES == NATIVE_CONTROL_REQUIRED_FEATURES
+            && self.max_buffered_console_bytes == NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES
+            && self.reserved == 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeControlDescriptorV4>() == 16);
+const _: () = assert!(core::mem::align_of::<NativeControlDescriptorV4>() == 4);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,6 +167,9 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_CANCELLED (UINT64_MAX - UINT64_C(5))"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_DISCOVERY_OPERATION UINT64_C(0)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_ABI_VERSION UINT16_C(4)"));
+        assert!(header.contains("GINUX_NATIVE_CONTROL_REQUIRED_FEATURES UINT16_C(1041)"));
+        assert!(header.contains("GINUX_NATIVE_CONTROL_DESCRIPTOR_OPERATION UINT64_C(10)"));
+        assert!(header.contains("sizeof(struct ginux_native_control_descriptor_v4) == 16"));
     }
 
     #[test]
@@ -165,9 +206,53 @@ mod tests {
         ));
         assert!(!native_control_abi_is_compatible(compatible & !1));
         assert!(!native_control_abi_is_compatible(compatible & !(1 << 4)));
+        assert!(!native_control_abi_is_compatible(compatible & !(1 << 10)));
         assert!(!native_control_abi_is_compatible(compatible + (1 << 16)));
         assert!(!native_control_abi_is_compatible(
             compatible | (1_u64 << 32)
         ));
+    }
+
+    #[test]
+    fn control_descriptor_v4_layout_and_validation_are_frozen() {
+        let valid = NativeControlDescriptorV4 {
+            size: NATIVE_CONTROL_DESCRIPTOR_SIZE,
+            version: NATIVE_CONTROL_ABI_VERSION,
+            features: NATIVE_CONTROL_REQUIRED_FEATURES,
+            max_buffered_console_bytes: NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES,
+            reserved: 0,
+        };
+        assert_eq!(core::mem::size_of::<NativeControlDescriptorV4>(), 16);
+        assert_eq!(core::mem::offset_of!(NativeControlDescriptorV4, size), 0);
+        assert_eq!(core::mem::offset_of!(NativeControlDescriptorV4, version), 4);
+        assert_eq!(
+            core::mem::offset_of!(NativeControlDescriptorV4, features),
+            6
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeControlDescriptorV4, max_buffered_console_bytes),
+            8
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeControlDescriptorV4, reserved),
+            12
+        );
+        assert!(valid.is_compatible());
+        assert!(!NativeControlDescriptorV4 { size: 15, ..valid }.is_compatible());
+        assert!(!NativeControlDescriptorV4 {
+            version: 3,
+            ..valid
+        }
+        .is_compatible());
+        assert!(!NativeControlDescriptorV4 {
+            features: valid.features & !(1 << 10),
+            ..valid
+        }
+        .is_compatible());
+        assert!(!NativeControlDescriptorV4 {
+            reserved: 1,
+            ..valid
+        }
+        .is_compatible());
     }
 }

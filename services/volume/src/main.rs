@@ -8,10 +8,11 @@ use core::{
 };
 
 use ginux_native_abi::{
-    native_control_abi_is_compatible, NativeServiceBootV0, NATIVE_BLOCK_WAIT_CANCELLED,
-    NATIVE_BLOCK_WAIT_FAILED, NATIVE_BLOCK_WAIT_NOTIFIED, NATIVE_BLOCK_WAIT_OPERATION,
-    NATIVE_BLOCK_WAIT_PREPARED, NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    native_control_abi_is_compatible, NativeControlDescriptorV4, NativeServiceBootV0,
+    NATIVE_BLOCK_WAIT_CANCELLED, NATIVE_BLOCK_WAIT_FAILED, NATIVE_BLOCK_WAIT_NOTIFIED,
+    NATIVE_BLOCK_WAIT_OPERATION, NATIVE_BLOCK_WAIT_PREPARED, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
+    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
     NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 use ginux_volume_format::SECTOR_SIZE;
@@ -68,6 +69,9 @@ extern "C" fn ginux_volume_service_main(info: *const NativeServiceBootV0) -> ! {
     if !native_control_abi_is_compatible(discover_control_abi()) {
         fail();
     }
+    if !discover_control_descriptor().is_compatible() {
+        fail();
+    }
     let Some(info) = (unsafe { info.as_ref() }) else {
         fail();
     };
@@ -99,6 +103,26 @@ fn discover_control_abi() -> u64 {
         );
     }
     result
+}
+
+fn discover_control_descriptor() -> NativeControlDescriptorV4 {
+    let mut descriptor = NativeControlDescriptorV4::zeroed();
+    let mut result = NATIVE_CONTROL_DESCRIPTOR_OPERATION;
+    unsafe {
+        asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("rdi") 0_u64,
+            in("rsi") &mut descriptor as *mut NativeControlDescriptorV4 as u64,
+            in("rdx") u64::from(NATIVE_CONTROL_DESCRIPTOR_SIZE),
+            options(nostack),
+        );
+    }
+    if result == u64::from(NATIVE_CONTROL_DESCRIPTOR_SIZE) {
+        descriptor
+    } else {
+        NativeControlDescriptorV4::zeroed()
+    }
 }
 
 struct VirtioBlock {
