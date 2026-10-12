@@ -98,6 +98,11 @@ then completes a valid ARP exchange through the still-authorized page. Device
 and interrupt authority are quiesced before fault recovery; translation tables,
 the guard, and the authorized DMA page are scrubbed in order afterward. See
 [Virtio Network DMA Fault v0](specs/kernel/virtio-network-dma-fault-v0.md).
+A separate freestanding Rust network-service PIE now builds for
+`x86_64-unknown-none`, validates native control ABI v4, and reports completion
+through the stable lifecycle ABI. It is not yet authenticated, loaded, or
+granted device authority. See
+[Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table

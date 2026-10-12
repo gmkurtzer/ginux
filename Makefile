@@ -9,12 +9,13 @@ EFI_DESTINATION := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 LINUX_PROBE := build/linux-probe.elf
 LINUX_DYNAMIC_DIR := build/linux-dynamic
 VOLUME_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-volume-service-runtime
+NETWORK_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-network-service-runtime
 INITRAMFS := build/initramfs-v0.cpio
 SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image linux-probe volume-service abi-conformance build run test check fmt gate clean
+.PHONY: help doctor manifest system-image linux-probe network-service volume-service abi-conformance build run test check fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -23,6 +24,7 @@ help:
 	@echo "  make manifest Regenerate the signed development boot inputs"
 	@echo "  make system-image Build the pinned minimal system-container candidate"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
+	@echo "  make network-service Build the freestanding isolated network service"
 	@echo "  make volume-service Build the freestanding isolated volume service"
 	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
 	@echo "  make build   Build the x86-64 UEFI image"
@@ -36,7 +38,7 @@ help:
 doctor:
 	@tools/qemu/doctor.sh
 
-manifest: linux-probe volume-service
+manifest: linux-probe network-service volume-service
 	@mkdir -p "$(dir $(INITRAMFS))"
 	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
 	@test -s "$(INITRAMFS)"
@@ -62,6 +64,11 @@ volume-service:
 	@cargo build --package ginux-volume-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
 	@test -f "$(VOLUME_SERVICE)"
 	@echo "Built $(VOLUME_SERVICE)"
+
+network-service:
+	@cargo build --package ginux-network-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
+	@test -f "$(NETWORK_SERVICE)"
+	@echo "Built $(NETWORK_SERVICE)"
 
 abi-conformance:
 	@clang -target x86_64-none-elf -std=c11 -ffreestanding -fsyntax-only \
@@ -91,6 +98,7 @@ check: manifest
 	@cargo test --package ginux-volume-format
 	@cargo clippy --package ginux-volume-service -- -D warnings
 	@cargo test --package ginux-volume-service
+	@cargo clippy --package ginux-network-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-volume-service-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-manifest-tool -- -D warnings
 
