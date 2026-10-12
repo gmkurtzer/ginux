@@ -593,6 +593,11 @@ if ! grep -q '^ginux: pinned minimal system profile accepted' "$output_file"; th
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux process lifecycle contract validated' "$output_file"; then
+    echo "Boot test failed: the bounded Linux process lifecycle contract was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     echo "Boot test failed: the minimal system init was not planned." >&2
     exit 1

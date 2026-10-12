@@ -1231,6 +1231,12 @@ finally uses `rax = 231`
 Final process exit closes every open descriptor in the bounded table before
 retiring the last thread. A non-leader thread's `exit` does not close the
 process-shared descriptor table.
+The separate bounded process-lifecycle contract records generation-checked
+process identities, parentage, exclusive address-space-root ownership,
+exit-to-zombie ordering, and parent-only reap. It is currently an internal
+boot-verified model and is not reachable through this syscall profile. In
+particular, the exact bounded `clone` below remains thread-only and `fork`,
+process-style `clone`, and `wait4` remain unsupported.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;

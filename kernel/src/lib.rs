@@ -10,6 +10,7 @@ mod executable;
 mod initramfs;
 mod ipc;
 mod linux_elf;
+mod linux_process;
 mod manifest;
 mod memory;
 mod network;
@@ -627,6 +628,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: minimal system profile unreadable\r\n");
     }
     serial_write("ginux: pinned minimal system profile accepted\r\n");
+    if !linux_process::verify_lifecycle_contract() {
+        kernel_fail("ginux: bounded Linux process lifecycle contract invalid\r\n");
+    }
+    serial_write("ginux: bounded Linux process lifecycle contract validated\r\n");
     let Some(system_init_node) = initramfs::published_regular_file_node(b"sbin/init") else {
         kernel_fail("ginux: minimal system init missing\r\n");
     };
