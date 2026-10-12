@@ -533,8 +533,8 @@ executable-install profile. The scratch window has four page slots over
 null hint selects the lowest contiguous free run. Alternatively, anonymous
 `MAP_FIXED_NOREPLACE` requires an exact page-aligned free subrange wholly inside
 that window and returns `-EEXIST` without mutation if any selected slot is
-active. Its anonymous form otherwise requires a nonzero page-multiple length no
-larger than 16384 bytes,
+active. Its anonymous form otherwise requires a nonzero length that rounds up
+to no more than four pages,
 `PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
 MAP_ANONYMOUS`, fd -1, and offset zero, and allocates and installs zero-filled
 generation-bound RW/NX frame leases.
@@ -607,8 +607,9 @@ are released; the kernel-owned live-frame count must return to its
 pre-execution value. This is bounded userspace-owned loading for two
 preauthenticated images and one fixed dependency window, not ASLR, a general
 executable allocator, or authority to map unauthenticated bytes.
-`rax = 11` (`__NR_munmap`) accepts any page-aligned subrange of the four-page
-scratch window, including mapped pages, holes, or both. It clears the selected
+`rax = 11` (`__NR_munmap`) accepts any page-aligned address and nonzero length
+that rounds to a subrange of the four-page scratch window, including mapped
+pages, holes, or both. It clears the selected
 hardware leaves, invalidates their TLB entries, and scrubs the physical frames
 before returning their exact generation leases to the allocator. A partial
 removal rebuilds the registry around the holes while preserving every remaining
@@ -632,7 +633,7 @@ window, arbitrary files, demand paging, and mapping growth are unsupported.
 Outside the scratch window, fixed placement is available only for the seven
 admitted main pages and two admitted dependency pages described above.
 `rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for a fully mapped
-one- through four-page anonymous range. The range may cross adjacent registry
+nonzero range rounding to one through four anonymous pages. The range may cross adjacent registry
 records. Immutable-file mappings reject advice with `-EINVAL`. For an anonymous
 range it validates that every leaf still maps its allocator-owned frame, then
 zeros the frames through the supervisor direct map without changing their
@@ -640,8 +641,9 @@ present, user, NX, or writable state. The proof also discards a sealed one-page
 read-only mapping, observes zeroes from ring 3, and unmaps it normally. Other
 advice, ranges, or inactive mappings return `-EINVAL` without changing the
 contents. There is no paging policy, reclamation queue, or lazy refill.
-`rax = 27` (`__NR_mincore`) accepts either kind of fully mapped one- through
-four-page range, including a range crossing adjacent registry records, and atomically
+`rax = 27` (`__NR_mincore`) accepts either kind of fully mapped nonzero range
+rounding to one through four pages, including a range crossing adjacent
+registry records, and atomically
 writes one resident byte per page to a fully validated vector. It returns
 `-ENOMEM` when any requested page is unmapped. Misaligned or out-of-window
 ranges return `-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only
@@ -834,14 +836,14 @@ word returns `-EFAULT`. Timeouts, bitsets, requeueing, priority inheritance,
 multiple waiters, and cross-process keys remain undefined.
 
 `rax = 10` (`__NR_mprotect`) supports an irreversible transition on either the
-page named by the parsed `PT_GNU_RELRO` range or one complete page, or both
-pages, of an active anonymous area. The selected pages become read-only/NX.
-Sealing one page of a two-page area splits its registry record into independent
-one-page entries and preserves the other page's write permission and file-kind
-metadata. The RELRO seal lasts for the process lifetime; an anonymous seal
+page named by the parsed `PT_GNU_RELRO` range or a page-aligned scratch address
+plus a nonzero length rounding to one through four active pages. The selected
+pages become read-only/NX. Sealing a subrange rebuilds independent registry
+runs and preserves every other page's write permission and file-kind metadata.
+The RELRO seal lasts for the process lifetime; an anonymous seal
 lasts until unmap, and a later mapping starts from freshly scrubbed RW/NX
-frames. The normalized range must be present and page-aligned, and the only
-accepted protection is `PROT_READ`. A two-page range can span two independent
+frames. The rounded range must be present, its address must be page-aligned,
+and the only accepted protection is `PROT_READ`. A range can span independent
 adjacent writable entries; holes, mixed read-only entries, and all other
 requests return `-EINVAL`. Before changing any page, the kernel
 validates ownership and writable/NX permissions for every leaf. It then clears

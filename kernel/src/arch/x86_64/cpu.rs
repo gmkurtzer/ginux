@@ -4163,7 +4163,6 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_MPROTECT_SYSCALL => {
             if !first_argument.is_multiple_of(PAGE_SIZE as u64)
                 || buffer == 0
-                || !buffer.is_multiple_of(PAGE_SIZE as u64)
                 || count != LINUX_PROT_READ
             {
                 return LINUX_EINVAL;
@@ -5189,15 +5188,11 @@ fn linux_mmap_rebuild_areas(slots: [Option<(bool, u8)>; LINUX_MMAP_SLOT_COUNT]) 
 
 fn linux_mmap_range_slots(address: u64, length: u64) -> Option<(usize, usize)> {
     let base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
-    if !address.is_multiple_of(PAGE_SIZE as u64)
-        || address < base
-        || length == 0
-        || !length.is_multiple_of(PAGE_SIZE as u64)
-    {
+    if !address.is_multiple_of(PAGE_SIZE as u64) || address < base || length == 0 {
         return None;
     }
     let start = usize::try_from((address - base) / PAGE_SIZE as u64).ok()?;
-    let pages = usize::try_from(length / PAGE_SIZE as u64).ok()?;
+    let pages = usize::try_from(length.div_ceil(PAGE_SIZE as u64)).ok()?;
     (start < LINUX_MMAP_SLOT_COUNT
         && start
             .checked_add(pages)
@@ -5206,10 +5201,10 @@ fn linux_mmap_range_slots(address: u64, length: u64) -> Option<(usize, usize)> {
 }
 
 fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, offset: u64) -> u64 {
-    if length == 0 || !length.is_multiple_of(PAGE_SIZE as u64) {
+    if length == 0 {
         return LINUX_EINVAL;
     }
-    let Ok(pages) = u8::try_from(length / PAGE_SIZE as u64) else {
+    let Ok(pages) = u8::try_from(length.div_ceil(PAGE_SIZE as u64)) else {
         return LINUX_EINVAL;
     };
     if usize::from(pages) > LINUX_MMAP_SLOT_COUNT {

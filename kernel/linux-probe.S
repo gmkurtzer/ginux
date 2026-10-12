@@ -440,7 +440,7 @@ valid_interpreter_base:
     mov edi, 0x40b000
     mov esi, 4095
     mov eax, 11
-    call syscall_expect_einval
+    call syscall_expect_zero
     mov esi, 4096
     mov eax, 11
     call syscall_expect_zero
@@ -914,6 +914,70 @@ valid_interpreter_base:
     mov esi, 0x40e000
     mov eax, 1
     call syscall_expect_efault
+
+    # Linux rounds every nonzero scratch length up to a page.
+    xor edi, edi
+    mov esi, 1
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
+    jne failure
+    mov qword ptr [0x40b000], 17
+    mov edi, 0x40b000
+    mov esi, 1
+    mov eax, 11
+    call syscall_expect_zero
+    mov edi, 1
+    mov esi, 0x40b000
+    mov edx, 8
+    mov eax, 1
+    call syscall_expect_efault
+
+    xor edi, edi
+    mov esi, 4097
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
+    jne failure
+    mov qword ptr [0x40b000], 18
+    mov qword ptr [0x40c000], 19
+    mov byte ptr [0x40594a], 0
+    mov byte ptr [0x40594b], 0
+    mov edi, 0x40b000
+    mov esi, 4097
+    mov edx, 0x40594a
+    mov eax, 27
+    call syscall_expect_zero
+    cmp byte ptr [0x40594a], 1
+    jne failure
+    cmp byte ptr [0x40594b], 1
+    jne failure
+    mov edi, 0x40c000
+    mov esi, 1
+    mov edx, 1
+    mov eax, 10
+    call syscall_expect_zero
+    mov edi, 0x40b000
+    mov esi, 4097
+    mov eax, 11
+    call syscall_expect_zero
+
+    xor edi, edi
+    mov esi, 16385
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    call syscall_expect_einval
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     xor edi, edi

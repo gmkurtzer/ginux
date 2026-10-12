@@ -443,7 +443,9 @@ ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
 A four-page fixed `mmap` registry can install page-aligned private areas of one
 through four pages in its reserved virtual window. Physical frames are allocated
-only when a mapping is admitted. Anonymous areas are RW/NX,
+only when a mapping is admitted. Every nonzero scratch length is rounded up to
+a page consistently across mapping, protection, residency, discard, and unmap;
+a rounded request requiring more than four pages is rejected. Anonymous areas are RW/NX,
 removed from the hardware page table by exact `munmap`, scrubbed, and proven
 zero on reuse. Bounded `MADV_DONTNEED` also zeros an anonymous area in place
 without widening a sealed read-only area, while `mincore` reports each page

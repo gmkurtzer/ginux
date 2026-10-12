@@ -1699,6 +1699,11 @@ if ! grep -q '^ginux: bounded anonymous fixed mmap placement validated' "$output
     exit 1
 fi
 
+if ! grep -q '^ginux: page-rounded Linux mmap lengths validated' "$output_file"; then
+    echo "Boot test failed: page-rounded Linux mmap lengths were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux mmap frames allocated on demand' "$output_file"; then
     echo "Boot test failed: Linux mmap frames were not allocated on demand." >&2
     exit 1
