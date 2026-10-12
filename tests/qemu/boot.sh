@@ -674,7 +674,7 @@ if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$outpu
     exit 1
 fi
 
-if [[ "$(grep -c '^EXEC_OK' "$output_file")" -ne 1 ]] ||
+if [[ "$(grep -c '^SIGNAL!' "$output_file")" -ne 1 ]] ||
     [[ "$(grep -c '^SECOND!' "$output_file")" -ne 1 ]] ||
     [[ "$(grep -c '^DYNEXEC' "$output_file")" -ne 1 ]]; then
     echo "Boot test failed: all measured replacement Linux images did not execute." >&2

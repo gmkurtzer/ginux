@@ -3540,7 +3540,7 @@ pub(crate) fn verify_linked_probe() -> bool {
         && read_only_valid
         && executable_valid
         && writable_valid
-        && crate::address_space::verify_linux_elf_mapping(&plan, 1, 1, b"bin/exec-target")
+        && crate::address_space::verify_linux_elf_mapping(&plan, 1, 1, b"bin/signal-probe")
 }
 
 pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usize) -> bool {

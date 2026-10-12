@@ -618,23 +618,24 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: persistent read-only root publication failed\r\n");
     }
     serial_write("ginux: measured root published in kernel-owned memory\r\n");
-    let Some(exec_target_node) = initramfs::published_regular_file_node(b"bin/exec-target") else {
-        kernel_fail("ginux: measured Linux exec target missing\r\n");
-    };
-    let Some(exec_target) = initramfs::published_file_by_node(exec_target_node) else {
-        kernel_fail("ginux: measured Linux exec target unreadable\r\n");
-    };
     let Some(exec_second_node) = initramfs::published_regular_file_node(b"bin/exec-second") else {
         kernel_fail("ginux: second measured Linux exec target missing\r\n");
     };
     let Some(exec_second) = initramfs::published_file_by_node(exec_second_node) else {
         kernel_fail("ginux: second measured Linux exec target unreadable\r\n");
     };
-    let Some(exec_target_plan) = linux_elf::measured_static_exec_plan(exec_target) else {
-        kernel_fail("ginux: measured Linux exec target invalid\r\n");
+    let Some(signal_probe_node) = initramfs::published_regular_file_node(b"bin/signal-probe")
+    else {
+        kernel_fail("ginux: measured Linux signal probe missing\r\n");
+    };
+    let Some(signal_probe) = initramfs::published_file_by_node(signal_probe_node) else {
+        kernel_fail("ginux: measured Linux signal probe unreadable\r\n");
     };
     let Some(exec_second_plan) = linux_elf::measured_static_exec_plan(exec_second) else {
         kernel_fail("ginux: second measured Linux exec target invalid\r\n");
+    };
+    let Some(signal_probe_plan) = linux_elf::measured_static_exec_plan(signal_probe) else {
+        kernel_fail("ginux: measured Linux signal probe invalid\r\n");
     };
     let measured_file = |name: &[u8]| {
         initramfs::published_regular_file_node(name).and_then(initramfs::published_file_by_node)
@@ -662,7 +663,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || dynamic_plan.process.main_entry != 0x40_0100
         || dynamic_plan.dependency_bases != [0x61_0000, 0x63_0000]
         || linux_elf::measured_interpreted_exec_plan(
-            exec_target,
+            signal_probe,
             dynamic_interpreter,
             [dynamic_dependency, dynamic_auxiliary],
         )
@@ -684,13 +685,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: measured-root Linux interpreted exec graph planned\r\n");
     serial_write("ginux: measured-root Linux graph substitution rejected\r\n");
-    if exec_target == exec_second
-        || exec_target_plan.executable.virtual_page == exec_second_plan.executable.virtual_page
-        || exec_target_plan.executable.page_count != 1
+    if signal_probe == exec_second
+        || signal_probe_plan.executable.virtual_page == exec_second_plan.executable.virtual_page
+        || signal_probe_plan.executable.page_count != 1
         || exec_second_plan.executable.page_count != 2
     {
         kernel_fail("ginux: measured Linux exec target invalid\r\n");
     }
+    serial_write("ginux: dedicated measured Linux signal runtime planned\r\n");
     serial_write("ginux: multiple measured Linux exec targets planned\r\n");
     if !linux_elf::verify_parser() {
         kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");

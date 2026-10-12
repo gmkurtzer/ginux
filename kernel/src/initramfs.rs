@@ -263,10 +263,10 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
             .find(b"linux/libginux-aux.so")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive
-            .find(b"bin/exec-target")
+            .find(b"bin/exec-second")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive
-            .find(b"bin/exec-second")
+            .find(b"bin/signal-probe")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive.find(b"missing").is_none()
 }
@@ -802,10 +802,10 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
             .lookup(b"linux/libginux-aux.so")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root
-            .lookup(b"bin/exec-target")
+            .lookup(b"bin/exec-second")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root
-            .lookup(b"bin/exec-second")
+            .lookup(b"bin/signal-probe")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root.lookup(b"missing").is_none()
         && root.lookup(b"../init").is_none()

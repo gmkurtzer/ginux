@@ -26,7 +26,9 @@ The generated proof contains `bin`, `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
 `etc/os-release`, `etc/motd`, and four build-produced Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and auxiliary
 DSO. Two distinct static exec targets are published at their Linux-visible
-measured-root paths `bin/exec-target` and `bin/exec-second`. The hostname is immutable mode `0555` with exact contents
+measured-root paths `bin/signal-probe` and `bin/exec-second`. The first is a
+dedicated measured signal-runtime fixture with a one-page RX profile, while the
+second retains the independent two-page RX layout. The hostname is immutable mode `0555` with exact contents
 `ginux\n`; `os-release` is immutable mode `0555` with exact contents
 `NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`; and the nested
 state file contains `ready\n` and the version marker contains `0\n`. The archive

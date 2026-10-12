@@ -180,7 +180,7 @@ bounded immutable-root directory state, not a mutable or general VFS.
 `rax = 89` (`__NR_readlink`) recognizes exactly `/proc/self/exe`, copied as a
 bounded NUL-terminated pathname. It returns `/init` without a terminator before
 replacement, remains `/init` after interpreted self-replacement, and reports
-`/bin/exec-target` or `/bin/exec-second` after a static `execve` commit. Each
+`/bin/signal-probe` or `/bin/exec-second` after a static `execve` commit. Each
 rejected exec leaves the original identity visible. A zero output size returns
 `-EINVAL`; invalid pathname or output ranges return `-EFAULT`. Other paths
 return `-ENOENT`. This is not a general procfs.
@@ -357,7 +357,7 @@ contract below.
 single-threaded proof process. Absolute and current-directory-relative
 normalized paths resolve through the retained measured-root index. The selected
 node must be an executable regular file and must match the admitted static ELF
-profile. The independently built `bin/exec-target` and `bin/exec-second`
+profile. The independently built `bin/signal-probe` and `bin/exec-second`
 fixtures both execute, proving selection is based on the measured bytes and
 profile rather than equality with one kernel-compiled artifact or one virtual
 base. The second fixture uses a distinct four-page layout containing one
@@ -366,7 +366,7 @@ admits one through eight pointers and `envp` zero
 through eight, each terminated by a null pointer. Each string is limited to 63
 bytes plus its terminator, and the complete rebuilt initial stack is limited to
 512 bytes. The proof supplies
-`["/bin/exec-target", "exec-target", NULL]` and
+`["/bin/signal-probe", "signal-probe", NULL]` and
 `["GINUX_EXEC=1", NULL]`, while also rejecting an empty argument vector and a
 ninth argument. Unknown paths return `-ENOENT`, non-regular or non-executable
 nodes return `-EACCES`, executable files outside the admitted ELF profile return
@@ -392,7 +392,7 @@ survive. Caught signal dispositions reset to default, ignored dispositions
 remain ignored, the alternate signal stack becomes disabled, the signal mask
 and `no_new_privs` remain unchanged, and the process name becomes the selected
 node's bounded basename. The canonical measured-root node is retained as
-process state, so `/proc/self/exe` reports `/bin/exec-target` or
+process state, so `/proc/self/exe` reports `/bin/signal-probe` or
 `/bin/exec-second` independently of the accepted pathname form. Each
 replacement validates these transitions, reopens `/dev/console`, validates its
 complete initial stack, including target-specific program-header, entry,

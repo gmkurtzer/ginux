@@ -91,7 +91,9 @@ growth therefore fails at build time instead of overlapping the writable load
 or silently exceeding the runtime loader profile.
 
 Two distinct LLD-produced static images are retained directly under the
-measured-root names `bin/exec-target` and `bin/exec-second`. Each bounded plan has one
+measured-root names `bin/signal-probe` and `bin/exec-second`. The signal image
+provides independent growth space for signal-runtime behavior without changing
+the full five-page primary workload. Each bounded plan has one
 R/NX header page followed by one RX page entered at offset `0x100` and one
 RW/NX page. The first uses `0x3ff000`, `0x400000`, and `0x401000`; the second
 uses `0x40f000`, `0x410000`, and `0x411000`. Boot requires both measured files to match their

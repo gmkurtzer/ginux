@@ -40,7 +40,9 @@ The publication index now admits 64 nodes and is exercised beyond its original
 16-node limit. Open, metadata, and access checks share that lookup. The current native
 `init` remains a format marker, not PID 1, but the Linux-visible `/init`,
 and `/lib64/*` paths map to internal measured-root entries, while
-`/bin/exec-target` and `/bin/exec-second` are direct measured-root nodes. The complete dynamic
+`/bin/signal-probe` and `/bin/exec-second` are direct measured-root nodes. The
+first is a dedicated one-page RX signal-runtime profile, leaving the full
+five-page primary workload unchanged. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
 single-threaded `execve` proof atomically replaces two independent static workloads and
 the running interpreted `/init` graph with the selected measured executable, rebuilds up to eight bounded argument and eight environment entries
@@ -509,7 +511,7 @@ components are rejected. Paths and outputs remain fixed-size, and no mutable
 VFS is implied.
 Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
 `readlink` result is `/init` before replacement and the selected canonical
-`/bin/exec-target` or `/bin/exec-second` path after
+`/bin/signal-probe` or `/bin/exec-second` path after
 the bounded exec commit; rejected exec calls retain the old identity.
 An immutable runtime-file view exposes the exact authenticated `/init`,
 `/lib64/ld-ginux.so`, `/lib64/libginux.so`, and `/lib64/libginux-aux.so` bytes
@@ -525,7 +527,7 @@ the authenticated main and both dependency segments admitted by that exact plan.
 The separate static proofs resolve normalized absolute or current-directory-relative
 `execve` paths through the measured root, then admit any measured regular file
 that satisfies the bounded static ELF execution profile. The two
-independently linked fixtures, `bin/exec-target` and `bin/exec-second`, prove
+independently linked fixtures, `bin/signal-probe` and `bin/exec-second`, prove
 selection is neither compiled-byte nor fixed-address identity: the second image
 uses an independent header, two-page text segment, and data base. The profile
 allows one header page, up to five executable pages, up to two writable pages,
@@ -643,7 +645,7 @@ static artifact at `build/linux-probe.elf` and the dynamic fixtures at
 `build/linux-dynamic/linux-linked-main.elf`, and
 `build/linux-dynamic/libginux.so`. It also emits the bounded dependency-list
 fixtures `linux-linked-graph-main.elf`, `libginux-aux.so`,
-`linux-exec-target.elf`, and `linux-exec-second.elf` for inspection
+`linux-signal-probe.elf`, and `linux-exec-second.elf` for inspection
 and the deterministic proof root at `build/initramfs-v0.cpio` without assembling the EFI
 filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and

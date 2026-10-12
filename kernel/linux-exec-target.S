@@ -7,21 +7,33 @@ ginux_linux_exec_target:
     cmp qword ptr [rsp], 2
     jne .Lfailure
     mov rax, qword ptr [rsp + 8]
+#ifdef GINUX_SIGNAL_PROBE
+    movabs rcx, 0x6769732f6e69622f
+#else
     movabs rcx, 0x6578652f6e69622f
+#endif
     cmp qword ptr [rax], rcx
     jne .Lfailure
 #ifdef GINUX_EXEC_SECOND
     movabs rcx, 0x646e6f6365732d63
+#elif defined(GINUX_SIGNAL_PROBE)
+    movabs rcx, 0x626f72702d6c616e
 #else
     movabs rcx, 0x7465677261742d63
 #endif
     cmp qword ptr [rax + 8], rcx
     jne .Lfailure
+#ifdef GINUX_SIGNAL_PROBE
+    cmp word ptr [rax + 16], 0x65
+#else
     cmp byte ptr [rax + 16], 0
+#endif
     jne .Lfailure
     mov rax, qword ptr [rsp + 16]
 #ifdef GINUX_EXEC_SECOND
     movabs rcx, 0x6365732d63657865
+#elif defined(GINUX_SIGNAL_PROBE)
+    movabs rcx, 0x702d6c616e676973
 #else
     movabs rcx, 0x7261742d63657865
 #endif
@@ -29,10 +41,16 @@ ginux_linux_exec_target:
     jne .Lfailure
 #ifdef GINUX_EXEC_SECOND
     cmp dword ptr [rax + 8], 0x00646e6f
+#elif defined(GINUX_SIGNAL_PROBE)
+    cmp dword ptr [rax + 8], 0x65626f72
 #else
     cmp dword ptr [rax + 8], 0x00746567
 #endif
     jne .Lfailure
+#ifdef GINUX_SIGNAL_PROBE
+    cmp byte ptr [rax + 12], 0
+    jne .Lfailure
+#endif
     cmp qword ptr [rsp + 24], 0
     jne .Lfailure
     mov rax, qword ptr [rsp + 32]
@@ -197,6 +215,8 @@ ginux_linux_exec_target:
     jne .Lfailure
 #ifdef GINUX_EXEC_SECOND
     movabs rcx, 0x6365732d63657865
+#elif defined(GINUX_SIGNAL_PROBE)
+    movabs rcx, 0x702d6c616e676973
 #else
     movabs rcx, 0x7261742d63657865
 #endif
@@ -204,6 +224,8 @@ ginux_linux_exec_target:
     jne .Lfailure
 #ifdef GINUX_EXEC_SECOND
     cmp dword ptr [rip + .Lprocess_name + 8], 0x00646e6f
+#elif defined(GINUX_SIGNAL_PROBE)
+    cmp dword ptr [rip + .Lprocess_name + 8], 0x65626f72
 #else
     cmp dword ptr [rip + .Lprocess_name + 8], 0x00746567
 #endif
@@ -214,13 +236,23 @@ ginux_linux_exec_target:
     mov edx, 32
     mov eax, 89
     syscall
+#ifdef GINUX_SIGNAL_PROBE
+    cmp rax, 17
+#else
     cmp rax, 16
+#endif
     jne .Lfailure
+#ifdef GINUX_SIGNAL_PROBE
+    movabs rcx, 0x6769732f6e69622f
+#else
     movabs rcx, 0x6578652f6e69622f
+#endif
     cmp qword ptr [rip + .Lexecutable_path], rcx
     jne .Lfailure
 #ifdef GINUX_EXEC_SECOND
     movabs rcx, 0x646e6f6365732d63
+#elif defined(GINUX_SIGNAL_PROBE)
+    movabs rcx, 0x626f72702d6c616e
 #else
     movabs rcx, 0x7465677261742d63
 #endif
@@ -266,6 +298,8 @@ ginux_linux_exec_target:
 .Lmessage:
 #ifdef GINUX_EXEC_SECOND
     .ascii "SECOND!\n"
+#elif defined(GINUX_SIGNAL_PROBE)
+    .ascii "SIGNAL!\n"
 #else
     .ascii "EXEC_OK\n"
 #endif

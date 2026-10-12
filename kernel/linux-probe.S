@@ -4305,13 +4305,13 @@ exec_path:
 #ifdef GINUX_EXEC_SECOND
     .asciz "/bin/exec-second"
 #else
-    .asciz "/bin/exec-target"
+    .asciz "/bin/signal-probe"
 #endif
 exec_mode:
 #ifdef GINUX_EXEC_SECOND
     .asciz "exec-second"
 #else
-    .asciz "exec-target"
+    .asciz "signal-probe"
 #endif
 exec_environment:
     .asciz "GINUX_EXEC=1"

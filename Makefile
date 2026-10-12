@@ -45,8 +45,8 @@ linux-probe:
 	@test -f "$(LINUX_DYNAMIC_DIR)/libginux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/libginux-aux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/ld-ginux.so"
-	@test -f "$(LINUX_DYNAMIC_DIR)/linux-exec-target.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-exec-second.elf"
+	@test -f "$(LINUX_DYNAMIC_DIR)/linux-signal-probe.elf"
 	@echo "Built $(LINUX_PROBE) and $(LINUX_DYNAMIC_DIR)"
 
 build: manifest
