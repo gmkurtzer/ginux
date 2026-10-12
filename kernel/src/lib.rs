@@ -818,12 +818,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: interpreted Linux sibling stack replaced atomically\r\n");
     serial_write("ginux: old interpreted Linux sibling stack lease retired at exec\r\n");
     serial_write("ginux: replacement Linux sibling stack lease reclaimed\r\n");
-    serial_write("ginux: interpreted Linux mmap reserves replaced at exec commit\r\n");
-    serial_write("ginux: old interpreted Linux mmap reserve leases retired at exec\r\n");
-    serial_write("ginux: replacement Linux mmap reserve leases reclaimed\r\n");
-    serial_write("ginux: static Linux mmap reserves replaced at exec commit\r\n");
-    serial_write("ginux: old static Linux mmap reserve leases retired at exec\r\n");
-    serial_write("ginux: replacement static Linux mmap reserve leases reclaimed\r\n");
+    serial_write("ginux: interpreted Linux mmap registry empty across exec\r\n");
+    serial_write("ginux: static Linux mmap registry empty across exec\r\n");
     serial_write("ginux: interpreted Linux page-table hierarchy replaced atomically\r\n");
     serial_write("ginux: old interpreted Linux page-table leases retired at exec\r\n");
     serial_write("ginux: replacement Linux page-table leases reclaimed\r\n");
@@ -989,6 +985,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux atomic multi-page write seal validated\r\n");
     serial_write("ginux: bounded Linux mmap protection splitting validated\r\n");
     serial_write("ginux: adjacent Linux mmap range operations validated\r\n");
+    serial_write("ginux: Linux mmap frames allocated on demand\r\n");
+    serial_write("ginux: Linux mmap frame leases reclaimed\r\n");
     serial_write("ginux: Linux anonymous mapping discard validated\r\n");
     serial_write("ginux: Linux anonymous mapping residency validated\r\n");
     serial_write("ginux: Linux heap copy bounds validated\r\n");

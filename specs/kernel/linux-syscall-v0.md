@@ -533,7 +533,8 @@ executable-install profile. The scratch window has two entries over
 or one private two-page area. A null hint selects the lowest contiguous free
 entry. Its anonymous form requires a null hint, an
 exact 4096- or 8192-byte length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
-MAP_ANONYMOUS`, fd -1, and offset zero, and installs zero-filled RW/NX frames.
+MAP_ANONYMOUS`, fd -1, and offset zero, and allocates and installs zero-filled
+generation-bound RW/NX frame leases.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
 descriptor for `/init`, `/lib64/ld-ginux.so`, `/lib64/libginux.so`, or
 `/lib64/libginux-aux.so`, and a
@@ -541,6 +542,7 @@ page-aligned offset. Its complete one- or two-page window must fit within the
 file length rounded up to a page; offsets at or beyond EOF are rejected rather
 than deferred to a `SIGBUS` path. The kernel copies the authenticated bytes
 into allocator-owned read-only/NX frames and zero-fills a partial final page.
+Mapping failure scrubs and releases every provisional lease before returning.
 Descriptor cursors are unaffected. Unsupported arguments return `-EINVAL`, a
 non-file descriptor returns `-ENODEV`, an invalid descriptor returns `-EBADF`,
 and a request without enough contiguous free entries returns `-ENOMEM`.
@@ -604,7 +606,8 @@ executable allocator, or authority to map unauthenticated bytes.
 `rax = 11` (`__NR_munmap`) accepts a complete active scratch area or one
 page-aligned head or tail page of a two-page area. It clears the selected
 hardware leaves, invalidates their TLB entries, and scrubs the physical frames
-before reuse. A partial removal splits or truncates the registry record while
+before returning their exact generation leases to the allocator. A partial
+removal splits or truncates the registry record while
 preserving the remaining page's write and immutable-file attributes. Repeating
 a supported exact unmap succeeds. A two-page range can remove two independent
 adjacent areas or an active page beside an already-unmapped hole. The anonymous

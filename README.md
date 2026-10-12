@@ -71,10 +71,11 @@ and retires the exact old hierarchy. The fresh tables are reclaimed after the
 process root becomes inactive. Every successful exec also
 replaces the bounded heap with a fresh zeroed RW/NX lease and resets the process
 break to the fixed heap base. The old heap is scrubbed at commit and the replacement
-lease is reclaimed after the process root becomes inactive. Every successful
-exec likewise replaces both inactive anonymous-map reserve leases with fresh
-zeroed generation-bound frames, scrubs the exact old leases after image commit,
-and reclaims the replacements after the process root becomes inactive.
+lease is reclaimed after the process root becomes inactive. Scratch `mmap`
+pages have no inactive reserve leases: each successful request allocates fresh
+generation-bound frames, and complete or partial unmap scrubs and releases the
+exact selected leases. Exec requires the scratch registry and its lease slots
+to be empty.
 Interpreted replacement installs the measured
 interpreter first, lets it remap the authenticated main and both DSOs, reapplies
 RELRO, pre-materializes fresh primary and sibling TLS leases from the complete
@@ -441,7 +442,8 @@ One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
 A two-entry fixed `mmap` registry can install two independent one-page areas or
-one two-page area in its preallocated window. Anonymous areas are RW/NX,
+one two-page area in its reserved virtual window. Physical frames are allocated
+only when a mapping is admitted. Anonymous areas are RW/NX,
 removed from the hardware page table by exact `munmap`, scrubbed, and proven
 zero on reuse. Bounded `MADV_DONTNEED` also zeros an anonymous area in place
 without widening a sealed read-only area, while `mincore` reports each page
@@ -457,6 +459,9 @@ area with the original access and immutable-file attributes. `mprotect`,
 `madvise`, `mincore`, and `munmap` walk both entries when a two-page request
 crosses two adjacent one-page areas, so range behavior no longer depends on
 whether the registry contains one record or two.
+Every unmap shape validates generation ownership, removes the hardware leaf,
+scrubs the released frame, and returns its lease to the allocator; process exit
+requires both registry and lease state to be empty.
 General mapping placement, shared file mappings, writable mappings outside the
 exact authenticated main/dependency data pages, and arbitrary filesystem-backed
 mappings are not implemented.

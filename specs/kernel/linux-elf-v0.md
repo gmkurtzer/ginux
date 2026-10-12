@@ -277,7 +277,8 @@ keeps absent leaves for the main image's read-only/NX header page, four RX
 pages, two RW/NX pages, the primary dependency's two RX, one read-only/NX, and
 one RW page, and the auxiliary dependency's one RX and one RW page. It
 allocates each of those thirteen payload frames only when the matching authenticated mmap request
-arrives. It also owns bounded heap, stack, and two `mmap` payload frames. The
+arrives. It also owns bounded heap and stack frames. Scratch `mmap` frames are
+separately allocated and released during each admitted mapping lifecycle. The
 proof verifies that the main and both dependency leaves begin absent, validates
 their userspace-installed contents and permissions after execution, and
 constructs the dynamic-process stack with the common auxiliary-vector encoder.
@@ -473,11 +474,12 @@ are revalidated after execution. Both old TLS leases must be retired, and both
 replacement leases are scrubbed and reclaimed only after the process root is
 inactive. The old sibling-stack lease is likewise scrubbed at commit, and its
 replacement is validated and reclaimed only after the root is inactive.
-The two inactive anonymous-mapping reserve frames are also generation-bound.
-Both static and interpreted exec preallocate and zero their replacements before
-commit, publish them only after the image transaction succeeds, and scrub the
-exact old leases. Both replacement reserves must remain unmapped and zeroed
-through execution and are reclaimed after the process root becomes inactive.
+The anonymous-mapping registry owns no inactive reserve frames. Each admitted
+mapping allocates generation-bound leases and publishes them only after frame
+materialization and hardware mapping succeed. Unmap validates the exact leases,
+removes their leaves, scrubs them, and releases them. Both static and
+interpreted exec require all registry metadata, frame addresses, and generations
+to be zero before commit.
 
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF
@@ -777,8 +779,8 @@ RX versus RW/NX permissions plus exact materialized contents through the direct
 map. An owned page at `0x407000` supplies one zero-filled RW/NX heap page. The
 page at `0x408000` remains an unmapped lower stack guard, and an owned page at
 `0x409000` supplies a RW/NX stack; `0x40a000` remains an upper guard. Two final
-owned frames are initially absent at `0x40b000` and `0x40c000`. A two-entry
-registry installs them as two independent one-page areas or one two-page area
+leaves are initially absent at `0x40b000` and `0x40c000`. A two-entry
+registry allocates frames on demand and installs them as two independent one-page areas or one two-page area
 for the bounded anonymous or immutable-runtime-file `mmap` lifecycle.
 Removing either page of a two-page area preserves the other as a one-page
 registry entry with unchanged access and file-kind metadata. Protecting either
@@ -841,7 +843,8 @@ ring 3. Those calls are
 accepted only while an atomic probe flag is armed; exit returns directly to the
 saved kernel stack. The kernel verifies a ring-3 heap write after exit. The
 proof restores and reads back the kernel root, then clears and releases all
-sixteen root/table/reserved-segment/heap/stack/mapping frames.
+fourteen root/table/segment/heap/stack/TLS frames. Scratch mapping frames are
+allocated and reclaimed within the ring-3 lifecycle.
 
 This proves instruction fetch and controlled return, not a Linux process. The
 root retains supervisor-only low identity leaves around the ELF pages so the

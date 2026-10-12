@@ -708,12 +708,8 @@ for marker in \
     'interpreted Linux sibling stack replaced atomically' \
     'old interpreted Linux sibling stack lease retired at exec' \
     'replacement Linux sibling stack lease reclaimed' \
-    'interpreted Linux mmap reserves replaced at exec commit' \
-    'old interpreted Linux mmap reserve leases retired at exec' \
-    'replacement Linux mmap reserve leases reclaimed' \
-    'static Linux mmap reserves replaced at exec commit' \
-    'old static Linux mmap reserve leases retired at exec' \
-    'replacement static Linux mmap reserve leases reclaimed' \
+    'interpreted Linux mmap registry empty across exec' \
+    'static Linux mmap registry empty across exec' \
     'interpreted Linux page-table hierarchy replaced atomically' \
     'old interpreted Linux page-table leases retired at exec' \
     'replacement Linux page-table leases reclaimed' \
@@ -1690,6 +1686,16 @@ fi
 
 if ! grep -q '^ginux: adjacent Linux mmap range operations validated' "$output_file"; then
     echo "Boot test failed: adjacent Linux mmap range operations were not validated." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux mmap frames allocated on demand' "$output_file"; then
+    echo "Boot test failed: Linux mmap frames were not allocated on demand." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: Linux mmap frame leases reclaimed' "$output_file"; then
+    echo "Boot test failed: Linux mmap frame leases were not reclaimed." >&2
     exit 1
 fi
 
