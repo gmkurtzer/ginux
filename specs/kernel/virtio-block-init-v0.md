@@ -56,4 +56,5 @@ read or written and this contract adds no persistence claim.
 
 The separate [Virtio Block Read v0](virtio-block-read-v0.md) contract allocates
 generation-owned queue memory, validates queue geometry, and proves one bounded
-read request. IOMMU-enforced confinement remains future work.
+read request under the bounded
+[IOMMU Translation Hierarchy v0](iommu-translation-v0.md).

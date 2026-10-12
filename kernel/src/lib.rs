@@ -402,7 +402,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: ACPI DMAR validation invariant failed\r\n");
     }
     serial_write("\r\nginux: malformed DMAR structures rejected");
-    if !arch::x86_64::paging::mmio_mapping_is_read_only(iommu_mmio)
+    if !arch::x86_64::paging::mmio_mapping_is_writable(iommu_mmio)
         || !arch::x86_64::paging::mmio_identity_alias_is_absent(iommu_mmio)
         || !arch::x86_64::paging::mmio_translation_is_bounded(
             iommu_mmio,
@@ -417,7 +417,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     else {
         kernel_fail("\r\nginux: IOMMU capability probe failed\r\n");
     };
-    serial_write("\r\nginux: read-only uncached IOMMU mapping active");
+    serial_write("\r\nginux: bounded writable uncached IOMMU mapping active");
     serial_write("\r\nginux: IOMMU version: ");
     serial_write_u64(u64::from(iommu_capabilities.major_version));
     serial_write(".");
@@ -781,12 +781,26 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("\r\nginux: inactive IOMMU translation invariant failed\r\n");
     }
-    serial_write("\r\nginux: inactive IOMMU root/context hierarchy constructed");
-    serial_write("\r\nginux: inactive IOMMU root table address: ");
+    serial_write("\r\nginux: IOMMU root/context hierarchy constructed");
+    serial_write("\r\nginux: IOMMU root table address: ");
     serial_write_u64(iommu_translation.root_table_address());
     serial_write("\r\nginux: one-page identity DMA translation encoded exactly");
-    serial_write("\r\nginux: invalid inactive IOMMU translations rejected");
+    serial_write("\r\nginux: invalid IOMMU table inputs rejected");
     serial_write("\r\nginux: IOMMU hardware state unchanged after table construction");
+    let Some(iommu_active) = arch::x86_64::iommu::activate_translation(
+        platform.first_iommu_register_base,
+        iommu_mmio,
+        iommu_capabilities,
+        &iommu_translation,
+        virtio_dma_frame,
+    ) else {
+        kernel_fail("\r\nginux: IOMMU translation activation failed\r\n");
+    };
+    if !iommu_active.is_active() {
+        kernel_fail("\r\nginux: IOMMU translation activation invariant failed\r\n");
+    }
+    serial_write("\r\nginux: IOMMU root table installed");
+    serial_write("\r\nginux: IOMMU translation enabled for virtio DMA");
     let Some(virtio_dma_virtual) = virtio_dma_frame.direct_map_address() else {
         kernel_fail("\r\nginux: virtio DMA frame is outside direct map\r\n");
     };
@@ -847,10 +861,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: persistent virtio backend teardown failed\r\n");
     }
     serial_write("\r\nginux: persistent virtio device reset and bus mastering revoked");
+    if !iommu_active.finish()
+        || arch::x86_64::iommu::probe(platform.first_iommu_register_base, iommu_mmio).is_none()
+    {
+        kernel_fail("\r\nginux: IOMMU translation teardown failed\r\n");
+    }
+    serial_write("\r\nginux: IOMMU translation disabled after device quiescence");
+    serial_write("\r\nginux: IOMMU root table cleared");
+    serial_write("\r\nginux: IOMMU fault status remained clear");
     if !iommu_translation.retire() {
         kernel_fail("\r\nginux: inactive IOMMU translation retirement failed\r\n");
     }
-    serial_write("\r\nginux: inactive IOMMU translation frames scrubbed and released");
+    serial_write("\r\nginux: IOMMU translation frames scrubbed and released");
     if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[virtio_dma_frame])
         || memory::any_frame_lease_live(&[virtio_dma_frame])
     {

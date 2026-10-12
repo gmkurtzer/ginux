@@ -57,11 +57,12 @@ does not recycle the page.
 
 ## Security limitations
 
-The QEMU profile does not yet configure an IOMMU. Descriptors name only the
-single live lease and QEMU is treated as trusted, but hardware-enforced DMA
-confinement is **not** proven while bus mastering is enabled. An IOMMU domain
-must bind the device to its owned queue/data frames before untrusted physical
-hardware or an isolated userspace driver may use this path.
+The Q35 reference profile now binds the exact virtio source ID to a 48-bit VT-d
+domain containing only the single live queue/data page. Translation is enabled
+before bus mastering and disabled only after reset and bus-master revocation;
+fault status must remain clear. Deliberate unauthorized-DMA rejection and real
+hardware remain unproven, and the isolated userspace driver path does not yet
+receive this domain.
 
 The probe polls synchronously with interrupts disabled and permits one in-flight
 request. The reusable queue added on top of this layout supports bounded reads,

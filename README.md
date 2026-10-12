@@ -58,16 +58,19 @@ record without rewriting it. A third boot corrupts the committed slot and
 proves nonempty invalid media is rejected without modification after safe
 device and DMA teardown. Teardown revokes bus mastering, resets the device, and
 scrubs the lease before release. This trusted-QEMU kernel reference path remains
-separate from the isolated native service described below, and neither path yet
-has IOMMU confinement. The kernel now validates the Q35 DMAR unit and maps its
-single register page supervisor-only, read-only, uncached, and non-executable.
-It reads the VT-d version and capabilities while proving translation and the
-root-table pointer remain disabled. Because QEMU does not mark the unit as
+separate from the isolated native service described below. The reference path
+now has IOMMU confinement; the native-service path does not yet. The kernel
+validates the Q35 DMAR unit and maps its single register page supervisor-only,
+writable, uncached, and non-executable. It reads the VT-d version and
+capabilities while requiring a clean disabled state. Because QEMU does not mark the unit as
 covering every PCI device, the kernel validates every bounded DMAR device scope
 and requires an exact endpoint scope for the discovered virtio-blk source ID.
-It does not yet program a DMA domain. See
-[IOMMU Register Probe v0](specs/kernel/iommu-v0.md),
-[Inactive IOMMU Translation Hierarchy v0](specs/kernel/iommu-translation-v0.md),
+Six owned frames form an exact 48-bit hierarchy that permits only the one DMA
+page. The gate installs it, completes the real storage transaction, observes no
+IOMMU fault, then disables translation and clears the root before scrubbing the
+tables and DMA lease. See
+[IOMMU Register Access v0](specs/kernel/iommu-v0.md),
+[IOMMU Translation Hierarchy v0](specs/kernel/iommu-translation-v0.md),
 [Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md), and
 [Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
 The device boundary delegates manifest object 7 and attenuates it into

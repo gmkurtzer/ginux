@@ -379,7 +379,7 @@ if ! grep -q '^ginux: ACPI DMAR validated' "$output_file" ||
     exit 1
 fi
 
-if ! grep -q '^ginux: read-only uncached IOMMU mapping active' "$output_file" ||
+if ! grep -q '^ginux: bounded writable uncached IOMMU mapping active' "$output_file" ||
     ! grep -q '^ginux: IOMMU version: 1\.0' "$output_file" ||
     ! grep -q '^ginux: IOMMU translation remained disabled' "$output_file"; then
     echo "Boot test failed: bounded read-only IOMMU capability probe did not complete." >&2
@@ -392,13 +392,22 @@ if ! grep -Eq '^ginux: first IOMMU device scopes: [1-9][0-9]*' "$output_file" ||
     exit 1
 fi
 
-if ! grep -q '^ginux: inactive IOMMU root/context hierarchy constructed' "$output_file" ||
-    ! grep -Eq '^ginux: inactive IOMMU root table address: [1-9][0-9]*' "$output_file" ||
+if ! grep -q '^ginux: IOMMU root/context hierarchy constructed' "$output_file" ||
+    ! grep -Eq '^ginux: IOMMU root table address: [1-9][0-9]*' "$output_file" ||
     ! grep -q '^ginux: one-page identity DMA translation encoded exactly' "$output_file" ||
-    ! grep -q '^ginux: invalid inactive IOMMU translations rejected' "$output_file" ||
+    ! grep -q '^ginux: invalid IOMMU table inputs rejected' "$output_file" ||
     ! grep -q '^ginux: IOMMU hardware state unchanged after table construction' "$output_file" ||
-    ! grep -q '^ginux: inactive IOMMU translation frames scrubbed and released' "$output_file"; then
-    echo "Boot test failed: inactive IOMMU translation hierarchy lifecycle did not complete." >&2
+    ! grep -q '^ginux: IOMMU translation frames scrubbed and released' "$output_file"; then
+    echo "Boot test failed: IOMMU translation hierarchy lifecycle did not complete." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: IOMMU root table installed' "$output_file" ||
+    ! grep -q '^ginux: IOMMU translation enabled for virtio DMA' "$output_file" ||
+    ! grep -q '^ginux: IOMMU translation disabled after device quiescence' "$output_file" ||
+    ! grep -q '^ginux: IOMMU root table cleared' "$output_file" ||
+    ! grep -q '^ginux: IOMMU fault status remained clear' "$output_file"; then
+    echo "Boot test failed: active IOMMU translation lifecycle did not complete." >&2
     exit 1
 fi
 

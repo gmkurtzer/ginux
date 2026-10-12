@@ -531,6 +531,7 @@ pub(crate) unsafe fn install_initial_identity_map(
         mmio_table.add(platform_mmio_index + index).write(
             (platform_mmio_page + (index * PAGE_SIZE) as u64)
                 | PRESENT
+                | WRITABLE
                 | CACHE_DISABLE
                 | NO_EXECUTE,
         );
@@ -561,7 +562,7 @@ pub(crate) unsafe fn install_initial_identity_map(
         virtual_page: MMIO_WINDOW_BASE + platform_mmio_index * PAGE_SIZE,
         length: platform_mmio_length,
         mapped_length: platform_mmio_pages * PAGE_SIZE,
-        writable: false,
+        writable: true,
     };
 
     let fine_tables = core::ptr::addr_of_mut!(FINE_PAGE_TABLES).cast::<PageTable>();
@@ -1072,8 +1073,8 @@ pub(crate) fn mmio_identity_alias_is_absent(mapping: MmioMapping) -> bool {
         })
 }
 
-pub(crate) fn mmio_mapping_is_read_only(mapping: MmioMapping) -> bool {
-    mmio_mapping_is_valid(mapping) && !mapping.writable
+pub(crate) fn mmio_mapping_is_writable(mapping: MmioMapping) -> bool {
+    mmio_mapping_is_valid(mapping) && mapping.writable
 }
 
 pub(crate) fn mmio_translation_is_bounded(

@@ -39,10 +39,10 @@ Unknown remapping-structure types are skipped only after their length is
 validated. Synthetic zero-length, truncated, zero-base, unknown-flag, trailing,
 and malformed-scope records must all be rejected during every boot.
 
-The discovered first-unit register page is mapped and inspected under the
-separate [IOMMU Register Probe v0](iommu-v0.md) contract. This revision does not
+The discovered first-unit register page is consumed under the separate
+[IOMMU Register Access v0](iommu-v0.md) contract. This ACPI parser does not
 retain ACPI-reclaimable pages, enumerate interrupt-source overrides, initialize
 secondary processors, access an I/O APIC, or execute AML. It also does not
-resolve a nested bridge path, install root/context/second-level tables, enable
-translation, invalidate caches, handle faults, or confine DMA. Device DMA
-therefore remains unisolated until later milestones program the validated unit.
+resolve a nested bridge path. The validated Q35 endpoint scope and register base
+feed the separate bounded translation hierarchy; broader topology support
+remains future work.

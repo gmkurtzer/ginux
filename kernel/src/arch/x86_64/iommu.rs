@@ -1,4 +1,7 @@
-use core::ptr::read_volatile;
+use core::{
+    ptr::{read_volatile, write_volatile},
+    sync::atomic::{fence, Ordering},
+};
 
 use crate::memory::{self, FrameLease, FrameOwner};
 
@@ -9,7 +12,21 @@ const CAPABILITY_OFFSET: u64 = 0x08;
 const EXTENDED_CAPABILITY_OFFSET: u64 = 0x10;
 const GLOBAL_STATUS_OFFSET: u64 = 0x1c;
 const ROOT_TABLE_ADDRESS_OFFSET: u64 = 0x20;
+const GLOBAL_COMMAND_OFFSET: u64 = 0x18;
+const CONTEXT_COMMAND_OFFSET: u64 = 0x28;
+const FAULT_STATUS_OFFSET: u64 = 0x34;
 const TRANSLATION_ENABLE_STATUS: u32 = 1 << 31;
+const SET_ROOT_TABLE_POINTER: u32 = 1 << 30;
+const ROOT_TABLE_POINTER_STATUS: u32 = 1 << 30;
+const CONTEXT_INVALIDATE: u64 = 1 << 63;
+const CONTEXT_GLOBAL_INVALIDATE: u64 = 1 << 61;
+const IOTLB_INVALIDATE: u64 = 1 << 63;
+const IOTLB_GLOBAL_INVALIDATE: u64 = 1 << 60;
+const IOTLB_OFFSET_SHIFT: u64 = 8;
+const IOTLB_OFFSET_MASK: u64 = 0x3ff;
+const IOTLB_INVALIDATE_REGISTER_DELTA: u64 = 8;
+const FAULT_STATUS_MASK: u32 = 0x73;
+const STATUS_WAIT_LIMIT: usize = 1_000_000;
 const SUPPORTED_ADDRESS_WIDTHS_SHIFT: u64 = 8;
 const SUPPORTED_ADDRESS_WIDTHS_MASK: u64 = 0x1f;
 const SUPPORTED_48_BIT_WIDTH: u64 = 1 << 2;
@@ -42,6 +59,13 @@ pub(crate) struct InactiveTranslation {
     device: u8,
     function: u8,
     dma_page: u64,
+}
+
+pub(crate) struct ActiveTranslation {
+    register_base: u64,
+    mapping: MmioMapping,
+    root_table_address: u64,
+    iotlb_register: u64,
 }
 
 impl InactiveTranslation {
@@ -96,6 +120,49 @@ impl InactiveTranslation {
     pub(crate) fn retire(self) -> bool {
         memory::scrub_and_release_frames(FrameOwner::KERNEL, &self.frames)
             && !memory::any_frame_lease_live(&self.frames)
+    }
+}
+
+impl ActiveTranslation {
+    pub(crate) fn is_active(&self) -> bool {
+        read_u32(self.mapping, self.register_base + GLOBAL_STATUS_OFFSET)
+            .is_some_and(|status| status & TRANSLATION_ENABLE_STATUS != 0)
+            && read_u64(self.mapping, self.register_base + ROOT_TABLE_ADDRESS_OFFSET)
+                == Some(self.root_table_address)
+            && fault_status_is_clear(self.mapping, self.register_base)
+    }
+
+    pub(crate) fn finish(self) -> bool {
+        if !self.is_active()
+            || !write_u32(self.mapping, self.register_base + GLOBAL_COMMAND_OFFSET, 0)
+            || !wait_status(
+                self.mapping,
+                self.register_base,
+                TRANSLATION_ENABLE_STATUS,
+                false,
+            )
+            || !invalidate_caches(self.mapping, self.register_base, self.iotlb_register)
+            || !write_u64(
+                self.mapping,
+                self.register_base + ROOT_TABLE_ADDRESS_OFFSET,
+                0,
+            )
+            || !write_u32(
+                self.mapping,
+                self.register_base + GLOBAL_COMMAND_OFFSET,
+                SET_ROOT_TABLE_POINTER,
+            )
+            || !wait_status(
+                self.mapping,
+                self.register_base,
+                ROOT_TABLE_POINTER_STATUS,
+                true,
+            )
+        {
+            return false;
+        }
+        read_u64(self.mapping, self.register_base + ROOT_TABLE_ADDRESS_OFFSET) == Some(0)
+            && fault_status_is_clear(self.mapping, self.register_base)
     }
 }
 
@@ -199,6 +266,59 @@ pub(crate) fn build_inactive_translation(
     Some(translation)
 }
 
+pub(crate) fn activate_translation(
+    register_base: u64,
+    mapping: MmioMapping,
+    capabilities: Capabilities,
+    translation: &InactiveTranslation,
+    dma_frame: FrameLease,
+) -> Option<ActiveTranslation> {
+    let iotlb_register = register_base.checked_add(
+        ((capabilities.extended_capability >> IOTLB_OFFSET_SHIFT) & IOTLB_OFFSET_MASK)
+            .checked_mul(16)?
+            .checked_add(IOTLB_INVALIDATE_REGISTER_DELTA)?,
+    )?;
+    if !translation.is_exact(dma_frame)
+        || mapping.address(iotlb_register, size_of::<u64>()).is_none()
+        || !probe(register_base, mapping).is_some_and(|current| {
+            current.capability == capabilities.capability
+                && current.extended_capability == capabilities.extended_capability
+        })
+        || !fault_status_is_clear(mapping, register_base)
+    {
+        return None;
+    }
+    fence(Ordering::SeqCst);
+    let root_table_address = translation.root_table_address();
+    let installed = write_u64(
+        mapping,
+        register_base + ROOT_TABLE_ADDRESS_OFFSET,
+        root_table_address,
+    ) && write_u32(
+        mapping,
+        register_base + GLOBAL_COMMAND_OFFSET,
+        SET_ROOT_TABLE_POINTER,
+    ) && wait_status(mapping, register_base, ROOT_TABLE_POINTER_STATUS, true)
+        && invalidate_caches(mapping, register_base, iotlb_register)
+        && write_u32(
+            mapping,
+            register_base + GLOBAL_COMMAND_OFFSET,
+            TRANSLATION_ENABLE_STATUS,
+        )
+        && wait_status(mapping, register_base, TRANSLATION_ENABLE_STATUS, true);
+    let active = ActiveTranslation {
+        register_base,
+        mapping,
+        root_table_address,
+        iotlb_register,
+    };
+    if !installed || !active.is_active() {
+        rollback_activation(mapping, register_base);
+        return None;
+    }
+    Some(active)
+}
+
 pub(crate) fn verify_inactive_translation_rejections(
     capabilities: Capabilities,
     dma_frame: FrameLease,
@@ -273,4 +393,68 @@ fn read_u64(mapping: MmioMapping, physical: u64) -> Option<u64> {
     Some(u64::from_le(unsafe {
         read_volatile(address as *const u64)
     }))
+}
+
+fn write_u32(mapping: MmioMapping, physical: u64, value: u32) -> bool {
+    let Some(address) = mapping.address(physical, size_of::<u32>()) else {
+        return false;
+    };
+    unsafe {
+        write_volatile(address as *mut u32, value.to_le());
+    }
+    true
+}
+
+fn write_u64(mapping: MmioMapping, physical: u64, value: u64) -> bool {
+    let Some(address) = mapping.address(physical, size_of::<u64>()) else {
+        return false;
+    };
+    unsafe {
+        write_volatile(address as *mut u64, value.to_le());
+    }
+    true
+}
+
+fn wait_status(mapping: MmioMapping, register_base: u64, mask: u32, set: bool) -> bool {
+    (0..STATUS_WAIT_LIMIT).any(|_| {
+        read_u32(mapping, register_base + GLOBAL_STATUS_OFFSET)
+            .is_some_and(|status| (status & mask != 0) == set)
+    })
+}
+
+fn wait_u64_clear(mapping: MmioMapping, physical: u64, mask: u64) -> bool {
+    (0..STATUS_WAIT_LIMIT)
+        .any(|_| read_u64(mapping, physical).is_some_and(|value| value & mask == 0))
+}
+
+fn invalidate_caches(mapping: MmioMapping, register_base: u64, iotlb_register: u64) -> bool {
+    let context_command = register_base + CONTEXT_COMMAND_OFFSET;
+    write_u64(
+        mapping,
+        context_command,
+        CONTEXT_INVALIDATE | CONTEXT_GLOBAL_INVALIDATE,
+    ) && wait_u64_clear(mapping, context_command, CONTEXT_INVALIDATE)
+        && write_u64(
+            mapping,
+            iotlb_register,
+            IOTLB_INVALIDATE | IOTLB_GLOBAL_INVALIDATE,
+        )
+        && wait_u64_clear(mapping, iotlb_register, IOTLB_INVALIDATE)
+}
+
+fn fault_status_is_clear(mapping: MmioMapping, register_base: u64) -> bool {
+    read_u32(mapping, register_base + FAULT_STATUS_OFFSET)
+        .is_some_and(|status| status & FAULT_STATUS_MASK == 0)
+}
+
+fn rollback_activation(mapping: MmioMapping, register_base: u64) {
+    let _ = write_u32(mapping, register_base + GLOBAL_COMMAND_OFFSET, 0);
+    let _ = wait_status(mapping, register_base, TRANSLATION_ENABLE_STATUS, false);
+    let _ = write_u64(mapping, register_base + ROOT_TABLE_ADDRESS_OFFSET, 0);
+    let _ = write_u32(
+        mapping,
+        register_base + GLOBAL_COMMAND_OFFSET,
+        SET_ROOT_TABLE_POINTER,
+    );
+    let _ = wait_status(mapping, register_base, ROOT_TABLE_POINTER_STATUS, true);
 }
