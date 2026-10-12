@@ -350,15 +350,19 @@ the main and both dependencies' admitted segments through the fixed mapping
 contract below.
 
 `rax = 59` (`__NR_execve`) provides one bounded replacement transition for the
-single-threaded static proof process. The pathname must be
-`/bin/exec-target`. `argv` admits one through eight pointers and `envp` zero
+single-threaded static proof process. Absolute and current-directory-relative
+normalized paths resolve through the retained measured-root index. The selected
+node must be an executable regular file and must match the admitted static ELF
+profile; the sole current target is `bin/exec-target`. `argv` admits one through eight pointers and `envp` zero
 through eight, each terminated by a null pointer. Each string is limited to 63
 bytes plus its terminator, and the complete rebuilt initial stack is limited to
 512 bytes. The proof supplies
 `["/bin/exec-target", "exec-target", NULL]` and
 `["GINUX_EXEC=1", NULL]`, while also rejecting an empty argument vector and a
-ninth argument. Unknown paths return `-ENOENT`, inaccessible input returns
-`-EFAULT`, and count, string, or aggregate-stack overflow returns `-E2BIG`
+ninth argument. Unknown paths return `-ENOENT`, non-regular or non-executable
+nodes return `-EACCES`, executable files outside the admitted ELF profile return
+`-ENOEXEC`, inaccessible input returns `-EFAULT`, and count, string, or
+aggregate-stack overflow returns `-E2BIG`
 without changing the running image. A multithreaded caller returns `-EAGAIN`.
 On success the kernel clears the clear-child-TID and robust-list registrations,
 constructs a fresh bounded initial stack, atomically replaces the authenticated
@@ -367,9 +371,11 @@ image mappings, and never returns to the old program. Descriptors marked
 survive. Caught signal dispositions reset to default, ignored dispositions
 remain ignored, the alternate signal stack becomes disabled, the signal mask
 and `no_new_privs` remain unchanged, and the process name becomes
-`exec-target`. The replacement validates each of these transitions, reopens
+`exec-target`. The canonical measured-root node is retained as process state,
+so `/proc/self/exe` reports `/bin/exec-target` even when the successful call used
+the relative name `exec-target` from `/bin`. The replacement validates each of these transitions, reopens
 `/dev/console`, validates its complete initial stack, emits `EXEC_OK`, closes
-all surviving proof descriptors, and exits with status 42. General pathname
+all surviving proof descriptors, and exits with status 42. General ELF
 loading, dynamic targets, shebangs, and arbitrary argument or environment
 vectors are outside this version.
 `rax = 97` (`__NR_getrlimit`) and `rax = 302` (`__NR_prlimit64`) expose immutable

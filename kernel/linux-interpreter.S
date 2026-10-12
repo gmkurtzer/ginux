@@ -687,7 +687,7 @@ ginux_linux_interpreter:
     mov edx, 256
     mov eax, 217
     syscall
-    cmp rax, 216
+    cmp rax, 240
     jne .Linvalid_dynamic
     cmp byte ptr [rsp + 186], 4
     jne .Linvalid_dynamic
@@ -698,6 +698,10 @@ ginux_linux_interpreter:
     cmp dword ptr [rsp + 211], 0x74696e69
     jne .Linvalid_dynamic
     cmp byte ptr [rsp + 215], 0
+    jne .Linvalid_dynamic
+    cmp byte ptr [rsp + 234], 4
+    jne .Linvalid_dynamic
+    cmp dword ptr [rsp + 235], 0x006e6962
     jne .Linvalid_dynamic
 
     mov edi, 2

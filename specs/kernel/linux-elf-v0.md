@@ -90,8 +90,8 @@ entry through the end of its five-page executable mapping. Probe
 growth therefore fails at build time instead of overlapping the writable load
 or silently exceeding the runtime loader profile.
 
-A second LLD-produced static image is retained under the measured-root name
-`linux/exec-target` and exposed as `/bin/exec-target`. Its bounded plan has one
+A second LLD-produced static image is retained directly under the measured-root
+name `bin/exec-target` and exposed as `/bin/exec-target`. Its bounded plan has one
 R/NX header page at `0x3ff000`, one RX page entered at `0x400100`, and one
 RW/NX page at `0x401000`. Boot requires the measured bytes to match the
 build-time artifact exactly and validates the complete plan before any Linux
@@ -104,10 +104,12 @@ mapping verification restores the original stack, thread registrations, and
 page-table entries before returning an error.
 
 This is deliberately one authenticated replacement image, not a general ELF
-lookup or loader. The profile admits only `/bin/exec-target`, one live thread,
+loader. `execve` resolves absolute or current-directory-relative normalized
+paths through the retained measured-root index, requires an executable regular
+node, and then admits only the exact ELF profile of `bin/exec-target`. The profile admits one live thread,
 up to eight bounded argument strings, up to eight bounded environment strings,
 and a 512-byte replacement stack image. It does not yet support an interpreter,
-dependencies, shebangs, unbounded vectors, or dynamic exec targets.
+dependencies, shebangs, unbounded vectors, or additional static or dynamic exec targets.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory

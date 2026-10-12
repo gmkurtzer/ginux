@@ -117,6 +117,7 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
             &b"NAME=Ginux\nID=ginux\n"[..],
         ),
         (12, 0o100555, "etc/motd", &b"Welcome to Ginux\n"[..]),
+        (19, 0o040555, "bin", &b""[..]),
     ] {
         append_newc_entry(&mut archive, inode, mode, name, data);
     }
@@ -125,12 +126,12 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
         (14, "linux/ld-ginux.so", linux_interpreter.as_slice()),
         (15, "linux/libginux.so", linux_dependency.as_slice()),
         (16, "linux/libginux-aux.so", linux_auxiliary.as_slice()),
-        (18, "linux/exec-target", linux_exec_target.as_slice()),
+        (18, "bin/exec-target", linux_exec_target.as_slice()),
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
     append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
-    append_newc_entry(&mut archive, 19, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 20, 0, "TRAILER!!!", &[]);
     archive
 }
 

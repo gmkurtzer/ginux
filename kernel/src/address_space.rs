@@ -37,7 +37,7 @@ pub(crate) fn verify_linux_elf_mapping(
     protected_start: u64,
     protected_size: usize,
 ) -> bool {
-    let exec_target = crate::initramfs::published_regular_file_node(b"linux/exec-target")
+    let exec_target = crate::initramfs::published_regular_file_node(b"bin/exec-target")
         .and_then(crate::initramfs::published_file_by_node)
         .and_then(crate::linux_elf::measured_exec_target_plan);
     let Some(exec_plan) = exec_target else {

@@ -167,6 +167,7 @@ const LINUX_CAPABILITY_DATA_SIZE: usize = 24;
 const LINUX_RETURN_TO_KERNEL: u64 = (-4096_i64) as u64;
 const LINUX_EPERM: u64 = u64::MAX;
 const LINUX_E2BIG: u64 = u64::MAX - 6;
+const LINUX_ENOEXEC: u64 = u64::MAX - 7;
 const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
@@ -365,6 +366,7 @@ static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_EXEC_REPLACED: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_EXEC_NODE: AtomicU8 = AtomicU8::new(0);
 static LINUX_LIVE_RETURN_VALIDATED: AtomicBool = AtomicBool::new(false);
 static LINUX_CHILD_EXIT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PARENT_RESUMED: AtomicBool = AtomicBool::new(false);
@@ -2159,6 +2161,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     }
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
     ELF_PROBE_EXEC_REPLACED.store(false, Ordering::SeqCst);
+    ELF_PROBE_EXEC_NODE.store(0, Ordering::SeqCst);
     LINUX_LIVE_RETURN_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CHILD_EXIT_COUNT.store(0, Ordering::SeqCst);
     LINUX_PARENT_RESUMED.store(false, Ordering::SeqCst);
@@ -2439,6 +2442,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
     let exec_replaced = ELF_PROBE_EXEC_REPLACED.swap(false, Ordering::SeqCst);
+    let exec_node = ELF_PROBE_EXEC_NODE.swap(0, Ordering::SeqCst);
     let live_return_validated = LINUX_LIVE_RETURN_VALIDATED.swap(false, Ordering::SeqCst);
     let child_exit_count = LINUX_CHILD_EXIT_COUNT.swap(0, Ordering::SeqCst);
     let parent_resumed = LINUX_PARENT_RESUMED.swap(false, Ordering::SeqCst);
@@ -2545,9 +2549,14 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     for offset in &ELF_PROBE_DESCRIPTOR_OFFSETS {
         offsets_reset &= offset.swap(0, Ordering::SeqCst) == 0;
     }
+    let expected_cwd = if exec_replaced {
+        linux_root_directory_kind(b"/bin").unwrap_or(0)
+    } else {
+        LINUX_ROOT_DIRECTORY
+    };
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
-        && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
+        && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == expected_cwd
         && devices_closed
         && ELF_PROBE_EPOLL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EPOLL_TARGET.swap(u64::MAX, Ordering::SeqCst) == u64::MAX
@@ -2710,6 +2719,11 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
     let process_name_restored = ELF_PROBE_PROCESS_NAME_LOW.swap(0, Ordering::SeqCst)
         == expected_process_name[0]
         && ELF_PROBE_PROCESS_NAME_HIGH.swap(0, Ordering::SeqCst) == expected_process_name[1];
+    let executable_identity_restored = if exec_replaced {
+        initramfs::published_file_name_by_node(exec_node) == Some(b"bin/exec-target")
+    } else {
+        exec_node == 0
+    };
     let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
     let signal_mask_restored = ELF_PROBE_SIGNAL_MASK.swap(0, Ordering::SeqCst) == 0;
     let signal_actions_restored = (0..LINUX_SIGNAL_COUNT).all(|signal| {
@@ -2846,6 +2860,7 @@ pub(crate) fn verify_linux_elf_entry(execution: LinuxElfExecution) -> LinuxElfRe
         && linux_clone_publication_valid
         && linux_thread_table_released
         && process_name_restored
+        && executable_identity_restored
         && no_new_privileges_enforced
         && signal_mask_restored
         && signal_actions_restored
@@ -4478,10 +4493,20 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
     if &path[..path_length] != b"/proc/self/exe" {
         return LINUX_ENOENT;
     }
-    let executable = if ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst) {
-        b"/bin/exec-target" as &[u8]
-    } else {
+    let exec_node = ELF_PROBE_EXEC_NODE.load(Ordering::SeqCst);
+    let mut measured_path = [0_u8; 64];
+    let executable = if exec_node == 0 {
         b"/init" as &[u8]
+    } else {
+        let Some(name) = initramfs::published_file_name_by_node(exec_node) else {
+            return LINUX_ESRCH;
+        };
+        measured_path[0] = b'/';
+        let Some(destination) = measured_path.get_mut(1..1 + name.len()) else {
+            return LINUX_ENAMETOOLONG;
+        };
+        destination.copy_from_slice(name);
+        &measured_path[..1 + name.len()]
     };
     let output_length = usize::try_from(output_size)
         .unwrap_or(usize::MAX)
@@ -4501,7 +4526,6 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
             LINUX_FILE_AUXILIARY_DEPENDENCY,
             b"linux/libginux-aux.so" as &[u8],
         ),
-        b"/bin/exec-target" => (LINUX_FILE_ROOT_GENERIC, b"linux/exec-target" as &[u8]),
         _ => {
             let root_name = path.strip_prefix(b"/")?;
             if root_name.starts_with(b"linux/") {
@@ -4642,6 +4666,53 @@ fn linux_exec_vector(address: u64, require_nonempty: bool) -> Result<([u64; 8], 
     Err(LINUX_E2BIG)
 }
 
+fn linux_exec_root_node(path: &[u8]) -> Result<u8, u64> {
+    let mut root_name = [0_u8; 64];
+    let root_name_length = if let Some(absolute) = path.strip_prefix(b"/") {
+        if !linux_normalized_relative_path(absolute) {
+            return Err(LINUX_ENOENT);
+        }
+        let Some(destination) = root_name.get_mut(..absolute.len()) else {
+            return Err(LINUX_ENAMETOOLONG);
+        };
+        destination.copy_from_slice(absolute);
+        absolute.len()
+    } else {
+        if !linux_normalized_relative_path(path) {
+            return Err(LINUX_ENOENT);
+        }
+        let cwd = ELF_PROBE_CWD.load(Ordering::SeqCst);
+        let Some(directory) = linux_measured_directory_path(cwd) else {
+            return Err(LINUX_ENOENT);
+        };
+        let separator = usize::from(!directory.is_empty());
+        let Some(length) = directory
+            .len()
+            .checked_add(separator)
+            .and_then(|length| length.checked_add(path.len()))
+        else {
+            return Err(LINUX_ENAMETOOLONG);
+        };
+        let Some(destination) = root_name.get_mut(..length) else {
+            return Err(LINUX_ENAMETOOLONG);
+        };
+        destination[..directory.len()].copy_from_slice(directory);
+        if separator != 0 {
+            destination[directory.len()] = b'/';
+        }
+        destination[directory.len() + separator..].copy_from_slice(path);
+        length
+    };
+    let root_name = &root_name[..root_name_length];
+    let Some((mode, _)) = initramfs::published_lookup(root_name) else {
+        return Err(LINUX_ENOENT);
+    };
+    if mode & 0o170000 != 0o100000 || mode & 0o111 == 0 {
+        return Err(LINUX_EACCES);
+    }
+    initramfs::published_regular_file_node(root_name).ok_or(LINUX_ENOENT)
+}
+
 fn linux_execve(path_address: u64, arguments_address: u64, environment_address: u64) -> u64 {
     if current_linux_tid() != Some(1)
         || LINUX_THREAD_STATES
@@ -4653,14 +4724,21 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
     {
         return LINUX_EAGAIN;
     }
-    let mut path = [0_u8; 32];
+    let mut path = [0_u8; 64];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
     };
-    if &path[..path_length] != b"/bin/exec-target" {
+    let exec_node = match linux_exec_root_node(&path[..path_length]) {
+        Ok(node) => node,
+        Err(error) => return error,
+    };
+    let Some(exec_bytes) = initramfs::published_file_by_node(exec_node) else {
         return LINUX_ENOENT;
-    }
+    };
+    let Some(exec_plan) = crate::linux_elf::measured_exec_target_plan(exec_bytes) else {
+        return LINUX_ENOEXEC;
+    };
     let (argument_pointers, argument_count) = match linux_exec_vector(arguments_address, true) {
         Ok(vector) => vector,
         Err(error) => return error,
@@ -4690,12 +4768,24 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
     });
     let clear_addresses =
         core::array::from_fn(|index| ELF_PROBE_EXEC_CLEAR_ADDRESSES[index].load(Ordering::SeqCst));
-    if entry == 0
+    let Some(exec_header) = exec_plan.read_only else {
+        return LINUX_ENOEXEC;
+    };
+    if entry != exec_plan.entry
         || mappings
             .iter()
             .any(|mapping| mapping.address == 0 || mapping.frame == 0)
+        || mappings[0].address as u64 != exec_header.virtual_page
+        || mappings[0].writable
+        || mappings[0].executable
+        || mappings[1].address as u64 != exec_plan.executable.virtual_page
+        || mappings[1].writable
+        || !mappings[1].executable
+        || mappings[2].address as u64 != exec_plan.writable.virtual_page
+        || !mappings[2].writable
+        || mappings[2].executable
     {
-        return LINUX_ENOENT;
+        return LINUX_ENOEXEC;
     }
     let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
     let new_stack = stack_base + PAGE_SIZE as u64 - LINUX_EXEC_STACK_SIZE as u64;
@@ -4808,6 +4898,7 @@ fn linux_execve(path_address: u64, arguments_address: u64, environment_address: 
         LINUX_USER_RIP = entry;
         LINUX_USER_RSP = new_stack;
     }
+    ELF_PROBE_EXEC_NODE.store(exec_node, Ordering::SeqCst);
     ELF_PROBE_EXEC_REPLACED.store(true, Ordering::SeqCst);
     serial_write("ginux: measured Linux exec image replaced atomically\r\n");
     0

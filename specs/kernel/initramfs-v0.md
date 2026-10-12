@@ -21,11 +21,12 @@ Only regular files, directories, and nonempty symbolic links are admitted.
 Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
-The generated proof contains `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
+The generated proof contains `bin`, `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
 `var/lib`, `var/lib/state`, `var/lib/version`, the native `init` marker, `etc/hostname`,
 `etc/os-release`, `etc/motd`, and five build-produced Linux ELF artifacts
-under internal `linux/*` names: the main, interpreter, primary DSO, auxiliary
-DSO, and static exec target. The hostname is immutable mode `0555` with exact contents
+under internal `linux/*` names: the main, interpreter, primary DSO, and auxiliary
+DSO. The static exec target is published at its Linux-visible measured-root
+path `bin/exec-target`. The hostname is immutable mode `0555` with exact contents
 `ginux\n`; `os-release` is immutable mode `0555` with exact contents
 `NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`; and the nested
 state file contains `ready\n` and the version marker contains `0\n`. The ELF entries must byte-match the authenticated artifacts compiled
@@ -42,7 +43,7 @@ broader than this v0 publication capacity; images above 128 KiB fail closed
 during materialization.
 
 A second lifecycle proof constructs a fixed index of at most 64 nodes. The
-18-entry proof crosses the former 16-node limit while remaining representable
+19-entry proof crosses the former 16-node limit while remaining representable
 by the private one-byte descriptor selector. Each
 node stores only checked 32-bit name and data offsets inside the owned image; no node
 retains a pointer into the handed boot source. Exact `init` and directory
@@ -60,7 +61,7 @@ validates mode `0100555` and size 24, and reads its complete contents. It also
 requires denial through the console capability, rejects `../init`, and rejects
 a null output range without mutating the root. Root enumeration returns one
 fully staged metadata-and-name record per call, rejects regular files as
-directories, and reports end of the seven-entry proof root without copying. The
+directories, and reports end of the eight-entry proof root without copying. The
 published allocation remains allocator-owned after the control-plane domain exits.
 
 The bounded Linux syscall profile resolves the three `/etc` regular files
@@ -74,7 +75,7 @@ interpreter also opens `/etc` as an immutable directory and obtains its
 `hostname`, `os-release`, and `motd` children from the retained index through
 `getdents64`. It verifies the `.` and `..` records, file types, exact child names, directory metadata, EOF,
 cursor rewind, and atomic rejection of an undersized output buffer. The
-Linux `/` directory likewise enumerates the seven direct measured children in
+Linux `/` directory likewise enumerates the eight direct measured children in
 archive order. Measured directory descriptors use their own bounded node
 selectors to recover names from the index. The measured `proc`, `sys`, `tmp`,
 `proc`, `sys`, and `tmp` nodes are empty. The proof opens and enumerates the

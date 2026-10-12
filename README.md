@@ -7,8 +7,8 @@ ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
 boot manifest. The kernel validates its measurement, normalized metadata, safe relative
 paths, uniqueness, alignment, an executable `init`, and an exact trailer while
 rejecting malformed variants during every QEMU boot. The generated archive now
-contains the build-produced Linux main, interpreter, and two DSOs and is about
-73 KiB. The kernel copies it into a zeroed, contiguous 32-frame allocation,
+contains the build-produced Linux main, interpreter, two DSOs, and static exec
+target and is about 81 KiB. The kernel copies it into a zeroed, contiguous 32-frame allocation,
 verifies source independence and the complete zero tail, and builds a bounded
 pathname index whose 32-bit offsets resolve only inside the owned image. A
 final indexed copy remains kernel-owned through
@@ -35,7 +35,8 @@ opened relative to `/var`, while `../lib` is rejected before index lookup.
 The publication index now admits 64 nodes and is exercised beyond its original
 16-node limit. Open, metadata, and access checks share that lookup. The current native
 `init` remains a format marker, not PID 1, but the Linux-visible `/init`,
-`/lib64/*`, and `/bin/exec-target` paths map to internal measured-root entries. The complete dynamic
+and `/lib64/*` paths map to internal measured-root entries, while
+`/bin/exec-target` is a direct measured-root node. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
 single-threaded `execve` proof atomically replaces the static workload with the
 measured `/bin/exec-target`, rebuilds bounded argument and environment vectors
@@ -420,11 +421,13 @@ bounded immutable-root traversal, not a general VFS or general executable
 loading. The kernel
 authenticates and plans the fixed four-image graph; the interpreter installs
 the authenticated main and both dependency segments admitted by that exact plan.
-The separate static proof admits `execve` only for the exact measured
-`/bin/exec-target`, with up to eight 63-byte `argv` strings, eight equivalent
+The separate static proof resolves normalized absolute or current-directory-relative
+`execve` paths through the measured root, then admits only the exact measured
+`bin/exec-target` ELF profile, with up to eight 63-byte `argv` strings, eight equivalent
 `envp` strings, and one live thread. Rejected path, pointer, count, string, and
 aggregate-stack cases leave the original image
-running; success installs exact W^X target frames and unmaps the old image.
+running; success from relative `exec-target` in `/bin` installs exact W^X target
+frames, unmaps the old image, and retains the canonical `/bin/exec-target` identity.
 The proof also closes only `FD_CLOEXEC` descriptors, preserves an ordinary
 descriptor, resets caught signals while retaining an ignored disposition,
 disables the alternate signal stack, and changes the process name to

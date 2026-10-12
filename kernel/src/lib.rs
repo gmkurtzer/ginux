@@ -618,8 +618,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: persistent read-only root publication failed\r\n");
     }
     serial_write("ginux: measured root published in kernel-owned memory\r\n");
-    let Some(exec_target_node) = initramfs::published_regular_file_node(b"linux/exec-target")
-    else {
+    let Some(exec_target_node) = initramfs::published_regular_file_node(b"bin/exec-target") else {
         kernel_fail("ginux: measured Linux exec target missing\r\n");
     };
     let Some(exec_target) = initramfs::published_file_by_node(exec_target_node) else {
@@ -652,6 +651,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux exec signal state transitioned\r\n");
     serial_write("ginux: Linux exec process identity installed\r\n");
     serial_write("ginux: Linux executable link followed exec identity\r\n");
+    serial_write("ginux: measured-root Linux exec selection validated\r\n");
     if !linux_elf::verify_load_plan() {
         kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
     }

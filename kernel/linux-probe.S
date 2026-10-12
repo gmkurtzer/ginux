@@ -3353,6 +3353,22 @@ resolution_valid:
     mov eax, 59
     call syscall_expect_enoent
 
+    lea rdi, [rip + exec_directory_path]
+    mov rsi, rsp
+    lea rdx, [rsp + 24]
+    mov eax, 59
+    syscall
+    cmp rax, -13
+    jne failure
+
+    lea rdi, [rip + invalid_exec_path]
+    mov rsi, rsp
+    lea rdx, [rsp + 24]
+    mov eax, 59
+    syscall
+    cmp rax, -8
+    jne failure
+
     mov edi, 0x406200
     mov rsi, rsp
     lea rdx, [rsp + 24]
@@ -3424,7 +3440,11 @@ resolution_valid:
     cmp byte ptr [rsp + 148], 't'
     jne failure
 
-    lea rdi, [rip + exec_path]
+    lea rdi, [rip + exec_directory_path]
+    mov eax, 80
+    call syscall_expect_zero
+
+    lea rdi, [rip + exec_mode]
     mov rsi, rsp
     lea rdx, [rsp + 24]
     mov eax, 59
@@ -3565,6 +3585,10 @@ exec_environment:
     .asciz "GINUX_EXEC=1"
 missing_exec_path:
     .asciz "/bin/missing"
+exec_directory_path:
+    .asciz "/bin"
+invalid_exec_path:
+    .asciz "/init"
 exec_zero_path:
     .asciz "/dev/zero"
 exec_null_path:
