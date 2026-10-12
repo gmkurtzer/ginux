@@ -967,6 +967,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux thread-directed signal delivery validated\r\n");
     serial_write("ginux: Linux legacy thread signal delivery validated\r\n");
     serial_write("ginux: Linux pending signal delivery validated\r\n");
+    serial_write("ginux: Linux one-shot signal action validated\r\n");
     serial_write("ginux: Linux alternate signal stack delivery validated\r\n");
     serial_write("ginux: Linux bounded alternate signal stack validated\r\n");
     serial_write("ginux: Linux single-thread process identity verified\r\n");

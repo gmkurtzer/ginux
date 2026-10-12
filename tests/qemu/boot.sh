@@ -1583,6 +1583,10 @@ if ! grep -q '^ginux: Linux pending signal delivery validated' "$output_file"; t
     echo "Boot test failed: Linux pending signal delivery was not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux one-shot signal action validated' "$output_file"; then
+    echo "Boot test failed: Linux one-shot signal action was not validated." >&2
+    exit 1
+fi
 if ! grep -q '^ginux: Linux alternate signal stack delivery validated' "$output_file"; then
     echo "Boot test failed: Linux alternate signal stack delivery was not validated." >&2
     exit 1

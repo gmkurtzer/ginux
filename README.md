@@ -438,6 +438,10 @@ If this admitted signal is blocked, delivery coalesces into a pending bit;
 bit is unblocked. Other asynchronous sources, `SA_SIGINFO`, user-editable
 `ucontext`, nested delivery, automatic alternate-stack disarming, and syscall
 restart remain future work.
+`SA_NODEFER` suppresses the automatic delivered-signal mask bit while retaining
+the explicit action mask, and `SA_RESETHAND` atomically restores the default
+disposition after committing a delivery. The measured handler observes that
+mask and verifies the one-shot action is already cleared after return.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
 Real/effective/saved UID and GID triples are also zero and are copied only

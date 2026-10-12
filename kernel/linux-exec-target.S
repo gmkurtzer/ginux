@@ -388,10 +388,13 @@ ginux_linux_exec_target:
     cmp qword ptr [rip + .Lpending_mask], 0
     jne .Lfailure
 
-    mov qword ptr [rip + .Lsignal_action], 0
-    mov qword ptr [rip + .Lsignal_action + 8], 0
-    mov qword ptr [rip + .Lsignal_action + 16], 0
-    mov qword ptr [rip + .Lsignal_action + 24], 0
+    lea rax, [rip + .Lsignal_handler]
+    mov qword ptr [rip + .Lsignal_action], rax
+    mov eax, 0xc4000000
+    mov qword ptr [rip + .Lsignal_action + 8], rax
+    lea rax, [rip + .Lsignal_restorer]
+    mov qword ptr [rip + .Lsignal_action + 16], rax
+    mov qword ptr [rip + .Lsignal_action + 24], 0x200
     mov edi, 11
     lea rsi, [rip + .Lsignal_action]
     xor edx, edx
@@ -399,6 +402,43 @@ ginux_linux_exec_target:
     mov eax, 13
     syscall
     test rax, rax
+    jne .Lfailure
+    mov qword ptr [rip + .Lsignal_mode], 1
+    mov edi, 1
+    mov esi, 11
+    mov eax, 200
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov qword ptr [rip + .Lsignal_mode], 0
+    cmp qword ptr [rip + .Lsignal_count], 4
+    jne .Lfailure
+
+    mov edi, 11
+    xor esi, esi
+    lea rdx, [rip + .Lold_signal_action]
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lold_signal_action], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lold_signal_action + 8], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lold_signal_action + 16], 0
+    jne .Lfailure
+    cmp qword ptr [rip + .Lold_signal_action + 24], 0
+    jne .Lfailure
+    mov edi, 99
+    xor esi, esi
+    lea rdx, [rip + .Lold_signal_mask]
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lold_signal_mask], 0
     jne .Lfailure
 #endif
 
@@ -499,6 +539,19 @@ ginux_linux_exec_target:
     test rdx, rdx
     jne .Lfailure
     inc qword ptr [rip + .Lsignal_count]
+    cmp qword ptr [rip + .Lsignal_mode], 0
+    je .Lsignal_handler_return
+    mov edi, 99
+    xor esi, esi
+    lea rdx, [rip + .Lobserved_signal_mask]
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lobserved_signal_mask], 0x200
+    jne .Lfailure
+.Lsignal_handler_return:
     ret
 
 .Lsignal_restorer:
@@ -554,6 +607,12 @@ ginux_linux_exec_target:
     .zero 8
 .Lpending_mask:
     .zero 8
+.Lsignal_mode:
+    .zero 8
+.Lobserved_signal_mask:
+    .zero 8
+.Lold_signal_action:
+    .zero 32
 #endif
 
 .section .note.GNU-stack,"",@progbits

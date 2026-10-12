@@ -694,10 +694,11 @@ mask for the sole thread. It supports `SIG_BLOCK`, `SIG_UNBLOCK`, `SIG_SETMASK`,
 and a null-set query; `SIGKILL` and `SIGSTOP` are always cleared. The kernel
 validates the set size and every complete input/output range before mutation,
 so `-EINVAL` and `-EFAULT` leave the prior mask intact. The bounded synchronous
-delivery path temporarily adds the delivered signal and the action mask, then
-restores the exact prior mask through `rt_sigreturn`. Pending sets,
-asynchronous generation, and interrupted-syscall restart behavior are not
-implemented yet.
+delivery path temporarily adds the delivered signal unless `SA_NODEFER` is
+set, always adds the explicit action mask, then restores the exact prior mask
+through `rt_sigreturn`. The bounded pending contract is described below;
+external asynchronous generation and interrupted-syscall restart behavior are
+not implemented yet.
 `rax = 13` (`__NR_rt_sigaction`) stores and queries one 32-byte x86-64 action
 record for each of signals 1 through 64. Complete action and old-action ranges
 are validated before state changes; action masks also clear `SIGKILL` and
@@ -708,7 +709,8 @@ normalized registration, fault atomicity, and restoration of every action
 before exit.
 
 An unmasked ring-3 page fault is delivered as signal 11 when its action has
-`SA_RESTORER` and optionally `SA_ONSTACK`, both handler and restorer point into
+`SA_RESTORER` and any supported combination of `SA_ONSTACK`, `SA_NODEFER`, and
+`SA_RESETHAND`, both handler and restorer point into
 a current executable image extent, a Linux thread is current, and no signal
 frame is active. The
 kernel retains the complete interrupted general-register, RIP, RSP, RFLAGS, and
@@ -721,6 +723,14 @@ range only while both the flag and active frame agree. The proof handler
 observes `SS_ONSTACK`, proves replacement returns `-EPERM`, observes the
 automatic `SIGSEGV` bit plus its action mask, maps the missing page, and returns
 through the registered restorer.
+`SA_NODEFER` omits the automatic `SIGSEGV` bit while retaining the action mask.
+`SA_RESETHAND` clears the complete handler, flags, restorer, and action-mask
+record only after the frame and handler entry have committed. The dedicated
+runtime combines both flags, observes only its explicit `SIGUSR1` action-mask
+bit from inside the handler, returns with the original empty mask, and queries
+an already-defaulted action. Unsupported action-flag bits fail delivery with
+`-ENOSYS`; nested delivery remains outside this bounded profile even with
+`SA_NODEFER`.
 
 `rax = 15` (`__NR_rt_sigreturn`) succeeds only for that one active frame at its
 exact post-`ret` stack address with the intact cookie. A premature call returns
@@ -756,7 +766,7 @@ thread groups or thread IDs return `-ESRCH`. An unmasked admitted `SIGSEGV`
 uses the same live-return delivery path as `kill`, and the dedicated measured
 `/bin/signal-probe` installs a fresh post-`execve` handler, exercises every
 identity class, completes one handler/`rt_sigreturn` lifecycle, then restores
-the default action before exit. The verifier therefore requires five exact
+the default action before exit. The verifier therefore requires six exact
 delivery/return pairs for that measured runtime and two for the other probe
 executions.
 When that admitted caught `SIGSEGV` is blocked, `kill`, `tkill`, or `tgkill` coalesces it

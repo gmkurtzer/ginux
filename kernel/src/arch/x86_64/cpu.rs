@@ -292,6 +292,8 @@ const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SA_RESTORER: u64 = 0x0400_0000;
 const LINUX_SA_ONSTACK: u64 = 0x0800_0000;
+const LINUX_SA_NODEFER: u64 = 0x4000_0000;
+const LINUX_SA_RESETHAND: u64 = 0x8000_0000;
 const LINUX_SIGNAL_FRAME_SIZE: usize = 16;
 const LINUX_SIGNAL_FRAME_COOKIE: u64 = 0x4749_4e55_5853_4947;
 const LINUX_SS_ONSTACK: u32 = 1;
@@ -3197,7 +3199,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
-    let expected_signal_count = if signal_probe_executed { 5 } else { 2 };
+    let expected_signal_count = if signal_probe_executed { 6 } else { 2 };
     let signal_lifecycle_valid = !LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst)
         && signal_delivery_count == expected_signal_count
         && signal_return_count == expected_signal_count
@@ -9533,6 +9535,31 @@ fn linux_executable_user_address(address: u64) -> bool {
     (code..code_end).contains(&address) || (loader..loader_end).contains(&address)
 }
 
+fn linux_signal_action_deliverable(handler: u64, flags: u64, restorer: u64) -> bool {
+    let supported = LINUX_SA_RESTORER | LINUX_SA_ONSTACK | LINUX_SA_NODEFER | LINUX_SA_RESETHAND;
+    handler > 1
+        && flags & LINUX_SA_RESTORER != 0
+        && flags & !supported == 0
+        && linux_executable_user_address(handler)
+        && linux_executable_user_address(restorer)
+}
+
+fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: u64, flags: u64) {
+    let action_mask = ELF_PROBE_SIGNAL_ACTION_MASKS[index].load(Ordering::SeqCst);
+    let automatic_mask = if flags & LINUX_SA_NODEFER == 0 {
+        signal_bit
+    } else {
+        0
+    };
+    ELF_PROBE_SIGNAL_MASK.store(old_mask | action_mask | automatic_mask, Ordering::SeqCst);
+    if flags & LINUX_SA_RESETHAND != 0 {
+        ELF_PROBE_SIGNAL_HANDLERS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_FLAGS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_RESTORERS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_ACTION_MASKS[index].store(0, Ordering::SeqCst);
+    }
+}
+
 fn linux_kill(
     pid: u64,
     signal: u64,
@@ -9570,10 +9597,7 @@ fn linux_kill(
     let old_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
     let flags = ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
     let restorer = ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
-    if (flags != LINUX_SA_RESTORER && flags != (LINUX_SA_RESTORER | LINUX_SA_ONSTACK))
-        || !linux_executable_user_address(handler)
-        || !linux_executable_user_address(restorer)
-    {
+    if !linux_signal_action_deliverable(handler, flags, restorer) {
         return LINUX_ENOSYS;
     }
     if old_mask & signal_bit != 0 {
@@ -9635,8 +9659,7 @@ fn linux_kill(
     // SAFETY: syscall entry is serialized with interrupts disabled until its
     // return context enters the handler.
     unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(context) };
-    let action_mask = ELF_PROBE_SIGNAL_ACTION_MASKS[index].load(Ordering::SeqCst);
-    ELF_PROBE_SIGNAL_MASK.store(old_mask | action_mask | signal_bit, Ordering::SeqCst);
+    linux_apply_delivered_signal_action(index, signal_bit, old_mask, flags);
     if use_alt_stack {
         ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_ONSTACK, Ordering::SeqCst);
     }
@@ -9713,11 +9736,7 @@ fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {
     let handler = ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
     let flags = ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
     let restorer = ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
-    if handler <= 1
-        || (flags != LINUX_SA_RESTORER && flags != (LINUX_SA_RESTORER | LINUX_SA_ONSTACK))
-        || !linux_executable_user_address(handler)
-        || !linux_executable_user_address(restorer)
-    {
+    if !linux_signal_action_deliverable(handler, flags, restorer) {
         return false;
     }
     let interrupted = frame.context();
@@ -9762,8 +9781,7 @@ fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {
     // SAFETY: interrupts are disabled from exception entry through IRETQ, and
     // only one bounded Linux signal frame may be active at a time.
     unsafe { core::ptr::addr_of_mut!(LINUX_SIGNAL_CONTEXT).write(context) };
-    let action_mask = ELF_PROBE_SIGNAL_ACTION_MASKS[index].load(Ordering::SeqCst);
-    ELF_PROBE_SIGNAL_MASK.store(old_mask | action_mask | signal_bit, Ordering::SeqCst);
+    linux_apply_delivered_signal_action(index, signal_bit, old_mask, flags);
     if use_alt_stack {
         ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_ONSTACK, Ordering::SeqCst);
     }
