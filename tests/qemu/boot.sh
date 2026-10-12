@@ -598,6 +598,11 @@ if ! grep -q '^ginux: bounded Linux process lifecycle contract validated' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: generation-bound Linux process roots validated' "$output_file"; then
+    echo "Boot test failed: generation-bound Linux process roots were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: transactional Linux child publication validated' "$output_file"; then
     echo "Boot test failed: transactional Linux child publication was not validated." >&2
     exit 1

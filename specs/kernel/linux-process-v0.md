@@ -5,8 +5,8 @@
 This contract introduces the kernel-owned process identity and lifecycle model
 needed before Ginux can expose process-style Linux `clone`/`fork` and `wait4`.
 It is deliberately separate from the existing bounded Linux thread table:
-threads share one process address space, while every process record owns a
-distinct nonzero address-space root.
+threads share one process address space, while every running process record
+owns a distinct allocator-issued, generation-checked address-space root lease.
 
 ## Identity and capacity
 
@@ -19,32 +19,39 @@ The first record is PID 1 and has no parent. PID 1 can be created only once.
 Every later record names a live parent. Child creation first reserves a
 `Preparing` record with no address-space root. That record cannot exit, become
 a zombie, or be observed through wait. Commit requires a distinct nonzero root
-and atomically changes the record to `Running`; abort removes the reservation.
+lease that remains live under the kernel bootstrap owner and atomically changes
+the record to `Running`; abort removes the reservation.
 Both commit and abort require the exact generation-checked handle, so neither
 can affect a slot that has since been reused. A failed transaction may consume
 an internal PID, but never publishes that PID as a running process.
 
 Reservation fails without partial publication when the table is full, the
 parent is absent or not running, or an identity counter is exhausted. Commit
-fails without changing the reservation when the root is zero or already owned.
+fails without changing the reservation when the root lease is stale or its
+physical address is already attached to another process.
 
 ## Exit and wait ordering
 
 A running process cannot become a zombie while it still owns its address-space
-root. Teardown must first release the exact recorded root, then publish the
-exit status. A mismatched root or stale handle changes no state.
+root. Teardown requires the exact root lease and moves the record to `Exiting`,
+where it is neither runnable nor waitable. Zombie publication remains denied
+while the allocator still tracks that lease. Only after the caller scrubs and
+releases the root can it publish the exit status. A mismatched or stale root or
+process handle changes no state.
 
 Only the live recorded parent can reap a zombie, and only by the child's PID.
 Waiting for a running child or an unrelated process has no effect. Reaping
 removes the complete record and makes its slot reusable; the next occupant has
 a new generation and PID.
 
-The boot verifier constructs PID 1 and reserves PID 2. It rejects zero and
-aliased roots, proves the unpublished child cannot exit or be reaped, aborts
-the reservation, and rejects its stale handle. It then commits PID 3, proves
-that it cannot be reaped or exited early, releases its root, publishes status
-42, and reaps it through PID 1. Finally, it reuses the same slot for PID 4 and
-repeats teardown with status 7.
+The boot verifier allocates three real root leases, constructs PID 1, and
+reserves PID 2. It rejects stale and aliased roots, proves the unpublished child
+cannot exit or be reaped, aborts the reservation, and rejects its stale handle.
+It then commits PID 3, proves both premature detach and zombie publication are
+denied, scrubs and releases its exact root, publishes status 42, and reaps it
+through PID 1. Finally, it reuses the same slot for PID 4, repeats teardown with
+status 7, retires PID 1's root, and requires the allocator count to return to
+its starting value.
 
 ## Private page copy primitive
 

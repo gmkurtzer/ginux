@@ -284,12 +284,15 @@ A separate four-slot process-lifecycle table now establishes the ownership
 model required before process-style creation is exposed. Internal identities
 bind slot, generation, and monotonic PID; every child has a live recorded
 parent. Creation reserves an invisible `Preparing` record, and only a validated
-distinct nonzero address-space root can publish it as running; abort removes
-the reservation and stale handles cannot commit a reused slot. Exit cannot
-publish a zombie until that exact root is released, and only the live parent
-can reap it. The QEMU proof aborts one reservation, then creates and reaps two
-children through one reused slot. This table is not wired to Linux syscalls and
-does not yet construct a runnable child hierarchy or inherit process resources.
+distinct generation-checked root lease can publish it as running; abort removes
+the reservation and stale handles cannot commit a reused slot. Exit first
+moves the record to a non-runnable `Exiting` state, and zombie publication is
+denied until the allocator confirms that exact root lease was scrubbed and
+released. Only the live parent can reap it. The QEMU proof uses three real root
+frames, aborts one reservation, creates and reaps two children through one
+reused slot, retires PID 1, and restores the allocator count. This table is not
+wired to Linux syscalls and does not yet retain a complete child resource
+bundle or inherit process resources.
 A separate eager-copy primitive validates generation-bound ownership and
 pairwise separation before copying two complete private pages. Its proof
 rejects stale and aliased destinations without partial writes, demonstrates
