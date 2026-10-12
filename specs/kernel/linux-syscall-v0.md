@@ -1240,9 +1240,8 @@ record binds a virtual address, generation-checked frame, and W^X permissions;
 a complete page-table walk must match the exact inventory. Publication rejects
 metadata substitutions and any cross-process frame overlap. Exit enters a
 non-runnable intermediate state and cannot publish a zombie until the allocator
-no longer tracks any lease in the exact detached bundle. It is currently an
-internal boot-verified model and is not reachable through this syscall profile.
-Its dedicated proof gate now resumes the cloned child after validating its
+no longer tracks any lease in the exact detached bundle. Its dedicated proof
+gate resumes the cloned child after validating its
 complete saved frame, captures a subsequent ring-3 syscall number 60 and status
 42, and uses that captured status for zombie publication and parent wait. The
 live runtime now snapshots and completely validates its generation-bound image,
@@ -1253,9 +1252,8 @@ then tears down and reaps the child while restoring the allocator count. One
 child is selected through the native scheduler and enters ring 3 under its
 cloned root at a private bounded trampoline. Its complete fork-derived context
 and FS base are checked before its captured `exit(42)` drives zombie publication
-and reap; the parent code remains unchanged. This is still an internal terminal
-proof rather than a dispatched Linux process-creation syscall. The synthetic
-process exit proof itself does not dispatch through the live Linux runtime.
+and reap; the parent code remains unchanged. The synthetic process exit proof
+remains as an independent lower-level check.
 The live exit paths additionally translate the real syscall entry frame into
 the process model's complete register order and admit it with the snapshot as
 parentless PID 1. A canonical FS base is preserved even when unmapped, matching
@@ -1263,10 +1261,9 @@ Linux `arch_prctl` behavior; page access still requires an ordinary mapping.
 The validated PID 1 record is retained in non-stack kernel storage and refreshed
 from the exact address-space and return context at every leader syscall entry.
 Cleanup requires multiple successful refreshes and refuses any child or
-partially retiring record. The terminal clone verifier consumes it internally,
-but no process-style creation syscall does so yet.
-In particular, the exact bounded `clone` below remains thread-only and `fork`,
-process-style `clone`, and `wait4` remain unsupported.
+partially retiring record. The exact bounded `clone` below remains thread-only;
+the separate process path exposes syscall 57 (`fork`) and syscall 61 (`wait4`)
+for the minimal PID 1 profile.
 The process model's eager-copy helper can duplicate up to 41
 generation-checked private physical pages without aliasing. Its companion
 hierarchy transaction requires a complete bounded inventory of user leaves,
@@ -1276,15 +1273,28 @@ fork transaction obtains that inventory from the prepared child's recorded
 parent, performs both operations, revalidates the resulting child hierarchy,
 derives a child register/TLS context with `RAX = 0`, and atomically publishes
 the context and child bundle. Context publication requires its RIP, stack, FS
-base, and privilege flags to agree with the recorded mappings. It is not yet
-attached to the live syscall runtime. A synthetic proof admits the parent and
+base, and privilege flags to agree with the recorded mappings. A synthetic
+proof admits the parent and
 child contexts to the native scheduler, selects both under their exact roots,
 loads and restores the child's CR3 in kernel mode, and retires their
 generation-tagged bindings. The selected child also executes a bounded ring-3
 payload that checks `RAX = 0`, writes through FS into private memory, and
 returns through the user gate. The entry stub restores all fifteen general
-registers and the gate captures and compares the complete frame. Process-style
-creation remains unavailable through this syscall ABI.
+registers and the gate captures and compares the complete frame.
+
+The public `fork` handler accepts only PID 1's leader and defers the expensive
+clone until the syscall frame has unwound to the bootstrap stack. The child is
+selected through the native scheduler and resumes the real post-syscall RIP
+under its private CR3 with `RAX = 0`; PID 1 later resumes with the child PID.
+The bounded child observes process identity 2 and parent identity 1, then
+`exit(42)` records its eight-bit status and returns to the kernel before its
+active address space is released. `wait4` accepts only the exact positive child
+PID, zero options, and a null rusage pointer. It validates a non-null four-byte
+status output before reaping, writes `42 << 8`, and returns PID 2. Invalid
+options return `-EINVAL`, an invalid status pointer returns `-EFAULT`, and a
+missing or already reaped child returns `-ECHILD`. General process-style
+`clone`, `vfork`, wait options, rusage, multiple children, and concurrent
+parent/child execution remain unsupported.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;

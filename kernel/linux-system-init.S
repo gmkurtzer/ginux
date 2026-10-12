@@ -174,6 +174,69 @@ ginux_linux_system_init:
     cmp rax, 12
     jne .Lfailure
 
+    mov eax, 57
+    syscall
+    test rax, rax
+    js .Lfailure
+    jz .Lfork_child
+
+    mov r12, rax
+    mov rdi, r12
+    xor esi, esi
+    mov edx, 1
+    xor r10d, r10d
+    mov eax, 61
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+
+    mov rdi, r12
+    mov esi, 1
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 61
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+
+    mov dword ptr [rip + .Lstatus], -1
+    mov rdi, r12
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 61
+    syscall
+    cmp rax, r12
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 0x2a00
+    jne .Lfailure
+
+    mov rdi, r12
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    mov eax, 61
+    syscall
+    cmp rax, -10
+    jne .Lfailure
+    jmp .Lfork_complete
+
+.Lfork_child:
+    mov eax, 39
+    syscall
+    cmp rax, 2
+    jne .Lfailure
+    mov eax, 110
+    syscall
+    cmp rax, 1
+    jne .Lfailure
+    mov edi, 42
+    mov eax, 60
+    syscall
+    ud2
+
+.Lfork_complete:
+
     mov rdi, r8
     lea rsi, [rip + .Lready]
     mov edx, 21

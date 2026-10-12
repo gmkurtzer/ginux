@@ -7,7 +7,7 @@ runtime	elf.static-x86_64	ready	Load a measured static x86-64 ET_EXEC image
 runtime	console.pid1-banner	ready	PID 1 writes an exact readiness banner to the measured console
 runtime	process.identity	ready	PID 1 observes Linux container PID 1
 runtime	process.exit-group	ready	PID 1 terminates the bounded process with exit_group
-runtime	process.fork-wait	missing	PID 1 creates and reaps a child process
+runtime	process.fork-wait	ready	PID 1 forks PID 2 and reaps its exit status through wait4
 runtime	signal.standard	partial	Caught ignored blocked and selected fatal standard signals
 runtime	clock.monotonic	ready	Monotonic time sleep and timer waits
 runtime	futex.private	partial	Bounded private waits wakes and clear-child-TID

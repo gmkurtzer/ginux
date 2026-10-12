@@ -77,7 +77,9 @@ const LINUX_GETITIMER_SYSCALL: u64 = 36;
 const LINUX_SETITIMER_SYSCALL: u64 = 38;
 const LINUX_GETPID_SYSCALL: u64 = 39;
 const LINUX_CLONE_SYSCALL: u64 = 56;
+const LINUX_FORK_SYSCALL: u64 = 57;
 const LINUX_EXECVE_SYSCALL: u64 = 59;
+const LINUX_WAIT4_SYSCALL: u64 = 61;
 const LINUX_KILL_SYSCALL: u64 = 62;
 const LINUX_TKILL_SYSCALL: u64 = 200;
 const LINUX_TGKILL_SYSCALL: u64 = 234;
@@ -185,6 +187,7 @@ const LINUX_ENOEXEC: u64 = u64::MAX - 7;
 const LINUX_EBADF: u64 = u64::MAX - 8;
 const LINUX_ENOENT: u64 = u64::MAX - 1;
 const LINUX_ESRCH: u64 = u64::MAX - 2;
+const LINUX_ECHILD: u64 = u64::MAX - 9;
 const LINUX_EFAULT: u64 = u64::MAX - 13;
 const LINUX_EAGAIN: u64 = u64::MAX - 10;
 const LINUX_EPIPE: u64 = u64::MAX - 31;
@@ -435,6 +438,12 @@ static ELF_PROBE_EXEC_NODE: AtomicU8 = AtomicU8::new(0);
 static LINUX_LIVE_RETURN_VALIDATED: AtomicBool = AtomicBool::new(false);
 static LINUX_CHILD_EXIT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PARENT_RESUMED: AtomicBool = AtomicBool::new(false);
+static LINUX_FORK_REQUESTED: AtomicBool = AtomicBool::new(false);
+static LINUX_PROCESS_CHILD_EXITED: AtomicBool = AtomicBool::new(false);
+static LINUX_PROCESS_CHILD_STATUS: AtomicU8 = AtomicU8::new(0);
+static LINUX_CURRENT_PROCESS_PID: AtomicU32 = AtomicU32::new(1);
+static LINUX_PROCESS_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LIVE_FORK_PUBLIC_DIAGNOSTIC: AtomicU8 = AtomicU8::new(0);
 static LINUX_PROCESS_SNAPSHOT_VALIDATED: AtomicBool = AtomicBool::new(false);
 static LINUX_PROCESS_SNAPSHOT_STAGE: AtomicU8 = AtomicU8::new(0);
 static LINUX_CLONE_DISPATCH_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -966,7 +975,7 @@ ginux_process_user_enter:
     mov [rip + {user_return_stack}], rsp
     push {user_data}
     push rsi
-    push 0x202
+    push rcx
     push {user_code}
     push rdi
     mov rax, rdx
@@ -1154,7 +1163,7 @@ extern "sysv64" {
         service_identity: u64,
         root_handle: u64,
     );
-    fn ginux_process_user_enter(entry: usize, stack: usize, general: *const u64);
+    fn ginux_process_user_enter(entry: usize, stack: usize, general: *const u64, rflags: u64);
 }
 
 pub(crate) fn install() -> bool {
@@ -1343,7 +1352,7 @@ pub(crate) fn execute_linux_process_child(
     // validates that frame and returns to ring 3. A subsequent Linux exit(2)
     // trap captures its status and returns to the saved kernel stack because no
     // global native scheduler runtime is active.
-    unsafe { ginux_process_user_enter(entry, stack, general.as_ptr()) };
+    unsafe { ginux_process_user_enter(entry, stack, general.as_ptr(), 0x202) };
     let child_fs_preserved = active_fs_base() == fs_base;
     let probe_state = PROCESS_CHILD_PROBE_STATE.swap(PROCESS_CHILD_PROBE_IDLE, Ordering::SeqCst);
     let context_valid = PROCESS_CHILD_CONTEXT_VALID.swap(false, Ordering::SeqCst);
@@ -1363,6 +1372,32 @@ pub(crate) fn execute_linux_process_child(
         && probe_state == PROCESS_CHILD_PROBE_COMPLETE
         && fs_restored)
         .then_some(exit_status)
+}
+
+pub(crate) fn resume_live_linux_process(
+    entry: usize,
+    stack: usize,
+    fs_base: u64,
+    general: [u64; 15],
+    rflags: u64,
+) -> bool {
+    if entry == 0 || entry >= 1 << 47 || stack == 0 || stack >= 1 << 47 || fs_base >= 1 << 47 {
+        return false;
+    }
+    let saved_fs = active_fs_base();
+    unsafe { write_msr(FS_BASE_MSR, fs_base) };
+    if active_fs_base() != fs_base {
+        unsafe { write_msr(FS_BASE_MSR, saved_fs) };
+        return false;
+    }
+    // SAFETY: The caller activated the generation-checked process root and
+    // validated this complete return context against its private mappings.
+    // A terminating or deferred Linux syscall returns through the saved kernel
+    // stack installed by this entry stub.
+    unsafe { ginux_process_user_enter(entry, stack, general.as_ptr(), rflags) };
+    let preserved = active_fs_base() == fs_base;
+    unsafe { write_msr(FS_BASE_MSR, saved_fs) };
+    preserved && active_fs_base() == saved_fs
 }
 
 pub(crate) fn reset_process_child_execution_diagnostic() {
@@ -2001,6 +2036,68 @@ fn install_live_linux_process_registry(entry: usize, stack: usize, fs_base: u64)
         0x202,
         fs_base,
     )
+}
+
+#[inline(never)]
+fn execute_deferred_live_fork() -> bool {
+    if !LINUX_FORK_REQUESTED.swap(false, Ordering::SeqCst) {
+        return linux_process::verify_live_fork_clone_transaction();
+    }
+    let Some(child) = linux_process::begin_live_fork() else {
+        return false;
+    };
+    if child.pid == 1 || child.general[0] != 0 {
+        return false;
+    }
+    LINUX_PROCESS_CHILD_EXITED.store(false, Ordering::SeqCst);
+    LINUX_PROCESS_CHILD_STATUS.store(0, Ordering::SeqCst);
+    LINUX_CURRENT_PROCESS_PID.store(child.pid, Ordering::SeqCst);
+    let child_resumed = address_space::resume_live_linux_process(
+        child.root,
+        child.rip,
+        child.rsp,
+        child.fs_base,
+        child.general,
+        child.rflags,
+    );
+    let child_exited = LINUX_PROCESS_CHILD_EXITED.swap(false, Ordering::SeqCst);
+    let child_status = LINUX_PROCESS_CHILD_STATUS.swap(0, Ordering::SeqCst);
+    let Some(parent) = (child_resumed && child_exited)
+        .then(|| linux_process::complete_live_child_exit(child.pid, child_status))
+        .flatten()
+    else {
+        return false;
+    };
+    if parent.pid != 1 || parent.general[0] != u64::from(child.pid) {
+        return false;
+    }
+    LINUX_CURRENT_PROCESS_PID.store(1, Ordering::SeqCst);
+    LIVE_FORK_PUBLIC_DIAGNOSTIC.store(0x20, Ordering::SeqCst);
+    let parent_resumed = address_space::resume_live_linux_process(
+        parent.root,
+        parent.rip,
+        parent.rsp,
+        parent.fs_base,
+        parent.general,
+        parent.rflags,
+    );
+    let wait_count = LINUX_PROCESS_WAIT_COUNT.load(Ordering::SeqCst);
+    let valid = parent_resumed
+        && child_status == LINUX_PROBE_EXIT_STATUS as u8
+        && wait_count == 1
+        && !LINUX_FORK_REQUESTED.load(Ordering::SeqCst);
+    LIVE_FORK_PUBLIC_DIAGNOSTIC.store(
+        u8::from(parent_resumed)
+            | (u8::from(child_status == LINUX_PROBE_EXIT_STATUS as u8) << 1)
+            | (u8::from(wait_count == 1) << 2)
+            | (u8::from(ELF_PROBE_COMPLETED.load(Ordering::SeqCst)) << 3)
+            | (u8::from(!ELF_PROBE_ACTIVE.load(Ordering::SeqCst)) << 4),
+        Ordering::SeqCst,
+    );
+    if valid {
+        serial_write("ginux: Linux PID 1 fork and wait4 lifecycle completed\r\n");
+    }
+    valid
 }
 
 fn linux_active_image_writable_index(address: u64) -> Option<usize> {
@@ -3708,6 +3805,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_LIVE_RETURN_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CHILD_EXIT_COUNT.store(0, Ordering::SeqCst);
     LINUX_PARENT_RESUMED.store(false, Ordering::SeqCst);
+    LINUX_FORK_REQUESTED.store(false, Ordering::SeqCst);
+    LINUX_PROCESS_CHILD_EXITED.store(false, Ordering::SeqCst);
+    LINUX_PROCESS_CHILD_STATUS.store(0, Ordering::SeqCst);
+    LINUX_CURRENT_PROCESS_PID.store(1, Ordering::SeqCst);
+    LINUX_PROCESS_WAIT_COUNT.store(0, Ordering::SeqCst);
+    LIVE_FORK_PUBLIC_DIAGNOSTIC.store(0, Ordering::SeqCst);
     LINUX_PROCESS_SNAPSHOT_VALIDATED.store(false, Ordering::SeqCst);
     LINUX_CLONE_DISPATCH_COUNT.store(0, Ordering::SeqCst);
     LINUX_FIRST_CHILD_TID.store(0, Ordering::SeqCst);
@@ -4064,7 +4167,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         return LinuxElfResult::FAILED;
     }
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
-    let live_fork_executed = linux_process::verify_live_fork_clone_transaction();
+    let live_fork_executed = execute_deferred_live_fork();
     let live_process_registry_finished =
         live_fork_executed && linux_process::finish_live_process_registry();
     if !live_process_registry_finished {
@@ -4078,6 +4181,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         serial_write_u64(u64::from(
             PROCESS_CHILD_EXECUTION_DIAGNOSTIC.load(Ordering::SeqCst),
         ));
+        serial_write(" ");
+        serial_write_u64(u64::from(
+            LIVE_FORK_PUBLIC_DIAGNOSTIC.load(Ordering::SeqCst),
+        ));
+        serial_write(" ");
+        serial_write_u64(u64::from(LINUX_PROCESS_WAIT_COUNT.load(Ordering::SeqCst)));
         serial_write("\r\n");
     }
     let linux_wait_timer_finished = execution.tls_size == 0 || timer::finish_linux_wait_timer();
@@ -5476,7 +5585,10 @@ extern "sysv64" fn linux_syscall_handler(
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;
     }
-    if current_linux_tid() == Some(1) && !refresh_live_linux_process_registry(syscall_return) {
+    if current_linux_process_pid() == 1
+        && current_linux_tid() == Some(1)
+        && !refresh_live_linux_process_registry(syscall_return)
+    {
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;
     }
@@ -5703,6 +5815,18 @@ extern "sysv64" fn linux_syscall_handler(
             register(0),
         ),
         LINUX_CLONE_SYSCALL => linux_clone_thread(saved_registers, user_rip, user_rflags),
+        LINUX_FORK_SYSCALL => {
+            if current_linux_process_pid() != 1
+                || current_linux_tid() != Some(1)
+                || LINUX_FORK_REQUESTED
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_err()
+            {
+                LINUX_EAGAIN
+            } else {
+                LINUX_RETURN_TO_KERNEL
+            }
+        }
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
         LINUX_KILL_SYSCALL => linux_kill(
             first_argument,
@@ -5740,7 +5864,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXECVEAT_SYSCALL => {
             linux_execveat(first_argument, buffer, count, register(0), register(2))
         }
-        LINUX_GETPID_SYSCALL => 1,
+        LINUX_GETPID_SYSCALL => u64::from(current_linux_process_pid()),
         LINUX_GETTID_SYSCALL => {
             let Some(tid) = current_linux_tid() else {
                 return LINUX_ESRCH;
@@ -5750,7 +5874,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             u64::from(tid)
         }
-        LINUX_GETPPID_SYSCALL => 0,
+        LINUX_GETPPID_SYSCALL => u64::from((current_linux_process_pid() != 1) as u32),
         LINUX_GETPGRP_SYSCALL => 1,
         LINUX_GETPGID_SYSCALL | LINUX_GETSID_SYSCALL => {
             if matches!(first_argument, 0 | 1) {
@@ -6059,6 +6183,14 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_CLOCK_GETTIME_SYSCALL => linux_clock_gettime(first_argument, buffer),
         LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
         LINUX_STATX_SYSCALL => linux_statx(first_argument, buffer, count, register(0), register(2)),
+        LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
+        LINUX_EXIT_SYSCALL
+            if first_argument <= u64::from(u8::MAX) && current_linux_process_pid() != 1 =>
+        {
+            LINUX_PROCESS_CHILD_STATUS.store(first_argument as u8, Ordering::SeqCst);
+            LINUX_PROCESS_CHILD_EXITED.store(true, Ordering::SeqCst);
+            LINUX_RETURN_TO_KERNEL
+        }
         LINUX_EXIT_SYSCALL
             if first_argument == LINUX_PROBE_EXIT_STATUS && current_linux_tid() != Some(1) =>
         {
@@ -6250,6 +6382,35 @@ fn linux_exit_child_to_parent(output: *mut LinuxSyscallFrame) -> u64 {
     }
     LINUX_CHILD_EXIT_COUNT.fetch_add(1, Ordering::SeqCst);
     context.rax
+}
+
+fn current_linux_process_pid() -> u32 {
+    LINUX_CURRENT_PROCESS_PID.load(Ordering::SeqCst)
+}
+
+fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 {
+    if current_linux_process_pid() != 1 || current_linux_tid() != Some(1) {
+        return LINUX_ECHILD;
+    }
+    let Ok(pid) = u32::try_from(pid) else {
+        return LINUX_ECHILD;
+    };
+    if options != 0 || rusage != 0 {
+        return LINUX_EINVAL;
+    }
+    if status_address != 0 && !linux_writable_user_range_contains(status_address, size_of::<u32>())
+    {
+        return LINUX_EFAULT;
+    }
+    let Some((waited, status)) = linux_process::wait_live_child(1, pid) else {
+        return LINUX_ECHILD;
+    };
+    let encoded = u32::from(status) << 8;
+    if status_address != 0 && !copy_to_linux_user(status_address, &encoded.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    LINUX_PROCESS_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
+    u64::from(waited)
 }
 
 fn linux_sched_yield_live_return(

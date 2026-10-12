@@ -734,6 +734,7 @@ if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
 fi
 
 if [[ "$(grep -c '^GINUX_SYSTEM_INIT_V0' "$output_file")" -ne 1 ]] ||
+    ! grep -q '^ginux: Linux PID 1 fork and wait4 lifecycle completed' "$output_file" ||
     ! grep -q '^ginux: measured minimal system init executed as PID 1' "$output_file" ||
     ! grep -q '^ginux: minimal system init exited cleanly' "$output_file"; then
     echo "Boot test failed: the measured minimal system init did not run and exit cleanly." >&2

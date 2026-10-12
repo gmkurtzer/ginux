@@ -3149,6 +3149,33 @@ pub(crate) fn execute_linux_process_child(
         .flatten()
 }
 
+pub(crate) fn resume_live_linux_process(
+    root: memory::FrameLease,
+    entry: u64,
+    stack: u64,
+    fs_base: u64,
+    general: [u64; 15],
+    rflags: u64,
+) -> bool {
+    let previous = current_root();
+    let (Ok(entry), Ok(stack)) = (usize::try_from(entry), usize::try_from(stack)) else {
+        return false;
+    };
+    if root.address() == previous {
+        return memory::frames_owned_by(memory::FrameOwner::KERNEL, &[root])
+            && cpu::resume_live_linux_process(entry, stack, fs_base, general, rflags)
+            && current_root() == previous;
+    }
+    if !verify_linux_process_root_activation(root) || current_root() != previous {
+        return false;
+    }
+    unsafe { activate(root.address()) };
+    let resumed = current_root() == root.address()
+        && cpu::resume_live_linux_process(entry, stack, fs_base, general, rflags);
+    unsafe { activate(previous) };
+    resumed && current_root() == previous
+}
+
 fn validate_complete_linux_process_user_tree(
     table: u64,
     level: usize,

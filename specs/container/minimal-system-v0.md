@@ -27,14 +27,20 @@ PID 1 also enumerates the measured `/tmp` anchor, writes `ready\n` to the
 bounded kernel-owned `ginux-ready` scratch file, closes and reopens it, and
 validates the exact bytes. Process exit scrubs the complete 64-byte backing
 store. This moves tmpfs to `partial`; it is not a mounted general tmpfs.
+Before publishing readiness, PID 1 invokes Linux `fork`. The independently
+owned PID 2 resumes at the actual post-fork instruction with `RAX = 0`, verifies
+`getpid() == 2` and `getppid() == 1`, and exits with status 42. PID 1 first
+proves invalid `wait4` options and an invalid status pointer do not reap the
+zombie, then receives PID 2 and encoded status `42 << 8`; a repeated wait
+returns `-ECHILD`. This makes `process.fork-wait` ready for the bounded profile.
 
 This execution gate deliberately does not claim M5 completion. The immutable
 root publishes an explicit `/sbin` directory containing the exact `init` node,
 and bounded root enumeration reaches it through a second cursor page. PID 1 is
 currently a bounded readiness-and-exit workload, not a persistent supervisor
-or interactive console owner. Process creation/reaping, a mount namespace, a
-general tmpfs, a complete procfs, and a complete user-namespace contract remain
-explicit gaps in the matrix.
+or interactive console owner. General process concurrency, a mount namespace,
+a general tmpfs, a complete procfs, and a complete user-namespace contract
+remain explicit gaps in the matrix.
 
 Build the exact candidate root and signed development image with:
 

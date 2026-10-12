@@ -20,7 +20,9 @@ readiness it enumerates `/proc` and `/proc/1`, then reads a bounded read-only
 `/proc/1/status` view containing its exact name, running state, PID 1, and
 parent PID 0. It also enumerates `/tmp`, writes and rereads `ready\n` through a
 bounded 64-byte `ginux-ready` scratch file, and relies on final teardown to
-scrub that backing store. The kernel
+scrub that backing store. PID 1 also invokes the public Linux `fork` ABI,
+resumes an independently owned PID 2 under its private CR3, and reaps its
+`exit(42)` status through `wait4` before publishing readiness. The kernel
 copies the root into a zeroed, contiguous 32-frame allocation,
 verifies source independence and the complete zero tail, and builds a bounded
 pathname index whose 32-bit offsets resolve only inside the owned image. A
@@ -288,7 +290,7 @@ distinct generation-checked resource bundle can publish it as running; each
 bundle contains four through six page-table leases and one through 41
 private-page mapping records. Every record binds its virtual address, frame
 lease, and W^X permissions, and publication requires an exact match with every
-user leaf in the complete hierarchy while rejecting overlap in any frame. Exit
+user leaf in the complete hierarchy while rejecting overlap in any frame.
 Publication also requires a saved userspace context whose RIP resolves inside
 an executable recorded page, whose RSP resolves to the top of a writable page,
 and whose flags and FS base are safe. Exit first moves the complete bundle to a non-runnable `Exiting` state, and zombie
@@ -297,8 +299,10 @@ every lease. Only the live parent can reap it. The QEMU proof uses three real
 six-frame address spaces, rejects stale leases, partial aliases, substituted
 address or permission metadata, and invalid execution contexts, aborts one reservation, creates
 and reaps two children through one reused slot, retires PID 1, and restores the
-allocator count. This table is not wired to Linux syscalls and does not yet
-inherit descriptors, credentials, signals, or namespace state.
+allocator count. The live PID 1 `fork` and `wait4` path now uses this table;
+descriptor, credential, signal, mount, and namespace inheritance remain
+bounded to the existing process-global proof state rather than independently
+modeled per process.
 A separate eager-copy primitive validates generation-bound ownership and
 pairwise separation before copying two complete private pages. Its proof
 rejects stale and aliased destinations without partial writes, demonstrates
@@ -347,9 +351,14 @@ were restored. One live child also has a bounded private trampoline installed
 at its saved RIP, is selected through the native process scheduler, enters ring
 3 under its cloned CR3 with the complete fork context and FS base, and drives
 zombie publication with its captured `exit(42)`. The parent code remains
-unchanged. Process-style creation and wait are not yet exposed through the
-Linux syscall ABI, so the minimal system profile correctly keeps
-`process.fork-wait` missing. The exact contract and limits are recorded in
+unchanged. The minimal system workload now consumes the same machinery through
+Linux syscall 57 (`fork`) and syscall 61 (`wait4`). The child resumes its real
+post-fork code with `RAX = 0`, observes PID 2 and parent PID 1, and exits 42.
+PID 1 resumes with the child PID, verifies invalid waits do not consume the
+zombie, receives status `42 << 8`, and proves a repeated reap returns
+`-ECHILD`. The profile therefore records `process.fork-wait` ready while
+retaining explicit limits on concurrency and inherited process state. The
+exact contract and limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,

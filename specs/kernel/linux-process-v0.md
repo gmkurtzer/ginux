@@ -1,9 +1,9 @@
 # Bounded Linux Process Lifecycle v0
 
-**Status:** Internal lifecycle contract verified during x86-64 QEMU boot.
+**Status:** Bounded `fork`/`wait4` lifecycle verified during x86-64 QEMU boot.
 
 This contract introduces the kernel-owned process identity and lifecycle model
-needed before Ginux can expose process-style Linux `clone`/`fork` and `wait4`.
+used by the first process-style Linux `fork` and `wait4` implementation.
 It is deliberately separate from the existing bounded Linux thread table:
 threads share one process address space, while every running process record
 owns a distinct allocator-issued, generation-checked address-space resource
@@ -202,9 +202,8 @@ The boot workload exercises this contract for the static, dynamic,
 minimal-system, and interpreted exec paths. It also makes an otherwise valid
 snapshot incomplete, changes one permission, and substitutes a stale root
 generation, and supplies an out-of-range mapping count, requiring all four
-variants to fail. This snapshot is the source
-inventory needed by the next live process-clone transaction; it is not yet
-published as a second process record.
+variants to fail. The public `fork` path uses this snapshot as the source
+inventory for the independently owned child record.
 
 The exit and default-signal paths also convert the actual syscall frame into
 the process model's 15-register order. `RAX` carries the selected syscall
@@ -227,8 +226,8 @@ bundle, or non-running init record. The table is initialized field-by-field in
 static storage so neither construction nor replacement places the four-slot
 table on the bounded kernel stack.
 
-This now supplies the ownership, publication, and scheduler-staging operations
-needed by a future eager fork. The process bundle retains and cross-checks its
+This supplies the ownership, publication, and scheduler-staging operations
+used by the bounded eager fork. The process bundle retains and cross-checks its
 virtual address, frame, and permission inventory, the synthetic hierarchy clone
 is published through the process table, and its saved context is selected by
 the native scheduler under the child root. The child executes a bounded ring-3
@@ -259,24 +258,57 @@ corresponding code bytes remain unchanged, and the temporary scheduler must be
 empty before reuse. Later terminal workloads repeat clone/publication/reap
 without redundantly executing the probe.
 
-The transaction is still not exposed as a Linux process-creation or wait
-syscall.
+## Public `fork` and `wait4` path
+
+Linux syscall 57 is accepted only from PID 1's leader and only when no fork is
+already pending. The syscall records PID 1's exact post-syscall RIP, RSP,
+RFLAGS, FS base, and complete general-register frame, then returns to the
+kernel bootstrap stack. Allocation and page-table cloning never run on the
+bounded syscall stack. The transaction eagerly copies every recorded private
+page; copy-on-write is not claimed.
+
+PID 1 and the committed PID 2 are admitted to the native process scheduler.
+PID 2 is selected, its generation-checked root is activated, and it resumes the
+actual instruction following `fork` with `RAX = 0` and the saved flags and FS
+base. The process identity is separate from the existing thread identity: the
+bounded child remains the sole thread leader but observes `getpid() == 2` and
+`getppid() == 1`. Its `exit(42)` returns to the bootstrap stack without
+retiring resources under the active child CR3. After the parent root is
+restored, the scheduler selects PID 1, the child bundle is scrubbed and
+released, and PID 2 becomes a zombie. PID 1 resumes with `RAX = 2`.
+
+Linux syscall 61 accepts only a positive exact child PID, options zero, and a
+null rusage pointer. A non-null status pointer must cover a complete writable
+four-byte range before the zombie is consumed. Successful wait copies the
+Linux exit encoding `status << 8`, returns the child PID, and removes the
+generation-tagged child record. Unsupported options return `-EINVAL`, an
+invalid status range returns `-EFAULT`, and an absent, running, unrelated, or
+already reaped child returns `-ECHILD`. The measured PID 1 proves both error
+paths leave the zombie waitable, reaps status 42, and proves a second reap is
+rejected.
+
+Failure before child publication aborts the invisible reservation. Failure
+after publication but before dispatch withdraws any scheduler bindings,
+releases the scheduler workspace, scrubs the child bundle, removes its record,
+and restores the parent's pre-fork return value. Successful completion requires
+an empty scheduler workspace and leaves only the unchanged running PID 1
+record.
 
 ## Deliberate limits
 
-This is an internal ownership contract, not Linux process compatibility yet.
-It is not connected to the syscall dispatcher and does not implement:
+This is a bounded compatibility slice rather than general Linux process
+management. It does not implement:
 
-- resumption of arbitrary post-`fork` application code or copy-on-write;
-- process-style `clone`, `fork`, `vfork`, `wait4`, or `waitid`;
-- descriptor, credential, signal, mount, or namespace inheritance;
+- copy-on-write, concurrent parent/child execution, or more than one public
+  child lifecycle;
+- process-style `clone`, `vfork`, `waitid`, wait groups, `WNOHANG`, or rusage;
+- independently modeled descriptor, credential, signal, mount, or namespace
+  inheritance;
 - concurrent process scheduling or process-directed signal delivery;
 - orphan reparenting, subreapers, process groups, or sessions;
 - resource accounting, limits, PID namespaces, or procfs generation from this
   table; or
 - general capacity or PID/generation rollover recovery.
 
-The minimal system profile therefore continues to report
-`runtime process.fork-wait missing`. A later milestone may change that row only
-after PID 1 creates, runs, observes, and reaps an independently owned ring-3
-child through the Linux ABI.
+The minimal system profile reports `runtime process.fork-wait ready` only for
+this exact PID 1 → PID 2 → exit 42 → `wait4` contract.

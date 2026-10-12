@@ -865,6 +865,16 @@ pub(crate) fn acquire_process_scheduler_workspace() -> Option<&'static mut Proce
     }
 }
 
+pub(crate) fn active_process_scheduler_workspace() -> Option<&'static mut ProcessScheduler> {
+    if !PROCESS_WORKSPACE_ACTIVE.load(Ordering::Acquire) {
+        return None;
+    }
+    // SAFETY: Process execution is serialized on the bootstrap processor. The
+    // caller that acquired the workspace has returned its mutable reference
+    // before a later lifecycle phase resumes it through this accessor.
+    unsafe { Some(&mut *core::ptr::addr_of_mut!(PROCESS_WORKSPACE).cast::<ProcessScheduler>()) }
+}
+
 pub(crate) fn release_process_scheduler_workspace() -> bool {
     if !PROCESS_WORKSPACE_ACTIVE.load(Ordering::Acquire) {
         return false;
