@@ -5818,6 +5818,13 @@ pub(crate) fn verify_ring3_read_only_device_grant(
     valid
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum NativeVolumeOutcome {
+    Initialized,
+    Recovered,
+    Rejected,
+}
+
 pub(crate) fn verify_native_volume_service(
     image: &crate::native_elf::NativeImage<'_>,
     register_physical: u64,
@@ -5825,7 +5832,7 @@ pub(crate) fn verify_native_volume_service(
     mapping: paging::MmioMapping,
     msix_mapping: paging::MmioMapping,
     apic: &LocalApic,
-) -> Option<bool> {
+) -> Option<NativeVolumeOutcome> {
     const DMA_PAGE_INDEX: usize = 11;
     const DEVICE_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -5942,27 +5949,32 @@ pub(crate) fn verify_native_volume_service(
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     let event = domain::take_lifecycle_event();
     let completion = NATIVE_VOLUME_COMPLETION.swap(0, Ordering::AcqRel);
-    let success_fault = domain::delivered_fault_descriptor().is_some_and(|descriptor| {
-        let Some(vector) = descriptor
+    let fault = domain::delivered_fault_descriptor().and_then(|descriptor| {
+        let vector = descriptor
             .get(6..8)
             .and_then(|bytes| bytes.try_into().ok())
-            .map(u16::from_le_bytes)
-        else {
-            return false;
-        };
-        let Some(instruction) = descriptor
+            .map(u16::from_le_bytes)?;
+        let instruction = descriptor
             .get(32..40)
             .and_then(|bytes| bytes.try_into().ok())
-            .map(u64::from_le_bytes)
-        else {
-            return false;
-        };
-        vector == 6
-            && instruction >= USER_TEST_ADDRESS as u64
-            && image.address_is_executable(instruction - USER_TEST_ADDRESS as u64)
+            .map(u64::from_le_bytes)?;
+        let relative = instruction.checked_sub(USER_TEST_ADDRESS as u64)?;
+        image.address_is_executable(relative).then_some((
+            vector,
+            instruction,
+            image.byte_at_virtual(relative),
+        ))
     });
-    let valid = success_fault
-        && matches!(completion, 1 | 2)
+    let outcome = match (
+        fault.map(|(vector, _, opcode)| (vector, opcode)),
+        completion,
+    ) {
+        (Some((6, Some(0x0f))), 1) => Some(NativeVolumeOutcome::Initialized),
+        (Some((6, Some(0x0f))), 2) => Some(NativeVolumeOutcome::Recovered),
+        (Some((13, Some(0xcc))), 2) => Some(NativeVolumeOutcome::Rejected),
+        _ => None,
+    };
+    let valid = outcome.is_some()
         && timer::device_wait_timeout_count() == expected_timeouts
         && current_root() == kernel_root
         && scheduler::current_domain().is_none()
@@ -5988,7 +6000,7 @@ pub(crate) fn verify_native_volume_service(
         for value in [
             event.unwrap_or(u64::MAX),
             u64::from(completion),
-            u64::from(success_fault),
+            fault.map_or(u64::MAX, |(vector, _, _)| u64::from(vector)),
             registered_auxiliary_address_space_count() as u64,
             memory::owner_live_frame_count(owner).unwrap_or(usize::MAX) as u64,
         ] {
@@ -6005,7 +6017,7 @@ pub(crate) fn verify_native_volume_service(
             }
         }
     }
-    valid.then_some(completion == 2)
+    valid.then_some(outcome).flatten()
 }
 
 struct WxAddressSpace {

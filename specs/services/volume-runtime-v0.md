@@ -61,6 +61,16 @@ prepare/write/flush/commit/write/flush and recovers it. On existing media it
 accepts only that exact generation and payload. Success deliberately faults so
 the supervisor can exercise the same mandatory device-quiescence path.
 
+Corrupt, ambiguous, exhausted, or valid-but-policy-mismatched media follows a
+distinct authenticated rejection instruction after the two-slot scan. The
+kernel accepts that result only when the fault RIP names the exact breakpoint
+opcode in the measured RX segment and the DMA page contains a complete
+two-read scan. Device errors and runtime failures use a different privileged
+instruction and remain fatal to the boot proof. A separate QEMU boot corrupts
+sector four, requires rejection without a write or kernel panic, verifies the
+disk checksum is unchanged, and still requires complete device and DMA
+teardown.
+
 ## Deliberate limits
 
 - The compiled service is the sole live write-capable ring-3 virtio runtime;

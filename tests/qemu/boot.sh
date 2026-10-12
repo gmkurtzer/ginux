@@ -6,8 +6,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 output_file="$(mktemp -t ginux-boot.XXXXXX)"
 reboot_output_file="$(mktemp -t ginux-reboot.XXXXXX)"
 corrupt_output_file="$(mktemp -t ginux-corrupt.XXXXXX)"
+native_corrupt_output_file="$(mktemp -t ginux-native-corrupt.XXXXXX)"
 volume_image="$(mktemp -t ginux-volume.XXXXXX)"
 corrupt_volume_image="$(mktemp -t ginux-corrupt-volume.XXXXXX)"
+native_corrupt_volume_image="$(mktemp -t ginux-native-corrupt-volume.XXXXXX)"
 qemu_pid=""
 
 cleanup() {
@@ -19,8 +21,10 @@ cleanup() {
         "$output_file" \
         "$reboot_output_file" \
         "$corrupt_output_file" \
+        "$native_corrupt_output_file" \
         "$volume_image" \
-        "$corrupt_volume_image"
+        "$corrupt_volume_image" \
+        "$native_corrupt_volume_image"
 }
 trap cleanup EXIT
 
@@ -29,8 +33,9 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
 run_boot() {
     local boot_output="$1"
     local boot_name="$2"
+    local boot_volume="${3:-$volume_image}"
 
-    GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
+    GINUX_VOLUME_IMAGE="$boot_volume" "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
     qemu_pid=$!
 
     for _ in {1..30}; do
@@ -118,6 +123,30 @@ if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboo
     grep -q '^ginux: native volume record initialized and flushed' "$reboot_output_file"; then
     cat "$reboot_output_file"
     echo "Boot test failed: compiled native volume service did not recover its record." >&2
+    exit 1
+fi
+
+cp "$volume_image" "$native_corrupt_volume_image"
+dd if=/dev/zero of="$native_corrupt_volume_image" bs=1 seek=2048 count=1 conv=notrunc 2>/dev/null
+native_corrupt_checksum="$(cksum "$native_corrupt_volume_image")"
+run_boot "$native_corrupt_output_file" "native-volume corruption" "$native_corrupt_volume_image"
+
+if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: disk-backed volume recovered after reboot' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: corrupt native volume media rejected without modification' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: native volume service fault contained and device quiesced' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: faulted DMA lease scrubbed and released' "$native_corrupt_output_file"; then
+    cat "$native_corrupt_output_file"
+    echo "Boot test failed: corrupt native volume media was not rejected and cleaned up safely." >&2
+    exit 1
+fi
+
+if grep -q '^ginux: native volume record initialized and flushed' "$native_corrupt_output_file" ||
+    grep -q '^ginux: native volume record recovered after reboot' "$native_corrupt_output_file" ||
+    grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$native_corrupt_output_file" ||
+    [[ "$(cksum "$native_corrupt_volume_image")" != "$native_corrupt_checksum" ]]; then
+    cat "$native_corrupt_output_file"
+    echo "Boot test failed: corrupt native volume media was accepted, modified, or fatal." >&2
     exit 1
 fi
 

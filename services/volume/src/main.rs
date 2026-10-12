@@ -8,7 +8,7 @@ use core::{
 };
 
 use ginux_volume_format::SECTOR_SIZE;
-use ginux_volume_service::{commit, recover, BlockDevice};
+use ginux_volume_service::{commit, recover_with_slot, BlockDevice, CommitError, ScanError};
 
 const BLOCK_WAIT_OPERATION: u64 = 19;
 const BLOCK_WAIT_COMMAND: u64 = 1;
@@ -76,13 +76,15 @@ extern "C" fn ginux_volume_service_main(info: *const BootInfo) -> ! {
     let Some(mut device) = (unsafe { VirtioBlock::start(info) }) else {
         fail();
     };
-    match recover(&mut device) {
-        Some(record) if record.generation == 1 && record.payload() == PAYLOAD => success(),
-        None => match commit(&mut device, PAYLOAD) {
+    match recover_with_slot(&mut device) {
+        Ok(Some((_, record))) if record.generation == 1 && record.payload() == PAYLOAD => success(),
+        Ok(Some(_)) | Err(ScanError::Ambiguous | ScanError::Corrupt) => rejected(),
+        Ok(None) => match commit(&mut device, PAYLOAD) {
             Ok(record) if record.generation == 1 && record.payload() == PAYLOAD => success(),
+            Err(CommitError::Corrupt | CommitError::GenerationExhausted) => rejected(),
             _ => fail(),
         },
-        _ => fail(),
+        Err(ScanError::Device) => fail(),
     }
 }
 
@@ -357,6 +359,10 @@ fn success() -> ! {
     unsafe { asm!("ud2", options(noreturn)) }
 }
 
-fn fail() -> ! {
+fn rejected() -> ! {
     unsafe { asm!("int3", options(noreturn)) }
+}
+
+fn fail() -> ! {
+    unsafe { asm!("hlt", options(noreturn)) }
 }

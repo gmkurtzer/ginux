@@ -83,6 +83,10 @@ W^X pages, and executed in a capability-limited ring-3 domain with a guarded
 stack, read-only bootstrap page, one DMA lease, and only the required virtio
 MMIO pages. A fresh boot commits generation one to reserved sectors four and
 five; a second boot recovers the exact record without rewriting it. Its
+corruption boot invalidates the committed native slot while preserving the
+kernel reference volume, then requires the service to reject the nonempty
+media without modification, quiesce the device, scrub its DMA lease, and let
+the rest of the kernel boot complete. Its
 deliberate terminal fault drives mandatory interrupt, device, capability,
 address-space, and DMA cleanup without panicking the kernel. Its first request
 also proves stale-generation rejection, live timeout without generation

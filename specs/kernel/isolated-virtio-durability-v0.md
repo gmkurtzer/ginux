@@ -19,6 +19,12 @@ around the prepare and commit writes. On the second VM boot, two reads recover
 the committed record without rewriting either sector. The automated gate
 requires the fresh and recovered results on their respective boots.
 
+A third native-service boot corrupts the committed record in sector four while
+leaving the separate kernel reference record intact. The service performs only
+the two recovery reads, reports its authenticated rejection outcome, and does
+not attempt a write. The gate requires the complete kernel boot to survive,
+the image checksum to remain unchanged, and device/DMA cleanup to finish.
+
 Before notifying its first request, the runtime rejects future request
 generation two, enters generation one, and requires the live 100 ms APIC
 timeout. The timeout wakes the saved context with failure without consuming

@@ -1706,7 +1706,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
     serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
     serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
-    let native_volume_recovered = address_space::verify_native_volume_service(
+    let native_volume_outcome = address_space::verify_native_volume_service(
         &volume_image,
         virtio_status_physical,
         virtio_block,
@@ -1714,7 +1714,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         virtio_msix_mmio,
         &local_apic,
     );
-    let native_volume_valid = native_volume_recovered.is_some();
+    let native_volume_valid = native_volume_outcome.is_some();
     let native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
     if !native_volume_valid || !native_volume_quiesced {
         serial_write("\r\nginux: native volume valid/quiesced: ");
@@ -1723,13 +1723,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         serial_write_u64(u64::from(native_volume_quiesced));
         kernel_fail("\r\nginux: compiled native volume service invariant failed\r\n");
     }
+    let Some(native_volume_outcome) = native_volume_outcome else {
+        kernel_fail("\r\nginux: native volume outcome unavailable\r\n");
+    };
     serial_write("\r\nginux: compiled native volume service executed in ring 3");
     serial_write("\r\nginux: native volume service owned virtio request sequence");
-    serial_write(if native_volume_recovered == Some(true) {
-        "\r\nginux: native volume record recovered after reboot"
-    } else {
-        "\r\nginux: native volume record initialized and flushed"
-    });
+    match native_volume_outcome {
+        address_space::NativeVolumeOutcome::Initialized => {
+            serial_write("\r\nginux: native volume record initialized and flushed");
+            serial_write("\r\nginux: isolated volume prepare flush commit sequence completed");
+        }
+        address_space::NativeVolumeOutcome::Recovered => {
+            serial_write("\r\nginux: native volume record recovered after reboot");
+        }
+        address_space::NativeVolumeOutcome::Rejected => {
+            serial_write("\r\nginux: corrupt native volume media rejected without modification");
+        }
+    }
     serial_write("\r\nginux: native volume service fault contained and device quiesced");
     serial_write("\r\nginux: native volume write-only grant exercised in ring 3");
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
@@ -1748,7 +1758,6 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: duplicate isolated virtio wait rejected");
     serial_write("\r\nginux: isolated volume slots scanned in ring 3");
     serial_write("\r\nginux: isolated virtio request generation advanced and reused");
-    serial_write("\r\nginux: isolated volume prepare flush commit sequence completed");
     serial_write("\r\nginux: faulted native volume service revoked");
     serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
     serial_write("\r\nginux: fault path quiesced device before DMA release");
