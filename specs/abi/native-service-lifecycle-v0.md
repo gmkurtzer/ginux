@@ -5,6 +5,13 @@ volume service under the QEMU gate.
 
 ## Exit contract
 
+Before touching a delegated device, a native service invokes capability-free
+control operation 0. Bits 16 through 31 of its discovery result must equal
+control ABI version 4; bits 0 and 4 must advertise opaque capabilities and
+fault containment. Unknown feature bits are ignored, while nonzero bits above
+31, a different version, or a missing required feature fail closed. The shared
+Rust source provides the canonical validator and negative tests.
+
 An x86-64 native service exits through control ABI operation 2. It places 2 in
 `RAX`, a zero reserved capability value in `RDI`, and an unsigned eight-bit
 status in `RSI`, then executes `INT 0x80`. A valid exit does not return to the

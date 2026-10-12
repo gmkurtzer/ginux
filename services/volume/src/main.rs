@@ -8,9 +8,10 @@ use core::{
 };
 
 use ginux_native_abi::{
-    NativeServiceBootV0, NATIVE_BLOCK_WAIT_CANCELLED, NATIVE_BLOCK_WAIT_FAILED,
-    NATIVE_BLOCK_WAIT_NOTIFIED, NATIVE_BLOCK_WAIT_OPERATION, NATIVE_BLOCK_WAIT_PREPARED,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    native_control_abi_is_compatible, NativeServiceBootV0, NATIVE_BLOCK_WAIT_CANCELLED,
+    NATIVE_BLOCK_WAIT_FAILED, NATIVE_BLOCK_WAIT_NOTIFIED, NATIVE_BLOCK_WAIT_OPERATION,
+    NATIVE_BLOCK_WAIT_PREPARED, NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
     NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 use ginux_volume_format::SECTOR_SIZE;
@@ -64,6 +65,9 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 
 #[no_mangle]
 extern "C" fn ginux_volume_service_main(info: *const NativeServiceBootV0) -> ! {
+    if !native_control_abi_is_compatible(discover_control_abi()) {
+        fail();
+    }
     let Some(info) = (unsafe { info.as_ref() }) else {
         fail();
     };
@@ -80,6 +84,21 @@ extern "C" fn ginux_volume_service_main(info: *const NativeServiceBootV0) -> ! {
         },
         Err(ScanError::Device) => fail(),
     }
+}
+
+fn discover_control_abi() -> u64 {
+    let mut result = NATIVE_CONTROL_DISCOVERY_OPERATION;
+    unsafe {
+        asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("rdi") 0_u64,
+            in("rsi") 0_u64,
+            in("rdx") 0_u64,
+            options(nostack),
+        );
+    }
+    result
 }
 
 struct VirtioBlock {

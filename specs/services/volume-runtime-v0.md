@@ -47,6 +47,10 @@ maps the record read-only/NX, and supplies only those bounded resources. See
 [Native Service Bootstrap ABI v0](../abi/native-service-bootstrap-v0.md).
 The terminal path uses the separately frozen
 [Native Service Lifecycle ABI v0](../abi/native-service-lifecycle-v0.md).
+Before interpreting MMIO or DMA fields, the runtime queries control operation 0
+and requires ABI version 4 plus opaque-capability and fault-containment feature
+bits. An incompatible kernel therefore faults before the service touches its
+delegated device.
 
 The runtime itself negotiates only `FLUSH` and `VERSION_1`, configures queue
 zero and MSI-X table entry zero, and implements the shared whole-sector trait

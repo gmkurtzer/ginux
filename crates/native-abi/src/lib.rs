@@ -13,6 +13,20 @@ pub const NATIVE_BLOCK_WAIT_PREPARED: u64 = 1;
 pub const NATIVE_BLOCK_WAIT_NOTIFIED: u64 = 2;
 pub const NATIVE_BLOCK_WAIT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_BLOCK_WAIT_CANCELLED: u64 = u64::MAX - 5;
+pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
+pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
+pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
+pub const NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT: u16 = 1 << 4;
+pub const NATIVE_CONTROL_REQUIRED_FEATURES: u16 =
+    NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES | NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT;
+
+pub const fn native_control_abi_is_compatible(discovery: u64) -> bool {
+    let version = ((discovery >> 16) & u16::MAX as u64) as u16;
+    let features = (discovery & u16::MAX as u64) as u16;
+    discovery >> 32 == 0
+        && version == NATIVE_CONTROL_ABI_VERSION
+        && features & NATIVE_CONTROL_REQUIRED_FEATURES == NATIVE_CONTROL_REQUIRED_FEATURES
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,6 +127,8 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_PREPARED UINT64_C(1)"));
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_NOTIFIED UINT64_C(2)"));
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_CANCELLED (UINT64_MAX - UINT64_C(5))"));
+        assert!(header.contains("GINUX_NATIVE_CONTROL_DISCOVERY_OPERATION UINT64_C(0)"));
+        assert!(header.contains("GINUX_NATIVE_CONTROL_ABI_VERSION UINT16_C(4)"));
     }
 
     #[test]
@@ -137,5 +153,21 @@ mod tests {
         ] {
             assert!(!invalid.is_valid_virtio_block());
         }
+    }
+
+    #[test]
+    fn control_discovery_requires_v4_and_required_features() {
+        let compatible = (u64::from(NATIVE_CONTROL_ABI_VERSION) << 16)
+            | u64::from(NATIVE_CONTROL_REQUIRED_FEATURES);
+        assert!(native_control_abi_is_compatible(compatible));
+        assert!(native_control_abi_is_compatible(
+            compatible | u64::from(1_u16 << 15)
+        ));
+        assert!(!native_control_abi_is_compatible(compatible & !1));
+        assert!(!native_control_abi_is_compatible(compatible & !(1 << 4)));
+        assert!(!native_control_abi_is_compatible(compatible + (1 << 16)));
+        assert!(!native_control_abi_is_compatible(
+            compatible | (1_u64 << 32)
+        ));
     }
 }
