@@ -747,18 +747,18 @@ if ! grep -q '^ginux: isolated virtio read descriptors prepared in ring 3' "$out
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio available entry published without notification' "$output_file"; then
-    echo "Boot test failed: ring 3 did not publish the available entry without notification." >&2
+if ! grep -q '^ginux: isolated virtio available entry published in ring 3' "$output_file"; then
+    echo "Boot test failed: ring 3 did not publish the available entry." >&2
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio notification page mapped but unused' "$output_file"; then
-    echo "Boot test failed: the bounded virtio notification page was not mapped safely." >&2
+if ! grep -q '^ginux: isolated virtio queue notified from ring 3' "$output_file"; then
+    echo "Boot test failed: ring 3 did not notify the bounded virtio queue." >&2
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio request remained incomplete before quiescence' "$output_file"; then
-    echo "Boot test failed: the unnotified virtio request changed before quiescence." >&2
+if ! grep -q '^ginux: isolated virtio blank-sector read completed in ring 3' "$output_file"; then
+    echo "Boot test failed: ring 3 did not validate the blank-sector completion." >&2
     exit 1
 fi
 
@@ -777,7 +777,7 @@ if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; th
     exit 1
 fi
 
-if ! grep -q '^ginux: faulted virtio control device quiesced before completion' "$output_file"; then
+if ! grep -q '^ginux: completed virtio control device quiesced before release' "$output_file"; then
     echo "Boot test failed: the faulted virtio control service left its device active." >&2
     exit 1
 fi

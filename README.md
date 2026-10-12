@@ -53,13 +53,14 @@ initializes it in ring 3, and publishes its exact base, `+0x100`, and `+0x200`
 offsets as the descriptor, available, and used-ring addresses. After the kernel
 arms PCI bus mastering, the service enables queue zero and sets `DRIVER_OK`, but
 first constructs an exact three-descriptor sector-two read chain. It publishes
-descriptor head zero by advancing the available index to one, but performs no
-notification write. The kernel maps only the distinct 4 KiB page containing
-queue zero's validated two-byte notification register and binds that page to
-the teardown record. On fault, the registered device hook validates the
-active binding, disables bus
+descriptor head zero by advancing the available index to one. The kernel maps
+only the distinct 4 KiB page containing queue zero's validated two-byte
+notification register and binds that page to the teardown record. Ring 3
+notifies once, polls within a fixed bound, and validates used ID zero, length
+513, successful status, and the blank 512-byte sector-two payload. On its
+deliberate fault, the registered device hook validates the active binding, disables bus
 mastering, resets the device, and only then validates every byte of the now-stable
-published-but-unprocessed DMA layout before the page is scrubbed and released;
+completed DMA layout before the page is scrubbed and released;
 release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
 owned frames. See

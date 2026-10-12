@@ -4382,7 +4382,7 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
         })
         || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce(device, mapping)
-        || !unsafe { dma_page_has_published_read(dma_physical) }
+        || !unsafe { dma_page_has_completed_read(dma_physical) }
     {
         return false;
     }
@@ -5418,7 +5418,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     const DMA_PAGE_INDEX: usize = 6;
     const NOTIFICATION_PAGE_INDEX: usize = 7;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
-    const SUCCESS_FAULT_OFFSET: u64 = 378;
+    const SUCCESS_FAULT_OFFSET: u64 = 470;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5440,6 +5440,9 @@ pub(crate) fn verify_ring3_writable_device_grant(
     if notification_page == page || notification_offset + size_of::<u16>() > PAGE_SIZE {
         return None;
     }
+    let user_notification = USER_TEST_ADDRESS
+        .checked_add(NOTIFICATION_PAGE_INDEX * PAGE_SIZE)?
+        .checked_add(notification_offset)?;
     let user_dma = USER_TEST_ADDRESS + DMA_PAGE_INDEX * PAGE_SIZE;
     let mut program = [
         0x48, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rdi, common
@@ -5508,6 +5511,25 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0xf6, 0x47, 0x14, 0x04, // require DRIVER_OK to remain set
         0x75, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x66, 0xc7, 0x86, 0x02, 0x01, 0, 0, 0x01, 0, // publish available index one
+        0x48, 0xba, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rdx, notification register
+        0x66, 0xc7, 0x02, 0, 0, // notify queue zero
+        0xb9, 0x80, 0x96, 0x98, 0, // bounded completion poll count
+        0x66, 0x83, 0xbe, 0x02, 0x02, 0, 0, 0x01, // poll used index one
+        0x74, 0x06, // completed
+        0xf3, 0x90, // pause
+        0xe2, 0xf2, // loop to used-index poll
+        0x0f, 0x0b, // timeout fault
+        0x83, 0xbe, 0x04, 0x02, 0, 0, 0, // require used id zero
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x81, 0xbe, 0x08, 0x02, 0, 0, 0x01, 0x02, 0, 0, // require used length 513
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x80, 0xbe, 0, 0x09, 0, 0, 0, // require successful status
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x48, 0x8d, 0xbe, 0, 0x06, 0, 0, // point at sector data
+        0xb9, 0, 0x02, 0, 0, // scan 512 bytes
+        0x31, 0xc0, // compare against zero
+        0xf3, 0xae, // repe scasb
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x0f, 0x0b, // success: deliberate service fault
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
@@ -5554,12 +5576,13 @@ pub(crate) fn verify_ring3_writable_device_grant(
     };
     if mapped_dma != user_dma
         || memory::owner_live_frame_count(owner) != Some(8)
-        || unsafe { dma_page_has_published_read(dma_physical) }
+        || unsafe { dma_page_has_completed_read(dma_physical) }
     {
         let _ = space.release();
         return None;
     }
     program[156..164].copy_from_slice(&dma_physical.to_le_bytes());
+    program[380..388].copy_from_slice(&(user_notification as u64).to_le_bytes());
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
@@ -5907,7 +5930,7 @@ unsafe fn frame_is_zero(frame: u64) -> bool {
         .is_some_and(|entries| (0..ENTRY_COUNT).all(|index| entries.add(index).read() == 0))
 }
 
-unsafe fn dma_page_has_published_read(frame: u64) -> bool {
+unsafe fn dma_page_has_completed_read(frame: u64) -> bool {
     let Some(bytes) = mapped_frame::<u8>(frame) else {
         return false;
     };
@@ -5927,8 +5950,10 @@ unsafe fn dma_page_has_published_read(frame: u64) -> bool {
             40 => 1,
             44 => 2,
             0x102 => 1,
+            0x202 => 1,
+            0x208 => 1,
+            0x209 => 2,
             0x408 => 2,
-            VIRTIO_STATUS_OFFSET => 0xff,
             _ => 0,
         };
         core::ptr::read_volatile(bytes.add(offset)) == expected

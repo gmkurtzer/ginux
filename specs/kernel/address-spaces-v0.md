@@ -204,9 +204,10 @@ checks both the zeroed physical page and zero remaining owner frames. See
 The final optional leaf is bound to the distinct page containing queue zero's
 validated two-byte notification register. Root activation requires its exact
 RW/UC/NX flags and rejects aliasing with the common-configuration page. The
-device teardown record rechecks the exact physical mapping. This remains a
-page-granular bootstrap grant: unrelated bytes in the same MMIO page are not
-yet protected from the service.
+device teardown record rechecks the exact physical mapping. The service writes
+queue index zero once to initiate its bounded read. This remains a page-granular
+bootstrap grant: unrelated bytes in the same MMIO page are not yet protected
+from the service.
 
 A registered device teardown record changes release ordering for that domain.
 The stop-only fault path must validate and quiesce the exact device before

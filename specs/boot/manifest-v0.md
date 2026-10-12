@@ -41,8 +41,9 @@ authority. The control proof separately owns one DMA frame, binds its exact
 ring offsets, and activates an otherwise idle queue after the kernel arms bus
 mastering. It may prepare the bounded sector-two read chain and receives one
 additional page-granular mapping containing queue zero's validated notification
-register. The current proof publishes one available entry and faults without
-writing that register.
+register. The current proof publishes one available entry, writes queue index
+zero once, validates the bounded blank-sector completion, and then faults
+without reusing the grant.
 The bundle and root-image ranges in handoff v4 must exactly match their
 recorded sizes and digests. Only verified bundle bytes are copied into the
 ring-3 executable mapping, and only the verified root image reaches the

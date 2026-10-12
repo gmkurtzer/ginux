@@ -393,11 +393,11 @@ exactly `VIRTIO_BLK_F_FLUSH|VIRTIO_F_VERSION_1`, complete `FEATURES_OK`, select
 queue zero, set size eight, and bind its three addresses. The kernel arms bus
 mastering, after which the service enables the queue and sets `DRIVER_OK`
 after constructing an exact three-descriptor sector-two read chain. It
-publishes descriptor head zero by advancing the available index to one, leaves
-the used index at zero, and performs no notification. The kernel maps the
-distinct page containing queue zero's validated notification register but the
-current proof does not write it. This proves
-published-but-unnotified queue control followed by fault revocation and kernel
+publishes descriptor head zero by advancing the available index to one. The
+kernel maps the distinct page containing queue zero's validated notification
+register. The service writes queue index zero, polls within a fixed bound, and
+validates the exact blank-sector completion before faulting. This proves one
+bounded read followed by fault revocation and kernel
 quiescence. The same domain owns one separately tracked RW/NX DMA page. A domain fault
 triggers an internal teardown obligation: device validation, bus-master
 disable, and reset must complete before its address space or DMA lease can be

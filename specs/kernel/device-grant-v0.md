@@ -54,12 +54,14 @@ owned DMA page and writes the exact descriptor, available, and used
 offsets into the three queue-address fields. After the kernel has armed PCI bus
 mastering, the service enables queue zero, sets `DRIVER_OK`, confirms the bit,
 constructs an exact three-descriptor sector-two read chain, publishes
-descriptor head zero by advancing the available index to one, and takes a
-deliberate invalid-opcode fault without notifying the device. The fault hook
-independently reads back the
+descriptor head zero by advancing the available index to one, and writes queue
+index zero to the validated notification register. It polls within a fixed
+bound and requires used ID zero, length 513, successful status, and a blank
+512-byte payload before taking a deliberate invalid-opcode fault. The fault
+hook independently reads back the
 exact active queue and address-to-lease binding, disables bus mastering, resets
 the device, and then checks every byte of the stable
-published-but-unprocessed DMA layout.
+completed DMA layout.
 
 The stop-only path first revokes the exact object-7 handle. Its registered
 device hook validates the expected features and queue-to-lease binding, disables
@@ -67,9 +69,8 @@ PCI bus mastering, resets device status to zero, and confirms both conditions.
 Only then may the fault path restore the kernel root, destroy the service
 mapping, clear and release all owned frames, retire the domain, and publish the
 fault. Address-space release fails closed if a bound device has not completed
-quiescence. The service owns one DMA frame and writes its exact ring offsets to
-the device. The queue becomes DMA-capable, but the service submits no request
-and performs no notification. The lease lifecycle is specified in
+quiescence. The service owns one DMA frame, writes its exact ring offsets to the
+device, and completes one bounded read. The lease lifecycle is specified in
 [Isolated DMA Lease v0](device-dma-lease-v0.md).
 
 ## Deliberate limits
@@ -79,12 +80,12 @@ and performs no notification. The lease lifecycle is specified in
 - Page-granular mapping exposes the complete 4 KiB common-configuration page;
   capability attenuation is write-only, but the writable x86 leaf is also
   readable. The proof touches only feature-selection, feature-value, and device
-  status fields. Notification registers, ISR, device configuration, PCI
-  configuration, and port I/O are unavailable.
+  status fields. ISR, device configuration, PCI configuration, and port I/O
+  are unavailable.
 - One page-granular writable mapping contains queue zero's validated two-byte
-  notification register. The current proof does not write it, but unrelated
+  notification register. The service writes that register once, but unrelated
   bytes in that 4 KiB page are not yet sub-page protected.
-- No completion, interrupt, or IOMMU domain is delegated.
+- Completion is polled; no interrupt or IOMMU domain is delegated.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.
