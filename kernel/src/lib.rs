@@ -1605,12 +1605,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
     serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
     serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
-    let writable_grant_valid =
+    let writable_grant_dma =
         address_space::verify_ring3_writable_device_grant(virtio_status_physical);
+    let writable_grant_valid = writable_grant_dma.is_some();
     let writable_grant_negotiated =
         arch::x86_64::pci::device_features_are_selected(virtio_block, virtio_mmio);
-    let writable_grant_queue_inert =
-        arch::x86_64::pci::device_queue_geometry_is_selected(virtio_block, virtio_mmio);
+    let writable_grant_queue_inert = writable_grant_dma.is_some_and(|dma| {
+        arch::x86_64::pci::device_inert_queue_is_bound(virtio_block, virtio_mmio, dma)
+    });
     let writable_grant_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
     if !writable_grant_valid
         || !writable_grant_negotiated
@@ -1631,6 +1633,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
     serial_write("\r\nginux: isolated virtio queue geometry configured without DMA");
     serial_write("\r\nginux: isolated DMA lease initialized in ring 3");
+    serial_write("\r\nginux: isolated virtio queue bound to inactive DMA lease");
     serial_write("\r\nginux: faulted virtio control service revoked");
     serial_write("\r\nginux: faulted DMA lease scrubbed and released");
     serial_write("\r\nginux: faulted virtio control device quiesced without DMA");

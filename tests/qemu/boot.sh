@@ -732,6 +732,11 @@ if ! grep -q '^ginux: isolated DMA lease initialized in ring 3' "$output_file" |
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio queue bound to inactive DMA lease' "$output_file"; then
+    echo "Boot test failed: the inert virtio queue was not bound to its exact DMA lease." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; then
     echo "Boot test failed: the faulted virtio control service retained authority." >&2
     exit 1

@@ -6,8 +6,9 @@
 
 This contract introduces the memory side of an isolated virtio queue without
 yet permitting device DMA. It proves that one candidate DMA page can belong to
-the exact driver-domain generation, be writable from ring 3, and be reclaimed
-without retaining service data after a fault.
+the exact driver-domain generation, be writable from ring 3, be bound to inert
+queue-address registers, and be reclaimed without retaining service data after
+a fault.
 
 ## Mapping and ownership
 
@@ -25,10 +26,12 @@ unowned, stale, or cross-domain frame is rejected.
 ## Ring-3 and teardown proof
 
 After negotiating features and inert queue geometry, the service writes a
-fixed 64-bit marker into the candidate DMA page and reads it back. Queue enable
-remains zero, all descriptor/driver/device queue addresses remain zero, PCI bus
-mastering remains disabled, and `DRIVER_OK` is never set. The device therefore
-cannot reach the frame.
+fixed 64-bit marker into the candidate DMA page and reads it back. It writes the
+lease base to the descriptor address, base plus `0x100` to the driver/available
+address, and base plus `0x200` to the device/used address. The kernel reads back
+all three values and requires exact equality with the returned lease. Queue
+enable and PCI bus mastering remain zero, and `DRIVER_OK` is never set, so the
+device cannot access the frame.
 
 The service then deliberately faults. Stop-only teardown restores the kernel
 root, revokes object 7, zeros all eight owned frames, releases their exact
@@ -39,7 +42,9 @@ zero, while the allocator reports zero frames remaining for the retired owner.
 ## Deliberate limits
 
 - This is a candidate DMA lease, not an active virtqueue.
-- The physical address is not exposed to userspace or written to the device.
+- The physical address is embedded in the bounded bootstrap service and written
+  only to the three queue-address registers; no general physical-address ABI is
+  exposed.
 - Bus mastering, queue enable, notifications, interrupts, and `DRIVER_OK`
   remain off.
 - There is no IOMMU domain; actual DMA must not be enabled until confinement and

@@ -803,9 +803,10 @@ pub(crate) fn device_features_are_selected(
     u64::from(low) | (u64::from(high) << 32) == FEATURE_VERSION_1 | FEATURE_FLUSH
 }
 
-pub(crate) fn device_queue_geometry_is_selected(
+pub(crate) fn device_inert_queue_is_bound(
     device: VirtioBlockDevice,
     mapping: MmioMapping,
+    dma_physical: u64,
 ) -> bool {
     let Some((common_physical, common_length)) = device.common_region() else {
         return false;
@@ -816,9 +817,9 @@ pub(crate) fn device_queue_geometry_is_selected(
     read_common_u16(common, COMMON_QUEUE_SELECT) == 0
         && read_common_u16(common, COMMON_QUEUE_SIZE) == QUEUE_SIZE
         && read_common_u16(common, COMMON_QUEUE_ENABLE) == 0
-        && read_common_u64(common, COMMON_QUEUE_DESC) == 0
-        && read_common_u64(common, COMMON_QUEUE_DRIVER) == 0
-        && read_common_u64(common, COMMON_QUEUE_DEVICE) == 0
+        && read_common_u64(common, COMMON_QUEUE_DESC) == dma_physical
+        && read_common_u64(common, COMMON_QUEUE_DRIVER) == dma_physical + AVAIL_OFFSET as u64
+        && read_common_u64(common, COMMON_QUEUE_DEVICE) == dma_physical + USED_OFFSET as u64
 }
 
 pub(crate) fn quiesce(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {

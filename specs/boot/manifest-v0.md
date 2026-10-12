@@ -38,7 +38,8 @@ domains. The latter's writable x86 leaf is necessarily readable even though
 its capability lacks `READ`. Both receive only the common-configuration MMIO
 page as device authority; neither receives an enabled virtqueue, interrupt, or
 PCI-configuration authority. The control proof separately owns one inactive
-candidate DMA frame whose address is never published to the device.
+candidate DMA frame and binds its exact ring offsets while the queue and bus
+mastering remain disabled.
 The bundle and root-image ranges in handoff v4 must exactly match their
 recorded sizes and digests. Only verified bundle bytes are copied into the
 ring-3 executable mapping, and only the verified root image reaches the

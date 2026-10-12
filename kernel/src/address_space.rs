@@ -5327,29 +5327,25 @@ pub(crate) fn verify_ring3_read_only_device_grant(
     valid
 }
 
-pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool {
+pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> Option<u64> {
     const DEVICE_PAGE_INDEX: usize = 5;
     const DMA_PAGE_INDEX: usize = 6;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
-    const SUCCESS_FAULT_OFFSET: u64 = 154;
+    const SUCCESS_FAULT_OFFSET: u64 = 197;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
         .unwrap_or(PAGE_SIZE as u64);
     if offset >= PAGE_SIZE as u64 {
-        return false;
+        return None;
     }
     let user_register = USER_TEST_ADDRESS
         .checked_add(DEVICE_PAGE_INDEX * PAGE_SIZE)
         .and_then(|page| page.checked_add(offset as usize));
-    let Some(user_register) = user_register else {
-        return false;
-    };
-    let Some(user_common) = user_register.checked_sub(DEVICE_STATUS_OFFSET) else {
-        return false;
-    };
+    let user_register = user_register?;
+    let user_common = user_register.checked_sub(DEVICE_STATUS_OFFSET)?;
     if user_common & (PAGE_SIZE - 1) != 0 {
-        return false;
+        return None;
     }
     let user_dma = USER_TEST_ADDRESS + DMA_PAGE_INDEX * PAGE_SIZE;
     const DMA_PATTERN: u64 = 0x444d_415f_4c45_4153;
@@ -5383,25 +5379,31 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
         0x48, 0x89, 0x06, // initialize DMA page
         0x48, 0x39, 0x06, // verify service-visible contents
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rax, DMA physical
+        0x48, 0x89, 0x47, 0x20, // publish descriptor table
+        0x48, 0x05, 0, 0x01, 0, 0, // advance to available ring
+        0x48, 0x89, 0x47, 0x28, // publish available ring
+        0x48, 0x05, 0, 0x01, 0, 0, // advance to used ring
+        0x48, 0x89, 0x47, 0x30, // publish used ring
+        0x66, 0x83, 0x7f, 0x1c, 0, // require queue to remain disabled
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x0f, 0x0b, // success: deliberate service fault
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
     program[126..134].copy_from_slice(&(user_dma as u64).to_le_bytes());
     program[136..144].copy_from_slice(&DMA_PATTERN.to_le_bytes());
 
-    let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
+    let auxiliary = domain::initialize_boot_auxiliary_service(
         6,
         crate::control_abi::BLOCK_DEVICE_OBJECT,
         crate::capability::Rights::WRITE,
-    ) else {
-        return false;
-    };
+    )?;
     let (Some(handle), Some(identity), Some(owner)) = (
         domain::auxiliary_boot_handle(auxiliary, 0),
         domain::domain_service_identity(auxiliary),
         memory::FrameOwner::domain(auxiliary),
     ) else {
-        return false;
+        return None;
     };
     if !domain::handle_permits(
         auxiliary,
@@ -5414,26 +5416,25 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
         crate::control_abi::BLOCK_DEVICE_OBJECT,
         crate::capability::Rights::READ,
     ) {
-        return false;
+        return None;
     }
     let kernel_root = current_root();
-    let Some(mut space) = WxAddressSpace::new(kernel_root, owner) else {
-        return false;
-    };
+    let mut space = WxAddressSpace::new(kernel_root, owner)?;
     if !space.permissions_are_valid(kernel_root)
         || !space.map_uncached_device_page(DEVICE_PAGE_INDEX, page, true)
     {
         let _ = space.release();
-        return false;
+        return None;
     }
     let Some((mapped_dma, dma_physical)) = space.map_owned_dma_page(DMA_PAGE_INDEX) else {
         let _ = space.release();
-        return false;
+        return None;
     };
     if mapped_dma != user_dma || memory::owner_live_frame_count(owner) != Some(8) {
         let _ = space.release();
-        return false;
+        return None;
     }
+    program[156..164].copy_from_slice(&dma_physical.to_le_bytes());
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
@@ -5446,7 +5447,7 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
         || !cpu::activate_user_root(root)
     {
-        return false;
+        return None;
     }
     cpu::execute_auxiliary(entry, stack, handle, auxiliary, identity);
     let event = domain::take_lifecycle_event();
@@ -5500,7 +5501,7 @@ pub(crate) fn verify_ring3_writable_device_grant(register_physical: u64) -> bool
             }
         }
     }
-    valid
+    valid.then_some(dma_physical)
 }
 
 struct WxAddressSpace {

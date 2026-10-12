@@ -49,19 +49,21 @@ service sets `ACKNOWLEDGE|DRIVER`, reads both device-feature words, and requires
 driver features, sets `FEATURES_OK`, and requires the device to retain that
 bit. The kernel independently reads back the exact selected features and status
 after the service selects queue zero, requires capacity for at least eight
-descriptors, and writes the bounded size eight. It verifies queue enable and
-all three queue addresses remain zero, then takes a deliberate invalid-opcode
-fault. The kernel independently reads back the exact queue selection, size,
-disabled state, and zero addresses.
+descriptors, and writes the bounded size eight. The service initializes its
+owned candidate DMA page and writes the exact descriptor, available, and used
+offsets into the three queue-address fields. It verifies queue enable remains
+zero, then takes a deliberate invalid-opcode fault. The kernel independently
+reads back the exact queue selection, size, disabled state, and address-to-lease
+binding.
 
 The stop-only path revokes the exact object-7 handle, destroys its mapping,
 clears and releases all owned frames, and publishes the fault. Regardless
 of whether verification succeeds, the kernel's following quiesce operation
 first disables PCI bus mastering, resets device status to zero, and confirms
-both conditions before continuing. The service never sets `DRIVER_OK`, selects
-a queue or writes a queue address. It owns one separate candidate DMA frame,
-but the device never receives that frame's physical address, so geometry
-selection cannot initiate data transfer. The lease lifecycle is specified in
+both conditions before continuing. The service never sets `DRIVER_OK` or
+enables the queue. It owns one separate candidate DMA frame and writes its exact ring
+offsets to the device, but queue enable and bus mastering remain off, so binding
+cannot initiate data transfer. The lease lifecycle is specified in
 [Isolated DMA Lease v0](device-dma-lease-v0.md).
 
 ## Deliberate limits
