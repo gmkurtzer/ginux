@@ -110,23 +110,30 @@ guarded stack, and removes all seven or eight pages belonging to the old image.
 Replacement leaves may overlap old leaves or occupy unused leaves; the mapping
 transaction snapshots both sets, clears the complete old image, installs the
 new W^X leaves, and restores every prior entry on verification failure. The
-post-exit verifier requires the new R/NX, RX, and RW/NX leaves to name the exact
-published leases, the committed node and mapping state to reproduce the same
-measured plan, and every removed leaf to be absent. A failed allocation,
+post-exit verifier requires every new R/NX, RX, and RW/NX leaf to name the exact
+published lease, the committed node and variable-size active-image record to
+reproduce the same measured plan, and every removed leaf to be absent. A failed allocation,
 materialization, precondition, or mapping verification scrubs and releases the
 new leases, restores the original stack, thread registrations, and page-table
 entries, and returns an error. Successful teardown runs after the process root
-is inactive, scrubs all three frames, releases their exact generations, and
+is inactive, scrubs every replacement frame, releases its exact generation, and
 requires the allocator's prior live-frame count to be restored.
 
 This is deliberately a bounded static profile, not a general ELF loader.
 `execve` resolves absolute or current-directory-relative normalized paths
 through the retained measured-root index, requires an executable regular node,
 and admits either fixture because both independently satisfy that profile. The
-profile admits one live thread,
+profile admits one read-only header page, one to five executable pages, one or
+two writable pages, at most eight pages total, one live thread,
 up to eight bounded argument strings, up to eight bounded environment strings,
 and a 512-byte replacement stack image. It does not yet support an interpreter,
-dependencies, shebangs, unbounded vectors, multi-page replacement segments, or dynamic exec targets.
+dependencies, shebangs, unbounded vectors, or dynamic exec targets. The second
+fixture deliberately crosses an executable-page boundary, proving that mapping,
+materialization, publication, teardown, and frame reclamation use the runtime
+page count rather than a fixed three-frame shape. Before each live execution,
+the verifier forces the post-install validation path to fail for the selected
+overlapping or disjoint layout and requires every old and prospective leaf to
+match its exact pre-transaction value afterward.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory

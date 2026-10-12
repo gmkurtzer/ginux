@@ -40,9 +40,10 @@ and `/lib64/*` paths map to internal measured-root entries, while
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
 single-threaded `execve` proof atomically replaces two independent static workloads with the
 selected measured executable, rebuilds bounded argument and environment vectors
-on a fresh 512-byte initial stack, allocates and materializes its three measured
-ELF pages only during the transaction, derives entry and W^X mappings from that
-runtime selection instead of a boot-predeclared target template, removes the old image pages, applies close-on-exec and
+on a fresh 512-byte initial stack, and allocates and materializes up to eight
+measured ELF pages only during the transaction. It derives entry and W^X mappings from that
+runtime selection instead of a boot-predeclared target template, replaces the
+runtime-owned active-image record, removes the old image pages, applies close-on-exec and
 signal/alternate-stack transition rules, installs the replacement process
 name, and exits without reviving the old program. Generation-tagged replacement
 frames are scrubbed and released after the process root becomes inactive, with
@@ -428,10 +429,14 @@ authenticates and plans the fixed four-image graph; the interpreter installs
 the authenticated main and both dependency segments admitted by that exact plan.
 The separate static proofs resolve normalized absolute or current-directory-relative
 `execve` paths through the measured root, then admit any measured regular file
-that satisfies the strict three-page static ELF execution profile. The two
+that satisfies the bounded static ELF execution profile. The two
 independently linked fixtures, `bin/exec-target` and `bin/exec-second`, prove
 selection is neither compiled-byte nor fixed-address identity: the second image
-uses an independent header, text, and data base. The profile allows up to eight
+uses an independent header, two-page text segment, and data base. The profile
+allows one header page, up to five executable pages, up to two writable pages,
+and at most eight pages in total. The active mapping list is process runtime
+state: a successful transaction replaces it with the selected plan, while a
+failure retains the old list. The profile also allows up to eight
 63-byte `argv` strings, eight equivalent
 `envp` strings, and one live thread. Rejected path, pointer, count, string, and
 aggregate-stack cases leave the original image

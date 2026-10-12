@@ -197,6 +197,13 @@ ginux_linux_exec_target:
     .asciz "/proc/self/exe"
 .size ginux_linux_exec_target, . - ginux_linux_exec_target
 
+#ifdef GINUX_EXEC_SECOND
+.section .text.exec_tail,"ax",@progbits
+.balign 16
+.Lsecond_exec_page_proof:
+    .fill 4096, 1, 0x90
+#endif
+
 .section .data
 #ifdef GINUX_EXEC_SECOND
 .quad 0x5345434f4e444152

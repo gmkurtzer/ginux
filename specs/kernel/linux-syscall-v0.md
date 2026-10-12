@@ -356,7 +356,8 @@ node must be an executable regular file and must match the admitted static ELF
 profile. The independently built `bin/exec-target` and `bin/exec-second`
 fixtures both execute, proving selection is based on the measured bytes and
 profile rather than equality with one kernel-compiled artifact or one virtual
-base. The second fixture's three pages use a distinct address layout. `argv`
+base. The second fixture uses a distinct four-page layout containing one
+header page, two executable pages, and one writable page. `argv`
 admits one through eight pointers and `envp` zero
 through eight, each terminated by a null pointer. Each string is limited to 63
 bytes plus its terminator, and the complete rebuilt initial stack is limited to
@@ -369,12 +370,15 @@ nodes return `-EACCES`, executable files outside the admitted ELF profile return
 aggregate-stack overflow returns `-E2BIG`
 without changing the running image. A multithreaded caller returns `-EAGAIN`.
 On success the kernel clears the clear-child-TID and robust-list registrations,
-constructs a fresh bounded initial stack, allocates and materializes the three
+constructs a fresh bounded initial stack, allocates and materializes the
 selected measured ELF pages, derives their entry and mapping addresses without
 a predeclared per-target template, atomically replaces the authenticated image
 mappings, and never returns to the old program. Allocation or pre-commit
 failure scrubs and releases all new generation-tagged frame leases before
-returning. Descriptors marked
+returning. The process owns a bounded active-image record containing the exact
+old mapping addresses. Commit replaces that record with the new plan only
+after the page-table transaction succeeds; failed transactions preserve it.
+Descriptors marked
 `FD_CLOEXEC` close only after the mapping commit, while ordinary descriptors
 survive. Caught signal dispositions reset to default, ignored dispositions
 remain ignored, the alternate signal stack becomes disabled, the signal mask

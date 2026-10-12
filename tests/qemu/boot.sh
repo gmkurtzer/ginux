@@ -676,6 +676,7 @@ fi
 
 for marker in \
     'bounded Linux exec rejection preserved live image' \
+    'Linux exec mapping rollback restored active image' \
     'Linux exec argv and environment delivered' \
     'bounded Linux exec vectors validated' \
     'old Linux image pages removed after exec' \
@@ -690,6 +691,8 @@ for marker in \
     'measured Linux exec selection is profile-driven' \
     'independent measured Linux exec layouts validated' \
     'runtime-selected Linux exec plans committed' \
+    'variable-page Linux exec images committed' \
+    'Linux active image ownership transitioned' \
     'Linux replacement frames allocated on demand' \
     'Linux replacement frame generations reclaimed'; do
     if ! grep -q "^ginux: $marker" "$output_file"; then

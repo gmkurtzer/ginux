@@ -15,10 +15,11 @@ SECTIONS
     .headers : { BYTE(0) } :headers
 
     . = 0x410100;
-    .text : { *(.text) } :text
-    ASSERT(SIZEOF(.text) <= 0xf00, "Second Linux exec target exceeds its one-page RX profile")
+    .text : { *(.text) *(.text.*) } :text
+    ASSERT(SIZEOF(.text) > 0xf00, "Second Linux exec target must cross an RX page")
+    ASSERT(SIZEOF(.text) <= 0x1f00, "Second Linux exec target exceeds its two-page RX profile")
 
-    . = 0x411000;
+    . = 0x412000;
     .data : { *(.data) } :data
     .bss : { *(.bss) } :data
 

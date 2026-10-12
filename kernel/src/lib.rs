@@ -638,6 +638,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     if exec_target == exec_second
         || exec_target_plan.executable.virtual_page == exec_second_plan.executable.virtual_page
+        || exec_target_plan.executable.page_count != 1
+        || exec_second_plan.executable.page_count != 2
     {
         kernel_fail("ginux: measured Linux exec target invalid\r\n");
     }
@@ -657,6 +659,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: toolchain-linked static Linux ELF executed\r\n");
     serial_write("ginux: five-page Linux executable mapping validated\r\n");
     serial_write("ginux: bounded Linux exec rejection preserved live image\r\n");
+    serial_write("ginux: Linux exec mapping rollback restored active image\r\n");
     serial_write("ginux: Linux exec argv and environment delivered\r\n");
     serial_write("ginux: bounded Linux exec vectors validated\r\n");
     serial_write("ginux: old Linux image pages removed after exec\r\n");
@@ -671,6 +674,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured Linux exec selection is profile-driven\r\n");
     serial_write("ginux: independent measured Linux exec layouts validated\r\n");
     serial_write("ginux: runtime-selected Linux exec plans committed\r\n");
+    serial_write("ginux: variable-page Linux exec images committed\r\n");
+    serial_write("ginux: Linux active image ownership transitioned\r\n");
     serial_write("ginux: Linux replacement frames allocated on demand\r\n");
     serial_write("ginux: Linux replacement frame generations reclaimed\r\n");
     if !linux_elf::verify_load_plan() {

@@ -23,6 +23,7 @@ const MAX_USER_ADDRESS: u64 = 1 << 47;
 const PAGE_SIZE: usize = 4096;
 const MAX_EXECUTABLE_SEGMENT_PAGES: usize = 5;
 const MAX_OTHER_SEGMENT_PAGES: usize = 2;
+const MAX_STATIC_EXEC_IMAGE_PAGES: usize = 8;
 const MAX_INTERPRETER_PATH_SIZE: usize = 256;
 const MAX_TLS_TEMPLATE_SIZE: u64 = 64;
 const FIXTURE_EXECUTABLE_MEMORY_SIZE: u64 = (5 * PAGE_SIZE) as u64;
@@ -293,6 +294,10 @@ pub(crate) fn measured_static_exec_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
     let image = parse(bytes)?;
     let plan = plan(&image)?;
     let header = plan.read_only?;
+    let mapping_count = header
+        .page_count
+        .checked_add(plan.executable.page_count)?
+        .checked_add(plan.writable.page_count)?;
     (header.virtual_page >= 0x3f_f000
         && header.virtual_page < 0x42_0000
         && header.virtual_address == header.virtual_page
@@ -301,15 +306,18 @@ pub(crate) fn measured_static_exec_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
         && !header.executable
         && plan.program_headers == header.virtual_page + ELF_HEADER_SIZE as u64
         && plan.executable.virtual_page == header.virtual_page + PAGE_SIZE as u64
-        && plan.executable.page_count == 1
+        && (1..=5).contains(&plan.executable.page_count)
         && !plan.executable.writable
         && plan.executable.executable
         && plan.entry == plan.executable.virtual_page + 0x100
-        && plan.writable.virtual_page == plan.executable.virtual_page + PAGE_SIZE as u64
-        && plan.writable.page_count == 1
+        && plan.writable.virtual_page
+            == plan.executable.virtual_page + plan.executable.page_count as u64 * PAGE_SIZE as u64
+        && (1..=2).contains(&plan.writable.page_count)
         && plan.writable.writable
         && !plan.writable.executable
-        && plan.writable.virtual_page + PAGE_SIZE as u64 <= 0x42_0000
+        && mapping_count <= MAX_STATIC_EXEC_IMAGE_PAGES
+        && plan.writable.virtual_page + plan.writable.page_count as u64 * PAGE_SIZE as u64
+            <= 0x42_0000
         && plan.relro.is_none()
         && plan.tls.is_none()
         && plan.dynamic_relocations.is_none())

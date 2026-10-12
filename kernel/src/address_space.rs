@@ -53,17 +53,16 @@ pub(crate) fn verify_linux_elf_mapping(
     let Some(exec_header) = exec_plan.read_only else {
         return false;
     };
-    let exec_code = exec_plan.executable;
-    let exec_data = exec_plan.writable;
-    if exec_header.page_count != 1 || exec_code.page_count != 1 || exec_data.page_count != 1 {
+    let Some((exec_mapping_plan, exec_mapping_count)) = cpu::linux_exec_mapping_plan(&exec_plan)
+    else {
         return false;
-    }
+    };
     let startup = crate::linux_elf::static_startup(plan);
     let first = plan.executable;
     let header = plan.read_only;
     let second = plan.writable;
-    let mut exec_clear_addresses = [0_usize; cpu::LINUX_EXEC_CLEAR_COUNT];
-    let mut exec_clear_count = 0;
+    let mut initial_image_addresses = [0_usize; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut initial_image_count = 0;
     for segment in [header, Some(first), Some(second)].into_iter().flatten() {
         for page in 0..segment.page_count {
             let Some(address) = segment
@@ -73,11 +72,11 @@ pub(crate) fn verify_linux_elf_mapping(
             else {
                 return false;
             };
-            let Some(slot) = exec_clear_addresses.get_mut(exec_clear_count) else {
+            let Some(slot) = initial_image_addresses.get_mut(initial_image_count) else {
                 return false;
             };
             *slot = address;
-            exec_clear_count += 1;
+            initial_image_count += 1;
         }
     }
     let Some(relro) = plan.relro else {
@@ -198,7 +197,7 @@ pub(crate) fn verify_linux_elf_mapping(
     let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, first_fourth_page, first_fifth_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page, mmap_tail_page] =
         addresses;
     let kernel_root_physical = current_root();
-    let mut exec_frames = [None; 3];
+    let mut exec_frames = [None; cpu::LINUX_EXEC_MAPPING_LIMIT];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [root, pdpt, directory, table, header_table] {
@@ -569,6 +568,30 @@ pub(crate) fn verify_linux_elf_mapping(
 
             activate(root);
             let activated = current_root() == root;
+            let rollback_frames = [
+                header_page,
+                first_page,
+                first_tail_page,
+                first_third_page,
+                first_fourth_page,
+                first_fifth_page,
+                second_page,
+                second_tail_page,
+            ];
+            let mut rollback_mappings = exec_mapping_plan;
+            for (mapping, frame) in rollback_mappings[..exec_mapping_count]
+                .iter_mut()
+                .zip(rollback_frames)
+            {
+                mapping.frame = frame;
+            }
+            let initial_image_u64: [u64; cpu::LINUX_EXEC_MAPPING_LIMIT] =
+                core::array::from_fn(|index| initial_image_addresses[index] as u64);
+            let exec_rollback_valid = activated
+                && verify_current_linux_image_rollback(
+                    &rollback_mappings[..exec_mapping_count],
+                    &initial_image_u64[..initial_image_count],
+                );
             let observed = cpu::with_supervisor_user_access(|| {
                 (first.virtual_address as *const u8).read_volatile() == first.bytes[0]
                     && (second.virtual_address as *const u64).read_volatile()
@@ -577,7 +600,7 @@ pub(crate) fn verify_linux_elf_mapping(
                         (segment.virtual_address as *const u8).read_volatile() == segment.bytes[0]
                     })
             });
-            let execution_result = if activated && observed {
+            let execution_result = if exec_rollback_valid && observed {
                 cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
@@ -603,40 +626,42 @@ pub(crate) fn verify_linux_elf_mapping(
                     dependency_base_min: [0; 2],
                     dependency_base_end: [0; 2],
                     dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
-                    exec_clear_count,
-                    exec_clear_addresses,
+                    initial_image_count,
+                    initial_image_addresses,
                 })
             } else {
                 cpu::LinuxElfResult::FAILED
             };
             exec_frames = execution_result.exec_frames;
-            let exec_mappings = [
-                (exec_header.virtual_page, exec_frames[0]?, false, false),
-                (exec_code.virtual_page, exec_frames[1]?, false, true),
-                (exec_data.virtual_page, exec_frames[2]?, true, false),
-            ];
-            let exec_mappings_valid =
-                exec_mappings
+            let exec_mappings_valid = execution_result.exec_mapping_count == exec_mapping_count
+                && exec_mapping_plan[..exec_mapping_count]
                     .iter()
-                    .all(|(address, frame, writable, executable)| {
+                    .zip(&exec_frames[..exec_mapping_count])
+                    .all(|(mapping, frame)| {
+                        let Some(frame) = frame else {
+                            return false;
+                        };
                         let flags = PRESENT
                             | USER
-                            | if *writable { WRITABLE } else { 0 }
-                            | if *executable { 0 } else { NO_EXECUTE };
-                        current_linux_leaf(*address).is_some_and(|entry| {
+                            | if mapping.writable { WRITABLE } else { 0 }
+                            | if mapping.executable { 0 } else { NO_EXECUTE };
+                        current_linux_leaf(mapping.address as u64).is_some_and(|entry| {
                             entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
                                 == frame.address() | flags
                         })
                     })
-                    && exec_clear_addresses[..exec_clear_count]
-                        .iter()
-                        .all(|address| {
-                            exec_mappings
-                                .iter()
-                                .any(|(mapping, _, _, _)| *mapping as usize == *address)
-                                || current_linux_leaf(*address as u64)
-                                    .is_some_and(|entry| entry.read() == 0)
-                        });
+                && exec_frames[exec_mapping_count..]
+                    .iter()
+                    .all(Option::is_none)
+                && initial_image_addresses[..initial_image_count]
+                    .iter()
+                    .all(|address| {
+                        exec_mapping_plan[..exec_mapping_count]
+                            .iter()
+                            .any(|mapping| mapping.address == *address)
+                            || current_linux_leaf(*address as u64)
+                                .is_some_and(|entry| entry.read() == 0)
+                    });
             let executed = execution_result.valid
                 && execution_result.exec_replaced
                 && execution_result.exec_node == exec_node
@@ -1502,8 +1527,8 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_base_min: dependency_base_min.map(|base| base as usize),
                     dependency_base_end: dependency_base_end.map(|base| base as usize),
                     dependency_mappings,
-                    exec_clear_count: 0,
-                    exec_clear_addresses: [0; cpu::LINUX_EXEC_CLEAR_COUNT],
+                    initial_image_count: 0,
+                    initial_image_addresses: [0; cpu::LINUX_EXEC_MAPPING_LIMIT],
                 })
             } else {
                 cpu::LinuxElfResult::FAILED
@@ -2033,11 +2058,50 @@ pub(crate) fn map_current_linux_file_page(
 }
 
 pub(crate) fn replace_current_linux_image(
-    mappings: &[cpu::LinuxExecMapping; 3],
+    mappings: &[cpu::LinuxExecMapping],
     clear_addresses: &[u64],
 ) -> bool {
-    if clear_addresses.is_empty()
-        || clear_addresses.len() > cpu::LINUX_EXEC_CLEAR_COUNT
+    replace_current_linux_image_inner(mappings, clear_addresses, false)
+}
+
+fn verify_current_linux_image_rollback(
+    mappings: &[cpu::LinuxExecMapping],
+    clear_addresses: &[u64],
+) -> bool {
+    let mut mapping_entries = [0_u64; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut clear_entries = [0_u64; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    for (index, mapping) in mappings.iter().enumerate() {
+        let Some(entry) = current_linux_leaf(mapping.address as u64) else {
+            return false;
+        };
+        mapping_entries[index] = unsafe { entry.read() };
+    }
+    for (index, address) in clear_addresses.iter().enumerate() {
+        let Some(entry) = current_linux_leaf(*address) else {
+            return false;
+        };
+        clear_entries[index] = unsafe { entry.read() };
+    }
+    !replace_current_linux_image_inner(mappings, clear_addresses, true)
+        && mappings.iter().enumerate().all(|(index, mapping)| {
+            current_linux_leaf(mapping.address as u64)
+                .is_some_and(|entry| unsafe { entry.read() } == mapping_entries[index])
+        })
+        && clear_addresses.iter().enumerate().all(|(index, address)| {
+            current_linux_leaf(*address)
+                .is_some_and(|entry| unsafe { entry.read() } == clear_entries[index])
+        })
+}
+
+fn replace_current_linux_image_inner(
+    mappings: &[cpu::LinuxExecMapping],
+    clear_addresses: &[u64],
+    force_verification_failure: bool,
+) -> bool {
+    if mappings.is_empty()
+        || mappings.len() > cpu::LINUX_EXEC_MAPPING_LIMIT
+        || clear_addresses.is_empty()
+        || clear_addresses.len() > cpu::LINUX_EXEC_MAPPING_LIMIT
         || mappings.iter().enumerate().any(|(index, mapping)| {
             mapping.address == 0
                 || !(mapping.address as u64).is_multiple_of(PAGE_SIZE as u64)
@@ -2056,10 +2120,10 @@ pub(crate) fn replace_current_linux_image(
     {
         return false;
     }
-    let mut old_mapping_entries = [0_u64; 3];
-    let mut old_clear_entries = [0_u64; cpu::LINUX_EXEC_CLEAR_COUNT];
-    let mut mapping_entries = [core::ptr::null_mut(); 3];
-    let mut clear_entries = [core::ptr::null_mut(); cpu::LINUX_EXEC_CLEAR_COUNT];
+    let mut old_mapping_entries = [0_u64; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut old_clear_entries = [0_u64; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut mapping_entries = [core::ptr::null_mut(); cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut clear_entries = [core::ptr::null_mut(); cpu::LINUX_EXEC_MAPPING_LIMIT];
     for (index, mapping) in mappings.iter().enumerate() {
         let Some(entry) = current_linux_leaf(mapping.address as u64) else {
             return false;
@@ -2095,21 +2159,23 @@ pub(crate) fn replace_current_linux_image(
             asm!("invlpg [{}]", in(reg) mapping.address, options(nostack, preserves_flags));
         }
     }
-    let installed = mappings.iter().all(|mapping| {
-        let flags = PRESENT
-            | USER
-            | if mapping.writable { WRITABLE } else { 0 }
-            | if mapping.executable { 0 } else { NO_EXECUTE };
-        current_linux_leaf(mapping.address as u64).is_some_and(|entry| unsafe {
-            entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
-                == (mapping.frame | flags)
+    let installed = !force_verification_failure
+        && mappings.iter().all(|mapping| {
+            let flags = PRESENT
+                | USER
+                | if mapping.writable { WRITABLE } else { 0 }
+                | if mapping.executable { 0 } else { NO_EXECUTE };
+            current_linux_leaf(mapping.address as u64).is_some_and(|entry| unsafe {
+                entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
+                    == (mapping.frame | flags)
+            })
         })
-    }) && clear_addresses.iter().all(|address| {
-        mappings
-            .iter()
-            .any(|mapping| mapping.address as u64 == *address)
-            || current_linux_leaf(*address).is_some_and(|entry| unsafe { entry.read() == 0 })
-    });
+        && clear_addresses.iter().all(|address| {
+            mappings
+                .iter()
+                .any(|mapping| mapping.address as u64 == *address)
+                || current_linux_leaf(*address).is_some_and(|entry| unsafe { entry.read() == 0 })
+        });
     if installed {
         return true;
     }
@@ -2186,8 +2252,11 @@ pub(crate) fn prepare_linux_frame(frame: u64, bytes: &[u8]) -> bool {
 pub(crate) fn materialize_linux_exec_frame(
     frame: memory::FrameLease,
     segment: crate::linux_elf::PlannedSegment<'_>,
+    page_index: usize,
 ) -> bool {
-    if segment.page_count != 1 || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame]) {
+    if page_index >= segment.page_count
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
         return false;
     }
     let Some(address) = frame.direct_map_address() else {
@@ -2196,7 +2265,7 @@ pub(crate) fn materialize_linux_exec_frame(
     // SAFETY: the generation-tagged lease is live, uniquely selected for this
     // not-yet-published exec transaction, and covers exactly one page.
     let output = unsafe { &mut *(address as *mut [u8; PAGE_SIZE]) };
-    crate::linux_elf::materialize(segment, output)
+    crate::linux_elf::materialize_page(segment, page_index, output)
 }
 
 pub(crate) fn unmap_current_linux_page(address: u64, frame: u64) -> bool {
