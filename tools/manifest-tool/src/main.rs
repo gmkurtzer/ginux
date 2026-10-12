@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 #[allow(dead_code)]
 mod control_abi {
-    include!("../../../specs/abi/control-v3.rs");
+    include!("../../../specs/abi/control-v4.rs");
 }
 
 const MAGIC: &[u8; 8] = b"GINXMNF\0";

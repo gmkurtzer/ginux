@@ -460,7 +460,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: local APIC timer interrupt handled\r\n");
 
-    if !volume::verify_contract() {
+    if !volume::verify_contract() || !volume::install_live() {
         kernel_fail("ginux: persistent volume contract invalid\r\n");
     }
     serial_write("ginux: bounded persistent volume format validated\r\n");
@@ -1421,12 +1421,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: replacement network service observed retained state");
     serial_write("\r\nginux: replacement network capability lifecycle isolated");
+    if !address_space::verify_ring3_volume_service() {
+        kernel_fail("\r\nginux: ring-3 persistent volume service invariant failed\r\n");
+    }
+    serial_write("\r\nginux: write-only volume service committed generation");
+    serial_write("\r\nginux: faulted volume service authority revoked");
+    serial_write("\r\nginux: persistent volume survived service fault");
+    serial_write("\r\nginux: read-only replacement recovered volume");
+    serial_write("\r\nginux: volume mutation denied to replacement");
     if !address_space::verify_ring3_auxiliary_fault() {
         kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
     }
     serial_write("\r\nginux: stop-only auxiliary fault executed and contained");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
-    serial_write("\r\nginux: control call ABI v3 negotiated");
+    serial_write("\r\nginux: control call ABI v4 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");
     serial_write("\r\nginux: minimal user interrupt surface enforced");
     serial_write("\r\nginux: bounded userspace read enforced");

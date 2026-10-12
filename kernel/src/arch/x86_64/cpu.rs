@@ -15,7 +15,7 @@ use crate::{
     scheduler::{
         RuntimeAction, UserFaultContext, UserFaultFrame, UserInterruptFrame, UserTrapFrame,
     },
-    serial_write, serial_write_u64,
+    serial_write, serial_write_u64, volume,
 };
 
 const KERNEL_CODE_SELECTOR: u16 = 0x08;
@@ -14246,8 +14246,129 @@ fn dispatch_charged_call(
         15 => create_auxiliary_service(caller_domain, capability, frame),
         16 => network_device_call(caller_domain, capability, frame),
         17 => root_device_call(caller_domain, capability, frame),
+        18 => volume_device_call(caller_domain, capability, frame),
         _ => u64::MAX,
     }
+}
+
+fn volume_device_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    let command = frame.first_argument();
+    let argument = frame.second_argument();
+    match command {
+        control_abi::VOLUME_PROBE
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::VOLUME_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            control_abi::VOLUME_DESCRIPTOR_WORD
+        }
+        control_abi::VOLUME_QUERY_GENERATION
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::VOLUME_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            volume::live_generation().unwrap_or(u64::MAX - 2)
+        }
+        control_abi::VOLUME_READ
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::VOLUME_OBJECT,
+                Rights::READ,
+            ) =>
+        {
+            volume_read(argument)
+        }
+        control_abi::VOLUME_COMMIT
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::VOLUME_OBJECT,
+                Rights::WRITE,
+            ) =>
+        {
+            volume_commit(argument)
+        }
+        _ => u64::MAX - 2,
+    }
+}
+
+fn volume_read(address: u64) -> u64 {
+    let Some(request) = volume_request(address) else {
+        return u64::MAX - 2;
+    };
+    let Ok(capacity) = usize::try_from(request.size) else {
+        return u64::MAX - 2;
+    };
+    if !(1..=control_abi::VOLUME_MAX_TRANSFER_SIZE).contains(&capacity) {
+        return u64::MAX - 2;
+    }
+    let mut output = [0_u8; control_abi::VOLUME_MAX_TRANSFER_SIZE];
+    match volume::read_live(request.expected_generation, &mut output[..capacity]) {
+        Ok(size)
+            if address_space::copy_to_current_user(request.buffer_address, &output[..size]) =>
+        {
+            size as u64
+        }
+        Ok(_) => u64::MAX - 2,
+        Err(volume::LiveError::Stale) => control_abi::VOLUME_RESULT_STALE_GENERATION,
+        Err(_) => u64::MAX - 2,
+    }
+}
+
+fn volume_commit(address: u64) -> u64 {
+    let Some(request) = volume_request(address) else {
+        return u64::MAX - 2;
+    };
+    let Ok(size) = usize::try_from(request.size) else {
+        return u64::MAX - 2;
+    };
+    if !(1..=control_abi::VOLUME_MAX_TRANSFER_SIZE).contains(&size) {
+        return u64::MAX - 2;
+    }
+    let mut payload = [0_u8; control_abi::VOLUME_MAX_TRANSFER_SIZE];
+    if !address_space::copy_from_current_user(request.buffer_address, &mut payload[..size]) {
+        return u64::MAX - 2;
+    }
+    match volume::commit_live(request.expected_generation, &payload[..size]) {
+        Ok(generation) => generation,
+        Err(volume::LiveError::Stale) => control_abi::VOLUME_RESULT_STALE_GENERATION,
+        Err(_) => u64::MAX - 2,
+    }
+}
+
+struct VolumeRequest {
+    expected_generation: u64,
+    buffer_address: u64,
+    size: u64,
+}
+
+fn volume_request(address: u64) -> Option<VolumeRequest> {
+    let mut request = [0_u8; control_abi::VOLUME_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(address, &mut request)
+        || u32::from_le_bytes(request[0..4].try_into().ok()?) as usize
+            != control_abi::VOLUME_REQUEST_SIZE
+        || u16::from_le_bytes(request[4..6].try_into().ok()?) != control_abi::VERSION
+        || request[6..8] != [0, 0]
+    {
+        return None;
+    }
+    Some(VolumeRequest {
+        expected_generation: u64::from_le_bytes(request[8..16].try_into().ok()?),
+        buffer_address: u64::from_le_bytes(request[16..24].try_into().ok()?),
+        size: u64::from_le_bytes(request[24..32].try_into().ok()?),
+    })
 }
 
 fn root_device_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
@@ -15027,6 +15148,13 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         0
     };
     let fault_metadata = frame.metadata(fault_address);
+    if fault_domain.is_some() && failure_policy.is_none() {
+        serial_write("ginux: unexpected control fault vector/rip: ");
+        serial_write_u64(fault_metadata.vector);
+        serial_write(" ");
+        serial_write_u64(fault_metadata.instruction);
+        serial_write("\r\n");
+    }
     if fault_domain.is_none() && ELF_PROBE_ACTIVE.load(Ordering::SeqCst) {
         serial_write("ginux: Linux user fault vector/error/address/rip:");
         serial_write_u64(fault_metadata.vector);

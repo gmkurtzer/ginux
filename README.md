@@ -12,6 +12,13 @@ current backend models durable versus pending sectors in memory; it is not yet
 connected to virtio-blk and therefore does not claim persistence across a
 machine restart. See
 [Persistent Volume Record v0](specs/kernel/persistent-volume-v0.md).
+Control ABI v4 operation 18 exposes the live reference volume through signed
+object 6. A write-only ring-3 service commits generation one and is then
+faulted; its authority and address space are retired while the volume remains.
+A fresh read-only service recovers the exact payload, cannot mutate it, and
+also loses its attenuated handle at exit. This proves service-restart
+persistence and authority separation, not host reboot persistence. See
+[Persistent Volume Service v0](specs/kernel/volume-service-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
@@ -64,7 +71,7 @@ shutdown and is published to the control plane as read-only capability object
 from those authenticated measured-root bytes, binding canonical names,
 SONAMEs, dependency order, digests, and bounded non-overlapping load windows
 without requiring equality to kernel-embedded ELF artifacts. Substituted,
-reordered, and truncated graph members are rejected. Control ABI v3 provides bounded probe, exact-path metadata lookup, file
+reordered, and truncated graph members are rejected. Control ABI v4 provides bounded probe, exact-path metadata lookup, file
 reads, and cursor-based direct-child enumeration; the ring-3 proof reads `init`
 and enumerates `dev` while rejecting the wrong capability,
 traversal, and an invalid output range. The Linux syscall profile now resolves
@@ -955,7 +962,7 @@ and the deterministic proof root at `build/initramfs-v0.cpio` without assembling
 filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and
 proof-workload ABI constants share the machine-readable
-`specs/abi/control-v3.rs` source, and the manifest builder expands its symbolic
+`specs/abi/control-v4.rs` source, and the manifest builder expands its symbolic
 feature and descriptor words before signing. The checked-in key is an RFC test
 identity and must not be treated as a production trust root.
 

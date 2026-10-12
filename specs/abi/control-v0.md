@@ -10,7 +10,7 @@ The measured ring-3 control-plane bundle invokes interrupt vector `0x80` with:
 - `RAX` on return: result value.
 
 Operation 0 requires no capability and returns a discovery word. Bits 16-31
-contain ABI version 3 and bits 0-15 contain its feature bitmap:
+contain ABI version 4 and bits 0-15 contain its feature bitmap:
 
 | Bit | Feature |
 |---:|---|
@@ -34,10 +34,11 @@ contain ABI version 3 and bits 0-15 contain its feature bitmap:
 Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
 be silently changed within a version; incompatible changes require a new
-version and an overlap period when practical. Version 3 preserves operations
-0 through 16 and adds the mandatory read-only root object at operation 17. The
-pre-release bootstrap switches atomically to v3 rather than carrying adapters;
-`control-v1.rs` and `control-v2.rs` remain frozen as drift evidence. The scalar discovery word and
+version and an overlap period when practical. Version 4 preserves operations
+0 through 17 and adds the persistent-volume object at operation 18. The
+pre-release bootstrap switches atomically to v4 rather than carrying adapters;
+`control-v1.rs`, `control-v2.rs`, and `control-v3.rs` remain frozen as drift
+evidence. The scalar discovery word and
 structured descriptor are encoded from the same kernel constants so their
 version, feature bitmap, and bounded-console limit cannot drift independently.
 Those constants also drive symbolic expansion in the signed ring-3 proof
@@ -58,13 +59,13 @@ operation 5 receives one word and requires read authority. The kernel selects
 the request or reply direction from the caller's domain role, so an endpoint
 cannot receive its own outbound words. Queued words retain an internal exact
 sender-generation tag and a per-direction monotonic sequence number that are
-validated at dequeue, but operation 5 returns only the scalar value in ABI v2/v3.
+validated at dequeue, but operation 5 returns only the scalar value in ABI v2-v4.
 Failed enqueues do not consume sequence numbers, while intentional retirement
 cleanup can create valid gaps. IPC failure returns `UINT64_MAX - 2`.
 After queued replies are drained, operation 5 returns `UINT64_MAX - 4` once
 for each generation-tagged service closure retained by the endpoint. Closure
 records have a separate internal monotonic sequence that operation 5 does not
-expose in ABI v2/v3.
+expose in ABI v2-v4.
 Operation 6 writes one through eight packed bytes from `RSI`, with the byte
 count in `RDX`, and requires write authority on console object 2. It returns
 the byte count or `UINT64_MAX - 2` on denial or invalid input.
@@ -79,7 +80,7 @@ queue retains one sticky overflow notification. After the four concrete events
 are consumed, operation 7 returns event kind 2, the first dropped domain in
 bits 8-55, and a saturating dropped-record count in bits 56-63. Consuming that
 notification clears the overflow state. Concrete and summarized events carry
-an internal monotonic sequence for replay detection, but the packed ABI v2/v3
+an internal monotonic sequence for replay detection, but the packed ABI v2-v4
 result does not expose it.
 For a concrete service fault, the kernel retains vector, error code, fault
 address, and instruction address with the consumed record for supervision
@@ -269,7 +270,7 @@ Any charged operation returns `UINT64_MAX - 3` without dispatch when its
 domain's call budget is exhausted. Operation 2 remains available so the caller
 can exit after exhaustion.
 
-Operation 16 is the network-device call introduced by v2 and retained by v3. It requires `READ` authority on
+Operation 16 is the network-device call introduced by v2 and retained by v4. It requires `READ` authority on
 network-device object 4. `RSI` is the command and `RDX` its argument. Command 0
 requires argument zero and returns the fixed discovery word
 `0x0000000105dc0009`: descriptor version 9 in bits 0-15, MTU 1500 in bits
@@ -323,7 +324,7 @@ denial return `UINT64_MAX - 2`. This is a
 device-authorization skeleton only; it exposes no packets, general route table,
 DMA, interrupts, or hardware-backed configuration.
 
-Operation 17 is the v3 read-only root call and requires `READ` authority on
+Operation 17 is the v3 read-only root call retained by v4 and requires `READ` authority on
 root object 5. `RSI` selects the command and `RDX` supplies its argument.
 Command 0 requires argument zero and returns `0x0000004000100002`: profile
 version 2 in bits 0-15, the 16-node index limit in bits 16-31, and the 64-byte
@@ -357,6 +358,32 @@ children returns zero without touching output; a cursor beyond the index, a
 non-directory path, or insufficient capacity fails without partial output.
 Profile v2 adds this command; the other operation-17 commands retain their
 profile-v1 layouts. Enumeration does not grant mutation or mount authority.
+
+Operation 18 is the v4 persistent-volume call and requires authority on volume
+object 6. `RSI` selects the command and `RDX` supplies its argument. Read-only
+command 0 requires argument zero and returns descriptor
+`0x0000000200400001`: contract version 1 in bits 0-15, maximum transfer 64 in
+bits 16-31, and two record slots in bits 32-63. Read-only command 1 requires
+argument zero and returns the current generation, or zero for an empty volume.
+
+Read-only command 2 and write-only command 3 copy a 32-byte request from the
+address in `RDX`. It contains `u32` size 32, `u16` ABI version 4,
+reserved-zero `u16`, then `u64` expected generation, buffer address, and buffer
+size. Sizes are 1 through 64. Command 2 stages the exact recovered payload and
+copies it to a writable caller range, returning its length without touching
+the remaining capacity. Command 3 stages the complete caller payload before
+committing it with the two-slot prepare/flush/commit/flush algorithm and
+returns the new generation. The expected generation must be zero for an empty
+volume or exactly match the current generation; a mismatch returns
+`UINT64_MAX - 4` without mutation. Unknown commands, malformed inputs, absent
+rights, corrupt media, and device errors return `UINT64_MAX - 2`.
+
+The QEMU proof attenuates signed control-plane object 6 into a write-only
+service and a distinct read-only replacement. The writer cannot observe the
+volume, commits generation one, faults, and loses its capability. The
+replacement recovers the exact payload, is denied mutation, exits, and also
+loses its capability. The current backend is volatile kernel memory, so this
+proves persistence across isolated service failure rather than VM restart.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler

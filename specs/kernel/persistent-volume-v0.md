@@ -1,8 +1,8 @@
 # Persistent Volume Record v0
 
 **Status:** Two-slot format and recovery algorithm verified against an in-memory
-block-device model during every QEMU boot. No physical or virtual block-device
-backend is connected yet.
+block-device model during every QEMU boot and exposed through a bounded ring-3
+service contract. No physical or virtual block-device backend is connected yet.
 
 ## Purpose
 
@@ -86,7 +86,8 @@ volume validation markers before accepting the boot.
 - The reference backend is volatile memory and does not survive QEMU restart.
 - The format holds one value of at most 440 bytes; it has no allocation,
   filesystem, journal, names, snapshots, or concurrency.
-- There is no storage-service capability ABI or Linux block-device exposure.
+- Control ABI v4 operation 18 exposes a bounded 64-byte capability-separated
+  service path; there is no Linux block-device exposure.
 - There is no virtio-blk, NVMe, DMA, interrupt, or hardware queue backend.
 - SHA-256 is an integrity checksum here, not a signature or MAC.
 - Throughput, p99 latency, endurance, discard, barriers beyond flush, and

@@ -1,4 +1,7 @@
-use core::{arch::asm, mem::size_of};
+use core::{
+    arch::{asm, global_asm},
+    mem::size_of,
+};
 
 use crate::{
     arch::x86_64::{
@@ -6,8 +9,18 @@ use crate::{
         cpu, paging,
         timer::{self, LocalApicCalibration},
     },
-    domain, ipc, memory, network, scheduler,
+    domain, ipc, memory, network, scheduler, volume,
 };
+
+global_asm!(include_str!("../volume-service.S"));
+
+extern "C" {
+    fn ginux_volume_writer_start();
+    fn ginux_volume_writer_fault();
+    fn ginux_volume_writer_end();
+    fn ginux_volume_reader_start();
+    fn ginux_volume_reader_end();
+}
 
 const PAGE_SIZE: usize = 4096;
 const ENTRY_COUNT: usize = 512;
@@ -4945,6 +4958,165 @@ pub(crate) fn verify_ring3_network_recovery() -> bool {
         && domain::take_lifecycle_event().is_none()
 }
 
+struct VolumeAuxiliaryResult {
+    domain: u64,
+    identity: u64,
+    event: u64,
+    kind: u8,
+    sequence: u64,
+    detail: u8,
+}
+
+pub(crate) fn verify_ring3_volume_service() -> bool {
+    let Some(writer_program) = volume_program(
+        ginux_volume_writer_start as *const () as usize,
+        ginux_volume_writer_end as *const () as usize,
+    ) else {
+        return false;
+    };
+    let Some(writer) = run_volume_auxiliary(writer_program, crate::capability::Rights::WRITE)
+    else {
+        crate::serial_write_bytes(b"\r\nginux: volume writer setup/runtime failed");
+        return false;
+    };
+    if writer.kind != crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+        || writer.detail != 0
+        || writer.event
+            != (writer.domain << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT)
+        || !domain::delivered_fault_matches(
+            writer.domain,
+            domain::FaultMetadata {
+                vector: 6,
+                error: 0,
+                address: 0,
+                instruction: (USER_TEST_ADDRESS
+                    + (ginux_volume_writer_fault as *const () as usize
+                        - ginux_volume_writer_start as *const () as usize))
+                    as u64,
+            },
+        )
+        || volume::live_generation() != Ok(1)
+    {
+        crate::serial_write_bytes(
+            b"\r\nginux: volume writer result invalid kind/detail/event/gen: ",
+        );
+        crate::serial_write_u64(u64::from(writer.kind));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(u64::from(writer.detail));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(writer.event);
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(volume::live_generation().unwrap_or(u64::MAX));
+        return false;
+    }
+
+    let Some(reader_program) = volume_program(
+        ginux_volume_reader_start as *const () as usize,
+        ginux_volume_reader_end as *const () as usize,
+    ) else {
+        return false;
+    };
+    let Some(reader) = run_volume_auxiliary(reader_program, crate::capability::Rights::READ) else {
+        crate::serial_write_bytes(b"\r\nginux: volume reader setup/runtime failed");
+        return false;
+    };
+    let valid = reader.kind == crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
+        && reader.detail == 46
+        && reader.event
+            == (46_u64 << 56)
+                | (reader.domain << 8)
+                | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED)
+        && reader.sequence == writer.sequence + 1
+        && reader.identity != writer.identity
+        && volume::live_generation() == Ok(1);
+    if !valid {
+        crate::serial_write_bytes(
+            b"\r\nginux: volume reader result invalid kind/detail/event/gen: ",
+        );
+        crate::serial_write_u64(u64::from(reader.kind));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(u64::from(reader.detail));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(reader.event);
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(volume::live_generation().unwrap_or(u64::MAX));
+    }
+    valid
+}
+
+fn volume_program(start: usize, end: usize) -> Option<&'static [u8]> {
+    let size = end.checked_sub(start)?;
+    if size == 0 || size > PAGE_SIZE {
+        return None;
+    }
+    Some(unsafe { core::slice::from_raw_parts(start as *const u8, size) })
+}
+
+fn run_volume_auxiliary(
+    program: &[u8],
+    rights: crate::capability::Rights,
+) -> Option<VolumeAuxiliaryResult> {
+    let auxiliary =
+        domain::initialize_boot_auxiliary_service(5, crate::control_abi::VOLUME_OBJECT, rights)?;
+    let handle = domain::auxiliary_boot_handle(auxiliary, 0)?;
+    let identity = domain::domain_service_identity(auxiliary)?;
+    let owner = memory::FrameOwner::domain(auxiliary)?;
+    let kernel_root = current_root();
+    let space = WxAddressSpace::new(kernel_root, owner)?;
+    if !space.permissions_are_valid(kernel_root) {
+        return None;
+    }
+    unsafe {
+        for (offset, byte) in program.iter().enumerate() {
+            space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let root = space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(auxiliary, space)
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return None;
+    }
+    cpu::execute_auxiliary(entry, stack, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event()?;
+    let (kind, audited_domain, sequence) = domain::last_lifecycle_event_audit()?;
+    let detail = domain::last_lifecycle_event_detail()?;
+    if current_root() != kernel_root
+        || scheduler::current_domain().is_some()
+        || registered_auxiliary_address_space_count() != 0
+        || memory::owner_live_frame_count(owner) != Some(0)
+        || !domain::domain_is_retired(auxiliary)
+        || domain::handle_permits(
+            auxiliary,
+            handle,
+            crate::control_abi::VOLUME_OBJECT,
+            crate::capability::Rights::READ,
+        )
+        || domain::handle_permits(
+            auxiliary,
+            handle,
+            crate::control_abi::VOLUME_OBJECT,
+            crate::capability::Rights::WRITE,
+        )
+        || audited_domain != auxiliary
+        || domain::last_lifecycle_service_identity() != Some(identity)
+        || domain::take_lifecycle_event().is_some()
+    {
+        return None;
+    }
+    Some(VolumeAuxiliaryResult {
+        domain: auxiliary,
+        identity,
+        event,
+        kind,
+        sequence,
+        detail,
+    })
+}
+
 pub(crate) fn verify_ring3_auxiliary_fault() -> bool {
     const INVALID_OPCODE_PROGRAM: [u8; 2] = [0x0f, 0x0b];
     let Some(auxiliary) =
@@ -4991,7 +5163,7 @@ pub(crate) fn verify_ring3_auxiliary_fault() -> bool {
         && event
             == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
         && domain::last_lifecycle_event_audit()
-            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 13))
+            == Some((crate::control_abi::LIFECYCLE_AUXILIARY_FAULT, auxiliary, 15))
         && domain::last_lifecycle_event_detail() == Some(0)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::delivered_fault_matches(

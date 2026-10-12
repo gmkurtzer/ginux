@@ -1,9 +1,14 @@
+use core::{
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, Ordering},
+};
+
 const SECTOR_SIZE: usize = 512;
 const SLOT_COUNT: usize = 2;
 const MAGIC: &[u8; 8] = b"GINUXPV0";
 const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 72;
-const PAYLOAD_CAPACITY: usize = SECTOR_SIZE - HEADER_SIZE;
+pub(crate) const PAYLOAD_CAPACITY: usize = SECTOR_SIZE - HEADER_SIZE;
 const COMMIT_MARKER: u64 = 0x3144_4554_5449_4d43;
 
 const VERSION_OFFSET: usize = 8;
@@ -235,6 +240,90 @@ fn write_u64(bytes: &mut [u8], offset: usize, value: u64) {
 struct MemoryBlockDevice {
     durable: [[u8; SECTOR_SIZE]; SLOT_COUNT],
     pending: [[u8; SECTOR_SIZE]; SLOT_COUNT],
+}
+
+static LIVE_INSTALLED: AtomicBool = AtomicBool::new(false);
+static mut LIVE_DEVICE: MaybeUninit<MemoryBlockDevice> = MaybeUninit::uninit();
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LiveError {
+    Corrupt,
+    Device,
+    GenerationExhausted,
+    PayloadTooLarge,
+    Stale,
+}
+
+pub(crate) fn install_live() -> bool {
+    if LIVE_INSTALLED.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+    unsafe {
+        core::ptr::addr_of_mut!(LIVE_DEVICE).write(MaybeUninit::new(MemoryBlockDevice::new()));
+    }
+    live_device().is_some_and(|device| recover(device).is_none())
+}
+
+pub(crate) fn live_generation() -> Result<u64, LiveError> {
+    let device = live_device().ok_or(LiveError::Device)?;
+    recover_with_slot(device)
+        .map_err(live_scan_error)
+        .map(|record| record.map_or(0, |(_, record)| record.generation))
+}
+
+pub(crate) fn read_live(expected_generation: u64, output: &mut [u8]) -> Result<usize, LiveError> {
+    let device = live_device().ok_or(LiveError::Device)?;
+    let record = recover_with_slot(device)
+        .map_err(live_scan_error)?
+        .map(|(_, record)| record)
+        .ok_or(LiveError::Stale)?;
+    if record.generation != expected_generation {
+        return Err(LiveError::Stale);
+    }
+    let payload = record.payload();
+    if output.len() < payload.len() {
+        return Err(LiveError::PayloadTooLarge);
+    }
+    output[..payload.len()].copy_from_slice(payload);
+    Ok(payload.len())
+}
+
+pub(crate) fn commit_live(expected_generation: u64, payload: &[u8]) -> Result<u64, LiveError> {
+    let device = live_device_mut().ok_or(LiveError::Device)?;
+    let current = recover_with_slot(device).map_err(live_scan_error)?;
+    let current_generation = current.map_or(0, |(_, record)| record.generation);
+    if current_generation != expected_generation {
+        return Err(LiveError::Stale);
+    }
+    commit(device, payload)
+        .map(|record| record.generation)
+        .map_err(|error| match error {
+            CommitError::Corrupt => LiveError::Corrupt,
+            CommitError::Device => LiveError::Device,
+            CommitError::GenerationExhausted => LiveError::GenerationExhausted,
+            CommitError::PayloadTooLarge => LiveError::PayloadTooLarge,
+        })
+}
+
+fn live_scan_error(error: ScanError) -> LiveError {
+    match error {
+        ScanError::Ambiguous => LiveError::Corrupt,
+        ScanError::Device => LiveError::Device,
+    }
+}
+
+fn live_device() -> Option<&'static MemoryBlockDevice> {
+    if !LIVE_INSTALLED.load(Ordering::Acquire) {
+        return None;
+    }
+    Some(unsafe { &*core::ptr::addr_of!(LIVE_DEVICE).cast::<MemoryBlockDevice>() })
+}
+
+fn live_device_mut() -> Option<&'static mut MemoryBlockDevice> {
+    if !LIVE_INSTALLED.load(Ordering::Acquire) {
+        return None;
+    }
+    Some(unsafe { &mut *core::ptr::addr_of_mut!(LIVE_DEVICE).cast::<MemoryBlockDevice>() })
 }
 
 impl MemoryBlockDevice {

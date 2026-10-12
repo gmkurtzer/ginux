@@ -24,7 +24,7 @@ ABI. The value is lost when the service exits or faults. There is one fixed
 value, one fixed command, one client, no names, no request identifiers, no
 concurrency, no recovery, and no persistence across service restart or machine
 reboot. The separate [Persistent Volume Record v0](persistent-volume-v0.md)
-now defines a crash-consistent two-slot block format and recovery algorithm,
-but it is not yet connected to this ring-3 protocol or to a durable backend.
-A later storage-service ABI must join those pieces before exposing a
-general-purpose interface.
+defines a crash-consistent two-slot block format and recovery algorithm.
+Control ABI v4 now connects that format to a distinct capability-gated
+[Persistent Volume Service v0](volume-service-v0.md), but does not retrofit
+durability into this older IPC protocol or provide a real block backend.

@@ -2715,6 +2715,31 @@ if ! grep -q '^ginux: replacement network capability lifecycle isolated' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: write-only volume service committed generation' "$output_file"; then
+    echo "Boot test failed: the write-only volume service did not commit." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: faulted volume service authority revoked' "$output_file"; then
+    echo "Boot test failed: faulted volume-service authority was not revoked." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: persistent volume survived service fault' "$output_file"; then
+    echo "Boot test failed: the volume did not survive its writer fault." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: read-only replacement recovered volume' "$output_file"; then
+    echo "Boot test failed: the read-only replacement did not recover the volume." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: volume mutation denied to replacement' "$output_file"; then
+    echo "Boot test failed: the read-only replacement mutated the volume." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: failed auxiliary load rollback enforced' "$output_file"; then
     echo "Boot test failed: failed auxiliary load rollback was not enforced." >&2
     exit 1
@@ -2740,7 +2765,7 @@ if ! grep -q '^ginux: stop-only auxiliary fault executed and contained' "$output
     exit 1
 fi
 
-if ! grep -q '^ginux: control call ABI v3 negotiated' "$output_file"; then
+if ! grep -q '^ginux: control call ABI v4 negotiated' "$output_file"; then
     echo "Boot test failed: control call ABI negotiation failed." >&2
     exit 1
 fi

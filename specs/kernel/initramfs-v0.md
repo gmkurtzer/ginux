@@ -66,7 +66,7 @@ traversal paths fail. Destroying the index scrubs and releases all image frames.
 
 The runtime publication then materializes a third indexed copy and retains its
 32 frames under kernel ownership through shutdown. Signed manifest object 5 grants
-the control plane `READ` authority only. Control ABI v3 operation 17 exposes a
+the control plane `READ` authority only. Control ABI v4 operation 17 exposes a
 versioned profile probe, exact-path metadata lookup, reads of at most 64 bytes,
 and cursor-based direct-child enumeration.
 Path inputs are copied into a 255-byte kernel staging buffer; metadata and file
