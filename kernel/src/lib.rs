@@ -842,6 +842,25 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: virtio-net platform DMA negotiation validated");
     serial_write("\r\nginux: invalid virtio-net feature sets rejected");
     serial_write("\r\nginux: virtio-net returned to reset with PCI decoding disabled\r\n");
+    if !arch::x86_64::pci::verify_network_msix_programming_rejections(
+        virtio_network,
+        virtio_network_msix_mmio,
+    ) || !arch::x86_64::pci::program_masked_network_msix_vectors(
+        virtio_network,
+        virtio_network_msix_mmio,
+        local_apic.id,
+    ) || !arch::x86_64::pci::network_msix_vectors_are_masked(
+        virtio_network,
+        virtio_network_msix_mmio,
+        local_apic.id,
+    ) || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
+    {
+        kernel_fail("ginux: masked virtio-net MSI-X programming failed\r\n");
+    }
+    serial_write("ginux: invalid virtio-net MSI-X programming rejected atomically\r\n");
+    serial_write("ginux: masked virtio-net RX/TX MSI-X vectors programmed\r\n");
+    serial_write("ginux: virtio-net MSI-X remained globally disabled\r\n");
+    serial_write("ginux: virtio-net remained reset and DMA-disabled after MSI-X setup\r\n");
     if !arch::x86_64::pci::verify_msix_programming_rejections(virtio_block, virtio_msix_mmio) {
         kernel_fail("ginux: invalid MSI-X programming mutated table\r\n");
     }

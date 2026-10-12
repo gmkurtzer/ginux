@@ -112,6 +112,10 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues remain disabled and DMA-unbound' "$output_file" ||
     ! grep -q '^ginux: invalid virtio-net queue geometry rejected' "$output_file" ||
     ! grep -q '^ginux: virtio-net MSI-X remained disabled' "$output_file" ||
+    ! grep -q '^ginux: invalid virtio-net MSI-X programming rejected atomically' "$output_file" ||
+    ! grep -q '^ginux: masked virtio-net RX/TX MSI-X vectors programmed' "$output_file" ||
+    ! grep -q '^ginux: virtio-net MSI-X remained globally disabled' "$output_file" ||
+    ! grep -q '^ginux: virtio-net remained reset and DMA-disabled after MSI-X setup' "$output_file" ||
     ! grep -q '^ginux: generation-owned virtio-net DMA page allocated' "$output_file" ||
     ! grep -q '^ginux: bounded virtio-net RX/TX DMA layout validated' "$output_file" ||
     ! grep -q '^ginux: malformed virtio-net DMA layouts rejected' "$output_file" ||

@@ -41,6 +41,8 @@ const FIRST_DEVICE_VECTOR: u8 = 33;
 const LAST_DEVICE_VECTOR: u8 = 0xef;
 const SYSCALL_VECTOR: u8 = 0x80;
 const VIRTIO_INTERRUPT_VECTOR: u8 = FIRST_DEVICE_VECTOR;
+const VIRTIO_NETWORK_RX_VECTOR: u8 = FIRST_DEVICE_VECTOR + 1;
+const VIRTIO_NETWORK_TX_VECTOR: u8 = FIRST_DEVICE_VECTOR + 2;
 const APIC_EOI: u32 = 0xb0;
 const VIRTIO_COMMON: u8 = 1;
 const VIRTIO_NOTIFY: u8 = 2;
@@ -227,6 +229,36 @@ pub(crate) struct MsixCapability {
     pub(crate) pba_offset: u32,
     pub(crate) pba_length: u32,
     pub(crate) function_masked: bool,
+}
+
+#[derive(Clone, Copy)]
+struct MsixTarget {
+    bus: u8,
+    device: u8,
+    function: u8,
+    capability: MsixCapability,
+}
+
+impl VirtioBlockDevice {
+    fn msix_target(self) -> MsixTarget {
+        MsixTarget {
+            bus: self.bus,
+            device: self.device,
+            function: self.function,
+            capability: self.msix,
+        }
+    }
+}
+
+impl VirtioNetworkDevice {
+    fn msix_target(self) -> MsixTarget {
+        MsixTarget {
+            bus: self.bus,
+            device: self.device,
+            function: self.function,
+            capability: self.msix,
+        }
+    }
 }
 
 impl VirtioNetworkDevice {
@@ -633,23 +665,36 @@ pub(crate) fn program_masked_msix_vector(
     apic_id: u8,
     vector: u8,
 ) -> bool {
-    if index >= device.msix.vector_count
+    program_masked_msix_vector_raw(device.msix_target(), mapping, index, apic_id, vector)
+}
+
+fn program_masked_msix_vector_raw(
+    target: MsixTarget,
+    mapping: MmioMapping,
+    index: u16,
+    apic_id: u8,
+    vector: u8,
+) -> bool {
+    let msix = target.capability;
+    if index >= msix.vector_count
         || !(FIRST_DEVICE_VECTOR..=LAST_DEVICE_VECTOR).contains(&vector)
         || vector == SYSCALL_VECTOR
     {
         return false;
     }
-    let control_offset = match device.msix.capability_offset.checked_add(2) {
+    let control_offset = match msix.capability_offset.checked_add(2) {
         Some(offset) => offset,
         None => return false,
     };
-    if unsafe { read_config_u16(device.bus, device.device, device.function, control_offset) }
+    if unsafe { read_config_u16(target.bus, target.device, target.function, control_offset) }
         & MSIX_ENABLE
         != 0
     {
         return false;
     }
-    let Some((table_physical, table_length)) = device.msix_table_region() else {
+    let Some((table_physical, table_length)) =
+        region_bounds(msix.table_bar_address, msix.table_offset, msix.table_length)
+    else {
         return false;
     };
     let Some(entry_offset) = usize::from(index).checked_mul(MSIX_TABLE_ENTRY_SIZE as usize) else {
@@ -681,7 +726,7 @@ pub(crate) fn program_masked_msix_vector(
         && read_mmio_u32(entry + 4) == 0
         && read_mmio_u32(entry + 8) == u32::from(vector)
         && read_mmio_u32(entry + 12) == MSIX_VECTOR_MASK
-        && unsafe { read_config_u16(device.bus, device.device, device.function, control_offset) }
+        && unsafe { read_config_u16(target.bus, target.device, target.function, control_offset) }
             & MSIX_ENABLE
             == 0
 }
@@ -717,6 +762,119 @@ pub(crate) fn verify_msix_programming_rejections(
                 read_mmio_u32(entry + 8),
                 read_mmio_u32(entry + 12),
             ]
+}
+
+pub(crate) fn verify_network_msix_programming_rejections(
+    device: VirtioNetworkDevice,
+    mapping: MmioMapping,
+) -> bool {
+    let Some((table_physical, table_length)) = device.msix_table_region() else {
+        return false;
+    };
+    if table_length < 2 * MSIX_TABLE_ENTRY_SIZE as usize {
+        return false;
+    }
+    let Some(table) = mapping.address(table_physical, 2 * MSIX_TABLE_ENTRY_SIZE as usize) else {
+        return false;
+    };
+    let before: [u32; 8] = core::array::from_fn(|word| read_mmio_u32(table + word * 4));
+    !program_masked_msix_vector_raw(
+        device.msix_target(),
+        mapping,
+        device.msix.vector_count,
+        0,
+        VIRTIO_NETWORK_RX_VECTOR,
+    ) && !program_masked_msix_vector_raw(device.msix_target(), mapping, 0, 0, 31)
+        && !program_masked_msix_vector_raw(device.msix_target(), mapping, 1, 0, SYSCALL_VECTOR)
+        && before == core::array::from_fn(|word| read_mmio_u32(table + word * 4))
+}
+
+pub(crate) fn program_masked_network_msix_vectors(
+    device: VirtioNetworkDevice,
+    mapping: MmioMapping,
+    apic_id: u8,
+) -> bool {
+    if !network_function_is_disabled(device) {
+        return false;
+    }
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            COMMAND_MEMORY_SPACE,
+        );
+    }
+    let programmed = network_function_command(device) == COMMAND_MEMORY_SPACE
+        && device.msix.vector_count >= 2
+        && program_masked_msix_vector_raw(
+            device.msix_target(),
+            mapping,
+            0,
+            apic_id,
+            VIRTIO_NETWORK_RX_VECTOR,
+        )
+        && program_masked_msix_vector_raw(
+            device.msix_target(),
+            mapping,
+            1,
+            apic_id,
+            VIRTIO_NETWORK_TX_VECTOR,
+        )
+        && network_msix_vectors_match(device, mapping, apic_id);
+    programmed && revoke_network_function(device)
+}
+
+pub(crate) fn network_msix_vectors_are_masked(
+    device: VirtioNetworkDevice,
+    mapping: MmioMapping,
+    apic_id: u8,
+) -> bool {
+    if !network_function_is_disabled(device) {
+        return false;
+    }
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            COMMAND_MEMORY_SPACE,
+        );
+    }
+    let matched = network_function_command(device) == COMMAND_MEMORY_SPACE
+        && network_msix_vectors_match(device, mapping, apic_id);
+    matched && revoke_network_function(device)
+}
+
+fn network_msix_vectors_match(
+    device: VirtioNetworkDevice,
+    mapping: MmioMapping,
+    apic_id: u8,
+) -> bool {
+    let Some((table_physical, table_length)) = device.msix_table_region() else {
+        return false;
+    };
+    if table_length < 2 * MSIX_TABLE_ENTRY_SIZE as usize || !network_msix_is_disabled(device) {
+        return false;
+    }
+    let message_address = MSI_ADDRESS_BASE | u32::from(apic_id) << MSI_DESTINATION_SHIFT;
+    [VIRTIO_NETWORK_RX_VECTOR, VIRTIO_NETWORK_TX_VECTOR]
+        .into_iter()
+        .enumerate()
+        .all(|(index, vector)| {
+            let Some(entry) = table_physical
+                .checked_add((index as u64) * u64::from(MSIX_TABLE_ENTRY_SIZE))
+                .and_then(|physical| mapping.address(physical, MSIX_TABLE_ENTRY_SIZE as usize))
+            else {
+                return false;
+            };
+            read_mmio_u32(entry) == message_address
+                && read_mmio_u32(entry + 4) == 0
+                && read_mmio_u32(entry + 8) == u32::from(vector)
+                && read_mmio_u32(entry + 12) == MSIX_VECTOR_MASK
+        })
 }
 
 fn set_msix_control(device: VirtioBlockDevice, enabled: bool, function_masked: bool) -> bool {

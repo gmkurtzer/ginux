@@ -67,6 +67,11 @@ descriptor and performs no notification. Teardown revokes bus mastering before
 resetting the device and disabling VT-d, then scrubs translation tables before
 the DMA page. See
 [Virtio Network Empty Queue Activation v0](specs/kernel/virtio-network-queue-activation-v0.md).
+The kernel also programs distinct receive and transmit MSI-X messages while
+both entries remain masked and MSI-X remains globally disabled. Invalid table
+indices and reserved vectors are rejected without mutation; temporary PCI
+memory decoding is revoked immediately after readback. See
+[Virtio Network Masked MSI-X v0](specs/kernel/virtio-network-msix-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table
