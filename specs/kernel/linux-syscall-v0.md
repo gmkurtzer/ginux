@@ -370,7 +370,8 @@ aggregate-stack overflow returns `-E2BIG`
 without changing the running image. A multithreaded caller returns `-EAGAIN`.
 On success the kernel clears the clear-child-TID and robust-list registrations,
 constructs a fresh bounded initial stack, allocates and materializes the three
-selected measured ELF pages, atomically replaces the authenticated image
+selected measured ELF pages, derives their entry and mapping addresses without
+a predeclared per-target template, atomically replaces the authenticated image
 mappings, and never returns to the old program. Allocation or pre-commit
 failure scrubs and releases all new generation-tagged frame leases before
 returning. Descriptors marked

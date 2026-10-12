@@ -100,8 +100,10 @@ workload runs. Runtime admission does not compare against either compiled byte
 array: it parses the selected measured-root file and requires three consecutive
 pages inside `0x3ff000..0x420000`, the fixed entry displacement, role-derived
 protections, and absence of dynamic, TLS, and RELRO metadata.
-After path, vector, string, and mapping-template validation, the
-bounded exec transaction allocates three generation-tagged kernel frame leases
+After path, vector, and string validation, the bounded exec transaction derives
+entry and W^X mappings directly from the selected measured plan; the boot
+verifier does not preseed a target identity, entry, or address template. It
+then allocates three generation-tagged kernel frame leases
 and materializes the selected measured bytes into them. It installs those pages
 atomically, retains the existing
 guarded stack, and removes all seven or eight pages belonging to the old image.
@@ -109,7 +111,8 @@ Replacement leaves may overlap old leaves or occupy unused leaves; the mapping
 transaction snapshots both sets, clears the complete old image, installs the
 new W^X leaves, and restores every prior entry on verification failure. The
 post-exit verifier requires the new R/NX, RX, and RW/NX leaves to name the exact
-published leases and every removed leaf to be absent. A failed allocation,
+published leases, the committed node and mapping state to reproduce the same
+measured plan, and every removed leaf to be absent. A failed allocation,
 materialization, precondition, or mapping verification scrubs and releases the
 new leases, restores the original stack, thread registrations, and page-table
 entries, and returns an error. Successful teardown runs after the process root

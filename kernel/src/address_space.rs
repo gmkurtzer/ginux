@@ -603,28 +603,6 @@ pub(crate) fn verify_linux_elf_mapping(
                     dependency_base_min: [0; 2],
                     dependency_base_end: [0; 2],
                     dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
-                    exec_node,
-                    exec_entry: exec_plan.entry as usize,
-                    exec_mappings: [
-                        cpu::LinuxExecMapping {
-                            address: exec_header.virtual_page as usize,
-                            frame: 0,
-                            writable: false,
-                            executable: false,
-                        },
-                        cpu::LinuxExecMapping {
-                            address: exec_code.virtual_page as usize,
-                            frame: 0,
-                            writable: false,
-                            executable: true,
-                        },
-                        cpu::LinuxExecMapping {
-                            address: exec_data.virtual_page as usize,
-                            frame: 0,
-                            writable: true,
-                            executable: false,
-                        },
-                    ],
                     exec_clear_count,
                     exec_clear_addresses,
                 })
@@ -659,8 +637,10 @@ pub(crate) fn verify_linux_elf_mapping(
                                 || current_linux_leaf(*address as u64)
                                     .is_some_and(|entry| entry.read() == 0)
                         });
-            let executed =
-                execution_result.valid && execution_result.exec_replaced && exec_mappings_valid;
+            let executed = execution_result.valid
+                && execution_result.exec_replaced
+                && execution_result.exec_node == exec_node
+                && exec_mappings_valid;
             let mapping_removed = table_entries.add(mmap_indexes[3]).read() == 0
                 && table_entries.add(mmap_tail_indexes[3]).read() == 0;
             activate(kernel_root_physical);
@@ -1522,9 +1502,6 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_base_min: dependency_base_min.map(|base| base as usize),
                     dependency_base_end: dependency_base_end.map(|base| base as usize),
                     dependency_mappings,
-                    exec_node: 0,
-                    exec_entry: 0,
-                    exec_mappings: [cpu::LinuxExecMapping::EMPTY; 3],
                     exec_clear_count: 0,
                     exec_clear_addresses: [0; cpu::LINUX_EXEC_CLEAR_COUNT],
                 })

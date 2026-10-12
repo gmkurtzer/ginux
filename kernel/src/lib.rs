@@ -670,6 +670,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured-fd Linux empty-path exec validated\r\n");
     serial_write("ginux: measured Linux exec selection is profile-driven\r\n");
     serial_write("ginux: independent measured Linux exec layouts validated\r\n");
+    serial_write("ginux: runtime-selected Linux exec plans committed\r\n");
     serial_write("ginux: Linux replacement frames allocated on demand\r\n");
     serial_write("ginux: Linux replacement frame generations reclaimed\r\n");
     if !linux_elf::verify_load_plan() {
