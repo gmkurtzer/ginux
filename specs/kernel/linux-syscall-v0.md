@@ -184,8 +184,14 @@ byte of the linked main's RX area and the first byte of its adjacent RW area;
 the pipe is closed and recreated before the FIFO lifecycle continues. Reads
 return up to the requested
 count and consume only after successful copy-out. An empty live pipe follows
-the same nonblocking or would-block errors; closing the writer makes an empty
-read return EOF and reports `POLLHUP`, while buffered bytes remain readable.
+the nonblocking `-EAGAIN` rule. A blocking scalar read with a runnable peer
+stores its destination, bounded count, and descriptor in a typed scheduler wait.
+A write revalidates the output and completes the read, while closing the writer
+wakes it with EOF without modifying the destination. The measured two-thread
+graph proves both paths and retires both endpoints before continuing. Blocking
+without a runnable peer, blocking vectored reads, and signal interruption retain
+`-ENOSYS`. Closing the writer makes any later empty read return EOF and reports
+`POLLHUP`, while buffered bytes remain readable.
 Closing the reader makes writes return `-EPIPE` and reports `POLLERR`; SIGPIPE
 delivery is not yet implemented. The endpoints participate in `F_GETFD`,
 `F_SETFD`, `F_GETFL`, `lseek`, `poll`, epoll, and `close`. The ring-3 proof

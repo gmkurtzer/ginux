@@ -1388,6 +1388,32 @@ linux_clone_repeat:
     push 3
     pop rax
     call syscall_expect_zero
+    mov edi, 0x405e80
+    push 22
+    pop rax
+    call syscall_expect_zero
+    cmp dword ptr [0x405e80], 2
+    require_equal
+    cmp dword ptr [0x405e84], 3
+    require_equal
+    mov byte ptr [0x405eb0], 0
+    push 2
+    pop rdi
+    mov esi, 0x405eb0
+    push 1
+    pop rdx
+    xor eax, eax
+    call syscall_expect_one
+    cmp byte ptr [0x405eb0], 'P'
+    require_equal
+    mov byte ptr [0x405eb0], 0x7f
+    xor eax, eax
+    call syscall_expect_zero
+    cmp byte ptr [0x405eb0], 0x7f
+    require_equal
+    push 3
+    pop rax
+    call syscall_expect_zero
     push -4
     mov edi, 0x4050c0
     mov rsi, rsp
@@ -4801,7 +4827,21 @@ child_thread_probe:
     loop .Llinux_timeout_spin
     dec ebx
     jnz .Llinux_timeout_spin_next
+    mov byte ptr [0x405d80], 'P'
+    push 3
+    pop rdi
+    mov esi, 0x405d80
+    push 1
+    pop rdx
+    push 1
+    pop rax
+    call syscall_expect_one
     push 24
+    pop rax
+    call syscall_expect_zero
+    push 3
+    pop rdi
+    push 3
     pop rax
     call syscall_expect_zero
     push 24

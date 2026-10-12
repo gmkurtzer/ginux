@@ -431,6 +431,8 @@ static LINUX_EPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EVENTFD_READ_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EVENTFD_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EVENTFD_READ_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_PIPE_READ_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_PIPE_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -507,6 +509,7 @@ const LINUX_THREAD_WAIT_EPOLL: u8 = 5;
 const LINUX_THREAD_WAIT_EVENTFD_READ: u8 = 6;
 const LINUX_THREAD_WAIT_PPOLL: u8 = 7;
 const LINUX_THREAD_WAIT_EPOLL_PWAIT: u8 = 8;
+const LINUX_THREAD_WAIT_PIPE_READ: u8 = 9;
 const LINUX_SYSCALL_FRAME_REGISTERS: usize = 12;
 static LINUX_THREAD_STATES: [AtomicU8; LINUX_THREAD_LIMIT] =
     [const { AtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
@@ -2361,6 +2364,7 @@ fn block_current_linux_thread(kind: u8, key: u64, output: u64, deadline: u64) ->
             | LINUX_THREAD_WAIT_EVENTFD_READ
             | LINUX_THREAD_WAIT_PPOLL
             | LINUX_THREAD_WAIT_EPOLL_PWAIT
+            | LINUX_THREAD_WAIT_PIPE_READ
     ) || key == 0
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_RUNNING
         || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_NONE
@@ -3196,6 +3200,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_EVENTFD_READ_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_EVENTFD_READ_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_EVENTFD_READ_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_PIPE_READ_BLOCK_COUNT.store(0, Ordering::SeqCst);
+    LINUX_PIPE_READ_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_PPOLL_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_PPOLL_WAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_PPOLL_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
@@ -3569,6 +3575,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let eventfd_read_block_count = LINUX_EVENTFD_READ_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let eventfd_read_wake_count = LINUX_EVENTFD_READ_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let eventfd_read_interrupt_count = LINUX_EVENTFD_READ_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
+    let pipe_read_block_count = LINUX_PIPE_READ_BLOCK_COUNT.swap(0, Ordering::SeqCst);
+    let pipe_read_wake_count = LINUX_PIPE_READ_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let ppoll_wait_block_count = LINUX_PPOLL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let ppoll_wait_wake_count = LINUX_PPOLL_WAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let ppoll_wait_timeout_count = LINUX_PPOLL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
@@ -3602,7 +3610,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && first_child_tid != 0
             && clone_reuse_validated
             && child_gettid_count == 2
-            && yield_switch_count == 9
+            && yield_switch_count == 11
             && clone_busy_rejection_count == 2
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
@@ -3624,6 +3632,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && eventfd_read_block_count == 2
             && eventfd_read_wake_count == 1
             && eventfd_read_interrupt_count == 1
+            && pipe_read_block_count == 2
+            && pipe_read_wake_count == 2
             && ppoll_wait_block_count == 2
             && ppoll_wait_wake_count == 0
             && ppoll_wait_timeout_count == 1
@@ -3644,7 +3654,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             first_child_tid != 0,
             clone_reuse_validated,
             child_gettid_count == 2,
-            yield_switch_count == 9,
+            yield_switch_count == 11,
             clone_busy_rejection_count == 2,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
@@ -3666,6 +3676,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             eventfd_read_block_count == 2,
             eventfd_read_wake_count == 1,
             eventfd_read_interrupt_count == 1,
+            pipe_read_block_count == 2,
+            pipe_read_wake_count == 2,
             ppoll_wait_block_count == 2,
             ppoll_wait_wake_count == 0,
             ppoll_wait_timeout_count == 1,
@@ -3710,6 +3722,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             eventfd_read_block_count,
             eventfd_read_wake_count,
             eventfd_read_interrupt_count,
+            pipe_read_block_count,
+            pipe_read_wake_count,
             ppoll_wait_block_count,
             ppoll_wait_wake_count,
             ppoll_wait_timeout_count,
@@ -4337,7 +4351,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && first_child_tid != 0
                 && clone_reuse_validated
                 && child_gettid_count == 2
-                && yield_switch_count == 9
+                && yield_switch_count == 11
                 && clone_busy_rejection_count == 2
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
@@ -4359,6 +4373,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && eventfd_read_block_count == 2
                 && eventfd_read_wake_count == 1
                 && eventfd_read_interrupt_count == 1
+                && pipe_read_block_count == 2
+                && pipe_read_wake_count == 2
                 && ppoll_wait_block_count == 2
                 && ppoll_wait_wake_count == 0
                 && ppoll_wait_timeout_count == 1
@@ -8549,6 +8565,39 @@ fn wake_linux_eventfd_read_waits() -> u32 {
     woken
 }
 
+fn complete_linux_pipe_read_wait(slot: usize) -> bool {
+    if slot >= LINUX_THREAD_LIMIT
+        || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
+        || LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) != LINUX_THREAD_WAIT_PIPE_READ
+    {
+        return false;
+    }
+    let packed = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
+    let descriptor = packed & 0xff;
+    let count = packed >> 8;
+    let address = LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst);
+    let result = linux_pipe_read(descriptor, address, count).unwrap_or(LINUX_EBADF);
+    if result == LINUX_ENOSYS {
+        return false;
+    }
+    LINUX_THREAD_RAXS[slot].store(result, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_KINDS[slot].store(LINUX_THREAD_WAIT_NONE, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+    LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
+    LINUX_PIPE_READ_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
+    true
+}
+
+fn wake_linux_pipe_read_waits() -> u32 {
+    let mut woken = 0;
+    for slot in 0..LINUX_THREAD_LIMIT {
+        woken += u32::from(complete_linux_pipe_read_wait(slot));
+    }
+    woken
+}
+
 fn linux_descriptor_read_live_return(
     output: *mut LinuxSyscallFrame,
     caller: LinuxUserContext,
@@ -8557,10 +8606,23 @@ fn linux_descriptor_read_live_return(
     count: u64,
 ) -> u64 {
     let immediate = linux_descriptor_read(descriptor, address, count);
-    if immediate != LINUX_ENOSYS || !linux_eventfd_descriptor(descriptor) {
+    if immediate != LINUX_ENOSYS
+        || !linux_eventfd_descriptor(descriptor) && !linux_pipe_read_descriptor(descriptor)
+    {
         return immediate;
     }
-    if count != 8 || !linux_writable_user_range_contains(address, 8) {
+    let (kind, wait_count) = if linux_eventfd_descriptor(descriptor) {
+        if count != 8 {
+            return LINUX_EINVAL;
+        }
+        (LINUX_THREAD_WAIT_EVENTFD_READ, 8)
+    } else {
+        (
+            LINUX_THREAD_WAIT_PIPE_READ,
+            count.min(LINUX_PIPE_CAPACITY as u64),
+        )
+    };
+    if wait_count == 0 || !linux_writable_user_range_contains(address, wait_count as usize) {
         return LINUX_EFAULT;
     }
     let Some(current) = current_linux_thread_handle() else {
@@ -8573,8 +8635,13 @@ fn linux_descriptor_read_live_return(
         return LINUX_ESRCH;
     };
     let slot = usize::from(current.slot);
+    let wait_output = if kind == LINUX_THREAD_WAIT_PIPE_READ {
+        wait_count << 8 | descriptor
+    } else {
+        descriptor
+    };
     if !save_linux_thread_return_context(current, caller)
-        || !block_current_linux_thread(LINUX_THREAD_WAIT_EVENTFD_READ, address, descriptor, 0)
+        || !block_current_linux_thread(kind, address, wait_output, 0)
     {
         return LINUX_EINVAL;
     }
@@ -8612,7 +8679,11 @@ fn linux_descriptor_read_live_return(
         return LINUX_EINVAL;
     }
     LINUX_LIVE_RETURN_VALIDATED.store(true, Ordering::SeqCst);
-    LINUX_EVENTFD_READ_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+    if kind == LINUX_THREAD_WAIT_PIPE_READ {
+        LINUX_PIPE_READ_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+    } else {
+        LINUX_EVENTFD_READ_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
     selected.rax
 }
 
@@ -9211,7 +9282,10 @@ fn wake_linux_epoll_waits() -> u32 {
 }
 
 fn wake_linux_descriptor_waits() -> u32 {
-    wake_linux_poll_waits() + wake_linux_epoll_waits() + wake_linux_eventfd_read_waits()
+    wake_linux_poll_waits()
+        + wake_linux_epoll_waits()
+        + wake_linux_eventfd_read_waits()
+        + wake_linux_pipe_read_waits()
 }
 
 #[derive(Clone, Copy)]

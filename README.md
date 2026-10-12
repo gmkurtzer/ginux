@@ -440,11 +440,15 @@ the output or counter. The measured graph then blocks the same read again and
 completes it through a write, proving the descriptor remains live. Blocked
 signals, unsupported dispositions, nested delivery, and syscall restart retain
 their explicit `ENOSYS` boundary. Blocking eventfd writes and blocking reads
-from timerfd or pipes also remain unsupported.
+from timerfd also remain unsupported.
 A bounded monotonic timerfd adds one-shot and periodic clock-driven readiness with
-relative or absolute arming. One bounded nonblocking pipe pair provides a
-256-byte FIFO with atomic scalar or vectored I/O, poll/epoll readiness, EOF,
-broken-peer behavior, FIFO metadata, and byte-count introspection. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
+relative or absolute arming. One bounded pipe pair provides a 256-byte FIFO
+with atomic scalar or vectored I/O, poll/epoll readiness, EOF, broken-peer
+behavior, FIFO metadata, and byte-count introspection. An empty blocking scalar
+read sleeps in its scheduler slot while a peer is runnable, then revalidates and
+copies available bytes after a write or returns EOF after the writer closes.
+The measured graph proves both wake paths; blocking vectored reads and saturated
+writes and signal interruption remain unsupported. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
 retires either initial console descriptor. Bounded `dup` reuses the lowest closed slot and preserves whether
 the console endpoint is input or output; `dup2` provides exact-slot replacement.
 `fcntl(F_GETFD/F_GETFL)` exposes the bounded descriptor and endpoint flags. It also
