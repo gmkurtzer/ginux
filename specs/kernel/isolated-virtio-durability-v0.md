@@ -1,52 +1,48 @@
 # Isolated Virtio Durability v0
 
-**Status:** Interrupt-driven write, flush, and read-back verified in QEMU.
+**Status:** The compiled native volume service completes and recovers the
+two-slot persistent-volume protocol through interrupt-driven virtio in QEMU.
 
 ## Contract
 
-The first request reads blank reserved sector two. The second reads reserved
-sector three and accepts exactly one of two complete states: 512 zero bytes on
-a fresh image, or the previously flushed `0x5a` marker. The isolated object-7
-service then reuses its one owned DMA page and queue head for three more
-serialized requests:
+The measured `native/volume` static PIE links the shared `no_std` volume-format
+and transaction crates. Its block adapter maps logical slots zero and one to
+reserved device sectors four and five. Each operation reuses descriptor head
+zero in one owned DMA page and submits exactly one serialized read, write, or
+flush request through its generation-bound object-7 wait capability.
 
-1. generation three writes 512 bytes of `0x5a` to reserved sector three;
-2. generation four submits negotiated virtio request type 4 and requires its
-   status and used-ring completion; and
-3. generation five fills the DMA buffer with `0xa5`, reads sector three, and
-   requires all 512 bytes to be `0x5a`.
+On empty media the service reads both slots, prepares generation one in the
+inactive slot, flushes it, writes its commit marker last, flushes again, and
+recovers the exact `ginux-isolated-volume\n` payload. This is ten completed
+requests: two initial reads and two complete four-operation recovery scans
+around the prepare and commit writes. On the second VM boot, two reads recover
+the committed record without rewriting either sector. The automated gate
+requires the fresh and recovered results on their respective boots.
 
-Every operation uses the same capability-checked blocking wait, kernel-owned
-MSI-X vector, and 100 ms APIC timeout. MSI-X remains masked between requests.
-The kernel advances only the exact consumed request generation and rejects
-early, stale, duplicate, or concurrent waits.
-
-Before its first notification, the service deliberately enters generation one
-and requires the live timeout path. The timer wakes the saved context with
-failure without consuming the generation. The service then notifies and
-retries generation one successfully before beginning the durability sequence.
-
-The service retains whether request two found a fresh or persisted sector in
-its saved ring-3 context and deliberately faults at one of two exact success
-instructions. The kernel validates that fault metadata after quiescence. The
-automated gate requires the fresh result on its first VM boot and the recovered
-result on its second boot against the same raw image; either result in the wrong
-boot fails the gate.
+Before notifying its first request, the runtime rejects future request
+generation two, enters generation one, and requires the live 100 ms APIC
+timeout. The timeout wakes the saved context with failure without consuming
+the generation. The service then notifies queue zero, retries generation one
+successfully, and rejects a duplicate wait for the consumed generation before
+continuing the transaction.
 
 ## Stable teardown proof
 
-The final fault hook revokes bus mastering and resets the device before reading
-the DMA page. It requires available and used indices of five, used ID zero for
-all entries, lengths 513/513/1/1/513, a successful final status, read descriptor
-flags, sector three in the request header, and the complete `0x5a` payload.
-Only then may the page be scrubbed and released.
+The service deliberately executes an invalid opcode only after the shared
+transaction engine reports success. Its registered fault hook first masks and
+disables MSI-X, revokes bus mastering, resets the device, and retires vector
+33. It then requires equal available and used indices of ten on a fresh boot or
+two on recovery, a successful final sector-five read completion, and an exact
+queue-to-lease binding. Only afterward may the kernel restore its root, scrub
+and release the DMA and address-space frames, revoke the capability, and retire
+the domain.
 
 ## Deliberate limits
 
-- This proves that the isolated service can issue the ordering primitive needed
-  by the persistent-volume protocol. It does not yet move the two-slot record,
-  checksum, prepare/commit markers, or recovery scan out of the kernel.
 - QEMU flush completion and two-boot recovery do not independently prove
   physical-media power-loss behavior on real hardware.
 - Requests are serialized through one descriptor head and one DMA page. There
-  is no cancellation, batching, concurrent queue use, or IOMMU domain yet.
+  is no batching, concurrent queue use, cancellation after notification, or
+  recovery from an ambiguous late device completion.
+- The development profile has no IOMMU domain; safe release therefore depends
+  on synchronous device reset and bus-master revocation before frame reuse.

@@ -45,14 +45,17 @@ resources.
 
 The runtime itself negotiates only `FLUSH` and `VERSION_1`, configures queue
 zero and MSI-X table entry zero, and implements the shared whole-sector trait
-with one descriptor head. Each submission publishes a monotonically advancing
-available index, notifies queue zero, and blocks through control ABI v4
-operation 19 using the exact next request generation. Used ID, used length,
+with one descriptor head. The first submission rejects a stale future request,
+publishes its available entry without notifying the device, and proves a real
+100 ms APIC timeout does not consume the request generation. It then notifies
+queue zero, retries that same generation successfully, and rejects a duplicate
+wait after completion. Every subsequent submission publishes a monotonically
+advancing available index, notifies queue zero, and blocks through control ABI
+v4 operation 19 using the exact next request generation. Used ID, used length,
 status, and device status are validated before returning to the shared volume
 engine.
 
-Volume slots map to reserved device sectors four and five, separate from the
-earlier raw durability probe. On empty media the
+Volume slots map to reserved device sectors four and five. On empty media the
 shared engine commits generation one containing `ginux-isolated-volume\n` via
 prepare/write/flush/commit/write/flush and recovers it. On existing media it
 accepts only that exact generation and payload. Success deliberately faults so
@@ -60,10 +63,8 @@ the supervisor can exercise the same mandatory device-quiescence path.
 
 ## Deliberate limits
 
-- The compiled service is now registered and executed after the earlier raw
-  ring-3 timeout/retry proof. The raw proof remains temporarily to preserve its
-  deliberate timeout and duplicate-generation coverage; the compiled runtime
-  owns a separate complete volume transaction and two-boot recovery sequence.
+- The compiled service is the sole live write-capable ring-3 virtio runtime;
+  the earlier embedded machine-code durability program has been removed.
 - `BootInfo` is an internal bootstrap structure, not the stable driver ABI.
 - One queue, one DMA page, one outstanding request, and one object-7 device are
   supported. There is no IOMMU domain or concurrent request path.

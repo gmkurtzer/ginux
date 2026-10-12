@@ -1,101 +1,64 @@
 # Block-device Control Grant v0
 
-**Status:** Read-only observation and write-only control boundaries verified in QEMU.
+**Status:** Read-only observation and compiled write-only native volume control
+are verified in QEMU.
 
-## Purpose
-
-This contract is the first step from a kernel-owned virtio bootstrap path to an
-isolated storage-driver domain. It separately delegates bounded observation and
-control authority to ring-3 services and exposes one real MMIO page. It
-deliberately does not enable a queue or device DMA yet.
-
-## Authority and mapping
+## Authority
 
 The signed development manifest grants the control plane object 7 with
 `READ|WRITE` authority. The kernel attenuates that root into distinct fresh
-stop-only auxiliary domains: the observer receives only `READ`, while the
-control service receives only `WRITE`. Only an exact generation-tagged handle
-for object 7 authorizes either mapping decision; process ancestry and
-possession of another device or volume handle do not.
+stop-only domains. A bounded observer receives only `READ`; the measured native
+volume service receives only `WRITE`. Exact generation-tagged handles
+authorize mapping and control decisions. Process ancestry and possession of
+another device or volume handle confer no block-device authority.
 
-The service receives one fixed leaf at `USER_TEST_ADDRESS + 5 * 4096`. It maps
-the physical page containing the modern virtio common-configuration status
-byte. The observer's leaf is read-only; the control service's leaf is writable.
-Both are user-accessible, non-executable, write-through, and cache-disabled.
-The page must be above the 4 GiB allocator ceiling, so it cannot alias any
-allocator-owned page-table, code, or stack frame. No other unmodeled user leaf
-is admitted. Root validation accepts the hardware Accessed bit and accepts the
-Dirty bit only when the device leaf was explicitly writable.
+## Read-only observer
 
-## Hardware proof and revocation
+The observer receives one user-accessible, non-executable, uncached leaf for the
+physical page containing the virtio status byte. It reads reset status zero and
+then attempts a write, which must produce an x86 user write-protection fault.
+Fault handling revokes its handle, removes the mapping, scrubs and releases its
+owned frames, restores the kernel root, and retires the exact domain
+generation. The kernel then requires the device to remain reset with bus
+mastering disabled.
 
-The kernel first completes all block I/O, clears PCI bus mastering, and resets
-the device. The observer then reads status zero directly from the mapped MMIO
-byte. Its next instruction attempts to write one to that byte and must take an
-x86 page fault with the present, write, and user bits set in the error code.
-The denied instruction therefore cannot reach the device.
+## Native write-only service
 
-The native fault path retires the exact auxiliary-domain generation, publishes
-its fault record, revokes the object-7 handle, clears and releases all seven
-owned address-space frames, and restores the kernel root. Destroying the page
-table also removes the external MMIO mapping; the MMIO page itself is never
-treated as allocator-owned memory. After retirement the kernel rechecks that
-the virtio device is reset and PCI bus mastering is disabled.
+The native service's x86 MMIO leaves are necessarily readable as well as
+writable because x86 has no write-only PTE. It receives only the common
+configuration page, the page containing queue zero's validated notification
+register, one owned DMA lease, and a read-only bootstrap record. PCI
+configuration, MSI-X tables and pending bits, interrupt-controller registers,
+the IDT, other devices, and port I/O remain unavailable.
 
-The write-only capability holder starts from that reset state. Its x86 mapping
-is necessarily read/write because the architecture has no write-only PTE. The
-service sets `ACKNOWLEDGE|DRIVER`, reads both device-feature words, and requires
-`VIRTIO_BLK_F_FLUSH` plus `VIRTIO_F_VERSION_1`. It publishes exactly those two
-driver features, sets `FEATURES_OK`, and requires the device to retain that
-bit. The kernel independently reads back the exact selected features and status
-after the service selects queue zero, requires capacity for at least eight
-descriptors, and writes the bounded size eight. The service initializes its
-owned DMA page and writes the exact descriptor, available, and used
-offsets into the three queue-address fields. After the kernel has armed PCI bus
-mastering, the service enables queue zero, sets `DRIVER_OK`, confirms the bit,
-constructs an exact three-descriptor sector-two read chain, publishes
-descriptor head zero by advancing the available index to one, and writes queue
-index zero to the validated notification register. It invokes operation 19
-with its exact object-7 handle and request generation, blocks in the scheduler,
-and resumes only when kernel-owned MSI-X vector 33 wakes that exact generation.
-It requires used ID zero, length 513, successful status, and a blank 512-byte
-payload, then advances to request generation two and repeats the
-notify/block/wake cycle through the same queue. Generations three through five
-write reserved sector three, flush it, and read it back after poisoning the
-DMA buffer, before taking a deliberate
-invalid-opcode fault. The fault
-hook independently reads back the
-exact active queue and address-to-lease binding, disables bus mastering, resets
-the device, and then checks every byte of the stable
-completed DMA layout.
+The service negotiates exactly `VIRTIO_BLK_F_FLUSH` and
+`VIRTIO_F_VERSION_1`, selects queue zero with size eight, installs its one-page
+split-ring addresses, binds MSI-X entry zero, enables the queue, and sets
+`DRIVER_OK`. It implements the shared two-slot persistent-volume engine over
+serialized read, write, and flush requests to reserved sectors four and five.
 
-The stop-only path first revokes the exact object-7 handle. Its registered
-device hook validates the expected features and queue-to-lease binding, disables
-PCI bus mastering, resets device status to zero, and confirms both conditions.
-Only then may the fault path restore the kernel root, destroy the service
-mapping, clear and release all owned frames, retire the domain, and publish the
-fault. Address-space release fails closed if a bound device has not completed
-quiescence. The service owns one DMA frame, writes its exact ring offsets to the
-device, and completes five sequential bounded operations. The lease lifecycle is specified in
-[Isolated DMA Lease v0](device-dma-lease-v0.md).
+Control ABI v4 operation 19 accepts only the service's object-7 handle and exact
+next request generation. The kernel independently checks the active queue,
+feature state, bus mastering, queue-to-lease binding, domain generation, and
+request generation before blocking. Its private MSI-X vector wakes only that
+saved service context. A calibrated APIC one-shot bounds a missing interrupt.
+
+## Revocation and failure
+
+The runtime deliberately faults only after transaction success. The stop-only
+path revokes object 7 and runs the registered device hook while the service
+root and DMA lease still exist. That hook masks and disables MSI-X, validates
+the binding, revokes bus mastering, resets the device, retires the interrupt
+route, and validates stable completion state. Only then may the kernel restore
+its root, scrub and release all owned frames, retire the domain, and publish
+the fault. Address-space release fails closed if device quiescence is absent.
 
 ## Deliberate limits
 
-- These are bounded observation/control proofs, not a block driver or storage
-  service.
-- Page-granular mapping exposes the complete 4 KiB common-configuration page;
-  capability attenuation is write-only, but the writable x86 leaf is also
-  readable. The proof touches only feature-selection, feature-value, and device
-  status fields. ISR, device configuration, PCI configuration, and port I/O
-  are unavailable.
-- One page-granular writable mapping contains queue zero's validated two-byte
-  notification register. The service writes that register once, but unrelated
-  bytes in that 4 KiB page are not yet sub-page protected.
-- MSI-X remains entirely kernel-owned; no interrupt-controller or table
-  authority is delegated. A calibrated one-shot bounds a lost interrupt; the
-  live gate withholds one notification, proves timeout delivery, and retries
-  the unconsumed generation. There is no IOMMU domain.
-- The kernel still performs the two-slot persistent-volume algorithm; the
-  isolated service now proves the required write/flush/read-back primitive.
-- The mapping is a fixed bootstrap layout for one QEMU device, not a stable
-  general device-grant ABI.
+- Capability attenuation is write-only, but writable x86 MMIO mappings are also
+  readable.
+- Common and notification authority is page-granular; unrelated bytes in those
+  pages are not yet sub-page protected.
+- MSI-X routing remains entirely kernel-owned.
+- One QEMU device, queue zero, one DMA page, and one outstanding request are
+  supported. There is no IOMMU domain or stable general device-grant ABI.

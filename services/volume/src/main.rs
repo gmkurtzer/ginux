@@ -12,6 +12,7 @@ use ginux_volume_service::{commit, recover, BlockDevice};
 
 const BLOCK_WAIT_OPERATION: u64 = 19;
 const BLOCK_WAIT_COMMAND: u64 = 1;
+const BLOCK_WAIT_FAILED: u64 = u64::MAX - 2;
 const QUEUE_SIZE: u16 = 8;
 const DESC_NEXT: u16 = 1;
 const DESC_WRITE: u16 = 2;
@@ -246,9 +247,18 @@ impl VirtioBlock {
             compiler_fence(Ordering::SeqCst);
             self.available = self.available.wrapping_add(1);
             write_u16(self.dma + AVAIL_OFFSET + 2, self.available);
-            write_u16(self.notification, 0);
         }
+        if self.request == 1
+            && (wait(self.capability, 2) != BLOCK_WAIT_FAILED
+                || wait(self.capability, self.request) != BLOCK_WAIT_FAILED)
+        {
+            return false;
+        }
+        unsafe { write_u16(self.notification, 0) };
         if wait(self.capability, self.request) != 0 {
+            return false;
+        }
+        if self.request == 1 && wait(self.capability, self.request) != BLOCK_WAIT_FAILED {
             return false;
         }
         self.request = self.request.checked_add(1).unwrap_or(0);

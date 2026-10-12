@@ -57,54 +57,23 @@ generation one, boots a second VM against the same image, and recovers the exact
 record without rewriting it. A third boot corrupts the committed slot and
 proves nonempty invalid media is rejected without modification after safe
 device and DMA teardown. Teardown revokes bus mastering, resets the device, and
-scrubs the lease before release. This trusted-QEMU bootstrap proof has no IOMMU
-confinement and does not yet place the device path in an isolated service. See
+scrubs the lease before release. This trusted-QEMU kernel reference path remains
+separate from the isolated native service described below, and neither path yet
+has IOMMU confinement. See
 [Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md) and
 [Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
-The first device-isolation step delegates manifest object 7 with read/write
-authority, then attenuates it into separate stop-only ring-3 domains. A
-read-only observer sees reset status and faults on mutation. A control service
-with a write-only capability uses its necessarily read/write x86 leaf to
-require `FLUSH` and `VERSION_1`, publish exactly those features, and complete
-`FEATURES_OK`, select queue zero, and set its bounded size to eight before
-deliberately faulting. The control domain owns one additional RW/NX DMA page,
-initializes it in ring 3, and publishes its exact base, `+0x100`, and `+0x200`
-offsets as the descriptor, available, and used-ring addresses. After the kernel
-arms PCI bus mastering, the service enables queue zero and sets `DRIVER_OK`, but
-first constructs an exact three-descriptor sector-two read chain. It publishes
-descriptor head zero by advancing the available index to one. The kernel maps
-only the distinct 4 KiB page containing queue zero's validated two-byte
-notification register and binds that page to the teardown record. Ring 3
-binds queue zero to MSI-X entry zero and notifies it. Control ABI v4 operation
-19 verifies the write-only object-7 capability, active queue, exact DMA lease,
-domain generation, and request generation before blocking the service. The
-kernel unmasks its private vector 33, wakes only that saved generation, and
-remasks delivery before returning to ring 3. The proof rejects a stale request
-and a duplicate wait, then validates used ID zero, length 513, successful status,
-and the blank 512-byte sector-two payload. The kernel then advances the exact
-expected request generation, clears only the consumed per-request interrupt
-state, and the same service reuses descriptor head zero for a second
-notify/block/wake cycle. It then writes a fixed pattern to reserved sector
-three, completes a negotiated virtio flush, poisons its DMA buffer, and reads
-the sector back through generations three through five. The first automated VM
-boot requires sector three to be fresh; the second VM boot against the same
-image requires the isolated service to recover the previously flushed marker.
-On its deliberate fault, the
-registered device hook masks and disables MSI-X, validates the active binding, disables bus
-mastering, resets the device, retires the temporary interrupt gate, and only then validates every byte of the now-stable
-completed DMA layout before the page is scrubbed and released;
-release is rejected
-unless quiescence completed. Each service loses its capability, mapping, and
-owned frames. A calibrated 100 ms APIC one-shot wakes a request whose device
-interrupt never arrives; successful MSI-X delivery cancels it. The live gate
-withholds the first notification, observes an actual timeout, and
-retries the same unconsumed generation successfully. This is the
-isolated durability primitive, not yet the two-slot volume transaction. A general
-multi-request ring, concurrent requests, and IOMMU confinement remain
-unimplemented. See
-[Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
-[Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md), plus
-[Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md)
+The device boundary delegates manifest object 7 and attenuates it into
+separate ring-3 grants. A read-only observer can inspect reset state but faults
+on mutation. The native volume service receives write-only authority, one
+owned DMA page, the virtio common page, and the exact notification page; PCI
+configuration, MSI-X tables, the IDT, and the local APIC remain kernel-only.
+Control ABI v4 operation 19 validates the capability, domain generation,
+request generation, active queue, and DMA binding before blocking for the
+kernel-owned MSI-X route. A 100 ms APIC deadline safely returns an unnotified
+request without consuming its generation. See
+[Block-device Control Grant v0](specs/kernel/device-grant-v0.md),
+[Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md),
+[Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md),
 and [Isolated Virtio Durability v0](specs/kernel/isolated-virtio-durability-v0.md).
 The same format and transaction crates now build into a freestanding
 `x86_64-unknown-none` Rust service that owns queue negotiation, descriptor
@@ -115,9 +84,10 @@ stack, read-only bootstrap page, one DMA lease, and only the required virtio
 MMIO pages. A fresh boot commits generation one to reserved sectors four and
 five; a second boot recovers the exact record without rewriting it. Its
 deliberate terminal fault drives mandatory interrupt, device, capability,
-address-space, and DMA cleanup without panicking the kernel. The earlier raw
-ring-3 program remains temporarily for timeout/retry and duplicate-generation
-coverage. See
+address-space, and DMA cleanup without panicking the kernel. Its first request
+also proves stale-generation rejection, live timeout without generation
+consumption, successful same-generation retry, and consumed-generation replay
+rejection. See
 [Isolated Volume Runtime v0](specs/services/volume-runtime-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded

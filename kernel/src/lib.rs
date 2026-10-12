@@ -1706,22 +1706,6 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
     serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
     serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
-    let writable_grant_recovered = address_space::verify_ring3_writable_device_grant(
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
-        &local_apic,
-    );
-    let writable_grant_valid = writable_grant_recovered.is_some();
-    let writable_grant_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-    if !writable_grant_valid || !writable_grant_quiesced {
-        serial_write("\r\nginux: writable grant/fault-quiesce result: ");
-        serial_write_u64(u64::from(writable_grant_valid));
-        serial_write(" ");
-        serial_write_u64(u64::from(writable_grant_quiesced));
-        kernel_fail("\r\nginux: writable block-device grant invariant failed\r\n");
-    }
     let native_volume_recovered = address_space::verify_native_volume_service(
         &volume_image,
         virtio_status_physical,
@@ -1747,9 +1731,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         "\r\nginux: native volume record initialized and flushed"
     });
     serial_write("\r\nginux: native volume service fault contained and device quiesced");
-    serial_write("\r\nginux: write-only virtio control grant exercised in ring 3");
+    serial_write("\r\nginux: native volume write-only grant exercised in ring 3");
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
-    serial_write("\r\nginux: isolated virtio queue geometry configured without DMA");
+    serial_write("\r\nginux: isolated virtio queue geometry configured with owned DMA");
     serial_write("\r\nginux: isolated DMA lease initialized in ring 3");
     serial_write("\r\nginux: isolated virtio queue bound to inactive DMA lease");
     serial_write("\r\nginux: isolated virtio queue activated before publication");
@@ -1762,19 +1746,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated virtio timeout cancelled after MSI-X");
     serial_write("\r\nginux: isolated virtio live timeout retried successfully");
     serial_write("\r\nginux: duplicate isolated virtio wait rejected");
-    serial_write("\r\nginux: isolated virtio blank-sector read completed in ring 3");
+    serial_write("\r\nginux: isolated volume slots scanned in ring 3");
     serial_write("\r\nginux: isolated virtio request generation advanced and reused");
-    serial_write("\r\nginux: isolated virtio write flush read-back completed");
-    serial_write(if writable_grant_recovered == Some(true) {
-        "\r\nginux: isolated virtio marker recovered after reboot"
-    } else {
-        "\r\nginux: isolated virtio marker initialized and flushed"
-    });
-    serial_write("\r\nginux: faulted virtio control service revoked");
+    serial_write("\r\nginux: isolated volume prepare flush commit sequence completed");
+    serial_write("\r\nginux: faulted native volume service revoked");
     serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
     serial_write("\r\nginux: fault path quiesced device before DMA release");
     serial_write("\r\nginux: faulted DMA lease scrubbed and released");
-    serial_write("\r\nginux: completed virtio control device quiesced before release");
+    serial_write("\r\nginux: native volume device quiesced before release");
     serial_write("\r\nginux: isolated virtio MSI-X route retired before DMA release");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v4 negotiated");

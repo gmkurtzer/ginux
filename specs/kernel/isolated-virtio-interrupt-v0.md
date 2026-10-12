@@ -1,72 +1,58 @@
 # Isolated Virtio Interrupt Wait v0
 
-**Status:** Five sequential generation-bound MSI-X waits verified in QEMU.
+**Status:** Generation-bound MSI-X waits, timeout retry, and replay rejection
+are verified through the compiled native volume service in QEMU.
 
 ## Boundary
 
-The stop-only block service retains write authority on manifest object 7. It
-maps the virtio common configuration, one queue-notification page, and one
-generation-owned DMA page. It never maps PCI configuration, the MSI-X table or
-pending-bit array, the IDT, or the local APIC.
+The measured native volume service has write authority on manifest object 7.
+It maps the virtio common configuration, the page containing queue zero's
+notification register, and one generation-owned DMA page. It never maps PCI
+configuration, the MSI-X table or pending-bit array, the IDT, or the local
+APIC.
 
 Control ABI v4 operation 19, command 1 accepts a nonzero request generation in
 `RDX`. The call requires `WRITE` authority on object 7 and an exact match with
-the kernel's registered device teardown record. Before blocking, the kernel
-revalidates the caller domain generation, request generation, queue-zero
-MSI-X binding, negotiated features, active queue, bus mastering, and all three
-queue addresses against the caller's live DMA lease.
+the registered device teardown record. Before blocking, the kernel revalidates
+the caller domain generation, request generation, queue-zero MSI-X binding,
+negotiated features, active queue, bus mastering, and all three queue addresses
+against the caller's live DMA lease.
 
 ## Block and wake
 
-The service first publishes and notifies its request while MSI-X table entry
-zero and the function are masked. It then enters operation 19. The scheduler
-saves the complete ring-3 context, marks that exact generation `Blocked`, and
-leaves no current userspace thread. Only after the state transition does the
-kernel unmask the owned vector and enter an interrupt-enabled `HLT` wait.
+The service publishes a request while delivery is masked, notifies queue zero,
+and invokes operation 19. The scheduler saves the complete ring-3 context and
+marks that exact generation blocked before the kernel unmasks vector 33. The
+interrupt handler matches the object, domain, and request generations, wakes
+only that context, and acknowledges the local APIC. The call remasks the MSI-X
+function and entry before returning to ring 3. Only a fully validated used
+entry advances the expected request and clears the consumed interrupt state.
 
-Vector 33 records the interrupt, matches the saved object, domain generation,
-and request generation, writes success into saved `RAX`, makes the same thread
-running, acknowledges the local APIC, and returns to the sleeping kernel call.
-The call remasks both the function and table entry before returning to ring 3.
-The service validates used ID zero, length 513, status zero, guard bytes, and
-the blank sector-two payload. The kernel atomically advances the expected
-request from generation one to two and clears the consumed interrupt count and
-completion bit while delivery remains masked. The service reuses descriptor
-head zero, publishes available index two, notifies again, and completes a
-second block/wake cycle. It then submits write, flush, and read-back requests
-through generations three, four, and five. The proof rejects request generation
-two before the first request and rejects a duplicate wait for consumed
-generation one.
+The first request additionally proves three failure cases. A future generation
+is rejected without blocking. A wait issued before notification is admitted,
+times out after the calibrated 100 ms APIC deadline, and returns failure
+without consuming generation one. After notification, generation one succeeds;
+an immediate replay of that consumed generation is rejected. The kernel
+independently requires its timeout counter to advance exactly once during the
+runtime.
 
-Every accepted wait also arms the previously calibrated local-APIC timer for a
-100 ms one-shot. The device interrupt cancels and masks that timer before the
-call returns. If the timer wins, its handler wakes the same saved wait with an
-error; the call masks MSI-X before returning the failure. The boot gate
-independently delivers the timeout interrupt and proves its state is consumed,
-then proves the real MSI-X path cancels the pending timeout.
-
-The live service also enters generation one before notifying queue zero. The
-request is admitted and scheduler-blocked, the APIC timer handler wakes it with
-failure, and an independent timeout counter proves that this was timer delivery
-rather than admission denial. MSI-X remains masked, the request generation is
-not consumed, and the service then notifies the queue and retries generation
-one successfully. Later generations continue normally.
+Fresh-volume initialization completes ten generations and recovery completes
+two. Every successful device interrupt cancels its associated timeout.
 
 ## Teardown
 
 The service deliberately faults after validation. Its registered teardown hook
-revalidates the active queue and DMA binding, function-masks and entry-masks
-MSI-X, disables MSI-X, revokes bus mastering, resets the device, and requires
-vector 33 to be idle before removing the temporary IDT gate. Only afterward may
-the kernel validate stable DMA contents, restore the kernel root, scrub and
-release the DMA page, destroy the service mappings, and retire its authority.
+revalidates the active queue and DMA binding, masks and disables MSI-X, revokes
+bus mastering, resets the device, and requires vector 33 to be idle before
+removing the temporary IDT gate. Only afterward may the kernel validate stable
+DMA state, restore its root, scrub and release service memory, and retire the
+service authority.
 
 ## Deliberate limits
 
-- Five sequential request generations and one outstanding queue-zero request
-  are modeled, including read, write, and flush descriptor shapes.
+- Only one outstanding queue-zero request is modeled.
 - There is no vector allocator, shared-vector demultiplexing, SMP affinity,
-  IOMMU domain, concurrent request ring, or stable general block-service ABI yet.
-- Timeout recovery currently retries the same serialized request; cancellation
-  after notification and ambiguous late device completion are not modeled.
-- Page-granular notification MMIO still exposes unrelated bytes in its page.
+  IOMMU domain, concurrent request ring, or stable general block-service ABI.
+- Cancellation after notification and ambiguous late completion are not
+  modeled.
+- Page-granular notification MMIO exposes unrelated bytes in its page.

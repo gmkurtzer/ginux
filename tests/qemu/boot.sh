@@ -85,11 +85,6 @@ if grep -q '^ginux: disk-backed volume recovered after reboot' "$output_file"; t
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio marker initialized and flushed' "$output_file" ||
-    grep -q '^ginux: isolated virtio marker recovered after reboot' "$output_file"; then
-    echo "Boot test failed: a fresh isolated sector was not initialized exactly once." >&2
-    exit 1
-fi
 if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native volume service owned virtio request sequence' "$output_file" ||
     ! grep -q '^ginux: native volume record initialized and flushed' "$output_file" ||
@@ -118,12 +113,6 @@ if grep -q '^ginux: disk-backed volume initialized and flushed' "$reboot_output_
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio marker recovered after reboot' "$reboot_output_file" ||
-    grep -q '^ginux: isolated virtio marker initialized and flushed' "$reboot_output_file"; then
-    cat "$reboot_output_file"
-    echo "Boot test failed: the isolated service did not recover its flushed marker." >&2
-    exit 1
-fi
 if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboot_output_file" ||
     ! grep -q '^ginux: native volume record recovered after reboot' "$reboot_output_file" ||
     grep -q '^ginux: native volume record initialized and flushed' "$reboot_output_file"; then
@@ -775,8 +764,8 @@ if ! grep -q '^ginux: APIC device-wait timeout delivered' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: write-only virtio control grant exercised in ring 3' "$output_file"; then
-    echo "Boot test failed: the isolated control service did not mutate virtio status." >&2
+if ! grep -q '^ginux: native volume write-only grant exercised in ring 3' "$output_file"; then
+    echo "Boot test failed: the native volume service did not exercise its write-only grant." >&2
     exit 1
 fi
 
@@ -785,7 +774,7 @@ if ! grep -q '^ginux: isolated virtio feature negotiation completed' "$output_fi
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio queue geometry configured without DMA' "$output_file"; then
+if ! grep -q '^ginux: isolated virtio queue geometry configured with owned DMA' "$output_file"; then
     echo "Boot test failed: isolated queue geometry was not configured safely." >&2
     exit 1
 fi
@@ -847,8 +836,8 @@ if ! grep -q '^ginux: duplicate isolated virtio wait rejected' "$output_file"; t
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio blank-sector read completed in ring 3' "$output_file"; then
-    echo "Boot test failed: ring 3 did not validate the blank-sector completion." >&2
+if ! grep -q '^ginux: isolated volume slots scanned in ring 3' "$output_file"; then
+    echo "Boot test failed: ring 3 did not scan the persistent volume slots." >&2
     exit 1
 fi
 
@@ -857,8 +846,8 @@ if ! grep -q '^ginux: isolated virtio request generation advanced and reused' "$
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio write flush read-back completed' "$output_file"; then
-    echo "Boot test failed: isolated virtio write/flush/read-back did not complete." >&2
+if ! grep -q '^ginux: isolated volume prepare flush commit sequence completed' "$output_file"; then
+    echo "Boot test failed: the isolated persistent-volume transaction did not complete." >&2
     exit 1
 fi
 
@@ -872,13 +861,13 @@ if ! grep -q '^ginux: fault path quiesced device before DMA release' "$output_fi
     exit 1
 fi
 
-if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; then
-    echo "Boot test failed: the faulted virtio control service retained authority." >&2
+if ! grep -q '^ginux: faulted native volume service revoked' "$output_file"; then
+    echo "Boot test failed: the faulted native volume service retained authority." >&2
     exit 1
 fi
 
-if ! grep -q '^ginux: completed virtio control device quiesced before release' "$output_file"; then
-    echo "Boot test failed: the faulted virtio control service left its device active." >&2
+if ! grep -q '^ginux: native volume device quiesced before release' "$output_file"; then
+    echo "Boot test failed: the faulted native volume service left its device active." >&2
     exit 1
 fi
 

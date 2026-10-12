@@ -1,86 +1,71 @@
 # Isolated DMA Lease v0
 
-**Status:** Isolated interrupt-driven read completion and fault cleanup verified in QEMU.
+**Status:** Compiled-service interrupt-driven volume I/O and fault cleanup are
+verified in QEMU.
 
 ## Purpose
 
-This contract introduces the memory side of an isolated virtio queue without
-yet submitting device I/O. It proves that one DMA page can belong to
-the exact driver-domain generation, be writable from ring 3, be bound to an
-active queue, and be reclaimed without retaining service data after a fault.
+This contract binds one DMA frame to the exact native volume-service domain
+generation. The service can use that frame for a bounded virtio split ring, but
+cannot retain it or leave the device capable of accessing it after failure.
 
 ## Mapping and ownership
 
-The kernel allocates one zeroed 4 KiB frame to the stop-only block-control
-domain in addition to its seven base address-space frames. A fixed leaf at
-`USER_TEST_ADDRESS + 6 * 4096` maps it user-readable/writable and
-non-executable. It is ordinary allocator-owned RAM, not MMIO.
+The native service address space owns thirteen base frames: four page-table
+frames, six static-PIE image frames, two stack frames, and one read-only
+bootstrap frame. An additional zeroed 4 KiB lease is mapped RW/NX at
+`USER_TEST_ADDRESS + 11 * 4096`. The virtio common and notification pages
+occupy the following two uncached leaves. Absent pages on both sides of the
+two-page stack remain guards.
 
-Root validation requires the optional leaf to have exact RW/NX user flags, a
-nonzero physical address below 4 GiB, and no alias with any base frame. Every
-CR3 activation rechecks that both the seven base frames and this eighth frame
-remain live under the scheduler's exact domain generation. A root naming an
-unowned, stale, or cross-domain frame is rejected.
+Root validation requires exact page permissions and non-aliasing across every
+owned frame. The DMA physical address must be nonzero, below the development
+allocator's 4 GiB ceiling, distinct from all base frames, and owned by the
+same live domain generation. Every CR3 activation revalidates that ownership.
+The MMIO frames are external, above the allocator ceiling, and are never
+released as ordinary memory.
 
-## Ring-3 and teardown proof
+The kernel writes the DMA virtual and physical addresses into a read-only
+bootstrap record. This is an internal development-profile contract, not yet a
+stable allocation ABI.
 
-After negotiating features and queue geometry, the service writes a fixed
-64-bit marker into the DMA page and reads it back. It writes the
-lease base to the descriptor address, base plus `0x100` to the driver/available
-address, and base plus `0x200` to the device/used address. The kernel reads back
-all three values and requires exact equality with the returned lease. The
-service replaces its initialization marker with an exact sector-two read
-layout: three chained descriptors reference a 16-byte request header, a
-512-byte device-write buffer, and a one-byte pending status field. The kernel
-arms PCI bus mastering, then the service enables queue zero and sets
-`DRIVER_OK`. It publishes descriptor head zero by advancing the available index
-to one and writes queue index zero to the separately mapped notification
-register. It invokes the capability-checked block-device wait, becomes
-scheduler-blocked, and resumes only after the kernel-owned MSI-X vector matches
-its domain and request generation. It requires used index one, used ID zero,
-length 513, successful status, and 512 zero bytes from reserved sector two.
-The kernel advances the expected request generation, and the service reuses
-the chain for a second notification and blocked completion. It then writes a
-fixed byte pattern to reserved sector three, flushes it, poisons the DMA data
-area, and reads the pattern back. The final layout has used index five: two
-length-513 reads, length-one write and flush completions, and a final
-length-513 read. The fault hook first masks and disables MSI-X, validates the active
-binding, disables PCI bus mastering, and resets the device. It then checks every byte in the now-stable page against
-that exact layout. Any changed address, length, flag, chain index, request
-field, ring index, buffer byte, or status byte prevents teardown from accepting
-the completion.
+## Ring-3 use
 
-On the first automated boot, the second read requires sector three to be all
-zero. On the recovery boot against the same image, it requires the complete
-previously flushed pattern. Distinct validated fault instructions report the
-fresh and recovered cases without retaining the DMA lease after teardown.
+The service writes the descriptor table at offset `0x000`, available ring at
+`0x100`, used ring at `0x200`, request header at `0x400`, sector buffer at
+`0x600`, and status byte at `0x900`. It programs exactly those physical
+offsets into queue zero, binds MSI-X entry zero, enables the queue, and sets
+`DRIVER_OK` only after the kernel has armed bus mastering.
 
-The service then deliberately faults. Stop-only teardown revokes object 7 and
-invokes the device hook while the service root and lease are still intact. The
-hook revalidates exact feature and queue-address state, disables PCI bus
-mastering, resets the device, validates the stable DMA contents, and records
-quiescence. Only then does teardown
-restore the kernel root, zero all eight owned frames, release their exact
-generation-tagged leases, and retire the domain. Registry release rejects a
-bound device whose quiescence record is absent. The gate reads the former DMA
-physical page through the supervisor direct map and requires it to be entirely
-zero, while the allocator reports zero frames remaining for the retired owner.
+One descriptor head represents read, write, and flush requests. Available and
+used indices advance monotonically and wrap through an eight-entry ring. The
+fresh-volume path completes ten serialized operations; recovery completes two.
+The kernel accepts teardown only when the final used index equals the available
+index, the final entry reports descriptor head zero with the expected length,
+the final status is successful, and the last request is a sector-five read.
+
+## Teardown
+
+The service deliberately faults after transaction success. Its registered hook
+masks and disables MSI-X, validates the active queue-to-lease binding, revokes
+PCI bus mastering, resets the device, and retires the temporary interrupt gate
+before inspecting or releasing DMA memory. Address-space release fails closed
+unless this quiescence record exists.
+
+After quiescence, the kernel validates stable DMA state, restores its own root,
+zeros the DMA and all base frames, releases their exact generation-tagged
+leases, revokes object 7, and retires the domain. The gate reads the former DMA
+page through the supervisor direct map and requires it to be entirely zero,
+while the allocator must report no frames owned by the retired generation.
 
 ## Deliberate limits
 
-- This is a bounded five-generation interrupt-driven read/write/flush proof,
-  not a general block-I/O service or the two-slot volume algorithm.
-- The physical address is embedded in the bounded bootstrap service and written
-  only to the three queue-address registers; no general physical-address ABI is
-  exposed.
-- The notification register's containing page is mapped and written once.
-  Page-granular authority currently exposes unrelated bytes in that page.
+- Requests are serialized through one descriptor head and one DMA page.
+- Page-granular common and notification mappings expose unrelated bytes within
+  those pages.
 - Interrupt routing remains kernel-owned; the service receives only a
-  generation-bound wait operation, not interrupt-controller authority.
-- A calibrated 100 ms kernel timer bounds a missing interrupt and wakes the
-  saved request with failure before teardown.
-- There is no IOMMU domain; the trusted-QEMU bootstrap permits bus mastering
-  only because the sole queue points at one bounded owned page and synchronous
-  fault teardown revokes hardware access before releasing it.
-- The fixed single-page layout is a bootstrap proof, not a stable allocation
-  or driver ABI.
+  generation-bound wait operation.
+- There is no IOMMU domain. The trusted-QEMU profile relies on exact queue
+  validation and synchronous bus-master revocation and reset before reuse.
+- The fixed layout and physical-address bootstrap field are not a stable
+  general driver ABI.
