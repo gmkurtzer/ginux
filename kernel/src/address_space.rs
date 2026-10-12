@@ -620,6 +620,15 @@ pub(crate) fn verify_linux_elf_mapping(
             let execution_result = if exec_rollback_valid && observed {
                 cpu::verify_linux_elf_entry(&cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
+                    page_table_frames: [
+                        frames[0],
+                        frames[1],
+                        frames[2],
+                        frames[3],
+                        frames[4],
+                        memory::FrameLease::EMPTY,
+                    ],
+                    page_table_frame_count: 5,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     stack_frame: frames[15],
                     heap_frame: frames[14],
@@ -1592,6 +1601,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
             let execution_result = if observed {
                 cpu::verify_linux_elf_entry(&cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
+                    page_table_frames: [
+                        frames[0], frames[1], frames[2], frames[3], frames[4], frames[5],
+                    ],
+                    page_table_frame_count: 6,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     stack_frame: frames[10],
                     heap_frame: frames[9],
@@ -2704,6 +2717,37 @@ pub(crate) fn current_linux_mapping_matches(
         entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
             == frame.address() | flags
     })
+}
+
+pub(crate) fn current_root_address() -> u64 {
+    current_root()
+}
+
+pub(crate) fn current_linux_hierarchy_matches(address: u64, frames: &[memory::FrameLease]) -> bool {
+    if address >= 1 << 47 || frames.is_empty() || current_root() != frames[0].address() {
+        return false;
+    }
+    let indexes = [
+        ((address >> 39) & 0x1ff) as usize,
+        ((address >> 30) & 0x1ff) as usize,
+        ((address >> 21) & 0x1ff) as usize,
+        ((address >> 12) & 0x1ff) as usize,
+    ];
+    let mut table = current_root();
+    for index in indexes[..3].iter().copied() {
+        if !frames.iter().any(|frame| frame.address() == table) {
+            return false;
+        }
+        let Some(entries) = mapped_frame::<u64>(table) else {
+            return false;
+        };
+        let entry = unsafe { entries.add(index).read() };
+        if entry & (PRESENT | USER) != PRESENT | USER || entry & LARGE_PAGE != 0 {
+            return false;
+        }
+        table = entry & ADDRESS_MASK;
+    }
+    frames.iter().any(|frame| frame.address() == table)
 }
 
 pub(crate) fn unmap_current_linux_page(address: u64, frame: u64) -> bool {

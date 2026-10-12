@@ -422,7 +422,9 @@ The replacement main emits the kernel-observed `DYNEXEC` completion by exiting
 with status 42. Other dynamic targets, general dependency resolution,
 shebangs, and arbitrary interpreted argument or environment vectors are
 outside this version. The process page-table hierarchy remains allocated across
-this transaction. The inactive anonymous-mapping backing frames are replaced
+this transaction, but its full frame set, live CR3, and every admitted Linux
+range are bound to exact generation-tagged ownership at execution entry; a
+stale root lease is rejected. The inactive anonymous-mapping backing frames are replaced
 with fresh zeroed generation-bound leases after the image commit; the old exact
 leases are scrubbed and retired, and teardown reclaims the replacements.
 Replacing the heap outside the interpreted profile and the retained page-table

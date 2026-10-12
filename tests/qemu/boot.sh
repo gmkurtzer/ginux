@@ -731,6 +731,7 @@ for marker in \
     'variable-page Linux exec images committed' \
     'Linux active image ownership transitioned' \
     'generation-bound Linux image ownership verified' \
+    'generation-bound Linux page-table hierarchy verified' \
     'Linux RELRO ownership permissions synchronized' \
     'stale Linux image retirement rejected' \
     'old Linux image leases retired at exec commit' \

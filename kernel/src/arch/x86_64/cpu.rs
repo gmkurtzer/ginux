@@ -1170,6 +1170,8 @@ impl LinuxRelativeFileMapping {
 
 pub(crate) struct LinuxElfExecution {
     pub(crate) entry: usize,
+    pub(crate) page_table_frames: [memory::FrameLease; 6],
+    pub(crate) page_table_frame_count: usize,
     pub(crate) stack: usize,
     pub(crate) stack_frame: memory::FrameLease,
     pub(crate) heap_frame: memory::FrameLease,
@@ -2242,6 +2244,63 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         return LinuxElfResult::FAILED;
     };
     let stack_base = execution.stack & !(PAGE_SIZE - 1);
+    let page_table_contract_valid = (5..=execution.page_table_frames.len())
+        .contains(&execution.page_table_frame_count)
+        && execution.page_table_frames[execution.page_table_frame_count..]
+            .iter()
+            .all(|frame| *frame == memory::FrameLease::EMPTY)
+        && execution.page_table_frames[..execution.page_table_frame_count]
+            .iter()
+            .enumerate()
+            .all(|(index, frame)| {
+                memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame])
+                    && execution.page_table_frames[..index]
+                        .iter()
+                        .all(|prior| prior != frame)
+            })
+        && execution.page_table_frames[0].address() == address_space::current_root_address()
+        && [
+            stack_base,
+            execution.heap,
+            execution.mmap,
+            execution.tls & !(PAGE_SIZE - 1),
+            execution.sibling_tls & !(PAGE_SIZE - 1),
+            execution.sibling_stack,
+            execution.code,
+            execution.loader_code,
+            execution.data,
+            execution.relro,
+        ]
+        .into_iter()
+        .filter(|address| *address != 0)
+        .all(|address| {
+            address_space::current_linux_hierarchy_matches(
+                address as u64,
+                &execution.page_table_frames[..execution.page_table_frame_count],
+            )
+        })
+        && execution.initial_image_count <= LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
+        && execution.initial_image_mappings[..execution.initial_image_count]
+            .iter()
+            .all(|mapping| {
+                address_space::current_linux_hierarchy_matches(
+                    mapping.address as u64,
+                    &execution.page_table_frames[..execution.page_table_frame_count],
+                )
+            });
+    let stale_page_table_lease_rejected = execution.page_table_frames[0]
+        .generation()
+        .checked_add(1)
+        .and_then(|generation| {
+            memory::FrameLease::from_parts(execution.page_table_frames[0].address(), generation)
+        })
+        .is_some_and(|stale| {
+            !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[stale])
+                && memory::frames_owned_by(
+                    memory::FrameOwner::KERNEL,
+                    &[execution.page_table_frames[0]],
+                )
+        });
     let stack_contract_valid = execution.stack != 0
         && stack_base != 0
         && execution.stack < stack_base + PAGE_SIZE
@@ -2310,7 +2369,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && ELF_PROBE_RECLAIM_MMAP_GENERATIONS
             .iter()
             .all(|generation| generation.load(Ordering::SeqCst) == 0);
-    if !stack_contract_valid
+    if !page_table_contract_valid
+        || !stale_page_table_lease_rejected
+        || !stack_contract_valid
         || !heap_contract_valid
         || !initial_image_valid
         || !retired_image_state_clean

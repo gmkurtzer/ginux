@@ -468,6 +468,14 @@ validator. In particular, file identity, ELF class/machine, segment overlap,
 entry validity, dynamic metadata, and the final admitted page set remain
 kernel-enforced contracts.
 
+The execution boundary receives the complete bounded page-table hierarchy as
+exact generation-tagged leases. Entry requires the live CR3 to equal the root
+lease and requires the primary stack, heap, anonymous-map window, TLS, sibling
+stack, code, data, RELRO, loader, and initial image ranges to traverse only
+those owned hierarchy frames. Duplicate leases and a synthesized stale root
+generation are rejected without changing ownership. This version retains the
+same hierarchy across exec; replacement is a separate lifecycle milestone.
+
 The initial-thread execution profile allocates a separate owned RW/NX page for
 the main image and both DSO TLS templates. It rounds each `p_memsz` up to
 `p_align` and constructs one deterministic x86-64 variant-II static layout:
