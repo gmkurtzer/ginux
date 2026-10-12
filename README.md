@@ -429,7 +429,9 @@ The separate static proofs resolve normalized absolute or current-directory-rela
 `execve` paths through the measured root, then admit any measured regular file
 that satisfies the strict three-page static ELF execution profile. The two
 independently linked fixtures, `bin/exec-target` and `bin/exec-second`, prove
-selection is not compiled-byte identity, with up to eight 63-byte `argv` strings, eight equivalent
+selection is neither compiled-byte nor fixed-address identity: the second image
+uses an independent header, text, and data base. The profile allows up to eight
+63-byte `argv` strings, eight equivalent
 `envp` strings, and one live thread. Rejected path, pointer, count, string, and
 aggregate-stack cases leave the original image
 running; success installs exact W^X target frames, unmaps the old image, and

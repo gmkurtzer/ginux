@@ -292,22 +292,24 @@ pub(crate) fn runtime_exec_second_bytes() -> &'static [u8] {
 pub(crate) fn measured_static_exec_plan(bytes: &[u8]) -> Option<LoadPlan<'_>> {
     let image = parse(bytes)?;
     let plan = plan(&image)?;
-    (plan.entry == 0x40_0100
-        && plan.program_headers == 0x3f_f040
-        && plan.read_only.is_some_and(|segment| {
-            segment.virtual_page == 0x3f_f000
-                && segment.page_count == 1
-                && !segment.writable
-                && !segment.executable
-        })
-        && plan.executable.virtual_page == 0x40_0000
+    let header = plan.read_only?;
+    (header.virtual_page >= 0x3f_f000
+        && header.virtual_page < 0x42_0000
+        && header.virtual_address == header.virtual_page
+        && header.page_count == 1
+        && !header.writable
+        && !header.executable
+        && plan.program_headers == header.virtual_page + ELF_HEADER_SIZE as u64
+        && plan.executable.virtual_page == header.virtual_page + PAGE_SIZE as u64
         && plan.executable.page_count == 1
         && !plan.executable.writable
         && plan.executable.executable
-        && plan.writable.virtual_page == 0x40_1000
+        && plan.entry == plan.executable.virtual_page + 0x100
+        && plan.writable.virtual_page == plan.executable.virtual_page + PAGE_SIZE as u64
         && plan.writable.page_count == 1
         && plan.writable.writable
         && !plan.writable.executable
+        && plan.writable.virtual_page + PAGE_SIZE as u64 <= 0x42_0000
         && plan.relro.is_none()
         && plan.tls.is_none()
         && plan.dynamic_relocations.is_none())

@@ -355,7 +355,9 @@ normalized paths resolve through the retained measured-root index. The selected
 node must be an executable regular file and must match the admitted static ELF
 profile. The independently built `bin/exec-target` and `bin/exec-second`
 fixtures both execute, proving selection is based on the measured bytes and
-profile rather than equality with one kernel-compiled artifact. `argv` admits one through eight pointers and `envp` zero
+profile rather than equality with one kernel-compiled artifact or one virtual
+base. The second fixture's three pages use a distinct address layout. `argv`
+admits one through eight pointers and `envp` zero
 through eight, each terminated by a null pointer. Each string is limited to 63
 bytes plus its terminator, and the complete rebuilt initial stack is limited to
 512 bytes. The proof supplies

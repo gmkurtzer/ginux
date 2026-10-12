@@ -92,17 +92,22 @@ or silently exceeding the runtime loader profile.
 
 Two distinct LLD-produced static images are retained directly under the
 measured-root names `bin/exec-target` and `bin/exec-second`. Each bounded plan has one
-R/NX header page at `0x3ff000`, one RX page entered at `0x400100`, and one
-RW/NX page at `0x401000`. Boot requires both measured files to match their
+R/NX header page followed by one RX page entered at offset `0x100` and one
+RW/NX page. The first uses `0x3ff000`, `0x400000`, and `0x401000`; the second
+uses `0x40f000`, `0x410000`, and `0x411000`. Boot requires both measured files to match their
 build-time artifacts and validates both complete plans before any Linux
 workload runs. Runtime admission does not compare against either compiled byte
-array: it parses the selected measured-root file and requires this exact static
-layout, entry, protection, and absence of dynamic, TLS, and RELRO metadata.
+array: it parses the selected measured-root file and requires three consecutive
+pages inside `0x3ff000..0x420000`, the fixed entry displacement, role-derived
+protections, and absence of dynamic, TLS, and RELRO metadata.
 After path, vector, string, and mapping-template validation, the
 bounded exec transaction allocates three generation-tagged kernel frame leases
 and materializes the selected measured bytes into them. It installs those pages
 atomically, retains the existing
-guarded stack, and removes the old image pages at `0x402000..0x406000`. The
+guarded stack, and removes all seven or eight pages belonging to the old image.
+Replacement leaves may overlap old leaves or occupy unused leaves; the mapping
+transaction snapshots both sets, clears the complete old image, installs the
+new W^X leaves, and restores every prior entry on verification failure. The
 post-exit verifier requires the new R/NX, RX, and RW/NX leaves to name the exact
 published leases and every removed leaf to be absent. A failed allocation,
 materialization, precondition, or mapping verification scrubs and releases the
@@ -118,7 +123,7 @@ and admits either fixture because both independently satisfy that profile. The
 profile admits one live thread,
 up to eight bounded argument strings, up to eight bounded environment strings,
 and a 512-byte replacement stack image. It does not yet support an interpreter,
-dependencies, shebangs, unbounded vectors, broader static layouts, or dynamic exec targets.
+dependencies, shebangs, unbounded vectors, multi-page replacement segments, or dynamic exec targets.
 
 The page-image planner represents executable, optional read-only, and writable
 loads explicitly. It aligns each mapping downward, retains the declared memory

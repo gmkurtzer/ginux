@@ -688,6 +688,7 @@ for marker in \
     'measured-dirfd Linux execveat validated' \
     'measured-fd Linux empty-path exec validated' \
     'measured Linux exec selection is profile-driven' \
+    'independent measured Linux exec layouts validated' \
     'Linux replacement frames allocated on demand' \
     'Linux replacement frame generations reclaimed'; do
     if ! grep -q "^ginux: $marker" "$output_file"; then

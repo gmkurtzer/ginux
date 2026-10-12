@@ -630,9 +630,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(exec_second) = initramfs::published_file_by_node(exec_second_node) else {
         kernel_fail("ginux: second measured Linux exec target unreadable\r\n");
     };
+    let Some(exec_target_plan) = linux_elf::measured_static_exec_plan(exec_target) else {
+        kernel_fail("ginux: measured Linux exec target invalid\r\n");
+    };
+    let Some(exec_second_plan) = linux_elf::measured_static_exec_plan(exec_second) else {
+        kernel_fail("ginux: second measured Linux exec target invalid\r\n");
+    };
     if exec_target == exec_second
-        || linux_elf::measured_static_exec_plan(exec_target).is_none()
-        || linux_elf::measured_static_exec_plan(exec_second).is_none()
+        || exec_target_plan.executable.virtual_page == exec_second_plan.executable.virtual_page
     {
         kernel_fail("ginux: measured Linux exec target invalid\r\n");
     }
@@ -664,6 +669,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured-dirfd Linux execveat validated\r\n");
     serial_write("ginux: measured-fd Linux empty-path exec validated\r\n");
     serial_write("ginux: measured Linux exec selection is profile-driven\r\n");
+    serial_write("ginux: independent measured Linux exec layouts validated\r\n");
     serial_write("ginux: Linux replacement frames allocated on demand\r\n");
     serial_write("ginux: Linux replacement frame generations reclaimed\r\n");
     if !linux_elf::verify_load_plan() {
