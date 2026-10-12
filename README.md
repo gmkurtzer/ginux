@@ -60,7 +60,10 @@ materializes that stack image in a fresh zeroed RW/NX page, replaces the exact
 generation-tagged primary-stack lease in the same rollback-capable page-table
 transaction as the interpreter, and scrubs and releases the old stack lease at
 commit. The replacement stack lease is reclaimed after the process root becomes
-inactive. Interpreted replacement installs the measured
+inactive. The same interpreted transaction replaces the bounded heap with a
+fresh zeroed RW/NX lease, while every successful exec resets the process break
+to the fixed heap base. The old heap is scrubbed at commit and the replacement
+lease is reclaimed after the process root becomes inactive. Interpreted replacement installs the measured
 interpreter first, lets it remap the authenticated main and both DSOs, reapplies
 RELRO, reconstructs both preallocated TLS images and FS state, and retires the
 complete old interpreter/main/DSO graph. The archive

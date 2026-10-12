@@ -690,6 +690,10 @@ for marker in \
     'interpreted Linux exec stack replaced atomically' \
     'old interpreted Linux stack lease retired at exec' \
     'replacement Linux stack lease reclaimed' \
+    'interpreted Linux exec heap replaced atomically' \
+    'old interpreted Linux heap lease retired at exec' \
+    'replacement Linux heap lease reclaimed' \
+    'Linux exec process break reset' \
     'interpreted Linux TLS state rematerialized' \
     'canonical interpreted Linux executable identity validated'; do
     if ! grep -q "^ginux: ${marker}" "$output_file"; then

@@ -406,17 +406,22 @@ initial stack in a newly allocated zeroed RW/NX frame and replaces the old
 primary-stack leaf in the same rollback-capable transaction as the interpreter.
 Commit requires the old stack's exact live generation and permissions, then
 scrubs and releases that lease; teardown reclaims the replacement stack after
-the process root is inactive. Both preallocated TLS pages are zeroed and
+the process root is inactive. The same commit installs a fresh zero-filled
+RW/NX heap frame, retires the old exact lease, and resets the process break to
+the heap base. The replacement heap is reclaimed only after the process root is
+inactive. Static exec also resets the break but retains its heap frame in this
+version. Both preallocated TLS pages are zeroed and
 rematerialized from the authenticated templates, the initial FS base is
 restored, ignored signal dispositions are preserved from the observed
 pre-exec set, caught dispositions are cleared, and RELRO is applied again.
 The replacement main emits the kernel-observed `DYNEXEC` completion by exiting
 with status 42. Other dynamic targets, general dependency resolution,
 shebangs, and arbitrary interpreted argument or environment vectors are
-outside this version. The process page-table root, heap, preallocated sibling
-stack, and TLS frame leases remain allocated across this transaction; TLS
-contents are fully reconstructed in their retained leases. Replacing the heap,
-page-table, sibling-stack, and TLS frame leases is a later lifecycle milestone.
+outside this version. The process page-table root, preallocated sibling stack,
+and TLS frame leases remain allocated across this transaction; TLS contents are
+fully reconstructed in their retained leases. Replacing the heap outside the
+interpreted profile, plus the page-table, sibling-stack, and TLS frame leases,
+is a later lifecycle milestone.
 
 `rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
 or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath

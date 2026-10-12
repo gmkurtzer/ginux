@@ -618,10 +618,11 @@ pub(crate) fn verify_linux_elf_mapping(
                     })
             });
             let execution_result = if exec_rollback_valid && observed {
-                cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
+                cpu::verify_linux_elf_entry(&cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     stack_frame: frames[15],
+                    heap_frame: frames[14],
                     initial_fs_base: 0,
                     tls: 0,
                     tls_size: 0,
@@ -1216,6 +1217,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let mut dependency_frames = [[None; 8]; 2];
     let mut exec_frames = [None; cpu::LINUX_EXEC_MAPPING_LIMIT];
     let mut exec_stack_frame = None;
+    let mut exec_heap_frame = None;
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [
@@ -1583,10 +1585,11 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 };
             }
             let execution_result = if observed {
-                cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
+                cpu::verify_linux_elf_entry(&cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     stack_frame: frames[10],
+                    heap_frame: frames[9],
                     initial_fs_base: tls_base as usize,
                     tls: tls_virtual_page as usize + tls_start_offset,
                     tls_size: tls_extent_size,
@@ -1626,7 +1629,11 @@ pub(crate) fn verify_interpreted_elf_mapping(
             main_frames = execution_result.main_frames;
             dependency_frames = execution_result.dependency_frames;
             exec_frames = execution_result.exec_frames;
-            exec_stack_frame = execution_result.exec_stack_frame;
+            if execution_result.exec_mapping_count <= cpu::LINUX_EXEC_MAPPING_LIMIT - 2 {
+                exec_stack_frame = exec_frames[execution_result.exec_mapping_count];
+                exec_frames[execution_result.exec_mapping_count] = None;
+            }
+            exec_heap_frame = cpu::take_linux_exec_heap_frame();
             let expected_active_image_count = initial_image_count
                 + main_mappings
                     .iter()
@@ -1643,6 +1650,14 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         == frame.address() | PRESENT | USER | WRITABLE | NO_EXECUTE
                         && frame != frames[10]
                         && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frames[10]])
+                });
+            let exec_heap_mapping_valid = executed
+                && exec_heap_frame.is_some_and(|frame| {
+                    main_entries.add(heap_indexes[3]).read()
+                        & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                        == frame.address() | PRESENT | USER | WRITABLE | NO_EXECUTE
+                        && frame != frames[9]
+                        && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frames[9]])
                 });
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
@@ -1915,6 +1930,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             if !exec_stack_mapping_valid {
                 crate::serial_write_bytes(b"\r\nginux: replacement Linux stack invalid");
             }
+            if !exec_heap_mapping_valid {
+                crate::serial_write_bytes(b"\r\nginux: replacement Linux heap invalid");
+            }
             if !main_permissions_valid {
                 crate::serial_write_bytes(b"\r\nginux: userspace main mapping invalid");
             }
@@ -1956,6 +1974,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     && sibling_tls_runtime_valid
                     && sibling_stack_runtime_valid
                     && exec_stack_mapping_valid
+                    && exec_heap_mapping_valid
                     && main_permissions_valid
                     && main_image_valid
                     && dependency_permissions_valid
@@ -1971,7 +1990,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let cleared = frames.iter().enumerate().all(|(index, frame)| unsafe {
         if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame]) {
             zero_frame(frame.address()).is_some()
-        } else if index == 10 && exec_stack_frame.is_some() {
+        } else if index == 9 && exec_heap_frame.is_some()
+            || index == 10 && exec_stack_frame.is_some()
+        {
             true
         } else {
             frame_is_zero(frame.address())
@@ -1995,6 +2016,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
             && memory::release_frames(memory::FrameOwner::KERNEL, [frame]);
     }
     let exec_stack_frame_released = exec_stack_frame.is_some_and(|frame| {
+        prepare_linux_frame(frame.address(), &[])
+            && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
+    });
+    let exec_heap_frame_released = exec_heap_frame.is_some_and(|frame| {
         prepare_linux_frame(frame.address(), &[])
             && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
     });
@@ -2026,6 +2051,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
         && original_frames_released
         && exec_frames_released
         && exec_stack_frame_released
+        && exec_heap_frame_released
         && main_frames_released
         && dependency_frames_released
         && frame_count_restored
