@@ -633,6 +633,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: bounded Linux process lifecycle contract validated\r\n");
     serial_write("ginux: generation-bound Linux process roots validated\r\n");
+    serial_write("ginux: bounded Linux process resource bundles validated\r\n");
     serial_write("ginux: transactional Linux child publication validated\r\n");
     if !linux_process::verify_private_page_copy_contract() {
         kernel_fail("ginux: bounded Linux private page copy invalid\r\n");

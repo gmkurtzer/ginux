@@ -1,6 +1,9 @@
 use crate::memory;
 
 const PROCESS_LIMIT: usize = 4;
+const PROCESS_HIERARCHY_LIMIT: usize = 6;
+const PROCESS_PRIVATE_PAGE_LIMIT: usize = 16;
+const PROCESS_LEASE_LIMIT: usize = PROCESS_HIERARCHY_LIMIT + PROCESS_PRIVATE_PAGE_LIMIT;
 const PAGE_SIZE: usize = 4096;
 const FORK_PRIVATE_PAGE_LIMIT: usize = 2;
 
@@ -15,15 +18,89 @@ struct ProcessHandle {
 enum ProcessState {
     Preparing,
     Running,
-    Exiting { root: memory::FrameLease },
+    Exiting,
     Zombie { status: u8 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProcessAddressSpace {
+    hierarchy: [memory::FrameLease; PROCESS_HIERARCHY_LIMIT],
+    hierarchy_count: u8,
+    pages: [memory::FrameLease; PROCESS_PRIVATE_PAGE_LIMIT],
+    page_count: u8,
+}
+
+impl ProcessAddressSpace {
+    fn new(hierarchy: &[memory::FrameLease], pages: &[memory::FrameLease]) -> Option<Self> {
+        if !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
+            || pages.is_empty()
+            || pages.len() > PROCESS_PRIVATE_PAGE_LIMIT
+            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
+            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, pages)
+            || hierarchy
+                .iter()
+                .enumerate()
+                .any(|(index, frame)| hierarchy[..index].contains(frame) || pages.contains(frame))
+            || pages
+                .iter()
+                .enumerate()
+                .any(|(index, frame)| pages[..index].contains(frame))
+        {
+            return None;
+        }
+        let mut space = Self {
+            hierarchy: [memory::FrameLease::EMPTY; PROCESS_HIERARCHY_LIMIT],
+            hierarchy_count: u8::try_from(hierarchy.len()).ok()?,
+            pages: [memory::FrameLease::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
+            page_count: u8::try_from(pages.len()).ok()?,
+        };
+        space.hierarchy[..hierarchy.len()].copy_from_slice(hierarchy);
+        space.pages[..pages.len()].copy_from_slice(pages);
+        Some(space)
+    }
+
+    fn leases(self) -> ([memory::FrameLease; PROCESS_LEASE_LIMIT], usize) {
+        let hierarchy_count = usize::from(self.hierarchy_count);
+        let page_count = usize::from(self.page_count);
+        let mut leases = [memory::FrameLease::EMPTY; PROCESS_LEASE_LIMIT];
+        leases[..hierarchy_count].copy_from_slice(&self.hierarchy[..hierarchy_count]);
+        leases[hierarchy_count..hierarchy_count + page_count]
+            .copy_from_slice(&self.pages[..page_count]);
+        (leases, hierarchy_count + page_count)
+    }
+
+    fn is_owned(self) -> bool {
+        let (leases, count) = self.leases();
+        memory::frames_owned_by(memory::FrameOwner::KERNEL, &leases[..count])
+    }
+
+    fn is_live(self) -> bool {
+        let (leases, count) = self.leases();
+        memory::any_frame_lease_live(&leases[..count])
+    }
+
+    fn overlaps(self, other: Self) -> bool {
+        let (left, left_count) = self.leases();
+        let (right, right_count) = other.leases();
+        left[..left_count].iter().any(|left| {
+            right[..right_count]
+                .iter()
+                .any(|right| left.address() == right.address())
+        })
+    }
+
+    fn scrub_and_release(self) -> bool {
+        let (leases, count) = self.leases();
+        memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &leases[..count])
+    }
 }
 
 #[derive(Clone, Copy)]
 struct Process {
     handle: ProcessHandle,
     parent: Option<ProcessHandle>,
-    address_space_root: Option<memory::FrameLease>,
+    address_space: Option<ProcessAddressSpace>,
+    retiring_address_space: Option<ProcessAddressSpace>,
     state: ProcessState,
 }
 
@@ -50,14 +127,11 @@ impl ProcessTable {
         }
     }
 
-    fn create_init(&mut self, address_space_root: memory::FrameLease) -> Option<ProcessHandle> {
-        if self.init.is_some()
-            || self.next_pid != 1
-            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[address_space_root])
-        {
+    fn create_init(&mut self, address_space: ProcessAddressSpace) -> Option<ProcessHandle> {
+        if self.init.is_some() || self.next_pid != 1 || !address_space.is_owned() {
             return None;
         }
-        let handle = self.allocate(None, Some(address_space_root), ProcessState::Running)?;
+        let handle = self.allocate(None, Some(address_space), ProcessState::Running)?;
         if handle.pid != 1 {
             return None;
         }
@@ -72,16 +146,15 @@ impl ProcessTable {
         self.allocate(Some(parent), None, ProcessState::Preparing)
     }
 
-    fn commit_fork(
-        &mut self,
-        handle: ProcessHandle,
-        address_space_root: memory::FrameLease,
-    ) -> bool {
-        if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[address_space_root])
+    fn commit_fork(&mut self, handle: ProcessHandle, address_space: ProcessAddressSpace) -> bool {
+        if !address_space.is_owned()
             || self.processes.iter().flatten().any(|process| {
                 process
-                    .address_space_root
-                    .is_some_and(|root| root.address() == address_space_root.address())
+                    .address_space
+                    .is_some_and(|existing| existing.overlaps(address_space))
+                    || process
+                        .retiring_address_space
+                        .is_some_and(|existing| existing.overlaps(address_space))
             })
         {
             return false;
@@ -89,10 +162,13 @@ impl ProcessTable {
         let Some(process) = self.process_mut(handle) else {
             return false;
         };
-        if process.state != ProcessState::Preparing || process.address_space_root.is_some() {
+        if process.state != ProcessState::Preparing
+            || process.address_space.is_some()
+            || process.retiring_address_space.is_some()
+        {
             return false;
         }
-        process.address_space_root = Some(address_space_root);
+        process.address_space = Some(address_space);
         process.state = ProcessState::Running;
         true
     }
@@ -101,7 +177,10 @@ impl ProcessTable {
         let Some(process) = self.process(handle) else {
             return false;
         };
-        if process.state != ProcessState::Preparing || process.address_space_root.is_some() {
+        if process.state != ProcessState::Preparing
+            || process.address_space.is_some()
+            || process.retiring_address_space.is_some()
+        {
             return false;
         }
         self.processes[usize::from(handle.slot)] = None;
@@ -111,32 +190,36 @@ impl ProcessTable {
     fn begin_exit(
         &mut self,
         handle: ProcessHandle,
-        expected_root: memory::FrameLease,
-    ) -> Option<memory::FrameLease> {
+        expected_space: ProcessAddressSpace,
+    ) -> Option<ProcessAddressSpace> {
         let process = self.process_mut(handle)?;
         if process.state != ProcessState::Running
-            || process.address_space_root != Some(expected_root)
-            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[expected_root])
+            || process.address_space != Some(expected_space)
+            || process.retiring_address_space.is_some()
+            || !expected_space.is_owned()
         {
             return None;
         }
-        process.address_space_root = None;
-        process.state = ProcessState::Exiting {
-            root: expected_root,
-        };
-        Some(expected_root)
+        process.address_space = None;
+        process.retiring_address_space = Some(expected_space);
+        process.state = ProcessState::Exiting;
+        Some(expected_space)
     }
 
     fn exit(&mut self, handle: ProcessHandle, status: u8) -> bool {
         let Some(process) = self.process_mut(handle) else {
             return false;
         };
-        let ProcessState::Exiting { root } = process.state else {
-            return false;
-        };
-        if process.address_space_root.is_some() || memory::frame_leases_live(&[root]) {
+        if process.state != ProcessState::Exiting || process.address_space.is_some() {
             return false;
         }
+        let Some(retiring) = process.retiring_address_space else {
+            return false;
+        };
+        if retiring.is_live() {
+            return false;
+        }
+        process.retiring_address_space = None;
         process.state = ProcessState::Zombie { status };
         true
     }
@@ -162,7 +245,7 @@ impl ProcessTable {
     fn allocate(
         &mut self,
         parent: Option<ProcessHandle>,
-        address_space_root: Option<memory::FrameLease>,
+        address_space: Option<ProcessAddressSpace>,
         state: ProcessState,
     ) -> Option<ProcessHandle> {
         let slot = self.processes.iter().position(Option::is_none)?;
@@ -178,7 +261,8 @@ impl ProcessTable {
         self.processes[slot] = Some(Process {
             handle,
             parent,
-            address_space_root,
+            address_space,
+            retiring_address_space: None,
             state,
         });
         Some(handle)
@@ -203,32 +287,47 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
     };
-    let Some(roots) = memory::allocate_frames::<3>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<15>(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let (Some(init_space), Some(first_space), Some(second_space), Some(shared_page_space)) = (
+        ProcessAddressSpace::new(&frames[0..4], &frames[4..5]),
+        ProcessAddressSpace::new(&frames[5..9], &frames[9..10]),
+        ProcessAddressSpace::new(&frames[10..14], &frames[14..15]),
+        ProcessAddressSpace::new(&frames[5..9], &frames[4..5]),
+    ) else {
         return false;
     };
     let mut table = ProcessTable::new();
-    let Some(init) = table.create_init(roots[0]) else {
+    let Some(init) = table.create_init(init_space) else {
         return false;
     };
     let Some(rejected_child) = table.prepare_fork(init) else {
         return false;
     };
-    let Some(stale_generation) = roots[1].generation().checked_add(1) else {
+    let Some(stale_generation) = frames[5].generation().checked_add(1) else {
         return false;
     };
-    let Some(stale_root) = memory::FrameLease::from_parts(roots[1].address(), stale_generation)
+    let Some(stale_root) = memory::FrameLease::from_parts(frames[5].address(), stale_generation)
     else {
         return false;
     };
+    let mut stale_hierarchy: [memory::FrameLease; 4] =
+        core::array::from_fn(|index| frames[5 + index]);
+    stale_hierarchy[0] = stale_root;
+    let stale_space = ProcessAddressSpace::new(&stale_hierarchy, &frames[9..10]);
+    let mut stale_expected = first_space;
+    stale_expected.hierarchy[0] = stale_root;
     if init.pid != 1
         || rejected_child.pid != 2
-        || table.create_init(roots[1]).is_some()
-        || table.commit_fork(rejected_child, roots[0])
-        || table.commit_fork(rejected_child, stale_root)
+        || table.create_init(first_space).is_some()
+        || table.commit_fork(rejected_child, init_space)
+        || table.commit_fork(rejected_child, shared_page_space)
+        || stale_space.is_some()
         || table.wait(init, rejected_child.pid).is_some()
         || table.exit(rejected_child, 1)
         || !table.abort_fork(rejected_child)
-        || table.commit_fork(rejected_child, roots[1])
+        || table.commit_fork(rejected_child, first_space)
         || table.abort_fork(rejected_child)
     {
         return false;
@@ -237,20 +336,26 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
         return false;
     };
     if first_child.pid != 3
-        || !table.commit_fork(first_child, roots[1])
-        || table.commit_fork(first_child, roots[2])
+        || !table.commit_fork(first_child, first_space)
+        || table.commit_fork(first_child, second_space)
         || table.wait(init, first_child.pid).is_some()
         || table.exit(first_child, 42)
-        || table.begin_exit(first_child, roots[2]).is_some()
-        || table.begin_exit(first_child, stale_root).is_some()
+        || table.begin_exit(first_child, second_space).is_some()
+        || table.begin_exit(first_child, stale_expected).is_some()
     {
         return false;
     }
-    let Some(first_root) = table.begin_exit(first_child, roots[1]) else {
+    let Some(first_resources) = table.begin_exit(first_child, first_space) else {
         return false;
     };
+    let (first_leases, first_lease_count) = first_resources.leases();
     if table.exit(first_child, 42)
-        || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[first_root])
+        || !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &first_leases[..1])
+        || table.exit(first_child, 42)
+        || !memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &first_leases[1..first_lease_count],
+        )
         || !table.exit(first_child, 42)
         || table.wait(first_child, first_child.pid).is_some()
         || table.wait(init, first_child.pid) != Some(WaitResult { pid: 3, status: 42 })
@@ -264,24 +369,25 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     if second_child.slot != first_child.slot
         || second_child.generation <= first_child.generation
         || second_child.pid != 4
-        || table.begin_exit(first_child, roots[2]).is_some()
-        || !table.commit_fork(second_child, roots[2])
+        || table.begin_exit(first_child, second_space).is_some()
+        || table.commit_fork(second_child, first_space)
+        || !table.commit_fork(second_child, second_space)
     {
         return false;
     }
-    let Some(second_root) = table.begin_exit(second_child, roots[2]) else {
+    let Some(second_resources) = table.begin_exit(second_child, second_space) else {
         return false;
     };
-    if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[second_root])
+    if !second_resources.scrub_and_release()
         || !table.exit(second_child, 7)
         || table.wait(init, second_child.pid) != Some(WaitResult { pid: 4, status: 7 })
     {
         return false;
     }
-    let Some(init_root) = table.begin_exit(init, roots[0]) else {
+    let Some(init_resources) = table.begin_exit(init, init_space) else {
         return false;
     };
-    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[init_root])
+    init_resources.scrub_and_release()
         && table.exit(init, 0)
         && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
 }

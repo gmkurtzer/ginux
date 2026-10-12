@@ -603,6 +603,11 @@ if ! grep -q '^ginux: generation-bound Linux process roots validated' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux process resource bundles validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux process resource bundles were not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: transactional Linux child publication validated' "$output_file"; then
     echo "Boot test failed: transactional Linux child publication was not validated." >&2
     exit 1

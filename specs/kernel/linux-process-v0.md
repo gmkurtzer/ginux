@@ -6,7 +6,8 @@ This contract introduces the kernel-owned process identity and lifecycle model
 needed before Ginux can expose process-style Linux `clone`/`fork` and `wait4`.
 It is deliberately separate from the existing bounded Linux thread table:
 threads share one process address space, while every running process record
-owns a distinct allocator-issued, generation-checked address-space root lease.
+owns a distinct allocator-issued, generation-checked address-space resource
+bundle.
 
 ## Identity and capacity
 
@@ -17,41 +18,48 @@ reaping cannot select a replacement process.
 
 The first record is PID 1 and has no parent. PID 1 can be created only once.
 Every later record names a live parent. Child creation first reserves a
-`Preparing` record with no address-space root. That record cannot exit, become
-a zombie, or be observed through wait. Commit requires a distinct nonzero root
-lease that remains live under the kernel bootstrap owner and atomically changes
-the record to `Running`; abort removes the reservation.
+`Preparing` record with no address-space bundle. That record cannot exit, become
+a zombie, or be observed through wait. Commit requires a bundle containing
+four through six hierarchy leases and one through sixteen private-page leases,
+all live under the kernel bootstrap owner and pairwise distinct. No lease may
+overlap any running or exiting process bundle. Successful commit atomically
+attaches the entire bundle and changes the record to `Running`; abort removes
+the empty reservation.
 Both commit and abort require the exact generation-checked handle, so neither
 can affect a slot that has since been reused. A failed transaction may consume
 an internal PID, but never publishes that PID as a running process.
 
 Reservation fails without partial publication when the table is full, the
 parent is absent or not running, or an identity counter is exhausted. Commit
-fails without changing the reservation when the root lease is stale or its
-physical address is already attached to another process.
+fails without changing the reservation when any lease is stale, duplicated, or
+physically attached to another process.
 
 ## Exit and wait ordering
 
-A running process cannot become a zombie while it still owns its address-space
-root. Teardown requires the exact root lease and moves the record to `Exiting`,
-where it is neither runnable nor waitable. Zombie publication remains denied
-while the allocator still tracks that lease. Only after the caller scrubs and
-releases the root can it publish the exit status. A mismatched or stale root or
-process handle changes no state.
+A running process cannot become a zombie while it still owns address-space
+resources. Teardown requires the exact complete bundle and moves the record to
+`Exiting`, where it is neither runnable nor waitable. Zombie publication
+remains denied while the allocator tracks any lease in that bundle. Only after
+one prevalidated operation scrubs and releases the whole hierarchy and payload
+set can it publish the exit status. A mismatched or stale bundle or process
+handle changes no state.
 
 Only the live recorded parent can reap a zombie, and only by the child's PID.
 Waiting for a running child or an unrelated process has no effect. Reaping
 removes the complete record and makes its slot reusable; the next occupant has
 a new generation and PID.
 
-The boot verifier allocates three real root leases, constructs PID 1, and
-reserves PID 2. It rejects stale and aliased roots, proves the unpublished child
-cannot exit or be reaped, aborts the reservation, and rejects its stale handle.
-It then commits PID 3, proves both premature detach and zombie publication are
-denied, scrubs and releases its exact root, publishes status 42, and reaps it
-through PID 1. Finally, it reuses the same slot for PID 4, repeats teardown with
-status 7, retires PID 1's root, and requires the allocator count to return to
-its starting value.
+The boot verifier allocates three five-frame bundles, constructs PID 1, and
+reserves PID 2. It rejects a stale hierarchy lease, a completely aliased
+bundle, and a unique-root bundle that aliases PID 1's payload page. It proves
+the unpublished child cannot exit or be reaped, aborts the reservation, and
+rejects its stale handle. It then commits PID 3, proves both premature detach
+and zombie publication are denied, releases one lease, proves the four
+survivors still block zombie publication, then scrubs and releases the rest,
+publishes status 42, and reaps it through PID 1. Finally, it reuses the same
+slot for PID 4, rejects the already released PID 3 bundle, exercises the normal
+whole-bundle teardown with status 7, retires PID 1's bundle, and requires the
+allocator count to return to its starting value.
 
 ## Private page copy primitive
 
@@ -83,8 +91,11 @@ value.
 
 This is the physical address-space operation needed by a future eager fork. It
 does not yet enumerate the live Linux runtime's complete mapping registry,
-attach the resulting leases to a prepared process record, install a child
-execution context, or activate the child CR3.
+publish the hierarchy clone through the live process table, install a child
+execution context, or activate the child CR3. The process table can retain the
+resulting lease inventory, but its bundle does not yet carry the virtual
+address and permission metadata needed to cross-check those leases against the
+cloned page tables at publication.
 
 ## Deliberate limits
 

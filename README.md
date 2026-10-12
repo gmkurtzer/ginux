@@ -284,15 +284,16 @@ A separate four-slot process-lifecycle table now establishes the ownership
 model required before process-style creation is exposed. Internal identities
 bind slot, generation, and monotonic PID; every child has a live recorded
 parent. Creation reserves an invisible `Preparing` record, and only a validated
-distinct generation-checked root lease can publish it as running; abort removes
-the reservation and stale handles cannot commit a reused slot. Exit first
-moves the record to a non-runnable `Exiting` state, and zombie publication is
-denied until the allocator confirms that exact root lease was scrubbed and
-released. Only the live parent can reap it. The QEMU proof uses three real root
-frames, aborts one reservation, creates and reaps two children through one
-reused slot, retires PID 1, and restores the allocator count. This table is not
-wired to Linux syscalls and does not yet retain a complete child resource
-bundle or inherit process resources.
+distinct generation-checked resource bundle can publish it as running; each
+bundle contains four through six page-table leases and one through sixteen
+private-page leases. Publication rejects overlap in any frame. Exit first moves
+the complete bundle to a non-runnable `Exiting` state, and zombie publication
+is denied until one prevalidated operation scrubs and releases every lease.
+Only the live parent can reap it. The QEMU proof uses three real five-frame
+bundles, rejects stale and partial-alias inputs, aborts one reservation, creates
+and reaps two children through one reused slot, retires PID 1, and restores the
+allocator count. This table is not wired to Linux syscalls and does not yet
+inherit descriptors, credentials, signals, or namespace state.
 A separate eager-copy primitive validates generation-bound ownership and
 pairwise separation before copying two complete private pages. Its proof
 rejects stale and aliased destinations without partial writes, demonstrates

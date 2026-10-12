@@ -1234,9 +1234,11 @@ process-shared descriptor table.
 The separate bounded process-lifecycle contract records generation-checked
 process identities, parentage, exclusive address-space-root ownership,
 two-phase child publication, exit-to-zombie ordering, and parent-only reap.
-Each running record holds an allocator-issued generation-checked root lease;
-exit enters a non-runnable intermediate state and cannot publish a zombie until
-the allocator no longer tracks that exact lease. It is currently an internal
+Each running record holds an allocator-issued bundle of four through six
+hierarchy leases and one through sixteen private-page leases. Publication
+rejects any cross-process frame overlap. Exit enters a non-runnable intermediate
+state and cannot publish a zombie until the allocator no longer tracks any
+lease in the exact detached bundle. It is currently an internal
 boot-verified model and is not reachable through this syscall profile. In
 particular, the exact bounded `clone` below remains thread-only and `fork`,
 process-style `clone`, and `wait4` remain unsupported.

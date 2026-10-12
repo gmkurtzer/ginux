@@ -383,9 +383,9 @@ impl FrameAllocator {
         })
     }
 
-    fn tracks(&self, frames: &[FrameLease]) -> bool {
+    fn tracks_any(&self, frames: &[FrameLease]) -> bool {
         !frames.is_empty()
-            && frames.iter().all(|frame| {
+            && frames.iter().any(|frame| {
                 self.live_frames[..self.live_count]
                     .iter()
                     .any(|live| live == frame)
@@ -563,13 +563,13 @@ pub(crate) fn frames_owned_by(owner: FrameOwner, frames: &[FrameLease]) -> bool 
     }
 }
 
-pub(crate) fn frame_leases_live(frames: &[FrameLease]) -> bool {
+pub(crate) fn any_frame_lease_live(frames: &[FrameLease]) -> bool {
     if !INITIALIZED.load(Ordering::Acquire) {
         return false;
     }
     unsafe {
         let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
-        (*allocator).tracks(frames)
+        (*allocator).tracks_any(frames)
     }
 }
 

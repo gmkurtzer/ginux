@@ -208,14 +208,17 @@ frames. This proof does not activate the child root, provide its required
 kernel mappings, snapshot the live Linux mapping registry, or install a
 schedulable execution context.
 
-The bounded process table now retains an allocator-issued root `FrameLease`
-rather than a raw physical address. Child publication rejects stale leases and
-physical roots already attached to another process. Exit detaches only the
-exact recorded lease, moves the process to a non-runnable intermediate state,
-and refuses zombie publication while that generation remains in the live-frame
-ledger. The boot proof scrubs and releases each detached root before publishing
-the corresponding zombie. Complete hierarchy and payload leases are not yet
-retained in the process record.
+The bounded process table now retains an allocator-issued resource bundle
+rather than a raw physical root. A bundle contains four through six hierarchy
+leases and one through sixteen private-page leases. Child publication rejects
+stale or internally duplicated leases and every physical overlap with a
+running or exiting process. Exit detaches only the exact recorded bundle,
+moves the process to a non-runnable intermediate state, and refuses zombie
+publication while any generation in that bundle remains in the live-frame
+ledger. One prevalidated teardown scrubs and releases the full bundle before
+the corresponding zombie is published. Virtual mapping metadata and a live
+connection from the hierarchy clone transaction to this record remain future
+work.
 
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate
