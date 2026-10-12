@@ -89,9 +89,11 @@ five; a second boot recovers the exact record without rewriting it. Its
 corruption boot invalidates the committed native slot while preserving the
 kernel reference volume, then requires the service to reject the nonempty
 media without modification, quiesce the device, scrub its DMA lease, and let
-the rest of the kernel boot complete. Its
-deliberate terminal fault drives mandatory interrupt, device, capability,
-address-space, and DMA cleanup without panicking the kernel. Its first request
+the rest of the kernel boot complete. Completed and rejected outcomes use the
+stable native lifecycle ABI rather than deliberate faults; clean exit drives
+mandatory interrupt, device, capability, address-space, and DMA cleanup. A
+separate invalid-opcode auxiliary proves genuine fault containment without
+panicking the kernel. The volume service's first request
 also proves stale-generation rejection, live timeout without generation
 consumption, successful same-generation retry, and consumed-generation replay
 rejection. After teardown, the kernel creates a fresh domain generation with
@@ -1107,4 +1109,4 @@ fail-closed supervisor execution/access and user-mode instruction protection
 requirements. `QEMU_CPU` may select a different model only if it still
 advertises SMEP, SMAP, and UMIP.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v4](specs/boot/handoff-v4.md) for the firmware-to-kernel boundary, [Initramfs Archive Profile v0](specs/kernel/initramfs-v0.md) for the proof root format, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v4](specs/boot/handoff-v4.md) for the firmware-to-kernel boundary, [Native Service Lifecycle ABI v0](specs/abi/native-service-lifecycle-v0.md) for clean service completion, [Initramfs Archive Profile v0](specs/kernel/initramfs-v0.md) for the proof root format, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.

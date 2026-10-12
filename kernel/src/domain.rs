@@ -2290,6 +2290,15 @@ pub(crate) fn last_lifecycle_event_detail() -> Option<u8> {
     Some(global_manager()?.last_delivered_lifecycle_event?.detail)
 }
 
+pub(crate) fn last_lifecycle_event_has_fault() -> Option<bool> {
+    Some(
+        global_manager()?
+            .last_delivered_lifecycle_event?
+            .fault
+            .is_some(),
+    )
+}
+
 pub(crate) fn last_lifecycle_service_identity() -> Option<u64> {
     Some(encode_service_id(
         global_manager()?.last_delivered_lifecycle_event?.service?,

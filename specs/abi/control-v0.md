@@ -53,6 +53,10 @@ auxiliary supplies an exit status from 0 through 255 in `RSI`; larger values
 are rejected without removing the thread. Other domain roles ignore `RSI`.
 The hardware proof first attempts status 256, requires `UINT64_MAX - 2`, then
 exits the same still-running context with status 42.
+The native lifecycle v0 profile reserves status 0 for completed work and 1 for
+authenticated input or state rejected without mutation. A stop-only service
+with an attached device cannot complete retirement until the kernel has
+quiesced that device and validated its stable DMA state.
 Operation 3
 cooperatively yields and returns zero when the context is scheduled again.
 Operation 4 sends the `RSI` word to IPC object 3 and requires write authority;
@@ -413,7 +417,7 @@ and retries generation one successfully. This proves one bounded read
 followed by exact generation advances, a second bounded read, and a
 write/flush/read-back transaction through the same queue. Only one request may
 be outstanding; consumed state is cleared
-while MSI-X remains masked, and overflow fails closed. Fault revocation and
+while MSI-X remains masked, and overflow fails closed. Clean-exit revocation and
 kernel quiescence follow the fifth completion. The automated first and second
 boots require distinct fresh-sector and recovered-marker outcomes from the
 isolated service. The same domain owns one

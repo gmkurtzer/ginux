@@ -5968,31 +5968,20 @@ pub(crate) fn verify_native_volume_service(
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     let event = domain::take_lifecycle_event();
     let completion = NATIVE_VOLUME_COMPLETION.swap(0, Ordering::AcqRel);
-    let fault = domain::delivered_fault_descriptor().and_then(|descriptor| {
-        let vector = descriptor
-            .get(6..8)
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u16::from_le_bytes)?;
-        let instruction = descriptor
-            .get(32..40)
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u64::from_le_bytes)?;
-        let relative = instruction.checked_sub(USER_TEST_ADDRESS as u64)?;
-        image.address_is_executable(relative).then_some((
-            vector,
-            instruction,
-            image.byte_at_virtual(relative),
-        ))
-    });
-    let outcome = match (
-        fault.map(|(vector, _, opcode)| (vector, opcode)),
-        completion,
-    ) {
-        (Some((6, Some(0x0f))), 1) => Some(NativeVolumeOutcome::Initialized),
-        (Some((6, Some(0x0f))), 2) => Some(NativeVolumeOutcome::Recovered),
-        (Some((13, Some(0xcc))), 2) => Some(NativeVolumeOutcome::Rejected),
+    let exit_status = domain::last_lifecycle_event_detail();
+    let outcome = match (exit_status, completion) {
+        (Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED), 1) => {
+            Some(NativeVolumeOutcome::Initialized)
+        }
+        (Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED), 2) => {
+            Some(NativeVolumeOutcome::Recovered)
+        }
+        (Some(ginux_native_abi::NATIVE_SERVICE_EXIT_REJECTED), 2) => {
+            Some(NativeVolumeOutcome::Rejected)
+        }
         _ => None,
     };
+    let expected_status = exit_status?;
     let valid = outcome.is_some()
         && timer::device_wait_timeout_count() == expected_timeouts
         && current_root() == kernel_root
@@ -6008,32 +5997,30 @@ pub(crate) fn verify_native_volume_service(
             crate::capability::Rights::WRITE,
         )
         && event
-            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_FAULT))
-        && domain::last_lifecycle_event_detail() == Some(0)
+            == Some(
+                (u64::from(expected_status) << 56)
+                    | (auxiliary << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && domain::last_lifecycle_event_audit().is_some_and(|(kind, audited, _)| {
+            kind == crate::control_abi::LIFECYCLE_AUXILIARY_EXITED && audited == auxiliary
+        })
+        && domain::last_lifecycle_event_has_fault() == Some(false)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::take_lifecycle_event().is_none();
     if !valid {
         crate::serial_write_bytes(
-            b"\r\nginux: native volume event/completion/success/roots/frames: ",
+            b"\r\nginux: native volume event/completion/status/roots/frames: ",
         );
         for value in [
             event.unwrap_or(u64::MAX),
             u64::from(completion),
-            fault.map_or(u64::MAX, |(vector, _, _)| u64::from(vector)),
+            exit_status.map_or(u64::MAX, u64::from),
             registered_auxiliary_address_space_count() as u64,
             memory::owner_live_frame_count(owner).unwrap_or(usize::MAX) as u64,
         ] {
             crate::serial_write_u64(value);
             crate::serial_write_bytes(b" ");
-        }
-        if let Some(descriptor) = domain::delivered_fault_descriptor() {
-            for range in [6..8, 16..24, 24..32, 32..40] {
-                let mut bytes = [0_u8; 8];
-                let length = range.len();
-                bytes[..length].copy_from_slice(&descriptor[range]);
-                crate::serial_write_u64(u64::from_le_bytes(bytes));
-                crate::serial_write_bytes(b" ");
-            }
         }
     }
     valid.then_some(NativeVolumeRun {

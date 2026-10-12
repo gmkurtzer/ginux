@@ -1730,6 +1730,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let native_volume_outcome = native_volume_run.outcome;
     serial_write("\r\nginux: compiled native volume service executed in ring 3");
     serial_write("\r\nginux: native service bootstrap ABI v0 validated in ring 3");
+    serial_write("\r\nginux: native service lifecycle ABI v0 clean exit validated in ring 3");
     serial_write("\r\nginux: native volume service owned virtio request sequence");
     match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized => {
@@ -1743,7 +1744,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             serial_write("\r\nginux: corrupt native volume media rejected without modification");
         }
     }
-    serial_write("\r\nginux: native volume service fault contained and device quiesced");
+    serial_write("\r\nginux: native volume service exited cleanly and device quiesced");
     let replacement_volume_run = address_space::verify_native_volume_service(
         &volume_image,
         virtio_status_physical,
@@ -1804,10 +1805,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: duplicate isolated virtio wait rejected");
     serial_write("\r\nginux: isolated volume slots scanned in ring 3");
     serial_write("\r\nginux: isolated virtio request generation advanced and reused");
-    serial_write("\r\nginux: faulted native volume service revoked");
+    serial_write("\r\nginux: completed native volume service authority revoked");
     serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
-    serial_write("\r\nginux: fault path quiesced device before DMA release");
-    serial_write("\r\nginux: faulted DMA lease scrubbed and released");
+    serial_write("\r\nginux: clean exit quiesced device before DMA release");
+    serial_write("\r\nginux: retired DMA lease scrubbed and released");
     serial_write("\r\nginux: native volume device quiesced before release");
     serial_write("\r\nginux: isolated virtio MSI-X route retired before DMA release");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");

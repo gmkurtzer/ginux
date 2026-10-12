@@ -15208,7 +15208,8 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         && (!domain::begin_auxiliary_runtime_exit(
             caller_domain,
             auxiliary_exit_status.unwrap_or(0),
-        ) || !address_space::activate_kernel_root_for_auxiliary(caller_domain)
+        ) || !address_space::quiesce_auxiliary_device(caller_domain)
+            || !address_space::activate_kernel_root_for_auxiliary(caller_domain)
             || !address_space::release_auxiliary_address_space(caller_domain)
             || !domain::retire_stopped_auxiliary_service(caller_domain))
     {

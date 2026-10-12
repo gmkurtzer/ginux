@@ -45,6 +45,8 @@ addresses, owned DMA virtual and device-visible addresses, and opaque object-7
 capability handle. The loader relocates the static PIE, maps load segments W^X,
 maps the record read-only/NX, and supplies only those bounded resources. See
 [Native Service Bootstrap ABI v0](../abi/native-service-bootstrap-v0.md).
+The terminal path uses the separately frozen
+[Native Service Lifecycle ABI v0](../abi/native-service-lifecycle-v0.md).
 
 The runtime itself negotiates only `FLUSH` and `VERSION_1`, configures queue
 zero and MSI-X table entry zero, and implements the shared whole-sector trait
@@ -61,18 +63,17 @@ engine.
 Volume slots map to reserved device sectors four and five. On empty media the
 shared engine commits generation one containing `ginux-isolated-volume\n` via
 prepare/write/flush/commit/write/flush and recovers it. On existing media it
-accepts only that exact generation and payload. Success deliberately faults so
-the supervisor can exercise the same mandatory device-quiescence path.
+accepts only that exact generation and payload. Success exits through control
+ABI operation 2 with `COMPLETED`; the supervisor cross-checks that status
+against the final DMA state before accepting initialization or recovery.
 
-Corrupt, ambiguous, exhausted, or valid-but-policy-mismatched media follows a
-distinct authenticated rejection instruction after the two-slot scan. The
-kernel accepts that result only when the fault RIP names the exact breakpoint
-opcode in the measured RX segment and the DMA page contains a complete
-two-read scan. Device errors and runtime failures use a different privileged
-instruction and remain fatal to the boot proof. A separate QEMU boot corrupts
-sector four, requires rejection without a write or kernel panic, verifies the
-disk checksum is unchanged, and still requires complete device and DMA
-teardown.
+Corrupt, ambiguous, exhausted, or valid-but-policy-mismatched media exits with
+`REJECTED` after the two-slot scan. The kernel accepts that result only when the
+DMA page contains a complete two-read scan. Device errors and runtime failures
+still produce a real fault and remain fatal to this boot proof. A separate QEMU
+boot corrupts sector four, requires rejection without a write or kernel panic,
+verifies the disk checksum is unchanged, and still requires complete device
+and DMA teardown.
 
 After the first domain is fully retired, the supervisor starts the same
 measured artifact under a fresh domain generation while preserving its logical
@@ -80,9 +81,11 @@ service identity. The restart constructor refuses a live registry slot or a
 remaining frame quarantine, creates a fresh capability table from the control
 plane's original authority, and allocates a new address space and DMA lease.
 The replacement must recover the exact record after initialization or repeat
-the same fail-closed rejection on corrupt media. Its second terminal fault must
+the same fail-closed rejection on corrupt media. Its second clean exit must
 again leave the device reset, authority revoked, and every owned frame scrubbed
-and released.
+and released. An independent stop-only auxiliary still executes a genuine
+invalid-opcode fault on every ordinary QEMU boot, proving that fault lifecycle
+metadata and containment remain distinct from clean completion.
 
 ## Deliberate limits
 

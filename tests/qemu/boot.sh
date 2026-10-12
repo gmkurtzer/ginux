@@ -125,6 +125,8 @@ fi
 
 if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$reboot_output_file" ||
     ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$reboot_output_file" ||
+    ! grep -q '^ginux: native service lifecycle ABI v0 clean exit validated in ring 3' "$reboot_output_file" ||
+    ! grep -q '^ginux: native volume service exited cleanly and device quiesced' "$reboot_output_file" ||
     ! grep -q '^ginux: native volume record recovered after reboot' "$reboot_output_file" ||
     ! grep -q '^ginux: replacement native volume domain generation started' "$reboot_output_file" ||
     ! grep -q '^ginux: native volume service identity survived replacement' "$reboot_output_file" ||
@@ -143,14 +145,15 @@ run_boot "$native_corrupt_output_file" "native-volume corruption" "$native_corru
 
 if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: native service lifecycle ABI v0 clean exit validated in ring 3' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: disk-backed volume recovered after reboot' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: corrupt native volume media rejected without modification' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume domain generation started' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native volume service identity survived replacement' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume service repeated fail-closed rejection' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: replacement native volume resources retired cleanly' "$native_corrupt_output_file" ||
-    ! grep -q '^ginux: native volume service fault contained and device quiesced' "$native_corrupt_output_file" ||
-    ! grep -q '^ginux: faulted DMA lease scrubbed and released' "$native_corrupt_output_file"; then
+    ! grep -q '^ginux: native volume service exited cleanly and device quiesced' "$native_corrupt_output_file" ||
+    ! grep -q '^ginux: retired DMA lease scrubbed and released' "$native_corrupt_output_file"; then
     cat "$native_corrupt_output_file"
     echo "Boot test failed: corrupt native volume media was not rejected and cleaned up safely." >&2
     exit 1
@@ -824,7 +827,7 @@ if ! grep -q '^ginux: isolated virtio queue geometry configured with owned DMA' 
 fi
 
 if ! grep -q '^ginux: isolated DMA lease initialized in ring 3' "$output_file" ||
-    ! grep -q '^ginux: faulted DMA lease scrubbed and released' "$output_file"; then
+    ! grep -q '^ginux: retired DMA lease scrubbed and released' "$output_file"; then
     echo "Boot test failed: the isolated DMA lease lifecycle was not completed safely." >&2
     exit 1
 fi
@@ -900,18 +903,18 @@ if ! grep -q '^ginux: virtio DMA validation followed hardware quiescence' "$outp
     exit 1
 fi
 
-if ! grep -q '^ginux: fault path quiesced device before DMA release' "$output_file"; then
+if ! grep -q '^ginux: clean exit quiesced device before DMA release' "$output_file"; then
     echo "Boot test failed: device teardown did not precede DMA lease release." >&2
     exit 1
 fi
 
-if ! grep -q '^ginux: faulted native volume service revoked' "$output_file"; then
-    echo "Boot test failed: the faulted native volume service retained authority." >&2
+if ! grep -q '^ginux: completed native volume service authority revoked' "$output_file"; then
+    echo "Boot test failed: the completed native volume service retained authority." >&2
     exit 1
 fi
 
 if ! grep -q '^ginux: native volume device quiesced before release' "$output_file"; then
-    echo "Boot test failed: the faulted native volume service left its device active." >&2
+    echo "Boot test failed: the completed native volume service left its device active." >&2
     exit 1
 fi
 
@@ -3227,6 +3230,14 @@ fi
 
 if ! grep -q '^ginux: stop-only auxiliary fault executed and contained' "$output_file"; then
     echo "Boot test failed: stop-only auxiliary fault was not contained." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: native volume service exited cleanly and device quiesced' "$output_file" ||
+    ! grep -q '^ginux: native service lifecycle ABI v0 clean exit validated in ring 3' "$output_file" ||
+    ! grep -q '^ginux: clean exit quiesced device before DMA release' "$output_file" ||
+    grep -q '^ginux: native volume service fault contained and device quiesced' "$output_file"; then
+    echo "Boot test failed: native service completion was not distinct from a fault." >&2
     exit 1
 fi
 

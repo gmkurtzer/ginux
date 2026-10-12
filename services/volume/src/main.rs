@@ -7,7 +7,10 @@ use core::{
     sync::atomic::{compiler_fence, Ordering},
 };
 
-use ginux_native_abi::NativeServiceBootV0;
+use ginux_native_abi::{
+    NativeServiceBootV0, NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
+    NATIVE_SERVICE_EXIT_REJECTED,
+};
 use ginux_volume_format::SECTOR_SIZE;
 use ginux_volume_service::{commit, recover_with_slot, BlockDevice, CommitError, ScanError};
 
@@ -348,11 +351,23 @@ unsafe fn write_u64(address: usize, value: u64) {
 }
 
 fn success() -> ! {
-    unsafe { asm!("ud2", options(noreturn)) }
+    exit(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
 fn rejected() -> ! {
-    unsafe { asm!("int3", options(noreturn)) }
+    exit(NATIVE_SERVICE_EXIT_REJECTED)
+}
+
+fn exit(status: u8) -> ! {
+    unsafe {
+        asm!(
+            "int 0x80",
+            in("rax") NATIVE_SERVICE_EXIT_OPERATION,
+            in("rdi") 0_u64,
+            in("rsi") u64::from(status),
+            options(noreturn),
+        )
+    }
 }
 
 fn fail() -> ! {

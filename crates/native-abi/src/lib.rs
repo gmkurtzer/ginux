@@ -4,6 +4,9 @@ pub const NATIVE_SERVICE_BOOT_MAGIC: u64 = 0x3042_5358_554e_4947;
 pub const NATIVE_SERVICE_BOOT_VERSION: u16 = 0;
 pub const NATIVE_SERVICE_BOOT_SIZE: u16 = 64;
 pub const NATIVE_SERVICE_FEATURE_VIRTIO_BLOCK: u32 = 1 << 0;
+pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
+pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
+pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,6 +94,14 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_SERVICE_BOOT_SIZE UINT16_C(64)"));
         assert!(header.contains("GINUX_NATIVE_SERVICE_FEATURE_VIRTIO_BLOCK UINT32_C(1)"));
         assert!(header.contains("sizeof(struct ginux_native_service_boot_v0) == 64"));
+    }
+
+    #[test]
+    fn lifecycle_binding_tracks_the_canonical_contract() {
+        let header = include_str!("../../../specs/abi/native-service-lifecycle-v0.h");
+        assert!(header.contains("GINUX_NATIVE_SERVICE_EXIT_OPERATION UINT64_C(2)"));
+        assert!(header.contains("GINUX_NATIVE_SERVICE_EXIT_COMPLETED UINT8_C(0)"));
+        assert!(header.contains("GINUX_NATIVE_SERVICE_EXIT_REJECTED UINT8_C(1)"));
     }
 
     #[test]
