@@ -467,10 +467,17 @@ mask and verifies the one-shot action is already cleared after return.
 Bounded `rt_sigtimedwait` synchronously consumes the lowest-numbered matching
 pending standard signal. It supports an immediate zero-time poll, optional
 128-byte `siginfo_t` output, and immediate consumption when a signal is already
-pending even if the supplied timeout is nonzero or null. Empty zero-time polls
-return `EAGAIN`; a wait that would block returns `ENOSYS` until scheduler-backed
-signal waits exist. Input, timeout, and output failures leave pending state
-unchanged.
+pending even if the supplied timeout is nonzero or null. A null-timeout wait
+with no pending match can also suspend one of the two bounded threads while its
+peer is runnable. A matching generated standard signal writes the optional
+information record, installs the signal number as the suspended syscall's
+return value, and makes that thread runnable without invoking its disposition.
+The measured workload proves this handoff from a futex-blocked child to its
+signal-waiting parent and requires all typed wait state to be reclaimed at
+exit. Empty zero-time polls return `EAGAIN`; positive-timeout sleeping,
+interruption by nonmatching signals, and waits without another runnable thread
+return `ENOSYS`. Input, timeout, and output failures leave pending and thread
+state unchanged.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
 Real/effective/saved UID and GID triples are also zero and are copied only

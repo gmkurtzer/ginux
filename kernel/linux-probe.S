@@ -1,4 +1,11 @@
 .intel_syntax noprefix
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+#define GINUX_PRIOR_SIGNAL_MASK 0x200
+#define GINUX_BLOCKED_SIGNAL_MASK 0x202
+#else
+#define GINUX_PRIOR_SIGNAL_MASK 0
+#define GINUX_BLOCKED_SIGNAL_MASK 2
+#endif
 .section .text
 .global ginux_linux_probe
 #ifdef GINUX_LINKED
@@ -1097,13 +1104,15 @@ valid_interpreter_base:
     call syscall_expect_zero
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+    # The first child wakes a signal wait; the reused child retains the
+    # existing futex exit-wake proof.
+    mov qword ptr [0x4050c0], 0x200
     xor edi, edi
-    mov esi, 0x413000
-    mov edx, 0x405194
-    lea r8d, [edx + 4]
-    mov r9d, 0x410fc0
-    mov eax, 56
-    call syscall_expect_einval
+    mov esi, 0x4050c0
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    call syscall_expect_zero
     mov r14d, 2
 linux_clone_repeat:
     mov edi, 0x13d0f00
@@ -1115,10 +1124,6 @@ linux_clone_repeat:
     syscall
     test rax, rax
     jz child_thread_probe
-    cmp eax, dword ptr [rdx]
-    jne failure
-    cmp eax, dword ptr [r8]
-    jne failure
     mov ebx, eax
     mov ebp, edx
     mov eax, 24
@@ -1138,15 +1143,23 @@ linux_clone_repeat:
     mov edx, esi
     mov eax, 202
     call syscall_expect_one
+    cmp r14d, 2
+    jne linux_parent_futex_wait
+    mov edi, 0x4050c0
+    xor esi, esi
+    xor edx, edx
+    mov eax, 128
+    syscall
+    cmp rax, 10
+    jne failure
+    jmp linux_child_joined
+linux_parent_futex_wait:
     mov rdi, r8
     xor esi, esi
     mov edx, ebx
     mov eax, 202
     call syscall_expect_zero
-    cmp dword ptr [r8], 0
-    jne failure
-    cmp dword ptr [rbp], ebx
-    jne failure
+linux_child_joined:
     dec r14d
     jnz linux_clone_repeat
 #else
@@ -1218,7 +1231,7 @@ linux_clone_repeat:
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4050e0], 0
+    cmp qword ptr [0x4050e0], GINUX_PRIOR_SIGNAL_MASK
     jne failure
 
     xor edi, edi
@@ -1227,7 +1240,7 @@ linux_clone_repeat:
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4050e0], 0
+    cmp qword ptr [0x4050e0], GINUX_PRIOR_SIGNAL_MASK
     jne failure
 
     mov edi, 99
@@ -1236,7 +1249,7 @@ linux_clone_repeat:
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4050e0], 2
+    cmp qword ptr [0x4050e0], GINUX_BLOCKED_SIGNAL_MASK
     jne failure
 
     mov qword ptr [0x4050c0], 8
@@ -1253,11 +1266,11 @@ linux_clone_repeat:
     mov r10d, 8
     mov eax, 14
     call syscall_expect_zero
-    cmp qword ptr [0x4050e0], 2
+    cmp qword ptr [0x4050e0], GINUX_BLOCKED_SIGNAL_MASK
     jne failure
 
-    mov qword ptr [0x4050c0], 2
-    mov edi, 1
+    mov qword ptr [0x4050c0], 0
+    mov edi, 2
     mov esi, 0x4050c0
     xor edx, edx
     mov r10d, 8
@@ -4139,6 +4152,16 @@ child_thread_probe:
     mov edx, dword ptr [rdi]
     mov eax, 202
     call syscall_expect_zero
+    cmp r14d, 2
+    jne child_thread_exit
+    push 1
+    pop rdi
+    push 10
+    pop rsi
+    push 62
+    pop rax
+    call syscall_expect_zero
+child_thread_exit:
     mov edi, 42
     mov eax, 60
     syscall

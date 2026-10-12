@@ -838,10 +838,21 @@ optionally copy its complete 128-byte generated `siginfo_t`; only then are that
 pending bit and its source code cleared. Invalid set, timeout, or matching
 information-output ranges return `-EFAULT`, invalid sizes or timespec fields
 return `-EINVAL`, and none consume pending state. A valid zero timespec with no
-match returns `-EAGAIN`. Null or positive timeouts with no match return
-`-ENOSYS`: scheduler-backed sleeping waits and interruption are not yet part of
-this bounded profile. The measured runtime proves every rejection, successful
-`SIGUSR1`/`SI_USER` consumption, empty polling, and mask cleanup.
+match returns `-EAGAIN`. With no pending match, a null timeout can block the
+current thread when the other bounded thread is ready. The wait records the
+requested standard-signal mask and optional prevalidated information pointer in
+typed scheduler state. A matching `kill`, `tkill`, or `tgkill` generation
+synchronously consumes that signal before disposition processing, copies its
+generated information when requested, installs the signal number in the saved
+syscall return context, and marks the waiter ready. The generator then returns
+normally in the peer. This profile selects the first matching blocked slot and
+supports at most the existing two-thread execution graph. Null waits with no
+runnable peer and positive-timeout waits with no pending match return `-ENOSYS`;
+timed sleeping, interruption by nonmatching signals, and general signal wait
+queues remain unsupported. The measured runtime proves every immediate
+rejection, pending `SIGUSR1`/`SI_USER` consumption, empty polling, mask cleanup,
+and a child-to-parent scheduler wake. Teardown requires the wait kind, mask,
+output pointer, and saved thread state to be fully reclaimed.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE`, or a zero-flag or
 `SS_AUTODISARM` stack of at least
