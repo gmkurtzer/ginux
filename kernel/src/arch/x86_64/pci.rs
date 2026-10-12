@@ -247,12 +247,39 @@ impl VirtioNetworkDevice {
         )
     }
 
-    fn notify_region(self) -> Option<(u64, usize)> {
+    pub(crate) fn notify_region(self) -> Option<(u64, usize)> {
         region_bounds(
             self.notify_bar_address,
             self.notify_offset,
             self.notify_length,
         )
+    }
+
+    pub(crate) fn msix_table_region(self) -> Option<(u64, usize)> {
+        region_bounds(
+            self.msix.table_bar_address,
+            self.msix.table_offset,
+            self.msix.table_length,
+        )
+    }
+
+    pub(crate) fn msix_pba_region(self) -> Option<(u64, usize)> {
+        region_bounds(
+            self.msix.pba_bar_address,
+            self.msix.pba_offset,
+            self.msix.pba_length,
+        )
+    }
+
+    pub(crate) fn msix_mmio_span(self) -> Option<(u64, usize)> {
+        let (table, table_length) = self.msix_table_region()?;
+        let (pba, pba_length) = self.msix_pba_region()?;
+        let start = table.min(pba);
+        let end = table
+            .checked_add(table_length as u64)?
+            .max(pba.checked_add(pba_length as u64)?);
+        let length = usize::try_from(end.checked_sub(start)?).ok()?;
+        (length != 0).then_some((start, length))
     }
 }
 
@@ -471,6 +498,16 @@ fn discover_virtio_device<T: Copy>(
 pub(crate) fn network_function_is_disabled(device: VirtioNetworkDevice) -> bool {
     let command = network_function_command(device);
     command & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER) == 0
+}
+
+pub(crate) fn network_msix_is_disabled(device: VirtioNetworkDevice) -> bool {
+    device
+        .msix
+        .capability_offset
+        .checked_add(2)
+        .is_some_and(|offset| unsafe {
+            read_config_u16(device.bus, device.device, device.function, offset) & MSIX_ENABLE == 0
+        })
 }
 
 pub(crate) fn network_function_command(device: VirtioNetworkDevice) -> u16 {

@@ -100,6 +100,8 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net IOMMU endpoint scope resolved exactly' "$output_file" ||
     ! grep -q '^ginux: bounded uncached virtio-net common mapping active' "$output_file" ||
     ! grep -q '^ginux: bounded read-only uncached virtio-net device mapping active' "$output_file" ||
+    ! grep -q '^ginux: bounded uncached virtio-net notification mapping active' "$output_file" ||
+    ! grep -q '^ginux: bounded uncached virtio-net MSI-X mapping active' "$output_file" ||
     ! grep -q '^ginux: virtio-net cacheable alias absent' "$output_file" ||
     ! grep -q '^ginux: virtio-net accepted features: 12884901920' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues available: 3' "$output_file" ||
@@ -109,6 +111,7 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net transmit notification address: [0-9]' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues remain disabled and DMA-unbound' "$output_file" ||
     ! grep -q '^ginux: invalid virtio-net queue geometry rejected' "$output_file" ||
+    ! grep -q '^ginux: virtio-net MSI-X remained disabled' "$output_file" ||
     ! grep -q '^ginux: generation-owned virtio-net DMA page allocated' "$output_file" ||
     ! grep -q '^ginux: bounded virtio-net RX/TX DMA layout validated' "$output_file" ||
     ! grep -q '^ginux: malformed virtio-net DMA layouts rejected' "$output_file" ||

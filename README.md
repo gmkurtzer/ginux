@@ -54,6 +54,12 @@ inactive hierarchy and DMA lease. Translation and bus mastering stay disabled
 throughout. See
 [Virtio Network DMA Confinement v0](specs/kernel/virtio-network-dma-v0.md).
 See [Virtio Network Initialization v0](specs/kernel/virtio-network-init-v0.md).
+The notification capability and exact MSI-X table/PBA span are then added as
+separate writable, uncached, NX supervisor mappings. The sealed MMIO table has
+exactly seven spans, both queue notification registers resolve inside their
+mapping, cacheable aliases are absent, and MSI-X plus all PCI authority remain
+disabled. See
+[Virtio Network Queue MMIO v0](specs/kernel/virtio-network-mmio-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
 are removed before page-table activation, and the complete sealed MMIO table

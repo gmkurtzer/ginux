@@ -20,8 +20,10 @@ disjoint from each other and from the virtio-blk, block MSI-X, and VT-d
 mappings, and the complete MMIO page table must contain no other present entry.
 No cacheable identity alias may remain.
 
-The notification, ISR, MSI-X table, and pending-bit regions are not mapped by
-this milestone.
+The initialization phase does not require notification, ISR, MSI-X table, or
+pending-bit access. The notification and MSI-X regions are mapped without use
+by the subsequent [Virtio Network Queue MMIO v0](virtio-network-mmio-v0.md)
+prerequisite; the ISR region remains unmapped.
 
 ## Initialization
 
@@ -55,7 +57,8 @@ for both. Queue enable must remain zero, the MSI-X vector must remain
 `NO_VECTOR`, and all three DMA-ring addresses must remain zero. The two
 notification offsets must resolve to distinct aligned 16-bit registers within
 the discovered notification capability; the profile places them four bytes
-apart. That notification page remains unmapped and is never accessed.
+apart. During this initialization phase that notification page is unmapped and
+never accessed.
 
 Boot-time checks reject undersized and non-power-of-two capacities, zero and
 overflowing notification geometry, and any queue that already has interrupt,
