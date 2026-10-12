@@ -50,6 +50,6 @@ persistence claim.
 
 The separate
 [Virtio Block Initialization v0](virtio-block-init-v0.md) contract maps the
-validated common region, resets the device, and negotiates a minimal feature
+validated configuration regions, resets the device, and negotiates a minimal feature
 set while bus mastering remains disabled. DMA authority and virtqueue
 activation still require a separate milestone and failure-containment contract.

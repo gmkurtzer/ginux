@@ -563,6 +563,46 @@ if ! grep -q '^ginux: per-domain physical frame budgets enforced' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: generation-owned virtio DMA frame allocated' "$output_file"; then
+    echo "Boot test failed: virtio DMA memory was not generation-owned." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: malformed virtio queue geometry rejected' "$output_file"; then
+    echo "Boot test failed: malformed virtio queue geometry was not rejected." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: bounded virtio sector zero read completed' "$output_file"; then
+    echo "Boot test failed: the bounded virtio sector read did not complete." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio read guard bytes preserved' "$output_file"; then
+    echo "Boot test failed: the virtio read crossed its data bounds." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio used-ring completion validated' "$output_file"; then
+    echo "Boot test failed: the virtio used-ring completion was invalid." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: deterministic virtio capacity sectors: 2048' "$output_file"; then
+    echo "Boot test failed: the deterministic virtio disk geometry changed." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio bus mastering revoked after read' "$output_file"; then
+    echo "Boot test failed: virtio bus mastering remained enabled after the read." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: virtio DMA frame scrubbed and released' "$output_file"; then
+    echo "Boot test failed: the virtio DMA lease was not retired." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated address space active' "$output_file"; then
     echo "Boot test failed: isolated address-space activation failed." >&2
     exit 1

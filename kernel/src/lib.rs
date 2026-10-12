@@ -239,6 +239,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some((virtio_common_physical, virtio_common_length)) = virtio_block.common_region() else {
         kernel_fail("ginux: invalid virtio common configuration range\r\n");
     };
+    let Some((virtio_mmio_physical, virtio_mmio_length)) = virtio_block.mmio_span() else {
+        kernel_fail("ginux: invalid virtio MMIO span\r\n");
+    };
 
     let Some(memory_map_end) = boot_info
         .memory_map_size
@@ -302,8 +305,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             &image,
             &required_addresses,
             &guard_pages,
-            virtio_common_physical,
-            virtio_common_length,
+            virtio_mmio_physical,
+            virtio_mmio_length,
         )
     }) else {
         kernel_fail("ginux: page-table transition failed\r\n");
@@ -492,9 +495,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
         || !arch::x86_64::paging::mmio_translation_is_bounded(
             virtio_mmio,
-            virtio_common_physical,
-            virtio_common_length,
+            virtio_mmio_physical,
+            virtio_mmio_length,
         )
+        || virtio_mmio
+            .address(virtio_common_physical, virtio_common_length)
+            .is_none()
     {
         kernel_fail("ginux: virtio MMIO mapping invalid\r\n");
     }
@@ -632,6 +638,48 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: tracked frame release ownership verified");
     serial_write("\r\nginux: stale frame leases rejected");
     serial_write("\r\nginux: per-domain physical frame budgets enforced");
+    if !arch::x86_64::pci::verify_queue_rejections() {
+        kernel_fail("\r\nginux: virtio queue contract invalid\r\n");
+    }
+    let Some([virtio_dma_frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+        kernel_fail("\r\nginux: virtio DMA frame allocation failed\r\n");
+    };
+    if !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[virtio_dma_frame]) {
+        kernel_fail("\r\nginux: virtio DMA frame ownership invalid\r\n");
+    }
+    let Some(virtio_dma_virtual) = virtio_dma_frame.direct_map_address() else {
+        kernel_fail("\r\nginux: virtio DMA frame is outside direct map\r\n");
+    };
+    // SAFETY: The allocator returned one exclusively kernel-owned page, its
+    // direct-map alias covers the complete physical frame, and the lease stays
+    // live until the device has reset and bus mastering is disabled.
+    let Some(virtio_read) = (unsafe {
+        arch::x86_64::pci::read_zero_sector(
+            virtio_block,
+            virtio_mmio,
+            virtio_dma_frame.address(),
+            virtio_dma_virtual,
+        )
+    }) else {
+        kernel_fail("\r\nginux: bounded virtio block read failed\r\n");
+    };
+    if virtio_read.capacity_sectors != 2048 || virtio_read.used_length != 513 {
+        kernel_fail("\r\nginux: deterministic virtio block geometry invalid\r\n");
+    }
+    if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[virtio_dma_frame])
+        || memory::any_frame_lease_live(&[virtio_dma_frame])
+    {
+        kernel_fail("\r\nginux: virtio DMA frame retirement failed\r\n");
+    }
+    serial_write("\r\nginux: generation-owned virtio DMA frame allocated");
+    serial_write("\r\nginux: malformed virtio queue geometry rejected");
+    serial_write("\r\nginux: bounded virtio sector zero read completed");
+    serial_write("\r\nginux: virtio read guard bytes preserved");
+    serial_write("\r\nginux: virtio used-ring completion validated");
+    serial_write("\r\nginux: deterministic virtio capacity sectors: ");
+    serial_write_u64(virtio_read.capacity_sectors);
+    serial_write("\r\nginux: virtio bus mastering revoked after read");
+    serial_write("\r\nginux: virtio DMA frame scrubbed and released");
     if !address_space::verify_isolated_user_mapping() {
         kernel_fail("\r\nginux: isolated address-space test failed\r\n");
     }
@@ -1368,6 +1416,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         )
         || !arch::x86_64::paging::static_page_tables_are_read_only()
         || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
+        || !arch::x86_64::pci::bus_master_is_disabled(virtio_block)
+        || !arch::x86_64::pci::device_is_reset(virtio_block, virtio_mmio)
         || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
         || !arch::x86_64::paging::identity_range_is_read_only_data(
             boot_info.manifest as usize,

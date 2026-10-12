@@ -25,7 +25,8 @@ map's page-directory hierarchy rather than using separately permissive leaves. C
 read-only, non-present, and NX decision—including guard pages, kernel image
 permissions, and sealed page-table pages—is identical through both aliases.
 The final higher-half pointer-table entry owns one bounded MMIO directory and
-table. It maps only the validated virtio common-configuration pages as
+table. It maps only the contiguous span covering the four validated virtio
+configuration regions as
 supervisor-only, writable, NX, cache-disabled memory; it has no low identity
 alias for the device's above-4-GiB physical BAR.
 Every derived domain root copies both supervisor-only kernel PML4 entries, and

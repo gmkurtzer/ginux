@@ -10,8 +10,10 @@ activating a queue.
 
 ## MMIO mapping
 
-Before the kernel seals its static page tables, it maps only the validated
-common-configuration range into a fixed supervisor-only higher-half window.
+Before the kernel seals its static page tables, it maps the smallest contiguous
+span covering the validated common, notification, ISR, and device regions into
+a fixed supervisor-only higher-half window. Initialization itself accesses
+only the common region. The mapping:
 The mapping:
 
 - accepts a nonempty range above the 4 GiB transitional direct map;
@@ -52,6 +54,6 @@ remains disabled, and no interrupt or DMA operation is possible. The device is
 returned to reset before general kernel initialization continues. No sector is
 read or written and this contract adds no persistence claim.
 
-The next milestone must allocate generation-owned queue memory, validate the
-queue geometry, and prove a bounded read request. Enabling bus mastering must
-be coupled to those exact live leases and reversed before they are retired.
+The separate [Virtio Block Read v0](virtio-block-read-v0.md) contract allocates
+generation-owned queue memory, validates queue geometry, and proves one bounded
+read request. IOMMU-enforced confinement remains future work.
