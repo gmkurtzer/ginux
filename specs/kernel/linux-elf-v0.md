@@ -424,7 +424,12 @@ artifact equality is not an admission condition. Substituting a static main,
 reversing the DSOs, or truncating the interpreter is rejected. `execve("/init")`
 consumes this exact plan: it atomically installs fresh interpreter pages,
 publishes them as the new active-image seed, retires every old interpreter,
-main, and dependency lease, and resets the userspace mapping contracts. The
+main, and dependency lease, and resets the userspace mapping contracts. It also
+materializes the bounded initial-stack image in a fresh zeroed RW/NX frame and
+replaces the primary stack leaf in that same transaction. The old stack address,
+permissions, and exact generation-tagged lease are preconditions of the commit;
+forced verification failure restores both the complete old image and old stack,
+while success scrubs and releases the old stack lease before publication. The
 replacement interpreter then maps the same authenticated main and two DSOs and
 reconstructs the complete active-image record. Initial and sibling TLS pages
 are rematerialized in place from all three authenticated templates, and the
@@ -434,6 +439,10 @@ argument, one environment entry, one live thread, the fixed two-DSO graph, and
 the existing bounded load windows. The internal `linux/init` node is exposed as
 canonical `/init`; the replacement main validates that `/proc/self/exe`
 returns exactly those five bytes before it can complete.
+Post-exit validation requires the stack leaf to name the fresh lease, rejects
+the retired generation even if its physical address has since been reused, and
+reclaims the replacement stack only after the process page-table root is
+inactive.
 
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF

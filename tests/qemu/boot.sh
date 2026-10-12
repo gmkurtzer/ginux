@@ -687,6 +687,9 @@ for marker in \
     'measured-root interpreted Linux exec committed' \
     'interpreted Linux exec graph remapped' \
     'complete interpreted Linux graph retired at exec' \
+    'interpreted Linux exec stack replaced atomically' \
+    'old interpreted Linux stack lease retired at exec' \
+    'replacement Linux stack lease reclaimed' \
     'interpreted Linux TLS state rematerialized' \
     'canonical interpreted Linux executable identity validated'; do
     if ! grep -q "^ginux: ${marker}" "$output_file"; then

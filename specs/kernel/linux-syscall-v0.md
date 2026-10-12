@@ -401,18 +401,22 @@ environment entry, authenticates the fixed interpreter/main/two-DSO graph,
 atomically installs fresh interpreter pages, and retires the complete previous
 graph with exact generation-tagged leases. It then resets the main and DSO
 mapping contracts so the replacement interpreter can install the authenticated
-main and dependencies again. Both preallocated TLS pages are zeroed and
+main and dependencies again. The kernel materializes the complete bounded
+initial stack in a newly allocated zeroed RW/NX frame and replaces the old
+primary-stack leaf in the same rollback-capable transaction as the interpreter.
+Commit requires the old stack's exact live generation and permissions, then
+scrubs and releases that lease; teardown reclaims the replacement stack after
+the process root is inactive. Both preallocated TLS pages are zeroed and
 rematerialized from the authenticated templates, the initial FS base is
 restored, ignored signal dispositions are preserved from the observed
 pre-exec set, caught dispositions are cleared, and RELRO is applied again.
 The replacement main emits the kernel-observed `DYNEXEC` completion by exiting
 with status 42. Other dynamic targets, general dependency resolution,
 shebangs, and arbitrary interpreted argument or environment vectors are
-outside this version. The process page-table root, heap, primary stack frame,
-preallocated sibling stack, and TLS frame leases remain allocated across this
-transaction; TLS contents are fully reconstructed, while only the bounded
-512-byte initial-stack region is rebuilt. Replacing those ancillary frame
-leases is a later lifecycle milestone.
+outside this version. The process page-table root, heap, preallocated sibling
+stack, and TLS frame leases remain allocated across this transaction; TLS
+contents are fully reconstructed in their retained leases. Replacing the heap,
+page-table, sibling-stack, and TLS frame leases is a later lifecycle milestone.
 
 `rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
 or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath

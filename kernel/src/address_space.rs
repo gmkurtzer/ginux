@@ -621,6 +621,7 @@ pub(crate) fn verify_linux_elf_mapping(
                 cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
+                    stack_frame: frames[15],
                     initial_fs_base: 0,
                     tls: 0,
                     tls_size: 0,
@@ -1214,6 +1215,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let mut main_frames = [None; 8];
     let mut dependency_frames = [[None; 8]; 2];
     let mut exec_frames = [None; cpu::LINUX_EXEC_MAPPING_LIMIT];
+    let mut exec_stack_frame = None;
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [
@@ -1584,6 +1586,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 cpu::verify_linux_elf_entry(cpu::LinuxElfExecution {
                     entry: startup.initial_entry as usize,
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
+                    stack_frame: frames[10],
                     initial_fs_base: tls_base as usize,
                     tls: tls_virtual_page as usize + tls_start_offset,
                     tls_size: tls_extent_size,
@@ -1623,6 +1626,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             main_frames = execution_result.main_frames;
             dependency_frames = execution_result.dependency_frames;
             exec_frames = execution_result.exec_frames;
+            exec_stack_frame = execution_result.exec_stack_frame;
             let expected_active_image_count = initial_image_count
                 + main_mappings
                     .iter()
@@ -1632,6 +1636,14 @@ pub(crate) fn verify_interpreted_elf_mapping(
             let executed = observed
                 && execution_result.valid
                 && execution_result.active_image_mapping_count == expected_active_image_count;
+            let exec_stack_mapping_valid = executed
+                && exec_stack_frame.is_some_and(|frame| {
+                    main_entries.add(stack_indexes[3]).read()
+                        & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                        == frame.address() | PRESENT | USER | WRITABLE | NO_EXECUTE
+                        && frame != frames[10]
+                        && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frames[10]])
+                });
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
             let tls_runtime_valid = executed
@@ -1900,6 +1912,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             if !sibling_stack_runtime_valid {
                 crate::serial_write_bytes(b"\r\nginux: sibling Linux stack runtime invalid");
             }
+            if !exec_stack_mapping_valid {
+                crate::serial_write_bytes(b"\r\nginux: replacement Linux stack invalid");
+            }
             if !main_permissions_valid {
                 crate::serial_write_bytes(b"\r\nginux: userspace main mapping invalid");
             }
@@ -1940,6 +1955,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     && tls_runtime_valid
                     && sibling_tls_runtime_valid
                     && sibling_stack_runtime_valid
+                    && exec_stack_mapping_valid
                     && main_permissions_valid
                     && main_image_valid
                     && dependency_permissions_valid
@@ -1952,9 +1968,11 @@ pub(crate) fn verify_interpreted_elf_mapping(
         }
     })()
     .unwrap_or(false);
-    let cleared = frames.iter().all(|frame| unsafe {
+    let cleared = frames.iter().enumerate().all(|(index, frame)| unsafe {
         if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame]) {
             zero_frame(frame.address()).is_some()
+        } else if index == 10 && exec_stack_frame.is_some() {
+            true
         } else {
             frame_is_zero(frame.address())
         }
@@ -1976,6 +1994,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
         exec_frames_released &= prepare_linux_frame(frame.address(), &[])
             && memory::release_frames(memory::FrameOwner::KERNEL, [frame]);
     }
+    let exec_stack_frame_released = exec_stack_frame.is_some_and(|frame| {
+        prepare_linux_frame(frame.address(), &[])
+            && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
+    });
     let mut original_frames_released = sibling_resources_scrubbed;
     if sibling_resources_scrubbed {
         for frame in frames {
@@ -2003,6 +2025,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     valid
         && original_frames_released
         && exec_frames_released
+        && exec_stack_frame_released
         && main_frames_released
         && dependency_frames_released
         && frame_count_restored
@@ -2254,7 +2277,8 @@ pub(crate) fn replace_current_linux_image(
     mappings: &[cpu::LinuxExecMapping],
     old_mappings: &[cpu::LinuxActiveImageMapping],
 ) -> bool {
-    replace_current_linux_image_inner(mappings, old_mappings, false)
+    verify_current_linux_image_rollback(mappings, old_mappings)
+        && replace_current_linux_image_inner(mappings, old_mappings, false)
 }
 
 fn verify_current_linux_image_rollback(
@@ -2508,6 +2532,52 @@ pub(crate) fn materialize_linux_exec_frame(
     // not-yet-published exec transaction, and covers exactly one page.
     let output = unsafe { &mut *(address as *mut [u8; PAGE_SIZE]) };
     crate::linux_elf::materialize_page(segment, page_index, output)
+}
+
+pub(crate) fn materialize_linux_exec_stack_frame(
+    frame: memory::FrameLease,
+    offset: usize,
+    image: &[u8],
+) -> bool {
+    if offset
+        .checked_add(image.len())
+        .is_none_or(|end| end > PAGE_SIZE)
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return false;
+    }
+    let Some(address) = frame.direct_map_address() else {
+        return false;
+    };
+    // SAFETY: this generation-tagged frame is live, private to the pending
+    // exec transaction, and has not yet been installed in userspace.
+    let output = unsafe { &mut *(address as *mut [u8; PAGE_SIZE]) };
+    output.fill(0);
+    output[offset..offset + image.len()].copy_from_slice(image);
+    true
+}
+
+pub(crate) fn current_linux_mapping_matches(
+    address: u64,
+    frame: memory::FrameLease,
+    writable: bool,
+    executable: bool,
+) -> bool {
+    if address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || writable && executable
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+    {
+        return false;
+    }
+    let flags = PRESENT
+        | USER
+        | if writable { WRITABLE } else { 0 }
+        | if executable { 0 } else { NO_EXECUTE };
+    current_linux_leaf(address).is_some_and(|entry| unsafe {
+        entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
+            == frame.address() | flags
+    })
 }
 
 pub(crate) fn unmap_current_linux_page(address: u64, frame: u64) -> bool {
