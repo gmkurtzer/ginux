@@ -19,6 +19,10 @@ The live QEMU proof also returns an older version to one compiled service
 generation. Its fatal path is contained before the virtio queue becomes active;
 the inactive device, capability, address space, and zero DMA lease are retired
 before a compatible replacement generation recovers persistent state.
+A second generation receives the valid v4 scalar discovery word but operation
+10 returns a descriptor with a nonzero reserved field. It must take the same
+pre-device fatal path, retire completely, and permit another compatible
+generation to recover.
 
 An x86-64 native service exits through control ABI operation 2. It places 2 in
 `RAX`, a zero reserved capability value in `RDI`, and an unsigned eight-bit

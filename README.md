@@ -87,8 +87,9 @@ addresses, DMA device address, and opaque capability are independently
 validated. The compiled service also negotiates control ABI v4 and validates
 its fixed structured descriptor plus required capability/fault-containment
 features before touching MMIO. One live generation
-is deliberately offered an older version and must fault before device activation;
-the kernel retires it and a fresh compatible generation recovers persistent state.
+is deliberately offered an older version and another receives a malformed
+descriptor. Both must fault before device activation; the kernel retires each
+and fresh compatible generations recover persistent state.
 A fresh boot commits generation one to reserved sectors four and
 five; a second boot recovers the exact record without rewriting it. Its
 corruption boot invalidates the committed native slot while preserving the

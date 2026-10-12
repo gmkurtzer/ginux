@@ -93,7 +93,10 @@ the fixed v4 structured control descriptor before reading bootstrap state. The
 incompatible generation executes the compiled service's fatal path before
 device activation; the kernel verifies the queue was inactive, contains the
 fault, revokes all resources, and starts a compatible generation that recovers
-the exact record or preserves corruption rejection. An independent stop-only auxiliary still executes a genuine
+the exact record or preserves corruption rejection. A separate generation gets
+valid scalar discovery but a descriptor with a nonzero reserved field and must
+undergo the same containment and fresh-generation recovery. An independent
+stop-only auxiliary still executes a genuine
 invalid-opcode fault on every ordinary QEMU boot, proving that fault lifecycle
 metadata and containment remain distinct from clean completion. A later run of
 the compiled service receives a structurally valid but intentionally invalid

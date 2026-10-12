@@ -472,6 +472,7 @@ static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static CONTROL_DISCOVERY_OVERRIDE_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static CONTROL_DISCOVERY_OVERRIDE_WORD: AtomicU64 = AtomicU64::new(0);
+static CONTROL_DESCRIPTOR_OVERRIDE_DOMAIN: AtomicU64 = AtomicU64::new(0);
 const PROCESS_CHILD_PROBE_IDLE: u8 = 0;
 const PROCESS_CHILD_PROBE_EXPECT_CONTEXT: u8 = 1;
 const PROCESS_CHILD_PROBE_EXPECT_EXIT: u8 = 2;
@@ -14238,6 +14239,13 @@ pub(crate) fn force_next_control_discovery(domain_id: u64, discovery_word: u64) 
     true
 }
 
+pub(crate) fn force_next_control_descriptor_reserved(domain_id: u64) -> bool {
+    domain_id != 0
+        && CONTROL_DESCRIPTOR_OVERRIDE_DOMAIN
+            .compare_exchange(0, domain_id, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+}
+
 fn dispatch_charged_call(
     number: u64,
     capability: u64,
@@ -14302,7 +14310,7 @@ fn dispatch_charged_call(
         }
         8 => blocking_receive(caller_domain, capability, frame),
         9 => console_write_buffer(caller_domain, capability, frame),
-        10 => write_abi_descriptor(frame),
+        10 => write_abi_descriptor(caller_domain, frame),
         11 => write_fault_descriptor(caller_domain, capability, frame),
         12 => write_lifecycle_descriptor(caller_domain, capability, frame),
         13 => write_ipc_delivery_descriptor(caller_domain, capability, frame),
@@ -15098,11 +15106,17 @@ fn console_write_buffer(domain_id: u64, capability: u64, frame: *const UserTrapF
     length as u64
 }
 
-fn write_abi_descriptor(frame: *const UserTrapFrame) -> u64 {
-    let descriptor = control_abi::descriptor();
+fn write_abi_descriptor(caller_domain: u64, frame: *const UserTrapFrame) -> u64 {
+    let mut descriptor = control_abi::descriptor();
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         return u64::MAX - 2;
     };
+    if CONTROL_DESCRIPTOR_OVERRIDE_DOMAIN
+        .compare_exchange(caller_domain, 0, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        descriptor[12] = 1;
+    }
     if frame.second_argument() != descriptor.len() as u64
         || !address_space::copy_to_current_user(frame.first_argument(), &descriptor)
     {

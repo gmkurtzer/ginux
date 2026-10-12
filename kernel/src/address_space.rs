@@ -5887,6 +5887,7 @@ pub(crate) enum NativeVolumeOutcome {
 enum NativeVolumeMode {
     Normal,
     IncompatibleAbi,
+    IncompatibleDescriptor,
     Fault,
     CancelNotified,
 }
@@ -5957,6 +5958,27 @@ pub(crate) fn verify_native_volume_service_incompatible_abi(
         apic,
         Some(restart_identity),
         NativeVolumeMode::IncompatibleAbi,
+    )
+}
+
+pub(crate) fn verify_native_volume_service_incompatible_descriptor(
+    image: &crate::native_elf::NativeImage<'_>,
+    register_physical: u64,
+    device: VirtioBlockDevice,
+    mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+    restart_identity: u64,
+) -> Option<NativeVolumeRun> {
+    verify_native_volume_service_run(
+        image,
+        register_physical,
+        device,
+        mapping,
+        msix_mapping,
+        apic,
+        Some(restart_identity),
+        NativeVolumeMode::IncompatibleDescriptor,
     )
 }
 
@@ -6074,7 +6096,9 @@ fn verify_native_volume_service_run(
     let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
     let expected_timeouts = timer::device_wait_timeout_count().checked_add(match mode {
         NativeVolumeMode::Normal => 1,
-        NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::Fault => 0,
+        NativeVolumeMode::IncompatibleAbi
+        | NativeVolumeMode::IncompatibleDescriptor
+        | NativeVolumeMode::Fault => 0,
         NativeVolumeMode::CancelNotified => 2,
     })?;
     NATIVE_VOLUME_COMPLETION.store(0, Ordering::Release);
@@ -6128,6 +6152,12 @@ fn verify_native_volume_service_run(
         crate::serial_write_bytes(b"\r\nginux: native control ABI mismatch injection failed");
         return None;
     }
+    if mode == NativeVolumeMode::IncompatibleDescriptor
+        && !cpu::force_next_control_descriptor_reserved(auxiliary)
+    {
+        crate::serial_write_bytes(b"\r\nginux: native control descriptor injection failed");
+        return None;
+    }
     if mode == NativeVolumeMode::CancelNotified
         && !pci::force_next_notified_wait_timeout(auxiliary, INTERRUPT_REQUEST)
     {
@@ -6144,7 +6174,9 @@ fn verify_native_volume_service_run(
     let exit_status = domain::last_lifecycle_event_detail();
     let fault = matches!(
         mode,
-        NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::Fault
+        NativeVolumeMode::IncompatibleAbi
+            | NativeVolumeMode::IncompatibleDescriptor
+            | NativeVolumeMode::Fault
     )
     .then(|| {
         domain::delivered_fault_descriptor().and_then(|descriptor| {
@@ -6167,6 +6199,9 @@ fn verify_native_volume_service_run(
     .flatten();
     let outcome = match (mode, exit_status, completion, fault) {
         (NativeVolumeMode::IncompatibleAbi, Some(0), 0, Some((13, _, Some(0xf4)))) => {
+            Some(NativeVolumeOutcome::IncompatibleAbi)
+        }
+        (NativeVolumeMode::IncompatibleDescriptor, Some(0), 0, Some((13, _, Some(0xf4)))) => {
             Some(NativeVolumeOutcome::IncompatibleAbi)
         }
         (NativeVolumeMode::Fault, Some(0), 0, Some((13, _, Some(0xf4)))) => {
@@ -6200,7 +6235,9 @@ fn verify_native_volume_service_run(
     };
     let expected_kind = if matches!(
         mode,
-        NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::Fault
+        NativeVolumeMode::IncompatibleAbi
+            | NativeVolumeMode::IncompatibleDescriptor
+            | NativeVolumeMode::Fault
     ) {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
     } else {
@@ -6230,10 +6267,12 @@ fn verify_native_volume_service_run(
         && domain::last_lifecycle_event_has_fault()
             == Some(matches!(
                 mode,
-                NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::Fault
+                NativeVolumeMode::IncompatibleAbi
+                    | NativeVolumeMode::IncompatibleDescriptor
+                    | NativeVolumeMode::Fault
             ))
         && match mode {
-            NativeVolumeMode::IncompatibleAbi => {
+            NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::IncompatibleDescriptor => {
                 unsafe_device_quiesce_was_active(auxiliary) == Some(false)
             }
             NativeVolumeMode::Fault => unsafe_device_quiesce_was_active(auxiliary) == Some(true),

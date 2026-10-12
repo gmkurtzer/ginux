@@ -1900,6 +1900,93 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: post-ABI-rejection outcome unavailable\r\n");
     };
     serial_write("\r\nginux: compatible native service recovered after ABI rejection");
+    let incompatible_descriptor_run =
+        address_space::verify_native_volume_service_incompatible_descriptor(
+            &volume_image,
+            virtio_status_physical,
+            virtio_block,
+            virtio_mmio,
+            virtio_msix_mmio,
+            &local_apic,
+            native_volume_run.service_identity,
+        );
+    let incompatible_descriptor_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    let incompatible_descriptor_valid =
+        incompatible_descriptor_run
+            .as_ref()
+            .is_some_and(|incompatible| {
+                incompatible.domain != native_volume_run.domain
+                    && incompatible.domain != replacement_volume_run.domain
+                    && incompatible.domain != incompatible_volume_run.domain
+                    && incompatible.domain != recovered_after_incompatible.domain
+                    && incompatible.service_identity == native_volume_run.service_identity
+                    && incompatible.outcome == address_space::NativeVolumeOutcome::IncompatibleAbi
+            });
+    if !incompatible_descriptor_valid || !incompatible_descriptor_quiesced {
+        serial_write("\r\nginux: incompatible native descriptor valid/quiesced: ");
+        serial_write_u64(u64::from(incompatible_descriptor_valid));
+        serial_write(" ");
+        serial_write_u64(u64::from(incompatible_descriptor_quiesced));
+        kernel_fail("\r\nginux: incompatible native descriptor invariant failed\r\n");
+    }
+    let Some(incompatible_descriptor_run) = incompatible_descriptor_run else {
+        kernel_fail("\r\nginux: incompatible native descriptor outcome unavailable\r\n");
+    };
+    serial_write(
+        "\r\nginux: malformed native control descriptor rejected before device activation",
+    );
+    serial_write("\r\nginux: malformed descriptor service generation retired cleanly");
+    let recovered_after_descriptor = address_space::verify_native_volume_service(
+        &volume_image,
+        virtio_status_physical,
+        virtio_block,
+        virtio_mmio,
+        virtio_msix_mmio,
+        &local_apic,
+        Some(native_volume_run.service_identity),
+    );
+    let recovered_after_descriptor_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    let recovered_after_descriptor_valid =
+        recovered_after_descriptor
+            .as_ref()
+            .is_some_and(|recovered| {
+                recovered.domain != native_volume_run.domain
+                    && recovered.domain != replacement_volume_run.domain
+                    && recovered.domain != incompatible_volume_run.domain
+                    && recovered.domain != recovered_after_incompatible.domain
+                    && recovered.domain != incompatible_descriptor_run.domain
+                    && recovered.service_identity == native_volume_run.service_identity
+                    && recovered.outcome
+                        == match native_volume_outcome {
+                            address_space::NativeVolumeOutcome::Initialized
+                            | address_space::NativeVolumeOutcome::Recovered => {
+                                address_space::NativeVolumeOutcome::Recovered
+                            }
+                            address_space::NativeVolumeOutcome::Rejected => {
+                                address_space::NativeVolumeOutcome::Rejected
+                            }
+                            address_space::NativeVolumeOutcome::RestartRequired => {
+                                address_space::NativeVolumeOutcome::RestartRequired
+                            }
+                            address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                                address_space::NativeVolumeOutcome::IncompatibleAbi
+                            }
+                            address_space::NativeVolumeOutcome::Faulted => {
+                                address_space::NativeVolumeOutcome::Faulted
+                            }
+                        }
+            });
+    if !recovered_after_descriptor_valid || !recovered_after_descriptor_quiesced {
+        serial_write("\r\nginux: post-descriptor-rejection native volume valid/quiesced: ");
+        serial_write_u64(u64::from(recovered_after_descriptor_valid));
+        serial_write(" ");
+        serial_write_u64(u64::from(recovered_after_descriptor_quiesced));
+        kernel_fail("\r\nginux: post-descriptor-rejection recovery invariant failed\r\n");
+    }
+    let Some(recovered_after_descriptor) = recovered_after_descriptor else {
+        kernel_fail("\r\nginux: post-descriptor-rejection outcome unavailable\r\n");
+    };
+    serial_write("\r\nginux: compatible native service recovered after descriptor rejection");
     let faulted_volume_run = address_space::verify_native_volume_service_fault(
         &volume_image,
         virtio_status_physical,
@@ -1915,6 +2002,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             && faulted.domain != replacement_volume_run.domain
             && faulted.domain != incompatible_volume_run.domain
             && faulted.domain != recovered_after_incompatible.domain
+            && faulted.domain != incompatible_descriptor_run.domain
+            && faulted.domain != recovered_after_descriptor.domain
             && faulted.service_identity == native_volume_run.service_identity
             && faulted.outcome == address_space::NativeVolumeOutcome::Faulted
     });
