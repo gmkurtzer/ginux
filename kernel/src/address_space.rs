@@ -37,6 +37,7 @@ const USER_TEST_ADDRESS: usize = 1usize << 39;
 const EXPECTED_SERVICE_FAULT_OFFSET: usize = 197;
 const ROOT_HANDLE_STACK_OFFSET: usize = PAGE_SIZE - 256;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
+const DMA_LEASE_MARKER: u64 = 0x444d_415f_4c45_4153;
 const NO_EXECUTE: u64 = 1 << 63;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
@@ -4346,6 +4347,7 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
         return false;
     };
     if registered.device_quiesced
+        || !unsafe { dma_page_is_idle(dma_physical) }
         || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce(device, mapping)
     {
@@ -5399,7 +5401,6 @@ pub(crate) fn verify_ring3_writable_device_grant(
         return None;
     }
     let user_dma = USER_TEST_ADDRESS + DMA_PAGE_INDEX * PAGE_SIZE;
-    const DMA_PATTERN: u64 = 0x444d_415f_4c45_4153;
     let mut program = [
         0x48, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rdi, common
         0xc6, 0x47, 0x14, 0x01, // status = ACKNOWLEDGE
@@ -5446,7 +5447,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
     program[126..134].copy_from_slice(&(user_dma as u64).to_le_bytes());
-    program[136..144].copy_from_slice(&DMA_PATTERN.to_le_bytes());
+    program[136..144].copy_from_slice(&DMA_LEASE_MARKER.to_le_bytes());
 
     let auxiliary = domain::initialize_boot_auxiliary_service(
         6,
@@ -5805,4 +5806,12 @@ unsafe fn zero_frame(frame: u64) -> Option<()> {
 unsafe fn frame_is_zero(frame: u64) -> bool {
     mapped_frame::<u64>(frame)
         .is_some_and(|entries| (0..ENTRY_COUNT).all(|index| entries.add(index).read() == 0))
+}
+
+unsafe fn dma_page_is_idle(frame: u64) -> bool {
+    let Some(entries) = mapped_frame::<u64>(frame) else {
+        return false;
+    };
+    core::ptr::read_volatile(entries) == DMA_LEASE_MARKER
+        && (1..ENTRY_COUNT).all(|index| core::ptr::read_volatile(entries.add(index)) == 0)
 }

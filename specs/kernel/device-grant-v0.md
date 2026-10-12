@@ -55,7 +55,8 @@ offsets into the three queue-address fields. After the kernel has armed PCI bus
 mastering, the service enables queue zero, sets `DRIVER_OK`, confirms the bit,
 and takes a deliberate invalid-opcode fault without publishing an available
 entry or sending a notification. The fault hook independently reads back the
-exact active queue and address-to-lease binding.
+exact active queue and address-to-lease binding, then requires the DMA page to
+contain only the service marker and zeros before quiescence.
 
 The stop-only path first revokes the exact object-7 handle. Its registered
 device hook validates the expected features and queue-to-lease binding, disables

@@ -32,7 +32,11 @@ address, and base plus `0x200` to the device/used address. The kernel reads back
 all three values and requires exact equality with the returned lease. The
 kernel arms PCI bus mastering, then the service enables queue zero and sets
 `DRIVER_OK`. It does not advance the available index or notify the device, so
-the queue is active but idle when the deliberate fault occurs.
+the queue is active but idle when the deliberate fault occurs. The fault hook
+requires the first eight bytes to retain the ring-3 marker and every remaining
+byte in the page to remain zero. Descriptor publication, an available-index
+advance, or a device completion therefore prevents teardown from claiming the
+no-submission proof.
 
 The service then deliberately faults. Stop-only teardown revokes object 7 and
 invokes the device hook while the service root and lease are still intact. The

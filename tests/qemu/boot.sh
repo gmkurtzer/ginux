@@ -742,6 +742,11 @@ if ! grep -q '^ginux: isolated virtio queue activated without submission' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio idle DMA state verified' "$output_file"; then
+    echo "Boot test failed: active virtio DMA state was not idle at teardown." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: fault path quiesced device before DMA release' "$output_file"; then
     echo "Boot test failed: device teardown did not precede DMA lease release." >&2
     exit 1

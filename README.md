@@ -53,8 +53,8 @@ initializes it in ring 3, and publishes its exact base, `+0x100`, and `+0x200`
 offsets as the descriptor, available, and used-ring addresses. After the kernel
 arms PCI bus mastering, the service enables queue zero and sets `DRIVER_OK`, but
 publishes no available entry and sends no notification. On fault, the registered
-device hook validates the active-idle binding, disables bus mastering, and
-resets the device before the page is scrubbed and released; release is rejected
+device hook validates the active-idle binding and exact idle DMA-page contents,
+disables bus mastering, and resets the device before the page is scrubbed and released; release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
 owned frames. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
