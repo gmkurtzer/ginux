@@ -76,8 +76,12 @@ through the user gate. The dedicated entry restores all fifteen general
 registers; the gate captures the complete frame and requires it to equal the
 recorded child context, resumes ring 3, and captures the child's subsequent
 `exit(42)` trap. That captured status drives teardown, zombie publication, and
-the synthetic parent's wait. The live Linux PID 1 runtime is not yet attached
-to this process scheduler path.
+the synthetic parent's wait. The terminal live Linux proof now admits PID 1
+and one eagerly cloned child to a serialized static scheduler workspace,
+selects the child under its cloned root, captures the same bounded ring-3 exit,
+selects PID 1 again, and requires both bindings and the workspace to be empty
+before teardown. This remains a boot proof rather than the persistent runtime
+scheduler used by a public Linux `fork` path.
 
 Scheduler capacity does not grant permission to create a thread. Runtime
 creation first reserves a slot from the generation-checked owning domain; exit

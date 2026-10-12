@@ -723,6 +723,11 @@ if ! grep -q '^ginux: live Linux child address space cloned transactionally' "$o
     exit 1
 fi
 
+if ! grep -q '^ginux: live Linux cloned child executed in ring 3' "$output_file"; then
+    echo "Boot test failed: the live Linux cloned child did not execute in ring 3." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     echo "Boot test failed: the minimal system init was not planned." >&2
     exit 1

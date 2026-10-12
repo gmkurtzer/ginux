@@ -250,8 +250,10 @@ permission, a stale root generation, and an out-of-range mapping count. After
 terminal ring-3 return, the kernel eagerly copies every recorded page into a
 distinct frame set, clones and revalidates the complete hierarchy, publishes
 the child record atomically, and proves teardown restores the allocator count.
-Executing this live child and exposing the transaction through the Linux ABI
-remain future work.
+One child is selected by the native process scheduler and enters ring 3 under
+that cloned root at a trampoline written only into its private executable page;
+the parent mapping remains byte-identical. Resuming arbitrary child application
+code and exposing the transaction through the Linux ABI remain future work.
 
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate

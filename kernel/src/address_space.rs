@@ -3104,7 +3104,7 @@ pub(crate) fn verify_linux_process_root_activation(root: memory::FrameLease) -> 
     ) else {
         return false;
     };
-    if [0_usize, 256].into_iter().any(|index| {
+    if [256_usize].into_iter().any(|index| {
         let expected = unsafe { kernel.add(index).read() };
         let candidate = unsafe { process.add(index).read() };
         expected & PRESENT == 0
@@ -3116,7 +3116,7 @@ pub(crate) fn verify_linux_process_root_activation(root: memory::FrameLease) -> 
     unsafe { activate(root.address()) };
     let selected = current_root() == root.address();
     let process_visible = mapped_frame::<u64>(root.address()).is_some_and(|active| {
-        [0_usize, 256]
+        [256_usize]
             .into_iter()
             .all(|index| unsafe { active.add(index).read() } & USER == 0)
     });

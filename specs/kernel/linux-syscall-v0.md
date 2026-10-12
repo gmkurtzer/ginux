@@ -1249,8 +1249,12 @@ live runtime now snapshots and completely validates its generation-bound image,
 stack, heap, TLS, sibling-stack, and `mmap` ownership before normal exit. After
 terminal ring-3 return, it transactionally clones that exact inventory into an
 independent child record, checks every copied page byte and hierarchy mapping,
-then tears down and reaps the child while restoring the allocator count. The
-child is not yet scheduled or executed by this live transaction. The synthetic
+then tears down and reaps the child while restoring the allocator count. One
+child is selected through the native scheduler and enters ring 3 under its
+cloned root at a private bounded trampoline. Its complete fork-derived context
+and FS base are checked before its captured `exit(42)` drives zombie publication
+and reap; the parent code remains unchanged. This is still an internal terminal
+proof rather than a dispatched Linux process-creation syscall. The synthetic
 process exit proof itself does not dispatch through the live Linux runtime.
 The live exit paths additionally translate the real syscall entry frame into
 the process model's complete register order and admit it with the snapshot as

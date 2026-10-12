@@ -69,7 +69,7 @@ types, and truncation. Images with neither metadata header, either one, or both
 are accepted when their declarations are valid. The boot verifier reuses one
 mutation buffer across metadata cases and runs the metadata and RELRO mutation
 suites sequentially. Non-inlined verifier phases construct at most one 20
-KiB-class fixture image at a time on the 64 KiB bootstrap kernel stack; the
+KiB-class fixture image at a time on the 128 KiB bootstrap-verification stack; the
 load materializer's page buffer and the alias verifier's compact dynamic image
 also execute in separate frames. This keeps verification bounded while
 reserving the complete five-page executable profile for proof instructions.

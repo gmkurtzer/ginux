@@ -8,6 +8,8 @@ pub(crate) const IPC_PEER_CLOSED: u64 = u64::MAX - 4;
 
 static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static mut RUNTIME: MaybeUninit<Runtime> = MaybeUninit::uninit();
+static PROCESS_WORKSPACE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static mut PROCESS_WORKSPACE: MaybeUninit<ProcessScheduler> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ThreadId {
@@ -839,6 +841,45 @@ impl ProcessScheduler {
     pub(crate) fn retire(&mut self, handle: ProcessThreadHandle) -> bool {
         self.scheduler.retire_process(handle.0)
     }
+}
+
+pub(crate) fn acquire_process_scheduler_workspace() -> Option<&'static mut ProcessScheduler> {
+    if PROCESS_WORKSPACE_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return None;
+    }
+    // SAFETY: The active flag serializes the single bootstrap processor. Each
+    // field is initialized directly so the bounded kernel stack never holds a
+    // complete scheduler temporary.
+    unsafe {
+        let workspace = core::ptr::addr_of_mut!(PROCESS_WORKSPACE).cast::<ProcessScheduler>();
+        for index in 0..MAX_THREADS {
+            core::ptr::addr_of_mut!((*workspace).scheduler.threads[index]).write(None);
+            core::ptr::addr_of_mut!((*workspace).scheduler.generations[index]).write(0);
+        }
+        core::ptr::addr_of_mut!((*workspace).scheduler.current).write(None);
+        core::ptr::addr_of_mut!((*workspace).scheduler.next_slot).write(0);
+        Some(&mut *workspace)
+    }
+}
+
+pub(crate) fn release_process_scheduler_workspace() -> bool {
+    if !PROCESS_WORKSPACE_ACTIVE.load(Ordering::Acquire) {
+        return false;
+    }
+    // SAFETY: The active workspace remains exclusively borrowed by the
+    // serialized process proof until every binding is retired.
+    let clean = unsafe {
+        let workspace = core::ptr::addr_of!(PROCESS_WORKSPACE).cast::<ProcessScheduler>();
+        (*workspace).scheduler.threads.iter().all(Option::is_none)
+            && (*workspace).scheduler.current.is_none()
+    };
+    if clean {
+        PROCESS_WORKSPACE_ACTIVE.store(false, Ordering::Release);
+    }
+    clean
 }
 
 pub(crate) fn initialize_runtime(

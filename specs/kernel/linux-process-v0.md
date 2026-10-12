@@ -245,18 +245,29 @@ with `RAX = 0`. The verifier requires identical mapping metadata and bytes with
 no shared frame, transitions the child through exit and zombie state, reaps
 status 42 from PID 1, and requires both the original parent record and allocator
 count to be unchanged afterward. Running outside the syscall-dispatch frame is
-required by the bounded kernel-stack contract; no user mapping is retired
-between the terminal syscall snapshot and this transaction.
+required by the bounded bootstrap-verification stack contract; no user mapping
+is retired between the terminal syscall snapshot and this transaction.
 
-This live child is not yet admitted to the scheduler or entered at ring 3, and
-the transaction is not exposed as a Linux process-creation or wait syscall.
+The first such child is admitted beside PID 1 to a serialized non-stack process
+scheduler workspace. Only its private executable copy is replaced at the saved
+RIP with a bounded context-check and `exit(42)` trampoline. The scheduler
+selects the child, its cloned root becomes active, ring 3 observes the complete
+fork-derived register frame with `RAX = 0` and the recorded FS base, and the
+captured exit status drives teardown, zombie publication, and parent-only reap.
+The parent is selected again before both scheduler bindings are retired, its
+corresponding code bytes remain unchanged, and the temporary scheduler must be
+empty before reuse. Later terminal workloads repeat clone/publication/reap
+without redundantly executing the probe.
+
+The transaction is still not exposed as a Linux process-creation or wait
+syscall.
 
 ## Deliberate limits
 
 This is an internal ownership contract, not Linux process compatibility yet.
 It is not connected to the syscall dispatcher and does not implement:
 
-- execution of the cloned live child or copy-on-write;
+- resumption of arbitrary post-`fork` application code or copy-on-write;
 - process-style `clone`, `fork`, `vfork`, `wait4`, or `waitid`;
 - descriptor, credential, signal, mount, or namespace inheritance;
 - concurrent process scheduling or process-directed signal delivery;

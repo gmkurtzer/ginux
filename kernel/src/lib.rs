@@ -32,7 +32,7 @@ pub(crate) const EFI_RUNTIME_SERVICES_CODE: u32 = 5;
 const EFI_CONVENTIONAL_MEMORY: u32 = 7;
 const UEFI_PAGES_PER_MIB: u64 = 256;
 const PAGE_SIZE: usize = 4096;
-const KERNEL_STACK_SIZE: usize = 64 * 1024;
+const KERNEL_STACK_SIZE: usize = 128 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
@@ -771,6 +771,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: live Linux PID 1 context admitted to process model\r\n");
     serial_write("ginux: live Linux process registry persisted across syscalls\r\n");
     serial_write("ginux: live Linux child address space cloned transactionally\r\n");
+    serial_write("ginux: live Linux cloned child executed in ring 3\r\n");
     serial_write("ginux: toolchain-linked static Linux ELF executed\r\n");
     serial_write("ginux: five-page Linux executable mapping validated\r\n");
     serial_write("ginux: bounded Linux exec rejection preserved live image\r\n");

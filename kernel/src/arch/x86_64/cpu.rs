@@ -423,6 +423,7 @@ const PROCESS_CHILD_PROBE_EXPECT_EXIT: u8 = 2;
 const PROCESS_CHILD_PROBE_COMPLETE: u8 = 3;
 static PROCESS_CHILD_PROBE_STATE: AtomicU8 = AtomicU8::new(PROCESS_CHILD_PROBE_IDLE);
 static PROCESS_CHILD_CONTEXT_VALID: AtomicBool = AtomicBool::new(false);
+static PROCESS_CHILD_EXECUTION_DIAGNOSTIC: AtomicU8 = AtomicU8::new(0);
 static PROCESS_CHILD_EXIT_STATUS: AtomicU8 = AtomicU8::new(0);
 static PROCESS_CHILD_EXPECTED_REGISTERS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
 static PROCESS_CHILD_EXPECTED_FS_BASE: AtomicU64 = AtomicU64::new(0);
@@ -1292,17 +1293,23 @@ pub(crate) fn execute_linux_process_child(
     fs_base: u64,
     general: [u64; 15],
 ) -> Option<u8> {
-    if entry == 0
-        || entry >= 1 << 47
-        || stack == 0
-        || stack >= 1 << 47
-        || !stack.is_multiple_of(16)
-        || fs_base >= 1 << 47
-        || general[0] != 0
-        || scheduler::current_domain().is_some()
-        || !install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
-        || !user_interrupt_surface_is_minimal()
-    {
+    let entry_valid = entry != 0 && entry < 1 << 47;
+    let stack_valid = stack != 0 && stack < 1 << 47;
+    let fs_valid = fs_base < 1 << 47;
+    let fork_return_valid = general[0] == 0;
+    let scheduler_idle = scheduler::current_domain().is_none();
+    let gate_installed =
+        install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize);
+    let interrupt_surface_valid = user_interrupt_surface_is_minimal();
+    let preconditions = u8::from(entry_valid)
+        | (u8::from(stack_valid) << 1)
+        | (u8::from(fs_valid) << 2)
+        | (u8::from(fork_return_valid) << 3)
+        | (u8::from(scheduler_idle) << 4)
+        | (u8::from(gate_installed) << 5)
+        | (u8::from(interrupt_surface_valid) << 6);
+    PROCESS_CHILD_EXECUTION_DIAGNOSTIC.store(preconditions, Ordering::SeqCst);
+    if preconditions != 0x7f {
         return None;
     }
     let saved_fs = active_fs_base();
@@ -1342,11 +1349,24 @@ pub(crate) fn execute_linux_process_child(
     let context_valid = PROCESS_CHILD_CONTEXT_VALID.swap(false, Ordering::SeqCst);
     let exit_status = PROCESS_CHILD_EXIT_STATUS.swap(0, Ordering::SeqCst);
     unsafe { write_msr(FS_BASE_MSR, saved_fs) };
+    let fs_restored = active_fs_base() == saved_fs;
+    PROCESS_CHILD_EXECUTION_DIAGNOSTIC.store(
+        0x80 | u8::from(child_fs_preserved)
+            | (u8::from(context_valid) << 1)
+            | (u8::from(probe_state == PROCESS_CHILD_PROBE_COMPLETE) << 2)
+            | (u8::from(fs_restored) << 3)
+            | (u8::from(exit_status == 42) << 4),
+        Ordering::SeqCst,
+    );
     (child_fs_preserved
         && context_valid
         && probe_state == PROCESS_CHILD_PROBE_COMPLETE
-        && active_fs_base() == saved_fs)
+        && fs_restored)
         .then_some(exit_status)
+}
+
+pub(crate) fn reset_process_child_execution_diagnostic() {
+    PROCESS_CHILD_EXECUTION_DIAGNOSTIC.store(0, Ordering::SeqCst);
 }
 
 pub(crate) fn verify_user_syscall(
@@ -4044,8 +4064,22 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         return LinuxElfResult::FAILED;
     }
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
-    let live_process_registry_finished = linux_process::verify_live_fork_clone_transaction()
-        && linux_process::finish_live_process_registry();
+    let live_fork_executed = linux_process::verify_live_fork_clone_transaction();
+    let live_process_registry_finished =
+        live_fork_executed && linux_process::finish_live_process_registry();
+    if !live_process_registry_finished {
+        serial_write("ginux: live Linux fork stages: ");
+        serial_write_u64(u64::from(live_fork_executed));
+        serial_write(" ");
+        serial_write_u64(u64::from(linux_process::live_fork_execution_stage()));
+        serial_write(" ");
+        serial_write_u64(u64::from(linux_process::live_fork_child_diagnostic()));
+        serial_write(" ");
+        serial_write_u64(u64::from(
+            PROCESS_CHILD_EXECUTION_DIAGNOSTIC.load(Ordering::SeqCst),
+        ));
+        serial_write("\r\n");
+    }
     let linux_wait_timer_finished = execution.tls_size == 0 || timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let linux_thread_table_released = finish_linux_thread_table();

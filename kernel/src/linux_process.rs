@@ -19,6 +19,9 @@ const TEST_USER_ADDRESS: usize = 1usize << 39;
 const PROCESS_RAX_INDEX: usize = 0;
 static LIVE_PROCESS_TABLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static LIVE_PROCESS_REFRESH_COUNT: AtomicU32 = AtomicU32::new(0);
+static LIVE_FORK_CHILD_EXECUTED: AtomicBool = AtomicBool::new(false);
+static LIVE_FORK_EXECUTION_STAGE: AtomicU32 = AtomicU32::new(0);
+static LIVE_FORK_CHILD_DIAGNOSTIC: AtomicU32 = AtomicU32::new(0);
 static mut LIVE_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
 const PROCESS_CHILD_PROGRAM: [u8; 42] = [
     0x48, 0x85, 0xc0, // test rax, rax
@@ -29,6 +32,13 @@ const PROCESS_CHILD_PROGRAM: [u8; 42] = [
     0x75, 0x17, // jne failure
     0x64, 0xc6, 0x04, 0x25, 0, 0, 0, 0, 0x5a, // mov byte ptr fs:[0], 0x5a
     0xcd, 0x80, // context-check trap
+    0xb8, 0x3c, 0, 0, 0, // mov eax, 60 (__NR_exit)
+    0xbf, 0x2a, 0, 0, 0, // mov edi, 42
+    0xcd, 0x80, // exit(42)
+    0x0f, 0x0b, // failure: ud2
+];
+const LIVE_PROCESS_CHILD_PROGRAM: [u8; 16] = [
+    0xcd, 0x80, // validate the complete fork-child context
     0xb8, 0x3c, 0, 0, 0, // mov eax, 60 (__NR_exit)
     0xbf, 0x2a, 0, 0, 0, // mov edi, 42
     0xcd, 0x80, // exit(42)
@@ -60,11 +70,11 @@ struct ProcessExecutionContext {
 }
 
 impl ProcessExecutionContext {
-    fn is_valid(self, address_space: ProcessAddressSpace) -> bool {
+    fn is_valid(self, address_space: &ProcessAddressSpace) -> bool {
         self.validation_error(address_space).is_none()
     }
 
-    fn validation_error(self, address_space: ProcessAddressSpace) -> Option<u8> {
+    fn validation_error(self, address_space: &ProcessAddressSpace) -> Option<u8> {
         const REQUIRED_RFLAGS: u64 = (1 << 1) | (1 << 9);
         const FORBIDDEN_RFLAGS: u64 = (3 << 12) | (1 << 14) | (1 << 17);
         if self.rip == 0
@@ -113,7 +123,7 @@ impl ProcessExecutionContext {
 
     fn scheduler_context(
         self,
-        address_space: ProcessAddressSpace,
+        address_space: &ProcessAddressSpace,
     ) -> Option<scheduler::ProcessSchedulerContext> {
         self.is_valid(address_space).then_some(())?;
         scheduler::process_user_context(
@@ -177,7 +187,7 @@ impl ProcessAddressSpace {
         &self.hierarchy[..usize::from(self.hierarchy_count)]
     }
 
-    fn root(self) -> memory::FrameLease {
+    fn root(&self) -> memory::FrameLease {
         self.hierarchy[0]
     }
 
@@ -185,7 +195,7 @@ impl ProcessAddressSpace {
         &self.mappings[..usize::from(self.mapping_count)]
     }
 
-    fn is_valid(self) -> bool {
+    fn is_valid(&self) -> bool {
         self.is_owned()
             && address_space::validate_linux_process_address_space(
                 self.hierarchy(),
@@ -193,7 +203,7 @@ impl ProcessAddressSpace {
             )
     }
 
-    fn leases(self) -> ([memory::FrameLease; PROCESS_LEASE_LIMIT], usize) {
+    fn leases(&self) -> ([memory::FrameLease; PROCESS_LEASE_LIMIT], usize) {
         let hierarchy_count = usize::from(self.hierarchy_count);
         let mapping_count = usize::from(self.mapping_count);
         let mut leases = [memory::FrameLease::EMPTY; PROCESS_LEASE_LIMIT];
@@ -207,17 +217,17 @@ impl ProcessAddressSpace {
         (leases, hierarchy_count + mapping_count)
     }
 
-    fn is_owned(self) -> bool {
+    fn is_owned(&self) -> bool {
         let (leases, count) = self.leases();
         memory::frames_owned_by(memory::FrameOwner::KERNEL, &leases[..count])
     }
 
-    fn is_live(self) -> bool {
+    fn is_live(&self) -> bool {
         let (leases, count) = self.leases();
         memory::any_frame_lease_live(&leases[..count])
     }
 
-    fn overlaps(self, other: Self) -> bool {
+    fn overlaps(&self, other: &Self) -> bool {
         let (left, left_count) = self.leases();
         let (right, right_count) = other.leases();
         left[..left_count].iter().any(|left| {
@@ -227,7 +237,7 @@ impl ProcessAddressSpace {
         })
     }
 
-    fn scrub_and_release(self) -> bool {
+    fn scrub_and_release(&self) -> bool {
         let (leases, count) = self.leases();
         memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &leases[..count])
     }
@@ -275,7 +285,7 @@ impl ProcessTable {
         if self.init.is_some()
             || self.next_pid != 1
             || !address_space.is_valid()
-            || !context.is_valid(address_space)
+            || !context.is_valid(&address_space)
         {
             return None;
         }
@@ -309,7 +319,7 @@ impl ProcessTable {
         context: ProcessExecutionContext,
     ) -> bool {
         if !address_space.is_valid()
-            || !context.is_valid(address_space)
+            || !context.is_valid(&address_space)
             || self.processes.iter().flatten().count() != 1
         {
             return false;
@@ -339,14 +349,14 @@ impl ProcessTable {
         context: ProcessExecutionContext,
     ) -> bool {
         if !address_space.is_valid()
-            || !context.is_valid(address_space)
+            || !context.is_valid(&address_space)
             || self.processes.iter().flatten().any(|process| {
                 process
                     .address_space
-                    .is_some_and(|existing| existing.overlaps(address_space))
+                    .is_some_and(|existing| existing.overlaps(&address_space))
                     || process
                         .retiring_address_space
-                        .is_some_and(|existing| existing.overlaps(address_space))
+                        .is_some_and(|existing| existing.overlaps(&address_space))
             })
         {
             return false;
@@ -383,7 +393,7 @@ impl ProcessTable {
         if process.state != ProcessState::Running || process.scheduler_thread.is_some() {
             return false;
         }
-        let Some(scheduler_context) = context.scheduler_context(address_space) else {
+        let Some(scheduler_context) = context.scheduler_context(&address_space) else {
             return false;
         };
         let Some(thread) = run_queue.admit(domain, scheduler_context) else {
@@ -791,7 +801,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     let Some(init) = table.create_init(init_space, init_context) else {
         return false;
     };
-    let Some(init_scheduler_context) = init_context.scheduler_context(init_space) else {
+    let Some(init_scheduler_context) = init_context.scheduler_context(&init_space) else {
         return false;
     };
     let mut run_queue = scheduler::ProcessScheduler::new();
@@ -925,7 +935,7 @@ pub(crate) fn verify_lifecycle_contract() -> bool {
     {
         return false;
     }
-    let Some(child_scheduler_context) = child_context.scheduler_context(first_space) else {
+    let Some(child_scheduler_context) = child_context.scheduler_context(&first_space) else {
         return false;
     };
     if !table.admit_to_scheduler(first_child, &mut run_queue, 1)
@@ -1064,7 +1074,7 @@ pub(crate) fn install_live_process_registry(
     };
     let mut invalid = context;
     invalid.rip = 0;
-    if invalid.is_valid(address_space) || !context.is_valid(address_space) {
+    if invalid.is_valid(&address_space) || !context.is_valid(&address_space) {
         return false;
     }
     let table = core::ptr::addr_of_mut!(LIVE_PROCESS_TABLE).cast::<ProcessTable>();
@@ -1144,6 +1154,18 @@ pub(crate) fn finish_live_process_registry() -> bool {
 
 #[inline(never)]
 pub(crate) fn verify_live_fork_clone_transaction() -> bool {
+    LIVE_FORK_EXECUTION_STAGE.store(0, Ordering::Release);
+    LIVE_FORK_CHILD_DIAGNOSTIC.store(0, Ordering::Release);
+    cpu::reset_process_child_execution_diagnostic();
+    if LIVE_FORK_CHILD_EXECUTED.load(Ordering::Acquire) {
+        verify_live_fork_clone_only_transaction()
+    } else {
+        verify_live_fork_clone_and_execution_transaction()
+    }
+}
+
+#[inline(never)]
+fn verify_live_fork_clone_and_execution_transaction() -> bool {
     let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
         return false;
     };
@@ -1209,7 +1231,7 @@ pub(crate) fn verify_live_fork_clone_transaction() -> bool {
         && child.state == ProcessState::Running
         && child.context == Some(parent_context.fork_child())
         && child_space.is_valid()
-        && !child_space.overlaps(parent_space)
+        && !child_space.overlaps(&parent_space)
         && child_space.hierarchy().len() == hierarchy_count
         && child_space.mappings().len() == mapping_count
         && child_space
@@ -1238,6 +1260,136 @@ pub(crate) fn verify_live_fork_clone_transaction() -> bool {
                             }
                         })
             });
+    let execute_child = child_valid && !LIVE_FORK_CHILD_EXECUTED.load(Ordering::Acquire);
+    let exit_status = if execute_child {
+        execute_cloned_live_child(table, parent_handle, child_handle)
+    } else {
+        child_valid.then_some(42)
+    };
+    let Some(retiring) = table.begin_exit(child_handle, child_space) else {
+        return false;
+    };
+    let resources_released = retiring.scrub_and_release();
+    let exited = resources_released && table.exit(child_handle, exit_status.unwrap_or(0));
+    let waited = exited
+        && table.wait(parent_handle, child_handle.pid)
+            == Some(WaitResult {
+                pid: child_handle.pid,
+                status: 42,
+            });
+    let valid = child_valid
+        && hierarchy_extras_released
+        && page_extras_released
+        && exit_status == Some(42)
+        && waited
+        && table.processes.iter().flatten().count() == 1
+        && table.process(parent_handle).is_some_and(|process| {
+            process.address_space == Some(parent_space)
+                && process.context == Some(parent_context)
+                && process.state == ProcessState::Running
+                && process.scheduler_thread.is_none()
+        })
+        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before);
+    if valid && execute_child {
+        LIVE_FORK_CHILD_EXECUTED.store(true, Ordering::Release);
+    }
+    valid
+}
+
+#[inline(never)]
+fn verify_live_fork_clone_only_transaction() -> bool {
+    let Some(before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(parent_handle) = table.init else {
+        return false;
+    };
+    let Some(parent) = table.process(parent_handle) else {
+        return false;
+    };
+    let (Some(parent_space), Some(parent_context)) = (parent.address_space, parent.context) else {
+        return false;
+    };
+    if parent.state != ProcessState::Running || !parent_space.is_valid() {
+        return false;
+    }
+    let Some(child_handle) = table.prepare_fork(parent_handle) else {
+        return false;
+    };
+    let Some(child_hierarchy) =
+        memory::allocate_frames::<PROCESS_HIERARCHY_LIMIT>(memory::FrameOwner::KERNEL)
+    else {
+        let _ = table.abort_fork(child_handle);
+        return false;
+    };
+    let Some(child_pages) =
+        memory::allocate_frames::<PROCESS_PRIVATE_PAGE_LIMIT>(memory::FrameOwner::KERNEL)
+    else {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &child_hierarchy);
+        let _ = table.abort_fork(child_handle);
+        return false;
+    };
+    let hierarchy_count = parent_space.hierarchy().len();
+    let mapping_count = parent_space.mappings().len();
+    let published = table.commit_cloned_fork(
+        child_handle,
+        &child_hierarchy[..hierarchy_count],
+        &child_pages[..mapping_count],
+    );
+    let hierarchy_extras_released = hierarchy_count == child_hierarchy.len()
+        || memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &child_hierarchy[hierarchy_count..],
+        );
+    let page_extras_released = mapping_count == child_pages.len()
+        || memory::scrub_and_release_frames(
+            memory::FrameOwner::KERNEL,
+            &child_pages[mapping_count..],
+        );
+    if !published {
+        return false;
+    }
+    let Some(child) = table.process(child_handle) else {
+        return false;
+    };
+    let Some(child_space) = child.address_space else {
+        return false;
+    };
+    let child_valid = child.parent == Some(parent_handle)
+        && child.state == ProcessState::Running
+        && child.context == Some(parent_context.fork_child())
+        && child_space.is_valid()
+        && !child_space.overlaps(&parent_space)
+        && child_space.hierarchy().len() == hierarchy_count
+        && child_space.mappings().len() == mapping_count
+        && child_space
+            .mappings()
+            .iter()
+            .zip(parent_space.mappings())
+            .all(|(child, parent)| {
+                child.address == parent.address
+                    && child.writable == parent.writable
+                    && child.executable == parent.executable
+                    && child.frame != parent.frame
+                    && child
+                        .frame
+                        .direct_map_address()
+                        .zip(parent.frame.direct_map_address())
+                        .is_some_and(|(child_address, parent_address)| {
+                            // SAFETY: Both live, generation-checked leases map
+                            // complete pages for this serialized comparison.
+                            unsafe {
+                                core::slice::from_raw_parts(child_address as *const u8, PAGE_SIZE)
+                                    == core::slice::from_raw_parts(
+                                        parent_address as *const u8,
+                                        PAGE_SIZE,
+                                    )
+                            }
+                        })
+            });
     let Some(retiring) = table.begin_exit(child_handle, child_space) else {
         return false;
     };
@@ -1249,16 +1401,162 @@ pub(crate) fn verify_live_fork_clone_transaction() -> bool {
                 pid: child_handle.pid,
                 status: 42,
             });
-    let retired = child_valid
+    child_valid
+        && hierarchy_extras_released
+        && page_extras_released
         && waited
         && table.processes.iter().flatten().count() == 1
         && table.process(parent_handle).is_some_and(|process| {
             process.address_space == Some(parent_space)
                 && process.context == Some(parent_context)
                 && process.state == ProcessState::Running
+                && process.scheduler_thread.is_none()
         })
-        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before);
-    hierarchy_extras_released && page_extras_released && retired
+        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(before)
+}
+
+#[inline(never)]
+fn execute_cloned_live_child(
+    table: &mut ProcessTable,
+    parent_handle: ProcessHandle,
+    child_handle: ProcessHandle,
+) -> Option<u8> {
+    LIVE_FORK_EXECUTION_STAGE.store(1, Ordering::Release);
+    let parent = table.process(parent_handle)?;
+    let parent_space = parent.address_space.as_ref()?;
+    let parent_context = parent.context?;
+    let parent_scheduler_context = parent_context.scheduler_context(parent_space)?;
+    let child = table.process(child_handle)?;
+    let child_space = child.address_space.as_ref()?;
+    let child_context = child.context?;
+    let child_scheduler_context = child_context.scheduler_context(child_space)?;
+    let child_root = child_space.root();
+    let child_code = child_space.mappings().iter().find(|mapping| {
+        mapping.executable
+            && child_context.rip >= mapping.address as u64
+            && child_context.rip < mapping.address as u64 + PAGE_SIZE as u64
+    })?;
+    let parent_code = parent_space
+        .mappings()
+        .iter()
+        .find(|mapping| mapping.address == child_code.address)?;
+    let child_code_frame = child_code.frame;
+    let parent_code_frame = parent_code.frame;
+    let offset = usize::try_from(child_context.rip - child_code.address as u64).ok()?;
+    if offset.checked_add(LIVE_PROCESS_CHILD_PROGRAM.len())? > PAGE_SIZE {
+        return None;
+    }
+    let child_address = child_code_frame.direct_map_address()?.checked_add(offset)?;
+    let parent_address = parent_code_frame
+        .direct_map_address()?
+        .checked_add(offset)?;
+    let mut original_parent = [0_u8; LIVE_PROCESS_CHILD_PROGRAM.len()];
+    // SAFETY: Both generation-checked pages remain exclusively owned by their
+    // process records. The validated offset covers the complete bounded probe.
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            parent_address as *const u8,
+            original_parent.as_mut_ptr(),
+            original_parent.len(),
+        );
+        core::ptr::copy_nonoverlapping(
+            LIVE_PROCESS_CHILD_PROGRAM.as_ptr(),
+            child_address as *mut u8,
+            LIVE_PROCESS_CHILD_PROGRAM.len(),
+        );
+    }
+    LIVE_FORK_EXECUTION_STAGE.store(2, Ordering::Release);
+    let run_queue = scheduler::acquire_process_scheduler_workspace()?;
+    if !table.admit_to_scheduler(parent_handle, run_queue, 1) {
+        let _ = scheduler::release_process_scheduler_workspace();
+        return None;
+    }
+    if !table.admit_to_scheduler(child_handle, run_queue, 1) {
+        let _ = table.withdraw_from_scheduler(parent_handle, run_queue);
+        let _ = scheduler::release_process_scheduler_workspace();
+        return None;
+    }
+    LIVE_FORK_EXECUTION_STAGE.store(3, Ordering::Release);
+    let parent_thread = table.process(parent_handle)?.scheduler_thread?;
+    let child_thread = table.process(child_handle)?.scheduler_thread?;
+    let initial = run_queue.schedule_next();
+    let selected_child = initial
+        .and_then(|selected| {
+            (selected.handle() == parent_thread && selected.context() == parent_scheduler_context)
+                .then_some(())
+        })
+        .and_then(|()| run_queue.yield_current(parent_thread, parent_scheduler_context));
+    let selected = selected_child.is_some_and(|selected| {
+        selected.handle() == child_thread && selected.context() == child_scheduler_context
+    });
+    if selected {
+        LIVE_FORK_EXECUTION_STAGE.store(4, Ordering::Release);
+    }
+    cpu::reset_process_child_execution_diagnostic();
+    let exit_status = selected
+        .then(|| {
+            address_space::execute_linux_process_child(
+                child_root,
+                child_context.rip,
+                child_context.rsp,
+                child_context.fs_base,
+                child_context.general,
+            )
+        })
+        .flatten();
+    if exit_status == Some(42) {
+        LIVE_FORK_EXECUTION_STAGE.store(5, Ordering::Release);
+    }
+    let resumed_parent =
+        exit_status.and_then(|_| run_queue.yield_current(child_thread, child_scheduler_context));
+    let resumed = resumed_parent.is_some_and(|selected| {
+        selected.handle() == parent_thread && selected.context() == parent_scheduler_context
+    });
+    if resumed {
+        LIVE_FORK_EXECUTION_STAGE.store(6, Ordering::Release);
+    }
+    let child_withdrawn = table.withdraw_from_scheduler(child_handle, run_queue);
+    let parent_withdrawn = table.withdraw_from_scheduler(parent_handle, run_queue);
+    let scheduler_released = scheduler::release_process_scheduler_workspace();
+    let parent_unchanged = parent_code_frame
+        .direct_map_address()
+        .and_then(|address| address.checked_add(offset))
+        .is_some_and(|address| {
+            // SAFETY: The parent lease remains live and the bounded range was
+            // validated above; the child executed under a disjoint root.
+            unsafe {
+                core::slice::from_raw_parts(address as *const u8, original_parent.len())
+                    == original_parent
+            }
+        });
+    if child_withdrawn && parent_withdrawn && parent_unchanged {
+        LIVE_FORK_EXECUTION_STAGE.store(7, Ordering::Release);
+    }
+    let valid = selected
+        && resumed
+        && child_withdrawn
+        && parent_withdrawn
+        && scheduler_released
+        && parent_unchanged
+        && exit_status == Some(42);
+    let diagnostic = u32::from(selected)
+        | (u32::from(exit_status.is_some()) << 1)
+        | (u32::from(exit_status == Some(42)) << 2)
+        | (u32::from(resumed) << 3)
+        | (u32::from(child_withdrawn) << 4)
+        | (u32::from(parent_withdrawn) << 5)
+        | (u32::from(parent_unchanged) << 6)
+        | (u32::from(scheduler_released) << 7);
+    LIVE_FORK_CHILD_DIAGNOSTIC.store(diagnostic, Ordering::Release);
+    valid.then_some(42)
+}
+
+pub(crate) fn live_fork_execution_stage() -> u32 {
+    LIVE_FORK_EXECUTION_STAGE.load(Ordering::Acquire)
+}
+
+pub(crate) fn live_fork_child_diagnostic() -> u32 {
+    LIVE_FORK_CHILD_DIAGNOSTIC.load(Ordering::Acquire)
 }
 
 fn live_process_table_mut() -> Option<&'static mut ProcessTable> {

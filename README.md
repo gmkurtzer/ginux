@@ -343,10 +343,13 @@ private page, clones the complete page-table hierarchy, derives a zero-return
 child context, and atomically publishes the result. It compares every copied
 page byte, requires complete parent/child frame separation, then tears the
 child down, reaps status 42, and proves the allocator count and PID 1 record
-were restored. The child is not yet scheduled from this live transaction and
-process-style creation and wait are not exposed through the Linux syscall ABI,
-so the minimal system profile correctly keeps `process.fork-wait` missing. The
-exact contract and limits are recorded in
+were restored. One live child also has a bounded private trampoline installed
+at its saved RIP, is selected through the native process scheduler, enters ring
+3 under its cloned CR3 with the complete fork context and FS base, and drives
+zombie publication with its captured `exit(42)`. The parent code remains
+unchanged. Process-style creation and wait are not yet exposed through the
+Linux syscall ABI, so the minimal system profile correctly keeps
+`process.fork-wait` missing. The exact contract and limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,

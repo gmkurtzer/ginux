@@ -45,7 +45,7 @@ The memory-map buffer is aligned, owned by the unified image, and remains alloca
 
 ## Current limitations
 
-- The kernel switches to an image-owned 64 KiB stack and then replaces the firmware page tables with the transitional mapping defined in `specs/kernel/paging-v0.md`.
+- The kernel switches to an image-owned 128 KiB bootstrap-verification stack and then replaces the firmware page tables with the transitional mapping defined in `specs/kernel/paging-v0.md`.
 - The map uses a fixed 128 KiB handoff buffer.
 - No framebuffer, ACPI root pointer, command line, manifest digest, or native system bundle metadata is passed yet.
 - `ResetSystem` is retained only to make early automated runs terminate cleanly.
