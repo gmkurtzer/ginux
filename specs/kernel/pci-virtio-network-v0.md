@@ -47,16 +47,16 @@ space and reads them back. A later boot-stage check requires them to remain
 clear.
 
 The validated ACPI DMAR unit must also contain an exact endpoint scope for
-`00:03.0`. No network BAR is mapped, no MMIO register or device feature is read,
-no MSI-X entry or queue is configured, and no DMA page is delegated in this
-milestone.
+`00:03.0`. The discovery phase maps no network BAR and reads no MMIO register.
+The subsequent initialization contract maps only the common page after this
+phase has completed. No MSI-X entry or queue is configured and no DMA page is
+delegated here.
 
 ## Deliberate limits
 
 - This is discovery and authority revocation, not a network driver.
 - The restricted QEMU user backend is test infrastructure; the guest sends no
   traffic yet.
-- Device reset semantics, feature negotiation, receive/transmit queues,
-  interrupts, IOMMU translation, a native network service, and container
-  networking remain later M6 work.
+- Receive/transmit queue setup, interrupts, IOMMU translation, a native network
+  service, and container networking remain later M6 work.
 - Only bus zero, function zero, and the deterministic Q35 profile are covered.

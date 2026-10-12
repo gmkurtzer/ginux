@@ -72,6 +72,7 @@ const STATUS_DRIVER_OK: u8 = 4;
 const STATUS_FEATURES_OK: u8 = 8;
 const STATUS_DEVICE_NEEDS_RESET: u8 = 64;
 const STATUS_FAILED: u8 = 128;
+const FEATURE_NET_MAC: u64 = 1 << 5;
 const FEATURE_FLUSH: u64 = 1 << 9;
 const FEATURE_VERSION_1: u64 = 1 << 32;
 const FEATURE_ACCESS_PLATFORM: u64 = 1 << 33;
@@ -210,6 +211,17 @@ pub(crate) struct MsixCapability {
     pub(crate) function_masked: bool,
 }
 
+impl VirtioNetworkDevice {
+    pub(crate) fn common_region(self) -> Option<(u64, usize)> {
+        let physical = self
+            .common_bar_address
+            .checked_add(u64::from(self.common_offset))?;
+        let length = usize::try_from(self.common_length).ok()?;
+        physical.checked_add(length as u64)?;
+        (length > COMMON_QUEUE_DEVICE).then_some((physical, length))
+    }
+}
+
 impl VirtioBlockDevice {
     pub(crate) fn common_region(self) -> Option<(u64, usize)> {
         let physical = self
@@ -302,6 +314,13 @@ impl VirtioBlockDevice {
 
 #[derive(Clone, Copy)]
 pub(crate) struct VirtioBlockInitialization {
+    pub(crate) offered_features: u64,
+    pub(crate) accepted_features: u64,
+    pub(crate) queue_count: u16,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct VirtioNetworkInitialization {
     pub(crate) offered_features: u64,
     pub(crate) accepted_features: u64,
     pub(crate) queue_count: u16,
@@ -777,6 +796,38 @@ pub(crate) fn initialize_without_dma(
             & COMMAND_BUS_MASTER
             != 0
     {
+        return None;
+    }
+    result
+}
+
+pub(crate) fn initialize_network_without_dma(
+    device: VirtioNetworkDevice,
+    mapping: MmioMapping,
+) -> Option<VirtioNetworkInitialization> {
+    let (common_physical, common_length) = device.common_region()?;
+    let common = mapping.address(common_physical, common_length)?;
+    if common % align_of::<u32>() != 0 || !network_function_is_disabled(device) {
+        return None;
+    }
+
+    let command = network_function_command(device);
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            (command | COMMAND_MEMORY_SPACE) & !(COMMAND_IO_SPACE | COMMAND_BUS_MASTER),
+        );
+    }
+    let memory_enabled = network_function_command(device)
+        & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+        == COMMAND_MEMORY_SPACE;
+    let result = memory_enabled.then(|| negotiate_network(common)).flatten();
+    let reset_complete = reset(common).is_some();
+    let revoked = revoke_network_function(device);
+    if !reset_complete || !revoked {
         return None;
     }
     result
@@ -1300,6 +1351,46 @@ fn negotiate(common: usize) -> Option<VirtioBlockInitialization> {
     })
 }
 
+fn negotiate_network(common: usize) -> Option<VirtioNetworkInitialization> {
+    reset(common)?;
+    write_common_u8(common, COMMON_DEVICE_STATUS, STATUS_ACKNOWLEDGE);
+    write_common_u8(
+        common,
+        COMMON_DEVICE_STATUS,
+        STATUS_ACKNOWLEDGE | STATUS_DRIVER,
+    );
+
+    write_common_u32(common, COMMON_DEVICE_FEATURE_SELECT, 0);
+    let low = read_common_u32(common, COMMON_DEVICE_FEATURE);
+    write_common_u32(common, COMMON_DEVICE_FEATURE_SELECT, 1);
+    let high = read_common_u32(common, COMMON_DEVICE_FEATURE);
+    let offered_features = u64::from(low) | (u64::from(high) << 32);
+    let accepted_features = select_network_features(offered_features)?;
+
+    write_common_u32(common, COMMON_DRIVER_FEATURE_SELECT, 0);
+    write_common_u32(common, COMMON_DRIVER_FEATURE, accepted_features as u32);
+    write_common_u32(common, COMMON_DRIVER_FEATURE_SELECT, 1);
+    write_common_u32(
+        common,
+        COMMON_DRIVER_FEATURE,
+        (accepted_features >> 32) as u32,
+    );
+    write_common_u8(
+        common,
+        COMMON_DEVICE_STATUS,
+        STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK,
+    );
+    if read_common_u8(common, COMMON_DEVICE_STATUS) & STATUS_FEATURES_OK == 0 {
+        return None;
+    }
+    let queue_count = read_common_u16(common, COMMON_NUM_QUEUES);
+    (queue_count >= 2).then_some(VirtioNetworkInitialization {
+        offered_features,
+        accepted_features,
+        queue_count,
+    })
+}
+
 pub(crate) fn verify_feature_rejections(offered: u64, accepted: u64) -> bool {
     accepted == (FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_FLUSH)
         && select_features(offered) == Some(accepted)
@@ -1307,6 +1398,15 @@ pub(crate) fn verify_feature_rejections(offered: u64, accepted: u64) -> bool {
         && select_features(offered & !FEATURE_ACCESS_PLATFORM).is_none()
         && select_features(offered & !FEATURE_FLUSH).is_none()
         && select_features(0).is_none()
+}
+
+pub(crate) fn verify_network_feature_rejections(offered: u64, accepted: u64) -> bool {
+    accepted == (FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_NET_MAC)
+        && select_network_features(offered) == Some(accepted)
+        && select_network_features(offered & !FEATURE_VERSION_1).is_none()
+        && select_network_features(offered & !FEATURE_ACCESS_PLATFORM).is_none()
+        && select_network_features(offered & !FEATURE_NET_MAC).is_none()
+        && select_network_features(0).is_none()
 }
 
 pub(crate) fn verify_queue_rejections() -> bool {
@@ -1330,6 +1430,11 @@ pub(crate) fn verify_queue_rejections() -> bool {
 
 fn select_features(offered: u64) -> Option<u64> {
     let required = FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_FLUSH;
+    (offered & required == required).then_some(required)
+}
+
+fn select_network_features(offered: u64) -> Option<u64> {
+    let required = FEATURE_VERSION_1 | FEATURE_ACCESS_PLATFORM | FEATURE_NET_MAC;
     (offered & required == required).then_some(required)
 }
 
@@ -1382,6 +1487,16 @@ fn bus_master_is_enabled(device: VirtioBlockDevice) -> bool {
 }
 
 pub(crate) fn device_is_reset(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {
+    let Some((physical, length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = mapping.address(physical, length) else {
+        return false;
+    };
+    read_common_u8(common, COMMON_DEVICE_STATUS) == 0
+}
+
+pub(crate) fn network_device_is_reset(device: VirtioNetworkDevice, mapping: MmioMapping) -> bool {
     let Some((physical, length)) = device.common_region() else {
         return false;
     };
