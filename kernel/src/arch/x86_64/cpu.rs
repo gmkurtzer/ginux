@@ -5124,6 +5124,17 @@ fn linux_mmap_area_index(address: u64, length: u64) -> Option<usize> {
     })
 }
 
+fn linux_mmap_covering_area_index(address: u64, length: u64) -> Option<usize> {
+    let base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
+    let end = address.checked_add(length)?;
+    (0..2).find(|index| {
+        let pages = ELF_PROBE_MMAP_PAGES[*index].load(Ordering::SeqCst);
+        let area_start = base + (*index * PAGE_SIZE) as u64;
+        let area_end = area_start + u64::from(pages) * PAGE_SIZE as u64;
+        pages != 0 && address >= area_start && end <= area_end
+    })
+}
+
 fn linux_mmap_range_overlaps_area(address: u64, length: u64) -> bool {
     let base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
     (0..2).any(|index| {
@@ -5424,7 +5435,7 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
     {
         return LINUX_EINVAL;
     }
-    let Some(index) = linux_mmap_area_index(address, length) else {
+    let Some(index) = linux_mmap_covering_area_index(address, length) else {
         return if linux_mmap_range_overlaps_area(address, length) {
             LINUX_EINVAL
         } else {
@@ -5432,15 +5443,32 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
         };
     };
     let pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
-    let frame = linux_mmap_slot_frame(index);
+    let area_address = mapping + (index * PAGE_SIZE) as u64;
+    let removed_slot = index + usize::from(address != area_address);
+    let frame = linux_mmap_slot_frame(removed_slot);
     if !address_space::unmap_current_linux_page(address, frame) {
         return LINUX_EINVAL;
     }
-    if pages == 2 {
+    if pages == 2 && length == 2 * PAGE_SIZE as u64 {
         let tail_frame = linux_mmap_slot_frame(index + 1);
         if !address_space::unmap_current_linux_page(address + PAGE_SIZE as u64, tail_frame) {
             return LINUX_EINVAL;
         }
+    }
+    if pages == 2 && length == PAGE_SIZE as u64 {
+        if removed_slot == index {
+            let writable = ELF_PROBE_MMAP_WRITABLE[index].load(Ordering::SeqCst);
+            let file = ELF_PROBE_MMAP_FILE[index].load(Ordering::SeqCst);
+            ELF_PROBE_MMAP_PAGES[index + 1].store(1, Ordering::SeqCst);
+            ELF_PROBE_MMAP_WRITABLE[index + 1].store(writable, Ordering::SeqCst);
+            ELF_PROBE_MMAP_FILE[index + 1].store(file, Ordering::SeqCst);
+            ELF_PROBE_MMAP_PAGES[index].store(0, Ordering::SeqCst);
+            ELF_PROBE_MMAP_WRITABLE[index].store(false, Ordering::SeqCst);
+            ELF_PROBE_MMAP_FILE[index].store(0, Ordering::SeqCst);
+        } else {
+            ELF_PROBE_MMAP_PAGES[index].store(1, Ordering::SeqCst);
+        }
+        return 0;
     }
     ELF_PROBE_MMAP_PAGES[index].store(0, Ordering::SeqCst);
     ELF_PROBE_MMAP_WRITABLE[index].store(false, Ordering::SeqCst);

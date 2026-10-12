@@ -601,13 +601,17 @@ are released; the kernel-owned live-frame count must return to its
 pre-execution value. This is bounded userspace-owned loading for two
 preauthenticated images and one fixed dependency window, not ASLR, a general
 executable allocator, or authority to map unauthenticated bytes.
-`rax = 11` (`__NR_munmap`) accepts only a complete active scratch area, clears
-its hardware leaves, invalidates their TLB entries, and scrubs the physical
-frames before reuse. Repeating a supported exact unmap succeeds. A partial
-range that overlaps an active area is rejected. The anonymous proof keeps two
-one-page areas active, queries and removes the second independently, and
-proves the first remains intact. It also crosses a two-page area boundary with
-syscall copy-out, while the file proof maps the complete two-page interpreter,
+`rax = 11` (`__NR_munmap`) accepts a complete active scratch area or one
+page-aligned head or tail page of a two-page area. It clears the selected
+hardware leaves, invalidates their TLB entries, and scrubs the physical frames
+before reuse. A partial removal splits or truncates the registry record while
+preserving the remaining page's write and immutable-file attributes. Repeating
+a supported exact unmap succeeds; a range spanning two independent areas is
+rejected. The anonymous proof keeps two one-page areas active, queries and
+removes the second independently, and proves the first remains intact. It then
+removes both the head and tail of separate two-page areas and validates the
+surviving area's residency, access, and contents. It also crosses a two-page
+area boundary with syscall copy-out, while the file proof maps the complete two-page interpreter,
 observes ELF magic and its entry byte, checks the zero-filled tail, proves
 syscall copy-out is denied, and rejects an unaligned file offset. Both paths
 exit with both leaves absent. This is not a general VMA allocator: arbitrary

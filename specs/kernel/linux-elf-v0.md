@@ -780,7 +780,8 @@ page at `0x408000` remains an unmapped lower stack guard, and an owned page at
 owned frames are initially absent at `0x40b000` and `0x40c000`. A two-entry
 registry installs them as two independent one-page areas or one two-page area
 for the bounded anonymous or immutable-runtime-file `mmap` lifecycle.
-File-backed windows are private,
+Removing either page of a two-page area preserves the other as a one-page
+registry entry with unchanged access and file-kind metadata. File-backed windows are private,
 read-only/NX copies of authenticated bytes and are scrubbed during unmap.
 Before changing CR3, the proof rejects either
 segment, heap, or stack target page if it overlaps the loaded kernel PE image.

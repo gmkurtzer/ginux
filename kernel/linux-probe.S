@@ -610,15 +610,62 @@ valid_interpreter_base:
 
     mov esi, 4096
     mov eax, 11
-    call syscall_expect_einval
-    mov esi, 8192
+    call syscall_expect_zero
+    mov edi, 1
+    mov esi, 0x40b000
+    mov edx, 8
+    mov eax, 1
+    call syscall_expect_efault
+    mov byte ptr [0x40594a], 0
+    mov edi, 0x40c000
+    mov esi, 4096
+    mov edx, 0x40594a
+    mov eax, 27
+    call syscall_expect_zero
+    cmp byte ptr [0x40594a], 1
+    jne failure
+    cmp qword ptr [0x40c000], 0
+    jne failure
+    mov edi, 0x40c000
+    mov esi, 4096
     mov eax, 11
     call syscall_expect_zero
+
+    xor edi, edi
+    mov esi, 8192
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
+    jne failure
+    mov qword ptr [0x40b000], 3
+    mov qword ptr [0x40c000], 4
+    mov edi, 0x40c000
+    mov esi, 4096
+    mov eax, 11
+    call syscall_expect_zero
+    cmp qword ptr [0x40b000], 3
+    jne failure
     mov edi, 1
     mov esi, 0x40c000
     mov edx, 8
     mov eax, 1
     call syscall_expect_efault
+    mov byte ptr [0x40594a], 0
+    mov edi, 0x40b000
+    mov esi, 4096
+    mov edx, 0x40594a
+    mov eax, 27
+    call syscall_expect_zero
+    cmp byte ptr [0x40594a], 1
+    jne failure
+    mov edi, 0x40b000
+    mov esi, 4096
+    mov eax, 11
+    call syscall_expect_zero
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     xor edi, edi

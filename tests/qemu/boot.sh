@@ -1668,6 +1668,11 @@ if ! grep -q '^ginux: multiple bounded Linux mmap areas validated' "$output_file
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux mmap area splitting validated' "$output_file"; then
+    echo "Boot test failed: bounded Linux mmap area splitting was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux anonymous mapping write seal validated' "$output_file"; then
     echo "Boot test failed: Linux anonymous mapping write seal was not validated." >&2
     exit 1

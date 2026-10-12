@@ -449,7 +449,9 @@ complete two-page window can expose a two-page file extent. File offsets must
 be page aligned, partial final pages are zero-filled, syscall copy-out cannot
 modify the mapping, and unmap scrubs every payload frame. The runtime proof
 keeps two one-page areas live simultaneously, queries and removes the second,
-and verifies that the first remains usable.
+and verifies that the first remains usable. Removing either the head or tail
+page of a two-page area preserves the other page as an independent one-page
+area with the original access and immutable-file attributes.
 General mapping placement, shared file mappings, writable mappings outside the
 exact authenticated main/dependency data pages, and arbitrary filesystem-backed
 mappings are not implemented.
