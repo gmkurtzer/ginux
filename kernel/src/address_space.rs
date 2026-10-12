@@ -2388,6 +2388,7 @@ pub(crate) fn replace_current_linux_pages(
     old_frames: &[Option<memory::FrameLease>],
     old_writable: &[bool],
     new_frames: &[memory::FrameLease],
+    new_writable: bool,
 ) -> bool {
     if !(1..=cpu::LINUX_MMAP_SLOT_COUNT).contains(&new_frames.len())
         || old_frames.len() != new_frames.len()
@@ -2419,10 +2420,11 @@ pub(crate) fn replace_current_linux_pages(
         }
         leaves[index] = leaf;
     }
+    let new_flags = PRESENT | USER | NO_EXECUTE | if new_writable { WRITABLE } else { 0 };
     for (index, frame) in new_frames.iter().enumerate() {
         let page = address + (index * PAGE_SIZE) as u64;
         unsafe {
-            leaves[index].write(frame.address() | PRESENT | WRITABLE | USER | NO_EXECUTE);
+            leaves[index].write(frame.address() | new_flags);
             asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
         }
     }
@@ -2431,7 +2433,7 @@ pub(crate) fn replace_current_linux_pages(
         .zip(new_frames)
         .all(|(leaf, frame)| {
             (unsafe { leaf.read() } & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE))
-                == (frame.address() | PRESENT | WRITABLE | USER | NO_EXECUTE)
+                == (frame.address() | new_flags)
         })
 }
 

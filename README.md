@@ -448,7 +448,7 @@ through four pages in its reserved virtual window. Physical frames are allocated
 only when a mapping is admitted. Every nonzero scratch length is rounded up to
 a page consistently across mapping, protection, residency, discard, and unmap;
 a rounded request requiring more than four pages is rejected. Anonymous areas
-may be RW/NX or virtual-only `PROT_NONE` reservations. Reservations own no
+may be read-only/NX, RW/NX, or virtual-only `PROT_NONE` reservations. Reservations own no
 physical frame, keep their page-table leaves absent, deny syscall copies, and
 remain occupied for placement purposes until activation or unmap. RW/NX areas are
 removed from the hardware page table by exact `munmap`, scrubbed, and proven
@@ -471,7 +471,7 @@ overlap returns `EEXIST` without changing either the existing mappings or frame
 ownership. A reservation also counts as overlap. Anonymous `MAP_FIXED` can
 atomically fill holes, reservations, or replace a selected
 subrange after all old and new frame leases and page-table leaves pass one
-preflight. Replacement publishes fresh zeroed RW/NX pages before scrubbing and
+preflight. Replacement publishes fresh zeroed read-only/NX or RW/NX pages before scrubbing and
 retiring the displaced generation leases. A `PROT_NONE` fixed replacement
 instead clears the selected leaves, retires their leases, and leaves an
 occupied virtual-only reservation that can later be activated.

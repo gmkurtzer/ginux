@@ -41,10 +41,11 @@ policy remain separate milestones.
 
 That Linux proof also reserves four initially absent leaves over
 `0x40b000..0x40f000`. Its bounded anonymous mapping call rounds a nonzero
-length up to one through four pages and admits RW/NX mappings or virtual-only
+length up to one through four pages and admits R/NX mappings, RW/NX mappings, or virtual-only
 `PROT_NONE` reservations. A reservation occupies registry slots while retaining
 zero lease metadata and absent leaves. RW mappings allocate exact
-generation-bound frames before installing any leaf. The
+generation-bound frames before installing any leaf, using the requested
+read-only or writable permission from the first published PTE. The
 lowest-free placement policy and exact
 `MAP_FIXED_NOREPLACE` placement share the same overlap preflight; fixed overlap
 returns `EEXIST` before frame allocation, including on a reservation. Anonymous

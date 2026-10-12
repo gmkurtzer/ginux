@@ -539,10 +539,13 @@ replaces active pages with fresh zeroed RW/NX generation leases.
 It preflights every old leaf and lease before changing the page table, then
 scrubs and releases every displaced lease before returning. Its anonymous form
 otherwise requires a nonzero length that rounds up to no more than four pages,
-either `PROT_NONE` or `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`,
+`PROT_NONE`, `PROT_READ`, or `PROT_READ | PROT_WRITE`,
+`MAP_PRIVATE | MAP_ANONYMOUS`,
 fd -1, and offset zero. `PROT_NONE` publishes an occupied virtual reservation
-without allocating a frame or installing a leaf. RW requests allocate and
-install zero-filled generation-bound RW/NX frame leases. `MAP_FIXED` with
+without allocating a frame or installing a leaf. Read-only and RW requests
+allocate and install zero-filled generation-bound R/NX or RW/NX frame leases.
+`MAP_FIXED` preserves the requested protection when filling or replacing a
+selected range. `MAP_FIXED` with
 `PROT_NONE` preflights every selected leaf and exact old lease, clears the
 leaves as one bounded transaction, publishes reservation metadata, and then
 scrubs and releases the displaced leases. It therefore discards mapped

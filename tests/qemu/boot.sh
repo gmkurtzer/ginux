@@ -1709,6 +1709,11 @@ if ! grep -q '^ginux: bounded PROT_NONE fixed replacement validated' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded read-only anonymous mapping validated' "$output_file"; then
+    echo "Boot test failed: bounded read-only anonymous mapping was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: page-rounded Linux mmap lengths validated' "$output_file"; then
     echo "Boot test failed: page-rounded Linux mmap lengths were not validated." >&2
     exit 1

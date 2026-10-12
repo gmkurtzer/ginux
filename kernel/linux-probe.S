@@ -869,13 +869,15 @@ valid_interpreter_base:
     syscall
     cmp rax, 0x40e000
     jne failure
-    mov edx, 3
+    mov edx, 1
     mov r10d, 0x32
     mov eax, 9
     syscall
     cmp rax, 0x40e000
     jne failure
-    mov qword ptr [0x40e000], 16
+    mov edi, 0x40e000
+    mov eax, 63
+    call syscall_expect_efault
     mov r10d, 0x100022
     mov eax, 9
     syscall

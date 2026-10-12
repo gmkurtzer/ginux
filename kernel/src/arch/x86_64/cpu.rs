@@ -5335,7 +5335,9 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
 
     let (file_kind, file_source) =
         if flags == anonymous_flags || fixed_anonymous || replace_anonymous {
-            if protection != 0 && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
+            if protection != 0
+                && protection != LINUX_PROT_READ
+                && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
                 || fd != u64::MAX
                 || offset != 0
             {
@@ -5511,6 +5513,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                 &old_leases[..usize::from(pages)],
                 &old_writable[..usize::from(pages)],
                 &leases[..usize::from(pages)],
+                protection & LINUX_PROT_WRITE != 0,
             )
         {
             let _ = memory::scrub_and_release_frames(
@@ -5522,7 +5525,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
         for (offset, lease) in leases[..usize::from(pages)].iter().copied().enumerate() {
             let slot = start_slot + offset;
             linux_mmap_store_slot_lease(slot, lease);
-            slots[slot] = Some(((LINUX_PROT_READ | LINUX_PROT_WRITE) as u8, 0));
+            slots[slot] = Some((protection as u8, 0));
         }
         linux_mmap_rebuild_areas(slots);
         if released_count != 0
