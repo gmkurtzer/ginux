@@ -244,6 +244,7 @@ const LINUX_TFD_TIMER_ABSTIME: u64 = 1;
 const LINUX_TIMER_ABSTIME: u64 = 1;
 const LINUX_TFD_NONBLOCK: u64 = 0x800;
 const LINUX_PIPE_CAPACITY: usize = 256;
+const LINUX_PIPE_READV_WAIT_FLAG: u64 = 1 << 63;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_AT_EMPTY_PATH: u64 = 0x1000;
 const LINUX_TCGETS: u64 = 0x5401;
@@ -570,6 +571,10 @@ static LINUX_THREAD_POLL_DESCRIPTORS: [[AtomicU32; LINUX_POLLFD_LIMIT]; LINUX_TH
     [const { [const { AtomicU32::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
 static LINUX_THREAD_POLL_EVENTS: [[AtomicU16; LINUX_POLLFD_LIMIT]; LINUX_THREAD_LIMIT] =
     [const { [const { AtomicU16::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_IOV_ADDRESSES: [[AtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
+    [const { [const { AtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_IOV_LENGTHS: [[AtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
+    [const { [const { AtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
 static LINUX_CURRENT_THREAD_SLOT: AtomicU8 = AtomicU8::new(LINUX_THREAD_SLOT_NONE);
 static LINUX_NEXT_TID: AtomicU32 = AtomicU32::new(1);
 static ELF_PROBE_RELRO: AtomicU64 = AtomicU64::new(0);
@@ -2292,6 +2297,7 @@ fn clear_linux_thread_slot(slot: usize) {
     for events in &LINUX_THREAD_POLL_EVENTS[slot] {
         events.store(0, Ordering::SeqCst);
     }
+    clear_linux_iov_snapshot(slot);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_FREE, Ordering::SeqCst);
 }
 
@@ -2523,7 +2529,17 @@ fn finish_linux_thread_table() -> bool {
         })
         && LINUX_THREAD_POLL_EVENTS
             .iter()
-            .all(|events| events.iter().all(|value| value.load(Ordering::SeqCst) == 0));
+            .all(|events| events.iter().all(|value| value.load(Ordering::SeqCst) == 0))
+        && LINUX_THREAD_IOV_ADDRESSES.iter().all(|addresses| {
+            addresses
+                .iter()
+                .all(|value| value.load(Ordering::SeqCst) == 0)
+        })
+        && LINUX_THREAD_IOV_LENGTHS.iter().all(|lengths| {
+            lengths
+                .iter()
+                .all(|value| value.load(Ordering::SeqCst) == 0)
+        });
     for slot in 0..LINUX_THREAD_LIMIT {
         clear_linux_thread_slot(slot);
     }
@@ -4973,7 +4989,13 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
-        LINUX_READV_SYSCALL => linux_descriptor_readv(first_argument, buffer, count),
+        LINUX_READV_SYSCALL => linux_descriptor_readv_live_return(
+            registers,
+            syscall_return,
+            first_argument,
+            buffer,
+            count,
+        ),
         LINUX_WRITEV_SYSCALL => linux_descriptor_writev(first_argument, buffer, count),
         LINUX_PIPE_SYSCALL => linux_pipe(first_argument, 0),
         LINUX_MINCORE_SYSCALL => linux_mincore(first_argument, buffer, count),
@@ -8260,6 +8282,15 @@ fn clear_linux_poll_snapshot(slot: usize) {
     }
 }
 
+fn clear_linux_iov_snapshot(slot: usize) {
+    for address in &LINUX_THREAD_IOV_ADDRESSES[slot] {
+        address.store(0, Ordering::SeqCst);
+    }
+    for length in &LINUX_THREAD_IOV_LENGTHS[slot] {
+        length.store(0, Ordering::SeqCst);
+    }
+}
+
 fn complete_linux_poll_wait(slot: usize, timed_out: bool) -> bool {
     let kind = if slot < LINUX_THREAD_LIMIT {
         LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst)
@@ -8652,9 +8683,31 @@ fn complete_linux_pipe_read_wait(slot: usize) -> bool {
     }
     let packed = LINUX_THREAD_WAIT_OUTPUTS[slot].load(Ordering::SeqCst);
     let descriptor = packed & 0xff;
-    let count = packed >> 8;
+    let count = (packed & !LINUX_PIPE_READV_WAIT_FLAG) >> 8;
     let address = LINUX_THREAD_WAIT_KEYS[slot].load(Ordering::SeqCst);
-    let result = linux_pipe_read(descriptor, address, count).unwrap_or(LINUX_EBADF);
+    let result = if packed & LINUX_PIPE_READV_WAIT_FLAG != 0 {
+        let Ok(vector_count) = usize::try_from(count) else {
+            return false;
+        };
+        if !(1..=LINUX_IOV_LIMIT).contains(&vector_count) {
+            return false;
+        }
+        let mut ranges = [(0_u64, 0_usize); LINUX_IOV_LIMIT];
+        for (index, range) in ranges[..vector_count].iter_mut().enumerate() {
+            let Ok(length) =
+                usize::try_from(LINUX_THREAD_IOV_LENGTHS[slot][index].load(Ordering::SeqCst))
+            else {
+                return false;
+            };
+            *range = (
+                LINUX_THREAD_IOV_ADDRESSES[slot][index].load(Ordering::SeqCst),
+                length,
+            );
+        }
+        linux_pipe_readv_ranges(descriptor, &ranges[..vector_count])
+    } else {
+        linux_pipe_read(descriptor, address, count).unwrap_or(LINUX_EBADF)
+    };
     if result == LINUX_ENOSYS {
         return false;
     }
@@ -8663,6 +8716,7 @@ fn complete_linux_pipe_read_wait(slot: usize) -> bool {
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+    clear_linux_iov_snapshot(slot);
     LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
     LINUX_PIPE_READ_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
     true
@@ -8745,6 +8799,61 @@ fn linux_descriptor_read_live_return(
     if wait_count == 0 || !linux_writable_user_range_contains(address, wait_count as usize) {
         return LINUX_EFAULT;
     }
+    let wait_output = if kind == LINUX_THREAD_WAIT_PIPE_READ {
+        wait_count << 8 | descriptor
+    } else {
+        descriptor
+    };
+    linux_blocking_descriptor_read_live_return(
+        output,
+        caller,
+        kind,
+        address,
+        wait_output,
+        if kind == LINUX_THREAD_WAIT_TIMERFD_READ {
+            ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst)
+        } else {
+            0
+        },
+        None,
+    )
+}
+
+fn linux_descriptor_readv_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    descriptor: u64,
+    vectors: u64,
+    count: u64,
+) -> u64 {
+    let immediate = linux_descriptor_readv(descriptor, vectors, count);
+    if immediate != LINUX_ENOSYS || !linux_pipe_read_descriptor(descriptor) {
+        return immediate;
+    }
+    let (ranges, vector_count) = match linux_readv_ranges(vectors, count) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return error,
+    };
+    linux_blocking_descriptor_read_live_return(
+        output,
+        caller,
+        LINUX_THREAD_WAIT_PIPE_READ,
+        vectors,
+        LINUX_PIPE_READV_WAIT_FLAG | (vector_count as u64) << 8 | descriptor,
+        0,
+        Some(&ranges[..vector_count]),
+    )
+}
+
+fn linux_blocking_descriptor_read_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    kind: u8,
+    wait_key: u64,
+    wait_output: u64,
+    deadline: u64,
+    iov_snapshot: Option<&[(u64, usize)]>,
+) -> u64 {
     let Some(current) = current_linux_thread_handle() else {
         return LINUX_ESRCH;
     };
@@ -8755,23 +8864,16 @@ fn linux_descriptor_read_live_return(
         return LINUX_ESRCH;
     };
     let slot = usize::from(current.slot);
-    let wait_output = if kind == LINUX_THREAD_WAIT_PIPE_READ {
-        wait_count << 8 | descriptor
-    } else {
-        descriptor
-    };
+    if let Some(ranges) = iov_snapshot {
+        for (index, (address, length)) in ranges.iter().copied().enumerate() {
+            LINUX_THREAD_IOV_ADDRESSES[slot][index].store(address, Ordering::SeqCst);
+            LINUX_THREAD_IOV_LENGTHS[slot][index].store(length as u64, Ordering::SeqCst);
+        }
+    }
     if !save_linux_thread_return_context(current, caller)
-        || !block_current_linux_thread(
-            kind,
-            address,
-            wait_output,
-            if kind == LINUX_THREAD_WAIT_TIMERFD_READ {
-                ELF_PROBE_TIMERFD_DEADLINE.load(Ordering::SeqCst)
-            } else {
-                0
-            },
-        )
+        || !block_current_linux_thread(kind, wait_key, wait_output, deadline)
     {
+        clear_linux_iov_snapshot(slot);
         return LINUX_EINVAL;
     }
     let mut target_registers = LinuxSyscallFrame::ZERO;
@@ -8791,6 +8893,7 @@ fn linux_descriptor_read_live_return(
         LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
+        clear_linux_iov_snapshot(slot);
         LINUX_THREAD_STATES[slot].store(LINUX_THREAD_RUNNING, Ordering::SeqCst);
         LINUX_CURRENT_THREAD_SLOT.store(current.slot, Ordering::SeqCst);
         let _ = install_linux_tls_context(tls);
@@ -9202,15 +9305,26 @@ fn linux_pipe_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
     if !linux_pipe_read_descriptor(descriptor) {
         return None;
     }
+    let (ranges, vector_count) = match linux_readv_ranges(vectors, count) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return Some(error),
+    };
+    Some(linux_pipe_readv_ranges(descriptor, &ranges[..vector_count]))
+}
+
+fn linux_readv_ranges(
+    vectors: u64,
+    count: u64,
+) -> Result<([(u64, usize); LINUX_IOV_LIMIT], usize), u64> {
     let Ok(vector_count) = usize::try_from(count) else {
-        return Some(LINUX_EINVAL);
+        return Err(LINUX_EINVAL);
     };
     if !(1..=LINUX_IOV_LIMIT).contains(&vector_count) {
-        return Some(LINUX_EINVAL);
+        return Err(LINUX_EINVAL);
     }
     let mut table = [0_u8; LINUX_IOV_LIMIT * 16];
     if !copy_from_linux_user(vectors, &mut table[..vector_count * 16]) {
-        return Some(LINUX_EFAULT);
+        return Err(LINUX_EFAULT);
     }
     let mut ranges = [(0_u64, 0_usize); LINUX_IOV_LIMIT];
     let mut capacity = 0_usize;
@@ -9223,32 +9337,54 @@ fn linux_pipe_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
         let address = u64::from_ne_bytes(vector[..8].try_into().unwrap());
         let length = u64::from_ne_bytes(vector[8..].try_into().unwrap());
         let Ok(length) = usize::try_from(length) else {
-            return Some(LINUX_EINVAL);
+            return Err(LINUX_EINVAL);
         };
         let Some(end) = capacity.checked_add(length) else {
-            return Some(LINUX_EINVAL);
+            return Err(LINUX_EINVAL);
         };
         if length == 0 || end > LINUX_PIPE_CAPACITY {
-            return Some(LINUX_EINVAL);
+            return Err(LINUX_EINVAL);
         }
         if !linux_writable_user_range_contains(address, length) {
-            return Some(LINUX_EFAULT);
+            return Err(LINUX_EFAULT);
         }
         ranges[index] = (address, length);
+        capacity = end;
+    }
+    Ok((ranges, vector_count))
+}
+
+fn linux_pipe_readv_ranges(descriptor: u64, ranges: &[(u64, usize)]) -> u64 {
+    if !linux_pipe_read_descriptor(descriptor) || ranges.is_empty() {
+        return LINUX_EBADF;
+    }
+    let mut capacity = 0_usize;
+    for (address, range_length) in ranges.iter().copied() {
+        let Some(end) = capacity.checked_add(range_length) else {
+            return LINUX_EINVAL;
+        };
+        if range_length == 0
+            || end > LINUX_PIPE_CAPACITY
+            || !linux_writable_user_range_contains(address, range_length)
+        {
+            return if range_length == 0 || end > LINUX_PIPE_CAPACITY {
+                LINUX_EINVAL
+            } else {
+                LINUX_EFAULT
+            };
+        }
         capacity = end;
     }
     let length = ELF_PROBE_PIPE_LENGTH.load(Ordering::SeqCst) as usize;
     if length == 0 {
         if ELF_PROBE_PIPE_WRITE_DESCRIPTOR.load(Ordering::SeqCst) == 0 {
-            return Some(0);
+            return 0;
         }
-        return Some(
-            if ELF_PROBE_PIPE_READ_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
-                LINUX_EAGAIN
-            } else {
-                LINUX_ENOSYS
-            },
-        );
+        return if ELF_PROBE_PIPE_READ_FLAGS.load(Ordering::SeqCst) & LINUX_O_NONBLOCK as u32 != 0 {
+            LINUX_EAGAIN
+        } else {
+            LINUX_ENOSYS
+        };
     }
     let returned = length.min(capacity);
     let mut output = [0_u8; LINUX_PIPE_CAPACITY];
@@ -9259,13 +9395,13 @@ fn linux_pipe_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
         *target = source.load(Ordering::SeqCst);
     }
     let mut copied = 0;
-    for (address, range_length) in ranges[..vector_count].iter().copied() {
+    for (address, range_length) in ranges.iter().copied() {
         let amount = range_length.min(returned - copied);
         if amount == 0 {
             break;
         }
         if !copy_to_linux_user(address, &output[copied..copied + amount]) {
-            return Some(LINUX_EFAULT);
+            return LINUX_EFAULT;
         }
         copied += amount;
     }
@@ -9278,7 +9414,7 @@ fn linux_pipe_readv(descriptor: u64, vectors: u64, count: u64) -> Option<u64> {
     }
     ELF_PROBE_PIPE_LENGTH.store((length - returned) as u32, Ordering::SeqCst);
     wake_linux_descriptor_waits();
-    Some(returned as u64)
+    returned as u64
 }
 
 fn linux_epoll_ctl(epoll: u64, operation: u64, descriptor: u64, event_address: u64) -> u64 {
@@ -11829,6 +11965,9 @@ fn linux_interrupt_blocked_wait(
     }
     if matches!(wait_kind, LINUX_THREAD_WAIT_POLL | LINUX_THREAD_WAIT_PPOLL) {
         clear_linux_poll_snapshot(slot);
+    }
+    if wait_kind == LINUX_THREAD_WAIT_PIPE_READ {
+        clear_linux_iov_snapshot(slot);
     }
     // SAFETY: the switch above made the target the sole running Linux thread,
     // and the live return already names its validated handler context.

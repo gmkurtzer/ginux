@@ -214,7 +214,7 @@ stores its destination, bounded count, and descriptor in a typed scheduler wait.
 A write revalidates the output and completes the read, while closing the writer
 wakes it with EOF without modifying the destination. The measured two-thread
 graph proves both paths and retires both endpoints before continuing. Blocking
-without a runnable peer and blocking vectored reads retain `-ENOSYS`. An
+without a runnable peer retains `-ENOSYS`. An
 admitted caught standard signal unblocked by the waiting thread's ordinary mask
 may cancel a scalar read through the shared transactional handoff. It returns
 `-EINTR` through `rt_sigreturn` without modifying the destination or FIFO; the
@@ -240,7 +240,13 @@ nonempty iovecs with an aggregate maximum of 256 bytes. `writev` gathers and
 validates every input range before appending any byte; `readv` validates every
 output range before scattering or consuming data. The proof injects an invalid
 later vector in each direction, then verifies that the complete original FIFO
-sequence remains available to a valid retry.
+sequence remains available to a valid retry. On an empty blocking pipe,
+`readv` snapshots the complete validated iovec table into the waiting thread's
+kernel state before selecting its peer. Completion uses only that snapshot,
+revalidates every output range before copying or consuming, and clears the
+snapshot on wake, close, rollback, signal interruption, or thread retirement.
+The measured graph changes the shared userspace table while the reader sleeps
+and proves that the original one-byte target still receives the writer's byte.
 `rax = 79` (`__NR_getcwd`) copies the process's indexed working-directory path
 and terminator to a writable VMA and returns the required byte count. The
 initial directory is `/`; measured directories such as `/var/lib` retain their

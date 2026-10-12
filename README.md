@@ -457,12 +457,15 @@ at the original deadline. Blocked signals, nested delivery, and syscall restart
 remain unsupported. One bounded pipe pair provides a 256-byte FIFO
 with atomic scalar or vectored I/O, poll/epoll readiness, EOF, broken-peer
 behavior, FIFO metadata, and byte-count introspection. An empty blocking scalar
-read sleeps in its scheduler slot while a peer is runnable, then revalidates and
-copies available bytes after a write or returns EOF after the writer closes.
-An admitted caught signal may interrupt the scalar wait with `EINTR` without
+or vectored read sleeps in its scheduler slot while a peer is runnable, then
+revalidates and copies available bytes after a write or returns EOF after the
+writer closes. A blocked `readv` retains a kernel-owned snapshot of up to four
+iovecs and revalidates every snapshotted output range at completion; changing
+the userspace iovec table while asleep cannot redirect the copy. An admitted
+caught signal may interrupt either wait with `EINTR` without
 changing the output or FIFO; retrying the same read can then complete normally.
-The measured graph proves both wake paths and the interruption/retry path;
-blocking vectored reads and saturated writes remain unsupported. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
+The measured graph proves both wake paths, the scalar interruption/retry path,
+and readv snapshot isolation; saturated writes remain unsupported. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
 retires either initial console descriptor. Bounded `dup` reuses the lowest closed slot and preserves whether
 the console endpoint is input or output; `dup2` provides exact-slot replacement.
 `fcntl(F_GETFD/F_GETFL)` exposes the bounded descriptor and endpoint flags. It also

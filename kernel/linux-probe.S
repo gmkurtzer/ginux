@@ -1442,7 +1442,9 @@ linux_clone_repeat:
     cmp byte ptr [0x405eb0], 0x7f
     require_equal
     mov byte ptr [0x405eb0], 0
-    xor eax, eax
+    lea rsi, [rip + blocked_pipe_readv]
+    push 19
+    pop rax
     call syscall_expect_one
     cmp byte ptr [0x405eb0], 'P'
     require_equal
@@ -2617,7 +2619,8 @@ linux_child_joined:
     mov eax, 233
     call syscall_expect_zero
 
-    mov edi, 3
+    push 3
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -2793,12 +2796,15 @@ linux_child_joined:
     cmp rax, -24
     require_equal
 
-    mov edi, 3
-    mov esi, 1
+    push 3
+    pop rdi
+    push 1
+    pop rsi
     push 72
     pop rax
     call syscall_expect_one
-    mov esi, 3
+    push 3
+    pop rsi
     push 72
     pop rax
     syscall
@@ -2998,7 +3004,8 @@ linux_child_joined:
     push 3
     pop rax
     call syscall_expect_zero
-    mov edi, 4
+    push 4
+    pop rdi
     push 3
     pop rax
     call syscall_expect_zero
@@ -3012,8 +3019,10 @@ linux_child_joined:
     cmp rax, -24
     require_equal
 
-    mov edi, 3
-    mov esi, 1
+    push 3
+    pop rdi
+    push 1
+    pop rsi
     push 72
     pop rax
     call syscall_expect_one
@@ -3023,7 +3032,8 @@ linux_child_joined:
     syscall
     cmp rax, 0x800
     require_equal
-    mov edi, 4
+    push 4
+    pop rdi
     push 72
     pop rax
     syscall
@@ -4911,6 +4921,9 @@ child_thread_probe:
     push 12
     pop rdx
     call linux_child_signal_parent
+    # The blocked readv must retain its kernel snapshot even if the shared
+    # userspace iovec table is changed before the pipe becomes readable.
+    mov byte ptr [rip + blocked_pipe_readv + 8], 0
     mov byte ptr [0x405d80], 'P'
     push 3
     pop rdi
@@ -5419,6 +5432,11 @@ ginux_linux_probe_data:
 .global ginux_main_init_state
 ginux_main_init_state:
     .quad 0
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+blocked_pipe_readv:
+    .quad 0x405eb0
+    .quad 1
+#endif
 #endif
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
@@ -5440,7 +5458,7 @@ ginux_main_tls_zero:
 .section .bss
 .balign 8
 #ifdef GINUX_GRAPH
-    .space 4064
+    .space 4048
 #else
     .space 4088
 #endif
