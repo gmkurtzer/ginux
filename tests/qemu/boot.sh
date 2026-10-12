@@ -720,7 +720,8 @@ for marker in \
     'old static Linux page-table leases retired at exec' \
     'replacement static Linux page-table leases reclaimed' \
     'static Linux exec auxiliary vector rebuilt' \
-    'canonical interpreted Linux executable identity validated'; do
+    'canonical interpreted Linux executable identity validated' \
+    'interpreted Linux exec vectors generalized'; do
     if ! grep -q "^ginux: ${marker}" "$output_file"; then
         echo "Boot test failed: ${marker}." >&2
         exit 1

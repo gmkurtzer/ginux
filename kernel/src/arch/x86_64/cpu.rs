@@ -6034,9 +6034,6 @@ fn linux_execve_at(
         }
         [first, second]
     };
-    if interpreted && (argument_count != 1 || environment_count != 1) {
-        return LINUX_E2BIG;
-    }
     let interpreted_tls = if let Some(plan) = interpreted_exec_plan.as_ref() {
         let Some(initial) = current_linux_thread_handle().and_then(linux_thread_context) else {
             return LINUX_ESRCH;

@@ -32,11 +32,39 @@ ginux_auxiliary_init:
     cmp qword ptr [rip + .Lauxiliary_initialized], 0x47
     jne .Lauxiliary_initialize_done
     cmp edi, 1
+    je .Lauxiliary_initialize_single_vector
+    cmp edi, 2
     jne .Lauxiliary_initialize_done
+    cmp qword ptr [rsi + 16], 0
+    jne .Lauxiliary_initialize_done
+    cmp qword ptr [rdx + 16], 0
+    jne .Lauxiliary_initialize_done
+    mov rax, qword ptr [rsi + 8]
+    movabs rcx, 0x2d63696d616e7964
+    cmp qword ptr [rax], rcx
+    jne .Lauxiliary_initialize_done
+    cmp dword ptr [rax + 8], 0x63657865
+    jne .Lauxiliary_initialize_done
+    cmp byte ptr [rax + 12], 0
+    jne .Lauxiliary_initialize_done
+    mov rax, qword ptr [rdx]
+    movabs rcx, 0x00313d58554e4947
+    cmp qword ptr [rax], rcx
+    jne .Lauxiliary_initialize_done
+    mov rax, qword ptr [rdx + 8]
+    movabs rcx, 0x4f4d5f58554e4947
+    cmp qword ptr [rax], rcx
+    jne .Lauxiliary_initialize_done
+    movabs rcx, 0x00636578653d4544
+    cmp qword ptr [rax + 8], rcx
+    jne .Lauxiliary_initialize_done
+    jmp .Lauxiliary_initialize_common
+.Lauxiliary_initialize_single_vector:
     cmp qword ptr [rsi + 8], 0
     jne .Lauxiliary_initialize_done
     cmp qword ptr [rdx + 8], 0
     jne .Lauxiliary_initialize_done
+.Lauxiliary_initialize_common:
     mov rax, qword ptr [rsi]
     cmp dword ptr [rax], 0x696e692f
     jne .Lauxiliary_initialize_done

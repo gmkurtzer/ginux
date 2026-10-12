@@ -13,7 +13,31 @@ ginux_linux_probe:
     movabs rax, 0x4e49414d54494e49
     cmp qword ptr [rip + ginux_main_init_state], rax
     jne failure
-    cmp qword ptr [rsp + 304], 1
+    mov rcx, qword ptr [rsp]
+    cmp rcx, 8
+    ja failure
+    lea rax, [rsp + rcx*8 + 16]
+    xor ecx, ecx
+.Lentry_environment_scan:
+    cmp rcx, 8
+    ja failure
+    cmp qword ptr [rax + rcx*8], 0
+    je .Lentry_auxiliary_scan_start
+    inc rcx
+    jmp .Lentry_environment_scan
+.Lentry_auxiliary_scan_start:
+    lea rax, [rax + rcx*8 + 8]
+    mov ecx, 32
+.Lentry_auxiliary_scan:
+    cmp qword ptr [rax], 26
+    je .Lentry_hardware_capability_two
+    cmp qword ptr [rax], 0
+    je failure
+    add rax, 16
+    loop .Lentry_auxiliary_scan
+    jmp failure
+.Lentry_hardware_capability_two:
+    cmp qword ptr [rax + 8], 1
     je .Ldynamic_exec_complete
 #else
     mov rax, qword ptr [rip + ginux_dependency_symbol@GOTPCREL]
@@ -3515,13 +3539,17 @@ resolution_valid:
     sub rsp, 64
     lea rax, [rip + .Ldynamic_exec_path]
     mov qword ptr [rsp], rax
-    mov qword ptr [rsp + 8], 0
+    lea rax, [rip + .Ldynamic_exec_argument]
+    mov qword ptr [rsp + 8], rax
+    mov qword ptr [rsp + 16], 0
     lea rax, [rip + .Ldynamic_exec_environment]
-    mov qword ptr [rsp + 16], rax
-    mov qword ptr [rsp + 24], 0
+    mov qword ptr [rsp + 24], rax
+    lea rax, [rip + .Ldynamic_exec_environment_second]
+    mov qword ptr [rsp + 32], rax
+    mov qword ptr [rsp + 40], 0
     lea rdi, [rip + .Ldynamic_exec_path]
     mov rsi, rsp
-    lea rdx, [rsp + 16]
+    lea rdx, [rsp + 24]
     mov eax, 59
     syscall
     jmp failure
@@ -3811,11 +3839,39 @@ ginux_linux_initialize:
 .Lvalidate_main_startup:
     xor eax, eax
     cmp edi, 1
+    je .Lvalidate_main_startup_single_vector
+    cmp edi, 2
     jne .Lvalidate_main_startup_done
+    cmp qword ptr [rsi + 16], 0
+    jne .Lvalidate_main_startup_done
+    cmp qword ptr [rdx + 16], 0
+    jne .Lvalidate_main_startup_done
+    mov r8, qword ptr [rsi + 8]
+    movabs r9, 0x2d63696d616e7964
+    cmp qword ptr [r8], r9
+    jne .Lvalidate_main_startup_done
+    cmp dword ptr [r8 + 8], 0x63657865
+    jne .Lvalidate_main_startup_done
+    cmp byte ptr [r8 + 12], 0
+    jne .Lvalidate_main_startup_done
+    mov r8, qword ptr [rdx]
+    movabs r9, 0x00313d58554e4947
+    cmp qword ptr [r8], r9
+    jne .Lvalidate_main_startup_done
+    mov r8, qword ptr [rdx + 8]
+    movabs r9, 0x4f4d5f58554e4947
+    cmp qword ptr [r8], r9
+    jne .Lvalidate_main_startup_done
+    movabs r9, 0x00636578653d4544
+    cmp qword ptr [r8 + 8], r9
+    jne .Lvalidate_main_startup_done
+    jmp .Lvalidate_main_startup_common
+.Lvalidate_main_startup_single_vector:
     cmp qword ptr [rsi + 8], 0
     jne .Lvalidate_main_startup_done
     cmp qword ptr [rdx + 8], 0
     jne .Lvalidate_main_startup_done
+.Lvalidate_main_startup_common:
     mov r8, qword ptr [rsi]
     cmp dword ptr [r8], 0x696e692f
     jne .Lvalidate_main_startup_done
@@ -3842,8 +3898,12 @@ auxiliary_dependency_path:
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
 .Ldynamic_exec_path:
     .asciz "/init"
+.Ldynamic_exec_argument:
+    .asciz "dynamic-exec"
 .Ldynamic_exec_environment:
     .asciz "GINUX=1"
+.Ldynamic_exec_environment_second:
+    .asciz "GINUX_MODE=exec"
 #endif
 
 .section .data

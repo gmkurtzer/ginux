@@ -370,9 +370,11 @@ own private initialization state only if both calls succeed; the main entry
 requires that state. This proves dependency constructors run before the main
 constructor, which runs before the main entry. The interpreter retains the
 original stack pointer and invokes the preinitializer and all three constructors
-with `argc`, `argv`, and `envp` in the System V argument registers. Each constructor requires
-`argc = 1`, the `/init` argument and null terminator, and the `GINUX=1`
-environment entry and null terminator before publishing initialized state. The
+with `argc`, `argv`, and `envp` in the System V argument registers. Each
+constructor validates the initial one-argument, one-environment-entry launch
+or the replacement launch containing `/init`, `dynamic-exec`, `GINUX=1`, and
+`GINUX_MODE=exec`, including both null terminators, before publishing
+initialized state. The
 main then calls both providers through its
 linker-produced PLT, after the interpreter matches both complete names through
 the three-bucket main SysV table and each provider's GNU table. The kernel
@@ -439,8 +441,11 @@ before interpreter entry. A fresh zeroed RW/NX sibling-stack frame also
 replaces the exact old lease in that transaction while its lower and upper
 guard leaves remain unmapped. RELRO is reapplied before
 the replacement main exits. Admission is currently limited to `/init`, one
-argument, one environment entry, one live thread, the fixed two-DSO graph, and
-the existing bounded load windows. The internal `linux/init` node is exposed as
+through eight arguments, zero through eight environment entries within the
+shared 63-byte per-string and 512-byte aggregate-stack bounds, one live thread,
+the fixed two-DSO graph, and the existing bounded load windows. The current
+replacement proof uses two arguments and two environment entries. The internal
+`linux/init` node is exposed as
 canonical `/init`; the replacement main validates that `/proc/self/exe`
 returns exactly those five bytes before it can complete.
 Static replacement targets consume the same deterministic auxiliary-vector

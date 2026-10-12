@@ -93,7 +93,7 @@ ginux_linux_interpreter:
     cmp rcx, 8
     ja .Linvalid_dynamic
     lea rdi, [rdi + rcx * 8 + 16]
-    mov ecx, 8
+    mov ecx, 9
 .Lscan_environment:
     cmp qword ptr [rdi], 0
     je .Lscan_auxiliary_vector

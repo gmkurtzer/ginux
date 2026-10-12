@@ -398,8 +398,12 @@ vector entries, emits its distinct proof marker, closes
 all surviving proof descriptors, and exits with status 42.
 
 The same syscall admits one interpreted target: Linux-visible `/init`, backed
-by measured-root `linux/init`. It requires exactly one argument and one
-environment entry, authenticates the fixed interpreter/main/two-DSO graph,
+by measured-root `linux/init`. It accepts one through eight arguments and zero
+through eight environment entries under the same 63-byte per-string and
+512-byte aggregate-stack limits as static replacement. The replacement proof
+passes `/init` plus `dynamic-exec` and the two entries `GINUX=1` and
+`GINUX_MODE=exec` through the interpreter to the main and both DSO
+constructors. It authenticates the fixed interpreter/main/two-DSO graph,
 atomically installs fresh interpreter pages, and retires the complete previous
 graph with exact generation-tagged leases. It then resets the main and DSO
 mapping contracts so the replacement interpreter can install the authenticated
@@ -420,9 +424,8 @@ lease is retired at commit, and the replacement is reclaimed after the process
 root is inactive. Ignored signal dispositions are preserved from the observed
 pre-exec set, caught dispositions are cleared, and RELRO is applied again.
 The replacement main emits the kernel-observed `DYNEXEC` completion by exiting
-with status 42. Other dynamic targets, general dependency resolution,
-shebangs, and arbitrary interpreted argument or environment vectors are
-outside this version. Both exec profiles replace the complete process
+with status 42. Other dynamic targets, general dependency resolution, and
+shebangs are outside this version. Both exec profiles replace the complete process
 page-table hierarchy: static exec constructs the new image in an inactive
 five-frame clone and interpreted exec uses a six-frame clone. Each rejects
 forced verification failure and stale root generations without changing live

@@ -831,6 +831,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: replacement static Linux page-table leases reclaimed\r\n");
     serial_write("ginux: static Linux exec auxiliary vector rebuilt\r\n");
     serial_write("ginux: canonical interpreted Linux executable identity validated\r\n");
+    serial_write("ginux: interpreted Linux exec vectors generalized\r\n");
     serial_write("ginux: combined Linux static TLS materialized\r\n");
     serial_write("ginux: ordered Linux dependency TLS layout materialized\r\n");
     serial_write("ginux: Linux TLS active before initializers\r\n");

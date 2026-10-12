@@ -43,7 +43,7 @@ and `/lib64/*` paths map to internal measured-root entries, while
 `/bin/exec-target` and `/bin/exec-second` are direct measured-root nodes. The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
 single-threaded `execve` proof atomically replaces two independent static workloads and
-the running interpreted `/init` graph with the selected measured executable, rebuilds bounded argument and environment vectors
+the running interpreted `/init` graph with the selected measured executable, rebuilds up to eight bounded argument and eight environment entries
 plus a deterministic Linux auxiliary vector in a 512-byte initial-stack image,
 and allocates and materializes up to eight
 measured ELF pages only during the transaction. It derives entry and W^X mappings from that
@@ -492,7 +492,11 @@ The proof also closes only `FD_CLOEXEC` descriptors, preserves an ordinary
 descriptor, resets caught signals while retaining an ignored disposition,
 disables the alternate signal stack, and derives the bounded process name from
 the selected measured node's basename. The interpreted `/init` proof accepts
-exactly `argv = ["/init", NULL]` and one environment entry, installs the
+the same one-to-eight argument and zero-to-eight environment-entry kernel
+contract as static replacement. Its replacement run proves
+`argv = ["/init", "dynamic-exec", NULL]` and
+`envp = ["GINUX=1", "GINUX_MODE=exec", NULL]` reach the main and both DSO
+constructors, then installs the
 authenticated interpreter pages atomically, resets the main/DSO mapping
 contracts, rematerializes initial and sibling TLS pages from authenticated
 templates, restores the initial FS base, and executes the replacement main
