@@ -42,9 +42,13 @@ policy remain separate milestones.
 That Linux proof also reserves four initially absent leaves over
 `0x40b000..0x40f000`. Its bounded anonymous mapping call validates a one-
 through four-page RW/NX request and allocates exact generation-bound frames
-before installing any leaf. Unmap accepts a page-aligned window subrange,
+before installing any leaf. The lowest-free placement policy and exact
+`MAP_FIXED_NOREPLACE` placement share the same overlap preflight; fixed overlap
+returns `EEXIST` before frame allocation. Unmap accepts a page-aligned window
+subrange,
 clears each occupied leaf, invalidates its local translation, and scrubs and
-releases every selected frame before reuse. While active, mapped subranges can be irreversibly sealed
+releases every selected frame before reuse. While active, mapped subranges can
+be irreversibly sealed
 read-only after one validation pass; copy permissions change with the hardware
 leaves, and unmap accepts either state. Bounded discard validates the same owned leaf and zeros its frame in place,
 preserving whichever writable state the mapping currently has.

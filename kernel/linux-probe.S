@@ -859,11 +859,31 @@ valid_interpreter_base:
     cmp rax, -12
     jne failure
 
+    mov edi, 0x40e000
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x100022
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40e000
+    jne failure
+    mov qword ptr [0x40e000], 16
+    mov eax, 9
+    syscall
+    cmp rax, -17
+    jne failure
+    mov edi, 0x40f000
+    mov eax, 9
+    call syscall_expect_einval
+
     mov byte ptr [0x40594a], 0
     mov byte ptr [0x40594b], 0
     mov byte ptr [0x40594c], 0
+    mov byte ptr [0x40594d], 0
     mov edi, 0x40b000
-    mov esi, 12288
+    mov esi, 16384
     mov edx, 0x40594a
     mov eax, 27
     call syscall_expect_zero
@@ -872,6 +892,8 @@ valid_interpreter_base:
     cmp byte ptr [0x40594b], 1
     jne failure
     cmp byte ptr [0x40594c], 1
+    jne failure
+    cmp byte ptr [0x40594d], 1
     jne failure
 
     mov edi, 0x40b000

@@ -530,8 +530,11 @@ selectors return `-EINVAL`; invalid complete input or output ranges return
 `rax = 9` (`__NR_mmap`) has a scratch-window profile and one authenticated
 executable-install profile. The scratch window has four page slots over
 `0x40b000..0x40f000` and admits private extents of one through four pages. A
-null hint selects the lowest contiguous free run. Its anonymous form requires a
-null hint, a nonzero page-multiple length no larger than 16384 bytes,
+null hint selects the lowest contiguous free run. Alternatively, anonymous
+`MAP_FIXED_NOREPLACE` requires an exact page-aligned free subrange wholly inside
+that window and returns `-EEXIST` without mutation if any selected slot is
+active. Its anonymous form otherwise requires a nonzero page-multiple length no
+larger than 16384 bytes,
 `PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
 MAP_ANONYMOUS`, fd -1, and offset zero, and allocates and installs zero-filled
 generation-bound RW/NX frame leases.
@@ -545,7 +548,8 @@ into allocator-owned read-only/NX frames and zero-fills a partial final page.
 Mapping failure scrubs and releases every provisional lease before returning.
 Descriptor cursors are unaffected. Unsupported arguments return `-EINVAL`, a
 non-file descriptor returns `-ENODEV`, an invalid descriptor returns `-EBADF`,
-and a request without enough contiguous free entries returns `-ENOMEM`.
+and a first-fit request without enough contiguous free entries returns
+`-ENOMEM`. A fixed request outside the window returns `-EINVAL`.
 The executable-install profile accepts only open `/init`,
 `/lib64/libginux.so`, or `/lib64/libginux-aux.so` descriptors and exact one-page `MAP_PRIVATE |
 MAP_FIXED_NOREPLACE` requests already authenticated by the kernel plan. For
@@ -622,11 +626,11 @@ exit with the selected leaves absent. A four-page proof seals its middle two
 pages, creates separated holes, reuses the lowest hole, rejects a fragmented
 two-page allocation with `-ENOMEM`, and releases the complete sparse range.
 This is not a general VMA allocator: arbitrary
-hints, fixed mappings, writable or shared file
-mappings outside the admitted executable pages, ranges outside the bounded window, arbitrary
-files, demand paging, and mapping growth are unsupported. Fixed placement is
-available only for the seven admitted main pages and two admitted dependency
-pages described above.
+hints, replacement mappings, writable or shared file
+mappings outside the admitted executable pages, ranges outside the bounded
+window, arbitrary files, demand paging, and mapping growth are unsupported.
+Outside the scratch window, fixed placement is available only for the seven
+admitted main pages and two admitted dependency pages described above.
 `rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for a fully mapped
 one- through four-page anonymous range. The range may cross adjacent registry
 records. Immutable-file mappings reject advice with `-EINVAL`. For an anonymous

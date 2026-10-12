@@ -458,13 +458,17 @@ across splits. A four-page proof seals the middle pair, punches two holes,
 reuses the lowest hole, rejects a two-page request when free pages are
 fragmented, and finally unmaps the complete sparse window. `mprotect`,
 `madvise`, `mincore`, and `munmap` walk adjacent records, so range behavior no
-longer depends on their original allocation boundaries.
+longer depends on their original allocation boundaries. Anonymous
+`MAP_FIXED_NOREPLACE` can select an exact free subrange inside the window;
+overlap returns `EEXIST` without changing either the existing mappings or frame
+ownership.
 Every occupied page selected by unmap validates generation ownership, removes
 the hardware leaf, scrubs the released frame, and returns its lease to the
 allocator; process exit requires the complete registry and all four lease
 slots to be empty.
-General mapping placement, shared file mappings, writable mappings outside the
-exact authenticated main/dependency data pages, and arbitrary filesystem-backed
+Placement outside the bounded window, replacement mappings, shared file
+mappings, writable mappings outside the exact authenticated main/dependency
+data pages, and arbitrary filesystem-backed
 mappings are not implemented.
 The root view starts with `/` as its working directory. Bounded `chdir` and
 `fchdir` can select an immutable indexed directory such as `/var/lib`, and

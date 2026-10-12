@@ -5215,16 +5215,41 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
     if usize::from(pages) > LINUX_MMAP_SLOT_COUNT {
         return LINUX_EINVAL;
     }
-    if address != 0 {
+    let anonymous_flags = LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS;
+    let fixed_anonymous_flags = anonymous_flags | LINUX_MAP_FIXED_NOREPLACE;
+    let fixed_anonymous = flags == fixed_anonymous_flags;
+    if address != 0 && !fixed_anonymous {
         return linux_mmap_fixed_file(address, length, protection, flags, fd, offset);
     }
-    let Some(start_slot) = (0..=LINUX_MMAP_SLOT_COUNT - usize::from(pages)).find(|start| {
-        (*start..*start + usize::from(pages)).all(|slot| !linux_mmap_slot_occupied(slot))
-    }) else {
-        return LINUX_ENOMEM;
+    if address == 0 && fixed_anonymous {
+        return LINUX_EINVAL;
+    }
+    let start_slot = if fixed_anonymous {
+        let Some((start, range_pages)) = linux_mmap_range_slots(address, length) else {
+            return LINUX_EINVAL;
+        };
+        if range_pages != usize::from(pages) {
+            return LINUX_EINVAL;
+        }
+        start
+    } else {
+        let Some(start) = (0..=LINUX_MMAP_SLOT_COUNT - usize::from(pages)).find(|start| {
+            (*start..*start + usize::from(pages)).all(|slot| !linux_mmap_slot_occupied(slot))
+        }) else {
+            return LINUX_ENOMEM;
+        };
+        start
     };
+    if (start_slot..start_slot + usize::from(pages)).any(linux_mmap_slot_occupied) {
+        return if fixed_anonymous {
+            LINUX_EEXIST
+        } else {
+            LINUX_ENOMEM
+        };
+    }
     let mapping = ELF_PROBE_MMAP.load(Ordering::SeqCst) + (start_slot * PAGE_SIZE) as u64;
     if mapping == 0
+        || fixed_anonymous && mapping != address
         || (start_slot..start_slot + usize::from(pages)).any(|slot| {
             linux_mmap_slot_frame(slot) != 0
                 || ELF_PROBE_MMAP_GENERATIONS[slot].load(Ordering::SeqCst) != 0
@@ -5233,7 +5258,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
         return LINUX_ENOMEM;
     }
 
-    let (file_kind, file_source) = if flags == (LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS) {
+    let (file_kind, file_source) = if flags == anonymous_flags || fixed_anonymous {
         if protection != (LINUX_PROT_READ | LINUX_PROT_WRITE) || fd != u64::MAX || offset != 0 {
             return LINUX_EINVAL;
         }
