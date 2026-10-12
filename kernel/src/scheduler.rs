@@ -182,22 +182,29 @@ impl UserFaultFrame {
         handler: u64,
         stack: u64,
         signal: u64,
+        arguments: (u64, u64),
         code_selector: u16,
         data_selector: u16,
     ) -> bool {
+        let (information, context) = arguments;
         if !self.selectors_match(code_selector, data_selector)
             || handler == 0
             || handler >= 1 << 47
             || stack == 0
             || stack >= 1 << 47
+            || information == 0
+            || information >= 1 << 47
+            || context == 0
+            || context >= 1 << 47
         {
             return false;
         }
         self.rip = handler;
         self.rsp = stack;
         self.rdi = signal;
-        self.rsi = 0;
-        self.rdx = 0;
+        self.rsi = information;
+        self.rdx = context;
+        self.rflags &= !((1 << 8) | (1 << 10) | (1 << 16));
         true
     }
 }

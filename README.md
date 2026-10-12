@@ -421,9 +421,14 @@ The ring-3 workload verifies each error and continues into valid calls.
 A real ring-3 page fault now enters a bounded `SIGSEGV` handler registered with
 `rt_sigaction` and `SA_RESTORER`. With `SA_ONSTACK`, the kernel selects the
 registered writable alternate stack, marks it `SS_ONSTACK`, and admits syscall
-entry from that range only for the active signal frame. It builds a validated
-16-byte frame, applies the automatic signal and action masks, and retains the
-complete interrupted register state. The handler observes `SS_ONSTACK`, proves
+entry from that range only for the active signal frame. It builds the 440-byte
+x86-64 Linux `rt_sigframe` base layout with the restorer, `ucontext`, and
+128-byte `siginfo_t` at their UAPI offsets, preserves the normal-stack red zone,
+and retains the complete interrupted register state. Handler arguments always
+identify the frame's information and context records. `SA_SIGINFO` populates
+page-fault `SEGV_MAPERR` address/trap state and software-generation identity;
+the frame advertises no floating-point state yet. The handler observes
+`SS_ONSTACK`, proves
 the alternate stack cannot be replaced while active, and proves a premature
 `rt_sigreturn` is rejected without consuming that state, maps the missing page,
 and returns through the restorer. A dedicated `IRETQ` syscall epilogue restores
@@ -435,9 +440,11 @@ return into the same handler and resume after that syscall. The thread-directed 
 out-of-range identities before distinguishing absent thread groups or threads.
 If this admitted signal is blocked, delivery coalesces into a pending bit;
 `rt_sigpending` reports it and `rt_sigprocmask` delivers it directly when the
-bit is unblocked. Other asynchronous sources, `SA_SIGINFO`, user-editable
-`ucontext`, nested delivery, automatic alternate-stack disarming, and syscall
-restart remain future work.
+bit is unblocked while retaining the first source code. The kernel-side saved
+context remains authoritative: edits to the published `ucontext` are not yet
+restored. Floating-point/XSAVE state, other asynchronous sources, nested
+delivery, automatic alternate-stack disarming, and syscall restart remain
+future work.
 `SA_NODEFER` suppresses the automatic delivered-signal mask bit while retaining
 the explicit action mask, and `SA_RESETHAND` atomically restores the default
 disposition after committing a delivery. The measured handler observes that

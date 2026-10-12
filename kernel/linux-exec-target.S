@@ -210,7 +210,7 @@ ginux_linux_exec_target:
 #ifdef GINUX_SIGNAL_PROBE
     lea rax, [rip + .Lsignal_handler]
     mov qword ptr [rip + .Lsignal_action], rax
-    mov qword ptr [rip + .Lsignal_action + 8], 0x04000000
+    mov qword ptr [rip + .Lsignal_action + 8], 0x04000004
     lea rax, [rip + .Lsignal_restorer]
     mov qword ptr [rip + .Lsignal_action + 16], rax
     mov qword ptr [rip + .Lsignal_action + 24], 0
@@ -219,6 +219,19 @@ ginux_linux_exec_target:
     xor edx, edx
     mov r10d, 8
     mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov qword ptr [rip + .Lsignal_mode], 2
+    cmp qword ptr [0x40b000], 0
+    jne .Lfailure
+    mov qword ptr [rip + .Lsignal_mode], 0
+    cmp qword ptr [rip + .Lsignal_count], 1
+    jne .Lfailure
+    mov edi, 0x40b000
+    mov esi, 4096
+    mov eax, 11
     syscall
     test rax, rax
     jne .Lfailure
@@ -279,7 +292,7 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lsignal_count], 1
+    cmp qword ptr [rip + .Lsignal_count], 2
     jne .Lfailure
 
     xor edi, edi
@@ -318,7 +331,7 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lsignal_count], 2
+    cmp qword ptr [rip + .Lsignal_count], 3
     jne .Lfailure
 
     mov qword ptr [rip + .Lsignal_mask], 0x400
@@ -343,7 +356,7 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lsignal_count], 2
+    cmp qword ptr [rip + .Lsignal_count], 3
     jne .Lfailure
 
     lea rdi, [rip + .Lpending_mask]
@@ -375,7 +388,7 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
-    cmp qword ptr [rip + .Lsignal_count], 3
+    cmp qword ptr [rip + .Lsignal_count], 4
     jne .Lfailure
     cmp qword ptr [rip + .Lold_signal_mask], 0x400
     jne .Lfailure
@@ -390,7 +403,7 @@ ginux_linux_exec_target:
 
     lea rax, [rip + .Lsignal_handler]
     mov qword ptr [rip + .Lsignal_action], rax
-    mov eax, 0xc4000000
+    mov eax, 0xc4000004
     mov qword ptr [rip + .Lsignal_action + 8], rax
     lea rax, [rip + .Lsignal_restorer]
     mov qword ptr [rip + .Lsignal_action + 16], rax
@@ -411,7 +424,7 @@ ginux_linux_exec_target:
     test rax, rax
     jne .Lfailure
     mov qword ptr [rip + .Lsignal_mode], 0
-    cmp qword ptr [rip + .Lsignal_count], 4
+    cmp qword ptr [rip + .Lsignal_count], 5
     jne .Lfailure
 
     mov edi, 11
@@ -534,13 +547,49 @@ ginux_linux_exec_target:
 .Lsignal_handler:
     cmp edi, 11
     jne .Lfailure
-    test rsi, rsi
+    lea rax, [rsp + 312]
+    cmp rsi, rax
     jne .Lfailure
-    test rdx, rdx
+    lea rax, [rsp + 8]
+    cmp rdx, rax
+    jne .Lfailure
+    cmp qword ptr [rdx], 6
+    jne .Lfailure
+    cmp qword ptr [rdx + 8], 0
+    jne .Lfailure
+    cmp qword ptr [rdx + 16], 0
+    jne .Lfailure
+    cmp dword ptr [rdx + 24], 2
+    jne .Lfailure
+    cmp qword ptr [rdx + 32], 0
+    jne .Lfailure
+    cmp qword ptr [rdx + 224], 0
     jne .Lfailure
     inc qword ptr [rip + .Lsignal_count]
     cmp qword ptr [rip + .Lsignal_mode], 0
     je .Lsignal_handler_return
+    cmp qword ptr [rip + .Lsignal_mode], 2
+    je .Lsignal_fault_handler
+    cmp dword ptr [rsi], 11
+    jne .Lfailure
+    cmp dword ptr [rsi + 4], 0
+    jne .Lfailure
+    cmp dword ptr [rsi + 8], -6
+    jne .Lfailure
+    cmp dword ptr [rsi + 16], 1
+    jne .Lfailure
+    cmp dword ptr [rsi + 20], 0
+    jne .Lfailure
+    cmp qword ptr [rdx + 192], 0
+    jne .Lfailure
+    cmp qword ptr [rdx + 200], 0
+    jne .Lfailure
+    cmp qword ptr [rdx + 208], 0
+    jne .Lfailure
+    cmp qword ptr [rdx + 216], 0
+    jne .Lfailure
+    cmp qword ptr [rdx + 296], 0
+    jne .Lfailure
     mov edi, 99
     xor esi, esi
     lea rdx, [rip + .Lobserved_signal_mask]
@@ -550,6 +599,34 @@ ginux_linux_exec_target:
     test rax, rax
     jne .Lfailure
     cmp qword ptr [rip + .Lobserved_signal_mask], 0x200
+    jne .Lfailure
+    jmp .Lsignal_handler_return
+.Lsignal_fault_handler:
+    cmp dword ptr [rsi], 11
+    jne .Lfailure
+    cmp dword ptr [rsi + 4], 0
+    jne .Lfailure
+    cmp dword ptr [rsi + 8], 1
+    jne .Lfailure
+    cmp qword ptr [rsi + 16], 0x40b000
+    jne .Lfailure
+    cmp qword ptr [rdx + 200], 14
+    jne .Lfailure
+    cmp qword ptr [rdx + 208], 0
+    jne .Lfailure
+    cmp qword ptr [rdx + 216], 0x40b000
+    jne .Lfailure
+    cmp qword ptr [rdx + 296], 0
+    jne .Lfailure
+    xor edi, edi
+    mov esi, 4096
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
     jne .Lfailure
 .Lsignal_handler_return:
     ret

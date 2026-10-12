@@ -709,20 +709,37 @@ normalized registration, fault atomicity, and restoration of every action
 before exit.
 
 An unmasked ring-3 page fault is delivered as signal 11 when its action has
-`SA_RESTORER` and any supported combination of `SA_ONSTACK`, `SA_NODEFER`, and
-`SA_RESETHAND`, both handler and restorer point into
+`SA_RESTORER` and any supported combination of `SA_SIGINFO`, `SA_ONSTACK`,
+`SA_NODEFER`, and `SA_RESETHAND`, both handler and restorer point into
 a current executable image extent, a Linux thread is current, and no signal
 frame is active. The
 kernel retains the complete interrupted general-register, RIP, RSP, RFLAGS, and
-mask state. It places a bounded 16-byte frame containing the restorer address
-and an opaque validation cookie below the selected writable stack, aligns
-handler entry to the x86-64 function ABI, sets `rdi = 11`, and enters the
-handler through the exception `IRETQ` path. `SA_ONSTACK` selects the registered
+mask state. It places the 440-byte x86-64 Linux `rt_sigframe` base layout below
+the selected writable stack: the restorer is at offset 0, the 304-byte
+`ucontext` is at offset 8, and the 128-byte `siginfo_t` is at offset 312. Compile-time
+layout assertions bind those sizes and offsets. Normal-stack delivery first
+preserves the 128-byte x86-64 red zone; alternate-stack delivery starts from
+the registered top. Both paths round the frame base down to 16 bytes and then
+subtract eight, leaving ABI-correct handler entry alignment. The context
+publishes flags `UC_SIGCONTEXT_SS | UC_STRICT_RESTORE_SS`, the prior alternate
+stack, complete integer registers and selectors, the prior signal mask in both
+defined locations, zeroed reserved fields, and a null `fpstate` pointer because
+floating-point/XSAVE preservation is not implemented yet. Handler entry sets
+`rdi = 11`, `rsi = &frame.info`, and `rdx = &frame.uc` even when `SA_SIGINFO` is
+clear, and clears DF, RF, and TF as required by the x86 signal ABI before
+entering through the exception `IRETQ` path. `SA_ONSTACK` selects the registered
 alternate-stack top and publishes `SS_ONSTACK`; the syscall gate admits that
 range only while both the flag and active frame agree. The proof handler
 observes `SS_ONSTACK`, proves replacement returns `-EPERM`, observes the
 automatic `SIGSEGV` bit plus its action mask, maps the missing page, and returns
 through the registered restorer.
+With `SA_SIGINFO`, page-fault delivery publishes `si_signo = SIGSEGV`,
+`si_code = SEGV_MAPERR` or `SEGV_ACCERR` from the page-fault present bit,
+`si_addr = CR2`, and matching trap, error, and CR2 machine-context fields.
+Generated `kill` publishes `SI_USER`, while `tkill` and `tgkill` publish
+`SI_TKILL`; their sender PID is the bounded container-local PID 1 and UID is 0.
+Without `SA_SIGINFO`, the information record is zeroed rather than exposing
+uninitialized kernel data.
 `SA_NODEFER` omits the automatic `SIGSEGV` bit while retaining the action mask.
 `SA_RESETHAND` clears the complete handler, flags, restorer, and action-mask
 record only after the frame and handler entry have committed. The dedicated
@@ -733,13 +750,16 @@ an already-defaulted action. Unsupported action-flag bits fail delivery with
 `SA_NODEFER`.
 
 `rax = 15` (`__NR_rt_sigreturn`) succeeds only for that one active frame at its
-exact post-`ret` stack address with the intact cookie. A premature call returns
-`-EINVAL` without consuming the frame. Successful return clears the kernel
+exact post-`ret` stack address with the registered restorer still present at
+the frame base. A premature call returns `-EINVAL` without consuming the frame.
+Successful return clears the kernel
 record, restores the prior mask, and uses a dedicated `IRETQ` syscall epilogue
 to restore all interrupted registers, including `rcx` and `r11`; the retried
-load then observes the newly mapped zero page. Nested delivery,
-`SA_SIGINFO`, alternate-stack automatic disarming, user-editable `ucontext`,
-restartable syscalls, and other asynchronous signal sources remain unsupported. A page fault
+load then observes the newly mapped zero page. The published frame is currently
+observational: return restores the retained kernel snapshot rather than
+accepting user edits to `ucontext`, and no floating-point/XSAVE state is exposed
+or restored. Nested delivery, alternate-stack automatic disarming, restartable
+syscalls, and other asynchronous signal sources remain unsupported. A page fault
 that does not meet this contract terminates the bounded Linux execution rather
 than entering the native-domain scheduler fault path.
 `rax = 62` (`__NR_kill`) accepts PID 1 or process-group selector 0. Signal zero
@@ -766,7 +786,10 @@ thread groups or thread IDs return `-ESRCH`. An unmasked admitted `SIGSEGV`
 uses the same live-return delivery path as `kill`, and the dedicated measured
 `/bin/signal-probe` installs a fresh post-`execve` handler, exercises every
 identity class, completes one handler/`rt_sigreturn` lifecycle, then restores
-the default action before exit. The verifier therefore requires six exact
+the default action before exit. It also delivers a fresh page fault under
+`SA_SIGINFO` and validates the exact handler pointers, `SEGV_MAPERR` address,
+trap number, CR2, context flags, disabled alternate-stack record, signal masks,
+and null FP-state pointer. The verifier therefore requires seven exact
 delivery/return pairs for that measured runtime and two for the other probe
 executions.
 When that admitted caught `SIGSEGV` is blocked, `kill`, `tkill`, or `tgkill` coalesces it
@@ -780,7 +803,8 @@ the pending bit only after the frame and return context are committed, and
 resumes after `rt_sigprocmask` following `rt_sigreturn`. The measured signal
 runtime proves the signal remains pending while masked, the prior mask is
 reported during unblock, exactly one coalesced delivery occurs, and both mask
-and pending state are zero at teardown. Pending state for other signals,
+and pending state are zero at teardown. The first queued generator's `si_code`
+is retained across coalescing and cleared only with the pending bit. Pending state for other signals,
 process/thread selection among multiple runnable threads, and asynchronous
 sources remain unsupported.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64

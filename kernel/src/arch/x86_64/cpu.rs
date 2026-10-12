@@ -290,12 +290,21 @@ const LINUX_MIN_ALT_STACK_SIZE: u64 = 2048;
 const LINUX_SS_DISABLE: u32 = 2;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_SIGSEGV: u64 = 11;
+const LINUX_SI_USER: i32 = 0;
+const LINUX_SI_TKILL: i32 = -6;
+const LINUX_SEGV_MAPERR: i32 = 1;
+const LINUX_SEGV_ACCERR: i32 = 2;
+const LINUX_SA_SIGINFO: u64 = 0x0000_0004;
 const LINUX_SA_RESTORER: u64 = 0x0400_0000;
 const LINUX_SA_ONSTACK: u64 = 0x0800_0000;
 const LINUX_SA_NODEFER: u64 = 0x4000_0000;
 const LINUX_SA_RESETHAND: u64 = 0x8000_0000;
-const LINUX_SIGNAL_FRAME_SIZE: usize = 16;
-const LINUX_SIGNAL_FRAME_COOKIE: u64 = 0x4749_4e55_5853_4947;
+const LINUX_SIGNAL_FRAME_SIZE: usize = 440;
+const LINUX_SIGNAL_FRAME_INFO_OFFSET: u64 = 312;
+const LINUX_SIGNAL_FRAME_CONTEXT_OFFSET: u64 = 8;
+const LINUX_SIGNAL_RED_ZONE_SIZE: u64 = 128;
+const LINUX_UC_SIGCONTEXT_SS: u64 = 0x2;
+const LINUX_UC_STRICT_RESTORE_SS: u64 = 0x4;
 const LINUX_SS_ONSTACK: u32 = 1;
 const LINUX_UTSNAME_SIZE: usize = 6 * 65;
 const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
@@ -578,6 +587,7 @@ static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_SIGNAL_MASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNALS: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_PENDING_SIGNAL_CODE: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_EXEC_IGNORED_SIGNALS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_SIGNAL_HANDLERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
     [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
@@ -1524,6 +1534,7 @@ struct LinuxSignalContext {
     rsp: u64,
     rflags: u64,
     signal_stack: u64,
+    signal_restorer: u64,
     signal_mask: u64,
     alt_stack_flags: u32,
 }
@@ -1538,6 +1549,7 @@ impl LinuxSignalContext {
         rsp: 0,
         rflags: 0,
         signal_stack: 0,
+        signal_restorer: 0,
         signal_mask: 0,
         alt_stack_flags: 0,
     };
@@ -1545,6 +1557,7 @@ impl LinuxSignalContext {
     fn from_fault(
         context: UserFaultContext,
         signal_stack: u64,
+        signal_restorer: u64,
         signal_mask: u64,
         alt_stack_flags: u32,
     ) -> Self {
@@ -1570,6 +1583,7 @@ impl LinuxSignalContext {
             rsp: context.rsp,
             rflags: context.rflags,
             signal_stack,
+            signal_restorer,
             signal_mask,
             alt_stack_flags,
         }
@@ -1591,7 +1605,7 @@ impl LinuxSignalContext {
         rip: u64,
         rsp: u64,
         rflags: u64,
-        signal_stack: u64,
+        signal_frame: (u64, u64),
         signal_mask: u64,
         alt_stack_flags: u32,
     ) -> Self {
@@ -1603,12 +1617,139 @@ impl LinuxSignalContext {
             rip,
             rsp,
             rflags,
-            signal_stack,
+            signal_stack: signal_frame.0,
+            signal_restorer: signal_frame.1,
             signal_mask,
             alt_stack_flags,
         }
     }
 }
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct LinuxSignalStack {
+    pointer: u64,
+    flags: u32,
+    padding: u32,
+    size: u64,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct LinuxSignalMachineContext {
+    r8: u64,
+    r9: u64,
+    r10: u64,
+    r11: u64,
+    r12: u64,
+    r13: u64,
+    r14: u64,
+    r15: u64,
+    rdi: u64,
+    rsi: u64,
+    rbp: u64,
+    rbx: u64,
+    rdx: u64,
+    rax: u64,
+    rcx: u64,
+    rsp: u64,
+    rip: u64,
+    rflags: u64,
+    cs: u16,
+    gs: u16,
+    fs: u16,
+    ss: u16,
+    error: u64,
+    trap: u64,
+    old_mask: u64,
+    cr2: u64,
+    fpstate: u64,
+    reserved: [u64; 8],
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct LinuxSignalUserContext {
+    flags: u64,
+    link: u64,
+    stack: LinuxSignalStack,
+    machine: LinuxSignalMachineContext,
+    signal_mask: u64,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct LinuxSignalInformation {
+    signal: i32,
+    error: i32,
+    code: i32,
+    padding: i32,
+    fields: [u8; 112],
+}
+
+impl LinuxSignalInformation {
+    const ZERO: Self = Self {
+        signal: 0,
+        error: 0,
+        code: 0,
+        padding: 0,
+        fields: [0; 112],
+    };
+
+    const fn generated(signal: u64, code: i32) -> Self {
+        let mut fields = [0; 112];
+        let sender = 1_u32.to_ne_bytes();
+        fields[0] = sender[0];
+        fields[1] = sender[1];
+        fields[2] = sender[2];
+        fields[3] = sender[3];
+        Self {
+            signal: signal as i32,
+            error: 0,
+            code,
+            padding: 0,
+            fields,
+        }
+    }
+
+    const fn fault(signal: u64, code: i32, address: u64) -> Self {
+        let mut fields = [0; 112];
+        let address = address.to_ne_bytes();
+        fields[0] = address[0];
+        fields[1] = address[1];
+        fields[2] = address[2];
+        fields[3] = address[3];
+        fields[4] = address[4];
+        fields[5] = address[5];
+        fields[6] = address[6];
+        fields[7] = address[7];
+        Self {
+            signal: signal as i32,
+            error: 0,
+            code,
+            padding: 0,
+            fields,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct LinuxRtSignalFrame {
+    restorer: u64,
+    context: LinuxSignalUserContext,
+    information: LinuxSignalInformation,
+}
+
+const _: [(); 24] = [(); size_of::<LinuxSignalStack>()];
+const _: [(); 256] = [(); size_of::<LinuxSignalMachineContext>()];
+const _: [(); 304] = [(); size_of::<LinuxSignalUserContext>()];
+const _: [(); 128] = [(); size_of::<LinuxSignalInformation>()];
+const _: [(); LINUX_SIGNAL_FRAME_SIZE] = [(); size_of::<LinuxRtSignalFrame>()];
+const _: [(); LINUX_SIGNAL_FRAME_CONTEXT_OFFSET as usize] =
+    [(); core::mem::offset_of!(LinuxRtSignalFrame, context)];
+const _: [(); LINUX_SIGNAL_FRAME_INFO_OFFSET as usize] =
+    [(); core::mem::offset_of!(LinuxRtSignalFrame, information)];
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct LinuxUserContext {
@@ -3010,6 +3151,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNAL_CODE.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
     for signal in 0..LINUX_SIGNAL_COUNT {
         ELF_PROBE_SIGNAL_HANDLERS[signal].store(0, Ordering::SeqCst);
@@ -3199,7 +3341,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
-    let expected_signal_count = if signal_probe_executed { 6 } else { 2 };
+    let expected_signal_count = if signal_probe_executed { 7 } else { 2 };
     let signal_lifecycle_valid = !LINUX_SIGNAL_ACTIVE.swap(false, Ordering::SeqCst)
         && signal_delivery_count == expected_signal_count
         && signal_return_count == expected_signal_count
@@ -3474,6 +3616,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let no_new_privileges_enforced = ELF_PROBE_NO_NEW_PRIVS.swap(false, Ordering::SeqCst);
     let signal_mask_restored = ELF_PROBE_SIGNAL_MASK.swap(0, Ordering::SeqCst) == 0;
     let pending_signals_cleared = ELF_PROBE_PENDING_SIGNALS.swap(0, Ordering::SeqCst) == 0;
+    let pending_signal_code_cleared = ELF_PROBE_PENDING_SIGNAL_CODE.swap(0, Ordering::SeqCst) == 0;
     let ignored_signals = ELF_PROBE_EXEC_IGNORED_SIGNALS.swap(0, Ordering::SeqCst);
     let signal_actions_restored = (exec_replaced || ignored_signals == 0)
         && (0..LINUX_SIGNAL_COUNT).all(|signal| {
@@ -3903,6 +4046,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && signal_lifecycle_valid
         && signal_mask_restored
         && pending_signals_cleared
+        && pending_signal_code_cleared
         && signal_actions_restored
         && alt_stack_disabled
         && msrs_restored;
@@ -3944,6 +4088,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             signal_lifecycle_valid,
             signal_mask_restored,
             pending_signals_cleared,
+            pending_signal_code_cleared,
             signal_actions_restored,
             alt_stack_disabled,
             msrs_restored,
@@ -4439,7 +4584,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
         LINUX_KILL_SYSCALL => linux_kill(
             first_argument,
-            buffer,
+            (buffer, LINUX_SI_USER),
             registers,
             saved_registers,
             user_stack,
@@ -4449,7 +4594,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_TGKILL_SYSCALL => match linux_tgkill_identity(first_argument, buffer) {
             Ok(()) => linux_kill(
                 1,
-                count,
+                (count, LINUX_SI_TKILL),
                 registers,
                 saved_registers,
                 user_stack,
@@ -4461,7 +4606,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_TKILL_SYSCALL => match linux_tkill_identity(first_argument) {
             Ok(()) => linux_kill(
                 1,
-                buffer,
+                (buffer, LINUX_SI_TKILL),
                 registers,
                 saved_registers,
                 user_stack,
@@ -9536,12 +9681,116 @@ fn linux_executable_user_address(address: u64) -> bool {
 }
 
 fn linux_signal_action_deliverable(handler: u64, flags: u64, restorer: u64) -> bool {
-    let supported = LINUX_SA_RESTORER | LINUX_SA_ONSTACK | LINUX_SA_NODEFER | LINUX_SA_RESETHAND;
+    let supported = LINUX_SA_SIGINFO
+        | LINUX_SA_RESTORER
+        | LINUX_SA_ONSTACK
+        | LINUX_SA_NODEFER
+        | LINUX_SA_RESETHAND;
     handler > 1
         && flags & LINUX_SA_RESTORER != 0
         && flags & !supported == 0
         && linux_executable_user_address(handler)
         && linux_executable_user_address(restorer)
+}
+
+fn linux_signal_stack(stack_top: u64, use_alt_stack: bool) -> Option<u64> {
+    let frame_top = if use_alt_stack {
+        stack_top
+    } else {
+        stack_top.checked_sub(LINUX_SIGNAL_RED_ZONE_SIZE)?
+    };
+    let signal_stack = frame_top
+        .checked_sub(LINUX_SIGNAL_FRAME_SIZE as u64)?
+        .checked_div(16)?
+        .checked_mul(16)?
+        .checked_sub(8)?;
+    if use_alt_stack && signal_stack < ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst) {
+        None
+    } else {
+        Some(signal_stack)
+    }
+}
+
+fn linux_rt_signal_frame(
+    context: LinuxSignalContext,
+    flags: u64,
+    information: LinuxSignalInformation,
+    trap: u64,
+    error: u64,
+    cr2: u64,
+) -> LinuxRtSignalFrame {
+    let registers = context.registers;
+    let alt_stack_flags = context.alt_stack_flags;
+    let alt_stack_disabled = alt_stack_flags == LINUX_SS_DISABLE;
+    LinuxRtSignalFrame {
+        restorer: context.signal_restorer,
+        context: LinuxSignalUserContext {
+            flags: LINUX_UC_SIGCONTEXT_SS | LINUX_UC_STRICT_RESTORE_SS,
+            link: 0,
+            stack: LinuxSignalStack {
+                pointer: if alt_stack_disabled {
+                    0
+                } else {
+                    ELF_PROBE_ALT_STACK_POINTER.load(Ordering::SeqCst)
+                },
+                flags: alt_stack_flags,
+                padding: 0,
+                size: if alt_stack_disabled {
+                    0
+                } else {
+                    ELF_PROBE_ALT_STACK_SIZE.load(Ordering::SeqCst)
+                },
+            },
+            machine: LinuxSignalMachineContext {
+                r8: registers.r8,
+                r9: registers.r9,
+                r10: registers.r10,
+                r11: context.r11,
+                r12: registers.r12,
+                r13: registers.r13,
+                r14: registers.r14,
+                r15: registers.r15,
+                rdi: registers.rdi,
+                rsi: registers.rsi,
+                rbp: registers.rbp,
+                rbx: registers.rbx,
+                rdx: registers.rdx,
+                rax: context.rax,
+                rcx: context.rcx,
+                rsp: context.rsp,
+                rip: context.rip,
+                rflags: context.rflags,
+                cs: USER_CODE_SELECTOR,
+                gs: 0,
+                fs: 0,
+                ss: USER_DATA_SELECTOR,
+                error,
+                trap,
+                old_mask: context.signal_mask,
+                cr2,
+                fpstate: 0,
+                reserved: [0; 8],
+            },
+            signal_mask: context.signal_mask,
+        },
+        information: if flags & LINUX_SA_SIGINFO != 0 {
+            information
+        } else {
+            LinuxSignalInformation::ZERO
+        },
+    }
+}
+
+fn copy_linux_signal_frame(address: u64, frame: &LinuxRtSignalFrame) -> bool {
+    // SAFETY: every field, including ABI padding and reserved bytes, is
+    // initialized above and the resulting byte view is used only for copy-out.
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            core::ptr::from_ref(frame).cast::<u8>(),
+            size_of::<LinuxRtSignalFrame>(),
+        )
+    };
+    copy_to_linux_user(address, bytes)
 }
 
 fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: u64, flags: u64) {
@@ -9562,13 +9811,14 @@ fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: 
 
 fn linux_kill(
     pid: u64,
-    signal: u64,
+    generated: (u64, i32),
     output: *mut LinuxSyscallFrame,
     registers: LinuxSyscallFrame,
     user_stack: u64,
     user_rip: u64,
     user_rflags: u64,
 ) -> u64 {
+    let (signal, signal_code) = generated;
     if !matches!(pid, 0 | 1) {
         return LINUX_ESRCH;
     }
@@ -9601,6 +9851,9 @@ fn linux_kill(
         return LINUX_ENOSYS;
     }
     if old_mask & signal_bit != 0 {
+        if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & signal_bit == 0 {
+            ELF_PROBE_PENDING_SIGNAL_CODE.store(signal_code as u32, Ordering::SeqCst);
+        }
         ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
         return 0;
     }
@@ -9616,11 +9869,7 @@ fn linux_kill(
     } else {
         user_stack
     };
-    let Some(signal_stack) = stack_top
-        .checked_sub(24)
-        .map(|stack| stack & !15)
-        .and_then(|stack| stack.checked_add(8))
-    else {
+    let Some(signal_stack) = linux_signal_stack(stack_top, use_alt_stack) else {
         return LINUX_EFAULT;
     };
     let context = LinuxSignalContext::from_syscall(
@@ -9628,28 +9877,33 @@ fn linux_kill(
         user_rip,
         user_stack,
         user_rflags,
-        signal_stack,
+        (signal_stack, restorer),
         old_mask,
         old_alt_stack_flags,
     );
     if !context.user_context().is_valid() {
         return LINUX_EINVAL;
     }
-    let mut signal_frame = [0_u8; LINUX_SIGNAL_FRAME_SIZE];
-    signal_frame[..8].copy_from_slice(&restorer.to_ne_bytes());
-    signal_frame[8..].copy_from_slice(&LINUX_SIGNAL_FRAME_COOKIE.to_ne_bytes());
-    if !copy_to_linux_user(signal_stack, &signal_frame) {
+    let signal_frame = linux_rt_signal_frame(
+        context,
+        flags,
+        LinuxSignalInformation::generated(signal, signal_code),
+        0,
+        0,
+        0,
+    );
+    if !copy_linux_signal_frame(signal_stack, &signal_frame) {
         return LINUX_EFAULT;
     }
     let mut handler_registers = registers;
     handler_registers.rdi = signal;
-    handler_registers.rsi = 0;
-    handler_registers.rdx = 0;
+    handler_registers.rsi = signal_stack + LINUX_SIGNAL_FRAME_INFO_OFFSET;
+    handler_registers.rdx = signal_stack + LINUX_SIGNAL_FRAME_CONTEXT_OFFSET;
     let handler_context = LinuxUserContext {
         registers: handler_registers,
         rip: handler,
         rsp: signal_stack,
-        rflags: user_rflags,
+        rflags: user_rflags & !((1 << 8) | (1 << 10) | (1 << 16)),
         rax: 0,
         fs_base: active_fs_base(),
     };
@@ -9707,7 +9961,10 @@ fn linux_deliver_pending_signal(
     }
     let result = linux_kill(
         1,
-        LINUX_SIGSEGV,
+        (
+            LINUX_SIGSEGV,
+            ELF_PROBE_PENDING_SIGNAL_CODE.load(Ordering::SeqCst) as i32,
+        ),
         output,
         registers,
         user_stack,
@@ -9716,11 +9973,12 @@ fn linux_deliver_pending_signal(
     );
     if result == 0 {
         ELF_PROBE_PENDING_SIGNALS.fetch_and(!signal_bit, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNAL_CODE.store(0, Ordering::SeqCst);
     }
     result
 }
 
-fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {
+fn deliver_linux_sigsegv(frame: &mut UserFaultFrame, fault: domain::FaultMetadata) -> bool {
     if !frame.is_page_fault()
         || current_linux_thread_handle().is_none()
         || LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
@@ -9752,27 +10010,46 @@ fn deliver_linux_sigsegv(frame: &mut UserFaultFrame) -> bool {
     } else {
         interrupted.rsp
     };
-    let Some(stack_floor) = stack_top.checked_sub(24) else {
+    let Some(signal_stack) = linux_signal_stack(stack_top, use_alt_stack) else {
         return false;
     };
-    let Some(signal_stack) = (stack_floor & !15).checked_add(8) else {
-        return false;
-    };
-    let context =
-        LinuxSignalContext::from_fault(interrupted, signal_stack, old_mask, old_alt_stack_flags);
+    let context = LinuxSignalContext::from_fault(
+        interrupted,
+        signal_stack,
+        restorer,
+        old_mask,
+        old_alt_stack_flags,
+    );
     if !context.user_context().is_valid() {
         return false;
     }
-    let mut signal_frame = [0_u8; LINUX_SIGNAL_FRAME_SIZE];
-    signal_frame[..8].copy_from_slice(&restorer.to_ne_bytes());
-    signal_frame[8..].copy_from_slice(&LINUX_SIGNAL_FRAME_COOKIE.to_ne_bytes());
-    if !copy_to_linux_user(signal_stack, &signal_frame) {
+    let signal_frame = linux_rt_signal_frame(
+        context,
+        flags,
+        LinuxSignalInformation::fault(
+            LINUX_SIGSEGV,
+            if fault.error & 1 == 0 {
+                LINUX_SEGV_MAPERR
+            } else {
+                LINUX_SEGV_ACCERR
+            },
+            fault.address,
+        ),
+        fault.vector,
+        fault.error,
+        fault.address,
+    );
+    if !copy_linux_signal_frame(signal_stack, &signal_frame) {
         return false;
     }
     if !frame.enter_signal_handler(
         handler,
         signal_stack,
         LINUX_SIGSEGV,
+        (
+            signal_stack + LINUX_SIGNAL_FRAME_INFO_OFFSET,
+            signal_stack + LINUX_SIGNAL_FRAME_CONTEXT_OFFSET,
+        ),
         USER_CODE_SELECTOR,
         USER_DATA_SELECTOR,
     ) {
@@ -9800,9 +10077,9 @@ fn linux_rt_sigreturn(output: *mut LinuxSyscallFrame, user_stack: u64) -> u64 {
     if context.signal_stack.checked_add(8) != Some(user_stack) {
         return LINUX_EINVAL;
     }
-    let mut cookie = [0_u8; 8];
-    if !copy_from_linux_user(user_stack, &mut cookie)
-        || u64::from_ne_bytes(cookie) != LINUX_SIGNAL_FRAME_COOKIE
+    let mut restorer = [0_u8; 8];
+    if !copy_from_linux_user(context.signal_stack, &mut restorer)
+        || u64::from_ne_bytes(restorer) != context.signal_restorer
         || !context.user_context().is_valid()
         || !write_linux_live_return(output, context.user_context())
     {
@@ -10704,7 +10981,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         serial_write(" ");
         serial_write_u64(fault_metadata.instruction);
         serial_write("\r\n");
-        if deliver_linux_sigsegv(frame) {
+        if deliver_linux_sigsegv(frame, fault_metadata) {
             return 0;
         }
         abort_linux_signal();
