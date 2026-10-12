@@ -6,8 +6,10 @@ The first M6 storage primitive is a canonical two-sector persistent-volume
 record. It preserves the older generation while preparing and flushing an
 inactive slot, writes the commit marker last, and accepts the new generation
 only after the final flush. Its canonical encoder/decoder is now a shared
-`no_std` crate used by the kernel and intended for the isolated storage
-service. Every QEMU boot proves recovery at all five commit
+`no_std` crate. The complete two-slot transaction/recovery engine is a second
+`no_std` crate depending only on that format and a whole-sector block trait;
+the kernel backend now consumes both, and the isolated service can consume the
+same engine without kernel internals. Every QEMU boot proves recovery at all five commit
 stages, rejects partial commit markers and corrupt records, falls back to the
 older valid slot, and fails closed on generation exhaustion or ambiguity. See
 [Persistent Volume Record v0](specs/kernel/persistent-volume-v0.md).

@@ -120,6 +120,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "ginux-volume-format",
+ "ginux-volume-service",
 ]
 
 [[package]]
@@ -135,6 +136,13 @@ name = "ginux-volume-format"
 version = "0.1.0"
 dependencies = [
  "sha2",
+]
+
+[[package]]
+name = "ginux-volume-service"
+version = "0.1.0"
+dependencies = [
+ "ginux-volume-format",
 ]
 
 [[package]]

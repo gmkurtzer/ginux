@@ -3,7 +3,10 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use ginux_volume_format::{decode, encode, Record, PAYLOAD_CAPACITY, SECTOR_SIZE, SLOT_COUNT};
+use ginux_volume_format::{encode, PAYLOAD_CAPACITY, SECTOR_SIZE, SLOT_COUNT};
+use ginux_volume_service::{commit_through, recover_with_slot, CommitStage, ScanError};
+
+pub(crate) use ginux_volume_service::{commit, recover, BlockDevice, CommitError};
 
 const VERSION_OFFSET: usize = 8;
 const HEADER_SIZE_OFFSET: usize = 12;
@@ -13,137 +16,6 @@ const COMMIT_OFFSET: usize = 24;
 const DIGEST_OFFSET: usize = 32;
 const RESERVED_OFFSET: usize = 64;
 const HEADER_SIZE: usize = 72;
-
-pub(crate) trait BlockDevice {
-    fn read_sector(&mut self, sector: usize, output: &mut [u8; SECTOR_SIZE]) -> bool;
-    fn write_sector(&mut self, sector: usize, input: &[u8; SECTOR_SIZE]) -> bool;
-    fn flush(&mut self) -> bool;
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CommitError {
-    Corrupt,
-    Device,
-    GenerationExhausted,
-    PayloadTooLarge,
-}
-
-/// Commits a new record to the inactive slot.
-///
-/// The prepared sector is flushed before its commit marker is written. The
-/// checksum describes the final committed sector, so neither a prepared nor a
-/// torn commit-marker write can be mistaken for a committed record.
-pub(crate) fn commit<D: BlockDevice>(
-    device: &mut D,
-    payload: &[u8],
-) -> Result<Record, CommitError> {
-    commit_through(device, payload, CommitStage::FinalFlush)?;
-    recover_with_slot(device)
-        .map_err(scan_error)?
-        .map(|(_, record)| record)
-        .ok_or(CommitError::Device)
-}
-
-pub(crate) fn recover<D: BlockDevice>(device: &mut D) -> Option<Record> {
-    recover_with_slot(device)
-        .ok()
-        .flatten()
-        .map(|(_, record)| record)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CommitStage {
-    BeforeWrite,
-    PreparedWrite,
-    PreparedFlush,
-    CommitWrite,
-    FinalFlush,
-}
-
-fn commit_through<D: BlockDevice>(
-    device: &mut D,
-    payload: &[u8],
-    through: CommitStage,
-) -> Result<(), CommitError> {
-    if payload.len() > PAYLOAD_CAPACITY {
-        return Err(CommitError::PayloadTooLarge);
-    }
-    let current = recover_with_slot(device).map_err(scan_error)?;
-    let generation = current
-        .map_or(Some(1), |(_, record)| record.generation.checked_add(1))
-        .ok_or(CommitError::GenerationExhausted)?;
-    let target = current.map_or(0, |(slot, _)| slot ^ 1);
-    if through == CommitStage::BeforeWrite {
-        return Ok(());
-    }
-
-    let (prepared, committed) = encode(generation, payload).ok_or(CommitError::PayloadTooLarge)?;
-    if !device.write_sector(target, &prepared) {
-        return Err(CommitError::Device);
-    }
-    if through == CommitStage::PreparedWrite {
-        return Ok(());
-    }
-    if !device.flush() {
-        return Err(CommitError::Device);
-    }
-    if through == CommitStage::PreparedFlush {
-        return Ok(());
-    }
-    if !device.write_sector(target, &committed) {
-        return Err(CommitError::Device);
-    }
-    if through == CommitStage::CommitWrite {
-        return Ok(());
-    }
-    if !device.flush() {
-        return Err(CommitError::Device);
-    }
-    Ok(())
-}
-
-enum ScanError {
-    Ambiguous,
-    Corrupt,
-    Device,
-}
-
-fn scan_error(error: ScanError) -> CommitError {
-    match error {
-        ScanError::Ambiguous | ScanError::Corrupt => CommitError::Corrupt,
-        ScanError::Device => CommitError::Device,
-    }
-}
-
-fn recover_with_slot<D: BlockDevice>(device: &mut D) -> Result<Option<(usize, Record)>, ScanError> {
-    let mut sector = [0_u8; SECTOR_SIZE];
-    let mut selected: Option<(usize, Record)> = None;
-    let mut corrupt = false;
-    for slot in 0..SLOT_COUNT {
-        if !device.read_sector(slot, &mut sector) {
-            return Err(ScanError::Device);
-        }
-        let Some(record) = decode(&sector) else {
-            corrupt |= sector.iter().any(|byte| *byte != 0);
-            continue;
-        };
-        match selected {
-            None => selected = Some((slot, record)),
-            Some((_, current)) if record.generation > current.generation => {
-                selected = Some((slot, record));
-            }
-            Some((_, current)) if record.generation == current.generation => {
-                return Err(ScanError::Ambiguous);
-            }
-            Some(_) => {}
-        }
-    }
-    if selected.is_none() && corrupt {
-        Err(ScanError::Corrupt)
-    } else {
-        Ok(selected)
-    }
-}
 
 #[derive(Clone, Copy)]
 struct MemoryBlockDevice {

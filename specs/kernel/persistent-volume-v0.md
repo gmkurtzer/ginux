@@ -27,6 +27,13 @@ payload bounds, commit marker, zero-padding rules, and SHA-256 validation. The
 crate rejects generation zero and oversized payloads before encoding, treats a
 prepared record as uncommitted, and contains no device or kernel authority.
 
+The prepare/flush/commit/flush state machine and two-slot recovery scan live in
+the separate `ginux-volume-service` `no_std` crate. It depends only on the
+format crate and a three-method whole-sector `BlockDevice` trait. The current
+kernel backend implements that trait, while the isolated virtio service can
+implement the same interface without importing kernel internals. Host unit
+tests and the QEMU reboot/corruption gate execute this shared engine.
+
 Canonical empty media consists of two all-zero sectors. If neither slot is
 valid and either sector contains any nonzero byte, recovery reports corruption
 instead of permitting generation-one initialization. This includes an

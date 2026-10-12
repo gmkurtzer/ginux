@@ -1,5 +1,11 @@
 [workspace]
-members = ["boot/efi", "crates/volume-format", "kernel", "tools/manifest-tool"]
+members = [
+    "boot/efi",
+    "crates/volume-format",
+    "crates/volume-service",
+    "kernel",
+    "tools/manifest-tool",
+]
 resolver = "2"
 
 [profile.dev]

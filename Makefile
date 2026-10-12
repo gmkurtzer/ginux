@@ -73,6 +73,8 @@ check: manifest
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
 	@cargo clippy --package ginux-volume-format -- -D warnings
 	@cargo test --package ginux-volume-format
+	@cargo clippy --package ginux-volume-service -- -D warnings
+	@cargo test --package ginux-volume-service
 	@cargo clippy --package ginux-manifest-tool -- -D warnings
 
 fmt: manifest
