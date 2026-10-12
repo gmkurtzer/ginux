@@ -1437,10 +1437,16 @@ linux_clone_repeat:
     xor r10d, r10d
     mov eax, 286
     call syscall_expect_zero
-    mov qword ptr [0x405e60], 0
+    mov qword ptr [0x405e60], -1
     mov esi, 0x405e60
     push 8
     pop rdx
+    xor eax, eax
+    syscall
+    cmp rax, -4
+    require_equal
+    cmp qword ptr [0x405e60], -1
+    require_equal
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405e60], 0
@@ -4884,6 +4890,9 @@ child_thread_probe:
     push 24
     pop rax
     call syscall_expect_zero
+    push 12
+    pop rdx
+    call linux_child_signal_parent
     mov ecx, 0x100000
 .Llinux_timerfd_read_spin:
     pause

@@ -445,8 +445,10 @@ with relative or absolute arming. An unexpired or disarmed blocking read sleeps
 in its scheduler slot while a peer is runnable. Arming and disarming refresh the
 stored deadline; an APIC tick completes an expired read with its accumulated
 count and preempts directly back to the reader. Descriptor closure wakes it with
-`EBADF`. Signal interruption remains unsupported. One bounded pipe pair
-provides a 256-byte FIFO
+`EBADF`. A caught standard signal can interrupt the wait with `EINTR` without
+changing its output or consuming/disarming the timer; retrying can still finish
+at the original deadline. Blocked signals, nested delivery, and syscall restart
+remain unsupported. One bounded pipe pair provides a 256-byte FIFO
 with atomic scalar or vectored I/O, poll/epoll readiness, EOF, broken-peer
 behavior, FIFO metadata, and byte-count introspection. An empty blocking scalar
 read sleeps in its scheduler slot while a peer is runnable, then revalidates and

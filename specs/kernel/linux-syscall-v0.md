@@ -163,8 +163,12 @@ eight-byte destination, descriptor, and current deadline in a typed scheduler
 wait. `timerfd_settime` refreshes that deadline after an arm or disarm; descriptor
 closure wakes the read with `-EBADF`. Once the monotonic deadline elapses, the
 periodic APIC handler revalidates the output, consumes the expiration count, and
-preempts directly back to the reader. Blocking without a runnable peer and
-signal interruption retain `-ENOSYS`. `poll` and epoll expose
+preempts directly back to the reader. Blocking without a runnable peer returns
+`-ENOSYS`. An admitted caught standard signal unblocked by the waiting thread's
+ordinary mask cancels the wait through the shared transactional handoff and
+returns `-EINTR` without changing the output or timer state. The measured graph
+retries against the same deadline and completes through the APIC path. Blocked
+signals, nested delivery, and syscall restart remain unsupported. `poll` and epoll expose
 `POLLIN`/`EPOLLIN` dynamically once the monotonic deadline has elapsed. The
 descriptor also participates in
 `F_GETFD`, `F_SETFD`, `F_GETFL`, `lseek`, and `close`. The proof creates timerfd
