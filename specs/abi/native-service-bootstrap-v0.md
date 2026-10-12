@@ -47,6 +47,8 @@ compile-time size/alignment assertions plus layout and malformed-header tests.
 `native-service-bootstrap-v0.h` is the language-neutral C binding. Both are
 release contract artifacts; neither exposes Rust layout, kernel pointers, page
 table objects, interrupt-controller state, or internal domain records.
+`make abi-conformance` compiles an independent freestanding C11 consumer for
+x86-64 and freezes every field offset in addition to the structure size.
 
 ABI v0 is exact-version only. A later compatible extension must define a new
 accepted version and size policy before changing this structure. Recompiling a

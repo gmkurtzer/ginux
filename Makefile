@@ -14,7 +14,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image linux-probe volume-service build run test check fmt gate clean
+.PHONY: help doctor manifest system-image linux-probe volume-service abi-conformance build run test check fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -24,6 +24,7 @@ help:
 	@echo "  make system-image Build the pinned minimal system-container candidate"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
 	@echo "  make volume-service Build the freestanding isolated volume service"
+	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build and boot Ginux in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
@@ -62,6 +63,11 @@ volume-service:
 	@test -f "$(VOLUME_SERVICE)"
 	@echo "Built $(VOLUME_SERVICE)"
 
+abi-conformance:
+	@clang -target x86_64-none-elf -std=c11 -ffreestanding -fsyntax-only \
+		-Wall -Wextra -Werror -I. tests/abi/native-service-v0.c
+	@echo "Native service ABI C conformance passed"
+
 build: manifest
 	@echo "Building Ginux for $(TARGET) ($(PROFILE))"
 	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
@@ -76,6 +82,7 @@ test: build
 	@tests/qemu/boot.sh
 
 check: manifest
+	@$(MAKE) abi-conformance
 	@cargo fmt --all -- --check
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
 	@cargo clippy --package ginux-native-abi -- -D warnings

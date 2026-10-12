@@ -62,3 +62,7 @@ generation reinitializes the reset device with a new DMA lease.
 `native-service-lifecycle-v0.h` file is the C binding. These constants refine
 the already frozen control ABI v4 operation-2 contract; they do not change its
 calling convention or lifecycle record layout.
+The header also provides constant-expression discovery construction and
+compatibility predicates. `make abi-conformance` compiles a freestanding C11
+consumer that checks accepted and rejected discovery words; `make check` and
+the clean gate require it.

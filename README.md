@@ -1103,6 +1103,13 @@ This formats the workspace, removes prior artifacts, runs lint checks, rebuilds
 the EFI image, executes the QEMU boot assertions, and checks the working diff
 for whitespace errors.
 
+Compile the public native bootstrap and lifecycle ABI as an independent
+freestanding C11 consumer with:
+
+```sh
+make abi-conformance
+```
+
 `make help` lists all supported development targets.
 
 ## Virtualization profiles

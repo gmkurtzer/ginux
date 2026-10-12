@@ -19,5 +19,13 @@
 #define GINUX_NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES UINT16_C(1)
 #define GINUX_NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT UINT16_C(16)
 #define GINUX_NATIVE_CONTROL_REQUIRED_FEATURES UINT16_C(17)
+#define GINUX_NATIVE_CONTROL_DISCOVERY(version, features) \
+    (((uint64_t)(version) << 16) | (uint64_t)(features))
+#define GINUX_NATIVE_CONTROL_ABI_IS_COMPATIBLE(discovery)                         \
+    ((((uint64_t)(discovery) >> 32) == 0) &&                                     \
+     ((((uint64_t)(discovery) >> 16) & UINT64_C(0xffff)) ==                       \
+      GINUX_NATIVE_CONTROL_ABI_VERSION) &&                                        \
+     (((uint64_t)(discovery) & GINUX_NATIVE_CONTROL_REQUIRED_FEATURES) ==          \
+      GINUX_NATIVE_CONTROL_REQUIRED_FEATURES))
 
 #endif
