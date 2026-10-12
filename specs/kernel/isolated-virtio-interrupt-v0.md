@@ -45,6 +45,13 @@ error; the call masks MSI-X before returning the failure. The boot gate
 independently delivers the timeout interrupt and proves its state is consumed,
 then proves the real MSI-X path cancels the pending timeout.
 
+The live service also enters generation one before notifying queue zero. The
+request is admitted and scheduler-blocked, the APIC timer handler wakes it with
+failure, and an independent timeout counter proves that this was timer delivery
+rather than admission denial. MSI-X remains masked, the request generation is
+not consumed, and the service then notifies the queue and retries generation
+one successfully. Later generations continue normally.
+
 ## Teardown
 
 The service deliberately faults after validation. Its registered teardown hook
@@ -60,7 +67,6 @@ release the DMA page, destroy the service mappings, and retire its authority.
   are modeled, including read, write, and flush descriptor shapes.
 - There is no vector allocator, shared-vector demultiplexing, SMP affinity,
   IOMMU domain, concurrent request ring, or stable general block-service ABI yet.
-- The gate proves timeout delivery independently and cancellation on the live
-  device-success path; injected live-device timeout and recovery remains a
-  future fault-injection test.
+- Timeout recovery currently retries the same serialized request; cancellation
+  after notification and ambiguous late device completion are not modeled.
 - Page-granular notification MMIO still exposes unrelated bytes in its page.

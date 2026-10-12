@@ -92,9 +92,9 @@ device, and completes five sequential bounded operations. The lease lifecycle is
   notification register. The service writes that register once, but unrelated
   bytes in that 4 KiB page are not yet sub-page protected.
 - MSI-X remains entirely kernel-owned; no interrupt-controller or table
-  authority is delegated. A calibrated one-shot bounds a lost interrupt, but
-  live device-timeout fault injection is not yet in the gate. There is no
-  IOMMU domain.
+  authority is delegated. A calibrated one-shot bounds a lost interrupt; the
+  live gate withholds one notification, proves timeout delivery, and retries
+  the unconsumed generation. There is no IOMMU domain.
 - The kernel still performs the two-slot persistent-volume algorithm; the
   isolated service now proves the required write/flush/read-back primitive.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable

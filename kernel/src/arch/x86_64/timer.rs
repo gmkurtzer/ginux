@@ -59,6 +59,7 @@ static DEVICE_WAIT_TIMER_ARMED: AtomicBool = AtomicBool::new(false);
 static DEVICE_WAIT_TIMED_OUT: AtomicBool = AtomicBool::new(false);
 static DEVICE_WAIT_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static DEVICE_WAIT_REQUEST: AtomicU64 = AtomicU64::new(0);
+static DEVICE_WAIT_TIMEOUT_COUNT: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 static INTERRUPT_COUNTER_HZ: AtomicU64 = AtomicU64::new(0);
@@ -510,6 +511,10 @@ pub(crate) fn device_wait_timed_out(domain: u64, request: u64) -> bool {
         && DEVICE_WAIT_TIMED_OUT.load(Ordering::SeqCst)
 }
 
+pub(crate) fn device_wait_timeout_count() -> u64 {
+    DEVICE_WAIT_TIMEOUT_COUNT.load(Ordering::SeqCst)
+}
+
 /// Stops the device timeout and reports whether it won the interrupt race.
 pub(crate) fn finish_device_wait_timer(domain: u64, request: u64) -> Option<bool> {
     if DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst) != domain
@@ -578,14 +583,15 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
             apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
             apic.write(APIC_INITIAL_COUNT, 0);
         }
-        if domain == DEVICE_WAIT_TEST_DOMAIN
-            || scheduler::wake_device_completion(
-                domain,
-                control_abi::BLOCK_DEVICE_OBJECT,
-                request,
-                u64::MAX - 2,
-            )
-        {
+        if domain == DEVICE_WAIT_TEST_DOMAIN {
+            DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);
+        } else if scheduler::wake_device_completion(
+            domain,
+            control_abi::BLOCK_DEVICE_OBJECT,
+            request,
+            u64::MAX - 2,
+        ) {
+            DEVICE_WAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
             DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);
         }
         return;

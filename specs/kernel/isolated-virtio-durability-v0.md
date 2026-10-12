@@ -21,6 +21,11 @@ MSI-X vector, and 100 ms APIC timeout. MSI-X remains masked between requests.
 The kernel advances only the exact consumed request generation and rejects
 early, stale, duplicate, or concurrent waits.
 
+Before its first notification, the service deliberately enters generation one
+and requires the live timeout path. The timer wakes the saved context with
+failure without consuming the generation. The service then notifies and
+retries generation one successfully before beginning the durability sequence.
+
 The service retains whether request two found a fresh or persisted sector in
 its saved ring-3 context and deliberately faults at one of two exact success
 instructions. The kernel validates that fault metadata after quiescence. The

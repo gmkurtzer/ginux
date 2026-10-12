@@ -5489,8 +5489,8 @@ pub(crate) fn verify_ring3_writable_device_grant(
     const NOTIFICATION_PAGE_INDEX: usize = 7;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
     const INTERRUPT_REQUEST: u64 = 1;
-    const RECOVERED_SUCCESS_FAULT_OFFSET: u64 = 1222;
-    const FRESH_SUCCESS_FAULT_OFFSET: u64 = 1224;
+    const RECOVERED_SUCCESS_FAULT_OFFSET: u64 = 1253;
+    const FRESH_SUCCESS_FAULT_OFFSET: u64 = 1255;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5594,6 +5594,14 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0xcd, 0x80, // require denial without blocking
         0x4c, 0x89, 0xc6, // restore the DMA mapping
         0x48, 0x83, 0xf8, 0xfd, // require UINT64_MAX - 2
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x48, 0x89, 0xcf, // restore device capability to RDI
+        0xb8, 0x13, 0, 0, 0, // operation 19: block-device call
+        0xbe, 0x01, 0, 0, 0, // command 1: wait for completion
+        0xba, 0x01, 0, 0, 0, // request generation one without notification
+        0xcd, 0x80, // block until the device-wait timer wins
+        0x4c, 0x89, 0xc6, // restore the DMA mapping
+        0x48, 0x83, 0xf8, 0xfd, // require timeout failure
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x48, 0xba, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rdx, notification register
         0x66, 0xc7, 0x02, 0, 0, // notify queue zero
@@ -5802,9 +5810,9 @@ pub(crate) fn verify_ring3_writable_device_grant(
         return None;
     }
     program[156..164].copy_from_slice(&dma_physical.to_le_bytes());
-    program[429..437].copy_from_slice(&(user_notification as u64).to_le_bytes());
-    program[600..608].copy_from_slice(&(user_notification as u64).to_le_bytes());
-    program[740..748].copy_from_slice(&(user_notification as u64).to_le_bytes());
+    program[460..468].copy_from_slice(&(user_notification as u64).to_le_bytes());
+    program[631..639].copy_from_slice(&(user_notification as u64).to_le_bytes());
+    program[771..779].copy_from_slice(&(user_notification as u64).to_le_bytes());
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
@@ -5813,6 +5821,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     let root = space.root;
     let entry = USER_TEST_ADDRESS;
     let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    let expected_timeouts = timer::device_wait_timeout_count().checked_add(1)?;
     if !register_auxiliary_address_space(auxiliary, space)
         || !bind_auxiliary_device_teardown(
             auxiliary,
@@ -5856,6 +5865,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
         },
     );
     let valid = current_root() == kernel_root
+        && timer::device_wait_timeout_count() == expected_timeouts
         && scheduler::current_domain().is_none()
         && registered_auxiliary_address_space_count() == 0
         && memory::owner_live_frame_count(owner) == Some(0)

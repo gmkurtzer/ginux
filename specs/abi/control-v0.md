@@ -407,7 +407,9 @@ binding returns `UINT64_MAX - 2` without blocking. The service validates the
 exact blank-sector completion before faulting. Every admitted wait arms a
 calibrated 100 ms local-APIC one-shot; timeout wakes the saved call with
 `UINT64_MAX - 2`, while a valid device interrupt cancels the timer before
-return. This proves one bounded read
+return. Timeout does not consume the request generation: the live proof
+withholds generation one's notification, requires timer delivery, then notifies
+and retries generation one successfully. This proves one bounded read
 followed by exact generation advances, a second bounded read, and a
 write/flush/read-back transaction through the same queue. Only one request may
 be outstanding; consumed state is cleared

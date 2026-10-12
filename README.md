@@ -92,7 +92,9 @@ completed DMA layout before the page is scrubbed and released;
 release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
 owned frames. A calibrated 100 ms APIC one-shot wakes a request whose device
-interrupt never arrives; successful MSI-X delivery cancels it. This is the
+interrupt never arrives; successful MSI-X delivery cancels it. The live gate
+withholds the first notification, observes an actual timeout, and
+retries the same unconsumed generation successfully. This is the
 isolated durability primitive, not yet the two-slot volume transaction. A general
 multi-request ring, concurrent requests, and IOMMU confinement remain
 unimplemented. See

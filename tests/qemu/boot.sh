@@ -822,6 +822,11 @@ if ! grep -q '^ginux: isolated virtio timeout cancelled after MSI-X' "$output_fi
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio live timeout retried successfully' "$output_file"; then
+    echo "Boot test failed: a timed-out isolated virtio request was not retried safely." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: duplicate isolated virtio wait rejected' "$output_file"; then
     echo "Boot test failed: a duplicate isolated virtio wait was accepted." >&2
     exit 1

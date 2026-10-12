@@ -1703,6 +1703,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated virtio service blocked on MSI-X");
     serial_write("\r\nginux: kernel-owned MSI-X woke isolated virtio service");
     serial_write("\r\nginux: isolated virtio timeout cancelled after MSI-X");
+    serial_write("\r\nginux: isolated virtio live timeout retried successfully");
     serial_write("\r\nginux: duplicate isolated virtio wait rejected");
     serial_write("\r\nginux: isolated virtio blank-sector read completed in ring 3");
     serial_write("\r\nginux: isolated virtio request generation advanced and reused");
