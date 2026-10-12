@@ -79,23 +79,35 @@ self-registration errors. ADD and MOD accept only level-triggered `EPOLLIN`
 and `EPOLLOUT`, copy the complete packed 12-byte x86-64 `epoll_event` before
 changing state, and preserve its 64-bit data word. DEL ignores its event
 pointer. `rax = 232` (`__NR_epoll_wait`) accepts exactly one output event and
-atomically copies it only when the registered descriptor is immediately
-ready. A zero-timeout query with no event returns zero; a nonzero or infinite
-wait returns `-ENOSYS` until scheduler-backed wait queues exist. Invalid output
-memory returns `-EFAULT` without consuming the level-triggered event. The epoll
-descriptor participates in `F_GETFD`, `F_SETFD`, `F_GETFL`, `poll`, and
-`close`; closing it clears the registration and releases its descriptor.
+atomically copies it when the registered descriptor is ready. A zero-timeout
+query with no event returns zero. With another runnable thread, a positive
+signed 32-bit millisecond timeout or negative infinite timeout blocks the
+caller in its generation-tagged scheduler slot. The registration, requested
+events, 64-bit data word, and descriptor readiness remain live while blocked.
+Eventfd and pipe state changes, endpoint closure, timerfd arming or expiration,
+and epoll ADD or MOD operations recompute readiness and wake the waiter. A
+positive deadline returns zero without modifying the output event and can
+preempt the running peer directly from the local-APIC interrupt. The complete
+12-byte output is validated before blocking and revalidated on completion; a
+revoked output range resumes with `-EFAULT`. Closing the waited-on epoll
+descriptor wakes the waiter with `-EBADF`. Blocking without a runnable peer
+retains the explicit `-ENOSYS` boundary. The epoll descriptor participates in
+`F_GETFD`, `F_SETFD`, `F_GETFL`, `poll`, and `close`; closing it clears the
+registration and releases its descriptor.
 `rax = 281` (`__NR_epoll_pwait`) uses the same bounded wait operation after
 validating an optional eight-byte signal mask and its exact signal-set size.
-The temporary mask is not installed because this implementation never blocks;
-invalid sizes return `-EINVAL` and invalid mask ranges return `-EFAULT` before
-examining readiness.
+The temporary mask is not installed and this entry point does not yet enter the
+scheduler-backed wait; invalid sizes return `-EINVAL` and invalid mask ranges
+return `-EFAULT` before examining readiness. An immediately ready event or zero
+timeout behaves like `epoll_wait`, while a call that would block returns
+`-ENOSYS`.
 `rax = 441` (`__NR_epoll_pwait2`) replaces the integer timeout with a null or
 complete 16-byte x86-64 `timespec`. Negative seconds and non-normalized
 nanoseconds return `-EINVAL`; invalid memory returns `-EFAULT`. A zero timespec
 queries immediately, while a nonzero or null timeout that finds no ready event
 retains the explicit `-ENOSYS` blocking boundary.
 This is a bounded event-notification proof, not a general epoll interest tree.
+The scheduler-backed path has two fixed thread slots and one live registration.
 `rax = 284` (`__NR_eventfd`) and `rax = 290` (`__NR_eventfd2`) allocate one
 process-local event counter in the lowest free auxiliary descriptor. The
 initial value is truncated to Linux's unsigned 32-bit input. `eventfd2`

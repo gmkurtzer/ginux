@@ -398,9 +398,15 @@ timeout. This is a fixed two-thread proof, not a general wait-queue facility;
 zero-descriptor sleeps and blocking without a runnable peer return `ENOSYS`.
 `ppoll` adds validated timespec and temporary signal-mask inputs but does not
 yet use the blocking path. A single bounded epoll instance can register one
-console or device descriptor, report immediate level-triggered readiness, and
-preserve packed 64-bit user data; waits that would block use the same explicit
-`ENOSYS` boundary. A bounded eventfd counter provides a signalable source for that
+console or device descriptor, report level-triggered readiness, and preserve
+packed 64-bit user data. With a runnable peer, `epoll_wait` blocks for a signed
+millisecond timeout or indefinitely, wakes after relevant descriptor or
+registration changes, and returns zero after an APIC-driven timeout. The
+registration, readiness, and data word remain live while blocked, and the
+output event is revalidated before completion. This remains a fixed two-thread,
+one-registration proof; blocking without a runnable peer returns `ENOSYS`, and
+`epoll_pwait`/`epoll_pwait2` do not yet use the blocking path. A bounded eventfd
+counter provides a signalable source for that
 epoll path, including nonblocking saturation and semaphore reads. A bounded
 monotonic timerfd adds one-shot and periodic clock-driven readiness with
 relative or absolute arming. One bounded nonblocking pipe pair provides a
