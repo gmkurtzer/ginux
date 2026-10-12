@@ -742,8 +742,13 @@ if ! grep -q '^ginux: isolated virtio queue activated without submission' "$outp
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio idle DMA state verified' "$output_file"; then
-    echo "Boot test failed: active virtio DMA state was not idle at teardown." >&2
+if ! grep -q '^ginux: isolated virtio read descriptors prepared in ring 3' "$output_file"; then
+    echo "Boot test failed: ring 3 did not prepare the bounded virtio read descriptors." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: isolated virtio request remained unpublished' "$output_file"; then
+    echo "Boot test failed: the prepared virtio request did not remain unpublished." >&2
     exit 1
 fi
 

@@ -1,6 +1,6 @@
 # Isolated DMA Lease v0
 
-**Status:** Active-idle queue ownership and fault cleanup verified in QEMU.
+**Status:** Unpublished read preparation and fault cleanup verified in QEMU.
 
 ## Purpose
 
@@ -30,13 +30,15 @@ After negotiating features and queue geometry, the service writes a fixed
 lease base to the descriptor address, base plus `0x100` to the driver/available
 address, and base plus `0x200` to the device/used address. The kernel reads back
 all three values and requires exact equality with the returned lease. The
-kernel arms PCI bus mastering, then the service enables queue zero and sets
-`DRIVER_OK`. It does not advance the available index or notify the device, so
-the queue is active but idle when the deliberate fault occurs. The fault hook
-requires the first eight bytes to retain the ring-3 marker and every remaining
-byte in the page to remain zero. Descriptor publication, an available-index
-advance, or a device completion therefore prevents teardown from claiming the
-no-submission proof.
+service replaces its initialization marker with an exact sector-two read
+layout: three chained descriptors reference a 16-byte request header, a
+512-byte device-write buffer, and a one-byte pending status field. The kernel
+arms PCI bus mastering, then the service enables queue zero and sets
+`DRIVER_OK`. It leaves the available and used indices at zero and cannot map the
+notification region, so the prepared chain is not submitted. The fault hook
+checks every byte in the page against that exact layout. Any changed address,
+length, flag, chain index, request field, ring index, buffer byte, or status byte
+prevents teardown from claiming the no-submission proof.
 
 The service then deliberately faults. Stop-only teardown revokes object 7 and
 invokes the device hook while the service root and lease are still intact. The
@@ -50,11 +52,13 @@ zero, while the allocator reports zero frames remaining for the retired owner.
 
 ## Deliberate limits
 
-- This is an active but idle virtqueue, not a block-I/O submission path.
+- This is a prepared but unpublished virtqueue request, not a block-I/O
+  submission path.
 - The physical address is embedded in the bounded bootstrap service and written
   only to the three queue-address registers; no general physical-address ABI is
   exposed.
-- No available entry, notification, completion, or interrupt is produced.
+- No available-index advance, notification, completion, or interrupt is
+  produced.
 - There is no IOMMU domain; the trusted-QEMU bootstrap permits bus mastering
   only because the sole queue points at one bounded owned page and synchronous
   fault teardown revokes hardware access before releasing it.

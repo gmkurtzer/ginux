@@ -53,10 +53,11 @@ descriptors, and writes the bounded size eight. The service initializes its
 owned DMA page and writes the exact descriptor, available, and used
 offsets into the three queue-address fields. After the kernel has armed PCI bus
 mastering, the service enables queue zero, sets `DRIVER_OK`, confirms the bit,
-and takes a deliberate invalid-opcode fault without publishing an available
-entry or sending a notification. The fault hook independently reads back the
-exact active queue and address-to-lease binding, then requires the DMA page to
-contain only the service marker and zeros before quiescence.
+constructs an exact three-descriptor sector-two read chain, and takes a
+deliberate invalid-opcode fault. It leaves the available and used indices at
+zero and sends no notification. The fault hook independently reads back the
+exact active queue and address-to-lease binding, then checks every byte of the
+prepared-but-unpublished DMA layout before quiescence.
 
 The stop-only path first revokes the exact object-7 handle. Its registered
 device hook validates the expected features and queue-to-lease binding, disables
@@ -78,7 +79,8 @@ and performs no notification. The lease lifecycle is specified in
   readable. The proof touches only feature-selection, feature-value, and device
   status fields. Notification registers, ISR, device configuration, PCI
   configuration, and port I/O are unavailable.
-- No request submission, completion, interrupt, or IOMMU domain is delegated.
+- No available-ring publication, notification, completion, interrupt, or IOMMU
+  domain is delegated.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.

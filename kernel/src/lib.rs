@@ -1625,7 +1625,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated DMA lease initialized in ring 3");
     serial_write("\r\nginux: isolated virtio queue bound to inactive DMA lease");
     serial_write("\r\nginux: isolated virtio queue activated without submission");
-    serial_write("\r\nginux: isolated virtio idle DMA state verified");
+    serial_write("\r\nginux: isolated virtio read descriptors prepared in ring 3");
+    serial_write("\r\nginux: isolated virtio request remained unpublished");
     serial_write("\r\nginux: faulted virtio control service revoked");
     serial_write("\r\nginux: fault path quiesced device before DMA release");
     serial_write("\r\nginux: faulted DMA lease scrubbed and released");

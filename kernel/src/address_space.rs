@@ -38,6 +38,9 @@ const EXPECTED_SERVICE_FAULT_OFFSET: usize = 197;
 const ROOT_HANDLE_STACK_OFFSET: usize = PAGE_SIZE - 256;
 const TEST_PATTERN: u64 = 0x4749_4e55_5855_5345;
 const DMA_LEASE_MARKER: u64 = 0x444d_415f_4c45_4153;
+const VIRTIO_REQUEST_OFFSET: usize = 0x400;
+const VIRTIO_DATA_OFFSET: usize = 0x600;
+const VIRTIO_STATUS_OFFSET: usize = 0x900;
 const NO_EXECUTE: u64 = 1 << 63;
 const LINUX_INIT_ARGUMENT: [u8; 6] = [b'/', b'i', b'n', b'i', b't', 0];
 const LINUX_INIT_ENVIRONMENT: [u8; 8] = [b'G', b'I', b'N', b'U', b'X', b'=', b'1', 0];
@@ -4347,7 +4350,7 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
         return false;
     };
     if registered.device_quiesced
-        || !unsafe { dma_page_is_idle(dma_physical) }
+        || !unsafe { dma_page_has_prepared_read(dma_physical) }
         || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce(device, mapping)
     {
@@ -5384,7 +5387,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     const DEVICE_PAGE_INDEX: usize = 5;
     const DMA_PAGE_INDEX: usize = 6;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
-    const SUCCESS_FAULT_OFFSET: u64 = 215;
+    const SUCCESS_FAULT_OFFSET: u64 = 369;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5437,6 +5440,30 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0x48, 0x89, 0x47, 0x28, // publish available ring
         0x48, 0x05, 0, 0x01, 0, 0, // advance to used ring
         0x48, 0x89, 0x47, 0x30, // publish used ring
+        0x48, 0x2d, 0, 0x02, 0, 0, // restore DMA physical base
+        0x48, 0x05, 0, 0x04, 0, 0, // advance to request header
+        0x48, 0x89, 0x06, // descriptor zero address
+        0xc7, 0x46, 0x08, 0x10, 0, 0, 0, // descriptor zero length
+        0x66, 0xc7, 0x46, 0x0c, 0x01, 0, // descriptor zero NEXT flag
+        0x66, 0xc7, 0x46, 0x0e, 0x01, 0, // descriptor zero next index
+        0x48, 0x05, 0, 0x02, 0, 0, // advance to data buffer
+        0x48, 0x89, 0x46, 0x10, // descriptor one address
+        0xc7, 0x46, 0x18, 0, 0x02, 0, 0, // descriptor one length
+        0x66, 0xc7, 0x46, 0x1c, 0x03, 0, // descriptor one NEXT|WRITE flags
+        0x66, 0xc7, 0x46, 0x1e, 0x02, 0, // descriptor one next index
+        0x48, 0x05, 0, 0x03, 0, 0, // advance to status byte
+        0x48, 0x89, 0x46, 0x20, // descriptor two address
+        0xc7, 0x46, 0x28, 0x01, 0, 0, 0, // descriptor two length
+        0x66, 0xc7, 0x46, 0x2c, 0x02, 0, // descriptor two WRITE flag
+        0x66, 0xc7, 0x46, 0x2e, 0, 0, // descriptor two chain end
+        0xc7, 0x86, 0, 0x04, 0, 0, 0, 0, 0, 0, // read request type
+        0xc7, 0x86, 0x04, 0x04, 0, 0, 0, 0, 0, 0, // reserved field
+        0x48, 0xc7, 0x86, 0x08, 0x04, 0, 0, 0x02, 0, 0, 0, // sector two
+        0xc6, 0x86, 0, 0x09, 0, 0, 0xff, // pending status
+        0x66, 0x83, 0xbe, 0x02, 0x01, 0, 0, 0, // require avail index zero
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0x83, 0xbe, 0x02, 0x02, 0, 0, 0, // require used index zero
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x66, 0x83, 0x7f, 0x1c, 0, // require queue to remain disabled
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x66, 0xc7, 0x47, 0x1c, 0x01, 0, // enable queue zero
@@ -5486,7 +5513,10 @@ pub(crate) fn verify_ring3_writable_device_grant(
         let _ = space.release();
         return None;
     };
-    if mapped_dma != user_dma || memory::owner_live_frame_count(owner) != Some(8) {
+    if mapped_dma != user_dma
+        || memory::owner_live_frame_count(owner) != Some(8)
+        || unsafe { dma_page_has_prepared_read(dma_physical) }
+    {
         let _ = space.release();
         return None;
     }
@@ -5808,10 +5838,29 @@ unsafe fn frame_is_zero(frame: u64) -> bool {
         .is_some_and(|entries| (0..ENTRY_COUNT).all(|index| entries.add(index).read() == 0))
 }
 
-unsafe fn dma_page_is_idle(frame: u64) -> bool {
-    let Some(entries) = mapped_frame::<u64>(frame) else {
+unsafe fn dma_page_has_prepared_read(frame: u64) -> bool {
+    let Some(bytes) = mapped_frame::<u8>(frame) else {
         return false;
     };
-    core::ptr::read_volatile(entries) == DMA_LEASE_MARKER
-        && (1..ENTRY_COUNT).all(|index| core::ptr::read_volatile(entries.add(index)) == 0)
+    let descriptor_zero = (frame + VIRTIO_REQUEST_OFFSET as u64).to_le_bytes();
+    let descriptor_one = (frame + VIRTIO_DATA_OFFSET as u64).to_le_bytes();
+    let descriptor_two = (frame + VIRTIO_STATUS_OFFSET as u64).to_le_bytes();
+    (0..PAGE_SIZE).all(|offset| {
+        let expected = match offset {
+            0..=7 => descriptor_zero[offset],
+            8 => 16,
+            12 | 14 => 1,
+            16..=23 => descriptor_one[offset - 16],
+            25 => 2,
+            28 => 3,
+            30 => 2,
+            32..=39 => descriptor_two[offset - 32],
+            40 => 1,
+            44 => 2,
+            0x408 => 2,
+            VIRTIO_STATUS_OFFSET => 0xff,
+            _ => 0,
+        };
+        core::ptr::read_volatile(bytes.add(offset)) == expected
+    })
 }
