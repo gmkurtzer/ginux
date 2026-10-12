@@ -365,8 +365,11 @@ nodes return `-EACCES`, executable files outside the admitted ELF profile return
 aggregate-stack overflow returns `-E2BIG`
 without changing the running image. A multithreaded caller returns `-EAGAIN`.
 On success the kernel clears the clear-child-TID and robust-list registrations,
-constructs a fresh bounded initial stack, atomically replaces the authenticated
-image mappings, and never returns to the old program. Descriptors marked
+constructs a fresh bounded initial stack, allocates and materializes the three
+selected measured ELF pages, atomically replaces the authenticated image
+mappings, and never returns to the old program. Allocation or pre-commit
+failure scrubs and releases all new generation-tagged frame leases before
+returning. Descriptors marked
 `FD_CLOEXEC` close only after the mapping commit, while ordinary descriptors
 survive. Caught signal dispositions reset to default, ignored dispositions
 remain ignored, the alternate signal stack becomes disabled, the signal mask
@@ -382,7 +385,7 @@ vectors are outside this version.
 `rax = 322` (`__NR_execveat`) enters the same transaction and accepts flags zero
 or `AT_EMPTY_PATH`. An absolute path ignores `dirfd`; a relative path resolves beneath
 `AT_FDCWD` or an open measured-root directory descriptor. Unknown descriptors
-return `-EBADF`, non-directory descriptors return `-ENOTDIR`, and nonzero flags
+return `-EBADF`, non-directory descriptors return `-ENOTDIR`, and other flag bits
 return `-EINVAL` before image state changes. With `AT_EMPTY_PATH`, an empty
 pathname selects an already-open executable measured-root regular file;
 directories and non-executable objects return `-EACCES`. The proof closes an

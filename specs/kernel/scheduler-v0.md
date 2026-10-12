@@ -92,6 +92,9 @@ succeeds only after exactly two preemptions, six cooperative yields, one
 contained primary-service fault, three normal exits, one restart, three
 block/wake pairs, and thirteen or fourteen cross-root dispatches depending on the valid
 timer interleaving.
+The initial one-shot cannot select the service before the control plane has
+successfully published that request. An earlier expiration is acknowledged and
+rearmed without changing the current context or the exact two-preemption audit.
 Before the replacement becomes runnable, restart setup may remove its exact
 ready context as a rollback operation. This also reverses the domain thread
 charge and restores the retained address-space owner recorded by the scheduler;

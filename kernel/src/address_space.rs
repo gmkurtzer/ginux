@@ -37,6 +37,10 @@ pub(crate) fn verify_linux_elf_mapping(
     protected_start: u64,
     protected_size: usize,
 ) -> bool {
+    let Some(kernel_frames_before) = memory::owner_live_frame_count(memory::FrameOwner::KERNEL)
+    else {
+        return false;
+    };
     let exec_target = crate::initramfs::published_regular_file_node(b"bin/exec-target")
         .and_then(crate::initramfs::published_file_by_node)
         .and_then(crate::linux_elf::measured_exec_target_plan);
@@ -173,13 +177,14 @@ pub(crate) fn verify_linux_elf_mapping(
     {
         return false;
     }
-    let Some(frames) = memory::allocate_frames::<21>(memory::FrameOwner::KERNEL) else {
+    let Some(frames) = memory::allocate_frames::<18>(memory::FrameOwner::KERNEL) else {
         return false;
     };
     let addresses = frames.map(memory::FrameLease::address);
-    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, first_fourth_page, first_fifth_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page, mmap_tail_page, exec_header_page, exec_code_page, exec_data_page] =
+    let [root, pdpt, directory, table, header_table, first_page, first_tail_page, first_third_page, first_fourth_page, first_fifth_page, header_page, header_tail_page, second_page, second_tail_page, heap_page, stack_page, mmap_page, mmap_tail_page] =
         addresses;
     let kernel_root_physical = current_root();
+    let mut exec_frames = [None; 3];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [root, pdpt, directory, table, header_table] {
@@ -261,17 +266,8 @@ pub(crate) fn verify_linux_elf_mapping(
             let header_bytes = &mut *(mapped_frame::<u8>(header_page)? as *mut [u8; PAGE_SIZE]);
             let header_tail_bytes =
                 &mut *(mapped_frame::<u8>(header_tail_page)? as *mut [u8; PAGE_SIZE]);
-            let exec_header_bytes =
-                &mut *(mapped_frame::<u8>(exec_header_page)? as *mut [u8; PAGE_SIZE]);
-            let exec_code_bytes =
-                &mut *(mapped_frame::<u8>(exec_code_page)? as *mut [u8; PAGE_SIZE]);
-            let exec_data_bytes =
-                &mut *(mapped_frame::<u8>(exec_data_page)? as *mut [u8; PAGE_SIZE]);
             if !crate::linux_elf::materialize(first, first_bytes)
                 || !crate::linux_elf::materialize(second, second_bytes)
-                || !crate::linux_elf::materialize(exec_header, exec_header_bytes)
-                || !crate::linux_elf::materialize(exec_code, exec_code_bytes)
-                || !crate::linux_elf::materialize(exec_data, exec_data_bytes)
                 || first.page_count > 1
                     && !crate::linux_elf::materialize_page(first, 1, first_tail_bytes)
                 || first.page_count == 3
@@ -591,19 +587,19 @@ pub(crate) fn verify_linux_elf_mapping(
                     exec_mappings: [
                         cpu::LinuxExecMapping {
                             address: exec_header.virtual_page as usize,
-                            frame: exec_header_page,
+                            frame: 0,
                             writable: false,
                             executable: false,
                         },
                         cpu::LinuxExecMapping {
                             address: exec_code.virtual_page as usize,
-                            frame: exec_code_page,
+                            frame: 0,
                             writable: false,
                             executable: true,
                         },
                         cpu::LinuxExecMapping {
                             address: exec_data.virtual_page as usize,
-                            frame: exec_data_page,
+                            frame: 0,
                             writable: true,
                             executable: false,
                         },
@@ -613,15 +609,16 @@ pub(crate) fn verify_linux_elf_mapping(
             } else {
                 cpu::LinuxElfResult::FAILED
             };
+            exec_frames = execution_result.exec_frames;
             let exec_mappings_valid = header_table_entries.add(header_indexes[3]).read()
                 & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
-                == exec_header_page | PRESENT | USER | NO_EXECUTE
+                == exec_frames[0]?.address() | PRESENT | USER | NO_EXECUTE
                 && table_entries.add(first_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
-                    == exec_code_page | PRESENT | USER
+                    == exec_frames[1]?.address() | PRESENT | USER
                 && table_entries.add(first_indexes[3] + 1).read()
                     & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
-                    == exec_data_page | PRESENT | WRITABLE | USER | NO_EXECUTE
+                    == exec_frames[2]?.address() | PRESENT | WRITABLE | USER | NO_EXECUTE
                 && (2..=6).all(|page| table_entries.add(first_indexes[3] + page).read() == 0);
             let executed =
                 execution_result.valid && execution_result.exec_replaced && exec_mappings_valid;
@@ -636,7 +633,17 @@ pub(crate) fn verify_linux_elf_mapping(
     let cleared = frames
         .iter()
         .all(|frame| unsafe { zero_frame(frame.address()).is_some() });
-    valid && cleared && memory::release_frames(memory::FrameOwner::KERNEL, frames)
+    let mut exec_released = true;
+    for frame in exec_frames.into_iter().flatten() {
+        exec_released &= prepare_linux_frame(frame.address(), &[])
+            && memory::release_frames(memory::FrameOwner::KERNEL, [frame]);
+    }
+    let released = valid
+        && cleared
+        && exec_released
+        && memory::release_frames(memory::FrameOwner::KERNEL, frames);
+    released
+        && memory::owner_live_frame_count(memory::FrameOwner::KERNEL) == Some(kernel_frames_before)
 }
 
 pub(crate) fn verify_interpreted_elf_mapping(
@@ -2151,6 +2158,22 @@ pub(crate) fn prepare_linux_frame(frame: u64, bytes: &[u8]) -> bool {
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), output, bytes.len());
     }
     true
+}
+
+pub(crate) fn materialize_linux_exec_frame(
+    frame: memory::FrameLease,
+    segment: crate::linux_elf::PlannedSegment<'_>,
+) -> bool {
+    if segment.page_count != 1 || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame]) {
+        return false;
+    }
+    let Some(address) = frame.direct_map_address() else {
+        return false;
+    };
+    // SAFETY: the generation-tagged lease is live, uniquely selected for this
+    // not-yet-published exec transaction, and covers exactly one page.
+    let output = unsafe { &mut *(address as *mut [u8; PAGE_SIZE]) };
+    crate::linux_elf::materialize(segment, output)
 }
 
 pub(crate) fn unmap_current_linux_page(address: u64, frame: u64) -> bool {

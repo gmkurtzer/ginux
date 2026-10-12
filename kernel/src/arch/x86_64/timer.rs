@@ -43,8 +43,10 @@ const INTERRUPT_POLL_LIMIT: usize = 100_000_000;
 
 static TIMER_FIRED: AtomicBool = AtomicBool::new(false);
 static PREEMPTION_ARMED: AtomicBool = AtomicBool::new(false);
+static PREEMPTION_READY: AtomicBool = AtomicBool::new(false);
 static PREEMPTION_COUNT: AtomicU8 = AtomicU8::new(0);
 static PREEMPTION_RELOAD: AtomicU32 = AtomicU32::new(0);
+static PREEMPTION_DEFERRED_RELOAD: AtomicU32 = AtomicU32::new(0);
 static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 static CALIBRATED_TSC_HZ: AtomicU64 = AtomicU64::new(0);
@@ -331,6 +333,7 @@ pub(crate) unsafe fn arm_scheduler_preemption(
         return false;
     }
     PREEMPTION_COUNT.store(0, Ordering::SeqCst);
+    PREEMPTION_READY.store(false, Ordering::SeqCst);
     TIMER_FIRED.store(false, Ordering::SeqCst);
     apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
     apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
@@ -339,8 +342,20 @@ pub(crate) unsafe fn arm_scheduler_preemption(
     let reload_count = (calibration.counter_hz / SCHEDULER_PROOF_RELOAD_PREEMPTIONS_PER_SECOND)
         .clamp(1, u64::from(u32::MAX)) as u32;
     PREEMPTION_RELOAD.store(reload_count, Ordering::SeqCst);
+    PREEMPTION_DEFERRED_RELOAD.store(initial_count, Ordering::SeqCst);
     apic.write(APIC_INITIAL_COUNT, initial_count);
     true
+}
+
+/// Publishes that the initial scheduler proof has runnable service work.
+///
+/// The bootstrap timer may expire while the control plane is still validating
+/// its ABI. Interrupt delivery is acknowledged in that case, but selection is
+/// deferred until the first IPC request makes the service useful to run.
+pub(crate) fn mark_scheduler_preemption_ready() {
+    if PREEMPTION_ARMED.load(Ordering::SeqCst) && PREEMPTION_COUNT.load(Ordering::SeqCst) == 0 {
+        PREEMPTION_READY.store(true, Ordering::SeqCst);
+    }
 }
 
 pub(crate) fn rearm_scheduler_preemption() -> bool {
@@ -371,9 +386,13 @@ pub(crate) fn rearm_scheduler_preemption() -> bool {
 pub(crate) unsafe fn finish_scheduler_preemption(apic: &LocalApic) -> bool {
     apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
     apic.write(APIC_INITIAL_COUNT, 0);
-    !PREEMPTION_ARMED.load(Ordering::SeqCst)
+    let complete = !PREEMPTION_ARMED.load(Ordering::SeqCst)
         && TIMER_FIRED.load(Ordering::SeqCst)
-        && PREEMPTION_COUNT.load(Ordering::SeqCst) == 2
+        && PREEMPTION_COUNT.load(Ordering::SeqCst) == 2;
+    PREEMPTION_READY.store(false, Ordering::SeqCst);
+    PREEMPTION_RELOAD.store(0, Ordering::SeqCst);
+    PREEMPTION_DEFERRED_RELOAD.store(0, Ordering::SeqCst);
+    complete
 }
 
 extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
@@ -390,6 +409,18 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     // SAFETY: The verifier initializes these values before unmasking the timer,
     // and the handler runs with exclusive bootstrap-processor APIC ownership.
     unsafe { apic.write(APIC_EOI, 0) };
+    if PREEMPTION_ARMED.load(Ordering::SeqCst)
+        && PREEMPTION_COUNT.load(Ordering::SeqCst) == 0
+        && !PREEMPTION_READY.load(Ordering::SeqCst)
+    {
+        let reload = PREEMPTION_DEFERRED_RELOAD.load(Ordering::SeqCst);
+        if reload != 0 {
+            // SAFETY: This is the saved bootstrap APIC and the proof owns its
+            // one-shot timer until finish_scheduler_preemption masks it.
+            unsafe { apic.write(APIC_INITIAL_COUNT, reload) };
+        }
+        return;
+    }
     if !PREEMPTION_ARMED.swap(false, Ordering::SeqCst) {
         return;
     }

@@ -95,13 +95,18 @@ name `bin/exec-target` and exposed as `/bin/exec-target`. Its bounded plan has o
 R/NX header page at `0x3ff000`, one RX page entered at `0x400100`, and one
 RW/NX page at `0x401000`. Boot requires the measured bytes to match the
 build-time artifact exactly and validates the complete plan before any Linux
-workload runs. The bounded `execve` transition pre-materializes these three
-pages in kernel-owned frames, installs them atomically, retains the existing
+workload runs. After path, vector, string, and mapping-template validation, the
+bounded exec transaction allocates three generation-tagged kernel frame leases
+and materializes the selected measured bytes into them. It installs those pages
+atomically, retains the existing
 guarded stack, and removes the old image pages at `0x402000..0x406000`. The
 post-exit verifier requires the new R/NX, RX, and RW/NX leaves to name the exact
-planned frames and every removed leaf to be absent. A failed precondition or
-mapping verification restores the original stack, thread registrations, and
-page-table entries before returning an error.
+published leases and every removed leaf to be absent. A failed allocation,
+materialization, precondition, or mapping verification scrubs and releases the
+new leases, restores the original stack, thread registrations, and page-table
+entries, and returns an error. Successful teardown runs after the process root
+is inactive, scrubs all three frames, releases their exact generations, and
+requires the allocator's prior live-frame count to be restored.
 
 This is deliberately one authenticated replacement image, not a general ELF
 loader. `execve` resolves absolute or current-directory-relative normalized

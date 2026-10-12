@@ -51,7 +51,9 @@ The channel is object 3 in the signed boot authority manifest. Sending requires
 handle through the sealed control-plane capability table before touching the
 queue. The ring-3 proof requires a send with the console capability to fail,
 then has the control context enqueue request value 1 in the service-inbound
-direction and wait for timer preemption. The service receives 1, sends
+direction. That successful publication opens the initial timer-preemption
+gate; early timer expirations are acknowledged and rearmed without selecting
+the service. The control context then waits for preemption. The service receives 1, sends
 transformed reply 2 in the control-inbound direction, and deliberately faults.
 The resumed client requires reply 2. After replacement, it sends request 3 and
 requires reply 4 from the new exact service generation. Direction is selected from the current

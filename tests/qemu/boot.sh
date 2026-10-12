@@ -685,7 +685,9 @@ for marker in \
     'Linux executable link followed exec identity' \
     'measured-root Linux exec selection validated' \
     'measured-dirfd Linux execveat validated' \
-    'measured-fd Linux empty-path exec validated'; do
+    'measured-fd Linux empty-path exec validated' \
+    'Linux replacement frames allocated on demand' \
+    'Linux replacement frame generations reclaimed'; do
     if ! grep -q "^ginux: $marker" "$output_file"; then
         echo "Boot test failed: missing exec proof: $marker." >&2
         exit 1

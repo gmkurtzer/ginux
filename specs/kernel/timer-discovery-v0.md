@@ -70,8 +70,11 @@ interrupt into a boot failure instead of an indefinite wait.
 
 After both bootstrap domains and contexts exist, the kernel programs an initial
 proof-only scheduler one-shot for approximately 1 millisecond while
-interrupts remain disabled. The longer initial deadline lets the control plane
-reach its explicit preemption wait after its bootstrap calls. The replacement
+interrupts remain disabled. If it expires before the control plane publishes
+its first authenticated IPC request, the handler acknowledges and rearms the
+one-shot without consuming the preemption. The successful request publication
+marks the service runnable, so the next delivery selects it without depending
+on host or TCG instruction timing. The replacement
 dispatch reload remains approximately 100 microseconds, keeping TCG from
 completing the bounded control workload before the second involuntary dispatch.
 Both preserve the rule that delivery begins only in user mode. The initial
