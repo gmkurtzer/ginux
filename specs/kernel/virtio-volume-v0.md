@@ -38,19 +38,25 @@ needs-reset status.
 ## Reboot acceptance test
 
 The host test creates a fresh zeroed raw image and performs two complete QEMU
-boots:
+boots followed by one rejection boot:
 
 1. The first boot confirms the volume is empty, commits generation one with the
    fixed payload `ginux-reboot-persistent\n`, flushes it, and recovers it before
    shutdown.
 2. The second boot uses the same image, recovers generation one and the exact
    payload, and must not report the initialization path.
+3. The host copies the committed image and corrupts the first byte of its only
+   valid slot. The third boot must reject that nonempty invalid media, complete
+   device and DMA teardown, and reach `GINUX_KERNEL_PANIC` without changing any
+   byte of the corrupted image.
 
-Both boots must reach `GINUX_KERNEL_OK`. The recovery boot fails if it emits a
+The first two boots must reach `GINUX_KERNEL_OK`. The recovery boot fails if it emits a
 panic, rewrites an empty volume, returns another generation, or changes the
-payload. The existing in-memory fault model remains responsible for exhaustive
-crash-stage, torn-marker, corruption, and generation-ambiguity cases; the raw
-disk test proves restart persistence, not host power-cut injection.
+payload. The rejection boot must not reach the success marker or report volume
+initialization. The existing in-memory fault model remains responsible for
+exhaustive crash-stage, torn-marker, corruption, and generation-ambiguity cases;
+the raw disk test proves restart persistence and fail-closed corruption handling,
+not host power-cut injection.
 
 ## Teardown and limits
 

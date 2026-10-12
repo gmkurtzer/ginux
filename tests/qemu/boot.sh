@@ -5,7 +5,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 output_file="$(mktemp -t ginux-boot.XXXXXX)"
 reboot_output_file="$(mktemp -t ginux-reboot.XXXXXX)"
+corrupt_output_file="$(mktemp -t ginux-corrupt.XXXXXX)"
 volume_image="$(mktemp -t ginux-volume.XXXXXX)"
+corrupt_volume_image="$(mktemp -t ginux-corrupt-volume.XXXXXX)"
 qemu_pid=""
 
 cleanup() {
@@ -13,7 +15,12 @@ cleanup() {
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
     fi
-    rm -f "$output_file" "$reboot_output_file" "$volume_image"
+    rm -f \
+        "$output_file" \
+        "$reboot_output_file" \
+        "$corrupt_output_file" \
+        "$volume_image" \
+        "$corrupt_volume_image"
 }
 trap cleanup EXIT
 
@@ -94,6 +101,43 @@ if grep -q '^ginux: disk-backed volume initialized and flushed' "$reboot_output_
     grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$reboot_output_file"; then
     cat "$reboot_output_file"
     echo "Boot test failed: the recovery boot rewrote the volume or emitted a panic." >&2
+    exit 1
+fi
+
+cp "$volume_image" "$corrupt_volume_image"
+dd if=/dev/zero of="$corrupt_volume_image" bs=1 seek=0 count=1 conv=notrunc 2>/dev/null
+corrupt_checksum="$(cksum "$corrupt_volume_image")"
+
+GINUX_VOLUME_IMAGE="$corrupt_volume_image" \
+    "$repo_root/tools/qemu/run.sh" >"$corrupt_output_file" 2>&1 &
+qemu_pid=$!
+for _ in {1..30}; do
+    if grep -q '^GINUX_KERNEL_PANIC' "$corrupt_output_file" ||
+        ! kill -0 "$qemu_pid" 2>/dev/null; then
+        break
+    fi
+    sleep 1
+done
+if kill -0 "$qemu_pid" 2>/dev/null; then
+    kill "$qemu_pid" 2>/dev/null || true
+fi
+wait "$qemu_pid" 2>/dev/null || true
+qemu_pid=""
+
+if ! grep -q '^ginux: persistent virtio device reset and bus mastering revoked' "$corrupt_output_file" ||
+    ! grep -q '^ginux: virtio DMA frame scrubbed and released' "$corrupt_output_file" ||
+    ! grep -q '^ginux: persistent virtio volume transaction failed' "$corrupt_output_file" ||
+    ! grep -q '^GINUX_KERNEL_PANIC' "$corrupt_output_file"; then
+    cat "$corrupt_output_file"
+    echo "Boot test failed: corrupt nonempty volume media was not rejected safely." >&2
+    exit 1
+fi
+
+if grep -q '^ginux: disk-backed volume initialized and flushed' "$corrupt_output_file" ||
+    grep -q '^GINUX_KERNEL_OK' "$corrupt_output_file" ||
+    [[ "$(cksum "$corrupt_volume_image")" != "$corrupt_checksum" ]]; then
+    cat "$corrupt_output_file"
+    echo "Boot test failed: corrupt volume media was accepted or modified." >&2
     exit 1
 fi
 

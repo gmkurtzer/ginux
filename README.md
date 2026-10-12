@@ -35,10 +35,12 @@ completion length, status, and buffer guard bytes. The same queue then supports
 bounded sector reads, writes, and flushes and binds sectors zero and one to the
 persistent-volume record. The automated gate creates a fresh disk, initializes
 generation one, boots a second VM against the same image, and recovers the exact
-record without rewriting it. Teardown revokes bus mastering, resets the device,
-and scrubs the lease before release. This trusted-QEMU bootstrap proof has no
-IOMMU confinement and does not yet place the device path in an isolated
-service. See [Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md) and
+record without rewriting it. A third boot corrupts the committed slot and
+proves nonempty invalid media is rejected without modification after safe
+device and DMA teardown. Teardown revokes bus mastering, resets the device, and
+scrubs the lease before release. This trusted-QEMU bootstrap proof has no IOMMU
+confinement and does not yet place the device path in an isolated service. See
+[Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md) and
 [Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded

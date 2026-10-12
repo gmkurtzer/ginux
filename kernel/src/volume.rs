@@ -123,12 +123,13 @@ fn commit_through<D: BlockDevice>(
 
 enum ScanError {
     Ambiguous,
+    Corrupt,
     Device,
 }
 
 fn scan_error(error: ScanError) -> CommitError {
     match error {
-        ScanError::Ambiguous => CommitError::Corrupt,
+        ScanError::Ambiguous | ScanError::Corrupt => CommitError::Corrupt,
         ScanError::Device => CommitError::Device,
     }
 }
@@ -136,11 +137,13 @@ fn scan_error(error: ScanError) -> CommitError {
 fn recover_with_slot<D: BlockDevice>(device: &mut D) -> Result<Option<(usize, Record)>, ScanError> {
     let mut sector = [0_u8; SECTOR_SIZE];
     let mut selected: Option<(usize, Record)> = None;
+    let mut corrupt = false;
     for slot in 0..SLOT_COUNT {
         if !device.read_sector(slot, &mut sector) {
             return Err(ScanError::Device);
         }
         let Some(record) = decode(&sector) else {
+            corrupt |= sector.iter().any(|byte| *byte != 0);
             continue;
         };
         match selected {
@@ -154,7 +157,11 @@ fn recover_with_slot<D: BlockDevice>(device: &mut D) -> Result<Option<(usize, Re
             Some(_) => {}
         }
     }
-    Ok(selected)
+    if selected.is_none() && corrupt {
+        Err(ScanError::Corrupt)
+    } else {
+        Ok(selected)
+    }
 }
 
 fn encode(generation: u64, payload: &[u8]) -> ([u8; SECTOR_SIZE], [u8; SECTOR_SIZE]) {
@@ -307,7 +314,7 @@ pub(crate) fn commit_live(expected_generation: u64, payload: &[u8]) -> Result<u6
 
 fn live_scan_error(error: ScanError) -> LiveError {
     match error {
-        ScanError::Ambiguous => LiveError::Corrupt,
+        ScanError::Ambiguous | ScanError::Corrupt => LiveError::Corrupt,
         ScanError::Device => LiveError::Device,
     }
 }
@@ -397,6 +404,25 @@ pub(crate) fn verify_contract() -> bool {
 fn verify_rejections(baseline: MemoryBlockDevice) -> bool {
     if commit(&mut MemoryBlockDevice::new(), &[0_u8; PAYLOAD_CAPACITY + 1])
         != Err(CommitError::PayloadTooLarge)
+    {
+        return false;
+    }
+
+    let mut foreign = MemoryBlockDevice::new();
+    foreign.pending[0][0] = 1;
+    if !foreign.flush()
+        || recover(&mut foreign).is_some()
+        || commit(&mut foreign, b"must-not-initialize") != Err(CommitError::Corrupt)
+    {
+        return false;
+    }
+
+    let mut prepared_only = MemoryBlockDevice::new();
+    let (prepared, _) = encode(1, b"interrupted-first-commit");
+    prepared_only.pending[0] = prepared;
+    if !prepared_only.flush()
+        || recover(&mut prepared_only).is_some()
+        || commit(&mut prepared_only, b"must-not-replace") != Err(CommitError::Corrupt)
     {
         return false;
     }

@@ -700,14 +700,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !persistent_block.finish() {
         kernel_fail("\r\nginux: persistent virtio backend teardown failed\r\n");
     }
-    let Some((disk_record, recovered_after_reboot)) = disk_volume else {
-        kernel_fail("\r\nginux: persistent virtio volume transaction failed\r\n");
-    };
+    serial_write("\r\nginux: persistent virtio device reset and bus mastering revoked");
     if !memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[virtio_dma_frame])
         || memory::any_frame_lease_live(&[virtio_dma_frame])
     {
         kernel_fail("\r\nginux: virtio DMA frame retirement failed\r\n");
     }
+    serial_write("\r\nginux: virtio DMA frame scrubbed and released");
+    let Some((disk_record, recovered_after_reboot)) = disk_volume else {
+        kernel_fail("\r\nginux: persistent virtio volume transaction failed\r\n");
+    };
     serial_write("\r\nginux: generation-owned virtio DMA frame allocated");
     serial_write("\r\nginux: malformed virtio queue geometry rejected");
     serial_write("\r\nginux: bounded blank virtio sector read completed");
@@ -716,9 +718,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: deterministic virtio capacity sectors: ");
     serial_write_u64(virtio_read.capacity_sectors);
     serial_write("\r\nginux: virtio bus mastering revoked after read");
-    serial_write("\r\nginux: virtio DMA frame scrubbed and released");
     serial_write("\r\nginux: bounded virtio volume transaction completed");
-    serial_write("\r\nginux: persistent virtio device reset and bus mastering revoked");
     serial_write("\r\nginux: disk-backed volume generation: ");
     serial_write_u64(disk_record.generation);
     serial_write(if recovered_after_reboot {

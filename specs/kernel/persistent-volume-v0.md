@@ -20,6 +20,13 @@ discards writes that have not crossed a successful flush. Read, write, and
 flush failures are reported and a failed or ambiguous scan is never treated as
 an empty volume.
 
+Canonical empty media consists of two all-zero sectors. If neither slot is
+valid and either sector contains any nonzero byte, recovery reports corruption
+instead of permitting generation-one initialization. This includes an
+interrupted first commit whose prepared record reached durable media but whose
+commit marker did not. A valid older slot still permits recovery when the other
+slot is corrupt, preserving the intended rollback behavior.
+
 Real backends must document their atomic-write and flush guarantees. The
 format detects a torn sector through its digest, but cannot repair a backend
 that lies about completed flushes or loses both slots.
@@ -87,6 +94,11 @@ disk. The recovery boot must return generation one and the exact payload
 without taking the initialization path. Both boots must complete device reset,
 bus-master revocation, DMA scrubbing, and the normal kernel success marker. See
 [Virtio-backed Persistent Volume v0](virtio-volume-v0.md).
+
+The gate then copies that disk, corrupts the only committed slot, and attempts
+a third boot. The kernel must reset the device, revoke bus mastering, scrub the
+DMA lease, reject the volume, and emit its fail-closed panic marker without
+modifying the corrupted image. This is rejection testing, not repair.
 
 ## Deliberate limits
 
