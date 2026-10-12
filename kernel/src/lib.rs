@@ -1088,6 +1088,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux signal-interrupted masked waits validated\r\n");
     serial_write("ginux: Linux signal-interrupted epoll waits validated\r\n");
     serial_write("ginux: Linux scheduler-backed eventfd reads validated\r\n");
+    serial_write("ginux: Linux signal-interrupted eventfd reads validated\r\n");
     serial_write("ginux: APIC-driven Linux wait expiry validated\r\n");
     serial_write("ginux: APIC-driven Linux wait preemption validated\r\n");
     serial_write("ginux: Linux single-task CPU time validated\r\n");

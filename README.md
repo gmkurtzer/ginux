@@ -433,8 +433,14 @@ counter provides a signalable source for that epoll path, including
 nonblocking saturation and semaphore reads. With a runnable peer, a blocking
 read on an empty eventfd now sleeps in its scheduler slot until a write makes
 the counter readable; descriptor closure wakes it with `EBADF`, and its
-eight-byte output is revalidated on completion. Blocking eventfd writes and
-blocking reads from timerfd or pipes retain their explicit `ENOSYS` boundary.
+eight-byte output is revalidated on completion. A caught standard signal that
+is unblocked by the waiting thread's ordinary mask may interrupt that read:
+the same transactional sender/handler handoff returns `EINTR` without changing
+the output or counter. The measured graph then blocks the same read again and
+completes it through a write, proving the descriptor remains live. Blocked
+signals, unsupported dispositions, nested delivery, and syscall restart retain
+their explicit `ENOSYS` boundary. Blocking eventfd writes and blocking reads
+from timerfd or pipes also remain unsupported.
 A bounded monotonic timerfd adds one-shot and periodic clock-driven readiness with
 relative or absolute arming. One bounded nonblocking pipe pair provides a
 256-byte FIFO with atomic scalar or vectored I/O, poll/epoll readiness, EOF,

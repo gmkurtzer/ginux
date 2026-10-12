@@ -24,7 +24,7 @@ ginux_linux_probe:
 #ifdef GINUX_GRAPH
     movabs rax, 0x4e49414d54494e49
     cmp qword ptr [rip + ginux_main_init_state], rax
-    jne failure
+    require_equal
     mov rcx, qword ptr [rsp]
     cmp rcx, 8
     ja failure
@@ -52,81 +52,81 @@ ginux_linux_probe:
     cmp qword ptr [rax + 8], 1
     jne .Linitial_graph_entry
     cmp qword ptr [rax - 256], 3
-    jne failure
+    require_equal
     cmp qword ptr [rax - 248], 0x3ff040
-    jne failure
+    require_equal
     cmp qword ptr [rax - 240], 4
-    jne failure
+    require_equal
     cmp qword ptr [rax - 232], 56
-    jne failure
+    require_equal
     cmp qword ptr [rax - 224], 5
-    jne failure
+    require_equal
     cmp qword ptr [rax - 216], 9
-    jne failure
+    require_equal
     cmp qword ptr [rax - 208], 6
-    jne failure
+    require_equal
     cmp qword ptr [rax - 200], 4096
-    jne failure
+    require_equal
     cmp qword ptr [rax - 192], 7
-    jne failure
+    require_equal
     cmp qword ptr [rax - 184], 0x600000
-    jne failure
+    require_equal
     cmp qword ptr [rax - 176], 8
-    jne failure
+    require_equal
     cmp qword ptr [rax - 168], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax - 160], 11
-    jne failure
+    require_equal
     cmp qword ptr [rax - 152], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax - 144], 12
-    jne failure
+    require_equal
     cmp qword ptr [rax - 136], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax - 128], 13
-    jne failure
+    require_equal
     cmp qword ptr [rax - 120], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax - 112], 14
-    jne failure
+    require_equal
     cmp qword ptr [rax - 104], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax - 96], 23
-    jne failure
+    require_equal
     cmp qword ptr [rax - 88], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax - 80], 31
-    jne failure
+    require_equal
     mov rdx, qword ptr [rax - 72]
     cmp dword ptr [rdx], 0x696e692f
-    jne failure
+    require_equal
     cmp word ptr [rdx + 4], 0x74
-    jne failure
+    require_equal
     cmp qword ptr [rax - 64], 9
-    jne failure
+    require_equal
     cmp qword ptr [rax - 56], 0x400100
-    jne failure
+    require_equal
     cmp qword ptr [rax - 48], 17
-    jne failure
+    require_equal
     cmp qword ptr [rax - 40], 100
-    jne failure
+    require_equal
     cmp qword ptr [rax - 32], 15
-    jne failure
+    require_equal
     mov rdx, qword ptr [rax - 24]
     cmp dword ptr [rdx], 0x5f363878
-    jne failure
+    require_equal
     cmp word ptr [rdx + 4], 0x3436
-    jne failure
+    require_equal
     cmp byte ptr [rdx + 6], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax - 16], 16
-    jne failure
+    require_equal
     cmp qword ptr [rax - 8], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax + 16], 0
-    jne failure
+    require_equal
     cmp qword ptr [rax + 24], 0
-    jne failure
+    require_equal
     jmp .Ldynamic_exec_complete
 .Linitial_graph_entry:
 #else
@@ -136,7 +136,7 @@ ginux_linux_probe:
     call ginux_dependency_symbol@PLT
     movabs rcx, 0x59434e45444e4947
     cmp rax, rcx
-    jne failure
+    require_equal
 
 #endif
 
@@ -148,90 +148,90 @@ ginux_linux_probe:
     mov eax, 257
     syscall
     cmp rax, 2
-    jne failure
+    require_equal
     mov edi, 2
     lea rsi, [rsp - 32]
     mov edx, 4
     xor eax, eax
     syscall
     cmp rax, 4
-    jne failure
+    require_equal
     cmp dword ptr [rsp - 32], 0x464c457f
-    jne failure
+    require_equal
     mov eax, 3
     syscall
     test rax, rax
-    jne failure
+    require_equal
 #endif
 #endif
     cmp qword ptr [rsp], 1
-    jne failure
+    require_equal
     mov rax, qword ptr [rsp + 8]
     cmp byte ptr [rax], '/'
-    jne failure
+    require_equal
     mov rax, qword ptr [rsp + 24]
     cmp byte ptr [rax], 'G'
-    jne failure
+    require_equal
     mov rax, qword ptr [rsp + 112]
     test rax, rax
     jz static_relocation_state
     cmp rax, 0x600000
-    jne failure
+    require_equal
 #ifndef GINUX_LINKED
     cmp qword ptr [0x406100], 0x400100
-    jne failure
+    require_equal
     cmp qword ptr [0x406108], 0x610100
-    jne failure
+    require_equal
     cmp qword ptr [0x406110], 0x610100
-    jne failure
+    require_equal
     call qword ptr [0x406110]
     movabs rcx, 0x59434e45444e4947
     cmp rax, rcx
-    jne failure
+    require_equal
 #endif
     jmp valid_interpreter_base
 static_relocation_state:
     cmp qword ptr [0x406100], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x406108], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x406110], 0
-    jne failure
+    require_equal
 valid_interpreter_base:
     cmp qword ptr [rsp + 128], 0
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 208], 0
-    jne failure
+    require_equal
     mov rax, qword ptr [rsp + 224]
     cmp byte ptr [rax], '/'
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 240], 0x400100
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 248], 17
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 256], 100
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 264], 15
-    jne failure
+    require_equal
     mov rax, qword ptr [rsp + 272]
     cmp dword ptr [rax], 0x5f363878
-    jne failure
+    require_equal
     cmp word ptr [rax + 4], 0x3436
-    jne failure
+    require_equal
     cmp byte ptr [rax + 6], 0
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 280], 16
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 288], 0
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 296], 26
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 304], 0
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 312], 0
-    jne failure
+    require_equal
     cmp qword ptr [rsp + 320], 0
-    jne failure
+    require_equal
 
     push 1
     pop rdi
@@ -311,13 +311,13 @@ valid_interpreter_base:
     pop rax
     call syscall_expect_three
     cmp word ptr [0x405c86], 0x10
-    jne failure
+    require_equal
     cmp word ptr [0x405c8e], 4
-    jne failure
+    require_equal
     cmp word ptr [0x405c96], 0x20
-    jne failure
+    require_equal
     cmp word ptr [0x405c9e], 0
-    jne failure
+    require_equal
 
     mov dword ptr [0x405ca0], 1
     mov word ptr [0x405ca4], 0
@@ -330,7 +330,7 @@ valid_interpreter_base:
     pop rax
     call syscall_expect_zero
     cmp word ptr [0x405ca6], 0
-    jne failure
+    require_equal
     mov word ptr [0x405ca6], 0x7777
     push 1
     pop rdx
@@ -338,7 +338,7 @@ valid_interpreter_base:
     pop rax
     call syscall_expect_enosys
     cmp word ptr [0x405ca6], 0x7777
-    jne failure
+    require_equal
 
     xor edi, edi
     xor esi, esi
@@ -361,14 +361,14 @@ valid_interpreter_base:
     mov eax, 271
     call syscall_expect_zero
     cmp word ptr [0x405ca6], 0
-    jne failure
+    require_equal
 
     mov qword ptr [0x405cc8], 1
     mov word ptr [0x405ca6], 0x7777
     mov eax, 271
     call syscall_expect_enosys
     cmp word ptr [0x405ca6], 0x7777
-    jne failure
+    require_equal
 
     mov qword ptr [0x405cd0], 0
     mov edi, 0x405c80
@@ -387,12 +387,12 @@ valid_interpreter_base:
     mov eax, 12
     syscall
     cmp rax, 0x407000
-    jne failure
+    require_equal
     mov edi, 0x407080
     mov eax, 12
     syscall
     cmp rax, 0x407080
-    jne failure
+    require_equal
     movabs rax, 0x0a212145424f5250
     mov qword ptr [0x407000], rax
     push 1
@@ -414,12 +414,12 @@ valid_interpreter_base:
     mov eax, 12
     syscall
     cmp rax, 0x407080
-    jne failure
+    require_equal
     mov edi, 0x407040
     mov eax, 12
     syscall
     cmp rax, 0x407040
-    jne failure
+    require_equal
 
     xor edi, edi
     mov esi, 4096
@@ -439,15 +439,15 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
 
     mov edi, 0x40b000
     mov eax, 63
     call syscall_expect_zero
     cmp dword ptr [0x40b000], 0x756e6947
-    jne failure
+    require_equal
 
     xor edi, edi
     mov esi, 4096
@@ -458,9 +458,9 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40c000
-    jne failure
+    require_equal
     cmp qword ptr [0x40c000], 0
-    jne failure
+    require_equal
     mov byte ptr [0x405949], 0
     mov edi, 0x40c000
     mov esi, 4096
@@ -468,7 +468,7 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x405949], 1
-    jne failure
+    require_equal
     mov eax, 11
     call syscall_expect_zero
     mov edi, 1
@@ -500,9 +500,9 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
     mov qword ptr [0x40b000], 2
 
     mov edi, 0x40b000
@@ -534,12 +534,12 @@ valid_interpreter_base:
     mov eax, 28
     call syscall_expect_einval
     cmp qword ptr [0x40b000], 2
-    jne failure
+    require_equal
     mov edx, 4
     mov eax, 28
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
 
     mov edi, 0x40b000
     mov esi, 4096
@@ -555,9 +555,9 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
 
     mov edi, 0x40b001
     mov esi, 4096
@@ -573,7 +573,7 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x405948], 1
-    jne failure
+    require_equal
 
     mov edi, 0x40b000
     mov eax, 63
@@ -586,7 +586,7 @@ valid_interpreter_base:
     mov eax, 27
     syscall
     cmp rax, -12
-    jne failure
+    require_equal
     mov eax, 11
     call syscall_expect_zero
 
@@ -599,20 +599,20 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x40c000], 0
-    jne failure
+    require_equal
 
     mov qword ptr [0x40c000], -1
     mov edi, 0x40bf80
     mov eax, 63
     call syscall_expect_zero
     cmp dword ptr [0x40bf80], 0x756e6947
-    jne failure
+    require_equal
     cmp word ptr [0x40c000], 0
-    jne failure
+    require_equal
 
     mov byte ptr [0x40594a], 0
     mov byte ptr [0x40594b], 0
@@ -622,9 +622,9 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
-    jne failure
+    require_equal
     cmp byte ptr [0x40594b], 1
-    jne failure
+    require_equal
 
     mov qword ptr [0x40b000], 1
     mov qword ptr [0x40c000], 2
@@ -632,9 +632,9 @@ valid_interpreter_base:
     mov eax, 28
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x40c000], 0
-    jne failure
+    require_equal
 
     mov edi, 0x40b000
     mov esi, 8192
@@ -663,9 +663,9 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
-    jne failure
+    require_equal
     cmp qword ptr [0x40c000], 0
-    jne failure
+    require_equal
     mov edi, 0x40c000
     mov esi, 4096
     mov eax, 11
@@ -680,7 +680,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     mov qword ptr [0x40b000], 3
     mov qword ptr [0x40c000], 4
     mov edi, 0x40c000
@@ -688,7 +688,7 @@ valid_interpreter_base:
     mov eax, 11
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 3
-    jne failure
+    require_equal
     mov edi, 1
     mov esi, 0x40c000
     mov edx, 8
@@ -701,7 +701,7 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
-    jne failure
+    require_equal
     mov edi, 0x40b000
     mov esi, 4096
     mov eax, 11
@@ -716,7 +716,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     mov qword ptr [0x40b000], 5
     mov qword ptr [0x40c000], 6
     mov edi, 0x40b000
@@ -730,12 +730,12 @@ valid_interpreter_base:
     mov eax, 63
     call syscall_expect_efault
     cmp qword ptr [0x40b000], 5
-    jne failure
+    require_equal
     mov edi, 0x40c000
     mov eax, 63
     call syscall_expect_zero
     cmp dword ptr [0x40c000], 0x756e6947
-    jne failure
+    require_equal
     mov edi, 0x40c000
     mov esi, 4096
     mov edx, 1
@@ -761,7 +761,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     mov qword ptr [0x40b000], 7
     mov qword ptr [0x40c000], 8
     mov edi, 0x40c000
@@ -773,12 +773,12 @@ valid_interpreter_base:
     mov eax, 63
     call syscall_expect_zero
     cmp dword ptr [0x40b000], 0x756e6947
-    jne failure
+    require_equal
     mov edi, 0x40c000
     mov eax, 63
     call syscall_expect_efault
     cmp qword ptr [0x40c000], 8
-    jne failure
+    require_equal
     mov edi, 0x40b000
     mov esi, 4096
     mov eax, 11
@@ -796,12 +796,12 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     xor edi, edi
     mov eax, 9
     syscall
     cmp rax, 0x40c000
-    jne failure
+    require_equal
     mov qword ptr [0x40b000], 9
     mov qword ptr [0x40c000], 10
     mov byte ptr [0x40594a], 0
@@ -812,16 +812,16 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
-    jne failure
+    require_equal
     cmp byte ptr [0x40594b], 1
-    jne failure
+    require_equal
     mov edx, 4
     mov eax, 28
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x40c000], 0
-    jne failure
+    require_equal
     mov edx, 1
     mov eax, 10
     call syscall_expect_zero
@@ -857,7 +857,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     mov qword ptr [0x40b000], 11
     mov qword ptr [0x40c000], 12
     mov qword ptr [0x40d000], 13
@@ -885,7 +885,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40c000
-    jne failure
+    require_equal
     mov qword ptr [0x40c000], 15
 
     xor edi, edi
@@ -897,7 +897,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, -12
-    jne failure
+    require_equal
 
     mov edi, 0x40e000
     mov esi, 4096
@@ -908,13 +908,13 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40e000
-    jne failure
+    require_equal
     mov edx, 1
     mov r10d, 0x32
     mov eax, 9
     syscall
     cmp rax, 0x40e000
-    jne failure
+    require_equal
     mov edi, 0x40e000
     mov eax, 63
     call syscall_expect_efault
@@ -922,7 +922,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, -17
-    jne failure
+    require_equal
     mov edi, 0x40f000
     mov eax, 9
     call syscall_expect_einval
@@ -936,7 +936,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40c000
-    jne failure
+    require_equal
 
     mov byte ptr [0x40594a], 0
     mov byte ptr [0x40594b], 0
@@ -948,13 +948,13 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
-    jne failure
+    require_equal
     cmp byte ptr [0x40594b], 0
-    jne failure
+    require_equal
     cmp byte ptr [0x40594c], 0
-    jne failure
+    require_equal
     cmp byte ptr [0x40594d], 1
-    jne failure
+    require_equal
 
     mov edi, 0x40c000
     mov esi, 8192
@@ -962,9 +962,9 @@ valid_interpreter_base:
     mov eax, 10
     call syscall_expect_zero
     cmp qword ptr [0x40c000], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x40d000], 0
-    jne failure
+    require_equal
 
     mov edi, 0x40b000
     mov esi, 16384
@@ -994,9 +994,9 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40d000
-    jne failure
+    require_equal
     cmp qword ptr [0x40d000], 0
-    jne failure
+    require_equal
     mov eax, 11
     call syscall_expect_zero
 
@@ -1010,7 +1010,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     mov qword ptr [0x40b000], 17
     mov edi, 0x40b000
     mov esi, 1
@@ -1031,7 +1031,7 @@ valid_interpreter_base:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     mov qword ptr [0x40b000], 18
     mov qword ptr [0x40c000], 19
     mov byte ptr [0x40594a], 0
@@ -1042,9 +1042,9 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
-    jne failure
+    require_equal
     cmp byte ptr [0x40594b], 1
-    jne failure
+    require_equal
     mov edi, 0x40c000
     mov esi, 1
     mov edx, 1
@@ -1079,7 +1079,7 @@ valid_interpreter_base:
     pop rax
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     mov edi, 1
     mov esi, 0x40b000
     mov edx, 8
@@ -1093,9 +1093,9 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 0
-    jne failure
+    require_equal
     cmp byte ptr [0x40594b], 0
-    jne failure
+    require_equal
 
     mov edi, 0x40b000
     mov esi, 1
@@ -1103,7 +1103,7 @@ valid_interpreter_base:
     mov eax, 10
     call syscall_expect_zero
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
     mov byte ptr [0x40594a], 0
     mov byte ptr [0x40594b], 1
     mov edi, 0x40b000
@@ -1112,9 +1112,9 @@ valid_interpreter_base:
     mov eax, 27
     call syscall_expect_zero
     cmp byte ptr [0x40594a], 1
-    jne failure
+    require_equal
     cmp byte ptr [0x40594b], 0
-    jne failure
+    require_equal
 
     mov edi, 0x40c000
     mov esi, 1
@@ -1122,7 +1122,7 @@ valid_interpreter_base:
     mov eax, 10
     call syscall_expect_zero
     cmp qword ptr [0x40c000], 0
-    jne failure
+    require_equal
     mov edi, 0x40c000
     push 63
     pop rax
@@ -1294,6 +1294,17 @@ linux_clone_repeat:
     cmp word ptr [0x405da6], 1
     require_equal
     call linux_parent_eventfd_read
+    push -4
+    push 3
+    pop rdi
+    mov rsi, rsp
+    push 8
+    pop rdx
+    xor eax, eax
+    syscall
+    cmp qword ptr [rsp], rax
+    require_equal
+    pop rcx
     call linux_parent_eventfd_read
     cmp qword ptr [0x405d80], 1
     require_equal
@@ -1368,13 +1379,13 @@ linux_clone_repeat:
     mov eax, 128
     syscall
     cmp qword ptr [rsp], rax
-    jne failure
+    require_equal
     pop rcx
     xor esi, esi
     mov eax, 128
     syscall
     cmp eax, 10
-    jne failure
+    require_equal
     jmp linux_child_joined
 linux_parent_futex_wait:
     mov rdi, r8
@@ -1401,7 +1412,7 @@ linux_child_joined:
     mov eax, 143
     call syscall_expect_zero
     cmp dword ptr [0x405060], 0
-    jne failure
+    require_equal
 
     xor edi, edi
     mov eax, 146
@@ -1423,7 +1434,7 @@ linux_child_joined:
     mov eax, 140
     syscall
     cmp rax, 20
-    jne failure
+    require_equal
     xor edi, edi
     xor esi, esi
     xor edx, edx
@@ -1466,7 +1477,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_PRIOR_SIGNAL_MASK
-    jne failure
+    require_equal
 
     xor edi, edi
     mov esi, 0x4050c0
@@ -1476,7 +1487,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_PRIOR_SIGNAL_MASK
-    jne failure
+    require_equal
 
     push 99
     pop rdi
@@ -1487,7 +1498,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_BLOCKED_SIGNAL_MASK
-    jne failure
+    require_equal
 
     mov qword ptr [0x4050c0], 8
     xor edi, edi
@@ -1507,7 +1518,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_BLOCKED_SIGNAL_MASK
-    jne failure
+    require_equal
 
     mov qword ptr [0x4050c0], 0
     push 2
@@ -1528,7 +1539,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], 0
-    jne failure
+    require_equal
 
     xor edi, edi
     mov esi, 0x406200
@@ -1564,9 +1575,9 @@ linux_child_joined:
     call syscall_expect_zero
 
     cmp qword ptr [0x405120], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405138], 0
-    jne failure
+    require_equal
 #endif
 
     mov qword ptr [0x405140], 0x405800
@@ -1579,9 +1590,9 @@ linux_child_joined:
 
     mov qword ptr [0x405180], 0
     cmp qword ptr [0x40b000], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405180], 11
-    jne failure
+    require_equal
     mov edi, 0x40b000
     mov esi, 4096
     push 11
@@ -1620,11 +1631,11 @@ linux_child_joined:
     mov eax, 131
     call syscall_expect_zero
     cmp qword ptr [0x405158], 0x405800
-    jne failure
+    require_equal
     cmp dword ptr [0x405160], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405168], 2048
-    jne failure
+    require_equal
 
     mov qword ptr [0x405140], 0x406000
     mov qword ptr [0x405148], 0
@@ -1642,7 +1653,7 @@ linux_child_joined:
     mov eax, 131
     syscall
     cmp rax, -12
-    jne failure
+    require_equal
 
     mov qword ptr [0x405140], 0
     mov qword ptr [0x405148], 2
@@ -1668,7 +1679,7 @@ linux_child_joined:
     mov rbx, qword ptr fs:[0]
     movabs rax, 0x0a212145424f5250
     cmp rbx, rax
-    jne failure
+    require_equal
 
     mov edi, 0x1003
     mov esi, 0x406200
@@ -1685,7 +1696,7 @@ linux_child_joined:
     mov eax, 158
     call syscall_expect_zero
     cmp qword ptr [0x405008], 0x405000
-    jne failure
+    require_equal
 
     mov edi, 0x405020
     push 1
@@ -1694,7 +1705,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -34
-    jne failure
+    require_equal
     mov edi, 0x406200
     push 2
     pop rsi
@@ -1708,7 +1719,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_two
     cmp word ptr [0x405020], 0x002f
-    jne failure
+    require_equal
 
     lea rdi, [rip + proc_self_exe]
     mov esi, 0x405040
@@ -1738,9 +1749,9 @@ linux_child_joined:
     pop rax
     call syscall_expect_five
     cmp dword ptr [0x405040], 0x696e692f
-    jne failure
+    require_equal
     cmp byte ptr [0x405044], 't'
-    jne failure
+    require_equal
 
     push -100
     pop rdi
@@ -1750,9 +1761,9 @@ linux_child_joined:
     mov eax, 267
     call syscall_expect_five
     cmp dword ptr [0x405040], 0x696e692f
-    jne failure
+    require_equal
     cmp byte ptr [0x405044], 't'
-    jne failure
+    require_equal
 
     mov edi, -99
     lea rsi, [rip + proc_self_exe]
@@ -1780,19 +1791,19 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, 0x12
-    jne failure
+    require_equal
     mov edi, 0x29c
     push 95
     pop rax
     syscall
     cmp rax, 0x3f
-    jne failure
+    require_equal
     mov edi, 0x12
     push 95
     pop rax
     syscall
     cmp rax, 0x9c
-    jne failure
+    require_equal
 
     mov edi, 0x406200
     push 63
@@ -1804,7 +1815,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp dword ptr [rdi], 0x756e6947
-    jne failure
+    require_equal
 
     push 2
     pop rdi
@@ -1823,7 +1834,7 @@ linux_child_joined:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4061c0], rax
-    jne failure
+    require_equal
 
     push 1
     pop rdi
@@ -1832,11 +1843,11 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x405210], 1
-    jne failure
+    require_equal
     cmp dword ptr [0x405218], 0x2180
-    jne failure
+    require_equal
     cmp qword ptr [0x405238], 4096
-    jne failure
+    require_equal
 
     push 2
     pop rdi
@@ -1854,7 +1865,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -25
-    jne failure
+    require_equal
 
     push 1
     pop rdi
@@ -1872,11 +1883,11 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp word ptr [0x405280], 24
-    jne failure
+    require_equal
     cmp word ptr [0x405282], 80
-    jne failure
+    require_equal
     cmp dword ptr [0x405284], 0
-    jne failure
+    require_equal
 
     push 2
     pop rdi
@@ -1896,7 +1907,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -29
-    jne failure
+    require_equal
 
     lea rax, [rip + readable_payload]
     mov qword ptr [0x405300], rax
@@ -1958,7 +1969,7 @@ linux_child_joined:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4061f8], rax
-    jne failure
+    require_equal
 
     push 3
     pop rdi
@@ -1967,9 +1978,9 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x405080], 0x1000
-    jne failure
+    require_equal
     cmp qword ptr [0x405088], 0x1000
-    jne failure
+    require_equal
 
     push 2
     pop rdi
@@ -1980,7 +1991,7 @@ linux_child_joined:
     mov eax, 302
     syscall
     cmp rax, -3
-    jne failure
+    require_equal
 
     xor edi, edi
     push 99
@@ -1998,7 +2009,7 @@ linux_child_joined:
     mov eax, 302
     syscall
     cmp rax, -1
-    jne failure
+    require_equal
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x4061f8], rax
@@ -2011,7 +2022,7 @@ linux_child_joined:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4061f8], rax
-    jne failure
+    require_equal
 
     xor edi, edi
     push 7
@@ -2021,9 +2032,9 @@ linux_child_joined:
     mov eax, 302
     call syscall_expect_zero
     cmp qword ptr [0x405090], 6
-    jne failure
+    require_equal
     cmp qword ptr [0x405098], 6
-    jne failure
+    require_equal
 
     push 2
     pop rdi
@@ -2033,7 +2044,7 @@ linux_child_joined:
     mov eax, 204
     syscall
     cmp rax, -3
-    jne failure
+    require_equal
 
     xor edi, edi
     push 7
@@ -2052,7 +2063,7 @@ linux_child_joined:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4061fc], rax
-    jne failure
+    require_equal
 
     xor edi, edi
     push 8
@@ -2061,7 +2072,7 @@ linux_child_joined:
     mov eax, 204
     call syscall_expect_eight
     cmp qword ptr [0x4050a0], 1
-    jne failure
+    require_equal
 
     mov eax, 203
     call syscall_expect_zero
@@ -2080,7 +2091,7 @@ linux_child_joined:
     mov eax, 309
     call syscall_expect_efault
     cmp dword ptr [0x4050a8], 0x12345678
-    jne failure
+    require_equal
 
     mov edi, 0x4050a8
     mov esi, 0x4050ac
@@ -2088,9 +2099,9 @@ linux_child_joined:
     mov eax, 309
     call syscall_expect_zero
     cmp dword ptr [0x4050a8], 0
-    jne failure
+    require_equal
     cmp dword ptr [0x4050ac], 0
-    jne failure
+    require_equal
 
     mov edi, -100
     mov esi, 0x406200
@@ -2142,7 +2153,7 @@ linux_child_joined:
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405d90], 7
-    jne failure
+    require_equal
     push 3
     pop rax
     call syscall_expect_zero
@@ -2160,11 +2171,11 @@ linux_child_joined:
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405d90], 1
-    jne failure
+    require_equal
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405d90], 1
-    jne failure
+    require_equal
     xor eax, eax
     call syscall_expect_eagain
     push 3
@@ -2190,7 +2201,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405368], 0x2180
-    jne failure
+    require_equal
 
     mov edi, -100
     mov esi, 0x405340
@@ -2201,13 +2212,13 @@ linux_child_joined:
     mov eax, 257
     syscall
     cmp rax, 4
-    jne failure
+    require_equal
     mov eax, 257
     call syscall_expect_five
     mov eax, 257
     syscall
     cmp rax, -24
-    jne failure
+    require_equal
     push 3
     pop rdi
     push 3
@@ -2242,7 +2253,7 @@ linux_child_joined:
     mov eax, 262
     call syscall_expect_zero
     cmp dword ptr [0x405368], 0x2180
-    jne failure
+    require_equal
 
     mov edi, -100
     mov esi, 0x405340
@@ -2255,7 +2266,7 @@ linux_child_joined:
     mov eax, 269
     syscall
     cmp rax, -13
-    jne failure
+    require_equal
     mov esi, 0x406200
     xor edx, edx
     mov eax, 269
@@ -2304,7 +2315,7 @@ linux_child_joined:
     mov eax, 291
     syscall
     cmp rax, -24
-    jne failure
+    require_equal
 
     xor edi, edi
     push 2
@@ -2329,7 +2340,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, 0x802
-    jne failure
+    require_equal
     push 4
     pop rsi
     push 2
@@ -2355,19 +2366,19 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405368], 0x180
-    jne failure
+    require_equal
     push 3
     pop rdi
     push 5
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405368], 0x180
-    jne failure
+    require_equal
     push 8
     pop rax
     syscall
     cmp rax, -29
-    jne failure
+    require_equal
 
     mov dword ptr [0x405d00], 1
     movabs rax, 0xaabbccddeeff0011
@@ -2408,10 +2419,10 @@ linux_child_joined:
     mov eax, 232
     call syscall_expect_one
     cmp dword ptr [0x405d20], 1
-    jne failure
+    require_equal
     movabs rax, 0xaabbccddeeff0011
     cmp qword ptr [0x405d24], rax
-    jne failure
+    require_equal
 
     push 3
     pop rdi
@@ -2425,7 +2436,7 @@ linux_child_joined:
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405d90], 5
-    jne failure
+    require_equal
 
     mov edi, 2
     mov esi, 0x405d20
@@ -2466,7 +2477,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp word ptr [0x405da6], 0
-    jne failure
+    require_equal
 
     mov qword ptr [0x405d80], 1
     mov edi, 3
@@ -2480,7 +2491,7 @@ linux_child_joined:
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405d90], -2
-    jne failure
+    require_equal
 
     mov edi, 2
     mov esi, 2
@@ -2531,7 +2542,7 @@ linux_child_joined:
     mov eax, 233
     syscall
     cmp rax, -17
-    jne failure
+    require_equal
 
     mov edi, 2
     mov esi, 0x405d20
@@ -2559,10 +2570,10 @@ linux_child_joined:
     mov eax, 281
     call syscall_expect_one
     cmp dword ptr [0x405d20], 4
-    jne failure
+    require_equal
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x405d24], rax
-    jne failure
+    require_equal
 
     mov qword ptr [0x405d60], 0
     mov qword ptr [0x405d68], 1000000000
@@ -2594,10 +2605,10 @@ linux_child_joined:
     mov eax, 232
     call syscall_expect_one
     cmp dword ptr [0x405d20], 4
-    jne failure
+    require_equal
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x405d24], rax
-    jne failure
+    require_equal
 
     mov dword ptr [0x405d00], 1
     movabs rax, 0x8877665544332211
@@ -2627,7 +2638,7 @@ linux_child_joined:
     mov eax, 233
     syscall
     cmp rax, -2
-    jne failure
+    require_equal
 
     mov edi, 2
     mov esi, 0x405d20
@@ -2663,7 +2674,7 @@ linux_child_joined:
     mov eax, 283
     syscall
     cmp rax, -24
-    jne failure
+    require_equal
 
     mov edi, 3
     mov esi, 1
@@ -2675,7 +2686,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, 0x802
-    jne failure
+    require_equal
     mov esi, 4
     mov edx, 2
     push 72
@@ -2695,12 +2706,12 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405368], 0x180
-    jne failure
+    require_equal
     push 8
     pop rax
     syscall
     cmp rax, -29
-    jne failure
+    require_equal
     mov esi, 0x405e00
     mov edx, 8
     push 1
@@ -2711,9 +2722,9 @@ linux_child_joined:
     mov eax, 287
     call syscall_expect_zero
     cmp qword ptr [0x405e20], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405e38], 0
-    jne failure
+    require_equal
     mov esi, 0x405e00
     xor eax, eax
     call syscall_expect_eagain
@@ -2736,9 +2747,9 @@ linux_child_joined:
     mov eax, 286
     call syscall_expect_zero
     cmp qword ptr [0x405e40], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405e58], 0
-    jne failure
+    require_equal
 
     mov dword ptr [0x405d00], 1
     movabs rax, 0x54494d4552464433
@@ -2756,7 +2767,7 @@ linux_child_joined:
     call syscall_expect_one
     movabs rax, 0x54494d4552464433
     cmp qword ptr [0x405d24], rax
-    jne failure
+    require_equal
 
     mov edi, 3
     mov esi, 0x4061fc
@@ -2768,7 +2779,7 @@ linux_child_joined:
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405e60], 1
-    jne failure
+    require_equal
     mov edi, 2
     mov esi, 0x405d20
     mov edx, 1
@@ -2789,12 +2800,12 @@ linux_child_joined:
     mov eax, 286
     call syscall_expect_zero
     cmp qword ptr [0x405e48], 0
-    jne failure
+    require_equal
     mov esi, 0x405e20
     mov eax, 287
     call syscall_expect_zero
     cmp qword ptr [0x405e28], 1
-    jne failure
+    require_equal
     mov esi, 0x405e60
     mov edx, 8
     xor eax, eax
@@ -2848,9 +2859,9 @@ linux_child_joined:
     mov eax, 293
     call syscall_expect_zero
     cmp dword ptr [0x405e80], 3
-    jne failure
+    require_equal
     cmp dword ptr [0x405e84], 4
-    jne failure
+    require_equal
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     mov edi, 4
     mov esi, 0x404fff
@@ -2874,7 +2885,7 @@ linux_child_joined:
     mov eax, 293
     syscall
     cmp rax, -24
-    jne failure
+    require_equal
 
     mov edi, 3
     mov esi, 1
@@ -2886,13 +2897,13 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, 0x800
-    jne failure
+    require_equal
     mov edi, 4
     push 72
     pop rax
     syscall
     cmp rax, 0x801
-    jne failure
+    require_equal
     mov edi, 3
     mov esi, 4
     xor edx, edx
@@ -2908,7 +2919,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, 0x801
-    jne failure
+    require_equal
     mov edi, 3
     mov esi, 4
     mov edx, 0x4000
@@ -2928,7 +2939,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -29
-    jne failure
+    require_equal
 
     mov dword ptr [0x405d00], 1
     movabs rax, 0x5049504552454144
@@ -2968,7 +2979,7 @@ linux_child_joined:
     call syscall_expect_one
     movabs rax, 0x5049504552454144
     cmp qword ptr [0x405d24], rax
-    jne failure
+    require_equal
 
     mov edi, 3
     mov esi, 0x405350
@@ -2976,14 +2987,14 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405368], 0x1180
-    jne failure
+    require_equal
     mov esi, 0x541b
     mov edx, 0x405ec0
     push 16
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405ec0], 8
-    jne failure
+    require_equal
     mov edx, 0x406200
     push 16
     pop rax
@@ -2999,25 +3010,25 @@ linux_child_joined:
     xor eax, eax
     call syscall_expect_three
     cmp byte ptr [0x405eb0], 0x41
-    jne failure
+    require_equal
     cmp byte ptr [0x405eb2], 0x43
-    jne failure
+    require_equal
     mov esi, 0x541b
     mov edx, 0x405ec0
     push 16
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405ec0], 5
-    jne failure
+    require_equal
     mov edi, 3
     mov esi, 0x405eb8
     mov edx, 5
     xor eax, eax
     call syscall_expect_five
     cmp byte ptr [0x405eb8], 0x44
-    jne failure
+    require_equal
     cmp byte ptr [0x405ebc], 0x48
-    jne failure
+    require_equal
     mov esi, 0x405eb0
     mov edx, 1
     xor eax, eax
@@ -3052,13 +3063,13 @@ linux_child_joined:
     pop rax
     call syscall_expect_eight
     cmp byte ptr [0x405eb0], 0x41
-    jne failure
+    require_equal
     cmp byte ptr [0x405eb2], 0x43
-    jne failure
+    require_equal
     cmp byte ptr [0x405eb8], 0x44
-    jne failure
+    require_equal
     cmp byte ptr [0x405ebc], 0x48
-    jne failure
+    require_equal
 
     mov edi, 4
     mov esi, 0x405e00
@@ -3096,14 +3107,14 @@ linux_child_joined:
     pop rax
     call syscall_expect_one
     cmp word ptr [0x405da6], 0x11
-    jne failure
+    require_equal
     mov edi, 3
     mov esi, 0x405eb0
     mov edx, 1
     xor eax, eax
     call syscall_expect_one
     cmp byte ptr [0x405eb0], 0x41
-    jne failure
+    require_equal
     xor eax, eax
     call syscall_expect_zero
     push 3
@@ -3125,7 +3136,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -32
-    jne failure
+    require_equal
     push 3
     pop rax
     call syscall_expect_zero
@@ -3149,7 +3160,7 @@ linux_child_joined:
     xor eax, eax
     call syscall_expect_eight
     cmp qword ptr [0x405380], 0
-    jne failure
+    require_equal
     push 1
     pop rax
     call syscall_expect_ebadf
@@ -3183,21 +3194,21 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, 9
-    jne failure
+    require_equal
     mov esi, 0x5413
     mov edx, 0x405390
     push 16
     pop rax
     call syscall_expect_zero
     cmp word ptr [0x405390], 24
-    jne failure
+    require_equal
     cmp word ptr [0x405392], 80
-    jne failure
+    require_equal
     push 8
     pop rax
     syscall
     cmp rax, -29
-    jne failure
+    require_equal
     push 3
     pop rax
     call syscall_expect_zero
@@ -3230,11 +3241,11 @@ linux_child_joined:
     mov eax, 332
     call syscall_expect_zero
     cmp dword ptr [0x405400], 0x7ff
-    jne failure
+    require_equal
     cmp word ptr [0x40541c], 0x2180
-    jne failure
+    require_equal
     cmp qword ptr [0x405420], 3
-    jne failure
+    require_equal
     mov r10d, 0x80000000
     mov eax, 332
     call syscall_expect_einval
@@ -3260,15 +3271,15 @@ linux_child_joined:
     pop rax
     call syscall_expect_efault
     cmp qword ptr [0x405540], -1
-    jne failure
+    require_equal
     mov qword ptr [0x405510], 0x405550
     push 19
     pop rax
     call syscall_expect_eight
     cmp dword ptr [0x405540], 0
-    jne failure
+    require_equal
     cmp dword ptr [0x405550], 0
-    jne failure
+    require_equal
     mov edi, 2
     push 3
     pop rax
@@ -3308,7 +3319,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405718], 0x416d
-    jne failure
+    require_equal
     mov esi, 0x405800
     mov edx, 151
     mov eax, 217
@@ -3321,9 +3332,9 @@ linux_child_joined:
     mov eax, 217
     call syscall_expect_152
     cmp byte ptr [0x405813], '.'
-    jne failure
+    require_equal
     cmp byte ptr [0x405843], 'n'
-    jne failure
+    require_equal
     mov eax, 217
     call syscall_expect_zero
     xor esi, esi
@@ -3360,9 +3371,9 @@ linux_child_joined:
     xor eax, eax
     syscall
     cmp rax, 4
-    jne failure
+    require_equal
     cmp dword ptr [0x405380], 0x464c457f
-    jne failure
+    require_equal
 
     mov esi, 0x405384
     mov edx, 1
@@ -3371,7 +3382,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_one
     cmp byte ptr [0x405384], 0x48
-    jne failure
+    require_equal
 
     mov esi, 0x200
     xor edx, edx
@@ -3379,20 +3390,20 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, 0x200
-    jne failure
+    require_equal
     mov esi, 0x405384
     mov edx, 1
     xor eax, eax
     call syscall_expect_one
     cmp byte ptr [0x405384], 0x48
-    jne failure
+    require_equal
 
     mov esi, 0x405700
     push 5
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405718], 0x816d
-    jne failure
+    require_equal
     cmp qword ptr [0x405730], 0
     je failure
 
@@ -3411,19 +3422,19 @@ linux_child_joined:
     mov eax, 257
     syscall
     cmp rax, -13
-    jne failure
+    require_equal
     mov edx, 0x10000
     mov eax, 257
     syscall
     cmp rax, -20
-    jne failure
+    require_equal
 
     mov edx, 0x405700
     xor r10d, r10d
     mov eax, 262
     call syscall_expect_zero
     cmp dword ptr [0x405718], 0x816d
-    jne failure
+    require_equal
     cmp qword ptr [0x405730], 0
     je failure
 
@@ -3465,7 +3476,7 @@ linux_child_joined:
     mov eax, 257
     syscall
     cmp rax, 2
-    jne failure
+    require_equal
     mov edi, 2
     push 81
     pop rax
@@ -3484,12 +3495,12 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, 9
-    jne failure
+    require_equal
     movabs rax, 0x62696c2f7261762f
     cmp qword ptr [0x405020], rax
-    jne failure
+    require_equal
     cmp byte ptr [0x405028], 0
-    jne failure
+    require_equal
 
     movabs rax, 0x000062696c2f2e2e
     mov qword ptr [0x4050b0], rax
@@ -3498,7 +3509,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -2
-    jne failure
+    require_equal
 
     mov word ptr [0x4050b0], 0x2f
     mov edi, 0x4050b0
@@ -3514,16 +3525,16 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -2
-    jne failure
+    require_equal
 
     mov edi, 16
     mov esi, 0x4050d0
     mov eax, 157
     call syscall_expect_zero
     cmp dword ptr [0x4050d0], 0x74696e69
-    jne failure
+    require_equal
     cmp dword ptr [0x4050d4], 0
-    jne failure
+    require_equal
 
     mov edi, 15
     mov esi, 0x406200
@@ -3549,11 +3560,11 @@ linux_child_joined:
     call syscall_expect_zero
     movabs rax, 0x72702d78756e6967
     cmp qword ptr [0x4050d0], rax
-    jne failure
+    require_equal
     cmp dword ptr [0x4050d8], 0x0065626f
-    jne failure
+    require_equal
     cmp dword ptr [0x4050dc], 0
-    jne failure
+    require_equal
 
     mov edi, 99
     mov eax, 157
@@ -3710,7 +3721,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_efault
     cmp dword ptr [0x405060], 0x12345678
-    jne failure
+    require_equal
 
     mov edi, 1
     mov esi, 0x405060
@@ -3718,7 +3729,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_one
     cmp dword ptr [0x405060], 0
-    jne failure
+    require_equal
 
     mov edi, -1
     mov eax, 135
@@ -3741,7 +3752,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_efault
     cmp dword ptr [0x405068], 0x12345678
-    jne failure
+    require_equal
 
     mov edi, 0x405060
     mov esi, 0x405068
@@ -3754,7 +3765,7 @@ linux_child_joined:
     or eax, dword ptr [0x405074]
     or eax, dword ptr [0x405078]
     or eax, dword ptr [0x40507c]
-    jne failure
+    require_equal
 
     mov dword ptr [0x405060], 0
     mov edi, 0x405060
@@ -3763,14 +3774,14 @@ linux_child_joined:
     pop rax
     call syscall_expect_einval
     cmp dword ptr [0x405060], 0x20080522
-    jne failure
+    require_equal
 
     mov dword ptr [0x405064], 2
     push 125
     pop rax
     syscall
     cmp rax, -3
-    jne failure
+    require_equal
 
     mov dword ptr [0x405064], 0
     mov edi, 0x405060
@@ -3783,7 +3794,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -1
-    jne failure
+    require_equal
     mov dword ptr [0x405068], 0
 
     xor edi, edi
@@ -3792,7 +3803,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -1
-    jne failure
+    require_equal
 
     mov dword ptr [0x405060], 0x12345678
     mov dword ptr [0x405064], 0x12345678
@@ -3803,9 +3814,9 @@ linux_child_joined:
     pop rax
     call syscall_expect_efault
     cmp dword ptr [0x405060], 0x12345678
-    jne failure
+    require_equal
     cmp dword ptr [0x405064], 0x12345678
-    jne failure
+    require_equal
 
     mov edi, 0x405060
     mov esi, 0x405064
@@ -3814,11 +3825,11 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405060], 0
-    jne failure
+    require_equal
     cmp dword ptr [0x405064], 0
-    jne failure
+    require_equal
     cmp dword ptr [0x405068], 0
-    jne failure
+    require_equal
 
     mov dword ptr [0x405060], 0x12345678
     mov dword ptr [0x405064], 0x12345678
@@ -3830,11 +3841,11 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp dword ptr [0x405060], 0
-    jne failure
+    require_equal
     cmp dword ptr [0x405064], 0
-    jne failure
+    require_equal
     cmp dword ptr [0x405068], 0
-    jne failure
+    require_equal
 
     mov eax, 186
     call syscall_expect_one
@@ -3856,7 +3867,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -3
-    jne failure
+    require_equal
 
     xor edi, edi
     push 124
@@ -3867,7 +3878,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -3
-    jne failure
+    require_equal
 
     mov edi, 0x4051b0
     mov esi, 23
@@ -3890,7 +3901,7 @@ linux_child_joined:
     mov eax, 274
     syscall
     cmp rax, -3
-    jne failure
+    require_equal
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x4051c8], rax
@@ -3901,7 +3912,7 @@ linux_child_joined:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x4051c8], rax
-    jne failure
+    require_equal
 
     xor edi, edi
     mov esi, 0x4051c8
@@ -3909,9 +3920,9 @@ linux_child_joined:
     mov eax, 274
     call syscall_expect_zero
     cmp qword ptr [0x4051c8], 0x4051b0
-    jne failure
+    require_equal
     cmp qword ptr [0x4051d0], 24
-    jne failure
+    require_equal
 
     mov edi, 0x406001
     mov esi, 4096
@@ -3965,9 +3976,9 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x405280], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405298], 0
-    jne failure
+    require_equal
 
     mov edi, 2
     push 32
@@ -4028,7 +4039,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -24
-    jne failure
+    require_equal
 
     xor edi, edi
     push 3
@@ -4069,7 +4080,7 @@ linux_child_joined:
     pop rax
     syscall
     cmp rax, -24
-    jne failure
+    require_equal
 
     xor edi, edi
     lea rsi, [rip + readable_payload]
@@ -4132,7 +4143,7 @@ linux_child_joined:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x405ff8], rax
-    jne failure
+    require_equal
 
     xor edi, edi
     mov esi, 0x405900
@@ -4201,7 +4212,7 @@ clock_advanced:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x405ff8], rax
-    jne failure
+    require_equal
 
     mov edi, 1
     mov esi, 0x405930
@@ -4210,9 +4221,9 @@ clock_advanced:
     cmp qword ptr [0x405930], 0
     je resolution_subsecond
     cmp qword ptr [0x405930], 1
-    jne failure
+    require_equal
     cmp qword ptr [0x405938], 0
-    jne failure
+    require_equal
     jmp resolution_valid
 resolution_subsecond:
     cmp qword ptr [0x405938], 0
@@ -4229,7 +4240,7 @@ resolution_valid:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x405ff0], rax
-    jne failure
+    require_equal
     xor edi, edi
     push 100
     pop rax
@@ -4243,13 +4254,13 @@ resolution_valid:
     test rax, rax
     js failure
     cmp qword ptr [0x405970], rax
-    jne failure
+    require_equal
     cmp qword ptr [0x405978], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405980], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405988], 0
-    jne failure
+    require_equal
 
     movabs rax, 0x1122334455667788
     mov qword ptr [0x405ff0], rax
@@ -4260,7 +4271,7 @@ resolution_valid:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x405ff0], rax
-    jne failure
+    require_equal
 
     mov edi, 3
     mov esi, 0x405bc0
@@ -4274,9 +4285,9 @@ resolution_valid:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x405bc0], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405bd8], 0
-    jne failure
+    require_equal
 
     mov qword ptr [0x405be0], 1
     mov qword ptr [0x405be8], 0
@@ -4292,7 +4303,7 @@ resolution_valid:
     call syscall_expect_enosys
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x405c00], rax
-    jne failure
+    require_equal
 
     mov qword ptr [0x405be0], 0
     xor edi, edi
@@ -4302,9 +4313,9 @@ resolution_valid:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x405c00], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405c18], 0
-    jne failure
+    require_equal
 
     xor edi, edi
     mov esi, 0x406200
@@ -4351,9 +4362,9 @@ resolution_valid:
     call syscall_expect_efault
     movabs rax, 0x1122334455667788
     cmp qword ptr [0x405ff0], rax
-    jne failure
+    require_equal
     cmp qword ptr [0x405ff8], rax
-    jne failure
+    require_equal
 
     mov edi, 2
     mov esi, 0x405a00
@@ -4367,9 +4378,9 @@ resolution_valid:
     cmp qword ptr [0x405a08], 1000000
     jae failure
     cmp qword ptr [0x405a10], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405a18], 0
-    jne failure
+    require_equal
 
     mov edi, 1
     mov esi, 0x405a90
@@ -4385,9 +4396,9 @@ resolution_valid:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x405b20], 0
-    jne failure
+    require_equal
     cmp qword ptr [0x405ba8], 0
-    jne failure
+    require_equal
 
     mov edi, 0x406200
     mov eax, 218
@@ -4404,13 +4415,13 @@ resolution_valid:
     pop rax
     call syscall_expect_one
     cmp r10d, 0x12345678
-    jne failure
+    require_equal
     cmp edi, 0x11223344
-    jne failure
+    require_equal
 
     call nested_getpid
     cmp rax, 1
-    jne failure
+    require_equal
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     mov edi, 0x13d0f00
@@ -4494,7 +4505,7 @@ resolution_valid:
     pop rax
     syscall
     cmp rax, -13
-    jne failure
+    require_equal
 
     lea rdi, [rip + invalid_exec_path]
     mov rsi, rsp
@@ -4503,7 +4514,7 @@ resolution_valid:
     pop rax
     syscall
     cmp rax, -8
-    jne failure
+    require_equal
 
     mov edi, 0x406200
     mov rsi, rsp
@@ -4578,9 +4589,9 @@ resolution_valid:
     pop rax
     call syscall_expect_five
     cmp dword ptr [rsp + 144], 0x696e692f
-    jne failure
+    require_equal
     cmp byte ptr [rsp + 148], 't'
-    jne failure
+    require_equal
 
     mov edi, 99
     lea rsi, [rip + exec_mode]
@@ -4594,7 +4605,7 @@ resolution_valid:
     mov eax, 322
     syscall
     cmp rax, -20
-    jne failure
+    require_equal
 
     mov edi, -100
     mov r8d, 1
@@ -4633,7 +4644,7 @@ resolution_valid:
     mov eax, 322
     syscall
     cmp rax, -13
-    jne failure
+    require_equal
 
     mov edi, 3
     push 3
@@ -4690,11 +4701,11 @@ resolution_valid:
     pop rax
     syscall
     cmp rax, 5
-    jne failure
+    require_equal
     cmp dword ptr [rsp], 0x696e692f
-    jne failure
+    require_equal
     cmp byte ptr [rsp + 4], 0x74
-    jne failure
+    require_equal
     add rsp, 16
     mov edi, 0x406000
     mov esi, 4096
@@ -4713,10 +4724,10 @@ child_thread_probe:
     mov eax, 186
     syscall
     cmp eax, dword ptr [r8]
-    jne failure
+    require_equal
     mov rax, qword ptr fs:[0]
     cmp rax, r9
-    jne failure
+    require_equal
     mov qword ptr [0x4050e0], -1
     xor edi, edi
     xor esi, esi
@@ -4727,7 +4738,7 @@ child_thread_probe:
     pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_PRIOR_SIGNAL_MASK
-    jne failure
+    require_equal
     push 1
     pop rdi
     mov esi, 0x4050c0
@@ -4808,9 +4819,9 @@ linux_sigsegv_handler:
     mov eax, 131
     syscall
     test rax, rax
-    jne failure
+    require_equal
     cmp dword ptr [0x405160], 1
-    jne failure
+    require_equal
     mov qword ptr [0x405140], 0
     mov qword ptr [0x405148], 2
     mov qword ptr [0x405150], 0
@@ -4819,7 +4830,7 @@ linux_sigsegv_handler:
     mov eax, 131
     syscall
     cmp rax, -1
-    jne failure
+    require_equal
     mov edi, 99
     xor esi, esi
     mov edx, 0x405188
@@ -4828,13 +4839,13 @@ linux_sigsegv_handler:
     pop rax
     syscall
     test rax, rax
-    jne failure
+    require_equal
     cmp qword ptr [0x405188], 0xc00
-    jne failure
+    require_equal
     mov eax, 15
     syscall
     cmp rax, -22
-    jne failure
+    require_equal
     xor edi, edi
     mov esi, 4096
     mov edx, 3
@@ -4844,7 +4855,7 @@ linux_sigsegv_handler:
     mov eax, 9
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     ret
 
 linux_signal_restorer:
@@ -4858,93 +4869,93 @@ failure:
 syscall_expect_zero:
     syscall
     test rax, rax
-    jne failure
+    require_equal
     ret
 
 syscall_expect_efault:
     syscall
     cmp rax, -14
-    jne failure
+    require_equal
     ret
 
 syscall_expect_einval:
     syscall
     cmp rax, -22
-    jne failure
+    require_equal
     ret
 
 syscall_expect_ebadf:
     syscall
     cmp rax, -9
-    jne failure
+    require_equal
     ret
 
 syscall_expect_enosys:
     syscall
     cmp rax, -38
-    jne failure
+    require_equal
     ret
 
 syscall_expect_eagain:
     syscall
     cmp rax, -11
-    jne failure
+    require_equal
     ret
 
 #ifndef GINUX_LINKED
 syscall_expect_enoent:
     syscall
     cmp rax, -2
-    jne failure
+    require_equal
     ret
 
 syscall_expect_e2big:
     syscall
     cmp rax, -7
-    jne failure
+    require_equal
     ret
 #endif
 
 syscall_expect_one:
     syscall
     cmp rax, 1
-    jne failure
+    require_equal
     ret
 
 syscall_expect_two:
     syscall
     cmp rax, 2
-    jne failure
+    require_equal
     ret
 
 syscall_expect_three:
     syscall
     cmp rax, 3
-    jne failure
+    require_equal
     ret
 
 syscall_expect_five:
     syscall
     cmp rax, 5
-    jne failure
+    require_equal
     ret
 
 syscall_expect_eight:
     syscall
     cmp rax, 8
-    jne failure
+    require_equal
     ret
 
 syscall_expect_152:
     syscall
     cmp rax, 152
-    jne failure
+    require_equal
     ret
 
 syscall_expect_256:
     syscall
     cmp rax, 256
-    jne failure
+    require_equal
     ret
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
@@ -4964,7 +4975,7 @@ linux_child_eventfd_write_and_yield:
     mov esi, 0x405d80
     push 8
     pop rdx
-    push 3
+    push 2
     pop rbx
 .Llinux_child_eventfd_next:
     push 1
@@ -4975,14 +4986,30 @@ linux_child_eventfd_write_and_yield:
     call syscall_expect_zero
     dec ebx
     jnz .Llinux_child_eventfd_next
-    push 1
+    push 12
+    pop rdx
+    call linux_child_signal_parent
+    push 3
     pop rdi
+    mov esi, 0x405d80
+    push 8
+    pop rdx
     push 1
-    pop rsi
+    pop rax
+    call syscall_expect_eight
+    push 24
+    pop rax
+    call syscall_expect_zero
     push 11
     pop rdx
-    mov eax, 234
-    call syscall_expect_zero
+    call linux_child_signal_parent
+    call linux_child_signal_parent
+    ret
+
+linux_child_signal_parent:
+    push 1
+    pop rdi
+    mov rsi, rdi
     mov eax, 234
     call syscall_expect_zero
     ret
@@ -5048,13 +5075,13 @@ linked_file_mmap_test:
     pop rax
     syscall
     cmp rax, 0x40b000
-    jne failure
+    require_equal
     cmp dword ptr [0x40b000], 0x464c457f
-    jne failure
+    require_equal
     cmp byte ptr [0x40b200], 0x48
-    jne failure
+    require_equal
     cmp byte ptr [0x40cfff], 0
-    jne failure
+    require_equal
 
     mov edi, 2
     mov esi, 0x40b000

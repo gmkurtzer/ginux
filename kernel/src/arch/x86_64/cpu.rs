@@ -429,6 +429,7 @@ static LINUX_EPOLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EVENTFD_READ_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_EVENTFD_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_EVENTFD_READ_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_PPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -3181,6 +3182,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_EPOLL_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
     LINUX_EVENTFD_READ_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_EVENTFD_READ_WAKE_COUNT.store(0, Ordering::SeqCst);
+    LINUX_EVENTFD_READ_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
     LINUX_PPOLL_WAIT_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_PPOLL_WAIT_WAKE_COUNT.store(0, Ordering::SeqCst);
     LINUX_PPOLL_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
@@ -3552,6 +3554,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let epoll_wait_timeout_count = LINUX_EPOLL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
     let eventfd_read_block_count = LINUX_EVENTFD_READ_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let eventfd_read_wake_count = LINUX_EVENTFD_READ_WAKE_COUNT.swap(0, Ordering::SeqCst);
+    let eventfd_read_interrupt_count = LINUX_EVENTFD_READ_INTERRUPT_COUNT.swap(0, Ordering::SeqCst);
     let ppoll_wait_block_count = LINUX_PPOLL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let ppoll_wait_wake_count = LINUX_PPOLL_WAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let ppoll_wait_timeout_count = LINUX_PPOLL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
@@ -3570,7 +3573,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let expected_signal_count = if signal_probe_executed {
         10
     } else if execution.tls_size != 0 {
-        5
+        6
     } else {
         2
     };
@@ -3603,8 +3606,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && epoll_wait_block_count == 1
             && epoll_wait_wake_count == 1
             && epoll_wait_timeout_count == 0
-            && eventfd_read_block_count == 1
+            && eventfd_read_block_count == 2
             && eventfd_read_wake_count == 1
+            && eventfd_read_interrupt_count == 1
             && ppoll_wait_block_count == 2
             && ppoll_wait_wake_count == 0
             && ppoll_wait_timeout_count == 1
@@ -3643,8 +3647,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             epoll_wait_block_count == 1,
             epoll_wait_wake_count == 1,
             epoll_wait_timeout_count == 0,
-            eventfd_read_block_count == 1,
+            eventfd_read_block_count == 2,
             eventfd_read_wake_count == 1,
+            eventfd_read_interrupt_count == 1,
             ppoll_wait_block_count == 2,
             ppoll_wait_wake_count == 0,
             ppoll_wait_timeout_count == 1,
@@ -3687,6 +3692,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             epoll_wait_timeout_count,
             eventfd_read_block_count,
             eventfd_read_wake_count,
+            eventfd_read_interrupt_count,
             ppoll_wait_block_count,
             ppoll_wait_wake_count,
             ppoll_wait_timeout_count,
@@ -4332,8 +4338,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && epoll_wait_block_count == 1
                 && epoll_wait_wake_count == 1
                 && epoll_wait_timeout_count == 0
-                && eventfd_read_block_count == 1
+                && eventfd_read_block_count == 2
                 && eventfd_read_wake_count == 1
+                && eventfd_read_interrupt_count == 1
                 && ppoll_wait_block_count == 2
                 && ppoll_wait_wake_count == 0
                 && ppoll_wait_timeout_count == 1
@@ -11398,7 +11405,10 @@ fn linux_interrupt_blocked_wait(
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
         || !matches!(
             wait_kind,
-            LINUX_THREAD_WAIT_SIGNAL | LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
+            LINUX_THREAD_WAIT_SIGNAL
+                | LINUX_THREAD_WAIT_EVENTFD_READ
+                | LINUX_THREAD_WAIT_PPOLL
+                | LINUX_THREAD_WAIT_EPOLL_PWAIT
         )
         || output.is_null()
         || LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
@@ -11428,10 +11438,14 @@ fn linux_interrupt_blocked_wait(
     };
     let saved_interrupted = interrupted;
     interrupted.rax = LINUX_EINTR;
-    let restored_mask = if wait_kind == LINUX_THREAD_WAIT_SIGNAL {
-        wait_mask
-    } else {
+    let masked_wait = matches!(
+        wait_kind,
+        LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
+    );
+    let restored_mask = if masked_wait {
         LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].load(Ordering::SeqCst)
+    } else {
+        wait_mask
     };
     let old_alt_stack_flags = ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst);
     let use_alt_stack = flags & LINUX_SA_ONSTACK != 0
@@ -11529,7 +11543,7 @@ fn linux_interrupt_blocked_wait(
     LINUX_THREAD_WAIT_KEYS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_OUTPUTS[slot].store(0, Ordering::SeqCst);
     LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
-    if wait_kind != LINUX_THREAD_WAIT_SIGNAL {
+    if masked_wait {
         LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS[slot].store(0, Ordering::SeqCst);
     }
     if wait_kind == LINUX_THREAD_WAIT_PPOLL {
@@ -11552,6 +11566,8 @@ fn linux_interrupt_blocked_wait(
     LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
     if wait_kind == LINUX_THREAD_WAIT_SIGNAL {
         LINUX_SIGNAL_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+    } else if wait_kind == LINUX_THREAD_WAIT_EVENTFD_READ {
+        LINUX_EVENTFD_READ_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     } else {
         LINUX_MASKED_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     }

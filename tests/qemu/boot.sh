@@ -2178,6 +2178,10 @@ if ! grep -q '^ginux: Linux scheduler-backed eventfd reads validated' "$output_f
     echo "Boot test failed: Linux scheduler-backed eventfd reads were not validated." >&2
     exit 1
 fi
+if ! grep -q '^ginux: Linux signal-interrupted eventfd reads validated' "$output_file"; then
+    echo "Boot test failed: Linux signal-interrupted eventfd reads were not validated." >&2
+    exit 1
+fi
 
 if ! grep -q '^ginux: APIC-driven Linux wait expiry validated' "$output_file"; then
     echo "Boot test failed: APIC-driven Linux wait expiry was not validated." >&2
