@@ -82,9 +82,16 @@ empty DMA page, and the expected device state before enabling bus mastering.
 Clean lifecycle exit revokes bus mastering, resets and disables the function,
 then retires VT-d before any service-owned frame is scrubbed.
 
+A separate generation arms a kernel-internal activation-return fault injector;
+this does not add a test mode to the public bootstrap ABI. The service fully
+configures both queues and the kernel genuinely enables bus mastering, then the
+capability call returns failure. The compiled driver follows its normal fatal
+path and faults at ring 3. Fault handling proves the queues were live, revokes
+bus mastering, resets and disables the function, retires VT-d, and scrubs DMA
+without trusting a clean service exit.
+
 ## Deliberate limits
 
 This milestone publishes no descriptor, writes no notification register,
-enables no MSI-X route, and transfers no packet. Fault injection after queue
-activation, interrupt delivery, and service-owned packet processing remain
-separate milestones.
+enables no MSI-X route, and transfers no packet. Interrupt delivery and
+service-owned packet processing remain separate milestones.

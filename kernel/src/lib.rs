@@ -2897,6 +2897,21 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: native network bus mastering enabled last");
     serial_write("\r\nginux: native network device quiesced before VT-d teardown");
     serial_write("\r\nginux: native network empty-queue generation retired cleanly");
+    if !address_space::verify_native_network_active_fault_teardown(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+    ) {
+        kernel_fail("\r\nginux: active native network fault teardown failed\r\n");
+    }
+    serial_write("\r\nginux: active native network driver fault injected at call boundary");
+    serial_write("\r\nginux: faulted native network queues were live before quiescence");
+    serial_write("\r\nginux: faulted native network bus mastering revoked");
+    serial_write("\r\nginux: faulted native network device reset before VT-d teardown");
+    serial_write("\r\nginux: active network fault retired translation before DMA");
+    serial_write("\r\nginux: active network fault contained without kernel panic");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

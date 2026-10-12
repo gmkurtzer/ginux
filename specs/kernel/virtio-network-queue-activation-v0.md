@@ -25,6 +25,9 @@ register is touched, MSI-X entry is programmed, or packet is transferred. The
 same ordering is now independently exercised by the measured native network
 service: userspace negotiates and binds the queues, while a capability call
 keeps final validation and bus-master authorization in the kernel.
+An internal failed-return injection after successful authorization also proves
+that an actual ring-3 driver fault quiesces the live device before translation
+and memory retirement; no test-only bit is exposed in the bootstrap ABI.
 
 ## Teardown order
 
@@ -37,6 +40,6 @@ and finally scrubs and releases the DMA page. No lease may remain live.
 
 - This proof does not publish an RX buffer or TX descriptor.
 - Interrupt programming, notification, completion validation, packet parsing,
-  and activated-service fault injection remain subsequent milestones.
+  remain subsequent milestones.
 - Queue depth eight is the bootstrap profile; the device-advertised maximum is
   retained for later tuning.

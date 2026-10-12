@@ -123,6 +123,9 @@ zeroed eight-entry RX/TX rings inside its sole DMA page. Its capability call
 lets the kernel validate the exact empty layout and active VT-d domain before
 enabling bus mastering last. Clean exit revokes bus mastering, resets and
 disables the NIC, retires translation, and only then scrubs service memory.
+A separate generation receives a kernel-injected failed activation return only
+after bus mastering is live; the compiled service faults naturally and the
+fault path proves the same device-before-VT-d-before-DMA teardown ordering.
 No descriptor, notification, interrupt, or packet is published yet.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).

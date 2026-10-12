@@ -2275,6 +2275,7 @@ struct RegisteredAuxiliaryAddressSpace {
     network_teardown: Option<AuxiliaryNetworkTeardown>,
     iommu_translation: Option<iommu::DeviceTranslation>,
     device_quiesced: bool,
+    fail_network_activation_return: bool,
 }
 
 enum AuxiliaryAddressSpace {
@@ -4562,6 +4563,16 @@ pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeIma
     valid
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum NativeNetworkRunMode {
+    Inert,
+    RejectBootstrap,
+    Confined,
+    ConfinedReject,
+    Active,
+    ActiveFault,
+}
+
 pub(crate) fn verify_native_network_bootstrap(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -4573,8 +4584,7 @@ pub(crate) fn verify_native_network_bootstrap(
         device,
         initialization,
         iommu_profile,
-        false,
-        false,
+        NativeNetworkRunMode::Inert,
         None,
     )
 }
@@ -4590,8 +4600,7 @@ pub(crate) fn verify_native_network_bootstrap_rejection(
         device,
         initialization,
         iommu_profile,
-        true,
-        false,
+        NativeNetworkRunMode::RejectBootstrap,
         None,
     )
 }
@@ -4607,8 +4616,7 @@ pub(crate) fn verify_native_network_dma_confinement(
         device,
         initialization,
         iommu_profile,
-        false,
-        true,
+        NativeNetworkRunMode::Confined,
         None,
     )
 }
@@ -4625,8 +4633,24 @@ pub(crate) fn verify_native_network_empty_queue_activation(
         device,
         initialization,
         iommu_profile,
-        false,
-        true,
+        NativeNetworkRunMode::Active,
+        Some(common_mapping),
+    )
+}
+
+pub(crate) fn verify_native_network_active_fault_teardown(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ActiveFault,
         Some(common_mapping),
     )
 }
@@ -4636,10 +4660,18 @@ fn verify_native_network_bootstrap_run(
     device: VirtioNetworkDevice,
     initialization: VirtioNetworkInitialization,
     iommu_profile: iommu::DeviceTranslationProfile,
-    reject_reserved: bool,
-    activate_iommu: bool,
+    mode: NativeNetworkRunMode,
     active_mapping: Option<paging::MmioMapping>,
 ) -> bool {
+    let reject_reserved = matches!(
+        mode,
+        NativeNetworkRunMode::RejectBootstrap | NativeNetworkRunMode::ConfinedReject
+    );
+    let activate_iommu = !matches!(
+        mode,
+        NativeNetworkRunMode::Inert | NativeNetworkRunMode::RejectBootstrap
+    );
+    let fail_after_activation = mode == NativeNetworkRunMode::ActiveFault;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4667,7 +4699,9 @@ fn verify_native_network_bootstrap_run(
     {
         return false;
     }
-    if active_mapping.is_some() && (!activate_iommu || reject_reserved) {
+    if active_mapping.is_some() && (!activate_iommu || reject_reserved)
+        || fail_after_activation && active_mapping.is_none()
+    {
         return false;
     }
     let rights = if active_mapping.is_some() {
@@ -4777,6 +4811,7 @@ fn verify_native_network_bootstrap_run(
         .flatten();
     let active_device_ready = active_mapping.is_none_or(|mapping| {
         bind_auxiliary_network_teardown(auxiliary, device, mapping)
+            && (!fail_after_activation || arm_auxiliary_network_activation_fault(auxiliary))
             && pci::prepare_network_for_isolated_service(device, mapping)
     });
     if activate_iommu && iommu_evidence.is_none()
@@ -4788,7 +4823,8 @@ fn verify_native_network_bootstrap_run(
     }
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     let event = domain::take_lifecycle_event();
-    let expected_kind = if reject_reserved {
+    let expected_fault = reject_reserved || fail_after_activation;
+    let expected_kind = if expected_fault {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
     } else {
         crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
@@ -4808,13 +4844,14 @@ fn verify_native_network_bootstrap_run(
         && domain::last_lifecycle_event_audit()
             .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary)
         && domain::last_lifecycle_event_detail() == Some(0)
-        && domain::last_lifecycle_event_has_fault() == Some(reject_reserved)
+        && domain::last_lifecycle_event_has_fault() == Some(expected_fault)
         && domain::last_lifecycle_service_identity() == Some(identity)
         && domain::take_lifecycle_event().is_none()
         && iommu_profile.is_inactive()
         && iommu_evidence.is_none_or(iommu::TranslationEvidence::is_retired)
         && pci::network_function_is_disabled(device)
         && pci::network_msix_is_disabled(device)
+        && (!fail_after_activation || unsafe_device_quiesce_was_active(auxiliary) == Some(true))
 }
 
 pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
@@ -5020,8 +5057,7 @@ pub(crate) fn verify_native_network_dma_fault_teardown(
         device,
         initialization,
         iommu_profile,
-        true,
-        true,
+        NativeNetworkRunMode::ConfinedReject,
         None,
     )
 }
@@ -5056,6 +5092,7 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             network_teardown: None,
             iommu_translation: None,
             device_quiesced: false,
+            fail_network_activation_return: false,
         });
     }
     true
@@ -5190,7 +5227,7 @@ pub(crate) fn activate_auxiliary_network_empty_queues(domain_id: u64) -> bool {
     let Some(dma_virtual) = dma.direct_map_address() else {
         return false;
     };
-    !registered.device_quiesced
+    let activated = !registered.device_quiesced
         && registered
             .iommu_translation
             .as_ref()
@@ -5200,7 +5237,25 @@ pub(crate) fn activate_auxiliary_network_empty_queues(domain_id: u64) -> bool {
             teardown.mapping,
             dma.address(),
             dma_virtual,
-        )
+        );
+    activated && !registered.fail_network_activation_return
+}
+
+fn arm_auxiliary_network_activation_fault(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if registered.network_teardown.is_none()
+        || registered.fail_network_activation_return
+        || registered.device_quiesced
+    {
+        return false;
+    }
+    registered.fail_network_activation_return = true;
+    true
 }
 
 pub(crate) fn bind_auxiliary_device_teardown(

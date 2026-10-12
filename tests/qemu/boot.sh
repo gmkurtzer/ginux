@@ -224,6 +224,16 @@ if ! grep -q '^ginux: native network service configured empty RX/TX queues' "$ou
     exit 1
 fi
 
+if ! grep -q '^ginux: active native network driver fault injected at call boundary' "$output_file" ||
+    ! grep -q '^ginux: faulted native network queues were live before quiescence' "$output_file" ||
+    ! grep -q '^ginux: faulted native network bus mastering revoked' "$output_file" ||
+    ! grep -q '^ginux: faulted native network device reset before VT-d teardown' "$output_file" ||
+    ! grep -q '^ginux: active network fault retired translation before DMA' "$output_file" ||
+    ! grep -q '^ginux: active network fault contained without kernel panic' "$output_file"; then
+    echo "Boot test failed: active native network fault teardown was unsafe." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||
