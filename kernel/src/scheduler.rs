@@ -32,6 +32,11 @@ pub(crate) enum WaitReason {
         service_side: bool,
         peer_domain: u64,
     },
+    DeviceCompletion {
+        object: u64,
+        domain: u64,
+        request: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -673,6 +678,64 @@ impl Scheduler {
         thread.wait = None;
         self.current = Some(id);
         None
+    }
+
+    fn block_current_idle(&mut self, id: ThreadId, saved: UserContext, reason: WaitReason) -> bool {
+        if self.current != Some(id)
+            || !saved.is_valid()
+            || self.threads.iter().flatten().any(|thread| {
+                thread.id != id && matches!(thread.state, State::Ready | State::Running)
+            })
+        {
+            return false;
+        }
+        let Some(thread) = self.thread_mut(id) else {
+            return false;
+        };
+        if thread.state != State::Running {
+            return false;
+        }
+        thread.context = saved;
+        thread.state = State::Blocked;
+        thread.wait = Some(reason);
+        self.current = None;
+        true
+    }
+
+    fn wake_idle_domain(
+        &mut self,
+        domain: u64,
+        reason: WaitReason,
+        result: u64,
+    ) -> Option<Scheduled> {
+        if self.current.is_some() {
+            return None;
+        }
+        let mut blocked_slot = None;
+        for (slot, thread) in self.threads.iter().enumerate() {
+            let Some(thread) = thread else {
+                continue;
+            };
+            if thread.state == State::Blocked
+                && thread.domain == domain
+                && thread.wait == Some(reason)
+            {
+                if blocked_slot.is_some() {
+                    return None;
+                }
+                blocked_slot = Some(slot);
+            } else if thread.state == State::Ready {
+                return None;
+            }
+        }
+        let slot = blocked_slot?;
+        let id = self.threads[slot]?.id;
+        let thread = self.threads[slot].as_mut()?;
+        thread.context.rax = result;
+        thread.state = State::Ready;
+        thread.wait = None;
+        let scheduled = self.schedule_next()?;
+        (scheduled.id == id).then_some(scheduled)
     }
 
     fn wake_blocked_peer(&mut self, sender_domain: u64, reason: WaitReason, result: u64) -> bool {
@@ -1722,6 +1785,43 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && lone.current == Some(lone_id)
         && lone.thread(lone_id)?.state == State::Running
         && lone.thread(lone_id)?.wait.is_none();
+    let mut interrupt_idle = Scheduler::new();
+    let interrupt_domain = 0x0000_0002_0000_0001;
+    let interrupt_id = interrupt_idle.create(interrupt_domain, first_context)?;
+    let interrupt_wait = WaitReason::DeviceCompletion {
+        object: 7,
+        domain: interrupt_domain,
+        request: 1,
+    };
+    let interrupt_idle_valid = interrupt_idle.schedule_next()?.id == interrupt_id
+        && interrupt_idle.block_current_idle(interrupt_id, first_context, interrupt_wait)
+        && interrupt_idle.current.is_none()
+        && interrupt_idle.thread(interrupt_id)?.state == State::Blocked
+        && interrupt_idle
+            .wake_idle_domain(interrupt_domain.wrapping_add(1), interrupt_wait, 0)
+            .is_none()
+        && interrupt_idle
+            .wake_idle_domain(
+                interrupt_domain,
+                WaitReason::DeviceCompletion {
+                    object: 7,
+                    domain: interrupt_domain,
+                    request: 2,
+                },
+                0,
+            )
+            .is_none()
+        && interrupt_idle.current.is_none()
+        && interrupt_idle.thread(interrupt_id)?.state == State::Blocked
+        && interrupt_idle
+            .wake_idle_domain(interrupt_domain, interrupt_wait, 73)
+            .is_some_and(|scheduled| scheduled.id == interrupt_id && scheduled.context.rax == 73)
+        && interrupt_idle.current == Some(interrupt_id)
+        && interrupt_idle.thread(interrupt_id)?.state == State::Running
+        && interrupt_idle.thread(interrupt_id)?.wait.is_none()
+        && interrupt_idle
+            .wake_idle_domain(interrupt_domain, interrupt_wait, 74)
+            .is_none();
     let mut restart_rollback = Scheduler::new();
     let survivor = restart_rollback.create(1, first_context)?;
     let replacement = restart_rollback.create(2, second_context)?;
@@ -1750,6 +1850,7 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     Some(
         generation_valid
             && rollback
+            && interrupt_idle_valid
             && replacement_removed
             && staged_not_implicitly_admitted
             && staged_explicitly_started,

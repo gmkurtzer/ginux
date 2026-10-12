@@ -31,6 +31,18 @@ when the IPC object, endpoint direction, and expected peer generation exactly
 match the saved wait key. Object, direction, or generation mismatches leave the
 waiter unchanged. Waking does not grant authority or attach a new thread.
 
+The scheduler also models a distinct interrupt-idle transition for an exact
+device object, domain generation, and request generation. It is admitted only
+when the caller is the current running thread and no other thread is ready or
+running. The transition saves the complete user context, marks the caller
+`Blocked`, and leaves no current thread so the architecture layer may enter a
+kernel idle wait. An interrupt wake must match all three saved identifiers and
+the exact blocked domain; a stale domain, wrong request, duplicate wake, or
+ambiguous runnable state leaves the scheduler unchanged. A valid wake installs
+the result in saved `RAX`, makes that same generation current and running, and
+consumes the wait key. This state-machine proof does not yet connect a hardware
+vector to the transition.
+
 Each thread owns a C-layout saved context containing all general-purpose
 registers, user RIP/RSP/RFLAGS, its page-table root, and its lower-canonical
 FS base. Creation and yield
@@ -56,7 +68,8 @@ The QEMU boot gate covers two-thread ordering, rejected non-current yield,
 single-running-thread state, exit selection, idle behavior, slot reuse, domain
 ownership, stale-ID rejection, invalid-context rejection, and preservation of a
 modified register context and distinct FS bases across another thread's run and
-exit. The current native payloads use FS base zero; Linux scheduler integration
+exit. It also rejects stale-generation, wrong-request, and duplicate
+interrupt-idle wakes before accepting one exact wake. The current native payloads use FS base zero; Linux scheduler integration
 with the live static-TLS runtime remains a separate milestone.
 
 The bounded process proof now converts a process-owned context into this same
