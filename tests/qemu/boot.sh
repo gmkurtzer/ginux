@@ -750,6 +750,13 @@ if ! grep -q $'^Name:\tinit$' "$output_file" ||
     exit 1
 fi
 
+if ! grep -q '^ginux: generation-safe Linux mount namespace installed' "$output_file" ||
+    ! grep -q '^ginux: immutable measured root mounted read-only' "$output_file" ||
+    ! grep -q '^1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro$' "$output_file"; then
+    echo "Boot test failed: the bounded Linux root mount namespace was not observed." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: bounded writable tmp scratch file validated' "$output_file"; then
     echo "Boot test failed: the bounded writable tmp file was not validated." >&2

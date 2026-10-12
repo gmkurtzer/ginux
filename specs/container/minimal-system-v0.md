@@ -23,6 +23,12 @@ Before readiness, PID 1 enumerates `/proc` and `/proc/1`, reads the immutable
 bounded `/proc/1/status` snapshot, and publishes its exact `init`, running,
 PID 1, and parent PID 0 fields to the console. This moves procfs to `partial`;
 general process enumeration and lifecycle updates remain absent.
+The kernel binds PID 1 to the initial generation-tagged Linux mount namespace.
+Its sole root mount references the live measured-root generation and has fixed
+`ro,nosuid,nodev` flags. PID 1 reads the exact corresponding
+`/proc/1/mountinfo` record before readiness. This makes `root.mount` ready for
+this bounded profile; mount creation, bind mounts, remounting, propagation,
+namespace cloning, and a general mount syscall remain outside it.
 PID 1 also enumerates the measured `/tmp` anchor, writes `ready\n` to the
 bounded kernel-owned `ginux-ready` scratch file, closes and reopens it, and
 validates the exact bytes. Process exit scrubs the complete 64-byte backing
@@ -38,8 +44,8 @@ This execution gate deliberately does not claim M5 completion. The immutable
 root publishes an explicit `/sbin` directory containing the exact `init` node,
 and bounded root enumeration reaches it through a second cursor page. PID 1 is
 currently a bounded readiness-and-exit workload, not a persistent supervisor
-or interactive console owner. General process concurrency, a mount namespace,
-a general tmpfs, a complete procfs, and a complete user-namespace contract
+or interactive console owner. General process concurrency, mutable or multiple
+mounts, a general tmpfs, a complete procfs, and a complete user-namespace contract
 remain explicit gaps in the matrix.
 
 Build the exact candidate root and signed development image with:

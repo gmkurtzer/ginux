@@ -12,9 +12,9 @@ runtime	signal.standard	partial	Caught ignored blocked and selected fatal standa
 runtime	clock.monotonic	ready	Monotonic time sleep and timer waits
 runtime	futex.private	partial	Bounded private waits wakes and clear-child-TID
 filesystem	root.read-only	ready	Authenticated indexed newc root is immutable
-filesystem	root.mount	missing	Root is installed through a Linux mount namespace
+filesystem	root.mount	ready	Measured root is installed read-only nodev nosuid in a generation-bound Linux mount namespace
 filesystem	tmpfs.tmp	partial	Bounded kernel-owned /tmp/ginux-ready supports scrubbed scalar I/O
-filesystem	procfs	partial	Bounded /proc/1/status exposes PID 1 identity and running lifecycle state
+filesystem	procfs	partial	Bounded /proc/1 status and mountinfo expose PID 1 identity and immutable root state
 filesystem	devfs	partial	Console null zero and tty compatibility nodes
 security	credentials.root	ready	Container-local root credential queries
 security	namespace.user	missing	Container credentials are isolated by a user namespace contract

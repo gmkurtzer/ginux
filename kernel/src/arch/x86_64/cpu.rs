@@ -10,7 +10,7 @@ use super::{paging, timer};
 use crate::{
     address_space,
     capability::Rights,
-    control_abi, domain, initramfs, ipc, linux_process, memory, network, scheduler,
+    control_abi, domain, initramfs, ipc, linux_mount, linux_process, memory, network, scheduler,
     scheduler::{
         RuntimeAction, UserFaultContext, UserFaultFrame, UserInterruptFrame, UserTrapFrame,
     },
@@ -273,6 +273,8 @@ const LINUX_FILE_PROC_STATUS: u16 = LINUX_FILE_MASK;
 const LINUX_PROC_PID1_DIRECTORY: u16 = LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS;
 const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
+const LINUX_MOUNTINFO_FILE_NODE: u16 = 0xfe00;
+const LINUX_FILE_PROC_MOUNTINFO: u16 = LINUX_FILE_MASK | LINUX_MOUNTINFO_FILE_NODE;
 const LINUX_TMP_FILE_NODE: u16 = 0xff00;
 const LINUX_FILE_TMP_SCRATCH: u16 = LINUX_FILE_MASK | LINUX_TMP_FILE_NODE;
 const LINUX_TMP_FILE_CAPACITY: usize = 64;
@@ -4160,7 +4162,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
+    if !linux_mount::activate_initial() {
+        let _ = restore_linux_syscall(saved_msrs);
+        let _ = finish_linux_thread_table();
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return LinuxElfResult::FAILED;
+    }
     if !install_live_linux_process_registry(execution.entry, execution.stack, active_fs_base()) {
+        let _ = linux_mount::deactivate_initial();
         let _ = restore_linux_syscall(saved_msrs);
         let _ = finish_linux_thread_table();
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
@@ -5076,11 +5085,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_RELRO_SIZE.store(0, Ordering::SeqCst);
     let heap_break_state_valid = ELF_PROBE_BRK.swap(0, Ordering::SeqCst) == execution.heap as u64
         && ELF_PROBE_BRK_LIMIT.swap(0, Ordering::SeqCst) == heap_limit as u64;
+    let mount_namespace_valid =
+        linux_mount::current_root_is_read_only() && linux_mount::deactivate_initial();
     let valid = inactive
         && completed
         && exec_replaced == execution.exec_expected
         && live_return_validated
         && process_snapshot_validated
+        && mount_namespace_valid
         && (execution.tls_size == 0
             || child_exit_count == 2
                 && parent_resumed
@@ -5218,6 +5230,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             signal_actions_restored,
             alt_stack_disabled,
             live_process_registry_finished,
+            mount_namespace_valid,
             msrs_restored,
         ] {
             serial_write(" ");
@@ -7180,50 +7193,48 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
         return LINUX_ENOMEM;
     }
 
-    let (file_kind, file_source) = if flags == anonymous_flags
-        || fixed_anonymous
-        || replace_anonymous
-    {
-        if protection != 0
-            && protection != LINUX_PROT_READ
-            && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
-            || fd != u64::MAX
-            || offset != 0
-        {
-            return LINUX_EINVAL;
-        }
-        (0, None)
-    } else {
-        if protection != LINUX_PROT_READ || flags != LINUX_MAP_PRIVATE {
-            return LINUX_EINVAL;
-        }
-        let state = linux_device_descriptor(fd);
-        let Some(file) = linux_regular_file(state) else {
-            return if linux_descriptor_open(fd) {
-                LINUX_ENODEV
-            } else {
-                LINUX_EBADF
+    let (file_kind, file_source) =
+        if flags == anonymous_flags || fixed_anonymous || replace_anonymous {
+            if protection != 0
+                && protection != LINUX_PROT_READ
+                && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
+                || fd != u64::MAX
+                || offset != 0
+            {
+                return LINUX_EINVAL;
+            }
+            (0, None)
+        } else {
+            if protection != LINUX_PROT_READ || flags != LINUX_MAP_PRIVATE {
+                return LINUX_EINVAL;
+            }
+            let state = linux_device_descriptor(fd);
+            let Some(file) = linux_regular_file(state) else {
+                return if linux_descriptor_open(fd) {
+                    LINUX_ENODEV
+                } else {
+                    LINUX_EBADF
+                };
             };
+            if linux_proc_file(state) {
+                return LINUX_ENODEV;
+            }
+            if state & 3 != LINUX_DESCRIPTOR_INPUT || !offset.is_multiple_of(PAGE_SIZE as u64) {
+                return LINUX_EINVAL;
+            }
+            let Ok(start) = usize::try_from(offset) else {
+                return LINUX_EINVAL;
+            };
+            let mapped_length = usize::from(pages) * PAGE_SIZE;
+            if start >= file.len()
+                || start
+                    .checked_add(mapped_length)
+                    .is_none_or(|end| end > file.len().next_multiple_of(PAGE_SIZE))
+            {
+                return LINUX_EINVAL;
+            }
+            (state & LINUX_FILE_MASK, Some((file, start)))
         };
-        if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
-            return LINUX_ENODEV;
-        }
-        if state & 3 != LINUX_DESCRIPTOR_INPUT || !offset.is_multiple_of(PAGE_SIZE as u64) {
-            return LINUX_EINVAL;
-        }
-        let Ok(start) = usize::try_from(offset) else {
-            return LINUX_EINVAL;
-        };
-        let mapped_length = usize::from(pages) * PAGE_SIZE;
-        if start >= file.len()
-            || start
-                .checked_add(mapped_length)
-                .is_none_or(|end| end > file.len().next_multiple_of(PAGE_SIZE))
-        {
-            return LINUX_EINVAL;
-        }
-        (state & LINUX_FILE_MASK, Some((file, start)))
-    };
 
     if protection == 0 {
         if replace_anonymous {
@@ -7446,7 +7457,7 @@ fn linux_mmap_fixed_file(
             LINUX_EBADF
         };
     };
-    if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+    if linux_proc_file(state) {
         return LINUX_ENODEV;
     }
     if state & 3 != LINUX_DESCRIPTOR_INPUT {
@@ -7770,8 +7781,14 @@ fn linux_readlink_self(path_address: u64, output_address: u64, output_size: u64)
 }
 
 fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
+    if !linux_mount::current_root_is_read_only() {
+        return None;
+    }
     if path == b"/proc/1/status" {
         return Some(LINUX_FILE_PROC_STATUS);
+    }
+    if path == b"/proc/1/mountinfo" {
+        return Some(LINUX_FILE_PROC_MOUNTINFO);
     }
     if path == b"/tmp/ginux-ready" {
         return Some(LINUX_FILE_TMP_SCRATCH);
@@ -7802,6 +7819,9 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
 }
 
 fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
+    if !linux_mount::current_root_is_read_only() {
+        return None;
+    }
     match path {
         b"/" => Some(LINUX_ROOT_DIRECTORY),
         b"/dev" => Some(LINUX_DEVICE_DIRECTORY),
@@ -7815,6 +7835,9 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
 }
 
 fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
+    if !linux_mount::current_root_is_read_only() {
+        return None;
+    }
     if path == b"dev" {
         return Some(LINUX_DEVICE_DIRECTORY);
     }
@@ -7823,6 +7846,9 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     }
     if path == b"proc/1/status" {
         return Some(LINUX_FILE_PROC_STATUS);
+    }
+    if path == b"proc/1/mountinfo" {
+        return Some(LINUX_FILE_PROC_MOUNTINFO);
     }
     if path == b"tmp/ginux-ready" {
         return Some(LINUX_FILE_TMP_SCRATCH);
@@ -7935,6 +7961,9 @@ fn linux_exec_vector(address: u64, require_nonempty: bool) -> Result<([u64; 8], 
 }
 
 fn linux_exec_root_node(directory: u64, path: &[u8]) -> Result<u8, u64> {
+    if !linux_mount::current_root_is_read_only() {
+        return Err(LINUX_ENOENT);
+    }
     let mut root_name = [0_u8; 64];
     let root_name_length = if let Some(absolute) = path.strip_prefix(b"/") {
         if !linux_normalized_relative_path(absolute) {
@@ -8785,6 +8814,9 @@ fn linux_root_directory_inode(kind: u16) -> Option<u64> {
 }
 
 fn linux_measured_directory_path(kind: u16) -> Option<&'static [u8]> {
+    if !linux_mount::current_root_is_read_only() {
+        return None;
+    }
     let role = kind & (LINUX_DEVICE_DIRECTORY | LINUX_FILE_MASK);
     if role == LINUX_ROOT_DIRECTORY {
         return Some(b"");
@@ -8946,9 +8978,7 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
     if let Some(kind) = relative_kind {
         let denied = if linux_tmp_file(kind) {
             mode & 1 != 0
-        } else if kind & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS
-            && kind & LINUX_ROOT_NODE_MASK == 0
-        {
+        } else if linux_proc_file(kind) {
             mode & 3 != 0
         } else {
             mode & 2 != 0
@@ -8962,9 +8992,7 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
             let kind = linux_runtime_file_kind(path).unwrap_or(0);
             let denied = if linux_tmp_file(kind) {
                 mode & 1 != 0
-            } else if kind & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS
-                && kind & LINUX_ROOT_NODE_MASK == 0
-            {
+            } else if linux_proc_file(kind) {
                 mode & 3 != 0
             } else {
                 mode & 2 != 0
@@ -11232,11 +11260,26 @@ fn linux_tmp_file(state: u16) -> bool {
         && state & LINUX_ROOT_NODE_MASK == LINUX_TMP_FILE_NODE
 }
 
+fn linux_proc_file(state: u16) -> bool {
+    let kind = state & !3;
+    kind == LINUX_FILE_PROC_STATUS || kind == LINUX_FILE_PROC_MOUNTINFO
+}
+
+fn linux_mountinfo_file(state: u16) -> bool {
+    state & !3 == LINUX_FILE_PROC_MOUNTINFO
+}
+
 fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
+    if !linux_mount::current_root_is_read_only() {
+        return None;
+    }
     if state & LINUX_DEVICE_DIRECTORY != 0 {
         return None;
     }
-    if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+    if linux_mountinfo_file(state) {
+        return linux_mount::current_mountinfo();
+    }
+    if state & !3 == LINUX_FILE_PROC_STATUS {
         return Some(LINUX_PROC_PID1_STATUS);
     }
     if linux_tmp_file(state) {
@@ -11253,8 +11296,11 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
     if state & LINUX_DEVICE_DIRECTORY != 0 {
         return None;
     }
-    if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0 {
+    if state & !3 == LINUX_FILE_PROC_STATUS {
         return Some(17);
+    }
+    if linux_mountinfo_file(state) {
+        return Some(19);
     }
     if linux_tmp_file(state) {
         return Some(18);
@@ -11802,15 +11848,35 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 }
             }
         }
-        if directory == b"proc" || directory == b"proc/1" || directory == b"tmp" {
+        if directory == b"proc/1" {
+            if cursor > 2 {
+                return LINUX_EINVAL;
+            }
+            for (index, inode, name) in [
+                (0_usize, 17_u64, &b"status"[..]),
+                (1_usize, 19_u64, &b"mountinfo"[..]),
+            ] {
+                if cursor == index {
+                    if !append_linux_dirent(
+                        &mut entries,
+                        &mut used,
+                        inode,
+                        (index + 3) as i64,
+                        8,
+                        name,
+                    ) {
+                        return LINUX_EINVAL;
+                    }
+                    cursor += 1;
+                }
+            }
+        } else if directory == b"proc" || directory == b"tmp" {
             if cursor > 1 {
                 return LINUX_EINVAL;
             }
             if cursor == 0 {
                 let (inode, kind, name) = if directory == b"proc" {
                     (16, 4, &b"1"[..])
-                } else if directory == b"proc/1" {
-                    (17, 8, &b"status"[..])
                 } else {
                     (18, 8, &b"ginux-ready"[..])
                 };
@@ -12000,8 +12066,7 @@ fn linux_regular_file_stat(state: u16) -> [u8; LINUX_STAT_SIZE] {
 fn linux_regular_file_mode(state: u16) -> u32 {
     if linux_tmp_file(state) {
         0o100600
-    } else if state & LINUX_FILE_MASK == LINUX_FILE_PROC_STATUS && state & LINUX_ROOT_NODE_MASK == 0
-    {
+    } else if linux_proc_file(state) {
         0o100444
     } else {
         LINUX_STAT_REGULAR_MODE

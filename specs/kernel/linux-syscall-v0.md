@@ -469,13 +469,16 @@ contract below.
 The measured `/proc` directory is the immutable mount-point anchor for a
 synthetic bounded PID 1 view. Its `getdents64` result contains `.`, `..`, and
 the directory `1`; `/proc/1` likewise contains `.`, `..`, and the read-only
-regular file `status`. `/proc/1/status` has fixed mode `0444` and exact bytes
+regular files `status` and `mountinfo`. `/proc/1/status` has fixed mode `0444` and exact bytes
 `Name:\tinit\nState:\tR (running)\nPid:\t1\nPPid:\t0\n`. PID 1 enumerates both
 directories, validates their child records, reads all 45 bytes, and copies the
-snapshot to the measured console before readiness. Writes, execute access, and
-file mapping are denied. This is a boot-state identity/lifecycle snapshot, not
-general procfs: no other PIDs, mutable process state, threads, fd links, sysctl,
-or post-exit records exist.
+snapshot to the measured console before readiness. `/proc/1/mountinfo` has
+fixed mode `0444` and exposes the exact 51-byte record
+`1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro\n` while the namespace is
+active. Writes, execute access, and file mapping are denied for both records.
+This is a boot-state identity and mount snapshot, not general procfs: no other
+PIDs, mutable process state, threads, fd links, sysctl, or post-exit records
+exist.
 
 The measured `/tmp` directory anchors one synthetic mutable regular file,
 `/tmp/ginux-ready`. It has mode `0600`, zero initial length, a fixed 64-byte
@@ -487,7 +490,8 @@ truncation, unlink, rename, subdirectories, and additional files are outside
 this profile. PID 1 enumerates the `ginux-ready` dirent, writes `ready\n`,
 closes and reopens the file, and validates all six bytes. Final process teardown
 zeros the length and all 64 backing bytes before retiring PID 1. This is a
-bounded volatile-storage bridge, not a mounted tmpfs or a mount namespace.
+bounded volatile-storage bridge inside the initial namespace, not a mounted
+general tmpfs.
 
 `rax = 59` (`__NR_execve`) provides bounded replacement transitions for the
 single-threaded proof process. Absolute and current-directory-relative

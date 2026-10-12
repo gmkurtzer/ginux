@@ -1,6 +1,6 @@
 use crate::memory;
 use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 const MAGIC: &[u8; 6] = b"070701";
 const HEADER_SIZE: usize = 110;
@@ -20,7 +20,13 @@ const SYMLINK: u32 = 0o120000;
 const SYSTEM_PROFILE_HEADER: &[u8] = b"GINUX_SYSTEM_PROFILE_V0\n";
 
 static ROOT_PUBLISHED: AtomicBool = AtomicBool::new(false);
+static ROOT_GENERATION: AtomicU32 = AtomicU32::new(0);
 static mut PUBLISHED_ROOT: MaybeUninit<ReadOnlyRoot> = MaybeUninit::uninit();
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PublishedRootHandle {
+    pub(crate) generation: u32,
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct Entry<'a> {
@@ -624,8 +630,20 @@ pub(crate) fn publish_read_only_root(source: &[u8]) -> bool {
     unsafe {
         core::ptr::addr_of_mut!(PUBLISHED_ROOT).write(MaybeUninit::new(root));
     }
+    ROOT_GENERATION.store(1, Ordering::Release);
     ROOT_PUBLISHED.store(true, Ordering::Release);
     true
+}
+
+pub(crate) fn published_root_handle() -> Option<PublishedRootHandle> {
+    let generation = ROOT_GENERATION.load(Ordering::Acquire);
+    (generation != 0 && published_root_is_live()).then_some(PublishedRootHandle { generation })
+}
+
+pub(crate) fn published_root_handle_is_live(handle: PublishedRootHandle) -> bool {
+    handle.generation != 0
+        && ROOT_GENERATION.load(Ordering::Acquire) == handle.generation
+        && published_root_is_live()
 }
 
 pub(crate) fn published_root_is_live() -> bool {

@@ -94,9 +94,10 @@ Its fixed 256-byte staging buffer returns the first eight children through
 `bin` on one page and the explicit `sbin` directory on a second cursor page.
 Measured directory descriptors use their own bounded node
 selectors to recover names from the index. The measured `sys` node is empty.
-The measured `proc` node anchors a synthetic bounded `1/status`
-runtime view; it does not add mutable bytes to the authenticated archive. The
-PID 1 proof enumerates both synthetic directories and reads the status record.
+The measured `proc` node anchors synthetic bounded `1/status` and
+`1/mountinfo` runtime views; neither adds mutable bytes to the authenticated
+archive. The PID 1 proof enumerates both synthetic directories, reads the
+status record, and verifies the immutable root mount record.
 The measured `tmp` node similarly anchors a kernel-owned, 64-byte
 `ginux-ready` scratch file whose contents are outside the signed archive and
 are scrubbed at process teardown.
@@ -123,9 +124,9 @@ complete main/interpreter/two-DSO graph through those entries.
 
 The native `init` entry remains a format marker for the frozen control ABI
 proof; it is not PID 1. The archive-backed Linux graph is a proof workload, not
-a runnable system-container image, and the bounded root view is not a general
-mount. Mount semantics,
+a runnable system-container image. Its root is the sole immutable mount in the
+bounded initial Linux namespace, not a general VFS. Mutable and multiple mount semantics,
 ownership beyond normalized root metadata, hard links, special nodes, extended
 attributes, compression, loading the image separately from the EFI binary,
-mounts, mutable nodes, and VFS or service
+mount syscalls, mutable nodes, and VFS or service
 publication are outside v0.

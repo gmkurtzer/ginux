@@ -10,6 +10,7 @@ mod executable;
 mod initramfs;
 mod ipc;
 mod linux_elf;
+mod linux_mount;
 mod linux_process;
 mod manifest;
 mod memory;
@@ -619,6 +620,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: persistent read-only root publication failed\r\n");
     }
     serial_write("ginux: measured root published in kernel-owned memory\r\n");
+    if !linux_mount::verify_contract() || !linux_mount::install_initial() {
+        kernel_fail("ginux: initial Linux mount namespace invalid\r\n");
+    }
+    serial_write("ginux: generation-safe Linux mount namespace installed\r\n");
+    serial_write("ginux: immutable measured root mounted read-only\r\n");
     let Some(system_profile_node) =
         initramfs::published_regular_file_node(b"etc/ginux-system-profile")
     else {

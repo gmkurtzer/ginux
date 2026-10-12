@@ -51,14 +51,18 @@ ginux_linux_system_init:
     mov r9, rax
     mov rdi, rax
     lea rsi, [rip + .Lstatus]
-    mov edx, 80
+    mov edx, 128
     mov eax, 217
     syscall
-    cmp rax, 80
+    cmp rax, 112
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 67], 0x74617473
     jne .Lfailure
     cmp word ptr [rip + .Lstatus + 71], 0x7375
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 99], 0x6e756f6d
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 103], 0x666e6974
     jne .Lfailure
     mov rdi, r9
     mov eax, 3
@@ -87,6 +91,34 @@ ginux_linux_system_init:
     mov eax, 1
     syscall
     cmp rax, 45
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Lmountinfo_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 51
+    xor eax, eax
+    syscall
+    cmp rax, 51
+    jne .Lfailure
+    mov rdi, r8
+    lea rsi, [rip + .Lstatus]
+    mov edx, 51
+    mov eax, 1
+    syscall
+    cmp rax, 51
     jne .Lfailure
     mov rdi, r9
     mov eax, 3
@@ -269,6 +301,8 @@ ginux_linux_system_init:
     .asciz "/dev/console"
 .Lstatus_path:
     .asciz "/proc/1/status"
+.Lmountinfo_path:
+    .asciz "/proc/1/mountinfo"
 .Lproc_path:
     .asciz "/proc"
 .Lpid1_path:
@@ -282,4 +316,4 @@ ginux_linux_system_init:
 .Ltmp_marker:
     .ascii "TMPFS_READY\n"
 .Lstatus:
-    .space 80
+    .space 128
