@@ -233,18 +233,30 @@ virtual address, frame, and permission inventory, the synthetic hierarchy clone
 is published through the process table, and its saved context is selected by
 the native scheduler under the child root. The child executes a bounded ring-3
 context-and-exit proof under that CR3, and its captured exit status drives the
-existing resource teardown, zombie publication, and parent wait. This dedicated
-proof gate is not the live Linux syscall dispatcher. The live workload now has
-the complete source snapshot described above, but does not yet clone and
-publish that snapshot or expose fork/wait through the Linux ABI.
+existing resource teardown, zombie publication, and parent wait.
+
+The live workload now consumes the same operations after each terminal ring-3
+return and before releasing PID 1's address space. It reserves a child identity,
+allocates the maximum bounded hierarchy and private-page capacity, passes only
+the exact live prefixes to the clone transaction, and releases the unused
+capacity. Publication eagerly copies every live private page, clones and
+revalidates the complete hierarchy, and derives the child's complete context
+with `RAX = 0`. The verifier requires identical mapping metadata and bytes with
+no shared frame, transitions the child through exit and zombie state, reaps
+status 42 from PID 1, and requires both the original parent record and allocator
+count to be unchanged afterward. Running outside the syscall-dispatch frame is
+required by the bounded kernel-stack contract; no user mapping is retired
+between the terminal syscall snapshot and this transaction.
+
+This live child is not yet admitted to the scheduler or entered at ring 3, and
+the transaction is not exposed as a Linux process-creation or wait syscall.
 
 ## Deliberate limits
 
 This is an internal ownership contract, not Linux process compatibility yet.
 It is not connected to the syscall dispatcher and does not implement:
 
-- construction of a child address space from the complete live snapshot or
-  copy-on-write;
+- execution of the cloned live child or copy-on-write;
 - process-style `clone`, `fork`, `vfork`, `wait4`, or `waitid`;
 - descriptor, credential, signal, mount, or namespace inheritance;
 - concurrent process scheduling or process-directed signal delivery;

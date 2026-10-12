@@ -1246,9 +1246,12 @@ Its dedicated proof gate now resumes the cloned child after validating its
 complete saved frame, captures a subsequent ring-3 syscall number 60 and status
 42, and uses that captured status for zombie publication and parent wait. The
 live runtime now snapshots and completely validates its generation-bound image,
-stack, heap, TLS, sibling-stack, and `mmap` ownership before normal exit, but it
-does not yet publish a child process from that snapshot. The synthetic process
-exit proof itself does not dispatch through the live Linux runtime.
+stack, heap, TLS, sibling-stack, and `mmap` ownership before normal exit. After
+terminal ring-3 return, it transactionally clones that exact inventory into an
+independent child record, checks every copied page byte and hierarchy mapping,
+then tears down and reaps the child while restoring the allocator count. The
+child is not yet scheduled or executed by this live transaction. The synthetic
+process exit proof itself does not dispatch through the live Linux runtime.
 The live exit paths additionally translate the real syscall entry frame into
 the process model's complete register order and admit it with the snapshot as
 parentless PID 1. A canonical FS base is preserved even when unmapped, matching
@@ -1256,7 +1259,8 @@ Linux `arch_prctl` behavior; page access still requires an ordinary mapping.
 The validated PID 1 record is retained in non-stack kernel storage and refreshed
 from the exact address-space and return context at every leader syscall entry.
 Cleanup requires multiple successful refreshes and refuses any child or
-partially retiring record. No process-style creation syscall consumes it yet.
+partially retiring record. The terminal clone verifier consumes it internally,
+but no process-style creation syscall does so yet.
 In particular, the exact bounded `clone` below remains thread-only and `fork`,
 process-style `clone`, and `wait4` remain unsupported.
 The process model's eager-copy helper can duplicate up to 41

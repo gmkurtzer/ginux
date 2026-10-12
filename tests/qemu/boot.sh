@@ -718,6 +718,11 @@ if ! grep -q '^ginux: live Linux process registry persisted across syscalls' "$o
     exit 1
 fi
 
+if ! grep -q '^ginux: live Linux child address space cloned transactionally' "$output_file"; then
+    echo "Boot test failed: the live Linux child address space was not cloned transactionally." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     echo "Boot test failed: the minimal system init was not planned." >&2
     exit 1

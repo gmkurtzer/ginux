@@ -770,6 +770,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: incomplete Linux process snapshots rejected\r\n");
     serial_write("ginux: live Linux PID 1 context admitted to process model\r\n");
     serial_write("ginux: live Linux process registry persisted across syscalls\r\n");
+    serial_write("ginux: live Linux child address space cloned transactionally\r\n");
     serial_write("ginux: toolchain-linked static Linux ELF executed\r\n");
     serial_write("ginux: five-page Linux executable mapping validated\r\n");
     serial_write("ginux: bounded Linux exec rejection preserved live image\r\n");

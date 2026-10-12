@@ -246,8 +246,12 @@ exact one-to-one match with all effective user leaves and their W^X state.
 Owned tables reached through supervisor-only intermediate entries are still
 walked for ownership; a detached owned table is permitted only when all of its
 entries are zero. The QEMU proof rejects an omitted mapping, an altered
-permission, a stale root generation, and an out-of-range mapping count. Cloning and publishing this live
-snapshot through the Linux ABI remain future work.
+permission, a stale root generation, and an out-of-range mapping count. After
+terminal ring-3 return, the kernel eagerly copies every recorded page into a
+distinct frame set, clones and revalidates the complete hierarchy, publishes
+the child record atomically, and proves teardown restores the allocator count.
+Executing this live child and exposing the transaction through the Linux ABI
+remain future work.
 
 The current measured payload additionally proves capability enforcement: a
 console-only grant is denied for a host-control operation, while the appropriate

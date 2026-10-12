@@ -337,11 +337,16 @@ record is installed in non-stack kernel storage before userspace starts and
 refreshed from the exact live snapshot and return context at every PID 1
 syscall boundary. Terminal cleanup requires at least two successful refreshes,
 one parentless running record, and no child, scheduler binding, or retiring
-bundle. The dedicated
-cloned-child/wait proof is not yet attached to the running Linux syscall
-workload, so the minimal system
-profile correctly keeps `process.fork-wait` missing. The exact contract and
-limits are recorded in
+bundle. After each terminal ring-3 return, while the retained PID 1 resources
+are still live, the kernel reserves a child, allocates and eagerly copies every
+private page, clones the complete page-table hierarchy, derives a zero-return
+child context, and atomically publishes the result. It compares every copied
+page byte, requires complete parent/child frame separation, then tears the
+child down, reaps status 42, and proves the allocator count and PID 1 record
+were restored. The child is not yet scheduled from this live transaction and
+process-style creation and wait are not exposed through the Linux syscall ABI,
+so the minimal system profile correctly keeps `process.fork-wait` missing. The
+exact contract and limits are recorded in
 [Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).
 Each thread slot also owns its clear-child-TID pointer and robust-list head.
 The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,

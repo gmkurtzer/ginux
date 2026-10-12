@@ -1949,7 +1949,6 @@ fn record_live_linux_process_snapshot() -> bool {
         ));
         serial_write("\r\n");
     }
-    let valid = valid && linux_process::finish_live_process_registry();
     LINUX_PROCESS_SNAPSHOT_VALIDATED.store(valid, Ordering::SeqCst);
     valid
 }
@@ -4045,7 +4044,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         return LinuxElfResult::FAILED;
     }
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
-    let live_process_registry_finished = linux_process::finish_live_process_registry();
+    let live_process_registry_finished = linux_process::verify_live_fork_clone_transaction()
+        && linux_process::finish_live_process_registry();
     let linux_wait_timer_finished = execution.tls_size == 0 || timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let linux_thread_table_released = finish_linux_thread_table();
