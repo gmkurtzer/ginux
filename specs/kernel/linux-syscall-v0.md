@@ -542,9 +542,11 @@ otherwise requires a nonzero length that rounds up to no more than four pages,
 either `PROT_NONE` or `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`,
 fd -1, and offset zero. `PROT_NONE` publishes an occupied virtual reservation
 without allocating a frame or installing a leaf. RW requests allocate and
-install zero-filled generation-bound RW/NX frame leases. The current
-`MAP_FIXED` form requires RW protection; replacing an existing mapping with
-`PROT_NONE` is not implemented.
+install zero-filled generation-bound RW/NX frame leases. `MAP_FIXED` with
+`PROT_NONE` preflights every selected leaf and exact old lease, clears the
+leaves as one bounded transaction, publishes reservation metadata, and then
+scrubs and releases the displaced leases. It therefore discards mapped
+contents rather than preserving them as a future `mprotect` transition would.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
 descriptor for `/init`, `/lib64/ld-ginux.so`, `/lib64/libginux.so`, or
 `/lib64/libginux-aux.so`, and a

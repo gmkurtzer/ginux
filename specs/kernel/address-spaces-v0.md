@@ -49,7 +49,10 @@ lowest-free placement policy and exact
 `MAP_FIXED_NOREPLACE` placement share the same overlap preflight; fixed overlap
 returns `EEXIST` before frame allocation, including on a reservation. Anonymous
 `MAP_FIXED` can fill a reservation after its absent leaf and empty lease pass
-the same preflight used for holes. Unmap accepts a page-aligned window
+the same preflight used for holes. A fixed `PROT_NONE` replacement performs the
+reverse operation: it preflights every old leaf and generation lease, clears
+the complete range, publishes a reservation, and scrubs the displaced frames.
+Unmap accepts a page-aligned window
 address and nonzero length rounded to the selected subrange,
 clears each occupied leaf, invalidates its local translation, and scrubs and
 releases every selected frame before reuse; reserved pages are cleared without

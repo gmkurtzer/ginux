@@ -2435,6 +2435,64 @@ pub(crate) fn replace_current_linux_pages(
         })
 }
 
+pub(crate) fn reserve_current_linux_pages(
+    address: u64,
+    old_frames: &[Option<memory::FrameLease>],
+    old_writable: &[bool],
+) -> bool {
+    if !(1..=cpu::LINUX_MMAP_SLOT_COUNT).contains(&old_frames.len())
+        || old_writable.len() != old_frames.len()
+        || address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || old_frames
+            .iter()
+            .flatten()
+            .any(|frame| !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame]))
+    {
+        return false;
+    }
+    let mut leaves = [core::ptr::null_mut(); cpu::LINUX_MMAP_SLOT_COUNT];
+    let mut values = [0_u64; cpu::LINUX_MMAP_SLOT_COUNT];
+    for index in 0..old_frames.len() {
+        let page = address + (index * PAGE_SIZE) as u64;
+        let Some(leaf) = current_linux_leaf(page) else {
+            return false;
+        };
+        let value = unsafe { leaf.read() };
+        let valid = old_frames[index].map_or(value == 0, |frame| {
+            value & ADDRESS_MASK == frame.address()
+                && value & (PRESENT | WRITABLE | USER | NO_EXECUTE)
+                    == PRESENT | USER | NO_EXECUTE | if old_writable[index] { WRITABLE } else { 0 }
+        });
+        if !valid {
+            return false;
+        }
+        leaves[index] = leaf;
+        values[index] = value;
+    }
+    for (index, leaf) in leaves[..old_frames.len()].iter().enumerate() {
+        let page = address + (index * PAGE_SIZE) as u64;
+        unsafe {
+            leaf.write(0);
+            asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
+        }
+    }
+    if leaves[..old_frames.len()]
+        .iter()
+        .all(|leaf| unsafe { leaf.read() == 0 })
+    {
+        return true;
+    }
+    for (index, leaf) in leaves[..old_frames.len()].iter().enumerate() {
+        let page = address + (index * PAGE_SIZE) as u64;
+        unsafe {
+            leaf.write(values[index]);
+            asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
+        }
+    }
+    false
+}
+
 pub(crate) fn map_current_linux_pages(
     address: u64,
     frames: &[memory::FrameLease],

@@ -5336,7 +5336,6 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
     let (file_kind, file_source) =
         if flags == anonymous_flags || fixed_anonymous || replace_anonymous {
             if protection != 0 && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
-                || replace_anonymous && protection == 0
                 || fd != u64::MAX
                 || offset != 0
             {
@@ -5373,6 +5372,63 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
         };
 
     if protection == 0 {
+        if replace_anonymous {
+            let mut slots = linux_mmap_slot_attributes();
+            let mut old_leases = [None; LINUX_MMAP_SLOT_COUNT];
+            let mut old_writable = [false; LINUX_MMAP_SLOT_COUNT];
+            let mut released = [memory::FrameLease::EMPTY; LINUX_MMAP_SLOT_COUNT];
+            let mut released_count = 0;
+            for offset in 0..usize::from(pages) {
+                let slot = start_slot + offset;
+                if let Some((old_protection, _)) = slots[slot] {
+                    if old_protection != 0 {
+                        let Some(lease) = linux_mmap_slot_lease(slot) else {
+                            return LINUX_ENOMEM;
+                        };
+                        old_leases[offset] = Some(lease);
+                        old_writable[offset] = u64::from(old_protection) & LINUX_PROT_WRITE != 0;
+                        released[released_count] = lease;
+                        released_count += 1;
+                    } else if linux_mmap_slot_frame(slot) != 0
+                        || ELF_PROBE_MMAP_GENERATIONS[slot].load(Ordering::SeqCst) != 0
+                    {
+                        return LINUX_ENOMEM;
+                    }
+                } else if linux_mmap_slot_frame(slot) != 0
+                    || ELF_PROBE_MMAP_GENERATIONS[slot].load(Ordering::SeqCst) != 0
+                {
+                    return LINUX_ENOMEM;
+                }
+            }
+            if released_count != 0
+                && !memory::frame_leases_releasable(
+                    memory::FrameOwner::KERNEL,
+                    &released[..released_count],
+                )
+                || !address_space::reserve_current_linux_pages(
+                    mapping,
+                    &old_leases[..usize::from(pages)],
+                    &old_writable[..usize::from(pages)],
+                )
+            {
+                return LINUX_ENOMEM;
+            }
+            for offset in 0..usize::from(pages) {
+                let slot = start_slot + offset;
+                linux_mmap_clear_slot_lease(slot);
+                slots[slot] = Some((0, 0));
+            }
+            linux_mmap_rebuild_areas(slots);
+            if released_count != 0
+                && !memory::scrub_and_release_frames(
+                    memory::FrameOwner::KERNEL,
+                    &released[..released_count],
+                )
+            {
+                return LINUX_ENOMEM;
+            }
+            return mapping;
+        }
         ELF_PROBE_MMAP_PAGES[start_slot].store(pages, Ordering::SeqCst);
         ELF_PROBE_MMAP_PROTECTION[start_slot].store(0, Ordering::SeqCst);
         ELF_PROBE_MMAP_FILE[start_slot].store(0, Ordering::SeqCst);

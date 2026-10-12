@@ -1704,6 +1704,11 @@ if ! grep -q '^ginux: bounded anonymous fixed mmap replacement validated' "$outp
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded PROT_NONE fixed replacement validated' "$output_file"; then
+    echo "Boot test failed: bounded PROT_NONE fixed replacement was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: page-rounded Linux mmap lengths validated' "$output_file"; then
     echo "Boot test failed: page-rounded Linux mmap lengths were not validated." >&2
     exit 1

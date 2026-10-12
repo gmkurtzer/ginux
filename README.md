@@ -472,7 +472,9 @@ ownership. A reservation also counts as overlap. Anonymous `MAP_FIXED` can
 atomically fill holes, reservations, or replace a selected
 subrange after all old and new frame leases and page-table leaves pass one
 preflight. Replacement publishes fresh zeroed RW/NX pages before scrubbing and
-retiring the displaced generation leases.
+retiring the displaced generation leases. A `PROT_NONE` fixed replacement
+instead clears the selected leaves, retires their leases, and leaves an
+occupied virtual-only reservation that can later be activated.
 Every occupied page selected by unmap validates generation ownership, removes
 the hardware leaf, scrubs the released frame, and returns its lease to the
 allocator; process exit requires the complete registry and all four lease
