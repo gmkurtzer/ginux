@@ -417,8 +417,25 @@ valid_interpreter_base:
     xor r9d, r9d
     mov eax, 9
     syscall
-    cmp rax, -12
+    cmp rax, 0x40c000
     jne failure
+    cmp qword ptr [0x40c000], 0
+    jne failure
+    mov byte ptr [0x405949], 0
+    mov edi, 0x40c000
+    mov esi, 4096
+    mov edx, 0x405949
+    mov eax, 27
+    call syscall_expect_zero
+    cmp byte ptr [0x405949], 1
+    jne failure
+    mov eax, 11
+    call syscall_expect_zero
+    mov edi, 1
+    mov esi, 0x40c000
+    mov edx, 8
+    mov eax, 1
+    call syscall_expect_efault
 
     mov edi, 0x40b000
     mov esi, 4095

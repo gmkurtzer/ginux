@@ -406,7 +406,7 @@ configures and queries an FS-relative
 TLS base through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's
 prior FS base afterward. Pointer-bearing calls are constrained to the RW
 segment's declared ELF memory extent, allocated heap bytes below the current
-break, the mapped user stack, or the active one- or two-page mapping. They
+break, the mapped user stack, or the active bounded mappings. They
 cannot cross the stack's guard-page boundaries. Invalid ranges and write
 arguments return Linux `-EFAULT`, `-EBADF`, or `-EINVAL`. Copy-in may also read
 the declared main or interpreter RX ELF extent, while copy-out rejects both.
@@ -438,14 +438,18 @@ together: reads continue, writes fail, and executable permissions are rejected.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.
-A separate one- or two-page anonymous `mmap` extent is installed RW/NX on
-demand, removed from the hardware page table by exact `munmap`, scrubbed, and
-proven zero on reuse. Bounded `MADV_DONTNEED` also zeros it in place without
-widening a sealed read-only extent, while `mincore` reports each page resident
-only while active. The same fixed slot can instead expose a one- or two-page
-private read-only/NX window into an immutable runtime ELF file. File offsets
-must be page aligned, partial final pages are zero-filled, syscall copy-out
-cannot modify the mapping, and unmap scrubs both payload frames.
+A two-entry fixed `mmap` registry can install two independent one-page areas or
+one two-page area in its preallocated window. Anonymous areas are RW/NX,
+removed from the hardware page table by exact `munmap`, scrubbed, and proven
+zero on reuse. Bounded `MADV_DONTNEED` also zeros an anonymous area in place
+without widening a sealed read-only area, while `mincore` reports each page
+resident only while its area is active. Either entry can instead expose a
+one-page private read-only/NX window into an immutable runtime ELF file; the
+complete two-page window can expose a two-page file extent. File offsets must
+be page aligned, partial final pages are zero-filled, syscall copy-out cannot
+modify the mapping, and unmap scrubs every payload frame. The runtime proof
+keeps two one-page areas live simultaneously, queries and removes the second,
+and verifies that the first remains usable.
 General mapping placement, shared file mappings, writable mappings outside the
 exact authenticated main/dependency data pages, and arbitrary filesystem-backed
 mappings are not implemented.

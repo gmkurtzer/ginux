@@ -528,8 +528,10 @@ a timer returns `-ENOSYS` until asynchronous signal delivery exists. Invalid
 selectors return `-EINVAL`; invalid complete input or output ranges return
 `-EFAULT`, and rejected requests do not partially change the old-value output.
 `rax = 9` (`__NR_mmap`) has a scratch-window profile and one authenticated
-executable-install profile. The scratch window admits one private one- or
-two-page extent at kernel-selected address `0x40b000`. Its anonymous form requires a null hint, an
+executable-install profile. The scratch window has two entries over
+`0x40b000..0x40d000` and admits either two independent private one-page areas
+or one private two-page area. A null hint selects the lowest contiguous free
+entry. Its anonymous form requires a null hint, an
 exact 4096- or 8192-byte length, `PROT_READ | PROT_WRITE`, `MAP_PRIVATE |
 MAP_ANONYMOUS`, fd -1, and offset zero, and installs zero-filled RW/NX frames.
 The immutable-file form requires `PROT_READ`, `MAP_PRIVATE`, a readable
@@ -541,7 +543,7 @@ than deferred to a `SIGBUS` path. The kernel copies the authenticated bytes
 into allocator-owned read-only/NX frames and zero-fills a partial final page.
 Descriptor cursors are unaffected. Unsupported arguments return `-EINVAL`, a
 non-file descriptor returns `-ENODEV`, an invalid descriptor returns `-EBADF`,
-and a request while the sole extent is occupied returns `-ENOMEM`.
+and a request without enough contiguous free entries returns `-ENOMEM`.
 The executable-install profile accepts only open `/init`,
 `/lib64/libginux.so`, or `/lib64/libginux-aux.so` descriptors and exact one-page `MAP_PRIVATE |
 MAP_FIXED_NOREPLACE` requests already authenticated by the kernel plan. For
@@ -599,30 +601,33 @@ are released; the kernel-owned live-frame count must return to its
 pre-execution value. This is bounded userspace-owned loading for two
 preauthenticated images and one fixed dependency window, not ASLR, a general
 executable allocator, or authority to map unauthenticated bytes.
-`rax = 11` (`__NR_munmap`) accepts only the complete active scratch extent, clears its
-hardware leaves, invalidates their TLB entries, and scrubs the physical frames
-before reuse. Repeating a supported exact unmap succeeds. The anonymous probe
-crosses the two-page boundary with syscall copy-out, while the file proof maps
-the complete two-page interpreter, observes ELF magic and its entry byte,
-checks the zero-filled tail, proves syscall copy-out is denied, and rejects an
-unaligned file offset. Both paths exit with both leaves absent. This is not a
-general VMA allocator: hints, fixed mappings, writable or shared file
+`rax = 11` (`__NR_munmap`) accepts only a complete active scratch area, clears
+its hardware leaves, invalidates their TLB entries, and scrubs the physical
+frames before reuse. Repeating a supported exact unmap succeeds. A partial
+range that overlaps an active area is rejected. The anonymous proof keeps two
+one-page areas active, queries and removes the second independently, and
+proves the first remains intact. It also crosses a two-page area boundary with
+syscall copy-out, while the file proof maps the complete two-page interpreter,
+observes ELF magic and its entry byte, checks the zero-filled tail, proves
+syscall copy-out is denied, and rejects an unaligned file offset. Both paths
+exit with both leaves absent. This is not a general VMA allocator: arbitrary
+hints, fixed mappings, writable or shared file
 mappings outside the admitted executable pages, partial ranges, arbitrary
 files, demand paging, and mapping growth are unsupported. Fixed placement is
 available only for the seven admitted main pages and two admitted dependency
 pages described above.
-`rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for the exact active
-anonymous extent. Immutable-file mappings reject advice with `-EINVAL`. For an
-anonymous mapping it validates that every leaf still maps its allocator-owned
+`rax = 28` (`__NR_madvise`) accepts only `MADV_DONTNEED` for one exact active
+anonymous area. Immutable-file mappings reject advice with `-EINVAL`. For an
+anonymous area it validates that every leaf still maps its allocator-owned
 frame, then zeros the frames through the supervisor direct map without changing
 their present, user, NX, or writable state. The proof also discards a sealed
 one-page read-only mapping, observes zeroes from ring 3, and unmaps it normally.
 Other advice, ranges, or inactive mappings return `-EINVAL` without changing
 the contents. There is no paging policy, reclamation queue, or lazy refill.
-`rax = 27` (`__NR_mincore`) accepts either kind of exact active extent and
+`rax = 27` (`__NR_mincore`) accepts either kind of exact active area and
 atomically writes one resident byte per page to a fully validated vector. It returns
 `-ENOMEM` after unmap. Misaligned, partial, or different ranges return
-`-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only the fixed slot,
+`-EINVAL`; an invalid vector returns `-EFAULT`. It exposes only the fixed window,
 not arbitrary page-table state or reclaim information.
 The probe uses `rax = 12` (`__NR_brk`) to query an initial break at `0x407000`,
 grow within one separately owned zero-filled RW/NX page, write through that
