@@ -400,10 +400,16 @@ signed millisecond timeout or indefinitely, wakes after relevant eventfd,
 pipe, close, or timerfd state changes, and returns zero after an APIC-driven
 timeout. This is a fixed two-thread proof, not a general wait-queue facility;
 zero-descriptor sleeps and blocking without a runnable peer return `ENOSYS`.
-`ppoll` adds validated timespec and temporary signal-mask inputs but does not
-yet use the blocking path. A single bounded epoll instance can register one
-console or device descriptor, report level-triggered readiness, and preserve
-packed 64-bit user data. With a runnable peer, `epoll_wait` blocks for a signed
+`ppoll` uses the same scheduler-backed descriptor path with a checked
+nanosecond timespec or an infinite null timeout. Its optional eight-byte signal
+mask is installed only for the blocked interval, with `SIGKILL` and `SIGSTOP`
+removed, and the calling thread's prior mask is restored on readiness, timeout,
+or rollback. The measured two-thread graph proves an eventfd wake, an
+APIC-driven timeout, and restoration of the original per-thread mask. Signal
+interruption and syscall restart remain unsupported. A single bounded epoll
+instance can register one console or device descriptor, report level-triggered
+readiness, and preserve packed 64-bit user data. With a runnable peer,
+`epoll_wait` blocks for a signed
 millisecond timeout or indefinitely, wakes after relevant descriptor or
 registration changes, and returns zero after an APIC-driven timeout. The
 registration, readiness, and data word remain live while blocked, and the

@@ -61,13 +61,19 @@ general descriptor wait queue.
 `rax = 271` (`__NR_ppoll`) uses the same bounded readiness engine. A null
 timeout means an infinite wait request; otherwise the complete 16-byte x86-64
 `timespec` must contain nonnegative seconds and normalized nanoseconds. An
-optional eight-byte signal mask and exact signal-set size are validated before
-the query, but no persistent mask change occurs and this entry point does not
-yet enter the scheduler-backed `poll` wait. Zero timeouts and immediately ready
-descriptors behave like `poll`; a call that would wait returns `-ENOSYS`.
-Invalid timespecs or mask
-sizes return `-EINVAL`, invalid input ranges return `-EFAULT`, and the timeout
-is not rewritten.
+optional eight-byte signal mask requires the exact signal-set size and is
+sanitized to keep `SIGKILL` and `SIGSTOP` unblocked. Zero timeouts and
+immediately ready descriptors behave like `poll`. With one through four
+descriptors, no readiness, and another runnable thread, the caller blocks with
+the temporary mask installed in its per-thread state. Readiness or an
+APIC-driven deadline restores the prior mask before making the caller runnable;
+failed scheduler handoff rolls the mask and wait record back together. The
+measured graph proves an eventfd wake, a positive timeout, zeroed timeout
+`revents`, and restoration of the caller's original mask. Blocking without a
+runnable peer, or with zero descriptors, returns `-ENOSYS`. Invalid timespecs
+or mask sizes return `-EINVAL`, invalid input or output ranges return `-EFAULT`,
+and the timeout is not rewritten. Asynchronous signal interruption, `EINTR`,
+remaining-time reporting, and syscall restart remain outside this profile.
 `rax = 291` (`__NR_epoll_create1`) allocates one process-local epoll instance
 in the lowest free auxiliary descriptor, 2 through 5. It accepts only zero or
 `EPOLL_CLOEXEC`; a second epoll instance or exhausted auxiliary table returns

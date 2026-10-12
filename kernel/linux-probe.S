@@ -1256,13 +1256,7 @@ linux_clone_repeat:
     jne failure
     cmp dword ptr [0x405dc8], 0x11223344
     jne failure
-    push 3
-    pop rdi
-    mov esi, 0x405d80
-    push 8
-    pop rdx
-    xor eax, eax
-    call syscall_expect_eight
+    call linux_parent_eventfd_read
     mov edi, 0x405da0
     push 1
     pop rsi
@@ -1274,22 +1268,22 @@ linux_clone_repeat:
     jne failure
     cmp word ptr [0x405da6], 1
     jne failure
-    push 3
-    pop rdi
-    mov esi, 0x405d80
-    push 8
-    pop rdx
-    xor eax, eax
-    call syscall_expect_eight
-    push 3
-    pop rdi
-    mov esi, 0x405d80
-    push 8
-    pop rdx
-    xor eax, eax
-    call syscall_expect_eight
+    call linux_parent_eventfd_read
+    call linux_parent_eventfd_read
     cmp qword ptr [0x405d80], 1
     jne failure
+    mov edi, 0x405da0
+    push 1
+    pop rsi
+    xor edx, edx
+    mov r10d, 0x405cd0
+    push 8
+    pop r8
+    mov eax, 271
+    call syscall_expect_one
+    cmp word ptr [0x405da6], 1
+    jne failure
+    call linux_parent_eventfd_read
     push 2
     pop rdi
     mov esi, 0x405dc0
@@ -1309,6 +1303,12 @@ linux_clone_repeat:
     syscall
     test rax, rax
     jne failure
+    cmp word ptr [0x405da6], 0
+    jne failure
+    mov edx, 0x405cc0
+    mov r10d, 0x405cd0
+    mov eax, 271
+    call syscall_expect_zero
     cmp word ptr [0x405da6], 0
     jne failure
     push 3
@@ -4701,50 +4701,18 @@ child_thread_probe:
 .Llinux_wait_timer_spin:
     pause
     loop .Llinux_wait_timer_spin
-    push 3
-    pop rdi
-    mov esi, 0x405d80
-    push 8
-    pop rdx
-    push 1
-    pop rax
-    call syscall_expect_eight
-    push 24
-    pop rax
-    call syscall_expect_zero
-    push 3
-    pop rdi
-    mov esi, 0x405d80
-    push 8
-    pop rdx
-    push 1
-    pop rax
-    call syscall_expect_eight
-    push 24
-    pop rax
-    call syscall_expect_zero
-    push 3
-    pop rdi
-    mov esi, 0x405d80
-    push 8
-    pop rdx
-    push 1
-    pop rax
-    call syscall_expect_eight
-    push 24
-    pop rax
-    call syscall_expect_zero
-    # The parent blocks first in epoll_wait and then in poll with one-
-    # millisecond timeouts. Keep this peer in userspace across two APIC ticks
-    # so each expiry immediately preempts back to the parent.
+    call linux_child_eventfd_write_and_yield
+    # The parent blocks in epoll_wait, poll, and ppoll with positive timeouts.
+    # Keep this peer in userspace across three APIC ticks so each expiry
+    # immediately preempts back to the parent.
+    mov ebx, 3
+.Llinux_timeout_spin_next:
     mov ecx, 0x100000
-.Llinux_epoll_timeout_spin:
+.Llinux_timeout_spin:
     pause
-    loop .Llinux_epoll_timeout_spin
-    mov ecx, 0x100000
-.Llinux_poll_timeout_spin:
-    pause
-    loop .Llinux_poll_timeout_spin
+    loop .Llinux_timeout_spin
+    dec ebx
+    jnz .Llinux_timeout_spin_next
     push 24
     pop rax
     call syscall_expect_zero
@@ -4917,6 +4885,36 @@ syscall_expect_256:
     cmp rax, 256
     jne failure
     ret
+
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+linux_parent_eventfd_read:
+    push 3
+    pop rdi
+    mov esi, 0x405d80
+    push 8
+    pop rdx
+    xor eax, eax
+    call syscall_expect_eight
+    ret
+
+linux_child_eventfd_write_and_yield:
+    push 3
+    pop rdi
+    mov esi, 0x405d80
+    push 8
+    pop rdx
+    mov ebx, 4
+.Llinux_child_eventfd_next:
+    push 1
+    pop rax
+    call syscall_expect_eight
+    push 24
+    pop rax
+    call syscall_expect_zero
+    dec ebx
+    jnz .Llinux_child_eventfd_next
+    ret
+#endif
 
 nested_getpid:
     push 39
