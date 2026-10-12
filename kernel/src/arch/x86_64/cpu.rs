@@ -416,6 +416,7 @@ static LINUX_FUTEX_EXIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_FUTEX_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SLEEP_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SLEEP_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_TIMER_WAIT_EXPIRY_COUNT: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -3062,6 +3063,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_FUTEX_WAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
     LINUX_SLEEP_BLOCK_COUNT.store(0, Ordering::SeqCst);
     LINUX_SLEEP_WAKE_COUNT.store(0, Ordering::SeqCst);
+    LINUX_TIMER_WAIT_EXPIRY_COUNT.store(0, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -3354,7 +3356,15 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && linux_writable_user_range_contains(execution.tls as u64, execution.tls_size)
             && !linux_writable_user_range_contains(execution.sibling_tls as u64, execution.tls_size)
     };
+    let linux_wait_timer_armed = execution.tls_size == 0 || timer::arm_linux_wait_timer();
+    if !linux_wait_timer_armed {
+        let _ = restore_linux_syscall(saved_msrs);
+        let _ = finish_linux_thread_table();
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return LinuxElfResult::FAILED;
+    }
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
+    let linux_wait_timer_finished = execution.tls_size == 0 || timer::finish_linux_wait_timer();
     let msrs_restored = restore_linux_syscall(saved_msrs);
     let linux_thread_table_released = finish_linux_thread_table();
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
@@ -3407,6 +3417,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let futex_wait_timeout_count = LINUX_FUTEX_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
     let sleep_block_count = LINUX_SLEEP_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let sleep_wake_count = LINUX_SLEEP_WAKE_COUNT.swap(0, Ordering::SeqCst);
+    let timer_wait_expiry_count = LINUX_TIMER_WAIT_EXPIRY_COUNT.swap(0, Ordering::SeqCst);
     let signal_delivery_count = LINUX_SIGNAL_DELIVERY_COUNT.swap(0, Ordering::SeqCst);
     let signal_return_count = LINUX_SIGNAL_RETURN_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_block_count = LINUX_SIGNAL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
@@ -3436,6 +3447,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && futex_wait_timeout_count == 1
             && sleep_block_count == 1
             && sleep_wake_count == 1
+            && timer_wait_expiry_count == 1
             && signal_wait_block_count == 2
             && signal_wait_wake_count == 1
             && signal_wait_timeout_count == 1)
@@ -3458,6 +3470,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             futex_wait_timeout_count == 1,
             sleep_block_count == 1,
             sleep_wake_count == 1,
+            timer_wait_expiry_count == 1,
             signal_wait_block_count == 2,
             signal_wait_wake_count == 1,
             signal_wait_timeout_count == 1,
@@ -3482,6 +3495,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             futex_wait_timeout_count,
             sleep_block_count,
             sleep_wake_count,
+            timer_wait_expiry_count,
             signal_wait_block_count,
             signal_wait_wake_count,
             signal_wait_timeout_count,
@@ -4111,6 +4125,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && futex_wait_timeout_count == 1
                 && sleep_block_count == 1
                 && sleep_wake_count == 1
+                && timer_wait_expiry_count == 1
                 && signal_wait_block_count == 2
                 && signal_wait_wake_count == 1
                 && signal_wait_timeout_count == 1)
@@ -4139,6 +4154,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && tls_context_switch_valid
         && linux_clone_publication_valid
         && linux_thread_table_released
+        && linux_wait_timer_finished
         && process_name_restored
         && executable_identity_restored
         && no_new_privileges_enforced
@@ -4181,6 +4197,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             tls_context_switch_valid,
             linux_clone_publication_valid,
             linux_thread_table_released,
+            linux_wait_timer_finished,
             process_name_restored,
             executable_identity_restored,
             no_new_privileges_enforced,
@@ -10073,10 +10090,11 @@ fn wake_linux_signal_wait(signal: u64, signal_code: i32) -> bool {
     false
 }
 
-fn expire_linux_waits() {
+fn expire_linux_waits() -> u32 {
     let Some(now) = linux_elapsed_nanoseconds() else {
-        return;
+        return 0;
     };
+    let mut expired = 0;
     for slot in 0..LINUX_THREAD_LIMIT {
         let deadline = LINUX_THREAD_WAIT_DEADLINES[slot].load(Ordering::SeqCst);
         if deadline == 0
@@ -10098,6 +10116,15 @@ fn expire_linux_waits() {
         LINUX_THREAD_WAIT_DEADLINES[slot].store(0, Ordering::SeqCst);
         LINUX_THREAD_STATES[slot].store(LINUX_THREAD_READY, Ordering::SeqCst);
         counter.fetch_add(1, Ordering::SeqCst);
+        expired += 1;
+    }
+    expired
+}
+
+pub(crate) fn expire_linux_waits_from_timer() {
+    let expired = expire_linux_waits();
+    if expired != 0 {
+        LINUX_TIMER_WAIT_EXPIRY_COUNT.fetch_add(expired, Ordering::SeqCst);
     }
 }
 

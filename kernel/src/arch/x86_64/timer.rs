@@ -18,6 +18,7 @@ const INVARIANT_TSC: u32 = 1 << 8;
 const HERTZ_PER_MHZ: u64 = 1_000_000;
 const SCHEDULER_PROOF_INITIAL_PREEMPTIONS_PER_SECOND: u64 = 1_000;
 const SCHEDULER_PROOF_RELOAD_PREEMPTIONS_PER_SECOND: u64 = 10_000;
+const LINUX_WAIT_TICKS_PER_SECOND: u64 = 1_000;
 const APIC_LVT_TIMER: u32 = 0x320;
 const APIC_INITIAL_COUNT: u32 = 0x380;
 const APIC_CURRENT_COUNT: u32 = 0x390;
@@ -47,8 +48,11 @@ static PREEMPTION_READY: AtomicBool = AtomicBool::new(false);
 static PREEMPTION_COUNT: AtomicU8 = AtomicU8::new(0);
 static PREEMPTION_RELOAD: AtomicU32 = AtomicU32::new(0);
 static PREEMPTION_DEFERRED_RELOAD: AtomicU32 = AtomicU32::new(0);
+static LINUX_WAIT_TIMER_ARMED: AtomicBool = AtomicBool::new(false);
+static LINUX_WAIT_TIMER_RELOAD: AtomicU32 = AtomicU32::new(0);
 static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
+static INTERRUPT_COUNTER_HZ: AtomicU64 = AtomicU64::new(0);
 static CALIBRATED_TSC_HZ: AtomicU64 = AtomicU64::new(0);
 
 global_asm!(
@@ -292,6 +296,7 @@ pub(crate) unsafe fn verify_local_apic_interrupt(
         if apic.mode == Mode::X2Apic { 1 } else { 0 },
         Ordering::SeqCst,
     );
+    INTERRUPT_COUNTER_HZ.store(calibration.counter_hz, Ordering::SeqCst);
     TIMER_FIRED.store(false, Ordering::SeqCst);
 
     let spurious = apic.read(APIC_SPURIOUS_VECTOR);
@@ -395,6 +400,62 @@ pub(crate) unsafe fn finish_scheduler_preemption(apic: &LocalApic) -> bool {
     complete
 }
 
+/// Arms a periodic Linux deadline tick using the already-validated bootstrap
+/// local APIC. The service scheduler proof must have relinquished the timer.
+pub(crate) fn arm_linux_wait_timer() -> bool {
+    let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
+    if counter_hz == 0
+        || PREEMPTION_ARMED.load(Ordering::SeqCst)
+        || LINUX_WAIT_TIMER_ARMED.swap(true, Ordering::SeqCst)
+    {
+        LINUX_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
+        return false;
+    }
+    let reload = (counter_hz / LINUX_WAIT_TICKS_PER_SECOND).clamp(1, u64::from(u32::MAX)) as u32;
+    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    else {
+        LINUX_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
+        return false;
+    };
+    LINUX_WAIT_TIMER_RELOAD.store(reload, Ordering::SeqCst);
+    // SAFETY: discovery and the interrupt proof validated this saved APIC,
+    // and Linux execution owns its timer after the scheduler proof finishes.
+    unsafe {
+        apic.write(APIC_DIVIDE_CONFIGURATION, APIC_DIVIDE_BY_16);
+        apic.write(APIC_LVT_TIMER, u32::from(TIMER_VECTOR));
+        apic.write(APIC_INITIAL_COUNT, reload);
+    }
+    true
+}
+
+/// Stops the Linux deadline tick while kernel entry still has interrupts off.
+pub(crate) fn finish_linux_wait_timer() -> bool {
+    if !LINUX_WAIT_TIMER_ARMED.swap(false, Ordering::SeqCst) {
+        return false;
+    }
+    let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let Some(apic) = LocalApic::from_saved(0, mode, INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    else {
+        return false;
+    };
+    // SAFETY: Linux execution still exclusively owns the saved bootstrap APIC.
+    unsafe {
+        apic.write(APIC_LVT_TIMER, APIC_TIMER_MASKED | u32::from(TIMER_VECTOR));
+        apic.write(APIC_INITIAL_COUNT, 0);
+    }
+    LINUX_WAIT_TIMER_RELOAD.store(0, Ordering::SeqCst);
+    true
+}
+
 extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     TIMER_FIRED.store(true, Ordering::SeqCst);
     let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
@@ -409,6 +470,15 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
     // SAFETY: The verifier initializes these values before unmasking the timer,
     // and the handler runs with exclusive bootstrap-processor APIC ownership.
     unsafe { apic.write(APIC_EOI, 0) };
+    if LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst) {
+        cpu::expire_linux_waits_from_timer();
+        let reload = LINUX_WAIT_TIMER_RELOAD.load(Ordering::SeqCst);
+        if reload != 0 && LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst) {
+            // SAFETY: the Linux execution phase owns this one-shot timer.
+            unsafe { apic.write(APIC_INITIAL_COUNT, reload) };
+        }
+        return;
+    }
     if PREEMPTION_ARMED.load(Ordering::SeqCst)
         && PREEMPTION_COUNT.load(Ordering::SeqCst) == 0
         && !PREEMPTION_READY.load(Ordering::SeqCst)

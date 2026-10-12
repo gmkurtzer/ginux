@@ -4255,11 +4255,20 @@ child_thread_probe:
     call syscall_expect_zero
     cmp r14d, 2
     jne child_thread_exit
-    mov eax, 24
+    # Keep the child in userspace long enough for the APIC deadline tick to
+    # expire the parent's nanosleep before the child reaches a syscall.
+    mov ecx, 0x100000
+.Llinux_wait_timer_spin:
+    pause
+    loop .Llinux_wait_timer_spin
+    push 24
+    pop rax
     call syscall_expect_zero
-    mov eax, 24
+    push 24
+    pop rax
     call syscall_expect_zero
-    mov eax, 24
+    push 24
+    pop rax
     call syscall_expect_zero
     push 1
     pop rdi
@@ -4269,8 +4278,10 @@ child_thread_probe:
     pop rax
     call syscall_expect_zero
 child_thread_exit:
-    mov edi, 42
-    mov eax, 60
+    push 42
+    pop rdi
+    push 60
+    pop rax
     syscall
 #endif
 

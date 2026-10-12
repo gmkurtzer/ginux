@@ -2136,6 +2136,11 @@ if ! grep -q '^ginux: Linux scheduler-backed nanosleep validated' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: APIC-driven Linux wait expiry validated' "$output_file"; then
+    echo "Boot test failed: APIC-driven Linux wait expiry was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux single-task CPU time validated' "$output_file"; then
     echo "Boot test failed: Linux single-task CPU time was not validated." >&2
     exit 1

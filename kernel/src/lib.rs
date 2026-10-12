@@ -1079,6 +1079,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux bounded monotonic clocks validated\r\n");
     serial_write("ginux: Linux bounded clock resolution validated\r\n");
     serial_write("ginux: Linux scheduler-backed nanosleep validated\r\n");
+    serial_write("ginux: APIC-driven Linux wait expiry validated\r\n");
     serial_write("ginux: Linux single-task CPU time validated\r\n");
     serial_write("ginux: Linux bounded resource usage validated\r\n");
     serial_write("ginux: Linux disabled interval timers validated\r\n");

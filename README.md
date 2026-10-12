@@ -473,11 +473,12 @@ peer is runnable. A matching generated standard signal writes the optional
 information record, installs the signal number as the suspended syscall's
 return value, and makes that thread runnable without invoking its disposition.
 A positive timeout stores a checked monotonic deadline in that same wait record;
-the next Linux syscall or scheduling boundary at or after the deadline makes
-the waiter runnable with `EAGAIN`. The measured workload proves both timeout
+the periodic local-APIC tick makes the waiter runnable with `EAGAIN` after the
+deadline, independently of Linux syscall entry. The running peer remains in
+control until its next cooperative scheduling boundary. The measured workload proves both timeout
 and signal handoffs from a futex-blocked child to its signal-waiting parent and
 requires all typed wait state to be reclaimed at exit. Empty zero-time polls
-also return `EAGAIN`. Fully asynchronous timer wakeups, interruption by
+also return `EAGAIN`. Timer-driven preemptive dispatch, interruption by
 nonmatching signals, and waits without another runnable thread remain outside
 the profile and return `ENOSYS`. Input, timeout, and output failures leave
 pending and thread state unchanged.
@@ -497,9 +498,10 @@ restores the blocked child; child exit clears its registered word and restores
 the blocked parent. An optional relative timeout uses the same typed monotonic
 deadline state as signal waits: zero returns `ETIMEDOUT` immediately, while a
 positive duration wakes at the next Linux syscall or scheduling boundary after
-expiry. Mismatches return `EAGAIN`, and a matching wait without another runnable
-thread returns `ENOSYS`. General futex queues, asynchronous timer wakeups, and
-robust futex recovery are not implemented.
+expiry. The same periodic local-APIC tick can instead mark the timed waiter ready
+directly from interrupt context; dispatch remains cooperative. Mismatches return `EAGAIN`, and a matching wait without another runnable
+thread returns `ENOSYS`. General futex queues, timer-driven preemptive dispatch,
+and robust futex recovery are not implemented.
 Bounded `mprotect` can activate a complete `PROT_NONE` scratch range as fresh
 zeroed read-only/NX or RW/NX pages, or irreversibly seal the page named by the
 parsed `PT_GNU_RELRO` range or any complete RW scratch range as read-only/NX.
@@ -630,9 +632,10 @@ thread expose that same non-descheduled interval through CPU clocks and
 100-Hz `times` accounting; bounded `getrusage` returns it as user time in a
 fully initialized x86-64 resource-usage structure. Bounded `nanosleep` returns
 immediately for zero or stores a positive relative monotonic deadline while a
-peer is runnable; the next Linux syscall or scheduling boundary after expiry
-resumes it successfully. APIC-driven sleep wakeups, interruption, and remainder
-reporting remain unsupported. The three interval-timer classes can be queried
+peer is runnable. A periodic local-APIC interrupt marks the sleeper ready after
+expiry without requiring another syscall; the peer selects it at the next
+cooperative scheduling boundary. Timer-driven preemptive dispatch,
+interruption, and remainder reporting remain unsupported. The three interval-timer classes can be queried
 and idempotently disarmed; arming remains unsupported until asynchronous signal
 delivery exists.
 The bounded ELF parser and page-image planner also validate checked,
