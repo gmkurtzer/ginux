@@ -732,6 +732,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         virtio_network_initialization.offered_features,
         virtio_network_initialization.accepted_features,
     ) || !arch::x86_64::pci::network_function_is_disabled(virtio_network)
+        || !arch::x86_64::pci::verify_network_queue_rejections(virtio_network_initialization)
         || !arch::x86_64::pci::network_device_is_reset(virtio_network, virtio_network_common_mmio)
     {
         kernel_fail("ginux: virtio network initialization invariant failed\r\n");
@@ -742,6 +743,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write_u64(virtio_network_initialization.accepted_features);
     serial_write("\r\nginux: virtio-net queues available: ");
     serial_write_u64(u64::from(virtio_network_initialization.queue_count));
+    serial_write("\r\nginux: virtio-net receive queue size: ");
+    serial_write_u64(u64::from(virtio_network_initialization.receive_queue_size));
+    serial_write("\r\nginux: virtio-net transmit queue size: ");
+    serial_write_u64(u64::from(virtio_network_initialization.transmit_queue_size));
+    serial_write("\r\nginux: virtio-net receive notification address: ");
+    serial_write_u64(virtio_network_initialization.receive_notification);
+    serial_write("\r\nginux: virtio-net transmit notification address: ");
+    serial_write_u64(virtio_network_initialization.transmit_notification);
+    serial_write("\r\nginux: virtio-net queues remain disabled and DMA-unbound");
+    serial_write("\r\nginux: invalid virtio-net queue geometry rejected");
     serial_write("\r\nginux: virtio-net stable MAC validated: ");
     serial_write_u64(
         virtio_network_initialization

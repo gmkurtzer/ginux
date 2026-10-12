@@ -41,8 +41,11 @@ After that authority boundary is established, the common-configuration page
 and a read-only device-configuration page are mapped supervisor-only, uncached,
 and non-executable. The kernel resets the device, accepts exactly `VERSION_1`,
 `ACCESS_PLATFORM`, and `MAC`, verifies three available queues, reads the pinned
-MAC through a stable configuration-generation snapshot, and resets it again
-with all PCI decoding disabled.
+MAC through a stable configuration-generation snapshot, and validates the
+receive/transmit queue sizes and notification offsets without mapping the
+notification page. Both queues must remain disabled, interrupt-unbound, and
+free of DMA addresses before the device is reset again with all PCI decoding
+disabled.
 No queue, interrupt, DMA lease, packet traffic, or service delegation is active.
 See [Virtio Network Initialization v0](specs/kernel/virtio-network-init-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

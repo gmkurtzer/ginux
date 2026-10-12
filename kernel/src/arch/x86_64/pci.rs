@@ -193,6 +193,9 @@ pub(crate) struct VirtioNetworkDevice {
     pub(crate) common_bar_address: u64,
     pub(crate) common_offset: u32,
     pub(crate) common_length: u32,
+    notify_bar_address: u64,
+    notify_offset: u32,
+    notify_length: u32,
     device_bar_address: u64,
     device_offset: u32,
     device_length: u32,
@@ -229,6 +232,14 @@ impl VirtioNetworkDevice {
             self.device_bar_address,
             self.device_offset,
             self.device_length,
+        )
+    }
+
+    fn notify_region(self) -> Option<(u64, usize)> {
+        region_bounds(
+            self.notify_bar_address,
+            self.notify_offset,
+            self.notify_length,
         )
     }
 }
@@ -336,6 +347,10 @@ pub(crate) struct VirtioNetworkInitialization {
     pub(crate) accepted_features: u64,
     pub(crate) queue_count: u16,
     pub(crate) mac: [u8; 6],
+    pub(crate) receive_queue_size: u16,
+    pub(crate) transmit_queue_size: u16,
+    pub(crate) receive_notification: u64,
+    pub(crate) transmit_notification: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -846,6 +861,11 @@ pub(crate) fn initialize_network_without_dma(
         .then(|| {
             let mut initialization = negotiate_network(common)?;
             initialization.mac = read_network_mac(common, device_configuration)?;
+            let (receive, transmit) = network_queue_geometry(common, device)?;
+            initialization.receive_queue_size = receive.0;
+            initialization.receive_notification = receive.1;
+            initialization.transmit_queue_size = transmit.0;
+            initialization.transmit_notification = transmit.1;
             Some(initialization)
         })
         .flatten();
@@ -1413,7 +1433,62 @@ fn negotiate_network(common: usize) -> Option<VirtioNetworkInitialization> {
         accepted_features,
         queue_count,
         mac: [0; 6],
+        receive_queue_size: 0,
+        transmit_queue_size: 0,
+        receive_notification: 0,
+        transmit_notification: 0,
     })
+}
+
+fn network_queue_geometry(
+    common: usize,
+    device: VirtioNetworkDevice,
+) -> Option<((u16, u64), (u16, u64))> {
+    let (notification_physical, notification_length) = device.notify_region()?;
+    let mut geometry = [(0_u16, 0_u64); 2];
+    for (queue, entry) in geometry.iter_mut().enumerate() {
+        write_common_u16(common, COMMON_QUEUE_SELECT, u16::try_from(queue).ok()?);
+        let size = read_common_u16(common, COMMON_QUEUE_SIZE);
+        let notification_offset = notification_byte_offset(
+            read_common_u16(common, COMMON_QUEUE_NOTIFY_OFF),
+            device.notify_multiplier,
+            notification_length,
+        )?;
+        let size = validate_network_queue_size(size)?;
+        if read_common_u16(common, COMMON_QUEUE_ENABLE) != 0
+            || read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) != u16::MAX
+            || read_common_u64(common, COMMON_QUEUE_DESC) != 0
+            || read_common_u64(common, COMMON_QUEUE_DRIVER) != 0
+            || read_common_u64(common, COMMON_QUEUE_DEVICE) != 0
+        {
+            return None;
+        }
+        *entry = (
+            size,
+            notification_physical.checked_add(notification_offset as u64)?,
+        );
+    }
+    (geometry[0].1 != geometry[1].1).then_some((geometry[0], geometry[1]))
+}
+
+fn validate_network_queue_size(size: u16) -> Option<u16> {
+    (size >= QUEUE_SIZE && size.is_power_of_two()).then_some(size)
+}
+
+pub(crate) fn verify_network_queue_rejections(initialization: VirtioNetworkInitialization) -> bool {
+    initialization.receive_queue_size == 256
+        && initialization.transmit_queue_size == 256
+        && initialization
+            .transmit_notification
+            .checked_sub(initialization.receive_notification)
+            == Some(4)
+        && validate_network_queue_size(0).is_none()
+        && validate_network_queue_size(QUEUE_SIZE - 1).is_none()
+        && validate_network_queue_size(QUEUE_SIZE) == Some(QUEUE_SIZE)
+        && validate_network_queue_size(255).is_none()
+        && validate_network_queue_size(256) == Some(256)
+        && notification_byte_offset(1, 4, 4).is_none()
+        && notification_byte_offset(u16::MAX, u32::MAX, 4096).is_none()
 }
 
 fn read_network_mac(common: usize, device_configuration: usize) -> Option<[u8; 6]> {
@@ -2072,6 +2147,9 @@ fn parse_virtio_network(
         common_bar_address: parsed.common_bar_address,
         common_offset: parsed.common_offset,
         common_length: parsed.common_length,
+        notify_bar_address: parsed.notify_bar_address,
+        notify_offset: parsed.notify_offset,
+        notify_length: parsed.notify_length,
         device_bar_address: parsed.device_bar_address,
         device_offset: parsed.device_offset,
         device_length: parsed.device_length,

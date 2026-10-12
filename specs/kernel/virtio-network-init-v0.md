@@ -46,6 +46,21 @@ reads. It retries a changing snapshot and rejects the zero, broadcast, and
 multicast addresses. The QEMU profile pins `52:54:00:12:34:56` so the automated
 gate verifies the exact value on every boot.
 
+## Inert queue discovery
+
+The kernel selects receive queue 0 and transmit queue 1 only to read their
+maximum sizes and notification offsets. Each queue must report a power-of-two
+capacity of at least eight descriptors; the pinned QEMU profile reports 256
+for both. Queue enable must remain zero, the MSI-X vector must remain
+`NO_VECTOR`, and all three DMA-ring addresses must remain zero. The two
+notification offsets must resolve to distinct aligned 16-bit registers within
+the discovered notification capability; the profile places them four bytes
+apart. That notification page remains unmapped and is never accessed.
+
+Boot-time checks reject undersized and non-power-of-two capacities, zero and
+overflowing notification geometry, and any queue that already has interrupt,
+enable, or DMA state. Queue selection itself grants no DMA authority.
+
 No queue is selected or configured and `DRIVER_OK` is never set. The kernel
 then resets the device again, clears all PCI decoding and bus-master bits, and
 requires both zero device status and zero authority bits.
@@ -58,7 +73,7 @@ must contain no optional feature beyond the three listed above.
 
 ## Deliberate limits
 
-- Queue geometry, notification offsets, MSI-X routing, DMA rings, VT-d tables,
-  packet validation, and service delegation remain later M6 milestones.
+- Queue programming, notification MMIO mapping, MSI-X routing, DMA rings, VT-d
+  tables, packet validation, and service delegation remain later M6 milestones.
 - This is a serialized bootstrap proof for the deterministic Q35 device, not a
   general virtio transport implementation.

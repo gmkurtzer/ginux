@@ -103,6 +103,12 @@ if ! grep -q '^ginux: modern virtio network function: 0:3.0' "$output_file" ||
     ! grep -q '^ginux: virtio-net cacheable alias absent' "$output_file" ||
     ! grep -q '^ginux: virtio-net accepted features: 12884901920' "$output_file" ||
     ! grep -q '^ginux: virtio-net queues available: 3' "$output_file" ||
+    ! grep -q '^ginux: virtio-net receive queue size: 256' "$output_file" ||
+    ! grep -q '^ginux: virtio-net transmit queue size: 256' "$output_file" ||
+    ! grep -q '^ginux: virtio-net receive notification address: [0-9]' "$output_file" ||
+    ! grep -q '^ginux: virtio-net transmit notification address: [0-9]' "$output_file" ||
+    ! grep -q '^ginux: virtio-net queues remain disabled and DMA-unbound' "$output_file" ||
+    ! grep -q '^ginux: invalid virtio-net queue geometry rejected' "$output_file" ||
     ! grep -q '^ginux: virtio-net stable MAC validated: 90520731923542' "$output_file" ||
     ! grep -q '^ginux: virtio-net platform DMA negotiation validated' "$output_file" ||
     ! grep -q '^ginux: invalid virtio-net feature sets rejected' "$output_file" ||
