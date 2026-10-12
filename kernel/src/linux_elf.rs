@@ -69,6 +69,8 @@ const R_X86_64_TPOFF64: u32 = 18;
 const PROBE_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.bin"));
 const SECOND_PROBE_CODE: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe-second.bin"));
+const SYSTEM_INIT_PROBE_CODE: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe-system-init.bin"));
 const INTERPRETER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-interpreter.bin"));
 const DEPENDENCY_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-dependency.bin"));
 const LINKED_PROBE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/linux-probe.elf"));
@@ -3556,6 +3558,22 @@ pub(crate) fn verify_mapped_load_plan(protected_start: u64, protected_size: usiz
         protected_start,
         protected_size,
         b"bin/exec-second",
+    )
+}
+
+pub(crate) fn verify_mapped_system_init_plan(protected_start: u64, protected_size: usize) -> bool {
+    let image = fixture_with_code(SYSTEM_INIT_PROBE_CODE);
+    let Some(parsed) = parse(&image) else {
+        return false;
+    };
+    let Some(plan) = plan(&parsed) else {
+        return false;
+    };
+    crate::address_space::verify_linux_elf_mapping(
+        &plan,
+        protected_start,
+        protected_size,
+        b"sbin/init",
     )
 }
 

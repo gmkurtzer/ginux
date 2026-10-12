@@ -5510,6 +5510,7 @@ extern "sysv64" fn linux_syscall_handler(
             if ELF_PROBE_EXEC_REPLACED.load(Ordering::SeqCst) {
                 if current_linux_clear_child_tid() != Some(0)
                     || current_linux_robust_list() != Some(0)
+                    || !linux_close_all_descriptors()
                     || !retire_current_linux_thread()
                 {
                     return LINUX_ESRCH;
@@ -5532,6 +5533,7 @@ extern "sysv64" fn linux_syscall_handler(
             if robust_list == 0
                 || !set_current_linux_clear_child_tid(0)
                 || !set_current_linux_robust_list(0)
+                || !linux_close_all_descriptors()
             {
                 return LINUX_ESRCH;
             }
@@ -10515,6 +10517,15 @@ fn linux_console_close(descriptor: u64) -> u64 {
 
 fn linux_descriptor_close(descriptor: u64) -> u64 {
     linux_descriptor_close_with_wake(descriptor, true)
+}
+
+fn linux_close_all_descriptors() -> bool {
+    for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
+        if linux_descriptor_open(descriptor) && linux_descriptor_close(descriptor) != 0 {
+            return false;
+        }
+    }
+    (0..LINUX_AUX_DESCRIPTOR_LIMIT).all(|descriptor| !linux_descriptor_open(descriptor))
 }
 
 fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 {

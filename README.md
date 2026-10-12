@@ -13,7 +13,9 @@ exec targets, and a separately linked `/sbin/init` candidate. The validated
 root and records ready, partial, and missing requirements without treating
 partial behavior as compatibility. The kernel resolves the candidate only
 from the authenticated index and validates its one-page RX/one-page RW ELF
-plan; it does not yet claim to have launched the candidate as PID 1. The kernel
+plan. A dedicated measured exec workload launches it as PID 1, verifies its
+identity, opens `/dev/console`, emits `GINUX_SYSTEM_INIT_V0`, and exits cleanly
+while final process teardown closes all inherited descriptors. The kernel
 copies the root into a zeroed, contiguous 32-frame allocation,
 verifies source independence and the complete zero tail, and builds a bounded
 pathname index whose 32-bit offsets resolve only inside the owned image. A

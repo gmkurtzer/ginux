@@ -4,7 +4,7 @@ meta	init	/sbin/init	required
 meta	console	/dev/console	required
 meta	root	newc-ro	required
 runtime	elf.static-x86_64	ready	Load a measured static x86-64 ET_EXEC image
-runtime	console.pid1-banner	missing	PID 1 writes an exact readiness banner to standard output
+runtime	console.pid1-banner	ready	PID 1 writes an exact readiness banner to the measured console
 runtime	process.identity	ready	PID 1 observes Linux container PID 1
 runtime	process.exit-group	ready	PID 1 terminates the bounded process with exit_group
 runtime	process.fork-wait	missing	PID 1 creates and reaps a child process

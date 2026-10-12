@@ -85,6 +85,43 @@ fn main() {
     fs::write(output.join("linux-probe-second.bin"), second_probe_text)
         .expect("failed to write second Linux probe bytes");
 
+    let system_init_probe_object = output.join("linux-probe-system-init.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-DGINUX_SYSTEM_INIT_EXEC",
+            "-c",
+            "linux-probe.S",
+            "-o",
+        ])
+        .arg(&system_init_probe_object)
+        .status()
+        .expect("failed to run clang for minimal system-init exec probe");
+    assert!(
+        status.success(),
+        "clang failed to assemble minimal system-init exec probe"
+    );
+    let system_init_probe_elf = fs::read(&system_init_probe_object)
+        .expect("failed to read minimal system-init exec probe object");
+    let system_init_probe_text = elf_section(&system_init_probe_elf, b".text")
+        .expect("minimal system-init exec probe object has no .text section");
+    assert!(
+        !elf_section_has_relocations(&system_init_probe_elf, b".text")
+            .expect("failed to inspect minimal system-init exec probe relocations"),
+        "minimal system-init exec probe .text contains unresolved relocations"
+    );
+    assert_eq!(
+        system_init_probe_text.len(),
+        text.len(),
+        "minimal system-init exec probe must preserve the bounded executable layout"
+    );
+    fs::write(
+        output.join("linux-probe-system-init.bin"),
+        system_init_probe_text,
+    )
+    .expect("failed to write minimal system-init exec probe bytes");
+
     let interpreter_object = output.join("linux-interpreter.o");
     let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
     let status = Command::new(clang)

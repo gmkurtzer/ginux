@@ -1202,6 +1202,9 @@ without prior contents. This is a bounded write seal, not a general
 memory-management API. The probe
 finally uses `rax = 231`
 (`__NR_exit_group`) with `rdi = 42` (status).
+Final process exit closes every open descriptor in the bounded table before
+retiring the last thread. A non-leader thread's `exit` does not close the
+process-shared descriptor table.
 Immediately before entry, the kernel:
 
 - saves `EFER`, `STAR`, `LSTAR`, and `FMASK`;

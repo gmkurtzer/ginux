@@ -1,6 +1,6 @@
 # Minimal System Container Profile v0
 
-**Status:** Pinned candidate image and machine-readable compatibility matrix; execution as PID 1 is the next gate.
+**Status:** Measured candidate executes as PID 1, reports readiness, and exits cleanly.
 
 The first system-container profile is assembled entirely from repository-owned,
 reproducible inputs. `profiles/minimal-system-v0/profile.tsv` is the canonical
@@ -15,18 +15,17 @@ The candidate `/sbin/init` is a separately linked static Linux ELF artifact,
 not an alias for the existing proof workload. The kernel resolves it only from
 the authenticated root index and validates its bounded ELF plan, canonical
 entry point, RX page count, writable page count, and non-executable stack. Its
-eventual PID-1 path requires an initial stack naming `/sbin/init`, observes PID
-1, writes the exact `GINUX_SYSTEM_INIT_V0` readiness line to the inherited
-console, and exits through `exit_group(42)` for the automated profile gate.
+PID-1 path receives an initial stack naming `/sbin/init`, observes PID 1, opens
+the measured `/dev/console`, writes the exact `GINUX_SYSTEM_INIT_V0` readiness
+line, and exits through `exit_group(42)`. Final process teardown closes both
+the candidate's console descriptor and descriptors inherited across `exec`.
 
-This milestone pins and authenticates the candidate but deliberately does not
-claim M5 completion. The current kernel still executes the comprehensive Linux
-proof workloads. The archive carries the exact `sbin/init` node while `/sbin`
-directory publication remains part of the next execution view. That milestone
-must launch this distinct image through a container-specific entry path and
-verify its output and teardown.
-Process creation/reaping, a mount namespace, tmpfs, procfs, and a complete
-user-namespace contract remain explicit missing rows in the matrix.
+This execution gate deliberately does not claim M5 completion. The archive
+carries the exact `sbin/init` node while explicit `/sbin` directory publication
+remains absent. PID 1 is currently a bounded readiness-and-exit workload, not a
+persistent supervisor or interactive console owner. Process creation/reaping,
+a mount namespace, tmpfs, procfs, and a complete user-namespace contract remain
+explicit missing rows in the matrix.
 
 Build the exact candidate root and signed development image with:
 

@@ -598,6 +598,13 @@ if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     exit 1
 fi
 
+if [[ "$(grep -c '^GINUX_SYSTEM_INIT_V0' "$output_file")" -ne 1 ]] ||
+    ! grep -q '^ginux: measured minimal system init executed as PID 1' "$output_file" ||
+    ! grep -q '^ginux: minimal system init exited cleanly' "$output_file"; then
+    echo "Boot test failed: the measured minimal system init did not run and exit cleanly." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured-root Linux interpreted exec graph planned' "$output_file" ||
     ! grep -q '^ginux: measured-root Linux graph substitution rejected' "$output_file"; then
     echo "Boot test failed: the measured-root interpreted graph was not validated." >&2
@@ -679,8 +686,8 @@ if ! grep -q '^ginux: toolchain-linked static Linux ELF executed' "$output_file"
     exit 1
 fi
 
-if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 3 ]]; then
-    echo "Boot test failed: measured Linux exec replacement did not complete three times." >&2
+if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 4 ]]; then
+    echo "Boot test failed: measured Linux exec replacement did not complete four times." >&2
     exit 1
 fi
 
@@ -1549,7 +1556,7 @@ if ! grep -q '^ginux: Linux callable syscall assertion helpers validated' "$outp
     exit 1
 fi
 
-if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 21 ]]; then
+if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 28 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
     exit 1
 fi

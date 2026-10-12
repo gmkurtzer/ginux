@@ -5738,12 +5738,18 @@ nested_getpid:
 exec_path:
 #ifdef GINUX_EXEC_SECOND
     .asciz "/bin/exec-second"
+#elif defined(GINUX_SYSTEM_INIT_EXEC)
+    .asciz "/sbin/init"
+    .space 7
 #else
     .asciz "/bin/signal-probe"
 #endif
 exec_mode:
 #ifdef GINUX_EXEC_SECOND
     .asciz "exec-second"
+#elif defined(GINUX_SYSTEM_INIT_EXEC)
+    .asciz "system-init"
+    .space 1
 #else
     .asciz "signal-probe"
 #endif
