@@ -9,16 +9,18 @@ EFI_DESTINATION := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 LINUX_PROBE := build/linux-probe.elf
 LINUX_DYNAMIC_DIR := build/linux-dynamic
 INITRAMFS := build/initramfs-v0.cpio
+SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest linux-probe build run test check fmt gate clean
+.PHONY: help doctor manifest system-image linux-probe build run test check fmt gate clean
 
 help:
 	@echo "Ginux development targets"
 	@echo
 	@echo "  make doctor  Check the local development prerequisites"
 	@echo "  make manifest Regenerate the signed development boot inputs"
+	@echo "  make system-image Build the pinned minimal system-container candidate"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build and boot Ginux in headless QEMU"
@@ -33,8 +35,11 @@ doctor:
 
 manifest: linux-probe
 	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
 	@test -s "$(INITRAMFS)"
+
+system-image: manifest
+	@echo "Built $(INITRAMFS) from $(SYSTEM_PROFILE)"
 
 linux-probe:
 	@mkdir -p "$(dir $(LINUX_PROBE))"
@@ -47,6 +52,7 @@ linux-probe:
 	@test -f "$(LINUX_DYNAMIC_DIR)/ld-ginux.so"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-exec-second.elf"
 	@test -f "$(LINUX_DYNAMIC_DIR)/linux-signal-probe.elf"
+	@test -f "$(LINUX_DYNAMIC_DIR)/linux-system-init.elf"
 	@echo "Built $(LINUX_PROBE) and $(LINUX_DYNAMIC_DIR)"
 
 build: manifest

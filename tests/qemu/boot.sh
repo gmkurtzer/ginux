@@ -588,6 +588,16 @@ if ! grep -q '^ginux: measured root published in kernel-owned memory' "$output_f
     exit 1
 fi
 
+if ! grep -q '^ginux: pinned minimal system profile accepted' "$output_file"; then
+    echo "Boot test failed: the minimal system profile was not accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
+    echo "Boot test failed: the minimal system init was not planned." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: measured-root Linux interpreted exec graph planned' "$output_file" ||
     ! grep -q '^ginux: measured-root Linux graph substitution rejected' "$output_file"; then
     echo "Boot test failed: the measured-root interpreted graph was not validated." >&2

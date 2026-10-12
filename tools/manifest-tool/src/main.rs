@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
@@ -26,9 +27,9 @@ const DEVELOPMENT_SEED: [u8; 32] = [
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 6 {
+    if arguments.len() != 7 {
         fail(
-            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS OUTPUT_RS",
+            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS SYSTEM_PROFILE OUTPUT_RS",
         );
     }
     let config = fs::read_to_string(&arguments[1]).unwrap_or_else(|error| {
@@ -43,7 +44,11 @@ fn main() {
         fail("control-plane code must contain 1 through 4096 bytes");
     }
     let bundle = wrap_executable(&code, entries);
-    let root_image = build_initramfs(&arguments[4]);
+    let system_profile = fs::read(&arguments[5]).unwrap_or_else(|error| {
+        fail(&format!("cannot read {}: {error}", arguments[5]));
+    });
+    validate_system_profile(&system_profile);
+    let root_image = build_initramfs(&arguments[4], &system_profile);
 
     let bundle_digest: [u8; 32] = Sha256::digest(&bundle).into();
     let root_digest: [u8; 32] = Sha256::digest(&root_image).into();
@@ -80,7 +85,7 @@ fn main() {
         &bundle,
         &root_image,
     );
-    let output_path = Path::new(&arguments[5]);
+    let output_path = Path::new(&arguments[6]);
     fs::write(output_path, output).unwrap_or_else(|error| {
         fail(&format!("cannot write {}: {error}", output_path.display()));
     });
@@ -91,7 +96,7 @@ fn main() {
     );
 }
 
-fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
+fn build_initramfs(linux_artifacts: &str, system_profile: &[u8]) -> Vec<u8> {
     let artifacts = Path::new(linux_artifacts);
     let linux_init = read_root_artifact(&artifacts.join("linux-linked-graph-main.elf"));
     let linux_interpreter = read_root_artifact(&artifacts.join("ld-ginux.so"));
@@ -99,6 +104,7 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
     let linux_auxiliary = read_root_artifact(&artifacts.join("libginux-aux.so"));
     let linux_exec_second = read_root_artifact(&artifacts.join("linux-exec-second.elf"));
     let linux_signal_probe = read_root_artifact(&artifacts.join("linux-signal-probe.elf"));
+    let linux_system_init = read_root_artifact(&artifacts.join("linux-system-init.elf"));
     let mut archive = Vec::new();
     for (inode, mode, name, data) in [
         (1, 0o040555, "dev", &b""[..]),
@@ -119,6 +125,7 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
         ),
         (12, 0o100555, "etc/motd", &b"Welcome to Ginux\n"[..]),
         (19, 0o040555, "bin", &b""[..]),
+        (22, 0o100444, "etc/ginux-system-profile", system_profile),
     ] {
         append_newc_entry(&mut archive, inode, mode, name, data);
     }
@@ -129,12 +136,75 @@ fn build_initramfs(linux_artifacts: &str) -> Vec<u8> {
         (16, "linux/libginux-aux.so", linux_auxiliary.as_slice()),
         (18, "bin/signal-probe", linux_signal_probe.as_slice()),
         (20, "bin/exec-second", linux_exec_second.as_slice()),
+        (23, "sbin/init", linux_system_init.as_slice()),
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
     append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
-    append_newc_entry(&mut archive, 21, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 24, 0, "TRAILER!!!", &[]);
     archive
+}
+
+fn validate_system_profile(bytes: &[u8]) {
+    let text = std::str::from_utf8(bytes).unwrap_or_else(|_| fail("system profile is not UTF-8"));
+    if !text.ends_with('\n') || text.contains('\r') || text.contains('\0') {
+        fail("system profile must use newline-terminated LF text");
+    }
+    let mut lines = text.lines();
+    if lines.next() != Some("GINUX_SYSTEM_PROFILE_V0") {
+        fail("system profile has an unsupported version");
+    }
+    let mut names = BTreeSet::new();
+    let mut ready = false;
+    let mut partial = false;
+    let mut missing = false;
+    let mut metadata = [false; 4];
+    for line in lines {
+        let mut fields = line.split('\t');
+        let Some(kind) = fields.next() else {
+            fail("system profile row has no kind");
+        };
+        let Some(name) = fields.next() else {
+            fail("system profile row has no name");
+        };
+        let Some(state) = fields.next() else {
+            fail("system profile row has no state");
+        };
+        let Some(description) = fields.next() else {
+            fail("system profile row has no description");
+        };
+        if fields.next().is_some()
+            || !matches!(kind, "meta" | "runtime" | "filesystem" | "security")
+            || name.is_empty()
+            || description.is_empty()
+            || !names.insert(name)
+        {
+            fail("system profile contains a malformed or duplicate row");
+        }
+        if kind == "meta" {
+            let index = match (name, state, description) {
+                ("architecture", "x86_64", "required") => 0,
+                ("init", "/sbin/init", "required") => 1,
+                ("console", "/dev/console", "required") => 2,
+                ("root", "newc-ro", "required") => 3,
+                _ => fail("system profile contains unsupported metadata"),
+            };
+            metadata[index] = true;
+        } else {
+            match state {
+                "ready" => ready = true,
+                "partial" => partial = true,
+                "missing" => missing = true,
+                _ => fail("system profile row has an unsupported state"),
+            }
+        }
+    }
+    if metadata != [true; 4] {
+        fail("system profile is missing required metadata");
+    }
+    if !ready || !partial || !missing {
+        fail("system profile must expose ready, partial, and missing requirements");
+    }
 }
 
 fn read_root_artifact(path: &Path) -> Vec<u8> {

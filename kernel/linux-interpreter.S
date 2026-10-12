@@ -766,7 +766,7 @@ ginux_linux_interpreter:
     ret
 
 .Linspect_etc_directory:
-    sub rsp, 160
+    sub rsp, 192
     mov edi, -100
     lea rsi, [rip + .Letc_path]
     mov edx, 0x10000
@@ -777,10 +777,10 @@ ginux_linux_interpreter:
 
     mov edi, 2
     mov rsi, rsp
-    mov edx, 160
+    mov edx, 192
     mov eax, 217
     syscall
-    cmp rax, 136
+    cmp rax, 176
     jne .Linvalid_dynamic
     cmp word ptr [rsp + 16], 24
     jne .Linvalid_dynamic
@@ -829,7 +829,7 @@ ginux_linux_interpreter:
 
     mov edi, 2
     mov rsi, rsp
-    mov edx, 160
+    mov edx, 192
     mov eax, 217
     syscall
     test rax, rax
@@ -852,10 +852,10 @@ ginux_linux_interpreter:
     jne .Linvalid_dynamic
     mov edi, 2
     mov rsi, rsp
-    mov edx, 160
+    mov edx, 192
     mov eax, 217
     syscall
-    cmp rax, 136
+    cmp rax, 176
     jne .Linvalid_dynamic
 
     mov edi, 2
@@ -1016,7 +1016,7 @@ ginux_linux_interpreter:
     syscall
     cmp rax, -20
     jne .Linvalid_dynamic
-    add rsp, 160
+    add rsp, 192
     ret
 
 .Linspect_root_hostname:

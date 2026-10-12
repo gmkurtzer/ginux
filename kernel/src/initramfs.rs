@@ -17,6 +17,7 @@ const TYPE_MASK: u32 = 0o170000;
 const DIRECTORY: u32 = 0o040000;
 const REGULAR: u32 = 0o100000;
 const SYMLINK: u32 = 0o120000;
+const SYSTEM_PROFILE_HEADER: &[u8] = b"GINUX_SYSTEM_PROFILE_V0\n";
 
 static ROOT_PUBLISHED: AtomicBool = AtomicBool::new(false);
 static mut PUBLISHED_ROOT: MaybeUninit<ReadOnlyRoot> = MaybeUninit::uninit();
@@ -213,7 +214,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 20
+    archive.entry_count() == 22
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -242,6 +243,9 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
             .find(b"etc/motd")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"Welcome to Ginux\n")
         && archive
+            .find(b"etc/ginux-system-profile")
+            .is_some_and(|entry| entry.mode == 0o100444 && valid_system_profile(entry.data))
+        && archive
             .find(b"var/lib")
             .is_some_and(|entry| entry.mode == 0o040555 && entry.data.is_empty())
         && archive
@@ -268,7 +272,28 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
         && archive
             .find(b"bin/signal-probe")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && archive
+            .find(b"sbin/init")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && archive.find(b"missing").is_none()
+}
+
+fn valid_system_profile(bytes: &[u8]) -> bool {
+    bytes.starts_with(SYSTEM_PROFILE_HEADER)
+        && bytes.ends_with(b"\n")
+        && !bytes.contains(&b'\r')
+        && !bytes.contains(&0)
+        && [
+            b"meta\tarchitecture\tx86_64\trequired\n" as &[u8],
+            b"meta\tinit\t/sbin/init\trequired\n",
+            b"meta\tconsole\t/dev/console\trequired\n",
+            b"meta\troot\tnewc-ro\trequired\n",
+            b"\tready\t",
+            b"\tpartial\t",
+            b"\tmissing\t",
+        ]
+        .iter()
+        .all(|needle| bytes.windows(needle.len()).any(|window| window == *needle))
 }
 
 fn mutation_rejected(
@@ -748,7 +773,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 20
+    let valid = root.node_count == 22
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -781,6 +806,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
             .lookup(b"etc/motd")
             .is_some_and(|entry| entry.mode == 0o100555 && entry.data == b"Welcome to Ginux\n")
         && root
+            .lookup(b"etc/ginux-system-profile")
+            .is_some_and(|entry| entry.mode == 0o100444 && valid_system_profile(entry.data))
+        && root
             .lookup(b"var/lib")
             .is_some_and(|entry| entry.mode == 0o040555 && entry.data.is_empty())
         && root
@@ -806,6 +834,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root
             .lookup(b"bin/signal-probe")
+            .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
+        && root
+            .lookup(b"sbin/init")
             .is_some_and(|entry| entry.mode == 0o100555 && !entry.data.is_empty())
         && root.lookup(b"missing").is_none()
         && root.lookup(b"../init").is_none()

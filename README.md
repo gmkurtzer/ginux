@@ -7,8 +7,14 @@ ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
 boot manifest. The kernel validates its measurement, normalized metadata, safe relative
 paths, uniqueness, alignment, an executable `init`, and an exact trailer while
 rejecting malformed variants during every QEMU boot. The generated archive now
-contains the build-produced Linux main, interpreter, two DSOs, and two static
-exec targets and is about 90 KiB. The kernel copies it into a zeroed, contiguous 32-frame allocation,
+contains the build-produced Linux main, interpreter, two DSOs, two static
+exec targets, and a separately linked `/sbin/init` candidate. The validated
+`profiles/minimal-system-v0/profile.tsv` matrix is embedded into the signed
+root and records ready, partial, and missing requirements without treating
+partial behavior as compatibility. The kernel resolves the candidate only
+from the authenticated index and validates its one-page RX/one-page RW ELF
+plan; it does not yet claim to have launched the candidate as PID 1. The kernel
+copies the root into a zeroed, contiguous 32-frame allocation,
 verifies source independence and the complete zero tail, and builds a bounded
 pathname index whose 32-bit offsets resolve only inside the owned image. A
 final indexed copy remains kernel-owned through
@@ -802,7 +808,8 @@ static artifact at `build/linux-probe.elf` and the dynamic fixtures at
 `build/linux-dynamic/linux-linked-main.elf`, and
 `build/linux-dynamic/libginux.so`. It also emits the bounded dependency-list
 fixtures `linux-linked-graph-main.elf`, `libginux-aux.so`,
-`linux-signal-probe.elf`, and `linux-exec-second.elf` for inspection
+`linux-signal-probe.elf`, `linux-exec-second.elf`, and
+`linux-system-init.elf` for inspection
 and the deterministic proof root at `build/initramfs-v0.cpio` without assembling the EFI
 filesystem. Override the tools with `CLANG=/path/to/clang` or
 `LLD=/path/to/rust-lld`. Kernel and
@@ -810,6 +817,11 @@ proof-workload ABI constants share the machine-readable
 `specs/abi/control-v3.rs` source, and the manifest builder expands its symbolic
 feature and descriptor words before signing. The checked-in key is an RFC test
 identity and must not be treated as a production trust root.
+
+`make system-image` builds the pinned minimal system-container candidate and
+signed development inputs from the profile, repository-built ELF artifacts,
+and deterministic archive recipe. See
+[Minimal System Container Profile v0](specs/container/minimal-system-v0.md).
 
 The interpreter and dependency proof payloads are assembled from
 `kernel/linux-interpreter.S` and `kernel/linux-dependency.S` under separate

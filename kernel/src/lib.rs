@@ -618,6 +618,35 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: persistent read-only root publication failed\r\n");
     }
     serial_write("ginux: measured root published in kernel-owned memory\r\n");
+    let Some(system_profile_node) =
+        initramfs::published_regular_file_node(b"etc/ginux-system-profile")
+    else {
+        kernel_fail("ginux: minimal system profile missing\r\n");
+    };
+    if initramfs::published_file_by_node(system_profile_node).is_none() {
+        kernel_fail("ginux: minimal system profile unreadable\r\n");
+    }
+    serial_write("ginux: pinned minimal system profile accepted\r\n");
+    let Some(system_init_node) = initramfs::published_regular_file_node(b"sbin/init") else {
+        kernel_fail("ginux: minimal system init missing\r\n");
+    };
+    let Some(system_init) = initramfs::published_file_by_node(system_init_node) else {
+        kernel_fail("ginux: minimal system init unreadable\r\n");
+    };
+    let Some(system_init_plan) = linux_elf::measured_static_exec_plan(system_init) else {
+        kernel_fail("ginux: minimal system init invalid\r\n");
+    };
+    if system_init_plan.entry != 0x41_5100
+        || system_init_plan.executable.page_count != 1
+        || system_init_plan.writable.page_count != 1
+        || system_init_plan.executable.writable
+        || !system_init_plan.executable.executable
+        || !system_init_plan.writable.writable
+        || system_init_plan.writable.executable
+    {
+        kernel_fail("ginux: minimal system init plan outside profile\r\n");
+    }
+    serial_write("ginux: measured minimal system init planned\r\n");
     let Some(exec_second_node) = initramfs::published_regular_file_node(b"bin/exec-second") else {
         kernel_fail("ginux: second measured Linux exec target missing\r\n");
     };

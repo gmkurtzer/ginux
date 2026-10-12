@@ -1,0 +1,21 @@
+GINUX_SYSTEM_PROFILE_V0
+meta	architecture	x86_64	required
+meta	init	/sbin/init	required
+meta	console	/dev/console	required
+meta	root	newc-ro	required
+runtime	elf.static-x86_64	ready	Load a measured static x86-64 ET_EXEC image
+runtime	console.pid1-banner	missing	PID 1 writes an exact readiness banner to standard output
+runtime	process.identity	ready	PID 1 observes Linux container PID 1
+runtime	process.exit-group	ready	PID 1 terminates the bounded process with exit_group
+runtime	process.fork-wait	missing	PID 1 creates and reaps a child process
+runtime	signal.standard	partial	Caught ignored blocked and selected fatal standard signals
+runtime	clock.monotonic	ready	Monotonic time sleep and timer waits
+runtime	futex.private	partial	Bounded private waits wakes and clear-child-TID
+filesystem	root.read-only	ready	Authenticated indexed newc root is immutable
+filesystem	root.mount	missing	Root is installed through a Linux mount namespace
+filesystem	tmpfs.tmp	missing	Writable tmpfs is mounted at /tmp
+filesystem	procfs	missing	Bounded /proc exposes process identity and lifecycle
+filesystem	devfs	partial	Console null zero and tty compatibility nodes
+security	credentials.root	ready	Container-local root credential queries
+security	namespace.user	missing	Container credentials are isolated by a user namespace contract
+security	privilege-boundary	partial	Native capabilities remain independent of Linux root credentials

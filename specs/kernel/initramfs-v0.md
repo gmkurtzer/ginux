@@ -22,8 +22,9 @@ Directories carry no data. An archive must contain exactly one nonempty,
 executable regular file named `init`.
 
 The generated proof contains `bin`, `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
-`var/lib`, `var/lib/state`, `var/lib/version`, the native `init` marker, `etc/hostname`,
-`etc/os-release`, `etc/motd`, and four build-produced Linux ELF artifacts
+`var/lib`, `var/lib/state`, `var/lib/version`, the native `init` marker,
+`etc/hostname`, `etc/os-release`, `etc/motd`, the validated
+`etc/ginux-system-profile`, and four build-produced Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and auxiliary
 DSO. Two distinct static exec targets are published at their Linux-visible
 measured-root paths `bin/signal-probe` and `bin/exec-second`. Both use separately
@@ -32,7 +33,12 @@ behavior, while the second retains an independent address layout. The hostname i
 `ginux\n`; `os-release` is immutable mode `0555` with exact contents
 `NAME=Ginux\nID=ginux\n`; `motd` contains `Welcome to Ginux\n`; and the nested
 state file contains `ready\n` and the version marker contains `0\n`. The archive
-layer requires nonempty executable entries but does not compare them with
+also contains a separately linked static candidate at `sbin/init`. Its one-page
+RX and one-page RW plan is validated from the measured root, but this revision
+does not yet launch it as PID 1. The mode-`0444` profile file binds the
+candidate's architecture, canonical init path, console, root format, and
+machine-readable ready/partial/missing compatibility rows. The archive layer
+requires nonempty executable entries but does not compare them with
 kernel-embedded artifact bytes. The signed root-image digest authenticates the
 complete archive; after publication, the ELF planners parse and bind the
 selected measured files to their canonical paths, interpreter name, dependency
@@ -49,7 +55,7 @@ broader than this v0 publication capacity; images above 128 KiB fail closed
 during materialization.
 
 A second lifecycle proof constructs a fixed index of at most 64 nodes. The
-20-entry proof crosses the former 16-node limit while remaining representable
+22-entry proof crosses the former 16-node limit while remaining representable
 by the private one-byte descriptor selector. Each
 node stores only checked 32-bit name and data offsets inside the owned image; no node
 retains a pointer into the handed boot source. Exact `init` and directory
@@ -70,7 +76,7 @@ fully staged metadata-and-name record per call, rejects regular files as
 directories, and reports end of the eight-entry proof root without copying. The
 published allocation remains allocator-owned after the control-plane domain exits.
 
-The bounded Linux syscall profile resolves the three `/etc` regular files
+The bounded Linux syscall profile resolves the four `/etc` regular files
 directly from that same retained index. Auxiliary Linux
 descriptor state stores a one-based measured-root node selector independently
 of the bounded file role. Runtime reads therefore recover bytes by index rather

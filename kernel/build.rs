@@ -17,6 +17,7 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-dependency.S");
     println!("cargo:rerun-if-changed=linux-auxiliary-dependency.S");
     println!("cargo:rerun-if-changed=linux-exec-target.S");
+    println!("cargo:rerun-if-changed=linux-system-init.S");
     println!("cargo:rerun-if-changed=linux-probe.ld");
     println!("cargo:rerun-if-changed=linux-linked-main.ld");
     println!("cargo:rerun-if-changed=linux-linked-dependency.ld");
@@ -24,6 +25,7 @@ fn main() {
     println!("cargo:rerun-if-changed=linux-linked-interpreter.ld");
     println!("cargo:rerun-if-changed=linux-signal-probe.ld");
     println!("cargo:rerun-if-changed=linux-exec-second.ld");
+    println!("cargo:rerun-if-changed=linux-system-init.ld");
     println!("cargo:rerun-if-env-changed=CLANG");
     println!("cargo:rerun-if-env-changed=LLD");
     println!("cargo:rerun-if-env-changed=GINUX_LINUX_PROBE_EXPORT");
@@ -297,6 +299,22 @@ fn main() {
         status.success(),
         "clang failed to assemble Linux signal probe"
     );
+    let system_init_object = output.join("linux-system-init.o");
+    let status = Command::new(&clang)
+        .args([
+            "-target",
+            "x86_64-none-elf",
+            "-c",
+            "linux-system-init.S",
+            "-o",
+        ])
+        .arg(&system_init_object)
+        .status()
+        .expect("failed to assemble minimal Linux system init");
+    assert!(
+        status.success(),
+        "clang failed to assemble minimal Linux system init"
+    );
 
     let linked_dependency = output.join("libginux.so");
     let linked_dependency_script =
@@ -443,6 +461,36 @@ fn main() {
         .expect("failed to link Linux signal probe");
     assert!(status.success(), "LLD failed to link Linux signal probe");
 
+    let system_init = output.join("linux-system-init.elf");
+    let system_init_script =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
+            .join("linux-system-init.ld");
+    let mut system_init_link = Command::new(&lld);
+    system_init_link
+        .args([
+            "-flavor",
+            "gnu",
+            "-m",
+            "elf_x86_64",
+            "-static",
+            "-nostdlib",
+            "-e",
+            "ginux_linux_system_init",
+            "-T",
+        ])
+        .arg(&system_init_script)
+        .arg(&system_init_object)
+        .arg("-o")
+        .arg(&system_init);
+    configure_linker_library_path(&mut system_init_link, toolchain_library.as_ref());
+    let status = system_init_link
+        .status()
+        .expect("failed to link minimal Linux system init");
+    assert!(
+        status.success(),
+        "LLD failed to link minimal Linux system init"
+    );
+
     let linked_main = output.join("linux-linked-main.elf");
     let linked_main_script =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"))
@@ -521,6 +569,8 @@ fn main() {
             .expect("failed to export second Linux exec target");
         fs::copy(&signal_probe, directory.join("linux-signal-probe.elf"))
             .expect("failed to export Linux signal probe");
+        fs::copy(&system_init, directory.join("linux-system-init.elf"))
+            .expect("failed to export minimal Linux system init");
     }
 
     let linked = output.join("linux-probe.elf");
