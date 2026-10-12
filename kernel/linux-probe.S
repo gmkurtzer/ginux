@@ -667,6 +667,86 @@ valid_interpreter_base:
     mov eax, 11
     call syscall_expect_zero
 
+    xor edi, edi
+    mov esi, 8192
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
+    jne failure
+    mov qword ptr [0x40b000], 5
+    mov qword ptr [0x40c000], 6
+    mov edi, 0x40b000
+    mov esi, 4096
+    mov edx, 1
+    mov eax, 10
+    call syscall_expect_zero
+    mov eax, 10
+    call syscall_expect_einval
+    mov edi, 0x40b000
+    mov eax, 63
+    call syscall_expect_efault
+    cmp qword ptr [0x40b000], 5
+    jne failure
+    mov edi, 0x40c000
+    mov eax, 63
+    call syscall_expect_zero
+    cmp dword ptr [0x40c000], 0x756e6947
+    jne failure
+    mov edi, 0x40c000
+    mov esi, 4096
+    mov edx, 1
+    mov eax, 10
+    call syscall_expect_zero
+    mov edi, 0x40c000
+    mov eax, 63
+    call syscall_expect_efault
+    mov edi, 0x40b000
+    mov esi, 4096
+    mov eax, 11
+    call syscall_expect_zero
+    mov edi, 0x40c000
+    mov eax, 11
+    call syscall_expect_zero
+
+    xor edi, edi
+    mov esi, 8192
+    mov edx, 3
+    mov r10d, 0x22
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9
+    syscall
+    cmp rax, 0x40b000
+    jne failure
+    mov qword ptr [0x40b000], 7
+    mov qword ptr [0x40c000], 8
+    mov edi, 0x40c000
+    mov esi, 4096
+    mov edx, 1
+    mov eax, 10
+    call syscall_expect_zero
+    mov edi, 0x40b000
+    mov eax, 63
+    call syscall_expect_zero
+    cmp dword ptr [0x40b000], 0x756e6947
+    jne failure
+    mov edi, 0x40c000
+    mov eax, 63
+    call syscall_expect_efault
+    cmp qword ptr [0x40c000], 8
+    jne failure
+    mov edi, 0x40b000
+    mov esi, 4096
+    mov eax, 11
+    call syscall_expect_zero
+    mov edi, 0x40c000
+    mov eax, 11
+    call syscall_expect_zero
+
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
     xor edi, edi
     mov esi, 0x411000

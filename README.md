@@ -432,9 +432,11 @@ the blocked parent. Mismatches return `EAGAIN`, and a matching wait without
 another runnable thread returns `ENOSYS`. General futex queues, timeouts, and
 robust futex recovery are not implemented.
 Bounded `mprotect` can irreversibly seal the page named by the parsed
-`PT_GNU_RELRO` range or every page in the active anonymous extent as
-read-only/NX. The page-table permissions and syscall copy direction change
-together: reads continue, writes fail, and executable permissions are rejected.
+`PT_GNU_RELRO` range or any complete page in an active anonymous area as
+read-only/NX. Sealing one page of a two-page area splits its registry record so
+the other page retains independent write permission. The page-table
+permissions and syscall copy direction change together: reads continue, writes
+fail, and executable permissions are rejected.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.

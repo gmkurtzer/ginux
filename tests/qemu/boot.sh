@@ -1683,6 +1683,11 @@ if ! grep -q '^ginux: Linux atomic multi-page write seal validated' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: bounded Linux mmap protection splitting validated' "$output_file"; then
+    echo "Boot test failed: Linux mmap protection splitting was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: Linux anonymous mapping discard validated' "$output_file"; then
     echo "Boot test failed: Linux anonymous mapping discard was not validated." >&2
     exit 1

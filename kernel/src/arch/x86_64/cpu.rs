@@ -4202,7 +4202,10 @@ extern "sysv64" fn linux_syscall_handler(
         ),
         LINUX_MUNMAP_SYSCALL => linux_munmap(first_argument, buffer),
         LINUX_MPROTECT_SYSCALL => {
-            if !first_argument.is_multiple_of(PAGE_SIZE as u64) || count != LINUX_PROT_READ {
+            if !first_argument.is_multiple_of(PAGE_SIZE as u64)
+                || !matches!(buffer, length if length == PAGE_SIZE as u64 || length == 2 * PAGE_SIZE as u64)
+                || count != LINUX_PROT_READ
+            {
                 return LINUX_EINVAL;
             }
             let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
@@ -4222,18 +4225,35 @@ extern "sysv64" fn linux_syscall_handler(
                     }
                 }
             }
-            if let Some(index) = linux_mmap_area_index(first_argument, buffer) {
+            if let Some(index) = linux_mmap_covering_area_index(first_argument, buffer) {
                 let mapping_pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
+                let mapping_address =
+                    ELF_PROBE_MMAP.load(Ordering::SeqCst) + (index * PAGE_SIZE) as u64;
+                let protected_pages = (buffer / PAGE_SIZE as u64) as usize;
+                let protected_slot = index
+                    + usize::try_from((first_argument - mapping_address) / PAGE_SIZE as u64)
+                        .unwrap_or(2);
                 if ELF_PROBE_MMAP_WRITABLE[index].load(Ordering::SeqCst)
                     && address_space::protect_current_linux_pages_read_only(
                         first_argument,
                         &[
-                            linux_mmap_slot_frame(index),
-                            linux_mmap_slot_frame(index + 1),
-                        ][..usize::from(mapping_pages)],
+                            linux_mmap_slot_frame(protected_slot),
+                            linux_mmap_slot_frame(protected_slot + 1),
+                        ][..protected_pages],
                     )
                 {
-                    ELF_PROBE_MMAP_WRITABLE[index].store(false, Ordering::SeqCst);
+                    if mapping_pages == 2 && protected_pages == 1 {
+                        let file = ELF_PROBE_MMAP_FILE[index].load(Ordering::SeqCst);
+                        ELF_PROBE_MMAP_PAGES[index].store(1, Ordering::SeqCst);
+                        ELF_PROBE_MMAP_PAGES[index + 1].store(1, Ordering::SeqCst);
+                        ELF_PROBE_MMAP_WRITABLE[index]
+                            .store(protected_slot != index, Ordering::SeqCst);
+                        ELF_PROBE_MMAP_WRITABLE[index + 1]
+                            .store(protected_slot != index + 1, Ordering::SeqCst);
+                        ELF_PROBE_MMAP_FILE[index + 1].store(file, Ordering::SeqCst);
+                    } else {
+                        ELF_PROBE_MMAP_WRITABLE[index].store(false, Ordering::SeqCst);
+                    }
                     return 0;
                 }
             }

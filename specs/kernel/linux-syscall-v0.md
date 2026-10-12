@@ -820,18 +820,22 @@ deadlocking. Invalid operations or alignment return `-EINVAL`, and an invalid
 word returns `-EFAULT`. Timeouts, bitsets, requeueing, priority inheritance,
 multiple waiters, and cross-process keys remain undefined.
 
-`rax = 10` (`__NR_mprotect`) supports one irreversible transition on either the
-page named by the parsed `PT_GNU_RELRO` range or the complete active anonymous
-extent: one or two exact pages may become read-only/NX. The RELRO seal lasts for
-the process lifetime; an anonymous seal lasts until unmap, and a later mapping
-starts from freshly scrubbed RW/NX frames. The normalized range must be
-present, page-aligned, and exact, and the only accepted protection is
-`PROT_READ`. All other requests return `-EINVAL`. Before changing any page, the
-kernel validates ownership and writable/NX permissions for every leaf. It then
-clears every writable bit and invalidates every translation before resuming
-userspace. The probe confirms that copy-in remains available while cross-page
-`uname` copy-out returns `-EFAULT`, repeated and partial sealing are rejected, a
-read-only extent can still be unmapped, and remapping restores writable state
+`rax = 10` (`__NR_mprotect`) supports an irreversible transition on either the
+page named by the parsed `PT_GNU_RELRO` range or one complete page, or both
+pages, of an active anonymous area. The selected pages become read-only/NX.
+Sealing one page of a two-page area splits its registry record into independent
+one-page entries and preserves the other page's write permission and file-kind
+metadata. The RELRO seal lasts for the process lifetime; an anonymous seal
+lasts until unmap, and a later mapping starts from freshly scrubbed RW/NX
+frames. The normalized range must be present and page-aligned, and the only
+accepted protection is `PROT_READ`. Ranges spanning independent entries and
+all other requests return `-EINVAL`. Before changing any page, the kernel
+validates ownership and writable/NX permissions for every leaf. It then clears
+every selected writable bit and invalidates every selected translation before
+resuming userspace. The probe confirms that copy-in remains available while
+cross-page `uname` copy-out returns `-EFAULT`, repeated sealing is rejected,
+head- and tail-page seals preserve write access only on the unselected page, a
+read-only area can still be unmapped, and remapping restores writable state
 without prior contents. This is a bounded write seal, not a general
 memory-management API. The probe
 finally uses `rax = 231`
