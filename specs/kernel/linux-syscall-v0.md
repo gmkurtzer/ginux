@@ -847,12 +847,16 @@ generated information when requested, installs the signal number in the saved
 syscall return context, and marks the waiter ready. The generator then returns
 normally in the peer. This profile selects the first matching blocked slot and
 supports at most the existing two-thread execution graph. Null waits with no
-runnable peer and positive-timeout waits with no pending match return `-ENOSYS`;
-timed sleeping, interruption by nonmatching signals, and general signal wait
-queues remain unsupported. The measured runtime proves every immediate
-rejection, pending `SIGUSR1`/`SI_USER` consumption, empty polling, mask cleanup,
-and a child-to-parent scheduler wake. Teardown requires the wait kind, mask,
-output pointer, and saved thread state to be fully reclaimed.
+runnable peer return `-ENOSYS`. A positive timeout with a runnable peer is
+converted to a checked monotonic deadline and stored with the typed wait. At
+the first Linux syscall or scheduling boundary at or after that deadline, the
+kernel clears the wait and makes the saved context ready with `-EAGAIN`.
+Independent APIC-driven Linux timeout interrupts, interruption by nonmatching
+signals, and general signal wait queues remain unsupported. The measured
+runtime proves every immediate rejection, pending `SIGUSR1`/`SI_USER`
+consumption, empty polling, mask cleanup, a positive-timeout wake, and a
+child-to-parent signal wake. Teardown requires the wait kind, mask, output
+pointer, deadline, and saved thread state to be fully reclaimed.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE`, or a zero-flag or
 `SS_AUTODISARM` stack of at least

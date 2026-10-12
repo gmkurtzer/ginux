@@ -472,12 +472,15 @@ with no pending match can also suspend one of the two bounded threads while its
 peer is runnable. A matching generated standard signal writes the optional
 information record, installs the signal number as the suspended syscall's
 return value, and makes that thread runnable without invoking its disposition.
-The measured workload proves this handoff from a futex-blocked child to its
-signal-waiting parent and requires all typed wait state to be reclaimed at
-exit. Empty zero-time polls return `EAGAIN`; positive-timeout sleeping,
-interruption by nonmatching signals, and waits without another runnable thread
-return `ENOSYS`. Input, timeout, and output failures leave pending and thread
-state unchanged.
+A positive timeout stores a checked monotonic deadline in that same wait record;
+the next Linux syscall or scheduling boundary at or after the deadline makes
+the waiter runnable with `EAGAIN`. The measured workload proves both timeout
+and signal handoffs from a futex-blocked child to its signal-waiting parent and
+requires all typed wait state to be reclaimed at exit. Empty zero-time polls
+also return `EAGAIN`. Fully asynchronous timer wakeups, interruption by
+nonmatching signals, and waits without another runnable thread remain outside
+the profile and return `ENOSYS`. Input, timeout, and output failures leave
+pending and thread state unchanged.
 The bounded process reports UID, effective UID, GID, and effective GID zero as
 container-local identity only; these values grant no native kernel capability.
 Real/effective/saved UID and GID triples are also zero and are copied only

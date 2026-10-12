@@ -488,7 +488,8 @@ valid_interpreter_base:
     mov esi, 0x40b000
     xor edx, edx
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
     mov qword ptr [0x405940], 0
     mov esi, 0x405940
@@ -1015,11 +1016,13 @@ valid_interpreter_base:
     mov edi, 0x40c000
     mov esi, 1
     mov edx, 1
-    mov eax, 10
+    push 10
+    pop rax
     call syscall_expect_zero
     mov edi, 0x40b000
     mov esi, 4097
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
     xor edi, edi
@@ -1028,7 +1031,8 @@ valid_interpreter_base:
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     call syscall_expect_einval
 
     # Reserve two virtual pages without frames, activate them independently,
@@ -1039,7 +1043,8 @@ valid_interpreter_base:
     mov r10d, 0x22
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    push 9
+    pop rax
     syscall
     cmp rax, 0x40b000
     jne failure
@@ -1087,20 +1092,24 @@ valid_interpreter_base:
     cmp qword ptr [0x40c000], 0
     jne failure
     mov edi, 0x40c000
-    mov eax, 63
+    push 63
+    pop rax
     call syscall_expect_efault
     mov edi, 0x40b000
     mov esi, 1
     mov edx, 1
-    mov eax, 10
+    push 10
+    pop rax
     call syscall_expect_zero
     mov edx, 3
-    mov eax, 10
+    push 10
+    pop rax
     call syscall_expect_einval
 
     mov edi, 0x40b000
     mov esi, 8192
-    mov eax, 11
+    push 11
+    pop rax
     call syscall_expect_zero
 
 #if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
@@ -1111,7 +1120,8 @@ valid_interpreter_base:
     mov esi, 0x4050c0
     xor edx, edx
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
     mov r14d, 2
 linux_clone_repeat:
@@ -1120,22 +1130,26 @@ linux_clone_repeat:
     mov edx, 0x405194
     lea r8d, [edx + 4]
     mov r9d, 0x410fc0
-    mov eax, 56
+    push 56
+    pop rax
     syscall
     test rax, rax
     jz child_thread_probe
     mov ebx, eax
     mov ebp, edx
-    mov eax, 24
+    push 24
+    pop rax
     call syscall_expect_zero
     mov edi, 0x13d0f00
     mov esi, 0x413000
     mov edx, ebp
     lea r8d, [edx + 4]
     mov r9d, 0x410fc0
-    mov eax, 56
+    push 56
+    pop rax
     call syscall_expect_eagain
-    mov eax, 24
+    push 24
+    pop rax
     call syscall_expect_zero
     mov rdi, rbp
     xor esi, esi
@@ -1145,8 +1159,17 @@ linux_clone_repeat:
     call syscall_expect_one
     cmp r14d, 2
     jne linux_parent_futex_wait
+    push 1
+    push 0
     mov edi, 0x4050c0
     xor esi, esi
+    mov rdx, rsp
+    mov r10d, 8
+    mov eax, 128
+    syscall
+    add rsp, 16
+    cmp rax, -11
+    jne failure
     xor edx, edx
     mov eax, 128
     syscall
@@ -1163,7 +1186,8 @@ linux_child_joined:
     dec r14d
     jnz linux_clone_repeat
 #else
-    mov eax, 24
+    push 24
+    pop rax
     call syscall_expect_zero
 #endif
 
@@ -1222,14 +1246,16 @@ linux_child_joined:
     xor esi, esi
     mov edx, 0x4050e0
     mov r10d, 7
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_einval
 
     mov edi, 99
     xor esi, esi
     mov edx, 0x4050e0
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_PRIOR_SIGNAL_MASK
     jne failure
@@ -1238,7 +1264,8 @@ linux_child_joined:
     mov esi, 0x4050c0
     mov edx, 0x4050e0
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_PRIOR_SIGNAL_MASK
     jne failure
@@ -1247,7 +1274,8 @@ linux_child_joined:
     xor esi, esi
     mov edx, 0x4050e0
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_BLOCKED_SIGNAL_MASK
     jne failure
@@ -1257,14 +1285,16 @@ linux_child_joined:
     mov esi, 0x4050c0
     mov edx, 0x406200
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_efault
 
     mov edi, 99
     xor esi, esi
     mov edx, 0x4050e0
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], GINUX_BLOCKED_SIGNAL_MASK
     jne failure
@@ -1274,14 +1304,16 @@ linux_child_joined:
     mov esi, 0x4050c0
     xor edx, edx
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
 
     mov edi, 99
     xor esi, esi
     mov edx, 0x4050e0
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_zero
     cmp qword ptr [0x4050e0], 0
     jne failure
@@ -1290,7 +1322,8 @@ linux_child_joined:
     mov esi, 0x406200
     xor edx, edx
     mov r10d, 8
-    mov eax, 14
+    push 14
+    pop rax
     call syscall_expect_efault
 
     lea rax, [rip + linux_sigsegv_handler]
@@ -4154,6 +4187,8 @@ child_thread_probe:
     call syscall_expect_zero
     cmp r14d, 2
     jne child_thread_exit
+    mov eax, 24
+    call syscall_expect_zero
     push 1
     pop rdi
     push 10
