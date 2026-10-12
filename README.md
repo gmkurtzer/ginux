@@ -42,7 +42,9 @@ The publication index now admits 64 nodes and is exercised beyond its original
 and `/lib64/*` paths map to internal measured-root entries, while
 `/bin/signal-probe` and `/bin/exec-second` are direct measured-root nodes. The
 first is a dedicated two-page RX signal-runtime profile, leaving the full
-five-page primary workload unchanged. The complete dynamic
+five-page primary workload unchanged; after its caught and pending-signal
+checks, it proves default `SIGPIPE` process termination and resource cleanup.
+The complete dynamic
 main/interpreter/two-DSO graph executes from those retained bytes. A bounded
 single-threaded `execve` proof atomically replaces two independent static workloads and
 the running interpreted `/init` graph with the selected measured executable, rebuilds up to eight bounded argument and eight environment entries
@@ -478,7 +480,10 @@ changing the FIFO when interrupted, and wakes with `EPIPE` if the reader
 closes. A blocked `writev` retains a kernel-owned snapshot of up to four
 iovecs, so later userspace table mutations cannot redirect its input. The
 measured graph proves both write forms across interruption, capacity wake, and
-reader-close wake, including writev snapshot isolation. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
+reader-close wake, including writev snapshot isolation. Broken scalar and
+vectored writes generate `SIGPIPE`: caught delivery resumes the write with
+`EPIPE`, ignored delivery preserves `EPIPE`, and the default disposition
+terminates the bounded Linux process. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
 retires either initial console descriptor. Bounded `dup` reuses the lowest closed slot and preserves whether
 the console endpoint is input or output; `dup2` provides exact-slot replacement.
 `fcntl(F_GETFD/F_GETFL)` exposes the bounded descriptor and endpoint flags. It also

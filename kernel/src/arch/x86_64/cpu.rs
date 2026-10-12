@@ -302,8 +302,10 @@ const LINUX_SS_AUTODISARM: u32 = 1 << 31;
 const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_STANDARD_SIGNAL_COUNT: u64 = 31;
 const LINUX_SIGSEGV: u64 = 11;
+const LINUX_SIGPIPE: u64 = 13;
 const LINUX_SI_USER: i32 = 0;
 const LINUX_SI_TKILL: i32 = -6;
+const LINUX_SI_KERNEL: i32 = 0x80;
 const LINUX_SEGV_MAPERR: i32 = 1;
 const LINUX_SEGV_ACCERR: i32 = 2;
 const LINUX_SA_SIGINFO: u64 = 0x0000_0004;
@@ -404,6 +406,7 @@ static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
+static ELF_PROBE_TERMINATION_SIGNAL: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_EXEC_REPLACED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_EXEC_NODE: AtomicU8 = AtomicU8::new(0);
 static LINUX_LIVE_RETURN_VALIDATED: AtomicBool = AtomicBool::new(false);
@@ -2274,6 +2277,13 @@ fn retire_current_linux_thread() -> bool {
     true
 }
 
+fn retire_all_linux_threads() {
+    LINUX_CURRENT_THREAD_SLOT.store(LINUX_THREAD_SLOT_NONE, Ordering::SeqCst);
+    for slot in 0..LINUX_THREAD_LIMIT {
+        clear_linux_thread_slot(slot);
+    }
+}
+
 fn clear_linux_thread_slot(slot: usize) {
     let stack_base = LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst);
     let stack_size = LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst);
@@ -3206,6 +3216,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         return LinuxElfResult::FAILED;
     }
     ELF_PROBE_COMPLETED.store(false, Ordering::SeqCst);
+    ELF_PROBE_TERMINATION_SIGNAL.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_REPLACED.store(false, Ordering::SeqCst);
     ELF_PROBE_EXEC_NODE.store(0, Ordering::SeqCst);
     LINUX_LIVE_RETURN_VALIDATED.store(false, Ordering::SeqCst);
@@ -3564,6 +3575,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let linux_thread_table_released = finish_linux_thread_table();
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     let completed = ELF_PROBE_COMPLETED.load(Ordering::SeqCst);
+    let termination_signal = ELF_PROBE_TERMINATION_SIGNAL.swap(0, Ordering::SeqCst);
     let exec_replaced = ELF_PROBE_EXEC_REPLACED.swap(false, Ordering::SeqCst);
     let exec_node = ELF_PROBE_EXEC_NODE.swap(0, Ordering::SeqCst);
     let selected_static_exec_plan = if exec_replaced {
@@ -3654,10 +3666,16 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let signal_wait_timeout_count = LINUX_SIGNAL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
+    let termination_signal_valid = termination_signal
+        == if signal_probe_executed {
+            LINUX_SIGPIPE as u32
+        } else {
+            0
+        };
     let expected_signal_count = if signal_probe_executed {
         10
     } else if execution.tls_size != 0 {
-        14
+        16
     } else {
         2
     };
@@ -3672,7 +3690,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             && first_child_tid != 0
             && clone_reuse_validated
             && child_gettid_count == 2
-            && yield_switch_count == 17
+            && yield_switch_count == 19
             && clone_busy_rejection_count == 2
             && clone_invalid_rejection_count == 0
             && clone_tid_fault_count == 1
@@ -3728,7 +3746,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             first_child_tid != 0,
             clone_reuse_validated,
             child_gettid_count == 2,
-            yield_switch_count == 17,
+            yield_switch_count == 19,
             clone_busy_rejection_count == 2,
             clone_invalid_rejection_count == 0,
             clone_tid_fault_count == 1,
@@ -4449,7 +4467,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 && first_child_tid != 0
                 && clone_reuse_validated
                 && child_gettid_count == 2
-                && yield_switch_count == 17
+                && yield_switch_count == 19
                 && clone_busy_rejection_count == 2
                 && clone_invalid_rejection_count == 0
                 && clone_tid_fault_count == 1
@@ -4526,6 +4544,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && executable_identity_restored
         && no_new_privileges_enforced
         && signal_lifecycle_valid
+        && termination_signal_valid
         && signal_mask_restored
         && pending_signals_cleared
         && pending_signal_codes_cleared
@@ -4569,6 +4588,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             executable_identity_restored,
             no_new_privileges_enforced,
             signal_lifecycle_valid,
+            termination_signal_valid,
             signal_mask_restored,
             pending_signals_cleared,
             pending_signal_codes_cleared,
@@ -4929,7 +4949,9 @@ extern "sysv64" fn linux_syscall_handler(
             user_rip,
             user_rflags,
         ),
-        LINUX_CLOSE_SYSCALL => linux_descriptor_close(first_argument),
+        LINUX_CLOSE_SYSCALL => {
+            linux_descriptor_close_live_return(registers, syscall_return, first_argument)
+        }
         LINUX_POLL_SYSCALL => {
             linux_poll_live_return(registers, syscall_return, first_argument, buffer, count)
         }
@@ -8879,6 +8901,15 @@ fn wake_linux_pipe_write_waits() -> u32 {
     woken
 }
 
+fn blocked_linux_pipe_writer() -> Option<LinuxThreadHandle> {
+    (0..LINUX_THREAD_LIMIT).find_map(|slot| {
+        (LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) == LINUX_THREAD_BLOCKED
+            && LINUX_THREAD_WAIT_KINDS[slot].load(Ordering::SeqCst) == LINUX_THREAD_WAIT_PIPE_WRITE)
+            .then(|| linux_thread_handle(slot))
+            .flatten()
+    })
+}
+
 fn complete_linux_timerfd_read_wait(slot: usize) -> bool {
     if slot >= LINUX_THREAD_LIMIT
         || LINUX_THREAD_STATES[slot].load(Ordering::SeqCst) != LINUX_THREAD_BLOCKED
@@ -9002,6 +9033,9 @@ fn linux_descriptor_write_live_return(
     count: u64,
 ) -> u64 {
     let immediate = linux_descriptor_write(descriptor, address, count);
+    if immediate == LINUX_EPIPE && linux_pipe_write_descriptor(descriptor) {
+        return linux_broken_pipe_live_return(output, caller);
+    }
     if immediate != LINUX_ENOSYS
         || !linux_pipe_write_descriptor(descriptor) && !linux_eventfd_descriptor(descriptor)
     {
@@ -9061,6 +9095,9 @@ fn linux_descriptor_writev_live_return(
     count: u64,
 ) -> u64 {
     let immediate = linux_descriptor_writev(descriptor, vectors, count);
+    if immediate == LINUX_EPIPE && linux_pipe_write_descriptor(descriptor) {
+        return linux_broken_pipe_live_return(output, caller);
+    }
     if immediate != LINUX_ENOSYS || !linux_pipe_write_descriptor(descriptor) {
         return immediate;
     }
@@ -9077,6 +9114,27 @@ fn linux_descriptor_writev_live_return(
         0,
         Some(&ranges[..vector_count]),
     )
+}
+
+fn linux_broken_pipe_live_return(
+    output: *mut LinuxSyscallFrame,
+    mut interrupted: LinuxUserContext,
+) -> u64 {
+    interrupted.rax = LINUX_EPIPE;
+    let result = linux_kill(
+        1,
+        (LINUX_SIGPIPE, LINUX_SI_KERNEL),
+        output,
+        interrupted,
+        (interrupted.rip, interrupted.rflags),
+    );
+    if result == LINUX_RETURN_TO_KERNEL || result != 0 {
+        result
+    } else if LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst) {
+        0
+    } else {
+        LINUX_EPIPE
+    }
 }
 
 fn linux_blocking_descriptor_io_live_return(
@@ -10456,6 +10514,10 @@ fn linux_console_close(descriptor: u64) -> u64 {
 }
 
 fn linux_descriptor_close(descriptor: u64) -> u64 {
+    linux_descriptor_close_with_wake(descriptor, true)
+}
+
+fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 {
     if !(LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor) {
         return linux_console_close(descriptor);
     }
@@ -10465,7 +10527,9 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
         ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
         ELF_PROBE_EPOLL_DATA.store(0, Ordering::SeqCst);
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
-        wake_linux_descriptor_waits();
+        if wake_waiters {
+            wake_linux_descriptor_waits();
+        }
         return 0;
     }
     if linux_eventfd_descriptor(descriptor) {
@@ -10473,7 +10537,9 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
         ELF_PROBE_EVENTFD_COUNTER.store(0, Ordering::SeqCst);
         ELF_PROBE_EVENTFD_FLAGS.store(0, Ordering::SeqCst);
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
-        wake_linux_descriptor_waits();
+        if wake_waiters {
+            wake_linux_descriptor_waits();
+        }
         return 0;
     }
     if linux_timerfd_descriptor(descriptor) {
@@ -10482,7 +10548,9 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
         ELF_PROBE_TIMERFD_INTERVAL.store(0, Ordering::SeqCst);
         ELF_PROBE_TIMERFD_DEADLINE.store(0, Ordering::SeqCst);
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
-        wake_linux_descriptor_waits();
+        if wake_waiters {
+            wake_linux_descriptor_waits();
+        }
         return 0;
     }
     if linux_pipe_read_descriptor(descriptor) {
@@ -10493,7 +10561,9 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
             byte.store(0, Ordering::SeqCst);
         }
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
-        wake_linux_descriptor_waits();
+        if wake_waiters {
+            wake_linux_descriptor_waits();
+        }
         return 0;
     }
     if linux_pipe_write_descriptor(descriptor) {
@@ -10503,7 +10573,9 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
             ELF_PROBE_PIPE_LENGTH.store(0, Ordering::SeqCst);
         }
         ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
-        wake_linux_descriptor_waits();
+        if wake_waiters {
+            wake_linux_descriptor_waits();
+        }
         return 0;
     }
     if ELF_PROBE_DEVICE_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
@@ -10514,6 +10586,55 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
     }
     linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
     ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+    0
+}
+
+fn linux_descriptor_close_live_return(
+    output: *mut LinuxSyscallFrame,
+    caller: LinuxUserContext,
+    descriptor: u64,
+) -> u64 {
+    let closes_pipe_reader = linux_pipe_read_descriptor(descriptor);
+    let blocked_writer = closes_pipe_reader.then(blocked_linux_pipe_writer).flatten();
+    let result = linux_descriptor_close_with_wake(descriptor, false);
+    if result != 0 {
+        return result;
+    }
+    let Some(target) = blocked_writer else {
+        wake_linux_descriptor_waits();
+        return 0;
+    };
+    let slot = usize::from(target.slot);
+    let signal_bit = 1 << (LINUX_SIGPIPE - 1);
+    let signal_mask = LINUX_THREAD_SIGNAL_MASKS[slot].load(Ordering::SeqCst);
+    let index = LINUX_SIGPIPE as usize - 1;
+    let handler = ELF_PROBE_SIGNAL_HANDLERS[index].load(Ordering::SeqCst);
+    if signal_mask & signal_bit != 0 {
+        ELF_PROBE_PENDING_SIGNAL_CODES[index].store(LINUX_SI_KERNEL as u32, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
+        wake_linux_descriptor_waits();
+        return 0;
+    }
+    if handler == 1 {
+        wake_linux_descriptor_waits();
+        return 0;
+    }
+    if handler == 0 {
+        return linux_terminate_by_default_signal(LINUX_SIGPIPE);
+    }
+    let delivered = linux_deliver_signal_to_blocked_wait(
+        target,
+        (LINUX_SIGPIPE, LINUX_SI_KERNEL),
+        output,
+        caller,
+        LINUX_EPIPE,
+        true,
+    );
+    if delivered != 0 {
+        ELF_PROBE_PENDING_SIGNAL_CODES[index].store(LINUX_SI_KERNEL as u32, Ordering::SeqCst);
+        ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
+    }
+    wake_linux_descriptor_waits();
     0
 }
 
@@ -11915,6 +12036,34 @@ fn linux_apply_delivered_signal_action(index: usize, signal_bit: u64, old_mask: 
     }
 }
 
+fn linux_default_signal_terminates(signal: u64) -> bool {
+    signal == LINUX_SIGPIPE
+}
+
+fn linux_terminate_by_default_signal(signal: u64) -> u64 {
+    for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
+        let _ = linux_descriptor_close(descriptor);
+    }
+    retire_all_linux_threads();
+    ELF_PROBE_SIGNAL_MASK.store(0, Ordering::SeqCst);
+    ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
+    ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
+    for index in 0..LINUX_SIGNAL_COUNT {
+        ELF_PROBE_PENDING_SIGNAL_CODES[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_HANDLERS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_FLAGS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_RESTORERS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_SIGNAL_ACTION_MASKS[index].store(0, Ordering::SeqCst);
+    }
+    ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
+    ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+    ELF_PROBE_TERMINATION_SIGNAL.store(signal as u32, Ordering::SeqCst);
+    ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
+    ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+    LINUX_RETURN_TO_KERNEL
+}
+
 fn linux_kill(
     pid: u64,
     generated: (u64, i32),
@@ -11944,25 +12093,33 @@ fn linux_kill(
     if handler == 1 {
         return 0;
     }
-    if handler == 0
-        || output.is_null()
-        || current_linux_thread_handle().is_none()
-        || LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
-    {
-        return LINUX_ENOSYS;
-    }
     let old_mask = ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst);
-    let flags = ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
-    let restorer = ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
-    if !linux_signal_action_deliverable(handler, flags, restorer) {
-        return LINUX_ENOSYS;
-    }
     if old_mask & signal_bit != 0 {
         if ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst) & signal_bit == 0 {
             ELF_PROBE_PENDING_SIGNAL_CODES[index].store(signal_code as u32, Ordering::SeqCst);
         }
         ELF_PROBE_PENDING_SIGNALS.fetch_or(signal_bit, Ordering::SeqCst);
         return 0;
+    }
+    if handler == 0 {
+        return if linux_default_signal_terminates(signal)
+            && !LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
+        {
+            linux_terminate_by_default_signal(signal)
+        } else {
+            LINUX_ENOSYS
+        };
+    }
+    if output.is_null()
+        || current_linux_thread_handle().is_none()
+        || LINUX_SIGNAL_ACTIVE.load(Ordering::SeqCst)
+    {
+        return LINUX_ENOSYS;
+    }
+    let flags = ELF_PROBE_SIGNAL_FLAGS[index].load(Ordering::SeqCst);
+    let restorer = ELF_PROBE_SIGNAL_RESTORERS[index].load(Ordering::SeqCst);
+    if !linux_signal_action_deliverable(handler, flags, restorer) {
+        return LINUX_ENOSYS;
     }
     let old_alt_stack_flags = ELF_PROBE_ALT_STACK_FLAGS.load(Ordering::SeqCst);
     let use_alt_stack = flags & LINUX_SA_ONSTACK != 0
@@ -12040,6 +12197,24 @@ fn linux_interrupt_blocked_wait(
     output: *mut LinuxSyscallFrame,
     sender_return: LinuxUserContext,
 ) -> u64 {
+    linux_deliver_signal_to_blocked_wait(
+        target,
+        generated,
+        output,
+        sender_return,
+        LINUX_EINTR,
+        false,
+    )
+}
+
+fn linux_deliver_signal_to_blocked_wait(
+    target: LinuxThreadHandle,
+    generated: (u64, i32),
+    output: *mut LinuxSyscallFrame,
+    sender_return: LinuxUserContext,
+    interrupted_result: u64,
+    completed: bool,
+) -> u64 {
     let (signal, signal_code) = generated;
     if signal == 0 {
         return 0;
@@ -12102,7 +12277,7 @@ fn linux_interrupt_blocked_wait(
         return LINUX_ESRCH;
     };
     let saved_interrupted = interrupted;
-    interrupted.rax = LINUX_EINTR;
+    interrupted.rax = interrupted_result;
     let masked_wait = matches!(
         wait_kind,
         LINUX_THREAD_WAIT_PPOLL | LINUX_THREAD_WAIT_EPOLL_PWAIT
@@ -12280,7 +12455,9 @@ fn linux_interrupt_blocked_wait(
     }
     LINUX_SIGNAL_ACTIVE.store(true, Ordering::SeqCst);
     LINUX_SIGNAL_DELIVERY_COUNT.fetch_add(1, Ordering::SeqCst);
-    if wait_kind == LINUX_THREAD_WAIT_SIGNAL {
+    if completed && wait_kind == LINUX_THREAD_WAIT_PIPE_WRITE {
+        LINUX_PIPE_WRITE_WAKE_COUNT.fetch_add(1, Ordering::SeqCst);
+    } else if wait_kind == LINUX_THREAD_WAIT_SIGNAL {
         LINUX_SIGNAL_WAIT_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     } else if wait_kind == LINUX_THREAD_WAIT_SLEEP {
         LINUX_SLEEP_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);

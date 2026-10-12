@@ -1347,6 +1347,9 @@ valid_interpreter_base:
     inc edi
     mov al, 13
     call syscall_expect_zero
+    inc edi
+    mov al, 13
+    call syscall_expect_zero
     xor edi, edi
     mov eax, 291
     call syscall_expect_two
@@ -1663,6 +1666,9 @@ linux_clone_repeat:
     syscall
     cmp rax, -32
     require_equal
+    push 24
+    pop rax
+    call syscall_expect_zero
     push 3
     pop rax
     call syscall_expect_zero
@@ -1705,6 +1711,9 @@ linux_clone_repeat:
     syscall
     cmp rax, -32
     require_equal
+    push 24
+    pop rax
+    call syscall_expect_zero
     push 3
     pop rax
     call syscall_expect_zero
@@ -3676,6 +3685,7 @@ linux_child_joined:
     pop rax
     call syscall_expect_zero
 
+#if !defined(GINUX_LINKED) || !defined(GINUX_GRAPH)
     mov edi, 0x405e80
     push 22
     pop rax
@@ -3683,6 +3693,19 @@ linux_child_joined:
     push 3
     pop rdi
     push 3
+    pop rax
+    call syscall_expect_zero
+    mov qword ptr [0x405100], 1
+    mov qword ptr [0x405108], 0
+    mov qword ptr [0x405110], 0
+    mov qword ptr [0x405118], 0
+    push 13
+    pop rdi
+    mov esi, 0x405100
+    xor edx, edx
+    push 8
+    pop r10
+    push 13
     pop rax
     call syscall_expect_zero
     push 4
@@ -3703,6 +3726,13 @@ linux_child_joined:
     push 3
     pop rax
     call syscall_expect_zero
+#else
+    push 2
+    pop rdi
+    push 3
+    pop rax
+    call syscall_expect_zero
+#endif
 
     movabs rax, 0x72657a2f7665642f
     mov qword ptr [0x405340], rax
@@ -5479,8 +5509,13 @@ child_thread_exit:
 #endif
 
 linux_sigsegv_handler:
+#if defined(GINUX_LINKED) && defined(GINUX_GRAPH)
+    cmp edi, 13
+    je .Llinux_generated_signal_return
+#endif
     cmp dword ptr [rsi + 8], -6
     jne .Llinux_sigsegv_full
+.Llinux_generated_signal_return:
     ret
 .Llinux_sigsegv_full:
     cmp rsp, 0x405800

@@ -239,7 +239,16 @@ writer-close EOF. Blocked signals, nested delivery, and syscall restart remain
 unsupported. Closing the writer makes any later empty read return EOF and
 reports `POLLHUP`, while buffered bytes remain readable.
 Closing the reader makes writes return `-EPIPE` and reports `POLLERR`; `SIGPIPE`
-delivery is not yet implemented. The endpoints participate in `F_GETFD`,
+is generated with `SI_KERNEL` before a scalar or vectored write returns. An
+ignored disposition leaves the `-EPIPE` result unchanged. A caught disposition
+commits the ordinary signal frame and restores `-EPIPE` through
+`rt_sigreturn`; when the final reader close completes an already-blocked write,
+the frame is installed against that writer's saved thread context before it
+resumes. A blocked `SIGPIPE` is coalesced into the pending standard-signal set
+while the write still completes with `-EPIPE`. The default disposition closes
+the bounded process resources, retires every Linux thread, records termination
+by signal 13, and returns control to the kernel. The dedicated measured signal
+runtime proves that terminal path after its other signal checks. The endpoints participate in `F_GETFD`,
 `F_SETFD`, `F_GETFL`, `lseek`, `poll`, epoll, and `close`. The ring-3 proof
 checks FIFO ordering across partial reads, failed-read non-consumption, full
 buffer backpressure, epoll readiness, EOF, broken-peer handling, and legacy
@@ -920,11 +929,13 @@ the range 1 through 31 constructs the signal frame from the live syscall context
 redirects the pending `SYSRET` into the handler, and records the architectural
 post-syscall `rcx` and `r11` values. `rt_sigreturn` then resumes at the
 instruction following `kill` with a zero result. A disposition of `SIG_IGN`
-discards the signal successfully. Default dispositions and real-time signals
-32 through 64 remain outside this bounded generation profile and return
-`-ENOSYS` instead of pretending to apply Linux termination, stop, continue, or
-queueing semantics. The ring-3 proof covers caught `SIGSEGV` and `SIGUSR1`, an
-inherited ignored `SIGUSR2`, and an unsupported default `SIGTERM`. Foreign PIDs
+discards the signal successfully. The default `SIGPIPE` disposition terminates
+the complete bounded process and releases its descriptors, signal state, and
+threads. Other default dispositions and real-time signals 32 through 64 remain
+outside this bounded generation profile and return `-ENOSYS` instead of
+pretending to apply Linux termination, stop, continue, or queueing semantics.
+The ring-3 proof covers caught `SIGSEGV` and `SIGUSR1`, inherited ignored
+signals, default `SIGPIPE`, and an unsupported default `SIGTERM`. Foreign PIDs
 return `-ESRCH`, and invalid signal numbers return `-EINVAL`.
 `rax = 200` (`__NR_tkill`) admits positive, in-range container-local TID 1.
 Zero, negative, and out-of-range identities return `-EINVAL`; other valid TIDs

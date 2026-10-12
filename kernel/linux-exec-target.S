@@ -790,9 +790,37 @@ ginux_linux_exec_target:
     syscall
     test rax, rax
     jne .Lfailure
+#ifdef GINUX_SIGNAL_PROBE
+    mov qword ptr [rip + .Lsignal_action], 0
+    mov edi, 13
+    lea rsi, [rip + .Lsignal_action]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 13
+    syscall
+    test rax, rax
+    jne .Lfailure
+    lea rdi, [rip + .Lpipe_descriptors]
+    mov eax, 22
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_descriptors]
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov edi, dword ptr [rip + .Lpipe_descriptors + 4]
+    lea rsi, [rip + .Lmessage]
+    mov edx, 1
+    mov eax, 1
+    syscall
+    jmp .Lfailure
+#else
     mov edi, 42
     mov eax, 231
     syscall
+#endif
 
 .Lfailure:
     mov edi, 127
@@ -1040,6 +1068,8 @@ ginux_linux_exec_target:
 .Lexpected_signal_code:
     .zero 8
 .Lexpected_signal_mask:
+    .zero 8
+.Lpipe_descriptors:
     .zero 8
 #endif
 
