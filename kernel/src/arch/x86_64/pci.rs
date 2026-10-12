@@ -1345,6 +1345,27 @@ pub(crate) fn complete_isolated_interrupt_wait(
         && scheduler::current_domain() == Some(domain)
 }
 
+pub(crate) fn advance_isolated_interrupt_wait(
+    domain: u64,
+    completed_request: u64,
+    next_request: u64,
+) -> bool {
+    if domain == 0
+        || next_request != completed_request.checked_add(1).unwrap_or(0)
+        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != completed_request
+        || VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
+        || !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+        || VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) != 1
+    {
+        return false;
+    }
+    VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_REQUEST.store(next_request, Ordering::SeqCst);
+    true
+}
+
 pub(crate) fn quiesce_isolated_interrupt(
     device: VirtioBlockDevice,
     mapping: MmioMapping,

@@ -819,6 +819,11 @@ if ! grep -q '^ginux: isolated virtio blank-sector read completed in ring 3' "$o
     exit 1
 fi
 
+if ! grep -q '^ginux: isolated virtio request generation advanced and reused' "$output_file"; then
+    echo "Boot test failed: the isolated virtio request generation was not reused." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: virtio DMA validation followed hardware quiescence' "$output_file"; then
     echo "Boot test failed: virtio DMA state was not validated after hardware quiescence." >&2
     exit 1

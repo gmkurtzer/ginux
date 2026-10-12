@@ -71,21 +71,25 @@ first constructs an exact three-descriptor sector-two read chain. It publishes
 descriptor head zero by advancing the available index to one. The kernel maps
 only the distinct 4 KiB page containing queue zero's validated two-byte
 notification register and binds that page to the teardown record. Ring 3
-binds queue zero to MSI-X entry zero and notifies once. Control ABI v4 operation
+binds queue zero to MSI-X entry zero and notifies it. Control ABI v4 operation
 19 verifies the write-only object-7 capability, active queue, exact DMA lease,
 domain generation, and request generation before blocking the service. The
 kernel unmasks its private vector 33, wakes only that saved generation, and
 remasks delivery before returning to ring 3. The proof rejects a stale request
 and a duplicate wait, then validates used ID zero, length 513, successful status,
-and the blank 512-byte sector-two payload. On its deliberate fault, the
+and the blank 512-byte sector-two payload. The kernel then advances the exact
+expected request generation, clears only the consumed per-request interrupt
+state, and the same service reuses descriptor head zero for a second
+notify/block/wake cycle. On its deliberate fault, the
 registered device hook masks and disables MSI-X, validates the active binding, disables bus
 mastering, resets the device, retires the temporary interrupt gate, and only then validates every byte of the now-stable
 completed DMA layout before the page is scrubbed and released;
 release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
 owned frames. A calibrated 100 ms APIC one-shot wakes a request whose device
-interrupt never arrives; successful MSI-X delivery cancels it. Reusable
-requests and IOMMU confinement remain unimplemented. See
+interrupt never arrives; successful MSI-X delivery cancels it. A general
+multi-request ring, concurrent requests, and IOMMU confinement remain
+unimplemented. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
 [Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md), plus
 [Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md).

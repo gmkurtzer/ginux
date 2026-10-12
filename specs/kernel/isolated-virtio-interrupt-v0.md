@@ -1,6 +1,6 @@
 # Isolated Virtio Interrupt Wait v0
 
-**Status:** One generation-bound MSI-X wait verified in QEMU.
+**Status:** Two sequential generation-bound MSI-X waits verified in QEMU.
 
 ## Boundary
 
@@ -28,9 +28,13 @@ Vector 33 records the interrupt, matches the saved object, domain generation,
 and request generation, writes success into saved `RAX`, makes the same thread
 running, acknowledges the local APIC, and returns to the sleeping kernel call.
 The call remasks both the function and table entry before returning to ring 3.
-The service then validates used ID zero, length 513, status zero, guard bytes,
-and the blank sector-two payload. The proof rejects request generation two
-before notification and rejects a second wait for consumed generation one.
+The service validates used ID zero, length 513, status zero, guard bytes, and
+the blank sector-two payload. The kernel atomically advances the expected
+request from generation one to two and clears the consumed interrupt count and
+completion bit while delivery remains masked. The service reuses descriptor
+head zero, publishes available index two, notifies again, and completes a
+second block/wake cycle. The proof rejects request generation two before the
+first request and rejects a duplicate wait for consumed generation one.
 
 Every accepted wait also arms the previously calibrated local-APIC timer for a
 100 ms one-shot. The device interrupt cancels and masks that timer before the
@@ -50,9 +54,10 @@ release the DMA page, destroy the service mappings, and retire its authority.
 
 ## Deliberate limits
 
-- Only request generation one and one outstanding queue-zero read are modeled.
+- Two sequential request generations and one outstanding queue-zero read are
+  modeled.
 - There is no vector allocator, shared-vector demultiplexing, SMP affinity,
-  IOMMU domain, reusable request ring, or stable general block-service ABI yet.
+  IOMMU domain, concurrent request ring, or stable general block-service ABI yet.
 - The gate proves timeout delivery independently and cancellation on the live
   device-success path; injected live-device timeout and recovery remains a
   future fault-injection test.

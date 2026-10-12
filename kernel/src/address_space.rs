@@ -4388,23 +4388,32 @@ pub(crate) fn auxiliary_device_wait_ready(domain_id: u64, request: u64) -> bool 
 }
 
 pub(crate) fn complete_auxiliary_device_wait(domain_id: u64, request: u64) -> bool {
-    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
-    let Some(registered) =
-        (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
     else {
         return false;
     };
-    let Some(teardown) = registered.device_teardown else {
+    let Some(mut teardown) = registered.device_teardown else {
         return false;
     };
-    !registered.device_quiesced
+    let completed = !registered.device_quiesced
         && teardown.interrupt_request == request
         && pci::complete_isolated_interrupt_wait(
             teardown.device,
             teardown.msix_mapping,
             domain_id,
             request,
-        )
+        );
+    let Some(next_request) = request.checked_add(1) else {
+        return false;
+    };
+    if !completed || !pci::advance_isolated_interrupt_wait(domain_id, request, next_request) {
+        return false;
+    }
+    teardown.interrupt_request = next_request;
+    registered.device_teardown = Some(teardown);
+    true
 }
 
 pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
@@ -5480,7 +5489,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     const NOTIFICATION_PAGE_INDEX: usize = 7;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
     const INTERRUPT_REQUEST: u64 = 1;
-    const SUCCESS_FAULT_OFFSET: u64 = 559;
+    const SUCCESS_FAULT_OFFSET: u64 = 683;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5609,10 +5618,33 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x80, 0xbe, 0, 0x09, 0, 0, 0, // require successful status
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x49, 0x89, 0xf9, // preserve the device capability across the data scan
         0x48, 0x8d, 0xbe, 0, 0x06, 0, 0, // point at sector data
         0xb9, 0, 0x02, 0, 0, // scan 512 bytes
         0x31, 0xc0, // compare against zero
         0xf3, 0xae, // repe scasb
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0xc6, 0x86, 0, 0x09, 0, 0, 0xff, // reset pending status
+        0x66, 0xc7, 0x86, 0x06, 0x01, 0, 0, 0, 0, // publish ring slot one
+        0x66, 0xc7, 0x86, 0x02, 0x01, 0, 0, 0x02, 0, // publish available index two
+        0x48, 0xba, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rdx, notification register
+        0x66, 0xc7, 0x02, 0, 0, // notify queue zero again
+        0x49, 0x89, 0xf0, // preserve the DMA mapping across the control call
+        0x4c, 0x89, 0xcf, // restore device capability to RDI
+        0xb8, 0x13, 0, 0, 0, // operation 19: block-device call
+        0xbe, 0x01, 0, 0, 0, // command 1: wait for completion
+        0xba, 0x02, 0, 0, 0, // request generation two
+        0xcd, 0x80, // enter the kernel and block again
+        0x4c, 0x89, 0xc6, // restore the DMA mapping
+        0x48, 0x85, 0xc0, // require successful second wake
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0x83, 0xbe, 0x02, 0x02, 0, 0, 0x02, // require used index two
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x83, 0xbe, 0x0c, 0x02, 0, 0, 0, // require second used id zero
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x81, 0xbe, 0x10, 0x02, 0, 0, 0x01, 0x02, 0, 0, // require second used length 513
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x80, 0xbe, 0, 0x09, 0, 0, 0, // require successful second status
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x0f, 0x0b, // success: deliberate service fault
     ];
@@ -5667,6 +5699,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     }
     program[156..164].copy_from_slice(&dma_physical.to_le_bytes());
     program[429..437].copy_from_slice(&(user_notification as u64).to_le_bytes());
+    program[589..597].copy_from_slice(&(user_notification as u64).to_le_bytes());
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
@@ -6047,10 +6080,12 @@ unsafe fn dma_page_has_completed_read(frame: u64) -> bool {
             32..=39 => descriptor_two[offset - 32],
             40 => 1,
             44 => 2,
-            0x102 => 1,
-            0x202 => 1,
+            0x102 => 2,
+            0x202 => 2,
             0x208 => 1,
             0x209 => 2,
+            0x210 => 1,
+            0x211 => 2,
             0x408 => 2,
             _ => 0,
         };

@@ -408,7 +408,10 @@ exact blank-sector completion before faulting. Every admitted wait arms a
 calibrated 100 ms local-APIC one-shot; timeout wakes the saved call with
 `UINT64_MAX - 2`, while a valid device interrupt cancels the timer before
 return. This proves one bounded read
-followed by fault revocation and kernel quiescence. The same domain owns one
+followed by an exact generation advance and a second bounded read through the
+same queue. Only one request may be outstanding; consumed state is cleared
+while MSI-X remains masked, and overflow fails closed. Fault revocation and
+kernel quiescence follow the second completion. The same domain owns one
 separately tracked RW/NX DMA page. A domain fault triggers an internal teardown
 obligation: MSI-X mask and disable, device validation, bus-master disable,
 reset, and interrupt-gate retirement must complete before its address space or
