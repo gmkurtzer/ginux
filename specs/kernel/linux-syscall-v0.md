@@ -189,9 +189,14 @@ stores its destination, bounded count, and descriptor in a typed scheduler wait.
 A write revalidates the output and completes the read, while closing the writer
 wakes it with EOF without modifying the destination. The measured two-thread
 graph proves both paths and retires both endpoints before continuing. Blocking
-without a runnable peer, blocking vectored reads, and signal interruption retain
-`-ENOSYS`. Closing the writer makes any later empty read return EOF and reports
-`POLLHUP`, while buffered bytes remain readable.
+without a runnable peer and blocking vectored reads retain `-ENOSYS`. An
+admitted caught standard signal unblocked by the waiting thread's ordinary mask
+may cancel a scalar read through the shared transactional handoff. It returns
+`-EINTR` through `rt_sigreturn` without modifying the destination or FIFO; the
+measured graph retries that read, consumes the sibling's byte, and then proves
+writer-close EOF. Blocked signals, nested delivery, and syscall restart remain
+unsupported. Closing the writer makes any later empty read return EOF and
+reports `POLLHUP`, while buffered bytes remain readable.
 Closing the reader makes writes return `-EPIPE` and reports `POLLERR`; SIGPIPE
 delivery is not yet implemented. The endpoints participate in `F_GETFD`,
 `F_SETFD`, `F_GETFL`, `lseek`, `poll`, epoll, and `close`. The ring-3 proof
