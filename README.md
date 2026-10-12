@@ -5,7 +5,9 @@ Ginux is an immutable, capability-secure, container-native operating system for 
 The first M6 storage primitive is a canonical two-sector persistent-volume
 record. It preserves the older generation while preparing and flushing an
 inactive slot, writes the commit marker last, and accepts the new generation
-only after the final flush. Every QEMU boot proves recovery at all five commit
+only after the final flush. Its canonical encoder/decoder is now a shared
+`no_std` crate used by the kernel and intended for the isolated storage
+service. Every QEMU boot proves recovery at all five commit
 stages, rejects partial commit markers and corrupt records, falls back to the
 older valid slot, and fails closed on generation exhaustion or ambiguity. See
 [Persistent Volume Record v0](specs/kernel/persistent-volume-v0.md).

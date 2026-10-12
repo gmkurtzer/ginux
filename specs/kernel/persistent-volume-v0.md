@@ -20,6 +20,13 @@ discards writes that have not crossed a successful flush. Read, write, and
 flush failures are reported and a failed or ambiguous scan is never treated as
 an empty volume.
 
+The encoder and decoder live in the workspace's `ginux-volume-format` `no_std`
+crate. The kernel backend and the future isolated storage service therefore
+consume one canonical implementation of the magic, version, field offsets,
+payload bounds, commit marker, zero-padding rules, and SHA-256 validation. The
+crate rejects generation zero and oversized payloads before encoding, treats a
+prepared record as uncommitted, and contains no device or kernel authority.
+
 Canonical empty media consists of two all-zero sectors. If neither slot is
 valid and either sector contains any nonzero byte, recovery reports corruption
 instead of permitting generation-one initialization. This includes an

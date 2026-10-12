@@ -119,6 +119,7 @@ name = "ginux-kernel"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "ginux-volume-format",
 ]
 
 [[package]]
@@ -126,6 +127,13 @@ name = "ginux-manifest-tool"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "sha2",
+]
+
+[[package]]
+name = "ginux-volume-format"
+version = "0.1.0"
+dependencies = [
  "sha2",
 ]
 

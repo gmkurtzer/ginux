@@ -9,3 +9,4 @@ path = "src/lib.rs"
 
 [dependencies]
 ed25519-dalek = { version = "=3.0.0", default-features = false }
+ginux-volume-format = { path = "../crates/volume-format" }
