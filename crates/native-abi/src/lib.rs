@@ -4,6 +4,10 @@ pub const NATIVE_SERVICE_BOOT_MAGIC: u64 = 0x3042_5358_554e_4947;
 pub const NATIVE_SERVICE_BOOT_VERSION: u16 = 0;
 pub const NATIVE_SERVICE_BOOT_SIZE: u16 = 64;
 pub const NATIVE_SERVICE_FEATURE_VIRTIO_BLOCK: u32 = 1 << 0;
+pub const NATIVE_NETWORK_BOOT_MAGIC: u64 = 0x3042_4e58_554e_4947;
+pub const NATIVE_NETWORK_BOOT_VERSION: u16 = 0;
+pub const NATIVE_NETWORK_BOOT_SIZE: u16 = 80;
+pub const NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK: u32 = 1 << 0;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -120,6 +124,70 @@ impl NativeServiceBootV0 {
 const _: () = assert!(core::mem::size_of::<NativeServiceBootV0>() == 64);
 const _: () = assert!(core::mem::align_of::<NativeServiceBootV0>() == 8);
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeNetworkBootV0 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub common_config_address: u64,
+    pub receive_notification_address: u64,
+    pub transmit_notification_address: u64,
+    pub dma_virtual_address: u64,
+    pub dma_device_address: u64,
+    pub device_capability: u64,
+    pub mac_address: u64,
+    pub reserved: u64,
+}
+
+impl NativeNetworkBootV0 {
+    pub const fn virtio_network(
+        common_config_address: u64,
+        receive_notification_address: u64,
+        transmit_notification_address: u64,
+        dma_virtual_address: u64,
+        dma_device_address: u64,
+        device_capability: u64,
+        mac_address: u64,
+    ) -> Self {
+        Self {
+            magic: NATIVE_NETWORK_BOOT_MAGIC,
+            version: NATIVE_NETWORK_BOOT_VERSION,
+            size: NATIVE_NETWORK_BOOT_SIZE,
+            features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK,
+            common_config_address,
+            receive_notification_address,
+            transmit_notification_address,
+            dma_virtual_address,
+            dma_device_address,
+            device_capability,
+            mac_address,
+            reserved: 0,
+        }
+    }
+
+    pub const fn is_valid_virtio_network(&self) -> bool {
+        self.magic == NATIVE_NETWORK_BOOT_MAGIC
+            && self.version == NATIVE_NETWORK_BOOT_VERSION
+            && self.size == NATIVE_NETWORK_BOOT_SIZE
+            && self.features == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+            && self.common_config_address != 0
+            && self.receive_notification_address != 0
+            && self.transmit_notification_address != 0
+            && self.receive_notification_address != self.transmit_notification_address
+            && self.dma_virtual_address != 0
+            && self.dma_device_address != 0
+            && self.device_capability != 0
+            && self.mac_address != 0
+            && self.mac_address >> 48 == 0
+            && self.reserved == 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeNetworkBootV0>() == 80);
+const _: () = assert!(core::mem::align_of::<NativeNetworkBootV0>() == 8);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +220,12 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_SERVICE_BOOT_SIZE UINT16_C(64)"));
         assert!(header.contains("GINUX_NATIVE_SERVICE_FEATURE_VIRTIO_BLOCK UINT32_C(1)"));
         assert!(header.contains("sizeof(struct ginux_native_service_boot_v0) == 64"));
+        let network_header = include_str!("../../../specs/abi/native-network-bootstrap-v0.h");
+        assert!(network_header.contains("UINT64_C(0x30424e58554e4947)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_BOOT_VERSION UINT16_C(0)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_BOOT_SIZE UINT16_C(80)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK UINT32_C(1)"));
+        assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
     }
 
     #[test]
@@ -193,6 +267,80 @@ mod tests {
             },
         ] {
             assert!(!invalid.is_valid_virtio_block());
+        }
+    }
+
+    #[test]
+    fn network_bootstrap_layout_and_validation_are_frozen() {
+        assert_eq!(NATIVE_NETWORK_BOOT_MAGIC.to_le_bytes(), *b"GINUXNB0");
+        assert_eq!(core::mem::size_of::<NativeNetworkBootV0>(), 80);
+        assert_eq!(core::mem::align_of::<NativeNetworkBootV0>(), 8);
+        assert_eq!(core::mem::offset_of!(NativeNetworkBootV0, magic), 0);
+        assert_eq!(core::mem::offset_of!(NativeNetworkBootV0, version), 8);
+        assert_eq!(core::mem::offset_of!(NativeNetworkBootV0, size), 10);
+        assert_eq!(core::mem::offset_of!(NativeNetworkBootV0, features), 12);
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV0, common_config_address),
+            16
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV0, receive_notification_address),
+            24
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV0, transmit_notification_address),
+            32
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV0, dma_virtual_address),
+            40
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV0, dma_device_address),
+            48
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV0, device_capability),
+            56
+        );
+        assert_eq!(core::mem::offset_of!(NativeNetworkBootV0, mac_address), 64);
+        assert_eq!(core::mem::offset_of!(NativeNetworkBootV0, reserved), 72);
+
+        let valid = NativeNetworkBootV0::virtio_network(1, 2, 3, 4, 5, 6, 0x5254_0012_3456);
+        assert!(valid.is_valid_virtio_network());
+        for invalid in [
+            NativeNetworkBootV0 { magic: 0, ..valid },
+            NativeNetworkBootV0 {
+                version: 1,
+                ..valid
+            },
+            NativeNetworkBootV0 { size: 79, ..valid },
+            NativeNetworkBootV0 {
+                features: 0,
+                ..valid
+            },
+            NativeNetworkBootV0 {
+                receive_notification_address: valid.transmit_notification_address,
+                ..valid
+            },
+            NativeNetworkBootV0 {
+                dma_virtual_address: 0,
+                ..valid
+            },
+            NativeNetworkBootV0 {
+                device_capability: 0,
+                ..valid
+            },
+            NativeNetworkBootV0 {
+                mac_address: 1 << 48,
+                ..valid
+            },
+            NativeNetworkBootV0 {
+                reserved: 1,
+                ..valid
+            },
+        ] {
+            assert!(!invalid.is_valid_virtio_network());
         }
     }
 

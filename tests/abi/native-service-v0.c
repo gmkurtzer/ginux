@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "specs/abi/native-network-bootstrap-v0.h"
 #include "specs/abi/native-service-bootstrap-v0.h"
 #include "specs/abi/native-service-lifecycle-v0.h"
 
@@ -30,6 +31,36 @@ _Static_assert(
     "bootstrap capability offset");
 _Static_assert(offsetof(struct ginux_native_service_boot_v0, reserved) == 56,
                "bootstrap reserved offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v0, magic) == 0,
+               "network bootstrap magic offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v0, version) == 8,
+               "network bootstrap version offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v0, size) == 10,
+               "network bootstrap size offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v0, features) == 12,
+               "network bootstrap features offset");
+_Static_assert(
+    offsetof(struct ginux_native_network_boot_v0, common_config_address) == 16,
+    "network bootstrap common configuration offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v0,
+                        receive_notification_address) == 24,
+               "network bootstrap receive notification offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v0,
+                        transmit_notification_address) == 32,
+               "network bootstrap transmit notification offset");
+_Static_assert(
+    offsetof(struct ginux_native_network_boot_v0, dma_virtual_address) == 40,
+    "network bootstrap DMA virtual offset");
+_Static_assert(
+    offsetof(struct ginux_native_network_boot_v0, dma_device_address) == 48,
+    "network bootstrap DMA device offset");
+_Static_assert(
+    offsetof(struct ginux_native_network_boot_v0, device_capability) == 56,
+    "network bootstrap capability offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v0, mac_address) == 64,
+               "network bootstrap MAC offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v0, reserved) == 72,
+               "network bootstrap reserved offset");
 _Static_assert(offsetof(struct ginux_native_control_descriptor_v4, size) == 0,
                "control descriptor size offset");
 _Static_assert(offsetof(struct ginux_native_control_descriptor_v4, version) ==
@@ -75,6 +106,25 @@ uint64_t ginux_native_service_v0_consumer(
         boot->reserved != 0 ||
         !GINUX_NATIVE_CONTROL_ABI_IS_COMPATIBLE(discovery) ||
         !GINUX_NATIVE_CONTROL_DESCRIPTOR_IS_COMPATIBLE(descriptor)) {
+        return UINT64_MAX;
+    }
+    return boot->device_capability;
+}
+
+uint64_t ginux_native_network_v0_consumer(
+    const struct ginux_native_network_boot_v0 *boot) {
+    if (boot == NULL || boot->magic != GINUX_NATIVE_NETWORK_BOOT_MAGIC ||
+        boot->version != GINUX_NATIVE_NETWORK_BOOT_VERSION ||
+        boot->size != GINUX_NATIVE_NETWORK_BOOT_SIZE ||
+        boot->features != GINUX_NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK ||
+        boot->common_config_address == 0 ||
+        boot->receive_notification_address == 0 ||
+        boot->transmit_notification_address == 0 ||
+        boot->receive_notification_address ==
+            boot->transmit_notification_address ||
+        boot->dma_virtual_address == 0 || boot->dma_device_address == 0 ||
+        boot->device_capability == 0 || boot->mac_address == 0 ||
+        (boot->mac_address >> 48) != 0 || boot->reserved != 0) {
         return UINT64_MAX;
     }
     return boot->device_capability;

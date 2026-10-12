@@ -44,6 +44,14 @@ fault, restores its own page-table root, observes no registered service address
 space or owned frame, and retires the domain. No bootstrap pointer, opaque
 capability handle, device page, DMA page, or interrupt route is supplied.
 
+The next boundary is specified independently by
+[Native Network Service Bootstrap ABI v0](../abi/native-network-bootstrap-v0.md).
+Its fixed record separates the network service from the existing block-service
+bootstrap ABI and names both queue notification registers, one DMA window, the
+opaque generation capability, and the pinned MAC without exposing PCI, MSI-X,
+APIC, or IOMMU internals. This revision defines and verifies the record but does
+not yet deliver it to the running service.
+
 ## Deliberate limits
 
 This milestone does not yet delegate device capabilities, map MMIO or DMA, or
