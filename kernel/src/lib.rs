@@ -1624,14 +1624,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated virtio queue geometry configured without DMA");
     serial_write("\r\nginux: isolated DMA lease initialized in ring 3");
     serial_write("\r\nginux: isolated virtio queue bound to inactive DMA lease");
-    serial_write("\r\nginux: isolated virtio queue activated without submission");
+    serial_write("\r\nginux: isolated virtio queue activated before publication");
     serial_write("\r\nginux: isolated virtio read descriptors prepared in ring 3");
-    serial_write("\r\nginux: isolated virtio request remained unpublished");
+    serial_write("\r\nginux: isolated virtio available entry published without notification");
+    serial_write("\r\nginux: isolated virtio request remained incomplete before quiescence");
     serial_write("\r\nginux: faulted virtio control service revoked");
     serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
     serial_write("\r\nginux: fault path quiesced device before DMA release");
     serial_write("\r\nginux: faulted DMA lease scrubbed and released");
-    serial_write("\r\nginux: faulted virtio control device quiesced without submission");
+    serial_write("\r\nginux: faulted virtio control device quiesced before completion");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v4 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");

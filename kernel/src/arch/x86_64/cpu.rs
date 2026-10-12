@@ -15216,7 +15216,15 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
             return u64::MAX;
         }
         if !address_space::quiesce_auxiliary_device(fault_domain) {
-            serial_write("ginux: auxiliary device quiesce failed\r\n");
+            serial_write("ginux: auxiliary device quiesce failed vector/error/address/rip:");
+            serial_write_u64(fault_metadata.vector);
+            serial_write(" ");
+            serial_write_u64(fault_metadata.error);
+            serial_write(" ");
+            serial_write_u64(fault_metadata.address);
+            serial_write(" ");
+            serial_write_u64(fault_metadata.instruction);
+            serial_write("\r\n");
             return u64::MAX;
         }
         if !address_space::activate_kernel_root_for_auxiliary(fault_domain) {

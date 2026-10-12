@@ -52,11 +52,12 @@ deliberately faulting. The control domain owns one additional RW/NX DMA page,
 initializes it in ring 3, and publishes its exact base, `+0x100`, and `+0x200`
 offsets as the descriptor, available, and used-ring addresses. After the kernel
 arms PCI bus mastering, the service enables queue zero and sets `DRIVER_OK`, but
-first constructs an exact three-descriptor sector-two read chain. It leaves the
-available and used indices at zero and sends no notification. On fault, the
-registered device hook validates the active-idle binding, disables bus
+first constructs an exact three-descriptor sector-two read chain. It publishes
+descriptor head zero by advancing the available index to one, but receives no
+notification mapping. On fault, the registered device hook validates the
+active binding, disables bus
 mastering, resets the device, and only then validates every byte of the now-stable
-prepared-but-unpublished DMA layout before the page is scrubbed and released;
+published-but-unprocessed DMA layout before the page is scrubbed and released;
 release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
 owned frames. See

@@ -4352,7 +4352,7 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
     if registered.device_quiesced
         || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
         || !pci::quiesce(device, mapping)
-        || !unsafe { dma_page_has_prepared_read(dma_physical) }
+        || !unsafe { dma_page_has_published_read(dma_physical) }
     {
         return false;
     }
@@ -5387,7 +5387,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     const DEVICE_PAGE_INDEX: usize = 5;
     const DMA_PAGE_INDEX: usize = 6;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
-    const SUCCESS_FAULT_OFFSET: u64 = 369;
+    const SUCCESS_FAULT_OFFSET: u64 = 378;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5470,6 +5470,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0xc6, 0x47, 0x14, 0x0f, // set DRIVER_OK
         0xf6, 0x47, 0x14, 0x04, // require DRIVER_OK to remain set
         0x75, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0xc7, 0x86, 0x02, 0x01, 0, 0, 0x01, 0, // publish available index one
         0x0f, 0x0b, // success: deliberate service fault
     ];
     program[2..10].copy_from_slice(&(user_common as u64).to_le_bytes());
@@ -5515,7 +5516,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
     };
     if mapped_dma != user_dma
         || memory::owner_live_frame_count(owner) != Some(8)
-        || unsafe { dma_page_has_prepared_read(dma_physical) }
+        || unsafe { dma_page_has_published_read(dma_physical) }
     {
         let _ = space.release();
         return None;
@@ -5838,7 +5839,7 @@ unsafe fn frame_is_zero(frame: u64) -> bool {
         .is_some_and(|entries| (0..ENTRY_COUNT).all(|index| entries.add(index).read() == 0))
 }
 
-unsafe fn dma_page_has_prepared_read(frame: u64) -> bool {
+unsafe fn dma_page_has_published_read(frame: u64) -> bool {
     let Some(bytes) = mapped_frame::<u8>(frame) else {
         return false;
     };
@@ -5857,6 +5858,7 @@ unsafe fn dma_page_has_prepared_read(frame: u64) -> bool {
             32..=39 => descriptor_two[offset - 32],
             40 => 1,
             44 => 2,
+            0x102 => 1,
             0x408 => 2,
             VIRTIO_STATUS_OFFSET => 0xff,
             _ => 0,

@@ -737,8 +737,8 @@ if ! grep -q '^ginux: isolated virtio queue bound to inactive DMA lease' "$outpu
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio queue activated without submission' "$output_file"; then
-    echo "Boot test failed: the isolated queue did not reach the active-idle state." >&2
+if ! grep -q '^ginux: isolated virtio queue activated before publication' "$output_file"; then
+    echo "Boot test failed: the isolated queue was not activated before publication." >&2
     exit 1
 fi
 
@@ -747,8 +747,13 @@ if ! grep -q '^ginux: isolated virtio read descriptors prepared in ring 3' "$out
     exit 1
 fi
 
-if ! grep -q '^ginux: isolated virtio request remained unpublished' "$output_file"; then
-    echo "Boot test failed: the prepared virtio request did not remain unpublished." >&2
+if ! grep -q '^ginux: isolated virtio available entry published without notification' "$output_file"; then
+    echo "Boot test failed: ring 3 did not publish the available entry without notification." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: isolated virtio request remained incomplete before quiescence' "$output_file"; then
+    echo "Boot test failed: the unnotified virtio request changed before quiescence." >&2
     exit 1
 fi
 
@@ -767,7 +772,7 @@ if ! grep -q '^ginux: faulted virtio control service revoked' "$output_file"; th
     exit 1
 fi
 
-if ! grep -q '^ginux: faulted virtio control device quiesced without submission' "$output_file"; then
+if ! grep -q '^ginux: faulted virtio control device quiesced before completion' "$output_file"; then
     echo "Boot test failed: the faulted virtio control service left its device active." >&2
     exit 1
 fi
