@@ -15,7 +15,10 @@ partial behavior as compatibility. The kernel resolves the candidate only
 from the authenticated index and validates its one-page RX/one-page RW ELF
 plan. A dedicated measured exec workload launches it as PID 1, verifies its
 identity, opens `/dev/console`, emits `GINUX_SYSTEM_INIT_V0`, and exits cleanly
-while final process teardown closes all inherited descriptors. Before
+while final process teardown closes all inherited descriptors. It enumerates
+the immutable bounded `/dev`, proves `/dev/null` discard/EOF behavior,
+`/dev/zero` zero-fill behavior, and the `/dev/tty` terminal alias before
+publishing `DEVFS_READY`. Before
 readiness it enumerates `/proc` and `/proc/1`, then reads a bounded read-only
 `/proc/1/status` view containing its exact name, running state, PID 1, and
 parent PID 0. It also proves `/tmp` starts empty, creates the generation-bound

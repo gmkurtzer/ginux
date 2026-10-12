@@ -43,6 +43,15 @@ I/O privilege, namespace, and BPF requests all return `-EPERM`; an unknown
 syscall separately returns `-ENOSYS`. UID/GID 0 and the immutable mount remain
 unchanged. This makes `privilege-boundary` ready for the bounded profile, not a
 claim that every future Linux privileged syscall has already been classified.
+PID 1 enumerates the immutable `/dev` directory and validates the exact
+`null`, `zero`, `console`, and `tty` entries. It proves scalar discard and EOF
+behavior through a read-write `/dev/null` descriptor, zero filling through a
+read-only `/dev/zero` descriptor, and terminal ioctl behavior through the
+`/dev/tty` alias while retaining `/dev/console` for readiness output. It closes
+every auxiliary device descriptor before publishing `DEVFS_READY`. This makes
+`devfs` ready for the bounded profile; dynamic device discovery, controlling
+terminal ownership, pseudoterminals, and additional device classes remain
+outside it.
 PID 1 first observes the measured `/tmp` anchor as empty, creates the bounded
 kernel-owned `ginux-ready` file with `O_CREAT | O_EXCL`, writes `ready\n`,
 enumerates the new dirent, closes and reopens the file, and validates the exact

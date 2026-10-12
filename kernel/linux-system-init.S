@@ -19,6 +19,118 @@ ginux_linux_system_init:
     mov r8, rax
 
     mov edi, -100
+    lea rsi, [rip + .Ldev_path]
+    mov edx, 0x10000
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 152
+    mov eax, 217
+    syscall
+    cmp rax, 152
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 67], 0x6c6c756e
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 91], 0x6f72657a
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 115], 0x736e6f63
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 119], 0x00656c6f
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 147], 0x00797474
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Lnull_path]
+    mov edx, 2
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 4
+    mov eax, 1
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    mov rdi, r9
+    lea rsi, [rip + .Lstatus]
+    mov edx, 4
+    xor eax, eax
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov dword ptr [rip + .Lstatus], -1
+    mov edi, -100
+    lea rsi, [rip + .Lzero_path]
+    xor edx, edx
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    lea rsi, [rip + .Lstatus]
+    mov edx, 4
+    xor eax, eax
+    syscall
+    cmp rax, 4
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 0
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov edi, -100
+    lea rsi, [rip + .Ltty_path]
+    mov edx, 1
+    mov eax, 257
+    syscall
+    test rax, rax
+    js .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    mov esi, 0x5413
+    lea rdx, [rip + .Lstatus]
+    mov eax, 16
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    mov eax, 3
+    syscall
+    test rax, rax
+    jne .Lfailure
+
+    mov rdi, r8
+    lea rsi, [rip + .Ldevfs_marker]
+    mov edx, 12
+    mov eax, 1
+    syscall
+    cmp rax, 12
+    jne .Lfailure
+
+    mov edi, -100
     lea rsi, [rip + .Lproc_path]
     mov edx, 0x10000
     mov eax, 257
@@ -550,6 +662,14 @@ ginux_linux_system_init:
 .Lready_end:
 .Lconsole:
     .asciz "/dev/console"
+.Ldev_path:
+    .asciz "/dev"
+.Lnull_path:
+    .asciz "/dev/null"
+.Lzero_path:
+    .asciz "/dev/zero"
+.Ltty_path:
+    .asciz "/dev/tty"
 .Lstatus_path:
     .asciz "/proc/1/status"
 .Lmountinfo_path:
@@ -572,6 +692,8 @@ ginux_linux_system_init:
     .ascii "ready\n"
 .Ltmp_marker:
     .ascii "TMPFS_READY\n"
+.Ldevfs_marker:
+    .ascii "DEVFS_READY\n"
 .Luserns_marker:
     .ascii "USERNS_READY\n"
 .Lprivilege_marker:

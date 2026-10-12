@@ -771,6 +771,12 @@ if ! grep -q '^ginux: Linux privilege policy sealed fail-closed' "$output_file" 
     exit 1
 fi
 
+if [[ "$(grep -c '^DEVFS_READY' "$output_file")" -ne 1 ]] ||
+    ! grep -q '^ginux: bounded Linux devfs profile validated' "$output_file"; then
+    echo "Boot test failed: the bounded Linux device namespace was not validated." >&2
+    exit 1
+fi
+
 if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: generation-safe Linux tmpfs mounted at /tmp' "$output_file" ||
     ! grep -q '^ginux: generation-safe bounded tmpfs lifecycle validated' "$output_file"; then
