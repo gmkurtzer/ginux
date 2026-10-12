@@ -4079,6 +4079,7 @@ struct NativeServiceAddressSpace {
     root: u64,
     frames: [memory::FrameLease; NATIVE_SERVICE_FRAME_COUNT],
     entry: u64,
+    image_pages: usize,
     owner: memory::FrameOwner,
     dma_frame: Option<memory::FrameLease>,
 }
@@ -4089,7 +4090,8 @@ impl NativeServiceAddressSpace {
         owner: memory::FrameOwner,
         image: &crate::native_elf::NativeImage<'_>,
     ) -> Option<Self> {
-        if image.page_count()? != NATIVE_SERVICE_IMAGE_PAGES {
+        let image_pages = image.page_count()?;
+        if !(1..=NATIVE_SERVICE_IMAGE_PAGES).contains(&image_pages) {
             return None;
         }
         let frames = memory::allocate_frames::<NATIVE_SERVICE_FRAME_COUNT>(owner)?;
@@ -4117,7 +4119,7 @@ impl NativeServiceAddressSpace {
                 mapped_frame::<u64>(addresses[1])?.write(addresses[2] | PRESENT | WRITABLE | USER);
                 mapped_frame::<u64>(addresses[2])?.write(addresses[3] | PRESENT | WRITABLE | USER);
                 let table = mapped_frame::<u64>(addresses[3])?;
-                for page in 0..NATIVE_SERVICE_IMAGE_PAGES {
+                for page in 0..image_pages {
                     let frame = addresses[4 + page];
                     let output = &mut *(mapped_frame::<u8>(frame)? as *mut [u8; PAGE_SIZE]);
                     if !image.materialize_page(page, output) {
@@ -4160,6 +4162,7 @@ impl NativeServiceAddressSpace {
             root,
             frames,
             entry: (USER_TEST_ADDRESS as u64).checked_add(image.entry)?,
+            image_pages,
             owner,
             dma_frame: None,
         })
@@ -4168,6 +4171,7 @@ impl NativeServiceAddressSpace {
     fn layout_is_valid(&self, image: &crate::native_elf::NativeImage<'_>) -> bool {
         if self.kernel_root != current_root()
             || self.entry != USER_TEST_ADDRESS as u64 + image.entry
+            || self.image_pages != image.page_count().unwrap_or(0)
             || !memory::frames_owned_by(self.owner, &self.frames)
         {
             return false;
@@ -4197,7 +4201,7 @@ impl NativeServiceAddressSpace {
             {
                 return false;
             }
-            for page in 0..NATIVE_SERVICE_IMAGE_PAGES {
+            for page in 0..self.image_pages {
                 let observed = table.add(page).read();
                 let mut expected = self.frames[4 + page].address() | PRESENT | USER;
                 if !image.page_is_executable(page) {
@@ -4206,6 +4210,11 @@ impl NativeServiceAddressSpace {
                 if observed != expected || observed & WRITABLE != 0 {
                     return false;
                 }
+            }
+            if (self.image_pages..NATIVE_SERVICE_IMAGE_PAGES)
+                .any(|page| table.add(page).read() != 0)
+            {
+                return false;
             }
             table.add(NATIVE_BOOT_INFO_PAGE).read()
                 == self.frames[12].address() | PRESENT | USER | NO_EXECUTE

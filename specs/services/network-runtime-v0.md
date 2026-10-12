@@ -1,7 +1,7 @@
 # Native Network Service Runtime v0
 
-**Status:** A freestanding x86-64 service artifact is authenticated and its
-bounded ELF load plan is accepted; materialization and execution are pending.
+**Status:** A freestanding x86-64 service artifact is authenticated and
+materialized into a bounded W^X address space; execution is pending.
 
 ## Purpose
 
@@ -29,9 +29,15 @@ nonzero executable entry, exactly one read-only, executable, and writable load
 segment, and at least one valid relative relocation. No unmeasured fallback
 artifact is accepted.
 
+The kernel independently materializes the accepted plan into freshly owned
+pages, copies only bytes covered by load segments, zeros memory tails, applies
+only the validated relative relocations, and installs one read-only, one
+read-execute, and one read-write region. A non-executable stack is bounded by
+unmapped guard pages. The proof checks the resulting mappings and relocation
+values, then scrubs and releases the complete temporary address space.
+
 ## Deliberate limits
 
-This milestone does not yet materialize the artifact into a W^X domain,
-execute it, delegate device capabilities, map MMIO or DMA, or move packet
-processing out of the kernel. Each boundary is introduced and tested
-separately in subsequent milestones.
+This milestone does not yet execute the artifact, delegate device
+capabilities, map MMIO or DMA, or move packet processing out of the kernel.
+Each boundary is introduced and tested separately in subsequent milestones.

@@ -101,8 +101,10 @@ the guard, and the authorized DMA page are scrubbed in order afterward. See
 A separate freestanding Rust network-service PIE now builds for
 `x86_64-unknown-none`, validates native control ABI v4, and reports completion
 through the stable lifecycle ABI. Its exact bytes are authenticated in the
-signed root and its bounded native ELF plan is accepted during boot; it is not
-yet materialized, executed, or granted device authority. See
+signed root, its bounded native ELF plan is accepted during boot, and a
+temporary owned address space proves relative relocation, W^X mappings, guard
+pages, and complete retirement. It is not yet executed or granted device
+authority. See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases

@@ -1547,6 +1547,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured isolated network service discovered\r\n");
     serial_write("ginux: bounded native network PIE load plan accepted\r\n");
     serial_write("ginux: native network service relative relocations accepted\r\n");
+    if !address_space::verify_native_service_materialization(&network_image) {
+        kernel_fail("ginux: native network service materialization failed\r\n");
+    }
+    serial_write("ginux: native network service segments materialized in owned frames\r\n");
+    serial_write("ginux: native network service relative relocations applied\r\n");
+    serial_write("ginux: native network service W^X address space verified\r\n");
+    serial_write("ginux: native network service guard pages verified\r\n");
     if !linux_mount::verify_contract() || !linux_mount::install_initial() {
         kernel_fail("ginux: initial Linux mount namespace invalid\r\n");
     }
