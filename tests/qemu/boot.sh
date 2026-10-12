@@ -68,7 +68,22 @@ run_boot() {
     fi
 }
 
+assert_native_volume_iommu() {
+    local boot_output="$1"
+    local boot_name="$2"
+
+    if ! grep -q '^ginux: every native volume generation used an active IOMMU domain' "$boot_output" ||
+        ! grep -q '^ginux: native volume generations received fresh IOMMU leases' "$boot_output" ||
+        ! grep -q '^ginux: native volume IOMMU retired after device quiescence' "$boot_output" ||
+        ! grep -q '^ginux: fault and timeout paths retired native volume IOMMU state' "$boot_output"; then
+        cat "$boot_output"
+        echo "Boot test failed: $boot_name did not prove native volume IOMMU lifecycle isolation." >&2
+        exit 1
+    fi
+}
+
 run_boot "$output_file" "initial"
+assert_native_volume_iommu "$output_file" "initial boot"
 
 cat "$output_file"
 
@@ -110,6 +125,7 @@ if ! grep -q '^ginux: compiled native volume service executed in ring 3' "$outpu
 fi
 
 run_boot "$reboot_output_file" "recovery"
+assert_native_volume_iommu "$reboot_output_file" "recovery boot"
 
 if ! grep -q '^GINUX_KERNEL_OK' "$reboot_output_file" ||
     ! grep -q '^ginux: disk-backed volume generation: 1' "$reboot_output_file" ||
@@ -157,6 +173,7 @@ cp "$volume_image" "$native_corrupt_volume_image"
 dd if=/dev/zero of="$native_corrupt_volume_image" bs=1 seek=2048 count=1 conv=notrunc 2>/dev/null
 native_corrupt_checksum="$(cksum "$native_corrupt_volume_image")"
 run_boot "$native_corrupt_output_file" "native-volume corruption" "$native_corrupt_volume_image"
+assert_native_volume_iommu "$native_corrupt_output_file" "native-volume corruption boot"
 
 if ! grep -q '^GINUX_KERNEL_OK' "$native_corrupt_output_file" ||
     ! grep -q '^ginux: native service bootstrap ABI v0 validated in ring 3' "$native_corrupt_output_file" ||

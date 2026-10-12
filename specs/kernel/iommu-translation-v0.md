@@ -4,10 +4,11 @@
 
 ## Purpose
 
-This contract confines the bounded kernel-reference virtio-blk transaction to
-one owned DMA page. It encodes a minimal legacy-mode hierarchy for the exact
-Q35 source ID, installs it with bounded register transitions, and restores the
-IOMMU to its disabled, zero-root state before releasing any table frame.
+This contract confines both the bounded kernel-reference virtio-blk transaction
+and each isolated native volume-service generation to one owned DMA page. It
+encodes a minimal legacy-mode hierarchy for the exact Q35 source ID, installs
+it with bounded register transitions, and restores the IOMMU to its disabled,
+zero-root state before releasing any table or DMA frame.
 
 ## Table image
 
@@ -74,12 +75,29 @@ zero root, and reloads it. It then requires a disabled translation status,
 zero root register, and clear fault status. Only afterward are the six
 hierarchy frames scrubbed and released, followed by the guard and DMA pages.
 
+For the isolated native volume service, translation ownership is registered
+with the same domain resource record as its address space and device-teardown
+hook. A fresh hierarchy is built from the exact generation-tagged DMA lease and
+activated before PCI bus mastering is armed. Device waits fail closed if the
+registered translation is no longer active.
+
+Clean exit, control-ABI rejection, malformed-descriptor rejection, service
+fault, notified-timeout cancellation, persistent recovery, and corrupt-media
+rejection all converge on the registered teardown path. It must quiesce and
+reset the device and revoke bus mastering while translation is still active.
+Only then may address-space release disable translation, invalidate caches,
+clear the root, and scrub the six table frames. The service DMA frame is
+scrubbed afterward. Returned lifecycle evidence requires both table and DMA
+leases to be absent from the allocator. Consecutive service generations must
+use distinct generation-tagged table and DMA leases even when the allocator
+reuses the same physical addresses.
+
 ## Deliberate limits
 
 This hierarchy is logically immutable after construction but its ordinary
 kernel direct-map aliases are not yet made read-only. Fault status is polled;
-there is no fault interrupt or general fault-policy engine. The isolated native
-volume service is not yet attached to this domain. The single identity-mapped
-page, fixed domain ID, QEMU-specific single fault record, and exact reason
-encoding are a bounded bootstrap profile, not a general IOVA allocator,
-multi-device domain model, or production hardware claim.
+there is no fault interrupt or general fault-policy engine. The single
+identity-mapped page, fixed domain ID, serialized reuse of one remapping unit,
+QEMU-specific single fault record, and exact reason encoding are a bounded
+bootstrap profile, not a general IOVA allocator, concurrent multi-device domain
+model, or production hardware claim.

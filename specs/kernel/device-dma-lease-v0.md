@@ -46,17 +46,24 @@ the final status is successful, and the last request is a sector-five read.
 
 ## Teardown
 
-The service deliberately faults after transaction success. Its registered hook
-masks and disables MSI-X, validates the active queue-to-lease binding, revokes
-PCI bus mastering, resets the device, and retires the temporary interrupt gate
-before inspecting or releasing DMA memory. Address-space release fails closed
-unless this quiescence record exists.
+The service normally reports a bounded lifecycle completion after transaction
+success. Its registered hook masks and disables MSI-X, validates the active
+queue-to-lease binding, revokes PCI bus mastering, resets the device, and
+retires the temporary interrupt gate before inspecting or releasing DMA
+memory. Address-space release fails closed unless this quiescence record
+exists. Fault, cancellation, and pre-activation rejection use the same hook
+without trusting a completed queue.
 
-After quiescence, the kernel validates stable DMA state, restores its own root,
+Before bus mastering is armed, the kernel installs a fresh six-frame VT-d
+hierarchy containing only this lease. After quiescence, it disables translation,
+invalidates the context and IOTLB caches, clears the hardware root, and scrubs
+the hierarchy. It then validates stable DMA state, restores its own CPU root,
 zeros the DMA and all base frames, releases their exact generation-tagged
 leases, revokes object 7, and retires the domain. The gate reads the former DMA
 page through the supervisor direct map and requires it to be entirely zero,
-while the allocator must report no frames owned by the retired generation.
+while the allocator must report no frames owned by the retired generation and
+no live IOMMU table leases. Replacement generations must receive distinct
+generation-tagged DMA and table leases.
 
 ## Deliberate limits
 
@@ -65,7 +72,7 @@ while the allocator must report no frames owned by the retired generation.
   those pages.
 - Interrupt routing remains kernel-owned; the service receives only a
   generation-bound wait operation.
-- There is no IOMMU domain. The trusted-QEMU profile relies on exact queue
-  validation and synchronous bus-master revocation and reset before reuse.
+- The IOMMU profile maps one identity-addressed page for one serialized device;
+  it is not yet a general IOVA allocator or concurrent multi-device domain.
 - The fixed layout and physical-address bootstrap field are not a stable
   general driver ABI.

@@ -417,6 +417,16 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     else {
         kernel_fail("\r\nginux: IOMMU capability probe failed\r\n");
     };
+    let Some(virtio_iommu_profile) = arch::x86_64::iommu::DeviceTranslationProfile::new(
+        platform.first_iommu_register_base,
+        iommu_mmio,
+        iommu_capabilities,
+        virtio_block.bus,
+        virtio_block.device,
+        virtio_block.function,
+    ) else {
+        kernel_fail("\r\nginux: virtio IOMMU translation profile invalid\r\n");
+    };
     serial_write("\r\nginux: bounded writable uncached IOMMU mapping active");
     serial_write("\r\nginux: IOMMU version: ");
     serial_write_u64(u64::from(iommu_capabilities.major_version));
@@ -1866,6 +1876,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(virtio_status_physical) = virtio_block.status_register_physical() else {
         kernel_fail("\r\nginux: virtio status register unavailable\r\n");
     };
+    let Some(native_volume_device) = address_space::NativeVolumeDevice::new(
+        virtio_status_physical,
+        virtio_block,
+        virtio_mmio,
+        virtio_msix_mmio,
+        virtio_iommu_profile,
+    ) else {
+        kernel_fail("\r\nginux: native volume device profile invalid\r\n");
+    };
     if !address_space::verify_ring3_read_only_device_grant(virtio_status_physical, 0) {
         kernel_fail("\r\nginux: ring-3 block-device grant invariant failed\r\n");
     }
@@ -1879,10 +1898,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
     let native_volume_run = address_space::verify_native_volume_service(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         None,
     );
@@ -1929,16 +1945,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: native volume service exited cleanly and device quiesced");
     let replacement_volume_run = address_space::verify_native_volume_service(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         Some(native_volume_run.service_identity),
     );
     let replacement_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
     let replacement_volume_valid = replacement_volume_run.as_ref().is_some_and(|replacement| {
         replacement.domain != native_volume_run.domain
+            && replacement.iommu_lease_is_fresh_after(&native_volume_run)
             && replacement.service_identity == native_volume_run.service_identity
             && replacement.outcome
                 == match native_volume_outcome {
@@ -1993,10 +2007,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: replacement native volume resources retired cleanly");
     let incompatible_volume_run = address_space::verify_native_volume_service_incompatible_abi(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         native_volume_run.service_identity,
     );
@@ -2006,6 +2017,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         .is_some_and(|incompatible| {
             incompatible.domain != native_volume_run.domain
                 && incompatible.domain != replacement_volume_run.domain
+                && incompatible.iommu_lease_is_fresh_after(&replacement_volume_run)
                 && incompatible.service_identity == native_volume_run.service_identity
                 && incompatible.outcome == address_space::NativeVolumeOutcome::IncompatibleAbi
         });
@@ -2023,10 +2035,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: incompatible native service generation retired cleanly");
     let recovered_after_incompatible = address_space::verify_native_volume_service(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         Some(native_volume_run.service_identity),
     );
@@ -2039,6 +2048,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 recovered.domain != native_volume_run.domain
                     && recovered.domain != replacement_volume_run.domain
                     && recovered.domain != incompatible_volume_run.domain
+                    && recovered.iommu_lease_is_fresh_after(&incompatible_volume_run)
                     && recovered.service_identity == native_volume_run.service_identity
                     && recovered.outcome
                         == match native_volume_outcome {
@@ -2074,10 +2084,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let incompatible_descriptor_run =
         address_space::verify_native_volume_service_incompatible_descriptor(
             &volume_image,
-            virtio_status_physical,
-            virtio_block,
-            virtio_mmio,
-            virtio_msix_mmio,
+            native_volume_device,
             &local_apic,
             native_volume_run.service_identity,
         );
@@ -2090,6 +2097,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     && incompatible.domain != replacement_volume_run.domain
                     && incompatible.domain != incompatible_volume_run.domain
                     && incompatible.domain != recovered_after_incompatible.domain
+                    && incompatible.iommu_lease_is_fresh_after(&recovered_after_incompatible)
                     && incompatible.service_identity == native_volume_run.service_identity
                     && incompatible.outcome == address_space::NativeVolumeOutcome::IncompatibleAbi
             });
@@ -2109,10 +2117,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: malformed descriptor service generation retired cleanly");
     let recovered_after_descriptor = address_space::verify_native_volume_service(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         Some(native_volume_run.service_identity),
     );
@@ -2126,6 +2131,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     && recovered.domain != incompatible_volume_run.domain
                     && recovered.domain != recovered_after_incompatible.domain
                     && recovered.domain != incompatible_descriptor_run.domain
+                    && recovered.iommu_lease_is_fresh_after(&incompatible_descriptor_run)
                     && recovered.service_identity == native_volume_run.service_identity
                     && recovered.outcome
                         == match native_volume_outcome {
@@ -2160,10 +2166,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: compatible native service recovered after descriptor rejection");
     let faulted_volume_run = address_space::verify_native_volume_service_fault(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         native_volume_run.service_identity,
     );
@@ -2175,6 +2178,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             && faulted.domain != recovered_after_incompatible.domain
             && faulted.domain != incompatible_descriptor_run.domain
             && faulted.domain != recovered_after_descriptor.domain
+            && faulted.iommu_lease_is_fresh_after(&recovered_after_descriptor)
             && faulted.service_identity == native_volume_run.service_identity
             && faulted.outcome == address_space::NativeVolumeOutcome::Faulted
     });
@@ -2193,10 +2197,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: incomplete native DMA scrubbed after fault");
     let recovered_after_fault = address_space::verify_native_volume_service(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         Some(native_volume_run.service_identity),
     );
@@ -2205,6 +2206,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         recovered.domain != native_volume_run.domain
             && recovered.domain != replacement_volume_run.domain
             && recovered.domain != faulted_volume_run.domain
+            && recovered.iommu_lease_is_fresh_after(&faulted_volume_run)
             && recovered.service_identity == native_volume_run.service_identity
             && recovered.outcome
                 == match native_volume_outcome {
@@ -2259,10 +2261,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: post-fault native volume resources retired cleanly");
     let cancelled_volume_run = address_space::verify_native_volume_service_cancellation(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         native_volume_run.service_identity,
     );
@@ -2272,6 +2271,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             && cancelled.domain != replacement_volume_run.domain
             && cancelled.domain != faulted_volume_run.domain
             && cancelled.domain != recovered_after_fault.domain
+            && cancelled.iommu_lease_is_fresh_after(&recovered_after_fault)
             && cancelled.service_identity == native_volume_run.service_identity
             && cancelled.outcome == address_space::NativeVolumeOutcome::RestartRequired
     });
@@ -2289,10 +2289,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: cancelled native volume request generation retired");
     let recovered_after_cancellation = address_space::verify_native_volume_service(
         &volume_image,
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
+        native_volume_device,
         &local_apic,
         Some(native_volume_run.service_identity),
     );
@@ -2307,6 +2304,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     && recovered.domain != faulted_volume_run.domain
                     && recovered.domain != recovered_after_fault.domain
                     && recovered.domain != cancelled_volume_run.domain
+                    && recovered.iommu_lease_is_fresh_after(&cancelled_volume_run)
                     && recovered.service_identity == native_volume_run.service_identity
                     && recovered.outcome
                         == match native_volume_outcome {
@@ -2355,6 +2353,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
     });
     serial_write("\r\nginux: post-cancellation native resources retired cleanly");
+    serial_write("\r\nginux: every native volume generation used an active IOMMU domain");
+    serial_write("\r\nginux: native volume generations received fresh IOMMU leases");
+    serial_write("\r\nginux: native volume IOMMU retired after device quiescence");
+    serial_write("\r\nginux: fault and timeout paths retired native volume IOMMU state");
     serial_write("\r\nginux: native volume write-only grant exercised in ring 3");
     serial_write("\r\nginux: isolated virtio feature negotiation completed");
     serial_write("\r\nginux: isolated virtio queue geometry configured with owned DMA");

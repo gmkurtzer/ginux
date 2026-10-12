@@ -7,7 +7,7 @@ use core::{
 use crate::{
     arch::x86_64::{
         apic::LocalApic,
-        cpu, paging,
+        cpu, iommu, paging,
         pci::{self, VirtioBlockDevice},
         timer::{self, LocalApicCalibration},
     },
@@ -2272,6 +2272,7 @@ struct RegisteredAuxiliaryAddressSpace {
     domain: u64,
     space: AuxiliaryAddressSpace,
     device_teardown: Option<AuxiliaryDeviceTeardown>,
+    iommu_translation: Option<iommu::DeviceTranslation>,
     device_quiesced: bool,
 }
 
@@ -4343,9 +4344,13 @@ impl AuxiliaryAddressSpace {
     }
 
     fn dma_physical(&self) -> Option<u64> {
+        self.dma_lease().map(memory::FrameLease::address)
+    }
+
+    fn dma_lease(&self) -> Option<memory::FrameLease> {
         match self {
-            Self::Wx(space) => space.dma_frame.map(memory::FrameLease::address),
-            Self::Native(space) => space.dma_frame.map(memory::FrameLease::address),
+            Self::Wx(space) => space.dma_frame,
+            Self::Native(space) => space.dma_frame,
         }
     }
 
@@ -4649,6 +4654,7 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             domain: domain_id,
             space,
             device_teardown: None,
+            iommu_translation: None,
             device_quiesced: false,
         });
     }
@@ -4664,20 +4670,59 @@ pub(crate) fn release_auxiliary_address_space(domain_id: u64) -> bool {
     }) else {
         return false;
     };
-    let Some(registered) = (unsafe { (*registry)[slot].as_ref() }) else {
+    let Some(registered) = (unsafe { (*registry)[slot].as_mut() }) else {
         return false;
     };
     let root = registered.space.root();
     if registered.device_teardown.is_some() && !registered.device_quiesced
         || !registered.space.is_releasable()
-        || !domain::unbind_auxiliary_address_space(domain_id, root)
     {
+        return false;
+    }
+    if registered
+        .iommu_translation
+        .as_ref()
+        .is_some_and(|translation| !translation.is_active())
+    {
+        return false;
+    }
+    if let Some(translation) = registered.iommu_translation.take() {
+        if !translation.finish() {
+            return false;
+        }
+    }
+    if !domain::unbind_auxiliary_address_space(domain_id, root) {
         return false;
     }
     let Some(registered) = (unsafe { (*registry)[slot].take() }) else {
         return false;
     };
     registered.space.release()
+}
+
+pub(crate) fn bind_auxiliary_iommu_translation(
+    domain_id: u64,
+    profile: iommu::DeviceTranslationProfile,
+) -> Option<iommu::TranslationEvidence> {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let registered = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)?;
+    let teardown = registered.device_teardown?;
+    let dma_frame = registered.space.dma_lease()?;
+    if registered.iommu_translation.is_some()
+        || registered.device_quiesced
+        || !profile.matches_source(
+            teardown.device.bus,
+            teardown.device.device,
+            teardown.device.function,
+        )
+    {
+        return None;
+    }
+    let translation = profile.activate(dma_frame)?;
+    let evidence = translation.evidence();
+    registered.iommu_translation = Some(translation);
+    Some(evidence)
 }
 
 pub(crate) fn bind_auxiliary_device_teardown(
@@ -4726,6 +4771,10 @@ pub(crate) fn auxiliary_device_wait_ready(domain_id: u64, request: u64) -> bool 
         return false;
     };
     !registered.device_quiesced
+        && registered
+            .iommu_translation
+            .as_ref()
+            .is_none_or(iommu::DeviceTranslation::is_active)
         && teardown.interrupt_request == request
         && pci::isolated_interrupt_wait_ready(
             teardown.device,
@@ -4812,6 +4861,13 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
     };
     if registered.device_quiesced {
         return true;
+    }
+    if registered
+        .iommu_translation
+        .as_ref()
+        .is_some_and(|translation| !translation.is_active())
+    {
+        return false;
     }
     let AuxiliaryDeviceTeardown {
         device,
@@ -5896,23 +5952,53 @@ pub(crate) struct NativeVolumeRun {
     pub(crate) outcome: NativeVolumeOutcome,
     pub(crate) domain: u64,
     pub(crate) service_identity: u64,
+    iommu_evidence: iommu::TranslationEvidence,
 }
 
-pub(crate) fn verify_native_volume_service(
-    image: &crate::native_elf::NativeImage<'_>,
+#[derive(Clone, Copy)]
+pub(crate) struct NativeVolumeDevice {
     register_physical: u64,
     device: VirtioBlockDevice,
     mapping: paging::MmioMapping,
     msix_mapping: paging::MmioMapping,
+    iommu_profile: iommu::DeviceTranslationProfile,
+}
+
+impl NativeVolumeDevice {
+    pub(crate) fn new(
+        register_physical: u64,
+        device: VirtioBlockDevice,
+        mapping: paging::MmioMapping,
+        msix_mapping: paging::MmioMapping,
+        iommu_profile: iommu::DeviceTranslationProfile,
+    ) -> Option<Self> {
+        iommu_profile
+            .matches_source(device.bus, device.device, device.function)
+            .then_some(Self {
+                register_physical,
+                device,
+                mapping,
+                msix_mapping,
+                iommu_profile,
+            })
+    }
+}
+
+impl NativeVolumeRun {
+    pub(crate) fn iommu_lease_is_fresh_after(&self, prior: &Self) -> bool {
+        self.iommu_evidence.is_fresh_after(prior.iommu_evidence)
+    }
+}
+
+pub(crate) fn verify_native_volume_service(
+    image: &crate::native_elf::NativeImage<'_>,
+    volume_device: NativeVolumeDevice,
     apic: &LocalApic,
     restart_identity: Option<u64>,
 ) -> Option<NativeVolumeRun> {
     verify_native_volume_service_run(
         image,
-        register_physical,
-        device,
-        mapping,
-        msix_mapping,
+        volume_device,
         apic,
         restart_identity,
         NativeVolumeMode::Normal,
@@ -5921,19 +6007,13 @@ pub(crate) fn verify_native_volume_service(
 
 pub(crate) fn verify_native_volume_service_fault(
     image: &crate::native_elf::NativeImage<'_>,
-    register_physical: u64,
-    device: VirtioBlockDevice,
-    mapping: paging::MmioMapping,
-    msix_mapping: paging::MmioMapping,
+    volume_device: NativeVolumeDevice,
     apic: &LocalApic,
     restart_identity: u64,
 ) -> Option<NativeVolumeRun> {
     verify_native_volume_service_run(
         image,
-        register_physical,
-        device,
-        mapping,
-        msix_mapping,
+        volume_device,
         apic,
         Some(restart_identity),
         NativeVolumeMode::Fault,
@@ -5942,19 +6022,13 @@ pub(crate) fn verify_native_volume_service_fault(
 
 pub(crate) fn verify_native_volume_service_incompatible_abi(
     image: &crate::native_elf::NativeImage<'_>,
-    register_physical: u64,
-    device: VirtioBlockDevice,
-    mapping: paging::MmioMapping,
-    msix_mapping: paging::MmioMapping,
+    volume_device: NativeVolumeDevice,
     apic: &LocalApic,
     restart_identity: u64,
 ) -> Option<NativeVolumeRun> {
     verify_native_volume_service_run(
         image,
-        register_physical,
-        device,
-        mapping,
-        msix_mapping,
+        volume_device,
         apic,
         Some(restart_identity),
         NativeVolumeMode::IncompatibleAbi,
@@ -5963,19 +6037,13 @@ pub(crate) fn verify_native_volume_service_incompatible_abi(
 
 pub(crate) fn verify_native_volume_service_incompatible_descriptor(
     image: &crate::native_elf::NativeImage<'_>,
-    register_physical: u64,
-    device: VirtioBlockDevice,
-    mapping: paging::MmioMapping,
-    msix_mapping: paging::MmioMapping,
+    volume_device: NativeVolumeDevice,
     apic: &LocalApic,
     restart_identity: u64,
 ) -> Option<NativeVolumeRun> {
     verify_native_volume_service_run(
         image,
-        register_physical,
-        device,
-        mapping,
-        msix_mapping,
+        volume_device,
         apic,
         Some(restart_identity),
         NativeVolumeMode::IncompatibleDescriptor,
@@ -5984,36 +6052,33 @@ pub(crate) fn verify_native_volume_service_incompatible_descriptor(
 
 pub(crate) fn verify_native_volume_service_cancellation(
     image: &crate::native_elf::NativeImage<'_>,
-    register_physical: u64,
-    device: VirtioBlockDevice,
-    mapping: paging::MmioMapping,
-    msix_mapping: paging::MmioMapping,
+    volume_device: NativeVolumeDevice,
     apic: &LocalApic,
     restart_identity: u64,
 ) -> Option<NativeVolumeRun> {
     verify_native_volume_service_run(
         image,
-        register_physical,
-        device,
-        mapping,
-        msix_mapping,
+        volume_device,
         apic,
         Some(restart_identity),
         NativeVolumeMode::CancelNotified,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn verify_native_volume_service_run(
     image: &crate::native_elf::NativeImage<'_>,
-    register_physical: u64,
-    device: VirtioBlockDevice,
-    mapping: paging::MmioMapping,
-    msix_mapping: paging::MmioMapping,
+    volume_device: NativeVolumeDevice,
     apic: &LocalApic,
     restart_identity: Option<u64>,
     mode: NativeVolumeMode,
 ) -> Option<NativeVolumeRun> {
+    let NativeVolumeDevice {
+        register_physical,
+        device,
+        mapping,
+        msix_mapping,
+        iommu_profile,
+    } = volume_device;
     const DMA_PAGE_INDEX: usize = 11;
     const DEVICE_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -6131,6 +6196,10 @@ fn verify_native_volume_service_run(
         crate::serial_write_bytes(b"\r\nginux: native volume scheduler queue failed");
         return None;
     }
+    let Some(iommu_evidence) = bind_auxiliary_iommu_translation(auxiliary, iommu_profile) else {
+        crate::serial_write_bytes(b"\r\nginux: native volume IOMMU binding failed");
+        return None;
+    };
     if !pci::arm_isolated_device_interrupt(
         device,
         mapping,
@@ -6251,6 +6320,8 @@ fn verify_native_volume_service_run(
         && registered_auxiliary_address_space_count() == 0
         && memory::owner_live_frame_count(owner) == Some(0)
         && unsafe { frame_is_zero(dma_physical) }
+        && iommu_profile.is_inactive()
+        && iommu_evidence.is_retired()
         && domain::domain_is_retired(auxiliary)
         && !domain::handle_permits(
             auxiliary,
@@ -6299,6 +6370,7 @@ fn verify_native_volume_service_run(
         outcome: outcome?,
         domain: auxiliary,
         service_identity: identity,
+        iommu_evidence,
     })
 }
 

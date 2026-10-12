@@ -85,6 +85,132 @@ pub(crate) struct ActiveTranslation {
     fault_record_register: u64,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct DeviceTranslationProfile {
+    register_base: u64,
+    mapping: MmioMapping,
+    capabilities: Capabilities,
+    bus: u8,
+    device: u8,
+    function: u8,
+}
+
+pub(crate) struct DeviceTranslation {
+    inactive: InactiveTranslation,
+    active: ActiveTranslation,
+    evidence: TranslationEvidence,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct TranslationEvidence {
+    table_frames: [FrameLease; TRANSLATION_FRAME_COUNT],
+    dma_frame: FrameLease,
+}
+
+impl DeviceTranslationProfile {
+    pub(crate) fn new(
+        register_base: u64,
+        mapping: MmioMapping,
+        capabilities: Capabilities,
+        bus: u8,
+        device: u8,
+        function: u8,
+    ) -> Option<Self> {
+        if device >= 32
+            || function >= 8
+            || !probe(register_base, mapping).is_some_and(|current| {
+                current.capability == capabilities.capability
+                    && current.extended_capability == capabilities.extended_capability
+            })
+        {
+            return None;
+        }
+        Some(Self {
+            register_base,
+            mapping,
+            capabilities,
+            bus,
+            device,
+            function,
+        })
+    }
+
+    pub(crate) fn matches_source(self, bus: u8, device: u8, function: u8) -> bool {
+        self.bus == bus && self.device == device && self.function == function
+    }
+
+    pub(crate) fn activate(self, dma_frame: FrameLease) -> Option<DeviceTranslation> {
+        let inactive = build_inactive_translation(
+            self.capabilities,
+            self.bus,
+            self.device,
+            self.function,
+            dma_frame,
+        )?;
+        let evidence = TranslationEvidence {
+            table_frames: inactive.frames,
+            dma_frame,
+        };
+        let Some(active) = activate_translation(
+            self.register_base,
+            self.mapping,
+            self.capabilities,
+            &inactive,
+            dma_frame,
+        ) else {
+            let _ = inactive.retire();
+            return None;
+        };
+        Some(DeviceTranslation {
+            inactive,
+            active,
+            evidence,
+        })
+    }
+
+    pub(crate) fn is_inactive(self) -> bool {
+        probe(self.register_base, self.mapping).is_some_and(|current| {
+            current.capability == self.capabilities.capability
+                && current.extended_capability == self.capabilities.extended_capability
+        })
+    }
+}
+
+impl DeviceTranslation {
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.is_active()
+            && self.inactive.is_exact(self.evidence.dma_frame)
+            && memory::frames_owned_by(FrameOwner::KERNEL, &self.evidence.table_frames)
+    }
+
+    pub(crate) fn evidence(&self) -> TranslationEvidence {
+        self.evidence
+    }
+
+    pub(crate) fn finish(self) -> bool {
+        self.active.finish()
+            && self.inactive.retire()
+            && !memory::any_frame_lease_live(&self.evidence.table_frames)
+    }
+}
+
+impl TranslationEvidence {
+    pub(crate) fn is_retired(self) -> bool {
+        !memory::any_frame_lease_live(&self.table_frames)
+            && !memory::any_frame_lease_live(&[self.dma_frame])
+    }
+
+    pub(crate) fn is_fresh_after(self, prior: Self) -> bool {
+        self.dma_frame != prior.dma_frame
+            && self.table_frames.iter().all(|current| {
+                prior
+                    .table_frames
+                    .iter()
+                    .all(|previous| current != previous)
+            })
+    }
+}
+
 impl InactiveTranslation {
     pub(crate) fn root_table_address(&self) -> u64 {
         self.frames[ROOT_FRAME].address()

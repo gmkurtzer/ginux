@@ -57,9 +57,9 @@ generation one, boots a second VM against the same image, and recovers the exact
 record without rewriting it. A third boot corrupts the committed slot and
 proves nonempty invalid media is rejected without modification after safe
 device and DMA teardown. Teardown revokes bus mastering, resets the device, and
-scrubs the lease before release. This trusted-QEMU kernel reference path remains
-separate from the isolated native service described below. The reference path
-now has IOMMU confinement; the native-service path does not yet. The kernel
+scrubs the lease before release. This kernel reference transaction remains
+separate from the isolated native service described below, but both paths now
+use the same bounded IOMMU confinement profile. The kernel
 validates the Q35 DMAR unit and maps its single register page supervisor-only,
 writable, uncached, and non-executable. It reads the VT-d version and
 capabilities while requiring a clean disabled state. Because QEMU does not mark the unit as
@@ -78,6 +78,15 @@ guard, and DMA lease. See
 [IOMMU Translation Hierarchy v0](specs/kernel/iommu-translation-v0.md),
 [Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md), and
 [Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
+Every isolated native volume-service generation receives its own freshly
+allocated six-frame translation hierarchy for its generation-owned DMA page.
+The hierarchy is active before the kernel enables PCI bus mastering. Clean
+exit, ABI and descriptor rejection, driver fault, notified-timeout
+cancellation, restart, recovery, and corrupt-media rejection all pass through
+one ordered teardown: quiesce and reset the device, revoke bus mastering,
+disable translation and clear its root, scrub the translation tables, then
+scrub the DMA and address-space frames. The gate also requires consecutive
+service generations to use distinct generation-tagged DMA and table leases.
 The device boundary delegates manifest object 7 and attenuates it into
 separate ring-3 grants. A read-only observer can inspect reset state but faults
 on mutation. The native volume service receives write-only authority, one
