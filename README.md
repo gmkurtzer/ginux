@@ -440,6 +440,8 @@ retain independent protection. The page-table permissions and syscall copy
 direction change together: reads continue after sealing, writes fail, and
 executable permissions are rejected. Read-only pages cannot regain write
 permission, and active pages cannot transition back to `PROT_NONE` yet.
+An exact idempotent protection request succeeds only after revalidating every
+selected lease and page-table leaf.
 One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
 ring-3 workload grows and shrinks the break, writes through the mapping, and
 confirms that an out-of-range request leaves the current break unchanged.

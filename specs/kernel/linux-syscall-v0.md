@@ -627,6 +627,10 @@ page is installed; failure scrubs and releases all provisional leases.
 Read-only-to-writable escalation, transitions from mapped pages back to
 `PROT_NONE`, executable protection, mixed-source transitions, and partial
 transitions spanning reserved plus mapped pages return `-EINVAL`.
+Requesting the protection already recorded across the complete range is an
+idempotent success after validating each present generation lease and PTE, or
+each reservation's empty lease and absent leaf. This includes `PROT_NONE` on an
+already-reserved range; it does not turn a mapped range into a reservation.
 `rax = 11` (`__NR_munmap`) accepts any page-aligned address and nonzero length
 that rounds to a subrange of the four-page scratch window, including mapped
 pages, holes, or both. It clears the selected

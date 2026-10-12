@@ -984,6 +984,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux anonymous mapping write seal validated\r\n");
     serial_write("ginux: Linux atomic multi-page write seal validated\r\n");
     serial_write("ginux: bounded Linux mmap protection splitting validated\r\n");
+    serial_write("ginux: idempotent Linux mmap protection validated\r\n");
     serial_write("ginux: adjacent Linux mmap range operations validated\r\n");
     serial_write("ginux: four-page fragmented Linux mmap window validated\r\n");
     serial_write("ginux: bounded anonymous fixed mmap placement validated\r\n");

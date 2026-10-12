@@ -5203,7 +5203,10 @@ fn linux_mmap_range_slots(address: u64, length: u64) -> Option<(usize, usize)> {
 }
 
 fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
-    if protection != LINUX_PROT_READ && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE) {
+    if protection != 0
+        && protection != LINUX_PROT_READ
+        && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
+    {
         return LINUX_EINVAL;
     }
     let Some((start_slot, pages)) = linux_mmap_range_slots(address, length) else {
@@ -5216,6 +5219,39 @@ fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
         .any(|slot| slot.is_none())
     {
         return LINUX_EINVAL;
+    }
+    if slots[start_slot..start_slot + pages]
+        .iter()
+        .all(|slot| slot.is_some_and(|(current, _)| current == target))
+    {
+        for offset in 0..pages {
+            let slot = start_slot + offset;
+            let Some((current, _)) = slots[slot] else {
+                return LINUX_EINVAL;
+            };
+            let page = address + (offset * PAGE_SIZE) as u64;
+            if current == 0 {
+                if linux_mmap_slot_frame(slot) != 0
+                    || ELF_PROBE_MMAP_GENERATIONS[slot].load(Ordering::SeqCst) != 0
+                    || !address_space::current_linux_page_absent(page)
+                {
+                    return LINUX_EINVAL;
+                }
+            } else {
+                let Some(lease) = linux_mmap_slot_lease(slot) else {
+                    return LINUX_EINVAL;
+                };
+                if !address_space::current_linux_mapping_matches(
+                    page,
+                    lease,
+                    u64::from(current) & LINUX_PROT_WRITE != 0,
+                    false,
+                ) {
+                    return LINUX_EINVAL;
+                }
+            }
+        }
+        return 0;
     }
     let all_reserved = slots[start_slot..start_slot + pages]
         .iter()

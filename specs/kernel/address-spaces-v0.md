@@ -64,6 +64,9 @@ change with the hardware
 leaves, and unmap accepts either state. Bounded discard validates the same owned
 leaf and zeros its frame in place, preserving whichever writable state the
 mapping currently has.
+An idempotent `mprotect` succeeds only after the registry state, exact frame
+generation, and every selected leaf are revalidated; a reserved no-op instead
+requires empty lease metadata and absent leaves.
 The matching residency query reports mapped pages as resident and frame-less
 reservations as nonresident without walking or disclosing addresses outside
 the fixed window. The

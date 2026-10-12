@@ -1684,6 +1684,11 @@ if ! grep -q '^ginux: bounded Linux mmap protection splitting validated' "$outpu
     exit 1
 fi
 
+if ! grep -q '^ginux: idempotent Linux mmap protection validated' "$output_file"; then
+    echo "Boot test failed: idempotent Linux mmap protection was not validated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: adjacent Linux mmap range operations validated' "$output_file"; then
     echo "Boot test failed: adjacent Linux mmap range operations were not validated." >&2
     exit 1

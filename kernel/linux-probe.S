@@ -471,7 +471,7 @@ valid_interpreter_base:
     mov eax, 10
     call syscall_expect_zero
     mov eax, 10
-    call syscall_expect_einval
+    call syscall_expect_zero
 
     mov edi, 0x40b000
     mov eax, 63
@@ -602,7 +602,7 @@ valid_interpreter_base:
     mov eax, 10
     call syscall_expect_zero
     mov eax, 10
-    call syscall_expect_einval
+    call syscall_expect_zero
     mov edi, 0x40bf80
     mov eax, 63
     call syscall_expect_efault
@@ -685,7 +685,7 @@ valid_interpreter_base:
     mov eax, 10
     call syscall_expect_zero
     mov eax, 10
-    call syscall_expect_einval
+    call syscall_expect_zero
     mov edi, 0x40b000
     mov eax, 63
     call syscall_expect_efault
