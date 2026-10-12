@@ -623,6 +623,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     stack_frame: frames[15],
                     heap_frame: frames[14],
+                    tls_frames: [memory::FrameLease::EMPTY; 2],
                     initial_fs_base: 0,
                     tls: 0,
                     tls_size: 0,
@@ -1218,6 +1219,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let mut exec_frames = [None; cpu::LINUX_EXEC_MAPPING_LIMIT];
     let mut exec_stack_frame = None;
     let mut exec_heap_frame = None;
+    let mut exec_tls_frames = [None; 2];
     let valid = (|| -> Option<bool> {
         unsafe {
             for frame in [
@@ -1590,6 +1592,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     stack: (stack_virtual_page + stack_offset as u64) as usize,
                     stack_frame: frames[10],
                     heap_frame: frames[9],
+                    tls_frames: [frames[13], frames[14]],
                     initial_fs_base: tls_base as usize,
                     tls: tls_virtual_page as usize + tls_start_offset,
                     tls_size: tls_extent_size,
@@ -1634,6 +1637,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                 exec_frames[execution_result.exec_mapping_count] = None;
             }
             exec_heap_frame = cpu::take_linux_exec_heap_frame();
+            exec_tls_frames = cpu::take_linux_exec_tls_frames();
             let expected_active_image_count = initial_image_count
                 + main_mappings
                     .iter()
@@ -1659,12 +1663,32 @@ pub(crate) fn verify_interpreted_elf_mapping(
                         && frame != frames[9]
                         && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frames[9]])
                 });
+            let exec_tls_mappings_valid = executed
+                && exec_tls_frames.iter().enumerate().all(|(index, frame)| {
+                    frame.is_some_and(|frame| {
+                        let old = frames[13 + index];
+                        let virtual_page = if index == 0 {
+                            tls_virtual_page
+                        } else {
+                            sibling_tls_virtual_page
+                        };
+                        main_entries.add(indexes(virtual_page)[3]).read()
+                            & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
+                            == frame.address() | PRESENT | USER | WRITABLE | NO_EXECUTE
+                            && frame != old
+                            && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[old])
+                    })
+                });
             let mapping_removed = main_entries.add(mmap_indexes[3]).read() == 0
                 && main_entries.add(mmap_tail_indexes[3]).read() == 0;
             let tls_runtime_valid = executed
                 && main_entries.add(tls_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
+                    == exec_tls_frames[0].map_or(0, memory::FrameLease::address)
+                        | PRESENT
+                        | USER
+                        | WRITABLE
+                        | NO_EXECUTE
                 && cpu::with_supervisor_user_access(|| {
                     core::slice::from_raw_parts(
                         (tls_virtual_page as usize + auxiliary_tls_start_offset) as *const u8,
@@ -1709,7 +1733,11 @@ pub(crate) fn verify_interpreted_elf_mapping(
             let sibling_tls_runtime_valid = executed
                 && main_entries.add(sibling_tls_indexes[3]).read()
                     & (ADDRESS_MASK | PRESENT | USER | WRITABLE | NO_EXECUTE)
-                    == sibling_tls_page | PRESENT | USER | WRITABLE | NO_EXECUTE
+                    == exec_tls_frames[1].map_or(0, memory::FrameLease::address)
+                        | PRESENT
+                        | USER
+                        | WRITABLE
+                        | NO_EXECUTE
                 && cpu::with_supervisor_user_access(|| {
                     core::slice::from_raw_parts(
                         (sibling_tls_virtual_page as usize + tls_start_offset) as *const u8,
@@ -1933,6 +1961,9 @@ pub(crate) fn verify_interpreted_elf_mapping(
             if !exec_heap_mapping_valid {
                 crate::serial_write_bytes(b"\r\nginux: replacement Linux heap invalid");
             }
+            if !exec_tls_mappings_valid {
+                crate::serial_write_bytes(b"\r\nginux: replacement Linux TLS mappings invalid");
+            }
             if !main_permissions_valid {
                 crate::serial_write_bytes(b"\r\nginux: userspace main mapping invalid");
             }
@@ -1975,6 +2006,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     && sibling_stack_runtime_valid
                     && exec_stack_mapping_valid
                     && exec_heap_mapping_valid
+                    && exec_tls_mappings_valid
                     && main_permissions_valid
                     && main_image_valid
                     && dependency_permissions_valid
@@ -1990,8 +2022,10 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let cleared = frames.iter().enumerate().all(|(index, frame)| unsafe {
         if memory::frames_owned_by(memory::FrameOwner::KERNEL, &[*frame]) {
             zero_frame(frame.address()).is_some()
-        } else if index == 9 && exec_heap_frame.is_some()
-            || index == 10 && exec_stack_frame.is_some()
+        } else if (index == 9 && exec_heap_frame.is_some())
+            || (index == 10 && exec_stack_frame.is_some())
+            || (index == 13 && exec_tls_frames[0].is_some())
+            || (index == 14 && exec_tls_frames[1].is_some())
         {
             true
         } else {
@@ -1999,7 +2033,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
         }
     });
     let sibling_resources_scrubbed = cleared
-        && unsafe { frame_is_zero(sibling_tls_page) }
+        && (exec_tls_frames[1].is_some() || unsafe { frame_is_zero(sibling_tls_page) })
         && unsafe { frame_is_zero(sibling_stack_page) };
     let dependency_cleared = dependency_frames
         .iter()
@@ -2022,6 +2056,12 @@ pub(crate) fn verify_interpreted_elf_mapping(
     let exec_heap_frame_released = exec_heap_frame.is_some_and(|frame| {
         prepare_linux_frame(frame.address(), &[])
             && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
+    });
+    let exec_tls_frames_released = exec_tls_frames.into_iter().all(|frame| {
+        frame.is_some_and(|frame| {
+            prepare_linux_frame(frame.address(), &[])
+                && memory::release_frames(memory::FrameOwner::KERNEL, [frame])
+        })
     });
     let mut original_frames_released = sibling_resources_scrubbed;
     if sibling_resources_scrubbed {
@@ -2052,6 +2092,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
         && exec_frames_released
         && exec_stack_frame_released
         && exec_heap_frame_released
+        && exec_tls_frames_released
         && main_frames_released
         && dependency_frames_released
         && frame_count_restored
@@ -2272,20 +2313,26 @@ pub(crate) fn current_linux_tls_rematerializable(
     current_linux_tls_frames(dependency_plan, thread_pointers).is_some()
 }
 
-pub(crate) fn rematerialize_current_linux_tls(
+pub(crate) fn materialize_linux_exec_tls_frames(
     dependency_plan: &crate::linux_elf::DependencyGraphLoadPlan<'_, '_, '_>,
     thread_pointers: [u64; 2],
+    frames: [memory::FrameLease; 2],
 ) -> bool {
-    let Some((layout, main, dependencies, frames)) =
+    if frames[0] == frames[1] || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &frames) {
+        return false;
+    }
+    let Some((layout, main, dependencies, _)) =
         current_linux_tls_frames(dependency_plan, thread_pointers)
     else {
         return false;
     };
     for (frame, thread_pointer) in frames.into_iter().zip(thread_pointers) {
-        let Some(page) = mapped_frame::<u8>(frame) else {
+        let Some(address) = frame.direct_map_address() else {
             return false;
         };
-        let page = unsafe { &mut *(page as *mut [u8; PAGE_SIZE]) };
+        // SAFETY: each generation-tagged frame is live, unique, and private to
+        // the pending exec transaction.
+        let page = unsafe { &mut *(address as *mut [u8; PAGE_SIZE]) };
         if !crate::linux_elf::materialize_static_tls_page(
             layout,
             main,

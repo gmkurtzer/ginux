@@ -695,6 +695,9 @@ for marker in \
     'replacement Linux heap lease reclaimed' \
     'Linux exec process break reset' \
     'interpreted Linux TLS state rematerialized' \
+    'interpreted Linux TLS leases replaced atomically' \
+    'old interpreted Linux TLS leases retired at exec' \
+    'replacement Linux TLS leases reclaimed' \
     'canonical interpreted Linux executable identity validated'; do
     if ! grep -q "^ginux: ${marker}" "$output_file"; then
         echo "Boot test failed: ${marker}." >&2

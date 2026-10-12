@@ -424,6 +424,10 @@ static ELF_PROBE_RETIRED_IMAGE_FLAGS: [AtomicU8; LINUX_ACTIVE_IMAGE_MAPPING_LIMI
 static ELF_PROBE_RETIRED_IMAGE_COUNT: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_TLS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_TLS_SIZE: AtomicU64 = AtomicU64::new(0);
+static ELF_PROBE_TLS_FRAMES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+static ELF_PROBE_TLS_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
+static ELF_PROBE_RECLAIM_TLS_FRAMES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+static ELF_PROBE_RECLAIM_TLS_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
 static ELF_PROBE_SIBLING_FS_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_SIBLING_TLS: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_SIBLING_STACK: AtomicU64 = AtomicU64::new(0);
@@ -1162,6 +1166,7 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) stack: usize,
     pub(crate) stack_frame: memory::FrameLease,
     pub(crate) heap_frame: memory::FrameLease,
+    pub(crate) tls_frames: [memory::FrameLease; 2],
     pub(crate) initial_fs_base: usize,
     pub(crate) tls: usize,
     pub(crate) tls_size: usize,
@@ -2089,6 +2094,58 @@ pub(crate) fn take_linux_exec_heap_frame() -> Option<memory::FrameLease> {
     )
 }
 
+#[inline(never)]
+fn finalize_linux_exec_tls_frames(
+    addresses: [usize; 2],
+    initial: [memory::FrameLease; 2],
+    replaced: bool,
+) -> bool {
+    let mut valid = true;
+    for index in 0..2 {
+        let current = memory::FrameLease::from_parts(
+            ELF_PROBE_TLS_FRAMES[index].swap(0, Ordering::SeqCst),
+            ELF_PROBE_TLS_GENERATIONS[index].swap(0, Ordering::SeqCst),
+        );
+        if initial[index] == memory::FrameLease::EMPTY {
+            valid &= !replaced && current.is_none();
+            continue;
+        }
+        valid &= current.is_some_and(|frame| {
+            let replacement_valid = frame != initial[index]
+                && !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[initial[index]])
+                && ELF_PROBE_RECLAIM_TLS_FRAMES[index].load(Ordering::SeqCst) == 0
+                && ELF_PROBE_RECLAIM_TLS_GENERATIONS[index].load(Ordering::SeqCst) == 0;
+            let mapping_valid = address_space::current_linux_mapping_matches(
+                addresses[index] as u64,
+                frame,
+                true,
+                false,
+            );
+            if replaced && replacement_valid {
+                ELF_PROBE_RECLAIM_TLS_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+                ELF_PROBE_RECLAIM_TLS_GENERATIONS[index]
+                    .store(frame.generation(), Ordering::SeqCst);
+            }
+            mapping_valid
+                && if replaced {
+                    replacement_valid
+                } else {
+                    frame == initial[index]
+                }
+        });
+    }
+    valid
+}
+
+pub(crate) fn take_linux_exec_tls_frames() -> [Option<memory::FrameLease>; 2] {
+    core::array::from_fn(|index| {
+        memory::FrameLease::from_parts(
+            ELF_PROBE_RECLAIM_TLS_FRAMES[index].swap(0, Ordering::SeqCst),
+            ELF_PROBE_RECLAIM_TLS_GENERATIONS[index].swap(0, Ordering::SeqCst),
+        )
+    })
+}
+
 pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfResult {
     let Some(heap_limit) = execution.heap.checked_add(execution.heap_size) else {
         return LinuxElfResult::FAILED;
@@ -2185,7 +2242,32 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
                 sibling_tls.extent as u64,
                 sibling_tls.extent_size,
             ));
-    if !tls_contract_valid {
+    let tls_frame_contract_valid = if execution.tls_size == 0 {
+        execution.tls_frames == [memory::FrameLease::EMPTY; 2]
+    } else {
+        execution.tls_frames[0] != execution.tls_frames[1]
+            && execution
+                .tls_frames
+                .iter()
+                .all(|frame| *frame != execution.stack_frame && *frame != execution.heap_frame)
+            && address_space::current_linux_mapping_matches(
+                (execution.tls & !(PAGE_SIZE - 1)) as u64,
+                execution.tls_frames[0],
+                true,
+                false,
+            )
+            && address_space::current_linux_mapping_matches(
+                (execution.sibling_tls & !(PAGE_SIZE - 1)) as u64,
+                execution.tls_frames[1],
+                true,
+                false,
+            )
+    };
+    let tls_reclaim_state_clean = (0..2).all(|index| {
+        ELF_PROBE_RECLAIM_TLS_FRAMES[index].load(Ordering::SeqCst) == 0
+            && ELF_PROBE_RECLAIM_TLS_GENERATIONS[index].load(Ordering::SeqCst) == 0
+    });
+    if !tls_contract_valid || !tls_frame_contract_valid || !tls_reclaim_state_clean {
         return LinuxElfResult::FAILED;
     }
     if ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst) {
@@ -2461,6 +2543,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_BRK_LIMIT.store(heap_limit as u64, Ordering::SeqCst);
     ELF_PROBE_HEAP_FRAME.store(execution.heap_frame.address(), Ordering::SeqCst);
     ELF_PROBE_HEAP_GENERATION.store(execution.heap_frame.generation(), Ordering::SeqCst);
+    for (index, frame) in execution.tls_frames.iter().copied().enumerate() {
+        ELF_PROBE_TLS_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+        ELF_PROBE_TLS_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
+    }
     ELF_PROBE_MMAP.store(execution.mmap as u64, Ordering::SeqCst);
     ELF_PROBE_MMAP_FRAME.store(execution.mmap_frames[0], Ordering::SeqCst);
     ELF_PROBE_MMAP_TAIL_FRAME.store(execution.mmap_frames[1], Ordering::SeqCst);
@@ -3368,6 +3454,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     };
     let tls_state_valid = ELF_PROBE_TLS.swap(0, Ordering::SeqCst) == execution.tls as u64
         && ELF_PROBE_TLS_SIZE.swap(0, Ordering::SeqCst) == execution.tls_size as u64;
+    let tls_frame_state_valid = finalize_linux_exec_tls_frames(
+        [
+            execution.tls & !(PAGE_SIZE - 1),
+            execution.sibling_tls & !(PAGE_SIZE - 1),
+        ],
+        execution.tls_frames,
+        interpreted_exec_replaced,
+    );
     let sibling_thread_resources_cleared = ELF_PROBE_SIBLING_FS_BASE.swap(0, Ordering::SeqCst)
         == execution.sibling_fs_base as u64
         && ELF_PROBE_SIBLING_TLS.swap(0, Ordering::SeqCst) == execution.sibling_tls as u64
@@ -3412,6 +3506,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && stack_frame_state_valid
         && old_image_retirement_valid
         && tls_state_valid
+        && tls_frame_state_valid
         && sibling_thread_resources_cleared
         && tls_copy_bounds_valid
         && tls_context_switch_valid
@@ -3449,6 +3544,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             stack_frame_state_valid,
             old_image_retirement_valid,
             tls_state_valid,
+            tls_frame_state_valid,
             sibling_thread_resources_cleared,
             tls_copy_bounds_valid,
             tls_context_switch_valid,
@@ -5551,7 +5647,7 @@ fn linux_execve_at(
     let Some((mapping_templates, mapping_count)) = linux_exec_mapping_plan(exec_plan) else {
         return LINUX_ENOEXEC;
     };
-    if interpreted_exec_plan.is_some() && mapping_count > LINUX_EXEC_MAPPING_LIMIT - 2 {
+    if interpreted_exec_plan.is_some() && mapping_count > LINUX_EXEC_MAPPING_LIMIT - 4 {
         return LINUX_E2BIG;
     }
     let stack_base = ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1);
@@ -5562,7 +5658,7 @@ fn linux_execve_at(
     let mut stack_image = [0_u8; LINUX_EXEC_STACK_SIZE];
     let interpreted = interpreted_exec_plan.is_some();
     let old_stack_frame = if interpreted {
-        if active_image_count > LINUX_ACTIVE_IMAGE_MAPPING_LIMIT - 2 {
+        if active_image_count > LINUX_ACTIVE_IMAGE_MAPPING_LIMIT - 4 {
             return LINUX_E2BIG;
         }
         let Some(frame) = memory::FrameLease::from_parts(
@@ -5711,6 +5807,24 @@ fn linux_execve_at(
             return LINUX_ENOMEM;
         }
     }
+    if let Some((_, thread_pointers)) = interpreted_tls {
+        let Some(frames) = memory::allocate_frames::<2>(memory::FrameOwner::KERNEL) else {
+            let _ = release_linux_exec_frames(&mut exec_frames);
+            return LINUX_ENOMEM;
+        };
+        exec_frames[mapping_count + 2] = Some(frames[0]);
+        exec_frames[mapping_count + 3] = Some(frames[1]);
+        if !address_space::materialize_linux_exec_tls_frames(
+            interpreted_exec_plan
+                .as_ref()
+                .unwrap_or_else(|| unreachable!()),
+            thread_pointers,
+            frames,
+        ) {
+            let _ = release_linux_exec_frames(&mut exec_frames);
+            return LINUX_ENOMEM;
+        }
+    }
     if interpreted {
         let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
             let _ = release_linux_exec_frames(&mut exec_frames);
@@ -5727,7 +5841,7 @@ fn linux_execve_at(
             frame: exec_frames[index].map_or(0, memory::FrameLease::address),
             ..mapping_templates[index]
         });
-    let transaction_mapping_count = mapping_count + 2 * usize::from(interpreted);
+    let transaction_mapping_count = mapping_count + 4 * usize::from(interpreted);
     if interpreted {
         if let Some(frame) = exec_frames[mapping_count] {
             mappings[mapping_count] = LinuxExecMapping {
@@ -5745,8 +5859,20 @@ fn linux_execve_at(
                 executable: false,
             };
         }
+        if let Some((_, thread_pointers)) = interpreted_tls {
+            for (offset, thread_pointer) in thread_pointers.into_iter().enumerate() {
+                if let Some(frame) = exec_frames[mapping_count + 2 + offset] {
+                    mappings[mapping_count + 2 + offset] = LinuxExecMapping {
+                        address: (thread_pointer & !(PAGE_SIZE as u64 - 1)) as usize,
+                        frame: frame.address(),
+                        writable: true,
+                        executable: false,
+                    };
+                }
+            }
+        }
     }
-    let old_mapping_count = active_image_count + 2 * usize::from(interpreted);
+    let old_mapping_count = active_image_count + 4 * usize::from(interpreted);
     if let Some(frame) = old_stack_frame {
         active_image_mappings[active_image_count] = LinuxActiveImageMapping {
             address: stack_base as usize,
@@ -5776,6 +5902,32 @@ fn linux_execve_at(
             writable: true,
             executable: false,
         };
+    }
+    if let Some((_, thread_pointers)) = interpreted_tls {
+        for (index, thread_pointer) in thread_pointers.into_iter().enumerate() {
+            let Some(frame) = memory::FrameLease::from_parts(
+                ELF_PROBE_TLS_FRAMES[index].load(Ordering::SeqCst),
+                ELF_PROBE_TLS_GENERATIONS[index].load(Ordering::SeqCst),
+            ) else {
+                let _ = release_linux_exec_frames(&mut exec_frames);
+                return LINUX_ENOEXEC;
+            };
+            let address = thread_pointer & !(PAGE_SIZE as u64 - 1);
+            if active_image_mappings[..active_image_count + 2 + index]
+                .iter()
+                .any(|mapping| mapping.frame == frame || mapping.address == address as usize)
+                || !address_space::current_linux_mapping_matches(address, frame, true, false)
+            {
+                let _ = release_linux_exec_frames(&mut exec_frames);
+                return LINUX_ENOEXEC;
+            }
+            active_image_mappings[active_image_count + 2 + index] = LinuxActiveImageMapping {
+                address: address as usize,
+                frame,
+                writable: true,
+                executable: false,
+            };
+        }
     }
     let mut previous_stack = [0_u8; LINUX_EXEC_STACK_SIZE];
     if !interpreted
@@ -5831,16 +5983,16 @@ fn linux_execve_at(
             ELF_PROBE_HEAP_FRAME.store(frame.address(), Ordering::SeqCst);
             ELF_PROBE_HEAP_GENERATION.store(frame.generation(), Ordering::SeqCst);
         }
+        for index in 0..2 {
+            if let Some(frame) = exec_frames[mapping_count + 2 + index] {
+                ELF_PROBE_TLS_FRAMES[index].store(frame.address(), Ordering::SeqCst);
+                ELF_PROBE_TLS_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
+            }
+        }
     }
     ELF_PROBE_BRK.store(heap_base, Ordering::SeqCst);
-    if let Some((initial, thread_pointers)) = interpreted_tls {
-        if !address_space::rematerialize_current_linux_tls(
-            interpreted_exec_plan
-                .as_ref()
-                .unwrap_or_else(|| unreachable!()),
-            thread_pointers,
-        ) || !install_linux_tls_context(initial)
-        {
+    if let Some((initial, _)) = interpreted_tls {
+        if !install_linux_tls_context(initial) {
             return LINUX_ENOMEM;
         }
     }

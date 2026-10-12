@@ -65,7 +65,9 @@ fresh zeroed RW/NX lease, while every successful exec resets the process break
 to the fixed heap base. The old heap is scrubbed at commit and the replacement
 lease is reclaimed after the process root becomes inactive. Interpreted replacement installs the measured
 interpreter first, lets it remap the authenticated main and both DSOs, reapplies
-RELRO, reconstructs both preallocated TLS images and FS state, and retires the
+RELRO, pre-materializes fresh primary and sibling TLS leases from the complete
+authenticated templates in the same transaction, restores FS to the fresh
+primary mapping, and retires the
 complete old interpreter/main/DSO graph. The archive
 is not yet a general mount or a system-container image.
 

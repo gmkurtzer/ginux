@@ -431,9 +431,11 @@ permissions, and exact generation-tagged lease are preconditions of the commit;
 forced verification failure restores both the complete old image and old stack,
 while success scrubs and releases the old stack lease before publication. The
 replacement interpreter then maps the same authenticated main and two DSOs and
-reconstructs the complete active-image record. Initial and sibling TLS pages
-are rematerialized in place from all three authenticated templates, and the
-initial FS base is restored before interpreter entry. RELRO is reapplied before
+reconstructs the complete active-image record. Fresh initial and sibling TLS
+frames are materialized from all three authenticated templates before commit
+and their RW/NX leaves replace the exact old generations in the same atomic
+transaction. The initial FS base is restored against the fresh primary mapping
+before interpreter entry. RELRO is reapplied before
 the replacement main exits. Admission is currently limited to `/init`, one
 argument, one environment entry, one live thread, the fixed two-DSO graph, and
 the existing bounded load windows. The internal `linux/init` node is exposed as
@@ -447,6 +449,10 @@ rollback, scrub, and reclamation rules to the fixed one-page RW/NX heap. Its
 replacement frame begins fully zeroed. Every successful exec also resets the
 bounded process break to the heap base; the static profile retains its heap
 frame in this version, while interpreted exec replaces it.
+The fresh TLS leaves, authenticated contents, TCB self-pointers, and FS context
+are revalidated after execution. Both old TLS leases must be retired, and both
+replacement leases are scrubbed and reclaimed only after the process root is
+inactive.
 
 This userspace walker is defense in depth over files already authenticated and
 fully validated by the kernel plan; it is not yet an independent general ELF
