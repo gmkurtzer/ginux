@@ -458,6 +458,10 @@ contract as initial static entry. Their fresh stack carries target-specific
 conservative hardware masks, and `AT_NULL`. Both independently linked static
 targets validate every pair and dereference `AT_EXECFN` and `AT_PLATFORM` in
 ring 3 before making a syscall.
+Static replacement also installs the empty TLS context atomically before entry:
+FS base, TLS extent, and TLS size become zero instead of retaining state from
+the replaced image. The system-init supervisor proof rejects a saved context
+whose FS base does not match this empty context.
 The interpreted replacement main likewise validates all eighteen ordered
 pairs before completing. It requires the dynamic main's program headers and
 entry, interpreter base `0x600000`, `AT_EXECFN` naming `/init`, platform

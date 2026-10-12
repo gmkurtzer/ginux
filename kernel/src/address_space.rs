@@ -662,6 +662,7 @@ pub(crate) fn verify_linux_elf_mapping(
                     dependency_base_end: [0; 2],
                     dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
                     exec_expected: true,
+                    system_init: exec_name == b"sbin/init",
                     initial_image_count,
                     initial_image_mappings,
                 })
@@ -1717,6 +1718,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
                     dependency_base_end: dependency_base_end.map(|base| base as usize),
                     dependency_mappings,
                     exec_expected: true,
+                    system_init: false,
                     initial_image_count,
                     initial_image_mappings,
                 })

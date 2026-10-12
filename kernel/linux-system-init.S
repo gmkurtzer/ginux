@@ -862,6 +862,16 @@ ginux_linux_system_init:
 
 .Lfork_complete:
 
+    mov qword ptr [rip + .Lsignal_set], 0x4000
+    xor edi, edi
+    lea rsi, [rip + .Lsignal_set]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov rdi, r8
     lea rsi, [rip + .Lready]
     mov edx, 21
@@ -869,6 +879,37 @@ ginux_linux_system_init:
     syscall
     cmp rax, 21
     jne .Lfailure
+
+    lea rdi, [rip + .Lsignal_set]
+    lea rsi, [rip + .Lstatus]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 128
+    syscall
+    cmp rax, 15
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus], 15
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 8], 0x80
+    jne .Lfailure
+
+    mov rdi, r8
+    lea rsi, [rip + .Lsupervisor_shutdown_marker]
+    mov edx, 20
+    mov eax, 1
+    syscall
+    cmp rax, 20
+    jne .Lfailure
+
+    mov edi, 1
+    lea rsi, [rip + .Lsignal_set]
+    xor edx, edx
+    mov r10d, 8
+    mov eax, 14
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     mov rdi, r8
     mov eax, 3
     syscall
@@ -945,6 +986,8 @@ ginux_linux_system_init:
     .long 1
 .Lfutex_marker:
     .ascii "FUTEX_READY\n"
+.Lsupervisor_shutdown_marker:
+    .ascii "SUPERVISOR_SHUTDOWN\n"
 .align 8
 .Lsignal_set:
     .quad 0

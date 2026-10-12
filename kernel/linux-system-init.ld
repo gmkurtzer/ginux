@@ -16,9 +16,9 @@ SECTIONS
 
     . = 0x415100;
     .text : { *(.text) *(.text.*) } :text
-    ASSERT(SIZEOF(.text) <= 0xf00, "Minimal system init exceeds its one-page RX profile")
+    ASSERT(SIZEOF(.text) <= 0x1f00, "Minimal system init exceeds its two-page RX profile")
 
-    . = 0x416000;
+    . = 0x417000;
     .data : { *(.data) } :data
     .bss : { *(.bss) } :data
 

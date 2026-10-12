@@ -1,6 +1,8 @@
 # Minimal System Container Profile v0
 
-**Status:** Measured candidate executes as PID 1, reports readiness, and exits cleanly.
+**Status:** M5 bounded profile complete. The measured candidate executes as PID
+1, reports readiness, remains blocked as the console-owning supervisor until a
+native control-plane shutdown event, and exits cleanly.
 
 The first system-container profile is assembled entirely from repository-owned,
 reproducible inputs. `profiles/minimal-system-v0/profile.tsv` is the canonical
@@ -17,8 +19,9 @@ the authenticated root index and validates its bounded ELF plan, canonical
 entry point, RX page count, writable page count, and non-executable stack. Its
 PID-1 path receives an initial stack naming `/sbin/init`, observes PID 1, opens
 the measured `/dev/console`, writes the exact `GINUX_SYSTEM_INIT_V0` readiness
-line, and exits through `exit_group(42)`. Final process teardown closes both
-the candidate's console descriptor and descriptors inherited across `exec`.
+line, waits for the native shutdown event described below, and exits through
+`exit_group(42)`. Final process teardown closes both the candidate's console
+descriptor and descriptors inherited across `exec`.
 Before readiness, PID 1 enumerates `/proc` and `/proc/1`, reads the immutable
 bounded `/proc/1/status` snapshot, and publishes its exact `init`, running,
 PID 1, and parent PID 0 fields to the console. After fork returns, the parent
@@ -91,13 +94,25 @@ general queues, multiple waiters, cross-process keys, bitsets, requeueing,
 priority inheritance, and robust-list recovery remain outside it. The complete
 contract is recorded in `specs/kernel/linux-futex-v0.md`.
 
-This execution gate deliberately does not claim M5 completion. The immutable
-root publishes an explicit `/sbin` directory containing the exact `init` node,
-and bounded root enumeration reaches it through a second cursor page. PID 1 is
-currently a bounded readiness-and-exit workload, not a persistent supervisor
-or interactive console owner. General process concurrency, mutable or multiple
-mounts, a general tmpfs or procfs, and general user-namespace creation and
-mapping APIs remain outside the bounded matrix.
+After completing the child lifecycle and publishing `GINUX_SYSTEM_INIT_V0`,
+PID 1 retains its open console descriptor and enters an untimed
+`rt_sigtimedwait` for blocked `SIGTERM`. With no runnable peer, the native side
+records its exact generation-bound return context and blocked wait rather than
+returning `-ENOSYS`. The control plane verifies that PID 1 remains live, injects
+a kernel-origin shutdown event, and resumes that same context. PID 1 validates
+the returned signal and `siginfo_t`, writes `SUPERVISOR_SHUTDOWN` through the
+same console descriptor, restores its mask, closes the console, and exits. The
+QEMU gate requires the readiness and shutdown markers exactly once. This makes
+`supervisor.pid1` ready and completes the bounded M5 gate. It does not yet
+provide an interactive input terminal, arbitrary external signals, restart
+policy, or an unbounded multi-process service manager. The exact lifecycle is
+specified in `specs/kernel/linux-supervisor-v0.md`.
+
+The immutable root publishes an explicit `/sbin` directory containing the exact
+`init` node, and bounded root enumeration reaches it through a second cursor
+page. General process concurrency, mutable or multiple mounts, a general tmpfs
+or procfs, and general user-namespace creation and mapping APIs remain outside
+the bounded matrix.
 
 Build the exact candidate root and signed development image with:
 

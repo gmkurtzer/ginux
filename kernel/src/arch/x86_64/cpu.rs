@@ -368,6 +368,7 @@ const LINUX_UNBLOCKABLE_SIGNALS: u64 = (1 << (9 - 1)) | (1 << (19 - 1));
 const LINUX_STANDARD_SIGNAL_COUNT: u64 = 31;
 const LINUX_SIGSEGV: u64 = 11;
 const LINUX_SIGPIPE: u64 = 13;
+const LINUX_SIGTERM: u64 = 15;
 const LINUX_SI_USER: i32 = 0;
 const LINUX_SI_TKILL: i32 = -6;
 const LINUX_SI_KERNEL: i32 = 0x80;
@@ -779,6 +780,9 @@ static LINUX_SIGNAL_RETURN_COUNT: AtomicU64 = AtomicU64::new(0);
 static LINUX_SIGNAL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SIGNAL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SIGNAL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
 static mut USER_RETURN_STACK: u64 = 0;
@@ -1586,6 +1590,7 @@ pub(crate) struct LinuxElfExecution {
     pub(crate) dependency_mappings:
         [[LinuxRelativeFileMapping; LINUX_DEPENDENCY_MAPPING_COUNT]; LINUX_DEPENDENCY_COUNT],
     pub(crate) exec_expected: bool,
+    pub(crate) system_init: bool,
     pub(crate) initial_image_count: usize,
     pub(crate) initial_image_mappings: [LinuxActiveImageMapping; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT],
 }
@@ -2128,6 +2133,11 @@ fn execute_deferred_live_fork() -> bool {
         parent.general,
         parent.rflags,
     );
+    let parent_resumed = if parent_resumed && ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst) {
+        resume_linux_system_supervisor()
+    } else {
+        parent_resumed
+    };
     let wait_count = LINUX_PROCESS_WAIT_COUNT.load(Ordering::SeqCst);
     let valid = parent_resumed
         && child_status == LINUX_PROBE_EXIT_STATUS as u8
@@ -2146,6 +2156,54 @@ fn execute_deferred_live_fork() -> bool {
         serial_write("ginux: Linux fork inherited user namespace\r\n");
     }
     valid
+}
+
+fn resume_linux_system_supervisor() -> bool {
+    if LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT.load(Ordering::SeqCst) != 1
+        || LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.load(Ordering::SeqCst) != 0
+        || current_linux_thread_handle().is_some()
+        || linux_process::live_process_status(1)
+            != Some(linux_process::LiveProcessStatus {
+                pid: 1,
+                parent_pid: 0,
+                state: linux_process::LiveProcessState::Running,
+            })
+        || !wake_linux_signal_wait(LINUX_SIGTERM, LINUX_SI_KERNEL)
+    {
+        return false;
+    }
+    let Some(thread) = ready_linux_thread_handle() else {
+        return false;
+    };
+    let Some(context) = linux_thread_return_context(thread) else {
+        return false;
+    };
+    let Some(process) = linux_process::dispatch_live_init_with_return(LINUX_SIGTERM) else {
+        return false;
+    };
+    if process.pid != 1
+        || context.rax != LINUX_SIGTERM
+        || process.general
+            != context
+                .registers
+                .process_general(context.rax, context.rip, context.rflags)
+        || process.rip != context.rip
+        || process.rsp != context.rsp
+        || process.rflags != context.rflags
+        || process.fs_base != context.fs_base
+        || !switch_linux_thread(thread)
+    {
+        return false;
+    }
+    LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.fetch_add(1, Ordering::SeqCst);
+    address_space::resume_live_linux_process(
+        process.root,
+        process.rip,
+        process.rsp,
+        process.fs_base,
+        process.general,
+        process.rflags,
+    )
 }
 
 fn linux_active_image_writable_index(address: u64) -> Option<usize> {
@@ -3908,6 +3966,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     LINUX_EPOLL_PWAIT_TIMEOUT_COUNT.store(0, Ordering::SeqCst);
     LINUX_MASKED_WAIT_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
     LINUX_SIGNAL_WAIT_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT.store(0, Ordering::SeqCst);
+    LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.store(0, Ordering::SeqCst);
+    ELF_PROBE_SYSTEM_INIT.store(execution.system_init, Ordering::SeqCst);
     ELF_PROBE_SIBLING_FS_BASE.store(execution.sibling_fs_base as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_TLS.store(execution.sibling_tls as u64, Ordering::SeqCst);
     ELF_PROBE_SIBLING_STACK.store(execution.sibling_stack as u64, Ordering::SeqCst);
@@ -4342,6 +4403,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let signal_wait_block_count = LINUX_SIGNAL_WAIT_BLOCK_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_wake_count = LINUX_SIGNAL_WAIT_WAKE_COUNT.swap(0, Ordering::SeqCst);
     let signal_wait_timeout_count = LINUX_SIGNAL_WAIT_TIMEOUT_COUNT.swap(0, Ordering::SeqCst);
+    let system_supervisor_wait_count = LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT.swap(0, Ordering::SeqCst);
+    let system_supervisor_shutdown_count =
+        LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.swap(0, Ordering::SeqCst);
+    let system_init = ELF_PROBE_SYSTEM_INIT.swap(false, Ordering::SeqCst);
     let signal_probe_executed = exec_replaced
         && initramfs::published_file_name_by_node(exec_node) == Some(b"bin/signal-probe");
     let termination_signal_valid = termination_signal
@@ -4361,6 +4426,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && signal_delivery_count == expected_signal_count
         && signal_return_count == expected_signal_count
         && unsafe { core::ptr::addr_of!(LINUX_SIGNAL_CONTEXT).read() == LinuxSignalContext::ZERO };
+    let system_supervisor_valid = if system_init {
+        system_supervisor_wait_count == 1 && system_supervisor_shutdown_count == 1
+    } else {
+        system_supervisor_wait_count == 0 && system_supervisor_shutdown_count == 0
+    };
     if execution.tls_size != 0
         && !(child_exit_count == 2
             && parent_resumed
@@ -5226,6 +5296,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && executable_identity_restored
         && no_new_privileges_enforced
         && signal_lifecycle_valid
+        && system_supervisor_valid
         && termination_signal_valid
         && signal_mask_restored
         && pending_signals_cleared
@@ -5272,6 +5343,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             executable_identity_restored,
             no_new_privileges_enforced,
             signal_lifecycle_valid,
+            system_supervisor_valid,
             termination_signal_valid,
             signal_mask_restored,
             pending_signals_cleared,
@@ -8825,10 +8897,16 @@ fn linux_execve_at(
         }
     }
     ELF_PROBE_BRK.store(heap_base, Ordering::SeqCst);
-    if let Some((initial, _)) = interpreted_tls {
-        if !install_linux_tls_context(initial) {
-            return LINUX_ENOMEM;
-        }
+    let next_tls = interpreted_tls.map_or(
+        LinuxTlsContext {
+            thread_pointer: 0,
+            extent: 0,
+            extent_size: 0,
+        },
+        |(initial, _)| initial,
+    );
+    if !install_linux_tls_context(next_tls) {
+        return LINUX_ENOMEM;
     }
     if interpreted {
         serial_write("ginux: interpreted Linux exec image committed\r\n");
@@ -12983,6 +13061,24 @@ fn linux_rt_sigtimedwait_live_return(
     let Some(current) = current_linux_thread_handle() else {
         return LINUX_ESRCH;
     };
+    if ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst)
+        && current_linux_process_pid() == 1
+        && current_linux_tid() == Some(1)
+        && requested == 1 << (LINUX_SIGTERM - 1)
+        && timeout == 0
+        && information != 0
+        && ELF_PROBE_SIGNAL_MASK.load(Ordering::SeqCst) & requested == requested
+    {
+        if LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT.load(Ordering::SeqCst) != 0
+            || !save_linux_thread_return_context(current, caller)
+            || !block_current_linux_thread(LINUX_THREAD_WAIT_SIGNAL, requested, information, 0)
+        {
+            return LINUX_EINVAL;
+        }
+        LINUX_SIGNAL_WAIT_BLOCK_COUNT.fetch_add(1, Ordering::SeqCst);
+        LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
+        return LINUX_RETURN_TO_KERNEL;
+    }
     let Some(target) = ready_linux_thread_handle() else {
         return LINUX_ENOSYS;
     };

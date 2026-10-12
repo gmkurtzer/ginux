@@ -686,7 +686,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: minimal system init invalid\r\n");
     };
     if system_init_plan.entry != 0x41_5100
-        || system_init_plan.executable.page_count != 1
+        || system_init_plan.executable.page_count != 2
         || system_init_plan.writable.page_count != 1
         || system_init_plan.executable.writable
         || !system_init_plan.executable.executable
@@ -881,6 +881,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: minimal system init execution failed\r\n");
     }
     serial_write("ginux: measured minimal system init executed as PID 1\r\n");
+    serial_write("ginux: persistent Linux PID 1 supervisor lifecycle validated\r\n");
     serial_write("ginux: bounded Linux standard signal lifecycle validated\r\n");
     serial_write("ginux: bounded Linux private futex lifecycle validated\r\n");
     serial_write("ginux: bounded Linux devfs profile validated\r\n");

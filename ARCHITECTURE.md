@@ -37,7 +37,7 @@ The design is intentionally narrower than Linux in hardware support. A binary co
 - First development profile: an Apple Silicon Mac running an x86-64 Q35/OVMF guest under QEMU TCG; UTM may be used as an optional interactive frontend.
 - First accelerated profile: the same x86-64 Q35/OVMF guest and device model under QEMU with KVM acceleration on an x86-64 Linux host.
 - First milestone workload: boot the kernel, seal the authority envelope, create one isolated domain, and start a minimal native control-plane process.
-- First Linux compatibility profile, after the native boot/domain path is established: the repository-pinned `minimal-system-v0` x86-64 system-container test image with `/sbin/init` and `/dev/console`. Its signed candidate executes as PID 1, reports readiness, and exits cleanly; a persistent PID-1-managed console and the remaining machine-readable gap matrix remain the M5 gate.
+- First Linux compatibility profile, after the native boot/domain path is established: the repository-pinned `minimal-system-v0` x86-64 system-container test image with `/sbin/init` and `/dev/console`. Its signed candidate executes as PID 1, reports readiness, retains the console while blocked in an untimed supervisor wait, accepts an explicit native control-plane shutdown event, and exits cleanly. The bounded machine-readable M5 matrix is complete; broader Linux compatibility remains profile-driven work rather than an implied claim.
 - Later hardware profile: one explicitly selected server with PCIe, IOMMU, NVMe, high-speed Ethernet/RDMA, and an NVIDIA GPU.
 - Later workloads: SSH, package operations, OCI workloads, CUDA, PyTorch, distributed AI training/inference, and HPC applications.
 

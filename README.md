@@ -12,9 +12,10 @@ exec targets, and a separately linked `/sbin/init` candidate. The validated
 `profiles/minimal-system-v0/profile.tsv` matrix is embedded into the signed
 root and records ready, partial, and missing requirements without treating
 partial behavior as compatibility. The kernel resolves the candidate only
-from the authenticated index and validates its one-page RX/one-page RW ELF
+from the authenticated index and validates its two-page RX/one-page RW ELF
 plan. A dedicated measured exec workload launches it as PID 1, verifies its
-identity, opens `/dev/console`, emits `GINUX_SYSTEM_INIT_V0`, and exits cleanly
+identity, opens `/dev/console`, emits `GINUX_SYSTEM_INIT_V0`, and remains in an
+untimed supervisor wait until the native control plane requests clean shutdown
 while final process teardown closes all inherited descriptors. It enumerates
 the immutable bounded `/dev`, proves `/dev/null` discard/EOF behavior,
 `/dev/zero` zero-fill behavior, and the `/dev/tty` terminal alias before
@@ -717,6 +718,16 @@ operation encodings before readiness. `FUTEX_WAIT_PRIVATE` must return
 `FUTEX_READY`. Combined with the dedicated two-thread runtime above, this closes
 the bounded `futex.private` profile row without claiming general Linux futex
 compatibility.
+The bounded M5 system image keeps PID 1 and its console descriptor live after
+the readiness line. PID 1 blocks in `rt_sigtimedwait` for `SIGTERM`; the native
+control path verifies the saved generation-bound process and thread state,
+wakes it with kernel-origin signal information, and resumes the same context.
+PID 1 validates the event, emits `SUPERVISOR_SHUTDOWN` through the retained
+console, restores its signal mask, closes the descriptor, and exits. This is a
+deterministic persistent-supervisor proof, not yet an interactive console or a
+general service-restart policy. Static exec now clears the replaced image's FS
+base before entering an image without TLS, so the saved supervisor context
+cannot retain a stale thread pointer.
 Bounded `mprotect` can activate a complete `PROT_NONE` scratch range as fresh
 zeroed read-only/NX or RW/NX pages, or irreversibly seal the page named by the
 parsed `PT_GNU_RELRO` range or any complete RW scratch range as read-only/NX.

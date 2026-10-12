@@ -1252,6 +1252,15 @@ pub(crate) fn live_process_status(pid: u32) -> Option<LiveProcessStatus> {
     })
 }
 
+pub(crate) fn dispatch_live_init_with_return(value: u64) -> Option<LiveProcessDispatch> {
+    let table = live_process_table_mut()?;
+    let init = table.init?;
+    if !table.set_return_value(init, value) {
+        return None;
+    }
+    table.dispatch(init)
+}
+
 #[inline(never)]
 pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
     LIVE_FORK_EXECUTION_STAGE.store(10, Ordering::Release);

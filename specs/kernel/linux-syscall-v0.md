@@ -1049,6 +1049,16 @@ runtime proves every immediate rejection, pending `SIGUSR1`/`SI_USER`
 consumption, empty polling, mask cleanup, a positive-timeout wake, and a
 child-to-parent signal wake. Teardown requires the wait kind, mask, output
 pointer, deadline, and saved thread state to be fully reclaimed.
+The measured system-container PID 1 adds one native-control boundary to this
+contract. After publishing readiness with `SIGTERM` blocked, its null-timeout
+wait for exactly that signal may park even though no Linux peer is runnable.
+The kernel retains the complete generation-bound thread and process contexts,
+marks the thread blocked, and returns to the native control plane. A validated
+kernel-origin shutdown request writes the generated `siginfo_t`, wakes the
+exact waiter, and resumes it with signal number 15. No other signal set,
+process, or workload receives this no-peer admission; those waits continue to
+return `-ENOSYS`. `specs/kernel/linux-supervisor-v0.md` defines the complete
+bounded lifecycle.
 `rax = 131` (`__NR_sigaltstack`) reports an initially disabled 24-byte x86-64
 alternate-stack record. It accepts `SS_DISABLE`, or a zero-flag or
 `SS_AUTODISARM` stack of at least

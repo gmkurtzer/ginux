@@ -8,6 +8,7 @@ runtime	console.pid1-banner	ready	PID 1 writes an exact readiness banner to the 
 runtime	process.identity	ready	PID 1 observes Linux container PID 1
 runtime	process.exit-group	ready	PID 1 terminates the bounded process with exit_group
 runtime	process.fork-wait	ready	PID 1 forks PID 2 and reaps its exit status through wait4
+runtime	supervisor.pid1	ready	PID 1 retains its console while blocked until native control-plane shutdown
 runtime	signal.standard	ready	Caught ignored blocked pending synchronous and selected fatal standard signals
 runtime	clock.monotonic	ready	Monotonic time sleep and timer waits
 runtime	futex.private	ready	Scheduler-backed private wait wake timeout and clear-child-TID lifecycle
