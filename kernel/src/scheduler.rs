@@ -1474,6 +1474,67 @@ pub(crate) fn block_runtime(
     }
 }
 
+pub(crate) fn block_runtime_idle(
+    frame: &mut UserTrapFrame,
+    code_selector: u16,
+    data_selector: u16,
+    reason: WaitReason,
+    fs_base: u64,
+) -> bool {
+    if !frame.selectors_match(code_selector, data_selector) {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(current) = runtime.scheduler.current else {
+        return false;
+    };
+    let Some(root) = runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.address_space_root)
+    else {
+        return false;
+    };
+    let Some(blocks) = runtime.blocks.checked_add(1) else {
+        return false;
+    };
+    let saved = frame.saved_context(0, root, fs_base);
+    if !runtime.scheduler.block_current_idle(current, saved, reason) {
+        return false;
+    }
+    runtime.blocks = blocks;
+    true
+}
+
+pub(crate) fn wake_device_completion(domain: u64, object: u64, request: u64, result: u64) -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(wakes) = runtime.wakes.checked_add(1) else {
+        return false;
+    };
+    let reason = WaitReason::DeviceCompletion {
+        object,
+        domain,
+        request,
+    };
+    let Some(scheduled) = runtime.scheduler.wake_idle_domain(domain, reason, result) else {
+        return false;
+    };
+    if runtime
+        .scheduler
+        .thread(scheduled.id)
+        .map(|thread| thread.domain)
+        != Some(domain)
+    {
+        return false;
+    }
+    runtime.wakes = wakes;
+    true
+}
+
 pub(crate) fn wake_ipc_peer(
     sender_domain: u64,
     object: u64,

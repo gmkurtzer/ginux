@@ -788,6 +788,22 @@ if ! grep -q '^ginux: isolated virtio queue notified from ring 3' "$output_file"
     exit 1
 fi
 
+if ! grep -q '^ginux: stale isolated virtio wait generation rejected' "$output_file"; then
+    echo "Boot test failed: a stale isolated virtio wait was accepted." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: isolated virtio service blocked on MSI-X' "$output_file" ||
+    ! grep -q '^ginux: kernel-owned MSI-X woke isolated virtio service' "$output_file"; then
+    echo "Boot test failed: MSI-X did not block and wake the isolated virtio service." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: duplicate isolated virtio wait rejected' "$output_file"; then
+    echo "Boot test failed: a duplicate isolated virtio wait was accepted." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: isolated virtio blank-sector read completed in ring 3' "$output_file"; then
     echo "Boot test failed: ring 3 did not validate the blank-sector completion." >&2
     exit 1
@@ -810,6 +826,11 @@ fi
 
 if ! grep -q '^ginux: completed virtio control device quiesced before release' "$output_file"; then
     echo "Boot test failed: the faulted virtio control service left its device active." >&2
+    exit 1
+fi
+
+if ! grep -q '^ginux: isolated virtio MSI-X route retired before DMA release' "$output_file"; then
+    echo "Boot test failed: the isolated MSI-X route survived DMA release." >&2
     exit 1
 fi
 

@@ -2276,7 +2276,9 @@ struct RegisteredAuxiliaryAddressSpace {
 struct AuxiliaryDeviceTeardown {
     device: VirtioBlockDevice,
     mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
     notification_page: Option<u64>,
+    interrupt_request: u64,
 }
 
 pub(crate) fn expected_service_fault_instruction(service_entry_offset: usize) -> Option<u64> {
@@ -4330,7 +4332,9 @@ pub(crate) fn bind_auxiliary_device_teardown(
     domain_id: u64,
     device: VirtioBlockDevice,
     mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
     notification_page: Option<u64>,
+    interrupt_request: u64,
 ) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
@@ -4340,6 +4344,7 @@ pub(crate) fn bind_auxiliary_device_teardown(
     };
     if registered.device_teardown.is_some()
         || registered.device_quiesced
+        || interrupt_request == 0
         || notification_page.is_some_and(|physical| {
             !registered
                 .space
@@ -4351,9 +4356,55 @@ pub(crate) fn bind_auxiliary_device_teardown(
     registered.device_teardown = Some(AuxiliaryDeviceTeardown {
         device,
         mapping,
+        msix_mapping,
         notification_page,
+        interrupt_request,
     });
     true
+}
+
+pub(crate) fn auxiliary_device_wait_ready(domain_id: u64, request: u64) -> bool {
+    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) =
+        (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    let Some(teardown) = registered.device_teardown else {
+        return false;
+    };
+    let Some(dma_physical) = registered.space.dma_frame.map(memory::FrameLease::address) else {
+        return false;
+    };
+    !registered.device_quiesced
+        && teardown.interrupt_request == request
+        && pci::isolated_interrupt_wait_ready(
+            teardown.device,
+            teardown.mapping,
+            domain_id,
+            request,
+            dma_physical,
+        )
+}
+
+pub(crate) fn complete_auxiliary_device_wait(domain_id: u64, request: u64) -> bool {
+    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) =
+        (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    let Some(teardown) = registered.device_teardown else {
+        return false;
+    };
+    !registered.device_quiesced
+        && teardown.interrupt_request == request
+        && pci::complete_isolated_interrupt_wait(
+            teardown.device,
+            teardown.msix_mapping,
+            domain_id,
+            request,
+        )
 }
 
 pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
@@ -4369,7 +4420,9 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
     let AuxiliaryDeviceTeardown {
         device,
         mapping,
+        msix_mapping,
         notification_page,
+        interrupt_request,
     } = teardown;
     let Some(dma_physical) = registered.space.dma_frame.map(memory::FrameLease::address) else {
         return false;
@@ -4381,7 +4434,13 @@ pub(crate) fn quiesce_auxiliary_device(domain_id: u64) -> bool {
                 .device_page_mapping_is_exact(7, physical, true)
         })
         || !pci::device_active_queue_is_bound(device, mapping, dma_physical)
-        || !pci::quiesce(device, mapping)
+        || !pci::quiesce_isolated_interrupt(
+            device,
+            mapping,
+            msix_mapping,
+            domain_id,
+            interrupt_request,
+        )
         || !unsafe { dma_page_has_completed_read(dma_physical) }
     {
         return false;
@@ -5413,12 +5472,15 @@ pub(crate) fn verify_ring3_writable_device_grant(
     register_physical: u64,
     device: VirtioBlockDevice,
     mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
 ) -> Option<u64> {
     const DEVICE_PAGE_INDEX: usize = 5;
     const DMA_PAGE_INDEX: usize = 6;
     const NOTIFICATION_PAGE_INDEX: usize = 7;
     const DEVICE_STATUS_OFFSET: usize = 0x14;
-    const SUCCESS_FAULT_OFFSET: u64 = 470;
+    const INTERRUPT_REQUEST: u64 = 1;
+    const SUCCESS_FAULT_OFFSET: u64 = 559;
     let page = register_physical & ADDRESS_MASK;
     let offset = register_physical
         .checked_sub(page)
@@ -5506,19 +5568,41 @@ pub(crate) fn verify_ring3_writable_device_grant(
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x66, 0x83, 0x7f, 0x1c, 0, // require queue to remain disabled
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0x66, 0xc7, 0x47, 0x1a, 0, 0, // bind queue zero to MSI-X entry zero
+        0x66, 0x83, 0x7f, 0x1a, 0, // require the vector binding to remain zero
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x66, 0xc7, 0x47, 0x1c, 0x01, 0, // enable queue zero
         0xc6, 0x47, 0x14, 0x0f, // set DRIVER_OK
         0xf6, 0x47, 0x14, 0x04, // require DRIVER_OK to remain set
         0x75, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x66, 0xc7, 0x86, 0x02, 0x01, 0, 0, 0x01, 0, // publish available index one
+        0x49, 0x89, 0xf0, // preserve the DMA mapping across a denied wait
+        0x48, 0x89, 0xcf, // move device capability to RDI
+        0xb8, 0x13, 0, 0, 0, // operation 19: block-device call
+        0xbe, 0x01, 0, 0, 0, // command 1: wait for completion
+        0xba, 0x02, 0, 0, 0, // stale request generation two
+        0xcd, 0x80, // require denial without blocking
+        0x4c, 0x89, 0xc6, // restore the DMA mapping
+        0x48, 0x83, 0xf8, 0xfd, // require UINT64_MAX - 2
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x48, 0xba, 0, 0, 0, 0, 0, 0, 0, 0, // movabs rdx, notification register
         0x66, 0xc7, 0x02, 0, 0, // notify queue zero
-        0xb9, 0x80, 0x96, 0x98, 0, // bounded completion poll count
-        0x66, 0x83, 0xbe, 0x02, 0x02, 0, 0, 0x01, // poll used index one
-        0x74, 0x06, // completed
-        0xf3, 0x90, // pause
-        0xe2, 0xf2, // loop to used-index poll
-        0x0f, 0x0b, // timeout fault
+        0x49, 0x89, 0xf0, // preserve the DMA mapping across the control call
+        0x48, 0x89, 0xcf, // move device capability to RDI
+        0xb8, 0x13, 0, 0, 0, // operation 19: block-device call
+        0xbe, 0x01, 0, 0, 0, // command 1: wait for completion
+        0xba, 0x01, 0, 0, 0, // request generation one
+        0xcd, 0x80, // enter the kernel and block
+        0x4c, 0x89, 0xc6, // restore the DMA mapping
+        0x48, 0x85, 0xc0, // require successful wake
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
+        0xb8, 0x13, 0, 0, 0, // operation 19: block-device call
+        0xbe, 0x01, 0, 0, 0, // command 1: wait for completion
+        0xba, 0x01, 0, 0, 0, // already-consumed request generation one
+        0xcd, 0x80, // require duplicate-wait denial
+        0x4c, 0x89, 0xc6, // restore the DMA mapping
+        0x48, 0x83, 0xf8, 0xfd, // require UINT64_MAX - 2
+        0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x83, 0xbe, 0x04, 0x02, 0, 0, 0, // require used id zero
         0x74, 0x02, 0x0f, 0x0b, // branch over failure fault
         0x81, 0xbe, 0x08, 0x02, 0, 0, 0x01, 0x02, 0, 0, // require used length 513
@@ -5582,7 +5666,7 @@ pub(crate) fn verify_ring3_writable_device_grant(
         return None;
     }
     program[156..164].copy_from_slice(&dma_physical.to_le_bytes());
-    program[380..388].copy_from_slice(&(user_notification as u64).to_le_bytes());
+    program[429..437].copy_from_slice(&(user_notification as u64).to_le_bytes());
     unsafe {
         for (offset, byte) in program.iter().enumerate() {
             space.code_frame.add(offset).write(*byte);
@@ -5592,10 +5676,24 @@ pub(crate) fn verify_ring3_writable_device_grant(
     let entry = USER_TEST_ADDRESS;
     let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
     if !register_auxiliary_address_space(auxiliary, space)
-        || !bind_auxiliary_device_teardown(auxiliary, device, mapping, Some(notification_page))
+        || !bind_auxiliary_device_teardown(
+            auxiliary,
+            device,
+            mapping,
+            msix_mapping,
+            Some(notification_page),
+            INTERRUPT_REQUEST,
+        )
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !pci::arm_isolated_device_interrupt(
+            device,
+            mapping,
+            msix_mapping,
+            apic,
+            auxiliary,
+            INTERRUPT_REQUEST,
+        )
         || !cpu::activate_user_root(root)
-        || !pci::arm_isolated_device(device, mapping)
     {
         return None;
     }

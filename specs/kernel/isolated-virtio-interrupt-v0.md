@@ -1,0 +1,52 @@
+# Isolated Virtio Interrupt Wait v0
+
+**Status:** One generation-bound MSI-X wait verified in QEMU.
+
+## Boundary
+
+The stop-only block service retains write authority on manifest object 7. It
+maps the virtio common configuration, one queue-notification page, and one
+generation-owned DMA page. It never maps PCI configuration, the MSI-X table or
+pending-bit array, the IDT, or the local APIC.
+
+Control ABI v4 operation 19, command 1 accepts a nonzero request generation in
+`RDX`. The call requires `WRITE` authority on object 7 and an exact match with
+the kernel's registered device teardown record. Before blocking, the kernel
+revalidates the caller domain generation, request generation, queue-zero
+MSI-X binding, negotiated features, active queue, bus mastering, and all three
+queue addresses against the caller's live DMA lease.
+
+## Block and wake
+
+The service first publishes and notifies its request while MSI-X table entry
+zero and the function are masked. It then enters operation 19. The scheduler
+saves the complete ring-3 context, marks that exact generation `Blocked`, and
+leaves no current userspace thread. Only after the state transition does the
+kernel unmask the owned vector and enter an interrupt-enabled `HLT` wait.
+
+Vector 33 records the interrupt, matches the saved object, domain generation,
+and request generation, writes success into saved `RAX`, makes the same thread
+running, acknowledges the local APIC, and returns to the sleeping kernel call.
+The call remasks both the function and table entry before returning to ring 3.
+The service then validates used ID zero, length 513, status zero, guard bytes,
+and the blank sector-two payload. The proof rejects request generation two
+before notification and rejects a second wait for consumed generation one.
+
+## Teardown
+
+The service deliberately faults after validation. Its registered teardown hook
+revalidates the active queue and DMA binding, function-masks and entry-masks
+MSI-X, disables MSI-X, revokes bus mastering, resets the device, and requires
+vector 33 to be idle before removing the temporary IDT gate. Only afterward may
+the kernel validate stable DMA contents, restore the kernel root, scrub and
+release the DMA page, destroy the service mappings, and retire its authority.
+
+## Deliberate limits
+
+- Only request generation one and one outstanding queue-zero read are modeled.
+- A missing device interrupt has no timer-backed cancellation yet; the current
+  deterministic QEMU proof waits in `HLT`. A production contract requires a
+  kernel timer, cancellation result, and recoverable device-reset path.
+- There is no vector allocator, shared-vector demultiplexing, SMP affinity,
+  IOMMU domain, reusable request ring, or stable general block-service ABI yet.
+- Page-granular notification MMIO still exposes unrelated bytes in its page.

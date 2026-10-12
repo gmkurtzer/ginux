@@ -35,7 +35,8 @@ Unknown feature bits must be ignored. A caller must reject an unsupported ABI
 version before invoking other operations. Existing operation semantics cannot
 be silently changed within a version; incompatible changes require a new
 version and an overlap period when practical. Version 4 preserves operations
-0 through 17 and adds the persistent-volume object at operation 18. The
+0 through 17 and adds the persistent-volume object at operation 18 plus the
+block-device wait at operation 19. The
 pre-release bootstrap switches atomically to v4 rather than carrying adapters;
 `control-v1.rs`, `control-v2.rs`, and `control-v3.rs` remain frozen as drift
 evidence. The scalar discovery word and
@@ -385,7 +386,7 @@ replacement recovers the exact payload, is denied mutation, exits, and also
 loses its capability. The current backend is volatile kernel memory, so this
 proves persistence across isolated service failure rather than VM restart.
 Object 7 is reserved by this v4 authority envelope for a block-device grant.
-It has no control-call operation yet: the kernel consumes its attenuated
+The kernel consumes its attenuated
 `READ` authority while constructing a read-only ring-3 MMIO mapping and its
 separate attenuated `WRITE` authority while constructing a writable control
 mapping. On x86 that leaf is also readable; the service uses it to select
@@ -395,15 +396,22 @@ mastering, after which the service enables the queue and sets `DRIVER_OK`
 after constructing an exact three-descriptor sector-two read chain. It
 publishes descriptor head zero by advancing the available index to one. The
 kernel maps the distinct page containing queue zero's validated notification
-register. The service writes queue index zero, polls within a fixed bound, and
-validates the exact blank-sector completion before faulting. This proves one
-bounded read followed by fault revocation and kernel
-quiescence. The same domain owns one separately tracked RW/NX DMA page. A domain fault
-triggers an internal teardown obligation: device validation, bus-master
-disable, and reset must complete before its address space or DMA lease can be
-released. A usable device driver still requires a later, separately specified
-contract rather than an
-implicit extension of operation 18.
+register. Operation 19 requires that same domain's `WRITE` handle in `RDI`.
+Command 1 in `RSI` accepts a nonzero request generation in `RDX`. The kernel
+requires the registered device, active queue, queue-zero MSI-X selection, DMA
+lease, caller generation, and request generation to match before saving the
+ring-3 context as blocked. It then unmasks kernel-owned MSI-X vector 33 and
+returns success only after that vector wakes the exact saved wait. A stale
+request, duplicate wait, wrong capability, inactive queue, or mismatched DMA
+binding returns `UINT64_MAX - 2` without blocking. The service validates the
+exact blank-sector completion before faulting. This proves one bounded read
+followed by fault revocation and kernel quiescence. The same domain owns one
+separately tracked RW/NX DMA page. A domain fault triggers an internal teardown
+obligation: MSI-X mask and disable, device validation, bus-master disable,
+reset, and interrupt-gate retirement must complete before its address space or
+DMA lease can be released. A usable device driver still requires a later,
+separately specified request/cancellation contract rather than an implicit
+extension of operation 18.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler

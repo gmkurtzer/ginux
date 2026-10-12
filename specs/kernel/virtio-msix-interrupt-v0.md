@@ -37,8 +37,10 @@ gate. DMA remains live until this sequence succeeds.
 
 ## Limitations
 
-This is a kernel-owned bootstrap proof for one request. The persistent backend
-and isolated ring-3 driver still poll their used rings. There is no persistent
-vector allocator, blocked service wait, interrupt capability, shared-vector
-demultiplexing, affinity policy, SMP routing, IOMMU confinement, or recovery
-from a lost or malicious interrupt. MSI-X table pages remain kernel-only.
+The isolated ring-3 proof now uses the same kernel-owned vector through a
+generation-bound blocked wait; see
+[Isolated Virtio Interrupt Wait v0](isolated-virtio-interrupt-v0.md). The
+persistent backend still polls its used ring. There is no persistent vector
+allocator, shared-vector demultiplexing, affinity policy, SMP routing, IOMMU
+confinement, timer-backed cancellation, or recovery from a lost or malicious
+interrupt. MSI-X table pages remain kernel-only.

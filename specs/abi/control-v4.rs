@@ -73,3 +73,4 @@ pub const VOLUME_REQUEST_SIZE: usize = 32;
 pub const VOLUME_MAX_TRANSFER_SIZE: usize = 64;
 pub const VOLUME_RESULT_STALE_GENERATION: u64 = u64::MAX - 4;
 pub const BLOCK_DEVICE_OBJECT: u64 = 7;
+pub const BLOCK_DEVICE_WAIT: u64 = 1;

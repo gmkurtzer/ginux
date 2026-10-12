@@ -7,7 +7,11 @@ use super::{
     cpu,
     paging::MmioMapping,
 };
-use crate::{scheduler::UserInterruptFrame, volume};
+use crate::{
+    control_abi,
+    scheduler::{self, UserInterruptFrame},
+    volume,
+};
 
 const CONFIG_ADDRESS_PORT: u16 = 0x0cf8;
 const CONFIG_DATA_PORT: u16 = 0x0cfc;
@@ -86,6 +90,8 @@ static VIRTIO_INTERRUPT_ACTIVE: AtomicBool = AtomicBool::new(false);
 static VIRTIO_INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static VIRTIO_INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 static VIRTIO_INTERRUPT_COUNT: AtomicU8 = AtomicU8::new(0);
+static VIRTIO_INTERRUPT_DOMAIN: AtomicU64 = AtomicU64::new(0);
+static VIRTIO_INTERRUPT_REQUEST: AtomicU64 = AtomicU64::new(0);
 
 global_asm!(
     r#"
@@ -559,6 +565,8 @@ fn install_virtio_interrupt(apic: &LocalApic) -> bool {
     );
     VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
     VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_DOMAIN.store(0, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_REQUEST.store(0, Ordering::SeqCst);
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
     cpu::install_interrupt_gate(
         VIRTIO_INTERRUPT_VECTOR,
@@ -576,6 +584,8 @@ fn retire_virtio_interrupt(apic: &LocalApic) -> bool {
     if cleared {
         VIRTIO_INTERRUPT_APIC_BASE.store(0, Ordering::SeqCst);
         VIRTIO_INTERRUPT_APIC_MODE.store(0, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_DOMAIN.store(0, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_REQUEST.store(0, Ordering::SeqCst);
     }
     cleared
 }
@@ -583,7 +593,18 @@ fn retire_virtio_interrupt(apic: &LocalApic) -> bool {
 extern "sysv64" fn virtio_interrupt_handler(_frame: *mut UserInterruptFrame) {
     VIRTIO_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
     if VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst) {
-        VIRTIO_INTERRUPT_FIRED.store(true, Ordering::SeqCst);
+        let domain = VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst);
+        let request = VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst);
+        if domain == 0
+            || scheduler::wake_device_completion(
+                domain,
+                control_abi::BLOCK_DEVICE_OBJECT,
+                request,
+                0,
+            )
+        {
+            VIRTIO_INTERRUPT_FIRED.store(true, Ordering::SeqCst);
+        }
     }
     let mode = if VIRTIO_INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
         Mode::X2Apic
@@ -1219,11 +1240,134 @@ pub(crate) fn device_active_queue_is_bound(
         && read_common_u64(common, COMMON_QUEUE_DEVICE) == dma_physical + USED_OFFSET as u64
 }
 
-pub(crate) fn arm_isolated_device(device: VirtioBlockDevice, mapping: MmioMapping) -> bool {
-    device_is_reset(device, mapping)
-        && bus_master_is_disabled(device)
+pub(crate) fn arm_isolated_device_interrupt(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    apic: &LocalApic,
+    domain: u64,
+    request: u64,
+) -> bool {
+    if domain == 0
+        || request == 0
+        || !device_is_reset(device, mapping)
+        || !bus_master_is_disabled(device)
+        || !program_masked_msix_vector(device, msix_mapping, 0, apic.id, VIRTIO_INTERRUPT_VECTOR)
+        || !install_virtio_interrupt(apic)
+    {
+        return false;
+    }
+    let armed = set_msix_control(device, true, true)
         && set_pci_command(device, true)
-        && bus_master_is_enabled(device)
+        && bus_master_is_enabled(device);
+    if armed {
+        VIRTIO_INTERRUPT_DOMAIN.store(domain, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_REQUEST.store(request, Ordering::SeqCst);
+        return true;
+    }
+    let _ = set_msix_control(device, true, true);
+    let _ = set_msix_entry_mask(device, msix_mapping, 0, true);
+    let _ = set_msix_control(device, false, true);
+    let _ = set_pci_command(device, false);
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    let _ = retire_virtio_interrupt(apic);
+    false
+}
+
+pub(crate) fn isolated_interrupt_wait_ready(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+    domain: u64,
+    request: u64,
+    dma_physical: u64,
+) -> bool {
+    let Some((common_physical, common_length)) = device.common_region() else {
+        return false;
+    };
+    let Some(common) = mapping.address(common_physical, common_length) else {
+        return false;
+    };
+    domain != 0
+        && request != 0
+        && VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) == domain
+        && VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) == request
+        && !VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
+        && !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+        && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 0
+        && read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) == 0
+        && device_active_queue_is_bound(device, mapping, dma_physical)
+}
+
+pub(crate) fn complete_isolated_interrupt_wait(
+    device: VirtioBlockDevice,
+    msix_mapping: MmioMapping,
+    domain: u64,
+    request: u64,
+) -> bool {
+    if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+    {
+        return false;
+    }
+    VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+    if !set_msix_entry_mask(device, msix_mapping, 0, false)
+        || !set_msix_control(device, true, false)
+    {
+        VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+        let _ = scheduler::wake_device_completion(
+            domain,
+            control_abi::BLOCK_DEVICE_OBJECT,
+            request,
+            u64::MAX - 2,
+        );
+        return false;
+    }
+    while !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst) {
+        // STI's interrupt shadow covers the following HLT, so an interrupt
+        // cannot be lost between the readiness test and sleeping.
+        unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
+    }
+    let function_masked = set_msix_control(device, true, true);
+    let entry_masked = set_msix_entry_mask(device, msix_mapping, 0, true);
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    function_masked
+        && entry_masked
+        && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1
+        && scheduler::current_domain() == Some(domain)
+}
+
+pub(crate) fn quiesce_isolated_interrupt(
+    device: VirtioBlockDevice,
+    mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    domain: u64,
+    request: u64,
+) -> bool {
+    if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+    {
+        return false;
+    }
+    let mode = if VIRTIO_INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let Some(apic) =
+        LocalApic::from_saved(0, mode, VIRTIO_INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    else {
+        return false;
+    };
+    let function_masked = set_msix_control(device, true, true);
+    let entry_masked = set_msix_entry_mask(device, msix_mapping, 0, true);
+    let msix_disabled = set_msix_control(device, false, true);
+    let device_quiesced = quiesce(device, mapping);
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    function_masked
+        && entry_masked
+        && msix_disabled
+        && device_quiesced
+        && retire_virtio_interrupt(&apic)
 }
 
 pub(crate) fn queue_zero_notification_register(

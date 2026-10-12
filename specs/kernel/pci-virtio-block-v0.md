@@ -61,11 +61,13 @@ kernel does not enable memory space, bus mastering, interrupts, queues, or
 device features. It does not read or write a disk sector and makes no reboot
 persistence claim.
 
-This profile does not destructively probe BAR aperture sizes, map the MSI-X
-table or pending-bit array, allocate a vector, program a message address/data
-pair, expose interrupt authority to userspace, or prove interrupt delivery.
-Those actions belong to a separate kernel-owned routing milestone. Until that
-milestone, isolated virtio completion remains bounded polling.
+This discovery profile does not destructively probe BAR aperture sizes, map the
+MSI-X table or pending-bit array, allocate a vector, program a message
+address/data pair, expose interrupt authority to userspace, or prove interrupt
+delivery. Those actions are separately constrained by the kernel-owned MSI-X
+mapping and routing contracts. The isolated virtio proof now blocks through a
+generation-bound kernel wait rather than polling, while all interrupt hardware
+remains outside its address space.
 
 The separate
 [Virtio Block Initialization v0](virtio-block-init-v0.md) contract maps the

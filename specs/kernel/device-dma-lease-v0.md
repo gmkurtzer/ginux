@@ -1,6 +1,6 @@
 # Isolated DMA Lease v0
 
-**Status:** Isolated polled read completion and fault cleanup verified in QEMU.
+**Status:** Isolated interrupt-driven read completion and fault cleanup verified in QEMU.
 
 ## Purpose
 
@@ -35,10 +35,12 @@ layout: three chained descriptors reference a 16-byte request header, a
 arms PCI bus mastering, then the service enables queue zero and sets
 `DRIVER_OK`. It publishes descriptor head zero by advancing the available index
 to one and writes queue index zero to the separately mapped notification
-register. Within a fixed poll bound, it requires used index one, used ID zero,
-length 513, successful status, and 512 zero bytes from reserved sector two. The
-fault hook first validates the active binding, disables PCI bus mastering, and
-resets the device. It then checks every byte in the now-stable page against
+register. It invokes the capability-checked block-device wait, becomes
+scheduler-blocked, and resumes only after the kernel-owned MSI-X vector matches
+its domain and request generation. It then requires used index one, used ID
+zero, length 513, successful status, and 512 zero bytes from reserved sector
+two. The fault hook first masks and disables MSI-X, validates the active
+binding, disables PCI bus mastering, and resets the device. It then checks every byte in the now-stable page against
 that exact layout. Any changed address, length, flag, chain index, request
 field, ring index, buffer byte, or status byte prevents teardown from accepting
 the completion.
@@ -56,14 +58,16 @@ zero, while the allocator reports zero frames remaining for the retired owner.
 
 ## Deliberate limits
 
-- This is one completed, polled, read-only request, not a reusable block-I/O
+- This is one completed, interrupt-driven, read-only request, not a reusable block-I/O
   service.
 - The physical address is embedded in the bounded bootstrap service and written
   only to the three queue-address registers; no general physical-address ABI is
   exposed.
 - The notification register's containing page is mapped and written once.
   Page-granular authority currently exposes unrelated bytes in that page.
-- Completion is polled; no interrupt is delegated.
+- Interrupt routing remains kernel-owned; the service receives only a
+  generation-bound wait operation, not interrupt-controller authority.
+- A missing interrupt does not yet have a timer-backed cancellation path.
 - There is no IOMMU domain; the trusted-QEMU bootstrap permits bus mastering
   only because the sole queue points at one bounded owned page and synchronous
   fault teardown revokes hardware access before releasing it.

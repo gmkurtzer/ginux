@@ -71,17 +71,23 @@ first constructs an exact three-descriptor sector-two read chain. It publishes
 descriptor head zero by advancing the available index to one. The kernel maps
 only the distinct 4 KiB page containing queue zero's validated two-byte
 notification register and binds that page to the teardown record. Ring 3
-notifies once, polls within a fixed bound, and validates used ID zero, length
-513, successful status, and the blank 512-byte sector-two payload. On its
-deliberate fault, the registered device hook validates the active binding, disables bus
-mastering, resets the device, and only then validates every byte of the now-stable
+binds queue zero to MSI-X entry zero and notifies once. Control ABI v4 operation
+19 verifies the write-only object-7 capability, active queue, exact DMA lease,
+domain generation, and request generation before blocking the service. The
+kernel unmasks its private vector 33, wakes only that saved generation, and
+remasks delivery before returning to ring 3. The proof rejects a stale request
+and a duplicate wait, then validates used ID zero, length 513, successful status,
+and the blank 512-byte sector-two payload. On its deliberate fault, the
+registered device hook masks and disables MSI-X, validates the active binding, disables bus
+mastering, resets the device, retires the temporary interrupt gate, and only then validates every byte of the now-stable
 completed DMA layout before the page is scrubbed and released;
 release is rejected
 unless quiescence completed. Each service loses its capability, mapping, and
-owned frames. MSI-X routing and blocked interrupt completion are not yet
-implemented, so this isolated completion path still polls. See
+owned frames. Lost-interrupt timeout/cancellation, reusable requests, and IOMMU
+confinement remain unimplemented. See
 [Block-device Control Grant v0](specs/kernel/device-grant-v0.md) and
-[Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md).
+[Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md), plus
+[Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md).
 
 The first system-container storage prerequisite is a deterministic, bounded
 ASCII `newc` initramfs independently bound by size and SHA-256 in the signed

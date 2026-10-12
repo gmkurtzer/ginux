@@ -1674,6 +1674,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         virtio_status_physical,
         virtio_block,
         virtio_mmio,
+        virtio_msix_mmio,
+        &local_apic,
     );
     let writable_grant_valid = writable_grant_dma.is_some();
     let writable_grant_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
@@ -1692,13 +1694,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: isolated virtio queue activated before publication");
     serial_write("\r\nginux: isolated virtio read descriptors prepared in ring 3");
     serial_write("\r\nginux: isolated virtio available entry published in ring 3");
+    serial_write("\r\nginux: stale isolated virtio wait generation rejected");
     serial_write("\r\nginux: isolated virtio queue notified from ring 3");
+    serial_write("\r\nginux: isolated virtio service blocked on MSI-X");
+    serial_write("\r\nginux: kernel-owned MSI-X woke isolated virtio service");
+    serial_write("\r\nginux: duplicate isolated virtio wait rejected");
     serial_write("\r\nginux: isolated virtio blank-sector read completed in ring 3");
     serial_write("\r\nginux: faulted virtio control service revoked");
     serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
     serial_write("\r\nginux: fault path quiesced device before DMA release");
     serial_write("\r\nginux: faulted DMA lease scrubbed and released");
     serial_write("\r\nginux: completed virtio control device quiesced before release");
+    serial_write("\r\nginux: isolated virtio MSI-X route retired before DMA release");
     serial_write("\r\nginux: opaque capability handles enforced at call gate");
     serial_write("\r\nginux: control call ABI v4 negotiated");
     serial_write("\r\nginux: userspace console capability enforced");

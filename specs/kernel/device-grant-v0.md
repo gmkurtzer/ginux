@@ -55,8 +55,10 @@ offsets into the three queue-address fields. After the kernel has armed PCI bus
 mastering, the service enables queue zero, sets `DRIVER_OK`, confirms the bit,
 constructs an exact three-descriptor sector-two read chain, publishes
 descriptor head zero by advancing the available index to one, and writes queue
-index zero to the validated notification register. It polls within a fixed
-bound and requires used ID zero, length 513, successful status, and a blank
+index zero to the validated notification register. It invokes operation 19
+with its exact object-7 handle and request generation, blocks in the scheduler,
+and resumes only when kernel-owned MSI-X vector 33 wakes that exact generation.
+It then requires used ID zero, length 513, successful status, and a blank
 512-byte payload before taking a deliberate invalid-opcode fault. The fault
 hook independently reads back the
 exact active queue and address-to-lease binding, disables bus mastering, resets
@@ -85,7 +87,9 @@ device, and completes one bounded read. The lease lifecycle is specified in
 - One page-granular writable mapping contains queue zero's validated two-byte
   notification register. The service writes that register once, but unrelated
   bytes in that 4 KiB page are not yet sub-page protected.
-- Completion is polled; no interrupt or IOMMU domain is delegated.
+- MSI-X remains entirely kernel-owned; no interrupt-controller or table
+  authority is delegated. A timer-backed lost-interrupt cancellation path is
+  not yet implemented, and there is no IOMMU domain.
 - The kernel still negotiates virtio and performs all persistent-volume I/O.
 - The mapping is a fixed bootstrap layout for one QEMU device, not a stable
   general device-grant ABI.
