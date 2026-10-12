@@ -88,6 +88,7 @@ pub(crate) struct ValidatedUserRootFrames {
     base: [u64; 13],
     base_count: usize,
     dma: Option<u64>,
+    native_executable_pages: u8,
 }
 
 impl ValidatedUserRootFrames {
@@ -103,13 +104,14 @@ impl ValidatedUserRootFrames {
         if self.base_count == 7 {
             return user_context_matches_layout(instruction, stack);
         }
-        let executable_start = USER_REGION_BASE + PAGE_SIZE as u64;
-        let executable_end = USER_REGION_BASE + 5 * PAGE_SIZE as u64;
         let stack_start = USER_REGION_BASE + 7 * PAGE_SIZE as u64;
         let stack_end = USER_REGION_BASE + 9 * PAGE_SIZE as u64;
-        (executable_start..executable_end).contains(&instruction)
-            && stack_start < stack
-            && stack <= stack_end
+        let executable_page = instruction
+            .checked_sub(USER_REGION_BASE)
+            .map(|offset| offset / PAGE_SIZE as u64)
+            .filter(|page| *page < 6)
+            .is_some_and(|page| self.native_executable_pages & (1 << page) != 0);
+        executable_page && stack_start < stack && stack <= stack_end
     }
 }
 
@@ -226,6 +228,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             base,
             base_count: legacy_frames.len(),
             dma: (dma != 0).then_some(dma_address),
+            native_executable_pages: 0,
         });
     }
 
@@ -239,59 +242,83 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let flags_match = |entry: u64, expected: u64| {
         entry & !(ACCESSED | DIRTY) == expected && (entry & DIRTY == 0 || expected & WRITABLE != 0)
     };
+    let image_pages = (0..6)
+        .take_while(|index| native_entries[*index] & PRESENT != 0)
+        .count();
+    let mut native_executable_pages = 0_u8;
+    let image_valid = image_pages != 0
+        && (image_pages..6).all(|index| native_entries[index] == 0)
+        && (0..image_pages).all(|index| {
+            let entry = native_entries[index];
+            let address = entry & ADDRESS_MASK as u64;
+            let valid = address != 0
+                && address < INITIAL_IDENTITY_LIMIT as u64
+                && (flags_match(entry, address | executable)
+                    || flags_match(entry, address | read_only_nx));
+            if valid && entry & NO_EXECUTE == 0 {
+                native_executable_pages |= 1 << index;
+            }
+            valid
+        })
+        && native_executable_pages != 0;
     let native_dma = native_entries[11];
     let native_dma_address = native_dma & ADDRESS_MASK as u64;
-    let native_frames = [
-        root,
-        pdpt_address,
-        directory_address,
-        table_address,
-        native_entries[0] & ADDRESS_MASK as u64,
-        native_entries[1] & ADDRESS_MASK as u64,
-        native_entries[2] & ADDRESS_MASK as u64,
-        native_entries[3] & ADDRESS_MASK as u64,
-        native_entries[4] & ADDRESS_MASK as u64,
-        native_entries[5] & ADDRESS_MASK as u64,
-        native_entries[7] & ADDRESS_MASK as u64,
-        native_entries[8] & ADDRESS_MASK as u64,
-        native_entries[10] & ADDRESS_MASK as u64,
-    ];
-    (flags_match(native_entries[0], native_frames[4] | read_only_nx)
-        && (1..=4)
-            .all(|index| flags_match(native_entries[index], native_frames[4 + index] | executable))
-        && flags_match(native_entries[5], native_frames[9] | read_only_nx)
-        && native_entries[6] == 0
-        && flags_match(native_entries[7], native_frames[10] | stack_flags)
-        && flags_match(native_entries[8], native_frames[11] | stack_flags)
-        && native_entries[9] == 0
-        && flags_match(native_entries[10], native_frames[12] | read_only_nx)
-        && flags_match(native_dma, native_dma_address | stack_flags)
-        && native_dma_address != 0
-        && native_dma_address < INITIAL_IDENTITY_LIMIT as u64
-        && flags_match(
+    let dma_valid = native_dma == 0
+        || (flags_match(native_dma, native_dma_address | stack_flags)
+            && native_dma_address != 0
+            && native_dma_address < INITIAL_IDENTITY_LIMIT as u64);
+    let mmio_valid = if native_entries[12] == 0 && native_entries[13] == 0 {
+        true
+    } else {
+        flags_match(
             native_entries[12],
             (native_entries[12] & ADDRESS_MASK as u64) | mmio_flags,
-        )
-        && flags_match(
+        ) && flags_match(
             native_entries[13],
             (native_entries[13] & ADDRESS_MASK as u64) | mmio_flags,
-        )
-        && native_entries[12] & ADDRESS_MASK as u64 >= INITIAL_IDENTITY_LIMIT as u64
-        && native_entries[13] & ADDRESS_MASK as u64 >= INITIAL_IDENTITY_LIMIT as u64
-        && native_entries[12] & ADDRESS_MASK as u64 != native_entries[13] & ADDRESS_MASK as u64
-        && (14..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
-        && native_frames
-            .iter()
-            .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)
-        && native_frames
+        ) && native_entries[12] & ADDRESS_MASK as u64 >= INITIAL_IDENTITY_LIMIT as u64
+            && native_entries[13] & ADDRESS_MASK as u64 >= INITIAL_IDENTITY_LIMIT as u64
+            && native_entries[12] & ADDRESS_MASK as u64 != native_entries[13] & ADDRESS_MASK as u64
+    };
+    let mut native_frames = [0_u64; 13];
+    native_frames[..4].copy_from_slice(&[root, pdpt_address, directory_address, table_address]);
+    for index in 0..image_pages {
+        native_frames[4 + index] = native_entries[index] & ADDRESS_MASK as u64;
+    }
+    let stack_index = 4 + image_pages;
+    native_frames[stack_index] = native_entries[7] & ADDRESS_MASK as u64;
+    native_frames[stack_index + 1] = native_entries[8] & ADDRESS_MASK as u64;
+    native_frames[stack_index + 2] = native_entries[10] & ADDRESS_MASK as u64;
+    let native_frame_count = stack_index + 3;
+    let native_frames_valid = native_frames[..native_frame_count]
+        .iter()
+        .all(|frame| *frame != 0 && *frame < INITIAL_IDENTITY_LIMIT as u64)
+        && native_frames[..native_frame_count]
             .iter()
             .enumerate()
-            .all(|(index, frame)| !native_frames[index + 1..].contains(frame))
-        && !native_frames.contains(&native_dma_address))
+            .all(|(index, frame)| !native_frames[index + 1..native_frame_count].contains(frame));
+    (image_valid
+        && native_entries[6] == 0
+        && flags_match(native_entries[7], native_frames[stack_index] | stack_flags)
+        && flags_match(
+            native_entries[8],
+            native_frames[stack_index + 1] | stack_flags,
+        )
+        && native_entries[9] == 0
+        && flags_match(
+            native_entries[10],
+            native_frames[stack_index + 2] | read_only_nx,
+        )
+        && dma_valid
+        && mmio_valid
+        && (14..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
+        && native_frames_valid
+        && (native_dma == 0 || !native_frames[..native_frame_count].contains(&native_dma_address)))
     .then_some(ValidatedUserRootFrames {
         base: native_frames,
-        base_count: native_frames.len(),
-        dma: Some(native_dma_address),
+        base_count: native_frame_count,
+        dma: (native_dma != 0).then_some(native_dma_address),
+        native_executable_pages,
     })
 }
 

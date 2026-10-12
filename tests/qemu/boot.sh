@@ -171,6 +171,16 @@ if ! grep -q '^ginux: measured isolated network service discovered' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: compiled native network service executed in ring 3' "$output_file" ||
+    ! grep -q '^ginux: native network service negotiated control ABI v4' "$output_file" ||
+    ! grep -q '^ginux: native network service validated control descriptor v4' "$output_file" ||
+    ! grep -q '^ginux: native network service started without boot capabilities' "$output_file" ||
+    ! grep -q '^ginux: native network service exited through lifecycle ABI v0' "$output_file" ||
+    ! grep -q '^ginux: native network service address space retired cleanly' "$output_file"; then
+    echo "Boot test failed: the native network-service lifecycle was not isolated." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

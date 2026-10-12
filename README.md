@@ -103,8 +103,10 @@ A separate freestanding Rust network-service PIE now builds for
 through the stable lifecycle ABI. Its exact bytes are authenticated in the
 signed root, its bounded native ELF plan is accepted during boot, and a
 temporary owned address space proves relative relocation, W^X mappings, guard
-pages, and complete retirement. It is not yet executed or granted device
-authority. See
+pages, and complete retirement. The measured entry also executes at ring 3 in
+a fresh domain with no boot capabilities, negotiates control ABI v4, exits
+through lifecycle ABI v0, and leaves no domain frames live. It has not yet
+received device authority. See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
 bounded supervisor-only uncached mapping. Their low-memory cacheable aliases

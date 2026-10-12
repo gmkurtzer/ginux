@@ -426,7 +426,7 @@ impl Manager {
         role: Role,
         identity: ServiceId,
     ) -> Option<DomainId> {
-        if grants.is_empty() || grants.len() > MAX_BOOT_GRANTS {
+        if grants.len() > MAX_BOOT_GRANTS || (grants.is_empty() && role != Role::AuxiliaryService) {
             return None;
         }
         if !matches!(role, Role::SupervisedService | Role::AuxiliaryService) {
@@ -831,7 +831,7 @@ impl Manager {
             || domain.failure_policy != Some(ServiceFailurePolicy::StopOnly)
             || domain.state != State::Ready
             || require_quiescent && (domain.active_threads != 0 || domain.active_operations != 0)
-            || domain.boot_root_count == 0
+            || domain.boot_root_count == 0 && !domain.capabilities.is_empty()
             || domain.boot_roots[..domain.boot_root_count]
                 .iter()
                 .any(|root| {
@@ -979,6 +979,18 @@ pub(crate) fn initialize_boot_auxiliary_service(
         && domain.state == State::Ready
         && domain.thread_limit == 0
         && domain.boot_root_count == 1
+        && domain.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
+pub(crate) fn initialize_boot_unprivileged_auxiliary_service() -> Option<u64> {
+    let manager = global_manager_mut()?;
+    let id = manager.create_auxiliary_service_with_delegations(&[])?;
+    let domain = manager.domain(id)?;
+    (domain.role == Role::AuxiliaryService
+        && domain.state == State::Ready
+        && domain.thread_limit == 0
+        && domain.boot_root_count == 0
         && domain.capabilities.boot_authority_is_sealed())
     .then_some(encode_id(id))
 }
@@ -1869,11 +1881,9 @@ fn address_space_root_is_owned(domain_raw: u64, root: u64) -> bool {
     let Some(frames) = crate::arch::x86_64::paging::validated_user_root_frames(root) else {
         return false;
     };
-    matches!(
-        frames.base().len(),
-        crate::address_space::USER_ADDRESS_SPACE_FRAMES
-            | crate::address_space::NATIVE_SERVICE_FRAME_COUNT
-    ) && crate::memory::frame_addresses_owned_by(owner, frames.base())
+    (frames.base().len() == crate::address_space::USER_ADDRESS_SPACE_FRAMES
+        || (8..=crate::address_space::NATIVE_SERVICE_FRAME_COUNT).contains(&frames.base().len()))
+        && crate::memory::frame_addresses_owned_by(owner, frames.base())
         && frames
             .dma()
             .is_none_or(|dma| crate::memory::frame_addresses_owned_by(owner, &[dma]))

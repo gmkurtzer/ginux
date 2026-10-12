@@ -2824,6 +2824,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         serial_write_u64(u64::from(recovered_after_cancellation_quiesced));
         kernel_fail("\r\nginux: post-cancellation native volume invariant failed\r\n");
     }
+    if !address_space::verify_native_network_service(&network_image) {
+        kernel_fail("\r\nginux: compiled native network service invariant failed\r\n");
+    }
+    serial_write("\r\nginux: compiled native network service executed in ring 3");
+    serial_write("\r\nginux: native network service negotiated control ABI v4");
+    serial_write("\r\nginux: native network service validated control descriptor v4");
+    serial_write("\r\nginux: native network service started without boot capabilities");
+    serial_write("\r\nginux: native network service exited through lifecycle ABI v0");
+    serial_write("\r\nginux: native network service address space retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

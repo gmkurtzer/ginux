@@ -1,7 +1,7 @@
 # Native Network Service Runtime v0
 
-**Status:** A freestanding x86-64 service artifact is authenticated and
-materialized into a bounded W^X address space; execution is pending.
+**Status:** A freestanding x86-64 service artifact executes and exits cleanly
+in a capability-empty native domain; device delegation is pending.
 
 ## Purpose
 
@@ -36,8 +36,16 @@ read-execute, and one read-write region. A non-executable stack is bounded by
 unmapped guard pages. The proof checks the resulting mappings and relocation
 values, then scrubs and releases the complete temporary address space.
 
+The first live run creates a fresh stop-only auxiliary domain with a sealed,
+empty boot capability table. The measured entry executes at ring 3, negotiates
+control ABI v4, copies and validates its structured descriptor, and reports
+`COMPLETED` through lifecycle ABI v0. The kernel requires an exit rather than a
+fault, restores its own page-table root, observes no registered service address
+space or owned frame, and retires the domain. No bootstrap pointer, opaque
+capability handle, device page, DMA page, or interrupt route is supplied.
+
 ## Deliberate limits
 
-This milestone does not yet execute the artifact, delegate device
-capabilities, map MMIO or DMA, or move packet processing out of the kernel.
-Each boundary is introduced and tested separately in subsequent milestones.
+This milestone does not yet delegate device capabilities, map MMIO or DMA, or
+move packet processing out of the kernel. Each boundary is introduced and
+tested separately in subsequent milestones.

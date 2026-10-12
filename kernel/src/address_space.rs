@@ -4444,6 +4444,98 @@ pub(crate) fn verify_native_service_materialization(
     valid && space.release()
 }
 
+pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeImage<'_>) -> bool {
+    let Some(auxiliary) = domain::initialize_boot_unprivileged_auxiliary_service() else {
+        return false;
+    };
+    let (Some(identity), Some(owner)) = (
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+        return false;
+    };
+    if !space.layout_is_valid(image)
+        || !space.relocations_are_valid(image)
+        || domain::auxiliary_boot_handle(auxiliary, 0).is_some()
+        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT)
+    {
+        let _ = space.release();
+        return false;
+    }
+    let root = space.root;
+    let entry = match usize::try_from(space.entry) {
+        Ok(entry) => entry,
+        Err(_) => {
+            let _ = space.release();
+            return false;
+        }
+    };
+    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    let root_frames = paging::validated_user_root_frames(root);
+    if root_frames.as_ref().is_none_or(|frames| {
+        frames.base().len() != 4 + space.image_pages + 3
+            || frames.dma().is_some()
+            || !memory::frame_addresses_owned_by(owner, frames.base())
+    }) {
+        crate::serial_write_bytes(b"\r\nginux: native network root frame count: ");
+        crate::serial_write_u64(
+            root_frames
+                .as_ref()
+                .map_or(u64::MAX, |frames| frames.base().len() as u64),
+        );
+        let _ = space.release();
+        return false;
+    }
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space)) {
+        crate::serial_write_bytes(b"\r\nginux: native network registration failed");
+        return false;
+    }
+    if !scheduler::queue_auxiliary(auxiliary, root, entry, stack, 0) {
+        crate::serial_write_bytes(b"\r\nginux: native network scheduler queue failed");
+        return false;
+    }
+    if !cpu::activate_user_root(root) {
+        crate::serial_write_bytes(b"\r\nginux: native network root activation failed");
+        return false;
+    }
+    cpu::execute_native_auxiliary(entry, stack, 0, 0, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    let valid = current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && event
+            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED))
+        && domain::last_lifecycle_event_audit().is_some_and(|(kind, audited, _)| {
+            kind == crate::control_abi::LIFECYCLE_AUXILIARY_EXITED && audited == auxiliary
+        })
+        && domain::last_lifecycle_event_detail()
+            == Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED)
+        && domain::last_lifecycle_event_has_fault() == Some(false)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none();
+    if !valid {
+        crate::serial_write_bytes(b"\r\nginux: native network event/status/roots/frames: ");
+        for value in [
+            event.unwrap_or(u64::MAX),
+            domain::last_lifecycle_event_detail().map_or(u64::MAX, u64::from),
+            current_root(),
+            kernel_root,
+            registered_auxiliary_address_space_count() as u64,
+            memory::owner_live_frame_count(owner).unwrap_or(usize::MAX) as u64,
+        ] {
+            crate::serial_write_u64(value);
+            crate::serial_write_bytes(b" ");
+        }
+    }
+    valid
+}
+
 pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
     let Some(first_auxiliary) =
         domain::initialize_boot_auxiliary_service(1, 2, crate::capability::Rights::WRITE)

@@ -104,6 +104,10 @@ impl Table {
         self.boot_authority_sealed
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entries.iter().all(Option::is_none)
+    }
+
     /// Produces strictly less authority over the same object.
     pub(crate) fn derive(&mut self, parent: Handle, rights: Rights) -> Option<Handle> {
         let parent_entry = self.entry(parent)?;
