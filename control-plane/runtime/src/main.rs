@@ -2,7 +2,9 @@
 #![no_main]
 
 use core::arch::{asm, global_asm};
-use ginux_command::{parse, write_error, write_help, Arity, Command, HelpWriter, ParseOutcome};
+use ginux_command::{
+    parse, write_error, write_help, Arguments, Arity, Command, HelpWriter, ParseOutcome,
+};
 use ginux_native_abi::{
     native_control_abi_is_compatible, NativeContainerRequestV0, NativeControlDescriptorV4,
     NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
@@ -63,7 +65,7 @@ const CONTAINER_COMMANDS: &[Command<'static>] = &[
         b"container set NAME FIELD=VALUE...",
         b"Set one or more container fields",
         COMMAND_CONTAINER_SET,
-        Arity::range(2, 5),
+        Arity::at_least(2),
     ),
     Command::leaf(
         b"status",
@@ -270,7 +272,7 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                 exit(NATIVE_SERVICE_EXIT_COMPLETED);
             }
             COMMAND_LS => {
-                let path = invocation.arguments().first().copied().unwrap_or_default();
+                let path = invocation.arguments().first().unwrap_or_default();
                 let path = path.strip_prefix(b"/").unwrap_or(path);
                 if path == b"proc" {
                     list_proc_directory(console, host, b"");
@@ -385,8 +387,8 @@ fn write_container_configuration(console: u64, request: &NativeContainerRequestV
     );
 }
 
-fn handle_container_command(console: u64, host: u64, command: u16, arguments: &[&[u8]]) {
-    let name = arguments.first().copied().unwrap_or_default();
+fn handle_container_command(console: u64, host: u64, command: u16, arguments: Arguments<'_>) {
+    let name = arguments.first().unwrap_or_default();
     if !valid_container_name(name) {
         write(console, b"container: invalid name\r\n");
         return;
@@ -446,12 +448,13 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: &[
     }
 }
 
-fn set_container_configuration(console: u64, host: u64, name: &[u8], arguments: &[&[u8]]) {
-    let legacy = arguments.len() == 3 && !arguments[1].contains(&b'=');
+fn set_container_configuration(console: u64, host: u64, name: &[u8], arguments: Arguments<'_>) {
+    let legacy = arguments.len() == 3 && !arguments.get(1).unwrap_or_default().contains(&b'=');
+    let setting_count = if legacy { 1 } else { arguments.len() - 1 };
     let mut configured = 0_u16;
-    for setting in &arguments[1..if legacy { 2 } else { arguments.len() }] {
+    for setting in arguments.skip(1).take(setting_count) {
         let (field, value) = if legacy {
-            (*setting, arguments[2])
+            (setting, arguments.get(2).unwrap_or_default())
         } else if let Some(pair) = split_setting(setting) {
             pair
         } else {
@@ -471,9 +474,9 @@ fn set_container_configuration(console: u64, host: u64, name: &[u8], arguments: 
     }
 
     let mut state = NATIVE_CALL_FAILED;
-    for setting in &arguments[1..if legacy { 2 } else { arguments.len() }] {
+    for setting in arguments.skip(1).take(setting_count) {
         let (field, value) = if legacy {
-            (*setting, arguments[2])
+            (setting, arguments.get(2).unwrap_or_default())
         } else {
             split_setting(setting).unwrap()
         };

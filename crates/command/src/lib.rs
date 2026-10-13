@@ -3,31 +3,41 @@
 #[cfg(test)]
 extern crate std;
 
-pub const MAX_ARGUMENTS: usize = 8;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Arity {
     minimum: u8,
-    maximum: u8,
+    maximum: Option<u8>,
 }
 
 impl Arity {
     pub const fn exact(count: u8) -> Self {
-        assert!(count as usize <= MAX_ARGUMENTS);
         Self {
             minimum: count,
-            maximum: count,
+            maximum: Some(count),
         }
     }
 
     pub const fn range(minimum: u8, maximum: u8) -> Self {
         assert!(minimum <= maximum);
-        assert!(maximum as usize <= MAX_ARGUMENTS);
-        Self { minimum, maximum }
+        Self {
+            minimum,
+            maximum: Some(maximum),
+        }
+    }
+
+    pub const fn at_least(minimum: u8) -> Self {
+        Self {
+            minimum,
+            maximum: None,
+        }
     }
 
     const fn accepts(self, count: usize) -> bool {
-        count >= self.minimum as usize && count <= self.maximum as usize
+        count >= self.minimum as usize
+            && match self.maximum {
+                Some(maximum) => count <= maximum as usize,
+                None => true,
+            }
     }
 }
 
@@ -83,7 +93,7 @@ impl<'schema> Command<'schema> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Invocation<'input> {
     id: u16,
-    arguments: [&'input [u8]; MAX_ARGUMENTS],
+    arguments: &'input [u8],
     argument_count: usize,
 }
 
@@ -92,10 +102,67 @@ impl<'input> Invocation<'input> {
         self.id
     }
 
-    pub fn arguments(&self) -> &[&'input [u8]] {
-        &self.arguments[..self.argument_count]
+    pub const fn arguments(&self) -> Arguments<'input> {
+        Arguments {
+            input: self.arguments,
+            remaining: self.argument_count,
+        }
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Arguments<'input> {
+    input: &'input [u8],
+    remaining: usize,
+}
+
+impl<'input> Arguments<'input> {
+    pub const fn len(self) -> usize {
+        self.remaining
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.remaining == 0
+    }
+
+    pub fn get(mut self, index: usize) -> Option<&'input [u8]> {
+        self.nth(index)
+    }
+
+    pub fn first(self) -> Option<&'input [u8]> {
+        self.get(0)
+    }
+}
+
+impl<'input> Iterator for Arguments<'input> {
+    type Item = &'input [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let start = self
+            .input
+            .iter()
+            .position(|byte| !byte.is_ascii_whitespace())?;
+        self.input = &self.input[start..];
+        let end = self
+            .input
+            .iter()
+            .position(|byte| byte.is_ascii_whitespace())
+            .unwrap_or(self.input.len());
+        let word = &self.input[..end];
+        self.input = &self.input[end..];
+        self.remaining -= 1;
+        Some(word)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl ExactSizeIterator for Arguments<'_> {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ParseOutcome<'schema, 'input> {
@@ -109,7 +176,6 @@ pub enum ParseErrorKind {
     UnknownCommand,
     MissingArguments,
     TooManyArguments,
-    TooManyTokens,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -148,7 +214,7 @@ pub fn parse<'schema, 'input>(
             command: root,
         });
     };
-    let mut arguments = [b"" as &[u8]; MAX_ARGUMENTS];
+    let mut argument_start = input.len();
     let mut argument_count = 0;
     for word in words {
         if word == b"--help" || (word == b"help" && command.id.is_none()) {
@@ -166,13 +232,9 @@ pub fn parse<'schema, 'input>(
                 command,
             });
         }
-        if argument_count == MAX_ARGUMENTS {
-            return Err(ParseError {
-                kind: ParseErrorKind::TooManyTokens,
-                command,
-            });
+        if argument_count == 0 {
+            argument_start = word.as_ptr() as usize - input.as_ptr() as usize;
         }
-        arguments[argument_count] = word;
         argument_count += 1;
     }
     let Some(id) = command.id else {
@@ -190,7 +252,7 @@ pub fn parse<'schema, 'input>(
     }
     Ok(ParseOutcome::Invoke(Invocation {
         id,
-        arguments,
+        arguments: &input[argument_start..],
         argument_count,
     }))
 }
@@ -237,9 +299,7 @@ pub fn write_error(error: ParseError<'_>, output: &mut impl HelpWriter) {
     output.write(match error.kind {
         ParseErrorKind::UnknownCommand => b"Error: unknown command",
         ParseErrorKind::MissingArguments => b"Error: missing arguments",
-        ParseErrorKind::TooManyArguments | ParseErrorKind::TooManyTokens => {
-            b"Error: too many arguments"
-        }
+        ParseErrorKind::TooManyArguments => b"Error: too many arguments",
     });
     output.write(b"\r\nUsage:\r\n  ");
     output.write(error.command.usage);
@@ -263,7 +323,7 @@ mod tests {
         b"container set NAME FIELD=VALUE...",
         b"Set container fields",
         4,
-        Arity::range(2, 5),
+        Arity::at_least(2),
     );
     const CONTAINER_CHILDREN: &[Command<'static>] = &[START, SET];
     const CONTAINER: Command<'static> = Command::group(
@@ -287,7 +347,7 @@ mod tests {
         };
         assert_eq!(invocation.id(), 4);
         let expected: &[&[u8]] = &[b"demo", b"cpu", b"1"];
-        assert_eq!(invocation.arguments(), expected);
+        assert!(invocation.arguments().eq(expected.iter().copied()));
     }
 
     #[test]
@@ -306,7 +366,14 @@ mod tests {
             b"memory-mib=128",
             b"autostart=true",
         ];
-        assert_eq!(invocation.arguments(), expected);
+        assert!(invocation.arguments().eq(expected.iter().copied()));
+
+        let ParseOutcome::Invoke(invocation) =
+            parse(&ROOT, b"container set demo a=1 b=2 c=3 d=4 e=5 f=6 g=7 h=8").unwrap()
+        else {
+            panic!("expected variadic invocation");
+        };
+        assert_eq!(invocation.arguments().len(), 9);
     }
 
     #[test]
@@ -328,7 +395,7 @@ mod tests {
             panic!("expected invocation");
         };
         let expected: &[&[u8]] = &[b"help"];
-        assert_eq!(invocation.arguments(), expected);
+        assert!(invocation.arguments().eq(expected.iter().copied()));
     }
 
     #[test]

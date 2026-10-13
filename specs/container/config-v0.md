@@ -13,8 +13,9 @@ container new NAME
 container set NAME init=/sbin/init cpu=1 memory-mib=128 autostart=true
 ```
 
-One or more `FIELD=VALUE` settings may be supplied in the same command. The
-earlier single-setting `container set NAME FIELD VALUE` form remains accepted.
+Any number of `FIELD=VALUE` settings that fit on the command line may be
+supplied. The earlier single-setting `container set NAME FIELD VALUE` form
+remains accepted.
 
 No name is special. The name is chosen by the operator, and lifecycle commands
 must use that exact name. The current bounded implementation accepts one
