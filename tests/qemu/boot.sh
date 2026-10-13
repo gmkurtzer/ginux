@@ -355,6 +355,12 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: replacement network generation transmitted preserved reply' "$output_file" ||
     ! grep -q '^ginux: egress acknowledged only after TX completion' "$output_file" ||
     ! grep -q '^ginux: reliable protocol egress retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: network service blocked before egress publication' "$output_file" ||
+    ! grep -q '^ginux: egress publication woke exact object and sequence' "$output_file" ||
+    ! grep -q '^ginux: ingress and egress packet wait keys isolated' "$output_file" ||
+    ! grep -q '^ginux: woken network service claimed exact egress sequence' "$output_file" ||
+    ! grep -q '^ginux: blocking egress transmitted and acknowledged through virtio-net' "$output_file" ||
+    ! grep -q '^ginux: blocking egress producer and network domains retired cleanly' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2

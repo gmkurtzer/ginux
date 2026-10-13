@@ -194,6 +194,6 @@ FIFO with one bound producer and sequential consumers. Exact-sequence blocking
 is available, control-plane management can stop a blocked consumer, and a
 bounded relative timeout can release its exact sequence. A full FIFO also
 blocks and wakes its bound producer without polling. Self-cancellation,
-concurrent producers, dynamic configuration, claim deadlines, peer reception
-of the protocol egress proof, and container networking remain separate
+concurrent producers, dynamic configuration, claim deadlines, egress-producer
+backpressure, peer reception of the protocol egress proof, and container networking remain separate
 milestones.

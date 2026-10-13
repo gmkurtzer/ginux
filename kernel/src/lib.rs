@@ -3251,6 +3251,24 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: replacement network generation transmitted preserved reply");
     serial_write("\r\nginux: egress acknowledged only after TX completion");
     serial_write("\r\nginux: reliable protocol egress retired cleanly");
+    if !address_space::verify_native_network_egress_wait(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: blocking protocol egress transmit failed\r\n");
+    }
+    serial_write("\r\nginux: network service blocked before egress publication");
+    serial_write("\r\nginux: egress publication woke exact object and sequence");
+    serial_write("\r\nginux: woken network service claimed exact egress sequence");
+    serial_write("\r\nginux: blocking egress transmitted and acknowledged through virtio-net");
+    serial_write("\r\nginux: blocking egress producer and network domains retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");
@@ -3369,6 +3387,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: per-thread FS base installation failed\r\n");
     }
     serial_write("\r\nginux: scheduler context lifecycle verified");
+    serial_write("\r\nginux: ingress and egress packet wait keys isolated");
     serial_write("\r\nginux: preemptible user context flags enforced");
     serial_write("\r\nginux: per-thread FS base context preserved");
     if !crypto::verify_sha256_known_answers() {

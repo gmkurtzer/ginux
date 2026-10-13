@@ -367,6 +367,13 @@ pub(crate) fn wait_state(expected_sequence: u64) -> PacketWait {
     mailbox.wait_state(expected_sequence)
 }
 
+pub(crate) fn egress_wait_state(expected_sequence: u64) -> PacketWait {
+    let Some(mailbox) = egress_mailbox_mut() else {
+        return PacketWait::Stale;
+    };
+    mailbox.wait_state(expected_sequence)
+}
+
 pub(crate) fn space_state(domain: u64) -> PacketSpace {
     mailbox_mut().map_or(PacketSpace::InvalidProducer, |mailbox| {
         mailbox.space_state(domain)

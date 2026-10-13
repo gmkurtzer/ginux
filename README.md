@@ -478,8 +478,8 @@ future sequence use, and replay remain denied. Network bootstrap ABI v2 then
 gives a fresh measured network generation egress `READ` and separate NIC
 authority. It consumes a second reply into confined DMA, transmits it through
 virtio-net, and completes through kernel-owned MSI-X; the kernel validates the
-exact descriptor and reply before ordered teardown. Blocking egress waits and
-container-facing networking remain future work. See
+exact descriptor and reply before ordered teardown. Container-facing
+networking remains future work. See
 [Native Network Protocol Egress Transmit v0](specs/services/network-egress-transmit-v0.md).
 
 Network bootstrap ABI v3 makes egress restart-safe through separate claim and
@@ -489,6 +489,16 @@ validates virtio TX. The QEMU proof faults that generation after claiming,
 performs full device and DMA teardown, releases the claim without removing the
 packet, and has a fresh generation transmit and acknowledge the same sequence.
 See [Reliable Protocol Egress v0](specs/services/network-reliable-egress-v0.md).
+
+Network bootstrap ABI v4 starts the measured network service while the egress
+FIFO is empty. Operation 28 blocks its read-only object-9 capability on the
+exact next sequence without polling. A separately isolated write-only producer
+then publishes the 42-byte ICMP reply, waking only that object/sequence waiter.
+The resumed service claims, transmits, and acknowledges the packet through
+virtio-net, and both domains plus their wait, interrupt, device, VT-d, DMA, and
+capability state retire cleanly. Object-8 waits and ingress timers remain
+independent. See
+[Native Network Service Bootstrap ABI v4](specs/abi/native-network-bootstrap-v4.md).
 
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption

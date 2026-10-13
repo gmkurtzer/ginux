@@ -1660,6 +1660,14 @@ pub(crate) fn wake_ipc_peer(
 }
 
 pub(crate) fn packet_wait_is_available(sequence: u64) -> bool {
+    packet_object_wait_is_available(crate::control_abi::PACKET_OBJECT, sequence)
+}
+
+pub(crate) fn egress_wait_is_available(sequence: u64) -> bool {
+    packet_object_wait_is_available(crate::control_abi::PACKET_EGRESS_OBJECT, sequence)
+}
+
+fn packet_object_wait_is_available(object: u64, sequence: u64) -> bool {
     if sequence == 0 {
         return false;
     }
@@ -1668,13 +1676,22 @@ pub(crate) fn packet_wait_is_available(sequence: u64) -> bool {
     };
     !runtime
         .scheduler
-        .has_blocked_wait(WaitReason::PacketAvailable {
-            object: crate::control_abi::PACKET_OBJECT,
-            sequence,
-        })
+        .has_blocked_wait(WaitReason::PacketAvailable { object, sequence })
 }
 
 pub(crate) fn wake_packet_waiter(sender_domain: u64, sequence: u64) -> bool {
+    wake_packet_object_waiter(sender_domain, crate::control_abi::PACKET_OBJECT, sequence)
+}
+
+pub(crate) fn wake_egress_waiter(sender_domain: u64, sequence: u64) -> bool {
+    wake_packet_object_waiter(
+        sender_domain,
+        crate::control_abi::PACKET_EGRESS_OBJECT,
+        sequence,
+    )
+}
+
+fn wake_packet_object_waiter(sender_domain: u64, object: u64, sequence: u64) -> bool {
     if sender_domain == 0 || sequence == 0 {
         return false;
     }
@@ -1686,10 +1703,7 @@ pub(crate) fn wake_packet_waiter(sender_domain: u64, sequence: u64) -> bool {
     };
     if !runtime.scheduler.wake_blocked_peer(
         sender_domain,
-        WaitReason::PacketAvailable {
-            object: crate::control_abi::PACKET_OBJECT,
-            sequence,
-        },
+        WaitReason::PacketAvailable { object, sequence },
         sequence,
     ) {
         return false;
@@ -2160,6 +2174,44 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             .id
             == blocked_producer
         && backpressure.thread(blocked_producer)?.context.rax == 0;
+    let mut packet_objects = Scheduler::new();
+    let ingress_waiter = packet_objects.create(1, first_context)?;
+    let egress_waiter = packet_objects.create(2, second_context)?;
+    let egress_producer =
+        packet_objects.create(3, test_context(30, 0x9000, 0xb000, 0x300000, 0x3330))?;
+    let ingress_wait = WaitReason::PacketAvailable {
+        object: crate::control_abi::PACKET_OBJECT,
+        sequence: 7,
+    };
+    let egress_wait = WaitReason::PacketAvailable {
+        object: crate::control_abi::PACKET_EGRESS_OBJECT,
+        sequence: 7,
+    };
+    let packet_object_wake_exact = packet_objects.schedule_next()?.id == ingress_waiter
+        && packet_objects
+            .block_current(ingress_waiter, first_context, ingress_wait)?
+            .id
+            == egress_waiter
+        && packet_objects
+            .block_current(egress_waiter, second_context, egress_wait)?
+            .id
+            == egress_producer
+        && packet_objects.has_blocked_wait(ingress_wait)
+        && packet_objects.has_blocked_wait(egress_wait)
+        && !packet_objects.wake_blocked_peer(
+            3,
+            WaitReason::PacketAvailable {
+                object: crate::control_abi::PACKET_EGRESS_OBJECT,
+                sequence: 8,
+            },
+            8,
+        )
+        && packet_objects.wake_blocked_peer(3, egress_wait, 7)
+        && packet_objects.has_blocked_wait(ingress_wait)
+        && !packet_objects.has_blocked_wait(egress_wait)
+        && packet_objects.thread(ingress_waiter)?.state == State::Blocked
+        && packet_objects.thread(egress_waiter)?.state == State::Ready
+        && packet_objects.thread(egress_waiter)?.context.rax == 7;
     Some(
         generation_valid
             && rollback
@@ -2169,7 +2221,8 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             && staged_explicitly_started
             && blocked_auxiliary_cancelled
             && timed_wait_released
-            && packet_space_wake_exact,
+            && packet_space_wake_exact
+            && packet_object_wake_exact,
     )
 }
 

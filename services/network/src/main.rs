@@ -10,13 +10,14 @@ use core::{
 use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
     NativeControlDescriptorV4, NativeNetworkBootV0, NativeNetworkBootV1, NativeNetworkBootV2,
-    NativeNetworkBootV3, NativePacketRequestV0, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
-    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
-    NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES, NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD,
-    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED,
-    NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED,
-    NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_EGRESS_ACK_OPERATION,
-    NATIVE_PACKET_EGRESS_CLAIM_OPERATION, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE,
+    NativeNetworkBootV3, NativeNetworkBootV4, NativePacketRequestV0,
+    NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
+    NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
+    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
+    NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED,
+    NATIVE_PACKET_EGRESS_ACK_OPERATION, NATIVE_PACKET_EGRESS_CLAIM_OPERATION,
+    NATIVE_PACKET_EGRESS_WAIT_OPERATION, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE,
     NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
     NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
@@ -144,6 +145,7 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         v2.expected_egress_sequence,
                         false,
                         false,
+                        false,
                     )),
                 )
             } else if info.version == 3 {
@@ -167,6 +169,31 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         v3.expected_egress_sequence,
                         true,
                         v3.requests_fault_after_claim(),
+                        false,
+                    )),
+                )
+            } else if info.version == 4 {
+                let Some(v4) = (unsafe {
+                    (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV4).as_ref()
+                }) else {
+                    fail();
+                };
+                if !v4.is_valid_waiting_reliable_egress_transmit()
+                    || !native_control_abi_supports_packet_handoff(discovery)
+                {
+                    fail();
+                }
+                (
+                    v4.v0_prefix(),
+                    None,
+                    false,
+                    false,
+                    Some((
+                        v4.egress_capability,
+                        v4.expected_egress_sequence,
+                        true,
+                        false,
+                        true,
                     )),
                 )
             } else {
@@ -184,13 +211,23 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
             fail();
         }
         if info.requests_transmit_probe() {
-            let status = if let Some((capability, sequence, reliable, fault_after_claim)) = egress {
-                unsafe { transmit_egress(&info, capability, sequence, reliable, fault_after_claim) }
-            } else if info.requests_arp_probe() {
-                unsafe { arp_probe(&info, packet_capability, fault_after_packet, packet_batch) }
-            } else {
-                unsafe { transmit_probe(&info) }
-            };
+            let status =
+                if let Some((capability, sequence, reliable, fault_after_claim, wait)) = egress {
+                    unsafe {
+                        transmit_egress(
+                            &info,
+                            capability,
+                            sequence,
+                            reliable,
+                            fault_after_claim,
+                            wait,
+                        )
+                    }
+                } else if info.requests_arp_probe() {
+                    unsafe { arp_probe(&info, packet_capability, fault_after_packet, packet_batch) }
+                } else {
+                    unsafe { transmit_probe(&info) }
+                };
             let Some(status) = status else {
                 fail();
             };
@@ -277,6 +314,7 @@ unsafe fn transmit_egress(
     expected_sequence: u64,
     reliable: bool,
     fault_after_claim: bool,
+    wait: bool,
 ) -> Option<u8> {
     let dma = usize::try_from(info.dma_virtual_address).ok()?;
     let notification = usize::try_from(info.transmit_notification_address).ok()?;
@@ -289,10 +327,27 @@ unsafe fn transmit_egress(
     let publish = NativePacketRequestV0::publish(frame as u64, ECHO_REPLY.len() as u32);
     let future =
         NativePacketRequestV0::consume(frame as u64, ECHO_REPLY.len() as u32, future_sequence);
-    if publish_packet(egress_capability, &publish) != NATIVE_NETWORK_WAIT_FAILED
-        || consume_packet(egress_capability, &future) != NATIVE_PACKET_STALE
-        || (0..ECHO_REPLY.len()).any(|offset| read_u8(frame + offset) != 0xcc)
-    {
+    let future_wait = NativePacketRequestV0::consume(0, 0, future_sequence);
+    let exact_wait = NativePacketRequestV0::consume(0, 0, expected_sequence);
+    if publish_packet(egress_capability, &publish) != NATIVE_NETWORK_WAIT_FAILED {
+        return None;
+    }
+    if !wait && consume_packet(egress_capability, &future) != NATIVE_PACKET_STALE {
+        return None;
+    }
+    if wait {
+        if wait_for_egress_packet(egress_capability, &future_wait) != NATIVE_PACKET_STALE {
+            return None;
+        }
+        if wait_for_egress_packet(info.device_capability, &exact_wait) != NATIVE_NETWORK_WAIT_FAILED
+        {
+            return None;
+        }
+        if wait_for_egress_packet(egress_capability, &exact_wait) != expected_sequence {
+            return None;
+        }
+    }
+    if (0..ECHO_REPLY.len()).any(|offset| read_u8(frame + offset) != 0xcc) {
         return None;
     }
     let transfer =
@@ -768,6 +823,20 @@ fn claim_egress_packet(capability: u64, request: &NativePacketRequestV0) -> u64 
 
 fn acknowledge_egress_packet(capability: u64, request: &NativePacketRequestV0) -> u64 {
     let mut result = NATIVE_PACKET_EGRESS_ACK_OPERATION;
+    unsafe {
+        asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("rdi") capability,
+            in("rsi") request as *const NativePacketRequestV0 as u64,
+            options(nostack),
+        );
+    }
+    result
+}
+
+fn wait_for_egress_packet(capability: u64, request: &NativePacketRequestV0) -> u64 {
+    let mut result = NATIVE_PACKET_EGRESS_WAIT_OPERATION;
     unsafe {
         asm!(
             "int 0x80",

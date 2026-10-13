@@ -21,6 +21,7 @@ global_asm!(include_str!("../packet-backpressure.S"));
 global_asm!(include_str!("../packet-protocol-loop.S"));
 global_asm!(include_str!("../packet-ipv4.S"));
 global_asm!(include_str!("../packet-egress-consumer.S"));
+global_asm!(include_str!("../packet-egress-wait.S"));
 
 extern "C" {
     fn ginux_volume_writer_start();
@@ -40,6 +41,8 @@ extern "C" {
     fn ginux_packet_wait_timeout_consumer_end();
     fn ginux_packet_wait_timeout_helper_start();
     fn ginux_packet_wait_timeout_helper_end();
+    fn ginux_packet_egress_wait_producer_start();
+    fn ginux_packet_egress_wait_producer_end();
     fn ginux_packet_backpressure_producer_start();
     fn ginux_packet_backpressure_producer_end();
     fn ginux_packet_backpressure_consumer_start();
@@ -4438,6 +4441,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_network_boot_info_v4(&self, info: ginux_native_abi::NativeNetworkBootV4) -> bool {
+        if !info.is_valid_waiting_reliable_egress_transmit() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeNetworkBootV4>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn write_protocol_boot_info(&self, info: ginux_native_abi::NativeProtocolBootV0) -> bool {
         if !info.is_valid_arp_consumer() {
             return false;
@@ -4730,6 +4748,10 @@ pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeIma
             crate::serial_write_u64(value);
             crate::serial_write_bytes(b" ");
         }
+        crate::serial_write_bytes(b" observed ");
+        crate::serial_write_u64(event.unwrap_or(u64::MAX));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(domain::last_lifecycle_event_detail().map_or(u64::MAX, u64::from));
     }
     valid
 }
@@ -4754,6 +4776,7 @@ enum NativeNetworkRunMode {
     PacketEgressTransmit,
     ReliableEgressTransmit,
     ReliableEgressFault,
+    ReliableEgressWait,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4963,6 +4986,47 @@ pub(crate) fn verify_native_network_reliable_egress(
         && packet::egress_claim().is_none()
         && packet::egress_next_sequence() == expected.sequence.checked_add(1)
         && packet::egress_last_delivery() == Some(expected)
+}
+
+pub(crate) fn verify_native_network_egress_wait(
+    network_image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    interrupt: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
+) -> bool {
+    let (common_mapping, msix_mapping, apic) = interrupt;
+    let (Some(expected_sequence), previous_delivery) = (
+        packet::egress_next_sequence(),
+        packet::egress_last_delivery(),
+    ) else {
+        return false;
+    };
+    if expected_sequence == 0
+        || expected_sequence == u64::MAX
+        || packet::egress_pending_metadata().is_some()
+        || packet::egress_claim().is_some()
+        || !verify_native_network_bootstrap_run(
+            network_image,
+            device,
+            initialization,
+            iommu_profile,
+            NativeNetworkRunMode::ReliableEgressWait,
+            Some(common_mapping),
+            Some((msix_mapping, apic)),
+        )
+    {
+        return false;
+    }
+    packet::egress_pending_metadata().is_none()
+        && packet::egress_claim().is_none()
+        && packet::egress_next_sequence() == expected_sequence.checked_add(1)
+        && packet::egress_last_delivery().is_some_and(|metadata| {
+            metadata.sequence == expected_sequence
+                && metadata.length == 42
+                && Some(metadata) != previous_delivery
+        })
+        && scheduler::egress_wait_is_available(expected_sequence)
 }
 
 pub(crate) fn verify_native_network_receive_arp(
@@ -5835,25 +5899,40 @@ struct PacketWaitProducerRun {
 }
 
 fn prepare_packet_wait_producer(kernel_root: u64, program: &[u8]) -> Option<PacketWaitProducerRun> {
-    let domain = domain::initialize_boot_auxiliary_service(
-        7,
+    prepare_packet_wait_producer_for_object(
+        kernel_root,
+        program,
         crate::control_abi::PACKET_OBJECT,
+        7,
+    )
+}
+
+fn prepare_egress_wait_producer(kernel_root: u64, program: &[u8]) -> Option<PacketWaitProducerRun> {
+    prepare_packet_wait_producer_for_object(
+        kernel_root,
+        program,
+        crate::control_abi::PACKET_EGRESS_OBJECT,
+        8,
+    )
+}
+
+fn prepare_packet_wait_producer_for_object(
+    kernel_root: u64,
+    program: &[u8],
+    object: u64,
+    boot_slot: usize,
+) -> Option<PacketWaitProducerRun> {
+    let domain = domain::initialize_boot_auxiliary_service(
+        boot_slot,
+        object,
         crate::capability::Rights::WRITE,
     )?;
     let handle = domain::auxiliary_boot_handle(domain, 0)?;
     let identity = domain::domain_service_identity(domain)?;
     let owner = memory::FrameOwner::domain(domain)?;
-    if !domain::handle_permits(
-        domain,
-        handle,
-        crate::control_abi::PACKET_OBJECT,
-        crate::capability::Rights::WRITE,
-    ) || domain::handle_permits(
-        domain,
-        handle,
-        crate::control_abi::PACKET_OBJECT,
-        crate::capability::Rights::READ,
-    ) {
+    if !domain::handle_permits(domain, handle, object, crate::capability::Rights::WRITE)
+        || domain::handle_permits(domain, handle, object, crate::capability::Rights::READ)
+    {
         return None;
     }
     let space = WxAddressSpace::new(kernel_root, owner)?;
@@ -5870,7 +5949,11 @@ fn prepare_packet_wait_producer(kernel_root: u64, program: &[u8]) -> Option<Pack
     let entry = USER_TEST_ADDRESS;
     let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
     if !register_auxiliary_address_space(domain, space)
-        || !packet::bind_producer(domain, identity)
+        || !(if object == crate::control_abi::PACKET_OBJECT {
+            packet::bind_producer(domain, identity)
+        } else {
+            packet::bind_egress_producer(domain, identity)
+        })
         || !scheduler::queue_auxiliary(domain, root, entry, stack, handle)
     {
         return None;
@@ -6648,6 +6731,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::PacketEgressTransmit
             | NativeNetworkRunMode::ReliableEgressTransmit
             | NativeNetworkRunMode::ReliableEgressFault
+            | NativeNetworkRunMode::ReliableEgressWait
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -6682,12 +6766,16 @@ fn verify_native_network_bootstrap_run(
         NativeNetworkRunMode::PacketEgressTransmit
             | NativeNetworkRunMode::ReliableEgressTransmit
             | NativeNetworkRunMode::ReliableEgressFault
+            | NativeNetworkRunMode::ReliableEgressWait
     );
     let reliable_egress = matches!(
         mode,
-        NativeNetworkRunMode::ReliableEgressTransmit | NativeNetworkRunMode::ReliableEgressFault
+        NativeNetworkRunMode::ReliableEgressTransmit
+            | NativeNetworkRunMode::ReliableEgressFault
+            | NativeNetworkRunMode::ReliableEgressWait
     );
     let egress_fault = mode == NativeNetworkRunMode::ReliableEgressFault;
+    let egress_wait = mode == NativeNetworkRunMode::ReliableEgressWait;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -6866,7 +6954,19 @@ fn verify_native_network_bootstrap_run(
             }
         }
     }
-    let boot_written = if reliable_egress {
+    let boot_written = if egress_wait {
+        packet_handle.is_some_and(|packet_handle| {
+            packet::egress_next_sequence().is_some_and(|sequence| {
+                space.write_network_boot_info_v4(
+                    ginux_native_abi::NativeNetworkBootV4::waiting_reliable_egress_transmit(
+                        boot,
+                        packet_handle,
+                        sequence,
+                    ),
+                )
+            })
+        })
+    } else if reliable_egress {
         packet_handle.is_some_and(|packet_handle| {
             packet::egress_pending_metadata().is_some_and(|metadata| {
                 space.write_network_boot_info_v3(
@@ -6961,16 +7061,59 @@ fn verify_native_network_bootstrap_run(
             && (!force_receive_timeout
                 || pci::force_next_network_receive_wait_timeout(auxiliary, 2))
     });
+    let egress_producer = if egress_wait {
+        let Some(program) = volume_program(
+            ginux_packet_egress_wait_producer_start as *const () as usize,
+            ginux_packet_egress_wait_producer_end as *const () as usize,
+        ) else {
+            return false;
+        };
+        let Some(producer) = prepare_egress_wait_producer(kernel_root, program) else {
+            return false;
+        };
+        Some(producer)
+    } else {
+        None
+    };
+    let execution_ready = if let Some(producer) = egress_producer.as_ref() {
+        scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+            && scheduler::initialize_staged_native_auxiliary(auxiliary, boot_info as u64)
+            && scheduler::start_staged_auxiliary(auxiliary)
+            && cpu::activate_user_root(producer.root)
+    } else {
+        scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+            && cpu::activate_user_root(root)
+    };
     if !packet_bound
         || activate_iommu && iommu_evidence.is_none()
         || !active_device_ready
-        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
-        || !cpu::activate_user_root(root)
+        || !execution_ready
     {
         return false;
     }
-    cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
+    if let Some(producer) = egress_producer.as_ref() {
+        let Some(sequence) = packet::egress_next_sequence() else {
+            return false;
+        };
+        cpu::execute_packet_consumer(
+            producer.entry,
+            producer.stack,
+            producer.handle,
+            sequence,
+            false,
+            producer.domain,
+            producer.identity,
+        );
+    } else {
+        cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
+    }
     let packet_retired = !packet_handoff || packet::retire_producer(auxiliary);
+    let egress_producer_retired = egress_producer
+        .as_ref()
+        .is_none_or(|producer| !packet::retire_egress_producer(producer.domain));
+    let producer_event = egress_producer
+        .as_ref()
+        .map(|_| domain::take_lifecycle_event());
     let event = domain::take_lifecycle_event();
     let parser_fault_valid = !(corrupt_network_receive || packet_fault || egress_fault)
         || domain::delivered_fault_descriptor().and_then(|descriptor| {
@@ -7014,7 +7157,17 @@ fn verify_native_network_bootstrap_run(
             handle,
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             crate::capability::Rights::READ,
-        );
+        )
+        && egress_producer.as_ref().is_none_or(|producer| {
+            memory::owner_live_frame_count(producer.owner) == Some(0)
+                && domain::domain_is_retired(producer.domain)
+                && !domain::handle_permits(
+                    producer.domain,
+                    producer.handle,
+                    crate::control_abi::PACKET_EGRESS_OBJECT,
+                    crate::capability::Rights::WRITE,
+                )
+        });
     let event_valid = event
         == Some((u64::from(expected_detail) << 56) | (auxiliary << 8) | u64::from(expected_kind));
     let audit_valid = domain::last_lifecycle_event_audit()
@@ -7029,6 +7182,14 @@ fn verify_native_network_bootstrap_run(
         && fault_valid
         && identity_valid
         && no_extra_event;
+    let producer_lifecycle_valid = egress_producer.as_ref().is_none_or(|producer| {
+        producer_event
+            == Some(Some(
+                (59_u64 << 56)
+                    | (producer.domain << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            ))
+    });
     let translation_retired = iommu_profile.is_inactive()
         && iommu_evidence.is_none_or(iommu::TranslationEvidence::is_retired)
         && pci::network_function_is_disabled(device);
@@ -7038,7 +7199,9 @@ fn verify_native_network_bootstrap_run(
             || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
     execution_retired
         && packet_retired
+        && egress_producer_retired
         && lifecycle_valid
+        && producer_lifecycle_valid
         && translation_retired
         && interrupt_retired
         && parser_fault_valid

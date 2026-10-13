@@ -14371,6 +14371,13 @@ fn dispatch_charged_call(
         control_abi::PACKET_EGRESS_ACK_OPERATION => {
             packet_egress_ack_call(caller_domain, capability, frame)
         }
+        control_abi::PACKET_EGRESS_WAIT_OPERATION => packet_wait_call_for_object(
+            caller_domain,
+            capability,
+            frame,
+            None,
+            control_abi::PACKET_EGRESS_OBJECT,
+        ),
         _ => u64::MAX,
     }
 }
@@ -14438,8 +14445,12 @@ fn packet_publish_call(caller_domain: u64, capability: u64, frame: *const UserTr
     };
     match result {
         Ok(sequence) => {
-            if ingress && scheduler::wake_packet_waiter(caller_domain, sequence) {
-                let _ = timer::cancel_packet_wait_timer_for_sequence(sequence);
+            if ingress {
+                if scheduler::wake_packet_waiter(caller_domain, sequence) {
+                    let _ = timer::cancel_packet_wait_timer_for_sequence(sequence);
+                }
+            } else {
+                let _ = scheduler::wake_egress_waiter(caller_domain, sequence);
             }
             timer::mark_scheduler_preemption_ready();
             sequence
@@ -14565,6 +14576,22 @@ fn packet_wait_call(
     frame: *mut UserTrapFrame,
     timeout_ms: Option<u64>,
 ) -> u64 {
+    packet_wait_call_for_object(
+        caller_domain,
+        capability,
+        frame,
+        timeout_ms,
+        control_abi::PACKET_OBJECT,
+    )
+}
+
+fn packet_wait_call_for_object(
+    caller_domain: u64,
+    capability: u64,
+    frame: *mut UserTrapFrame,
+    timeout_ms: Option<u64>,
+    object: u64,
+) -> u64 {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX - 2;
     };
@@ -14580,22 +14607,29 @@ fn packet_wait_call(
     if request.expected_sequence == 0 {
         return u64::MAX - 2;
     }
-    if !domain::handle_permits(
-        caller_domain,
-        capability,
-        control_abi::PACKET_OBJECT,
-        Rights::READ,
-    ) {
+    if !domain::handle_permits(caller_domain, capability, object, Rights::READ) {
         return u64::MAX - 2;
     }
-    match crate::packet::wait_state(request.expected_sequence) {
+    let state = if object == control_abi::PACKET_OBJECT {
+        crate::packet::wait_state(request.expected_sequence)
+    } else if object == control_abi::PACKET_EGRESS_OBJECT && timeout_ms.is_none() {
+        crate::packet::egress_wait_state(request.expected_sequence)
+    } else {
+        return u64::MAX - 2;
+    };
+    match state {
         crate::packet::PacketWait::Ready => request.expected_sequence,
         crate::packet::PacketWait::Stale => control_abi::PACKET_RESULT_STALE,
         crate::packet::PacketWait::Empty => {
             if timeout_ms == Some(0) {
                 return control_abi::PACKET_RESULT_TIMED_OUT;
             }
-            if !scheduler::packet_wait_is_available(request.expected_sequence) {
+            let wait_available = if object == control_abi::PACKET_OBJECT {
+                scheduler::packet_wait_is_available(request.expected_sequence)
+            } else {
+                scheduler::egress_wait_is_available(request.expected_sequence)
+            };
+            if !wait_available {
                 return u64::MAX - 2;
             }
             if timeout_ms.is_some_and(|timeout| {
@@ -14604,7 +14638,7 @@ fn packet_wait_call(
                 return u64::MAX - 2;
             }
             let reason = scheduler::WaitReason::PacketAvailable {
-                object: control_abi::PACKET_OBJECT,
+                object,
                 sequence: request.expected_sequence,
             };
             let action = scheduler::block_runtime(
