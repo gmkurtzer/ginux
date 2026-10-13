@@ -37,6 +37,10 @@ pub(crate) enum WaitReason {
         domain: u64,
         request: u64,
     },
+    PacketAvailable {
+        object: u64,
+        sequence: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -766,6 +770,13 @@ impl Scheduler {
         true
     }
 
+    fn has_blocked_wait(&self, reason: WaitReason) -> bool {
+        self.threads
+            .iter()
+            .flatten()
+            .any(|thread| thread.state == State::Blocked && thread.wait == Some(reason))
+    }
+
     fn cancel_blocked_peers(&mut self, dead_domain: u64, reason: WaitReason, result: u64) -> usize {
         let mut cancelled = 0;
         for thread in self.threads.iter_mut().flatten() {
@@ -1154,6 +1165,30 @@ pub(crate) fn initialize_staged_auxiliary(
     };
     thread.context.rsi = payload_address;
     thread.context.rdx = payload_length;
+    thread.initialized = true;
+    true
+}
+
+pub(crate) fn initialize_staged_packet_auxiliary(domain_id: u64, sequence: u64) -> bool {
+    if sequence == 0 {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let mut matched = None;
+    for thread in runtime.scheduler.threads.iter_mut().flatten() {
+        if thread.domain == domain_id {
+            if matched.is_some() || thread.state != State::Staged || thread.initialized {
+                return false;
+            }
+            matched = Some(thread);
+        }
+    }
+    let Some(thread) = matched else {
+        return false;
+    };
+    thread.context.rbx = sequence;
     thread.initialized = true;
     true
 }
@@ -1559,6 +1594,47 @@ pub(crate) fn wake_ipc_peer(
             peer_domain: sender_domain,
         },
         result,
+    ) {
+        return false;
+    }
+    runtime.wakes = wakes;
+    runtime.last_wake_source = Some(sender_domain);
+    runtime.last_wake_sequence = Some(sequence);
+    true
+}
+
+pub(crate) fn packet_wait_is_available(sequence: u64) -> bool {
+    if sequence == 0 {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    !runtime
+        .scheduler
+        .has_blocked_wait(WaitReason::PacketAvailable {
+            object: crate::control_abi::PACKET_OBJECT,
+            sequence,
+        })
+}
+
+pub(crate) fn wake_packet_waiter(sender_domain: u64, sequence: u64) -> bool {
+    if sender_domain == 0 || sequence == 0 {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(wakes) = runtime.wakes.checked_add(1) else {
+        return false;
+    };
+    if !runtime.scheduler.wake_blocked_peer(
+        sender_domain,
+        WaitReason::PacketAvailable {
+            object: crate::control_abi::PACKET_OBJECT,
+            sequence,
+        },
+        sequence,
     ) {
         return false;
     }

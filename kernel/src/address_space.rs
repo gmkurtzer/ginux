@@ -16,6 +16,7 @@ use crate::{
 
 global_asm!(include_str!("../volume-service.S"));
 global_asm!(include_str!("../packet-consumer.S"));
+global_asm!(include_str!("../packet-wait.S"));
 
 extern "C" {
     fn ginux_volume_writer_start();
@@ -25,6 +26,10 @@ extern "C" {
     fn ginux_volume_reader_end();
     fn ginux_packet_consumer_start();
     fn ginux_packet_consumer_end();
+    fn ginux_packet_wait_producer_start();
+    fn ginux_packet_wait_producer_end();
+    fn ginux_packet_wait_consumer_start();
+    fn ginux_packet_wait_consumer_end();
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -4924,6 +4929,172 @@ pub(crate) fn verify_native_network_packet_batch(
         && verify_ring3_packet_consumer(second.sequence, false)
         && packet::last_delivery() == Some(second)
         && packet::pending_metadata().is_none()
+}
+
+pub(crate) fn verify_packet_wait_wakeup() -> bool {
+    let Some(expected_sequence) = packet::next_sequence() else {
+        return false;
+    };
+    if expected_sequence == 0 || packet::pending_metadata().is_some() {
+        return false;
+    }
+    let (Some(producer_program), Some(consumer_program)) = (
+        volume_program(
+            ginux_packet_wait_producer_start as *const () as usize,
+            ginux_packet_wait_producer_end as *const () as usize,
+        ),
+        volume_program(
+            ginux_packet_wait_consumer_start as *const () as usize,
+            ginux_packet_wait_consumer_end as *const () as usize,
+        ),
+    ) else {
+        return false;
+    };
+    let Some(producer) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) else {
+        return false;
+    };
+    let Some(consumer) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        let _ = domain::discard_unstarted_auxiliary_service(producer);
+        return false;
+    };
+    let (
+        Some(producer_handle),
+        Some(producer_identity),
+        Some(producer_owner),
+        Some(consumer_handle),
+        Some(consumer_owner),
+    ) = (
+        domain::auxiliary_boot_handle(producer, 0),
+        domain::domain_service_identity(producer),
+        memory::FrameOwner::domain(producer),
+        domain::auxiliary_boot_handle(consumer, 0),
+        memory::FrameOwner::domain(consumer),
+    )
+    else {
+        return false;
+    };
+    if !domain::handle_permits(
+        producer,
+        producer_handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) || domain::handle_permits(
+        producer,
+        producer_handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) || !domain::handle_permits(
+        consumer,
+        consumer_handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) || domain::handle_permits(
+        consumer,
+        consumer_handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) {
+        return false;
+    }
+    let kernel_root = current_root();
+    let (Some(producer_space), Some(consumer_space)) = (
+        WxAddressSpace::new(kernel_root, producer_owner),
+        WxAddressSpace::new(kernel_root, consumer_owner),
+    ) else {
+        return false;
+    };
+    if !producer_space.permissions_are_valid(kernel_root)
+        || !consumer_space.permissions_are_valid(kernel_root)
+        || !producer_space.is_disjoint_from(&consumer_space)
+    {
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in producer_program.iter().enumerate() {
+            producer_space.code_frame.add(offset).write(*byte);
+        }
+        for (offset, byte) in consumer_program.iter().enumerate() {
+            consumer_space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let producer_root = producer_space.root;
+    let consumer_root = consumer_space.root;
+    let producer_entry = USER_TEST_ADDRESS;
+    let consumer_entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(producer, producer_space)
+        || !register_auxiliary_address_space(consumer, consumer_space)
+        || !packet::bind_producer(producer, producer_identity)
+        || !scheduler::queue_auxiliary(
+            producer,
+            producer_root,
+            producer_entry,
+            stack,
+            producer_handle,
+        )
+        || !scheduler::queue_auxiliary(
+            consumer,
+            consumer_root,
+            consumer_entry,
+            stack,
+            consumer_handle,
+        )
+        || !scheduler::initialize_staged_packet_auxiliary(consumer, expected_sequence)
+        || !scheduler::start_staged_auxiliary(consumer)
+        || !cpu::activate_user_root(producer_root)
+    {
+        return false;
+    }
+    cpu::execute_packet_consumer(
+        producer_entry,
+        stack,
+        producer_handle,
+        expected_sequence,
+        false,
+        producer,
+        producer_identity,
+    );
+    let producer_retired = packet::retire_producer(producer);
+    let first_event = domain::take_lifecycle_event();
+    let second_event = domain::take_lifecycle_event();
+    let expected_delivery = packet::last_delivery();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(producer_owner) == Some(0)
+        && memory::owner_live_frame_count(consumer_owner) == Some(0)
+        && domain::domain_is_retired(producer)
+        && domain::domain_is_retired(consumer)
+        && producer_retired
+        && first_event
+            == Some(
+                (48_u64 << 56)
+                    | (producer << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && second_event
+            == Some(
+                (49_u64 << 56)
+                    | (consumer << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && domain::take_lifecycle_event().is_none()
+        && expected_delivery.is_some_and(|metadata| {
+            metadata.source_domain == producer
+                && metadata.service_identity == producer_identity
+                && metadata.sequence == expected_sequence
+                && metadata.length == 42
+        })
+        && packet::pending_metadata().is_none()
+        && packet::next_sequence() == expected_sequence.checked_add(1)
 }
 
 fn verify_ring3_packet_consumer(expected_sequence: u64, more_pending: bool) -> bool {

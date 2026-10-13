@@ -87,6 +87,10 @@ _Static_assert(GINUX_NATIVE_PACKET_QUEUE_CAPACITY == UINT32_C(4),
                "native packet queue capacity");
 _Static_assert(GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF == UINT16_C(2048),
                "control packet handoff feature bit");
+_Static_assert(GINUX_NATIVE_PACKET_CONSUME_OPERATION == UINT64_C(22),
+               "native packet consume operation");
+_Static_assert(GINUX_NATIVE_PACKET_WAIT_OPERATION == UINT64_C(23),
+               "native packet wait operation");
 _Static_assert(GINUX_NATIVE_NETWORK_WAIT_TX_NOTIFIED == UINT64_C(1),
                "network TX wait command");
 _Static_assert(GINUX_NATIVE_NETWORK_WAIT_RX_POSTED == UINT64_C(2),

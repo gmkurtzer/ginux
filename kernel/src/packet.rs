@@ -24,6 +24,13 @@ pub(crate) enum PacketError {
     TooLarge,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PacketWait {
+    Ready,
+    Empty,
+    Stale,
+}
+
 struct Mailbox {
     producer: Option<(u64, u64)>,
     next_sequence: u64,
@@ -91,6 +98,21 @@ impl Mailbox {
         }
         self.producer = None;
         true
+    }
+
+    fn wait_state(&self, expected_sequence: u64) -> PacketWait {
+        if self.len == 0 {
+            return if self.next_sequence != u64::MAX && expected_sequence == self.next_sequence {
+                PacketWait::Empty
+            } else {
+                PacketWait::Stale
+            };
+        }
+        if self.metadata[self.head].is_some_and(|metadata| metadata.sequence == expected_sequence) {
+            PacketWait::Ready
+        } else {
+            PacketWait::Stale
+        }
     }
 
     fn consume_with(
@@ -172,6 +194,17 @@ pub(crate) fn pending_metadata() -> Option<PacketMetadata> {
     mailbox.metadata[mailbox.head]
 }
 
+pub(crate) fn wait_state(expected_sequence: u64) -> PacketWait {
+    let Some(mailbox) = mailbox_mut() else {
+        return PacketWait::Stale;
+    };
+    mailbox.wait_state(expected_sequence)
+}
+
+pub(crate) fn next_sequence() -> Option<u64> {
+    Some(mailbox_mut()?.next_sequence)
+}
+
 fn mailbox_mut() -> Option<&'static mut Mailbox> {
     INSTALLED
         .load(Ordering::Acquire)
@@ -184,11 +217,15 @@ pub(crate) fn verify_invariants() -> bool {
     let mut output = [0; 42];
     !mailbox.bind(0, 1)
         && mailbox.bind(2, 7)
+        && mailbox.wait_state(1) == PacketWait::Empty
+        && mailbox.wait_state(2) == PacketWait::Stale
         && !mailbox.bind(3, 7)
         && mailbox.publish(3, &packet) == Err(PacketError::InvalidProducer)
         && mailbox.publish(2, &[]) == Err(PacketError::TooLarge)
         && mailbox.publish(2, &[0; MAX_PACKET_SIZE + 1]) == Err(PacketError::TooLarge)
         && mailbox.publish(2, &packet) == Ok(1)
+        && mailbox.wait_state(1) == PacketWait::Ready
+        && mailbox.wait_state(2) == PacketWait::Stale
         && mailbox.publish(2, &packet) == Ok(2)
         && mailbox.publish(2, &packet) == Ok(3)
         && mailbox.publish(2, &packet) == Ok(4)
@@ -215,4 +252,10 @@ pub(crate) fn verify_invariants() -> bool {
         && mailbox.consume_with(4, output.len(), |_, _| true).is_ok()
         && mailbox.consume_with(5, output.len(), |_, _| true).is_ok()
         && mailbox.consume_with(5, output.len(), |_, _| false) == Err(PacketError::Empty)
+        && mailbox.wait_state(6) == PacketWait::Empty
+        && mailbox.wait_state(5) == PacketWait::Stale
+        && {
+            mailbox.next_sequence = u64::MAX;
+            mailbox.wait_state(u64::MAX) == PacketWait::Stale
+        }
 }

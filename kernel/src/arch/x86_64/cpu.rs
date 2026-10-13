@@ -14354,6 +14354,7 @@ fn dispatch_charged_call(
         control_abi::PACKET_CONSUME_OPERATION => {
             packet_consume_call(caller_domain, capability, frame)
         }
+        control_abi::PACKET_WAIT_OPERATION => packet_wait_call(caller_domain, capability, frame),
         _ => u64::MAX,
     }
 }
@@ -14407,7 +14408,14 @@ fn packet_publish_call(caller_domain: u64, capability: u64, frame: *const UserTr
     ) {
         return u64::MAX - 2;
     }
-    crate::packet::publish(caller_domain, &packet[..request.buffer_size]).unwrap_or(u64::MAX - 2)
+    match crate::packet::publish(caller_domain, &packet[..request.buffer_size]) {
+        Ok(sequence) => {
+            let _ = scheduler::wake_packet_waiter(caller_domain, sequence);
+            timer::mark_scheduler_preemption_ready();
+            sequence
+        }
+        Err(_) => u64::MAX - 2,
+    }
 }
 
 fn packet_consume_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
@@ -14436,6 +14444,53 @@ fn packet_consume_call(caller_domain: u64, capability: u64, frame: *const UserTr
         Ok(metadata) => metadata.length as u64,
         Err(crate::packet::PacketError::Stale) => control_abi::PACKET_RESULT_STALE,
         Err(_) => u64::MAX - 2,
+    }
+}
+
+fn packet_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return u64::MAX - 2;
+    };
+    let Some(request) = packet_request(frame.first_argument()) else {
+        return u64::MAX - 2;
+    };
+    if request.buffer_address != 0 || request.buffer_size != 0 {
+        return u64::MAX - 2;
+    }
+    if request.expected_sequence == 0 {
+        return u64::MAX - 2;
+    }
+    if !domain::handle_permits(
+        caller_domain,
+        capability,
+        control_abi::PACKET_OBJECT,
+        Rights::READ,
+    ) {
+        return u64::MAX - 2;
+    }
+    match crate::packet::wait_state(request.expected_sequence) {
+        crate::packet::PacketWait::Ready => request.expected_sequence,
+        crate::packet::PacketWait::Stale => control_abi::PACKET_RESULT_STALE,
+        crate::packet::PacketWait::Empty => {
+            if !scheduler::packet_wait_is_available(request.expected_sequence) {
+                return u64::MAX - 2;
+            }
+            let action = scheduler::block_runtime(
+                frame,
+                USER_CODE_SELECTOR,
+                USER_DATA_SELECTOR,
+                scheduler::WaitReason::PacketAvailable {
+                    object: control_abi::PACKET_OBJECT,
+                    sequence: request.expected_sequence,
+                },
+                active_fs_base(),
+            );
+            if matches!(action, RuntimeAction::Invalid) {
+                u64::MAX - 2
+            } else {
+                resume_action(action)
+            }
+        }
     }
 }
 

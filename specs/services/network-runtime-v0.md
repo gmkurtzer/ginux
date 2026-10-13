@@ -153,6 +153,10 @@ consumer.
 A second test-only v1 feature publishes both validated replies as sequences
 three and four before retirement. Two independent read-only ring-3 consumers
 drain the bounded four-entry FIFO in order after device teardown.
+An independent two-domain proof then blocks a read-only consumer on exact
+sequence five, publishes from a write-only producer, wakes only that consumer,
+and consumes the exact frame. See
+[Native Network Packet Wait v0](network-packet-wait-v0.md).
 
 ## Deliberate limits
 
@@ -160,6 +164,7 @@ The empty-queue generations publish no descriptor. The transmit generation
 sends only one fixed probe. The receive generation performs only one fixed ARP
 exchange with the deterministic QEMU gateway; the replenishment generation
 reuses one descriptor exactly once. Packet handoff is one copied four-entry
-FIFO with one bound producer and sequential consumers. Blocking receive,
-backpressure notification, concurrent producers, dynamic configuration, and
-container networking remain separate milestones.
+FIFO with one bound producer and sequential consumers. Exact-sequence blocking
+is available, but wait cancellation, timeouts, backpressure notification,
+concurrent producers, dynamic configuration, and container networking remain
+separate milestones.

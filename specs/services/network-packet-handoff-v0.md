@@ -39,3 +39,8 @@ them in order after all device authority is gone. The kernel's four-entry FIFO
 invariant also proves full-queue backpressure, retained entries across producer
 replacement, wraparound reuse, and monotonic sequence allocation. This is a
 bounded copied queue, not yet a blocking or zero-copy container endpoint.
+
+Operation 23 now lets one read-only consumer block on the exact next sequence
+while the FIFO is empty. A separately authorized producer publishes sequence
+five and wakes that consumer, which then validates and removes the exact frame.
+See [Native Network Packet Wait v0](network-packet-wait-v0.md).

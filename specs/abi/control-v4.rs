@@ -83,6 +83,7 @@ pub const BLOCK_DEVICE_RESULT_CANCELLED: u64 = u64::MAX - 5;
 pub const PACKET_OBJECT: u64 = 8;
 pub const PACKET_PUBLISH_OPERATION: u64 = 21;
 pub const PACKET_CONSUME_OPERATION: u64 = 22;
+pub const PACKET_WAIT_OPERATION: u64 = 23;
 pub const PACKET_REQUEST_VERSION: u16 = 0;
 pub const PACKET_REQUEST_SIZE: usize = 32;
 pub const PACKET_MAX_SIZE: usize = 1514;

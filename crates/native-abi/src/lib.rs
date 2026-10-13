@@ -37,6 +37,8 @@ pub const NATIVE_NETWORK_WAIT_RX_POSTED: u64 = 2;
 pub const NATIVE_NETWORK_WAIT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_NETWORK_WAIT_CANCELLED: u64 = u64::MAX - 5;
 pub const NATIVE_PACKET_PUBLISH_OPERATION: u64 = 21;
+pub const NATIVE_PACKET_CONSUME_OPERATION: u64 = 22;
+pub const NATIVE_PACKET_WAIT_OPERATION: u64 = 23;
 pub const NATIVE_PACKET_REQUEST_VERSION: u16 = 0;
 pub const NATIVE_PACKET_REQUEST_SIZE: u32 = 32;
 pub const NATIVE_PACKET_MAX_SIZE: u32 = 1514;
@@ -449,6 +451,7 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_PACKET_FAULT UINT32_C(128)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_PACKET_BATCH UINT32_C(256)"));
         assert!(network_header.contains("GINUX_NATIVE_PACKET_QUEUE_CAPACITY UINT32_C(4)"));
+        assert!(network_header.contains("GINUX_NATIVE_PACKET_WAIT_OPERATION UINT64_C(23)"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v1) == 88"));
         assert!(network_header.contains("sizeof(struct ginux_native_packet_request_v0) == 32"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));

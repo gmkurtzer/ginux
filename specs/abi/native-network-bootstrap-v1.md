@@ -19,7 +19,8 @@ cannot use it to consume frames or control the NIC.
 
 ## Packet request v0
 
-Packet publication and consumption use an exact 32-byte little-endian request:
+Packet publication, consumption, and availability waits use an exact 32-byte
+little-endian request:
 
 | Offset | Width | Field |
 |---:|---:|---|
@@ -27,7 +28,7 @@ Packet publication and consumption use an exact 32-byte little-endian request:
 | 4 | 2 | version `0` |
 | 6 | 2 | reserved zero |
 | 8 | 8 | userspace buffer address |
-| 16 | 4 | buffer length or capacity, `1..1514` |
+| 16 | 4 | buffer length or capacity, `1..1514`; zero for wait |
 | 20 | 4 | reserved zero |
 | 24 | 8 | expected sequence; zero for publication |
 
@@ -39,6 +40,14 @@ stale result without modifying userspace or consuming the packet. A failed
 copy also retains the packet. Publication returns busy while all four entries
 are occupied. Producer retirement does not discard queued entries, and a fresh
 producer generation may bind while older entries await consumption.
+
+Operation 23 requires packet `READ`. With a zero buffer address and capacity,
+it returns the expected sequence immediately when that packet is at the FIFO
+head, blocks when an empty FIFO's exact next sequence is requested, and returns
+the stale result for any future or consumed sequence. A completed publication
+wakes the sole waiter for its exact sequence; the subsequent operation 22 is
+still required to copy and remove the packet. See
+[Native Network Packet Wait v0](../services/network-packet-wait-v0.md).
 
 The current bootstrap proof publishes exactly the validated 42-byte
 Ethernet/ARP reply as sequence one. The packet survives producer, NIC, VT-d,
@@ -68,7 +77,7 @@ wraparound, and preserves monotonic sequence allocation.
 
 There is one global four-entry FIFO, one bound producer generation, and a
 maximum Ethernet frame size of 1514 bytes. Publication uses a bounded copy
-rather than shared memory. There is no blocking receive, backpressure
-notification, production batching interface, multi-consumer fanout,
-VLAN-sized frame support, or zero-copy lease. The single-CPU call gate
+rather than shared memory. There is no wait timeout or cancellation,
+backpressure notification, production batching interface, multi-consumer
+fanout, VLAN-sized frame support, or zero-copy lease. The single-CPU call gate
 serializes access; SMP requires locking.
