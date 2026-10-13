@@ -1715,17 +1715,31 @@ fn wake_packet_object_waiter(sender_domain: u64, object: u64, sequence: u64) -> 
 }
 
 pub(crate) fn packet_space_wait_is_available() -> bool {
+    packet_object_space_wait_is_available(crate::control_abi::PACKET_OBJECT)
+}
+
+pub(crate) fn egress_space_wait_is_available() -> bool {
+    packet_object_space_wait_is_available(crate::control_abi::PACKET_EGRESS_OBJECT)
+}
+
+fn packet_object_space_wait_is_available(object: u64) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;
     };
     !runtime
         .scheduler
-        .has_blocked_wait(WaitReason::PacketSpaceAvailable {
-            object: crate::control_abi::PACKET_OBJECT,
-        })
+        .has_blocked_wait(WaitReason::PacketSpaceAvailable { object })
 }
 
 pub(crate) fn wake_packet_space_waiter(sender_domain: u64) -> bool {
+    wake_packet_object_space_waiter(sender_domain, crate::control_abi::PACKET_OBJECT)
+}
+
+pub(crate) fn wake_egress_space_waiter(sender_domain: u64) -> bool {
+    wake_packet_object_space_waiter(sender_domain, crate::control_abi::PACKET_EGRESS_OBJECT)
+}
+
+fn wake_packet_object_space_waiter(sender_domain: u64, object: u64) -> bool {
     if sender_domain == 0 {
         return false;
     }
@@ -1737,9 +1751,7 @@ pub(crate) fn wake_packet_space_waiter(sender_domain: u64) -> bool {
     };
     if !runtime.scheduler.wake_blocked_peer(
         sender_domain,
-        WaitReason::PacketSpaceAvailable {
-            object: crate::control_abi::PACKET_OBJECT,
-        },
+        WaitReason::PacketSpaceAvailable { object },
         0,
     ) {
         return false;
@@ -2212,6 +2224,35 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && packet_objects.thread(ingress_waiter)?.state == State::Blocked
         && packet_objects.thread(egress_waiter)?.state == State::Ready
         && packet_objects.thread(egress_waiter)?.context.rax == 7;
+    let mut packet_space_objects = Scheduler::new();
+    let ingress_producer = packet_space_objects.create(1, first_context)?;
+    let egress_producer = packet_space_objects.create(2, second_context)?;
+    let egress_consumer =
+        packet_space_objects.create(3, test_context(30, 0x9000, 0xb000, 0x300000, 0x3330))?;
+    let ingress_space_wait = WaitReason::PacketSpaceAvailable {
+        object: crate::control_abi::PACKET_OBJECT,
+    };
+    let egress_space_wait = WaitReason::PacketSpaceAvailable {
+        object: crate::control_abi::PACKET_EGRESS_OBJECT,
+    };
+    let packet_space_object_wake_exact = packet_space_objects.schedule_next()?.id
+        == ingress_producer
+        && packet_space_objects
+            .block_current(ingress_producer, first_context, ingress_space_wait)?
+            .id
+            == egress_producer
+        && packet_space_objects
+            .block_current(egress_producer, second_context, egress_space_wait)?
+            .id
+            == egress_consumer
+        && packet_space_objects.has_blocked_wait(ingress_space_wait)
+        && packet_space_objects.has_blocked_wait(egress_space_wait)
+        && packet_space_objects.wake_blocked_peer(3, egress_space_wait, 0)
+        && packet_space_objects.has_blocked_wait(ingress_space_wait)
+        && !packet_space_objects.has_blocked_wait(egress_space_wait)
+        && packet_space_objects.thread(ingress_producer)?.state == State::Blocked
+        && packet_space_objects.thread(egress_producer)?.state == State::Ready
+        && packet_space_objects.thread(egress_producer)?.context.rax == 0;
     Some(
         generation_valid
             && rollback
@@ -2222,7 +2263,8 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             && blocked_auxiliary_cancelled
             && timed_wait_released
             && packet_space_wake_exact
-            && packet_object_wake_exact,
+            && packet_object_wake_exact
+            && packet_space_object_wake_exact,
     )
 }
 

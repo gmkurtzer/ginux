@@ -30,5 +30,6 @@ replay.
 
 Version 5 itself grants no device authority. A separate network bootstrap v2
 consumer now connects a subsequent egress sequence to virtio-net while keeping
-that separation. Neither contract defines egress waits or backpressure calls,
-arbitrary packet transmission, routing, sockets, or container endpoints.
+that separation. Later control operations 28 and 29 add egress waiting and
+producer backpressure without changing this frozen bootstrap. Arbitrary packet
+transmission, routing, sockets, and container endpoints remain undefined.

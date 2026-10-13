@@ -42,7 +42,7 @@ objects; operation 23 waits indefinitely for an exact packet sequence,
 operation 24 adds a bounded relative packet-wait deadline, and write-only
 operation 25 waits for space in a full packet FIFO. Operations 26 and 27 provide
 restart-safe egress claim and acknowledgement; operation 28 blocks on an exact
-egress sequence. The
+egress sequence, and operation 29 waits for egress FIFO space. The
 pre-release bootstrap switches atomically to v4 rather than carrying adapters;
 `control-v1.rs`, `control-v2.rs`, and `control-v3.rs` remain frozen as drift
 evidence. The scalar discovery word and
@@ -487,6 +487,13 @@ other sequence. Publication wakes only the matching object-9 sequence; it does
 not affect object-8 waiters or ingress timers and grants no claim. See
 [Native Network Service Bootstrap ABI v3](native-network-bootstrap-v3.md) and
 [Native Network Service Bootstrap ABI v4](native-network-bootstrap-v4.md).
+Operation 29 requires object 9 `WRITE`, no request buffer, and the currently
+bound producer generation. It returns immediately when space exists or blocks
+when the four-entry egress FIFO is full. Destructive consumption and successful
+operation-27 acknowledgement wake only the object-9 space waiter; claims do
+not. Wakeup grants no reservation, so operation 21 must retry the exact next
+sequence. Object-8 and object-9 space-wait keys remain independent. See
+[Native Network Egress Backpressure v0](../services/network-egress-backpressure-v0.md).
 Before either bounded copy direction touches user memory, the kernel requires
 active CR3 to equal the scheduler's current root, revalidates the complete
 fixed page-table hierarchy, and confirms every page-table and payload frame is

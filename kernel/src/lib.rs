@@ -3269,6 +3269,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: woken network service claimed exact egress sequence");
     serial_write("\r\nginux: blocking egress transmitted and acknowledged through virtio-net");
     serial_write("\r\nginux: blocking egress producer and network domains retired cleanly");
+    if !address_space::verify_egress_backpressure_wakeup() {
+        kernel_fail("\r\nginux: egress backpressure wakeup failed\r\n");
+    }
+    serial_write("\r\nginux: full egress FIFO blocked write-only producer");
+    serial_write("\r\nginux: egress delivery woke only object-9 space waiter");
+    serial_write("\r\nginux: woken egress producer retried exact next sequence");
+    serial_write("\r\nginux: egress FIFO ordering survived backpressure wakeup");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");
@@ -3388,6 +3395,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: scheduler context lifecycle verified");
     serial_write("\r\nginux: ingress and egress packet wait keys isolated");
+    serial_write("\r\nginux: ingress and egress space-wait keys isolated");
     serial_write("\r\nginux: preemptible user context flags enforced");
     serial_write("\r\nginux: per-thread FS base context preserved");
     if !crypto::verify_sha256_known_answers() {

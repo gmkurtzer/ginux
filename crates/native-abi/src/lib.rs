@@ -54,6 +54,7 @@ pub const NATIVE_PACKET_SPACE_WAIT_OPERATION: u64 = 25;
 pub const NATIVE_PACKET_EGRESS_CLAIM_OPERATION: u64 = 26;
 pub const NATIVE_PACKET_EGRESS_ACK_OPERATION: u64 = 27;
 pub const NATIVE_PACKET_EGRESS_WAIT_OPERATION: u64 = 28;
+pub const NATIVE_PACKET_EGRESS_SPACE_WAIT_OPERATION: u64 = 29;
 pub const NATIVE_PACKET_REQUEST_VERSION: u16 = 0;
 pub const NATIVE_PACKET_REQUEST_SIZE: u32 = 32;
 pub const NATIVE_PACKET_MAX_SIZE: u32 = 1514;
@@ -1187,6 +1188,9 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_PACKET_WAIT_TIMEOUT_OPERATION UINT64_C(24)"));
         assert!(network_header.contains("GINUX_NATIVE_PACKET_SPACE_WAIT_OPERATION UINT64_C(25)"));
         assert!(network_header.contains("GINUX_NATIVE_PACKET_EGRESS_WAIT_OPERATION UINT64_C(28)"));
+        assert!(
+            network_header.contains("GINUX_NATIVE_PACKET_EGRESS_SPACE_WAIT_OPERATION UINT64_C(29)")
+        );
         assert!(network_header
             .contains("GINUX_NATIVE_PACKET_WAIT_TIMED_OUT (UINT64_MAX - UINT64_C(5))"));
         assert!(network_header.contains("GINUX_NATIVE_PACKET_WAIT_MAX_TIMEOUT_MS UINT64_C(1000)"));

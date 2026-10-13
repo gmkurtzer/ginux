@@ -500,6 +500,15 @@ capability state retire cleanly. Object-8 waits and ingress timers remain
 independent. See
 [Native Network Service Bootstrap ABI v4](specs/abi/native-network-bootstrap-v4.md).
 
+Operation 29 adds the matching write-side boundary. A write-only producer that
+fills all four egress entries blocks without polling; a read-only object-9
+consumer frees one slot and wakes only that producer. Wakeup grants no
+reservation, so the producer retries and receives the exact fifth sequence.
+The proof drains all entries in FIFO order and retires both domains and their
+wait/capability state. Reliable acknowledgement also wakes an egress space
+waiter, while a claim alone does not. See
+[Native Network Egress Backpressure v0](specs/services/network-egress-backpressure-v0.md).
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected

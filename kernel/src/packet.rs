@@ -380,6 +380,12 @@ pub(crate) fn space_state(domain: u64) -> PacketSpace {
     })
 }
 
+pub(crate) fn egress_space_state(domain: u64) -> PacketSpace {
+    egress_mailbox_mut().map_or(PacketSpace::InvalidProducer, |mailbox| {
+        mailbox.space_state(domain)
+    })
+}
+
 pub(crate) fn next_sequence() -> Option<u64> {
     Some(mailbox_mut()?.next_sequence)
 }
