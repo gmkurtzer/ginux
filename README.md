@@ -149,6 +149,10 @@ routes and all DMA authority. See
 If the RX-stage wait expires after TX completion, the kernel cancels the whole
 ambiguous device generation and the service exits `RESTART_REQUIRED`; a fresh
 generation with new DMA and VT-d leases must complete another ARP exchange.
+A separate internal fault proof corrupts only the ARP operation after genuine
+RX completion. The measured service rejects it through its ordinary parser;
+the kernel quiesces the active device generation and a fresh generation then
+accepts an unmodified reply.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

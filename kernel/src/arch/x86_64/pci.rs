@@ -1788,6 +1788,15 @@ pub(crate) fn network_service_arp_exchange_is_complete(
     })
 }
 
+pub(crate) fn corrupt_network_service_arp_reply(dma_physical: u64, dma_virtual: usize) -> bool {
+    const ARP_OPERATION_LOW_BYTE: usize = NET_RX_BUFFER_OFFSET + 12 + 14 + 7;
+    if !network_service_arp_exchange_is_complete(dma_physical, dma_virtual) {
+        return false;
+    }
+    write_dma_u8(dma_virtual + ARP_OPERATION_LOW_BYTE, 3);
+    read_dma_u8(dma_virtual + ARP_OPERATION_LOW_BYTE) == 3
+}
+
 pub(crate) fn quiesce_isolated_network(
     device: VirtioNetworkDevice,
     common_mapping: MmioMapping,

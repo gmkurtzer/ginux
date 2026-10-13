@@ -2278,6 +2278,7 @@ struct RegisteredAuxiliaryAddressSpace {
     fail_network_activation_return: bool,
     expect_network_transmit: bool,
     expect_network_receive: bool,
+    corrupt_network_receive: bool,
     network_tx_interrupt_completed: bool,
     network_rx_interrupt_completed: bool,
 }
@@ -4581,6 +4582,7 @@ enum NativeNetworkRunMode {
     TransmitTimeout,
     ReceiveArp,
     ReceiveArpTimeout,
+    ReceiveArpMalformed,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4750,6 +4752,26 @@ pub(crate) fn verify_native_network_receive_timeout(
     )
 }
 
+pub(crate) fn verify_native_network_malformed_receive(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReceiveArpMalformed,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    )
+}
+
 fn verify_native_network_bootstrap_run(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -4774,13 +4796,17 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::TransmitTimeout
             | NativeNetworkRunMode::ReceiveArp
             | NativeNetworkRunMode::ReceiveArpTimeout
+            | NativeNetworkRunMode::ReceiveArpMalformed
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
     let receive_arp = matches!(
         mode,
-        NativeNetworkRunMode::ReceiveArp | NativeNetworkRunMode::ReceiveArpTimeout
+        NativeNetworkRunMode::ReceiveArp
+            | NativeNetworkRunMode::ReceiveArpTimeout
+            | NativeNetworkRunMode::ReceiveArpMalformed
     );
+    let corrupt_network_receive = mode == NativeNetworkRunMode::ReceiveArpMalformed;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4932,6 +4958,7 @@ fn verify_native_network_bootstrap_run(
             && (!fail_after_activation || arm_auxiliary_network_activation_fault(auxiliary))
             && (!transmit_probe || arm_auxiliary_network_transmit_expectation(auxiliary))
             && (!receive_arp || arm_auxiliary_network_receive_expectation(auxiliary))
+            && (!corrupt_network_receive || arm_auxiliary_network_receive_corruption(auxiliary))
             && pci::prepare_network_for_isolated_service(device, mapping)
             && interrupt.is_none_or(|(msix_mapping, apic)| {
                 pci::arm_isolated_network_tx_interrupt(
@@ -4957,7 +4984,24 @@ fn verify_native_network_bootstrap_run(
     }
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     let event = domain::take_lifecycle_event();
-    let expected_fault = reject_reserved || fail_after_activation;
+    let parser_fault_valid = !corrupt_network_receive
+        || domain::delivered_fault_descriptor().and_then(|descriptor| {
+            let vector = descriptor
+                .get(6..8)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u16::from_le_bytes)?;
+            let instruction = descriptor
+                .get(32..40)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u64::from_le_bytes)?;
+            let relative = instruction.checked_sub(USER_TEST_ADDRESS as u64)?;
+            Some((
+                vector,
+                image.address_is_executable(relative),
+                image.byte_at_virtual(relative),
+            ))
+        }) == Some((13, true, Some(0xf4)));
+    let expected_fault = reject_reserved || fail_after_activation || corrupt_network_receive;
     let expected_kind = if expected_fault {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
     } else {
@@ -4997,12 +5041,13 @@ fn verify_native_network_bootstrap_run(
         && iommu_evidence.is_none_or(iommu::TranslationEvidence::is_retired)
         && pci::network_function_is_disabled(device);
     let interrupt_retired = pci::network_msix_is_disabled(device);
-    let fault_ordering_valid =
-        !fail_after_activation || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
+    let fault_ordering_valid = !(fail_after_activation || corrupt_network_receive)
+        || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
     execution_retired
         && lifecycle_valid
         && translation_retired
         && interrupt_retired
+        && parser_fault_valid
         && fault_ordering_valid
 }
 
@@ -5248,6 +5293,7 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             fail_network_activation_return: false,
             expect_network_transmit: false,
             expect_network_receive: false,
+            corrupt_network_receive: false,
             network_tx_interrupt_completed: false,
             network_rx_interrupt_completed: false,
         });
@@ -5467,6 +5513,23 @@ fn arm_auxiliary_network_receive_expectation(domain_id: u64) -> bool {
     true
 }
 
+fn arm_auxiliary_network_receive_corruption(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if !registered.expect_network_receive
+        || registered.corrupt_network_receive
+        || registered.device_quiesced
+    {
+        return false;
+    }
+    registered.corrupt_network_receive = true;
+    true
+}
+
 pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request: u64) -> bool {
     let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) =
@@ -5570,6 +5633,17 @@ pub(crate) fn complete_auxiliary_network_wait(
                     registered.network_teardown = Some(teardown);
                 }
             } else {
+                if registered.corrupt_network_receive {
+                    let Some(dma) = registered.space.dma_lease() else {
+                        return AuxiliaryDeviceWaitCompletion::Failed;
+                    };
+                    let Some(dma_virtual) = dma.direct_map_address() else {
+                        return AuxiliaryDeviceWaitCompletion::Failed;
+                    };
+                    if !pci::corrupt_network_service_arp_reply(dma.address(), dma_virtual) {
+                        return AuxiliaryDeviceWaitCompletion::Failed;
+                    }
+                }
                 registered.network_rx_interrupt_completed = true;
             }
             AuxiliaryDeviceWaitCompletion::Completed

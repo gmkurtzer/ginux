@@ -34,6 +34,15 @@ domain with newly delegated authority, VT-d tables, and DMA must reinitialize
 the reset device. The QEMU gate requires that replacement to complete and
 validate another ARP exchange.
 
+The malformed-reply proof uses a kernel-internal test injector rather than a
+public ABI mode. It waits for a genuine RX completion and first validates the
+otherwise correct exchange, then changes only the low ARP operation byte from
+reply value two to unsupported value three before returning to ring 3. The
+measured service's ordinary parser rejects the frame and takes its fatal path.
+The kernel contains that fault without trusting the corrupted DMA state, masks
+both routes, resets the still-active NIC, retires VT-d before DMA, and revokes
+the domain. A fresh generation must then accept an unmodified reply.
+
 The service accepts only one-buffer modern virtio-net input with a zeroed
 header, `num_buffers` equal to one, one used-ring element with descriptor ID
 zero, and a bounded length. It then validates Ethernet destination/source and
@@ -61,4 +70,5 @@ This proves one serialized receive buffer and a deterministic peer response.
 It does not provide a packet IPC interface, arbitrary Ethernet traffic, receive
 buffer replenishment, batching, multiple in-flight requests, IPv4 packet
 processing, DHCP, sockets, routing, a system-container interface, or production
-network configuration. Malformed-reply recovery remains a separate milestone.
+network configuration. The malformed proof covers one ARP field; systematic
+parser fuzzing and arbitrary frame classes remain future work.

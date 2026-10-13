@@ -125,6 +125,13 @@ retires the entire device generation before returning `CANCELLED`. The service
 exits `RESTART_REQUIRED`. A newly authorized generation with fresh DMA and VT-d
 leases must then complete a full ARP exchange.
 
+Another generation receives a real valid reply whose ARP operation low byte is
+changed by a kernel-internal test injector only after RX completion. No public
+bootstrap feature exposes this injector. The service's normal packet parser
+rejects the unsupported operation and faults. Fault containment quiesces the
+active device and both routes before retiring VT-d and DMA; a fresh generation
+then validates an unmodified ARP reply.
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The transmit generation
