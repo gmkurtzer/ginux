@@ -369,6 +369,10 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: completed egress acknowledgement woke blocked producer' "$output_file" ||
     ! grep -q '^ginux: post-ack producer published exact fifth sequence' "$output_file" ||
     ! grep -q '^ginux: hardware-coupled egress backpressure retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: resident network service transmitted two egress replies' "$output_file" ||
+    ! grep -q '^ginux: resident network service reused TX descriptor and DMA lease' "$output_file" ||
+    ! grep -q '^ginux: resident network interrupt generations advanced in order' "$output_file" ||
+    ! grep -q '^ginux: resident reliable egress retired cleanly' "$output_file" ||
     ! grep -q '^ginux: ingress and egress space-wait keys isolated' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then

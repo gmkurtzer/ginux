@@ -38,6 +38,7 @@ producer state retire cleanly.
 ## Limits
 
 There is one producer and at most one space waiter per packet object. There is
-also one global egress claim. Reservation, fairness among multiple producers,
-batching, continuously resident network service operation, and dynamic queue
-sizing are not defined.
+also one global egress claim. Bootstrap v5 separately proves one network
+service can transmit two packets without replacing its device generation.
+Reservation, fairness among multiple producers, batching, an unbounded service
+loop, and dynamic queue sizing are not defined.

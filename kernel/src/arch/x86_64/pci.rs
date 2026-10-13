@@ -1719,9 +1719,10 @@ pub(crate) fn network_service_transmit_is_complete(dma_physical: u64, dma_virtua
     })
 }
 
-pub(crate) fn network_service_egress_transmit_is_complete(
+pub(crate) fn network_service_egress_transmit_count_is_complete(
     dma_physical: u64,
     dma_virtual: usize,
+    completed: u16,
 ) -> bool {
     const HEADER_LENGTH: usize = 12;
     const ICMP_ECHO_REPLY: [u8; 42] = [
@@ -1730,7 +1731,8 @@ pub(crate) fn network_service_egress_transmit_is_complete(
         2, 0x00, 0x00, 0x41, 0x0f, 0xbe, 0xef, 0x00, 0x01,
     ];
     const PAYLOAD_LENGTH: usize = HEADER_LENGTH + ICMP_ECHO_REPLY.len();
-    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+    if !(1..=QUEUE_SIZE).contains(&completed)
+        || !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
         || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
         || read_dma_u64(dma_virtual + NET_TX_DESC_OFFSET)
             != dma_physical + NET_TX_BUFFER_OFFSET as u64
@@ -1738,12 +1740,16 @@ pub(crate) fn network_service_egress_transmit_is_complete(
         || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 12) != 0
         || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 14) != 0
         || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET) != 0
-        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2) != 1
-        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 4) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2) != completed
+        || (0..usize::from(completed))
+            .any(|entry| read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 4 + entry * 2) != 0)
         || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET) & !1 != 0
-        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) != 1
-        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4) != 0
-        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 8) > PAYLOAD_LENGTH as u32
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) != completed
+        || (0..usize::from(completed)).any(|entry| {
+            read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4 + entry * 8) != 0
+                || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 8 + entry * 8)
+                    > PAYLOAD_LENGTH as u32
+        })
         || (0..HEADER_LENGTH)
             .any(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) != 0)
         || ICMP_ECHO_REPLY.iter().enumerate().any(|(offset, byte)| {

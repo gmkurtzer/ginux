@@ -3293,6 +3293,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: completed egress acknowledgement woke blocked producer");
     serial_write("\r\nginux: post-ack producer published exact fifth sequence");
     serial_write("\r\nginux: hardware-coupled egress backpressure retired cleanly");
+    if !address_space::verify_native_network_egress_reuse(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: resident reliable egress reuse failed\r\n");
+    }
+    serial_write("\r\nginux: resident network service transmitted two egress replies");
+    serial_write("\r\nginux: resident network service reused TX descriptor and DMA lease");
+    serial_write("\r\nginux: resident network interrupt generations advanced in order");
+    serial_write("\r\nginux: resident reliable egress retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

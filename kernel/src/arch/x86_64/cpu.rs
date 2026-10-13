@@ -14576,6 +14576,9 @@ fn packet_egress_ack_call(caller_domain: u64, capability: u64, frame: *const Use
     }
     match crate::packet::acknowledge_egress(caller_domain, request.expected_sequence) {
         Ok(_) => {
+            if !address_space::record_auxiliary_network_egress_ack(caller_domain) {
+                return u64::MAX - 2;
+            }
             if scheduler::wake_egress_space_waiter(caller_domain) {
                 timer::mark_scheduler_preemption_ready();
             }

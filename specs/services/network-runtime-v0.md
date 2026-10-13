@@ -184,16 +184,27 @@ preserving the packet; a fresh generation then transmits and acknowledges the
 same sequence. See
 [Reliable Protocol Egress v0](network-reliable-egress-v0.md).
 
+Bootstrap v4 lets the service block on the exact next egress sequence before
+the producer publishes it. Bootstrap v5 then keeps that measured service,
+queue, descriptor, DMA lease, VT-d hierarchy, and device generation live for
+two consecutive replies. The service advances queue and interrupt generations
+from one to two, and each acknowledgement remains conditional on its own
+kernel-validated TX completion. The proof rejects premature acknowledgement,
+duplicate claim, interrupt replay, and post-ack claim replay for both packets.
+See [Native Network Service Bootstrap ABI v4](../abi/native-network-bootstrap-v4.md)
+and [Native Network Service Bootstrap ABI v5](../abi/native-network-bootstrap-v5.md).
+
 ## Deliberate limits
 
-The empty-queue generations publish no descriptor. The transmit generation
-sends only one fixed probe. The receive generation performs only one fixed ARP
-exchange with the deterministic QEMU gateway; the replenishment generation
-reuses one descriptor exactly once. Packet handoff is one copied four-entry
+The empty-queue generations publish no descriptor. The basic transmit
+generation sends one fixed probe, while the latest reliable-egress generation
+reuses one descriptor for exactly two fixed replies. The receive generation
+performs only one fixed ARP exchange with the deterministic QEMU gateway; the
+replenishment generation reuses one descriptor exactly once. Packet handoff is one copied four-entry
 FIFO with one bound producer and sequential consumers. Exact-sequence blocking
 is available, control-plane management can stop a blocked consumer, and a
 bounded relative timeout can release its exact sequence. A full FIFO also
 blocks and wakes its bound producer without polling. Self-cancellation,
-concurrent producers, dynamic configuration, claim deadlines, peer reception
-of the protocol egress proof, and container networking remain separate
-milestones.
+concurrent producers, an unbounded service loop, dynamic configuration, claim
+deadlines, peer reception of the protocol egress proof, and container
+networking remain separate milestones.

@@ -24,6 +24,7 @@ global_asm!(include_str!("../packet-egress-consumer.S"));
 global_asm!(include_str!("../packet-egress-wait.S"));
 global_asm!(include_str!("../packet-egress-backpressure.S"));
 global_asm!(include_str!("../packet-egress-ack-backpressure.S"));
+global_asm!(include_str!("../packet-egress-reuse.S"));
 
 extern "C" {
     fn ginux_volume_writer_start();
@@ -51,6 +52,8 @@ extern "C" {
     fn ginux_packet_egress_backpressure_consumer_end();
     fn ginux_packet_egress_ack_backpressure_producer_start();
     fn ginux_packet_egress_ack_backpressure_producer_end();
+    fn ginux_packet_egress_reuse_producer_start();
+    fn ginux_packet_egress_reuse_producer_end();
     fn ginux_packet_backpressure_producer_start();
     fn ginux_packet_backpressure_producer_end();
     fn ginux_packet_backpressure_consumer_start();
@@ -2317,10 +2320,13 @@ struct RegisteredAuxiliaryAddressSpace {
     fail_network_activation_return: bool,
     expect_network_transmit: bool,
     expect_network_egress: bool,
+    expect_network_reliable_egress: bool,
+    expect_network_egress_reuse: bool,
     expect_network_receive: bool,
     expect_network_reuse: bool,
     corrupt_network_receive: bool,
     network_interrupt_request_completed: u64,
+    network_egress_acknowledged: u64,
 }
 
 enum AuxiliaryAddressSpace {
@@ -4464,6 +4470,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_network_boot_info_v5(&self, info: ginux_native_abi::NativeNetworkBootV5) -> bool {
+        if !info.is_valid_resident_reliable_egress_transmit() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeNetworkBootV5>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn write_protocol_boot_info(&self, info: ginux_native_abi::NativeProtocolBootV0) -> bool {
         if !info.is_valid_arp_consumer() {
             return false;
@@ -4786,6 +4807,7 @@ enum NativeNetworkRunMode {
     ReliableEgressFault,
     ReliableEgressWait,
     ReliableEgressAckBackpressure,
+    ReliableEgressReuse,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -5110,6 +5132,43 @@ pub(crate) fn verify_native_network_ack_backpressure(
                 && metadata.source_domain == transmitted.source_domain
                 && metadata.service_identity == transmitted.service_identity
                 && metadata.length == ECHO_REPLY.len()
+        })
+}
+
+pub(crate) fn verify_native_network_egress_reuse(
+    network_image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    interrupt: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
+) -> bool {
+    let (common_mapping, msix_mapping, apic) = interrupt;
+    let Some(expected_sequence) = packet::egress_next_sequence() else {
+        return false;
+    };
+    if expected_sequence == 0
+        || expected_sequence.checked_add(2).is_none()
+        || packet::egress_pending_metadata().is_some()
+        || packet::egress_claim().is_some()
+    {
+        return false;
+    }
+    if !verify_native_network_bootstrap_run(
+        network_image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReliableEgressReuse,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    ) {
+        return false;
+    }
+    packet::egress_pending_metadata().is_none()
+        && packet::egress_claim().is_none()
+        && packet::egress_next_sequence() == expected_sequence.checked_add(2)
+        && packet::egress_last_delivery().is_some_and(|metadata| {
+            metadata.sequence == expected_sequence + 1 && metadata.length == 42
         })
 }
 
@@ -6971,6 +7030,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressFault
             | NativeNetworkRunMode::ReliableEgressWait
             | NativeNetworkRunMode::ReliableEgressAckBackpressure
+            | NativeNetworkRunMode::ReliableEgressReuse
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -7007,6 +7067,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressFault
             | NativeNetworkRunMode::ReliableEgressWait
             | NativeNetworkRunMode::ReliableEgressAckBackpressure
+            | NativeNetworkRunMode::ReliableEgressReuse
     );
     let reliable_egress = matches!(
         mode,
@@ -7014,14 +7075,17 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressFault
             | NativeNetworkRunMode::ReliableEgressWait
             | NativeNetworkRunMode::ReliableEgressAckBackpressure
+            | NativeNetworkRunMode::ReliableEgressReuse
     );
     let egress_fault = mode == NativeNetworkRunMode::ReliableEgressFault;
     let egress_wait = matches!(
         mode,
         NativeNetworkRunMode::ReliableEgressWait
             | NativeNetworkRunMode::ReliableEgressAckBackpressure
+            | NativeNetworkRunMode::ReliableEgressReuse
     );
     let egress_ack_backpressure = mode == NativeNetworkRunMode::ReliableEgressAckBackpressure;
+    let egress_reuse = mode == NativeNetworkRunMode::ReliableEgressReuse;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -7200,7 +7264,19 @@ fn verify_native_network_bootstrap_run(
             }
         }
     }
-    let boot_written = if egress_wait {
+    let boot_written = if egress_reuse {
+        packet_handle.is_some_and(|packet_handle| {
+            packet::egress_next_sequence().is_some_and(|sequence| {
+                space.write_network_boot_info_v5(
+                    ginux_native_abi::NativeNetworkBootV5::resident_reliable_egress_transmit(
+                        boot,
+                        packet_handle,
+                        sequence,
+                    ),
+                )
+            })
+        })
+    } else if egress_wait {
         packet_handle.is_some_and(|packet_handle| {
             packet::egress_next_sequence().is_some_and(|sequence| {
                 space.write_network_boot_info_v4(
@@ -7287,7 +7363,9 @@ fn verify_native_network_bootstrap_run(
         bind_auxiliary_network_teardown(auxiliary, device, mapping, interrupt_mapping)
             && (!fail_after_activation || arm_auxiliary_network_activation_fault(auxiliary))
             && (!transmit_probe || arm_auxiliary_network_transmit_expectation(auxiliary))
-            && (!packet_egress || arm_auxiliary_network_egress_expectation(auxiliary))
+            && (!packet_egress
+                || arm_auxiliary_network_egress_expectation(auxiliary, reliable_egress))
+            && (!egress_reuse || arm_auxiliary_network_egress_reuse_expectation(auxiliary))
             && (!receive_arp || arm_auxiliary_network_receive_expectation(auxiliary))
             && (!receive_reuse || arm_auxiliary_network_reuse_expectation(auxiliary))
             && (!corrupt_network_receive || arm_auxiliary_network_receive_corruption(auxiliary))
@@ -7308,7 +7386,12 @@ fn verify_native_network_bootstrap_run(
                 || pci::force_next_network_receive_wait_timeout(auxiliary, 2))
     });
     let egress_producer = if egress_wait {
-        let program = if egress_ack_backpressure {
+        let program = if egress_reuse {
+            volume_program(
+                ginux_packet_egress_reuse_producer_start as *const () as usize,
+                ginux_packet_egress_reuse_producer_end as *const () as usize,
+            )
+        } else if egress_ack_backpressure {
             volume_program(
                 ginux_packet_egress_ack_backpressure_producer_start as *const () as usize,
                 ginux_packet_egress_ack_backpressure_producer_end as *const () as usize,
@@ -7466,7 +7549,9 @@ fn verify_native_network_bootstrap_run(
         && identity_valid
         && no_extra_event;
     let producer_lifecycle_valid = egress_producer.as_ref().is_none_or(|producer| {
-        let detail = if egress_ack_backpressure {
+        let detail = if egress_reuse {
+            63_u64
+        } else if egress_ack_backpressure {
             62_u64
         } else {
             59_u64
@@ -7741,10 +7826,13 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             fail_network_activation_return: false,
             expect_network_transmit: false,
             expect_network_egress: false,
+            expect_network_reliable_egress: false,
+            expect_network_egress_reuse: false,
             expect_network_receive: false,
             expect_network_reuse: false,
             corrupt_network_receive: false,
             network_interrupt_request_completed: 0,
+            network_egress_acknowledged: 0,
         });
     }
     true
@@ -7962,7 +8050,7 @@ fn arm_auxiliary_network_receive_expectation(domain_id: u64) -> bool {
     true
 }
 
-fn arm_auxiliary_network_egress_expectation(domain_id: u64) -> bool {
+fn arm_auxiliary_network_egress_expectation(domain_id: u64, reliable: bool) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
@@ -7972,6 +8060,7 @@ fn arm_auxiliary_network_egress_expectation(domain_id: u64) -> bool {
     if registered.network_teardown.is_none()
         || !registered.expect_network_transmit
         || registered.expect_network_egress
+        || registered.expect_network_egress_reuse
         || registered.expect_network_receive
         || registered.expect_network_reuse
         || registered.device_quiesced
@@ -7979,6 +8068,26 @@ fn arm_auxiliary_network_egress_expectation(domain_id: u64) -> bool {
         return false;
     }
     registered.expect_network_egress = true;
+    registered.expect_network_reliable_egress = reliable;
+    true
+}
+
+fn arm_auxiliary_network_egress_reuse_expectation(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if !registered.expect_network_egress
+        || registered.expect_network_egress_reuse
+        || registered.expect_network_receive
+        || registered.expect_network_reuse
+        || registered.device_quiesced
+    {
+        return false;
+    }
+    registered.expect_network_egress_reuse = true;
     true
 }
 
@@ -8032,7 +8141,7 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request
     };
     let final_request = if registered.expect_network_reuse {
         4
-    } else if registered.expect_network_receive {
+    } else if registered.expect_network_egress_reuse || registered.expect_network_receive {
         2
     } else if registered.expect_network_transmit {
         1
@@ -8046,12 +8155,21 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request
     let stage_ready = request == next_request
         && request <= final_request
         && match command {
-            crate::control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED => request % 2 == 1,
+            crate::control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED => {
+                request % 2 == 1 || registered.expect_network_egress_reuse
+            }
             crate::control_abi::NETWORK_DEVICE_WAIT_RX_POSTED => {
                 registered.expect_network_receive && request.is_multiple_of(2)
             }
             _ => false,
         };
+    let pci_ready = pci::isolated_network_interrupt_wait_ready(
+        teardown.device,
+        teardown.mapping,
+        domain_id,
+        request,
+        dma_physical,
+    );
     !registered.device_quiesced
         && stage_ready
         && teardown.msix_mapping.is_some()
@@ -8060,13 +8178,7 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request
             .iommu_translation
             .as_ref()
             .is_some_and(iommu::DeviceTranslation::is_active)
-        && pci::isolated_network_interrupt_wait_ready(
-            teardown.device,
-            teardown.mapping,
-            domain_id,
-            request,
-            dma_physical,
-        )
+        && pci_ready
 }
 
 pub(crate) fn auxiliary_network_egress_transmit_complete(domain_id: u64) -> bool {
@@ -8083,14 +8195,49 @@ pub(crate) fn auxiliary_network_egress_transmit_complete(domain_id: u64) -> bool
     let Some(dma_virtual) = dma.direct_map_address() else {
         return false;
     };
+    let final_request = if registered.expect_network_egress_reuse {
+        2
+    } else {
+        1
+    };
+    let completed = registered.network_interrupt_request_completed;
+    let acknowledged = registered.network_egress_acknowledged;
+    let dma_valid = u16::try_from(completed).is_ok_and(|completed| {
+        pci::network_service_egress_transmit_count_is_complete(
+            dma.address(),
+            dma_virtual,
+            completed,
+        )
+    });
     !registered.device_quiesced
         && registered.expect_network_egress
+        && registered.expect_network_reliable_egress
         && registered.expect_network_transmit
         && !registered.expect_network_receive
         && !registered.expect_network_reuse
         && teardown.msix_mapping.is_some()
-        && registered.network_interrupt_request_completed == 1
-        && pci::network_service_egress_transmit_is_complete(dma.address(), dma_virtual)
+        && (1..=final_request).contains(&completed)
+        && acknowledged.checked_add(1) == Some(completed)
+        && dma_valid
+}
+
+pub(crate) fn record_auxiliary_network_egress_ack(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if !registered.expect_network_egress
+        || !registered.expect_network_reliable_egress
+        || registered.device_quiesced
+        || registered.network_egress_acknowledged.checked_add(1)
+            != Some(registered.network_interrupt_request_completed)
+    {
+        return false;
+    }
+    registered.network_egress_acknowledged = registered.network_interrupt_request_completed;
+    true
 }
 
 pub(crate) fn complete_auxiliary_network_wait(
@@ -8112,7 +8259,7 @@ pub(crate) fn complete_auxiliary_network_wait(
     };
     let final_request = if registered.expect_network_reuse {
         4
-    } else if registered.expect_network_receive {
+    } else if registered.expect_network_egress_reuse || registered.expect_network_receive {
         2
     } else if registered.expect_network_transmit {
         1
@@ -8125,7 +8272,9 @@ pub(crate) fn complete_auxiliary_network_wait(
         .unwrap_or(0);
     let queue = match command {
         crate::control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED
-            if request == next_request && request <= final_request && request % 2 == 1 =>
+            if request == next_request
+                && request <= final_request
+                && (request % 2 == 1 || registered.expect_network_egress_reuse) =>
         {
             1
         }
@@ -8358,7 +8507,15 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
             )
         };
         let transmit_complete = if registered.expect_network_egress {
-            pci::network_service_egress_transmit_is_complete(dma.address(), dma_virtual)
+            pci::network_service_egress_transmit_count_is_complete(
+                dma.address(),
+                dma_virtual,
+                if registered.expect_network_egress_reuse {
+                    2
+                } else {
+                    1
+                },
+            )
         } else if registered.expect_network_reuse {
             pci::network_service_arp_reuse_is_complete(dma.address(), dma_virtual)
         } else if registered.expect_network_receive {
@@ -8373,7 +8530,7 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
         }
         let final_interrupt_request = if registered.expect_network_reuse {
             4
-        } else if registered.expect_network_receive {
+        } else if registered.expect_network_egress_reuse || registered.expect_network_receive {
             2
         } else if registered.expect_network_transmit {
             1
@@ -8382,6 +8539,8 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
         };
         let interrupt_complete = teardown.msix_mapping.is_none()
             || registered.network_interrupt_request_completed == final_interrupt_request;
+        let egress_acknowledgements_complete = !registered.expect_network_reliable_egress
+            || registered.network_egress_acknowledged == final_interrupt_request;
         let quiesced = if let Some(msix_mapping) = teardown.msix_mapping {
             pci::quiesce_isolated_network_interrupt(
                 teardown.device,
@@ -8393,7 +8552,11 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
         } else {
             pci::quiesce_isolated_network(teardown.device, teardown.mapping)
         };
-        if require_completed_dma && (!active || !transmit_complete || !interrupt_complete)
+        if require_completed_dma
+            && (!active
+                || !transmit_complete
+                || !interrupt_complete
+                || !egress_acknowledgements_complete)
             || !quiesced
         {
             return false;

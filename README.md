@@ -513,6 +513,17 @@ blocked producer wakes and publishes the exact fifth sequence. The remaining
 replies retain FIFO order, and replay of the acknowledged head is stale. See
 [Native Network Egress Backpressure v0](specs/services/network-egress-backpressure-v0.md).
 
+Network bootstrap ABI v5 keeps one measured network-service generation alive
+for two consecutive reliable replies. It reuses TX descriptor zero, the DMA
+lease, active queue, VT-d hierarchy, and device authority while advancing the
+available/used indices and kernel-owned interrupt request from one to two.
+Each packet retains the queue head until its own validated hardware completion
+authorizes acknowledgement; premature acknowledgement, duplicate claim,
+interrupt replay, and post-ack claim replay are rejected. The final gate
+requires both sequences consumed in order and all resident device and domain
+state retired cleanly. See
+[Native Network Service Bootstrap ABI v5](specs/abi/native-network-bootstrap-v5.md).
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected

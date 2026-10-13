@@ -34,6 +34,7 @@ retire cleanly.
 ## Limits
 
 The wait is untimed, covers one consumer and one fixed reply, and has no claim
-deadline. Operation 29 defines producer backpressure separately. Multiple
-egress waiters, batching, peer receipt, and continuously resident
-protocol/network services remain future milestones.
+deadline. Operation 29 defines producer backpressure separately. Bootstrap v5
+reuses one resident network-service generation for two replies. Multiple
+egress waiters, batching, peer receipt, and an unbounded service loop remain
+future milestones.
