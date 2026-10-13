@@ -237,6 +237,14 @@ by yielding or creating another thread. A restarted service receives the new
 domain generation's independent budget. Exit is deliberately uncharged and
 remains available after exhaustion.
 
+An auxiliary driver may begin a fresh 23-call epoch only when its exact active
+network wait returns a validated hardware completion. The kernel requires the
+live auxiliary role, owned address space, one attached thread, one in-flight
+operation, and a previously charged epoch before resetting the allowance.
+Userspace cannot request renewal directly. Denied operations, yields, packet
+traffic, failed waits, and timeout cancellation do not replenish calls. This is
+a progress-bound bootstrap policy, not general CPU or I/O accounting.
+
 The bootstrap domain metadata also enforces a one-thread limit. Scheduler
 creation must first reserve a thread against the exact domain generation, and
 normal exit or contained fault releases it. Service retirement is rejected

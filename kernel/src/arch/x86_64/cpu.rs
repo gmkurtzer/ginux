@@ -14787,7 +14787,13 @@ fn network_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFr
         return u64::MAX - 2;
     }
     match address_space::complete_auxiliary_network_wait(caller_domain, command, request) {
-        address_space::AuxiliaryDeviceWaitCompletion::Completed => 0,
+        address_space::AuxiliaryDeviceWaitCompletion::Completed => {
+            if domain::renew_auxiliary_call_epoch(caller_domain) {
+                0
+            } else {
+                u64::MAX - 2
+            }
+        }
         address_space::AuxiliaryDeviceWaitCompletion::Cancelled => {
             control_abi::NETWORK_DEVICE_RESULT_CANCELLED
         }

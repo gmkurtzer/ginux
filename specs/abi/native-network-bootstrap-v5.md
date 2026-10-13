@@ -32,7 +32,8 @@ capabilities, and address spaces.
 
 ## Limits
 
-This profile processes exactly two fixed replies and then exits. It has one
-global egress claim, one TX descriptor, one DMA page, and one NIC. It does not
+This profile processes exactly two fixed replies and then exits. Bootstrap v6
+separately drains all four FIFO entries using completion-bound call epochs. It
+has one global egress claim, one TX descriptor, one DMA page, and one NIC. It does not
 define an unbounded service loop, batching, multiple producers, claim timeout,
 dynamic queue sizing, peer receipt, or container-facing sockets.

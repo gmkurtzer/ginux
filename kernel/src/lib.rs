@@ -940,6 +940,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: auxiliary supervision authority enforced\r\n");
     serial_write("ginux: auxiliary retirement events sequenced\r\n");
     serial_write("ginux: auxiliary retirement publication atomic\r\n");
+    if !domain::verify_auxiliary_call_epoch_invariants() {
+        kernel_fail("ginux: auxiliary call epoch invariant failed\r\n");
+    }
+    serial_write("ginux: auxiliary call epoch renewal constrained\r\n");
     if !domain::verify_auxiliary_stop_revocation_invariants() {
         kernel_fail("ginux: auxiliary stop revocation invariant failed\r\n");
     }
@@ -3310,6 +3314,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: resident network service reused TX descriptor and DMA lease");
     serial_write("\r\nginux: resident network interrupt generations advanced in order");
     serial_write("\r\nginux: resident reliable egress retired cleanly");
+    if !address_space::verify_native_network_egress_batch(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: resident reliable egress batch failed\r\n");
+    }
+    serial_write("\r\nginux: resident network service drained full egress FIFO");
+    serial_write("\r\nginux: validated device progress renewed service call epochs");
+    serial_write("\r\nginux: four network interrupt generations advanced in order");
+    serial_write("\r\nginux: resident reliable egress batch retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

@@ -524,6 +524,15 @@ requires both sequences consumed in order and all resident device and domain
 state retired cleanly. See
 [Native Network Service Bootstrap ABI v5](specs/abi/native-network-bootstrap-v5.md).
 
+Network bootstrap ABI v6 fills the entire four-entry egress FIFO and drains it
+through the same resident driver generation. Every validated network-device
+completion starts a fresh bounded service-call epoch, so the driver can exceed
+its original lifetime allowance without gaining calls from yield, denial,
+packet traffic, failure, or timeout. Queue indices and interrupt requests
+advance from one through four, and every packet retains independent
+claim/completion/acknowledgement ordering before complete teardown. See
+[Native Network Service Bootstrap ABI v6](specs/abi/native-network-bootstrap-v6.md).
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected

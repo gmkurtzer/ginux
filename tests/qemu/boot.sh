@@ -373,6 +373,10 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: resident network service reused TX descriptor and DMA lease' "$output_file" ||
     ! grep -q '^ginux: resident network interrupt generations advanced in order' "$output_file" ||
     ! grep -q '^ginux: resident reliable egress retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: resident network service drained full egress FIFO' "$output_file" ||
+    ! grep -q '^ginux: validated device progress renewed service call epochs' "$output_file" ||
+    ! grep -q '^ginux: four network interrupt generations advanced in order' "$output_file" ||
+    ! grep -q '^ginux: resident reliable egress batch retired cleanly' "$output_file" ||
     ! grep -q '^ginux: ingress and egress space-wait keys isolated' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
@@ -1006,6 +1010,10 @@ fi
 
 if ! grep -q '^ginux: domain resource admission policies verified' "$output_file"; then
     echo "Boot test failed: domain resource admission policies were not verified." >&2
+    exit 1
+fi
+if ! grep -q '^ginux: auxiliary call epoch renewal constrained' "$output_file"; then
+    echo "Boot test failed: auxiliary call epoch renewal was not constrained." >&2
     exit 1
 fi
 

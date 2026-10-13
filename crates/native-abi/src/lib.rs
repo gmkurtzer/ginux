@@ -21,6 +21,7 @@ pub const NATIVE_NETWORK_FEATURE_RELIABLE_EGRESS: u32 = 1 << 10;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_FAULT: u32 = 1 << 11;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_WAIT: u32 = 1 << 12;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_REUSE: u32 = 1 << 13;
+pub const NATIVE_NETWORK_FEATURE_EGRESS_BATCH: u32 = 1 << 14;
 pub const NATIVE_NETWORK_BOOT_V1_VERSION: u16 = 1;
 pub const NATIVE_NETWORK_BOOT_V1_SIZE: u16 = 88;
 pub const NATIVE_NETWORK_BOOT_V2_VERSION: u16 = 2;
@@ -31,6 +32,8 @@ pub const NATIVE_NETWORK_BOOT_V4_VERSION: u16 = 4;
 pub const NATIVE_NETWORK_BOOT_V4_SIZE: u16 = 96;
 pub const NATIVE_NETWORK_BOOT_V5_VERSION: u16 = 5;
 pub const NATIVE_NETWORK_BOOT_V5_SIZE: u16 = 96;
+pub const NATIVE_NETWORK_BOOT_V6_VERSION: u16 = 6;
+pub const NATIVE_NETWORK_BOOT_V6_SIZE: u16 = 96;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -817,6 +820,110 @@ const _: () = assert!(core::mem::align_of::<NativeNetworkBootV5>() == 8);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeNetworkBootV6 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub common_config_address: u64,
+    pub receive_notification_address: u64,
+    pub transmit_notification_address: u64,
+    pub dma_virtual_address: u64,
+    pub dma_device_address: u64,
+    pub device_capability: u64,
+    pub mac_address: u64,
+    pub egress_capability: u64,
+    pub expected_egress_sequence: u64,
+    pub reserved: u64,
+}
+
+impl NativeNetworkBootV6 {
+    pub const fn resident_reliable_egress_batch(
+        v0: NativeNetworkBootV0,
+        egress_capability: u64,
+        expected_egress_sequence: u64,
+    ) -> Self {
+        Self {
+            magic: v0.magic,
+            version: NATIVE_NETWORK_BOOT_V6_VERSION,
+            size: NATIVE_NETWORK_BOOT_V6_SIZE,
+            features: v0.features
+                | NATIVE_NETWORK_FEATURE_PACKET_EGRESS
+                | NATIVE_NETWORK_FEATURE_RELIABLE_EGRESS
+                | NATIVE_NETWORK_FEATURE_EGRESS_WAIT
+                | NATIVE_NETWORK_FEATURE_EGRESS_REUSE
+                | NATIVE_NETWORK_FEATURE_EGRESS_BATCH,
+            common_config_address: v0.common_config_address,
+            receive_notification_address: v0.receive_notification_address,
+            transmit_notification_address: v0.transmit_notification_address,
+            dma_virtual_address: v0.dma_virtual_address,
+            dma_device_address: v0.dma_device_address,
+            device_capability: v0.device_capability,
+            mac_address: v0.mac_address,
+            egress_capability,
+            expected_egress_sequence,
+            reserved: 0,
+        }
+    }
+
+    pub const fn is_valid_resident_reliable_egress_batch(&self) -> bool {
+        self.magic == NATIVE_NETWORK_BOOT_MAGIC
+            && self.version == NATIVE_NETWORK_BOOT_V6_VERSION
+            && self.size == NATIVE_NETWORK_BOOT_V6_SIZE
+            && self.features
+                == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                    | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                    | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                    | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
+                    | NATIVE_NETWORK_FEATURE_PACKET_EGRESS
+                    | NATIVE_NETWORK_FEATURE_RELIABLE_EGRESS
+                    | NATIVE_NETWORK_FEATURE_EGRESS_WAIT
+                    | NATIVE_NETWORK_FEATURE_EGRESS_REUSE
+                    | NATIVE_NETWORK_FEATURE_EGRESS_BATCH
+            && self.common_config_address != 0
+            && self.receive_notification_address != 0
+            && self.transmit_notification_address != 0
+            && self.receive_notification_address != self.transmit_notification_address
+            && self.dma_virtual_address != 0
+            && self.dma_device_address != 0
+            && self.device_capability != 0
+            && self.mac_address != 0
+            && self.mac_address >> 48 == 0
+            && self.egress_capability != 0
+            && self.egress_capability != self.device_capability
+            && self.expected_egress_sequence != 0
+            && self.expected_egress_sequence.checked_add(3).is_some()
+            && self.reserved == 0
+    }
+
+    pub const fn v0_prefix(&self) -> NativeNetworkBootV0 {
+        NativeNetworkBootV0 {
+            magic: self.magic,
+            version: NATIVE_NETWORK_BOOT_VERSION,
+            size: NATIVE_NETWORK_BOOT_SIZE,
+            features: self.features
+                & !(NATIVE_NETWORK_FEATURE_PACKET_EGRESS
+                    | NATIVE_NETWORK_FEATURE_RELIABLE_EGRESS
+                    | NATIVE_NETWORK_FEATURE_EGRESS_WAIT
+                    | NATIVE_NETWORK_FEATURE_EGRESS_REUSE
+                    | NATIVE_NETWORK_FEATURE_EGRESS_BATCH),
+            common_config_address: self.common_config_address,
+            receive_notification_address: self.receive_notification_address,
+            transmit_notification_address: self.transmit_notification_address,
+            dma_virtual_address: self.dma_virtual_address,
+            dma_device_address: self.dma_device_address,
+            device_capability: self.device_capability,
+            mac_address: self.mac_address,
+            reserved: 0,
+        }
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeNetworkBootV6>() == 96);
+const _: () = assert!(core::mem::align_of::<NativeNetworkBootV6>() == 8);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativePacketRequestV0 {
     pub size: u32,
     pub version: u16,
@@ -1288,6 +1395,9 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_EGRESS_FAULT UINT32_C(2048)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_EGRESS_WAIT UINT32_C(4096)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_EGRESS_REUSE UINT32_C(8192)"));
+        assert!(
+            network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_EGRESS_BATCH UINT32_C(16384)")
+        );
         assert!(network_header.contains("GINUX_NATIVE_PACKET_QUEUE_CAPACITY UINT32_C(4)"));
         assert!(network_header.contains("GINUX_NATIVE_PACKET_WAIT_OPERATION UINT64_C(23)"));
         assert!(network_header.contains("GINUX_NATIVE_PACKET_WAIT_TIMEOUT_OPERATION UINT64_C(24)"));
@@ -1744,6 +1854,43 @@ mod tests {
             },
         ] {
             assert!(!invalid.is_valid_resident_reliable_egress_transmit());
+        }
+        let batch = NativeNetworkBootV6::resident_reliable_egress_batch(interrupted, 7, 1);
+        assert!(batch.is_valid_resident_reliable_egress_batch());
+        assert_eq!(batch.v0_prefix(), interrupted);
+        assert_eq!(core::mem::size_of::<NativeNetworkBootV6>(), 96);
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV6, egress_capability),
+            72
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV6, expected_egress_sequence),
+            80
+        );
+        assert_eq!(core::mem::offset_of!(NativeNetworkBootV6, reserved), 88);
+        for invalid in [
+            NativeNetworkBootV6 {
+                version: NATIVE_NETWORK_BOOT_V5_VERSION,
+                ..batch
+            },
+            NativeNetworkBootV6 {
+                features: batch.features & !NATIVE_NETWORK_FEATURE_EGRESS_BATCH,
+                ..batch
+            },
+            NativeNetworkBootV6 {
+                features: batch.features | NATIVE_NETWORK_FEATURE_EGRESS_FAULT,
+                ..batch
+            },
+            NativeNetworkBootV6 {
+                expected_egress_sequence: u64::MAX - 2,
+                ..batch
+            },
+            NativeNetworkBootV6 {
+                reserved: 1,
+                ..batch
+            },
+        ] {
+            assert!(!invalid.is_valid_resident_reliable_egress_batch());
         }
         for invalid in [
             NativeNetworkBootV0 { magic: 0, ..valid },

@@ -138,11 +138,11 @@ charge and restores the retained address-space owner recorded by the scheduler;
 it cannot remove a running, blocked, ambiguous, or wrong-domain context.
 
 Call budgets belong to domains rather than threads. The control domain receives
-70 charged calls and each service generation receives twenty-three. Every call-gate
+79 charged calls and each service generation receives twenty-three. Every call-gate
 entry except thread exit is charged before dispatch, including denied
 operations and yield. Exhaustion returns `UINT64_MAX - 3`; exit remains
 available so a depleted domain is not trapped. The ring-3 proof accounts for
-exactly 82 charged calls across all generations, deliberately exhausts the
+exactly 91 charged calls across all generations, deliberately exhausts the
 control domain, and requires its next discovery call to be rejected before it
 exits.
 
@@ -152,6 +152,9 @@ affinity, wait reason, timer deadline, periodic tick, or quantum policy. The
 two explicitly armed one-shots are a bring-up proof rather than a complete
 preemptive scheduler.
 The call budget is a bring-up resource bound, not a complete
-resource-accounting policy. Address-space switching currently flushes the local
+resource-accounting policy. Native auxiliary network drivers can renew their
+23-call epoch only when a matching kernel-owned interrupt completes an active
+device wait; userspace-visible scheduling and failure paths cannot renew it.
+Address-space switching currently flushes the local
 TLB through CR3 reload; PCID, TLB shootdown, and multi-CPU ownership are not
 defined.

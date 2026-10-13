@@ -194,11 +194,19 @@ duplicate claim, interrupt replay, and post-ack claim replay for both packets.
 See [Native Network Service Bootstrap ABI v4](../abi/native-network-bootstrap-v4.md)
 and [Native Network Service Bootstrap ABI v5](../abi/native-network-bootstrap-v5.md).
 
+Bootstrap v6 extends the same generation across a full four-entry egress FIFO.
+Each successful kernel-owned network completion renews a bounded 23-call epoch;
+no userspace operation can renew it directly. The service therefore crosses
+the old lifetime allowance while remaining bounded between hardware progress
+events, advances four queue and interrupt generations, and acknowledges every
+sequence only after its own completion. See
+[Native Network Service Bootstrap ABI v6](../abi/native-network-bootstrap-v6.md).
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The basic transmit
 generation sends one fixed probe, while the latest reliable-egress generation
-reuses one descriptor for exactly two fixed replies. The receive generation
+reuses one descriptor for exactly four fixed replies. The receive generation
 performs only one fixed ARP exchange with the deterministic QEMU gateway; the
 replenishment generation reuses one descriptor exactly once. Packet handoff is one copied four-entry
 FIFO with one bound producer and sequential consumers. Exact-sequence blocking

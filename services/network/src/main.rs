@@ -10,8 +10,8 @@ use core::{
 use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
     NativeControlDescriptorV4, NativeNetworkBootV0, NativeNetworkBootV1, NativeNetworkBootV2,
-    NativeNetworkBootV3, NativeNetworkBootV4, NativeNetworkBootV5, NativePacketRequestV0,
-    NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    NativeNetworkBootV3, NativeNetworkBootV4, NativeNetworkBootV5, NativeNetworkBootV6,
+    NativePacketRequestV0, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
     NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
     NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
@@ -146,7 +146,7 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         false,
                         false,
                         false,
-                        false,
+                        1,
                     )),
                 )
             } else if info.version == 3 {
@@ -171,7 +171,7 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         true,
                         v3.requests_fault_after_claim(),
                         false,
-                        false,
+                        1,
                     )),
                 )
             } else if info.version == 4 {
@@ -196,7 +196,7 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         true,
                         false,
                         true,
-                        false,
+                        1,
                     )),
                 )
             } else if info.version == 5 {
@@ -221,7 +221,32 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         true,
                         false,
                         true,
+                        2,
+                    )),
+                )
+            } else if info.version == 6 {
+                let Some(v6) = (unsafe {
+                    (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV6).as_ref()
+                }) else {
+                    fail();
+                };
+                if !v6.is_valid_resident_reliable_egress_batch()
+                    || !native_control_abi_supports_packet_handoff(discovery)
+                {
+                    fail();
+                }
+                (
+                    v6.v0_prefix(),
+                    None,
+                    false,
+                    false,
+                    Some((
+                        v6.egress_capability,
+                        v6.expected_egress_sequence,
                         true,
+                        false,
+                        true,
+                        4,
                     )),
                 )
             } else {
@@ -239,26 +264,31 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
             fail();
         }
         if info.requests_transmit_probe() {
-            let status =
-                if let Some((capability, sequence, reliable, fault_after_claim, wait, reuse)) =
-                    egress
-                {
-                    unsafe {
-                        transmit_egress(
-                            &info,
-                            capability,
-                            sequence,
-                            reliable,
-                            fault_after_claim,
-                            wait,
-                            reuse,
-                        )
-                    }
-                } else if info.requests_arp_probe() {
-                    unsafe { arp_probe(&info, packet_capability, fault_after_packet, packet_batch) }
-                } else {
-                    unsafe { transmit_probe(&info) }
-                };
+            let status = if let Some((
+                capability,
+                sequence,
+                reliable,
+                fault_after_claim,
+                wait,
+                transmissions,
+            )) = egress
+            {
+                unsafe {
+                    transmit_egress(
+                        &info,
+                        capability,
+                        sequence,
+                        reliable,
+                        fault_after_claim,
+                        wait,
+                        transmissions,
+                    )
+                }
+            } else if info.requests_arp_probe() {
+                unsafe { arp_probe(&info, packet_capability, fault_after_packet, packet_batch) }
+            } else {
+                unsafe { transmit_probe(&info) }
+            };
             let Some(status) = status else {
                 fail();
             };
@@ -346,9 +376,11 @@ unsafe fn transmit_egress(
     reliable: bool,
     fault_after_claim: bool,
     wait: bool,
-    reuse: bool,
+    transmissions: u64,
 ) -> Option<u8> {
-    let transmissions = if reuse { 2_u64 } else { 1_u64 };
+    if !(1..=u64::from(QUEUE_SIZE)).contains(&transmissions) {
+        return None;
+    }
     for index in 0..transmissions {
         let sequence = expected_sequence.checked_add(index)?;
         let request = index.checked_add(1)?;

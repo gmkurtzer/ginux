@@ -114,10 +114,16 @@ _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_EGRESS_WAIT == UINT32_C(4096),
                "network egress wait feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_EGRESS_REUSE == UINT32_C(8192),
                "network egress reuse feature bit");
+_Static_assert(GINUX_NATIVE_NETWORK_FEATURE_EGRESS_BATCH == UINT32_C(16384),
+               "network egress batch feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_BOOT_V5_VERSION == UINT16_C(5),
                "network bootstrap v5 version");
 _Static_assert(sizeof(struct ginux_native_network_boot_v5) == 96,
                "network bootstrap v5 size");
+_Static_assert(GINUX_NATIVE_NETWORK_BOOT_V6_VERSION == UINT16_C(6),
+               "network bootstrap v6 version");
+_Static_assert(sizeof(struct ginux_native_network_boot_v6) == 96,
+               "network bootstrap v6 size");
 _Static_assert(GINUX_NATIVE_PACKET_EGRESS_CLAIM_OPERATION == UINT64_C(26),
                "native packet egress claim operation");
 _Static_assert(GINUX_NATIVE_PACKET_EGRESS_ACK_OPERATION == UINT64_C(27),

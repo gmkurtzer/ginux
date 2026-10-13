@@ -596,6 +596,28 @@ impl Manager {
         true
     }
 
+    fn renew_auxiliary_call_epoch(&mut self, id: DomainId) -> bool {
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if domain.role != Role::AuxiliaryService
+            || domain.state != State::Ready
+            || domain.address_space_root.is_none()
+            || domain.active_threads != 1
+            || domain.active_operations != 1
+            || domain.remaining_calls >= SERVICE_CALL_BUDGET
+        {
+            return false;
+        }
+        domain.remaining_calls = SERVICE_CALL_BUDGET;
+        true
+    }
+
     fn attach_thread(&mut self, id: DomainId) -> bool {
         let Some(total) = self.total_thread_attaches.checked_add(1) else {
             return false;
@@ -1311,6 +1333,10 @@ pub(crate) fn verify_auxiliary_fault_policy_invariants() -> bool {
     verify_auxiliary_fault_policy_invariants_inner().unwrap_or(false)
 }
 
+pub(crate) fn verify_auxiliary_call_epoch_invariants() -> bool {
+    verify_auxiliary_call_epoch_invariants_inner().unwrap_or(false)
+}
+
 pub(crate) fn verify_generation_exhaustion_invariants() -> bool {
     verify_generation_exhaustion_invariants_inner().unwrap_or(false)
 }
@@ -1574,6 +1600,40 @@ fn verify_auxiliary_fault_policy_invariants_inner() -> Option<bool> {
             && manager.lifecycle_events.is_empty()
             && manager.lifecycle_events.next_sequence == u64::MAX,
     )
+}
+
+fn verify_auxiliary_call_epoch_invariants_inner() -> Option<bool> {
+    let grants = [
+        BootGrant::new(1, Rights::READ.union(Rights::MANAGE)),
+        BootGrant::new(2, Rights::WRITE),
+    ];
+    let mut manager = Manager::new();
+    let control = manager.create_control_plane(&grants)?;
+    let source = manager.domain(control)?.boot_roots[1]?;
+    let auxiliary = manager.create_auxiliary_service_with_delegations(&[DelegationGrant {
+        source,
+        object: 2,
+        rights: Rights::WRITE,
+    }])?;
+    if manager.renew_auxiliary_call_epoch(auxiliary)
+        || !manager.bind_auxiliary_address_space(auxiliary, 0x1000)
+        || !manager.attach_thread(auxiliary)
+        || manager.renew_auxiliary_call_epoch(auxiliary)
+        || !manager.begin_operation(auxiliary)
+    {
+        return Some(false);
+    }
+    let slot = usize::from(auxiliary.slot);
+    manager.domains.get_mut(slot)?.as_mut()?.remaining_calls = SERVICE_CALL_BUDGET - 1;
+    if !manager.renew_auxiliary_call_epoch(auxiliary)
+        || manager.domain(auxiliary)?.remaining_calls != SERVICE_CALL_BUDGET
+        || manager.renew_auxiliary_call_epoch(auxiliary)
+        || !manager.end_operation(auxiliary)
+    {
+        return Some(false);
+    }
+    manager.domains.get_mut(slot)?.as_mut()?.remaining_calls = SERVICE_CALL_BUDGET - 1;
+    Some(!manager.renew_auxiliary_call_epoch(auxiliary))
 }
 
 fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
@@ -1859,6 +1919,13 @@ pub(crate) fn end_operation(domain_raw: u64) -> bool {
         return false;
     };
     global_manager_mut().is_some_and(|manager| manager.end_operation(id))
+}
+
+pub(crate) fn renew_auxiliary_call_epoch(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager_mut().is_some_and(|manager| manager.renew_auxiliary_call_epoch(id))
 }
 
 pub(crate) fn operation_accounting_proof_complete() -> bool {
