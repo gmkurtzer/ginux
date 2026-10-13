@@ -44,6 +44,9 @@ verification exercises configuration and lifecycle commands.
 
 ## C3: Rocky systemd early boot
 
+**Implementation status:** In progress; the x86-64 systemd image recipe is
+pinned and verified, and the storage-backed image path is next.
+
 Deliverables:
 
 - A reproducible, digest-pinned Rocky Linux 10 x86-64 container image recipe.
