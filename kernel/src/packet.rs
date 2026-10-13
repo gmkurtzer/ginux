@@ -31,6 +31,14 @@ pub(crate) enum PacketWait {
     Stale,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PacketSpace {
+    Ready,
+    Full,
+    InvalidProducer,
+    SequenceExhausted,
+}
+
 struct Mailbox {
     producer: Option<(u64, u64)>,
     next_sequence: u64,
@@ -100,6 +108,13 @@ impl Mailbox {
         true
     }
 
+    fn retire_if_bound(&mut self, domain: u64) -> bool {
+        if self.producer.is_some_and(|(bound, _)| bound == domain) {
+            self.producer = None;
+        }
+        true
+    }
+
     fn wait_state(&self, expected_sequence: u64) -> PacketWait {
         if self.len == 0 {
             return if self.next_sequence != u64::MAX && expected_sequence == self.next_sequence {
@@ -112,6 +127,18 @@ impl Mailbox {
             PacketWait::Ready
         } else {
             PacketWait::Stale
+        }
+    }
+
+    fn space_state(&self, domain: u64) -> PacketSpace {
+        if self.producer.is_none_or(|(bound, _)| bound != domain) {
+            PacketSpace::InvalidProducer
+        } else if self.next_sequence == u64::MAX {
+            PacketSpace::SequenceExhausted
+        } else if self.len == PACKET_CAPACITY {
+            PacketSpace::Full
+        } else {
+            PacketSpace::Ready
         }
     }
 
@@ -172,6 +199,10 @@ pub(crate) fn retire_producer(domain: u64) -> bool {
     mailbox_mut().is_some_and(|mailbox| mailbox.retire(domain))
 }
 
+pub(crate) fn retire_producer_if_bound(domain: u64) -> bool {
+    domain != 0 && mailbox_mut().is_some_and(|mailbox| mailbox.retire_if_bound(domain))
+}
+
 pub(crate) fn consume_with(
     expected_sequence: u64,
     capacity: usize,
@@ -201,6 +232,12 @@ pub(crate) fn wait_state(expected_sequence: u64) -> PacketWait {
     mailbox.wait_state(expected_sequence)
 }
 
+pub(crate) fn space_state(domain: u64) -> PacketSpace {
+    mailbox_mut().map_or(PacketSpace::InvalidProducer, |mailbox| {
+        mailbox.space_state(domain)
+    })
+}
+
 pub(crate) fn next_sequence() -> Option<u64> {
     Some(mailbox_mut()?.next_sequence)
 }
@@ -217,6 +254,8 @@ pub(crate) fn verify_invariants() -> bool {
     let mut output = [0; 42];
     !mailbox.bind(0, 1)
         && mailbox.bind(2, 7)
+        && mailbox.retire_if_bound(3)
+        && mailbox.space_state(2) == PacketSpace::Ready
         && mailbox.wait_state(1) == PacketWait::Empty
         && mailbox.wait_state(2) == PacketWait::Stale
         && !mailbox.bind(3, 7)
@@ -230,6 +269,8 @@ pub(crate) fn verify_invariants() -> bool {
         && mailbox.publish(2, &packet) == Ok(3)
         && mailbox.publish(2, &packet) == Ok(4)
         && mailbox.publish(2, &packet) == Err(PacketError::Busy)
+        && mailbox.space_state(2) == PacketSpace::Full
+        && mailbox.space_state(3) == PacketSpace::InvalidProducer
         && mailbox.retire(2)
         && mailbox.publish(2, &packet) == Err(PacketError::InvalidProducer)
         && mailbox.bind(3, 8)
@@ -244,6 +285,7 @@ pub(crate) fn verify_invariants() -> bool {
             sequence: 1,
             length: packet.len(),
         })
+        && mailbox.space_state(3) == PacketSpace::Ready
         && output == packet
         && mailbox.publish(3, &packet) == Ok(5)
         && mailbox.consume_with(1, output.len(), |_, _| false) == Err(PacketError::Stale)
@@ -257,5 +299,6 @@ pub(crate) fn verify_invariants() -> bool {
         && {
             mailbox.next_sequence = u64::MAX;
             mailbox.wait_state(u64::MAX) == PacketWait::Stale
+                && mailbox.space_state(3) == PacketSpace::SequenceExhausted
         }
 }

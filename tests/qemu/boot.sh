@@ -300,6 +300,10 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: replacement packet consumer claimed timed-out sequence' "$output_file" ||
     ! grep -q '^ginux: replacement packet consumer received post-timeout frame' "$output_file" ||
     ! grep -q '^ginux: packet publication cancelled pending wait deadline' "$output_file" ||
+    ! grep -q '^ginux: full packet FIFO blocked write-only producer' "$output_file" ||
+    ! grep -q '^ginux: packet consumption woke exactly one blocked producer' "$output_file" ||
+    ! grep -q '^ginux: woken packet producer retried exact next sequence' "$output_file" ||
+    ! grep -q '^ginux: packet FIFO ordering survived backpressure wakeup' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2

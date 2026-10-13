@@ -37,8 +37,11 @@ A bounded-batch generation publishes both validated replies as sequences three
 and four before clean driver retirement. Two fresh read-only domains consume
 them in order after all device authority is gone. The kernel's four-entry FIFO
 invariant also proves full-queue backpressure, retained entries across producer
-replacement, wraparound reuse, and monotonic sequence allocation. This is a
-bounded copied queue, not yet a blocking or zero-copy container endpoint.
+replacement, wraparound reuse, and monotonic sequence allocation. Operation 25
+now blocks the bound producer on a full queue and wakes it after consumption;
+the producer must retry publication. See
+[Native Network Packet Backpressure v0](network-packet-backpressure-v0.md).
+This remains a bounded copied queue, not a zero-copy container endpoint.
 
 Operation 23 now lets one read-only consumer block on the exact next sequence
 while the FIFO is empty. A separately authorized producer publishes sequence

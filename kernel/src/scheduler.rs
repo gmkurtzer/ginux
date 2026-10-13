@@ -41,6 +41,9 @@ pub(crate) enum WaitReason {
         object: u64,
         sequence: u64,
     },
+    PacketSpaceAvailable {
+        object: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -1673,6 +1676,40 @@ pub(crate) fn wake_packet_waiter(sender_domain: u64, sequence: u64) -> bool {
     true
 }
 
+pub(crate) fn packet_space_wait_is_available() -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    !runtime
+        .scheduler
+        .has_blocked_wait(WaitReason::PacketSpaceAvailable {
+            object: crate::control_abi::PACKET_OBJECT,
+        })
+}
+
+pub(crate) fn wake_packet_space_waiter(sender_domain: u64) -> bool {
+    if sender_domain == 0 {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(wakes) = runtime.wakes.checked_add(1) else {
+        return false;
+    };
+    if !runtime.scheduler.wake_blocked_peer(
+        sender_domain,
+        WaitReason::PacketSpaceAvailable {
+            object: crate::control_abi::PACKET_OBJECT,
+        },
+        0,
+    ) {
+        return false;
+    }
+    runtime.wakes = wakes;
+    true
+}
+
 pub(crate) fn timeout_packet_waiter(domain: u64, sequence: u64) -> bool {
     if domain == 0 || sequence == 0 {
         return false;
@@ -2080,6 +2117,25 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && !timed.has_blocked_wait(packet_wait)
         && timed.yield_current(timed_peer, second_context)?.id == timed_waiter
         && timed.thread(timed_waiter)?.context.rax == crate::control_abi::PACKET_RESULT_TIMED_OUT;
+    let mut backpressure = Scheduler::new();
+    let blocked_producer = backpressure.create(1, first_context)?;
+    let draining_consumer = backpressure.create(2, second_context)?;
+    let packet_space = WaitReason::PacketSpaceAvailable {
+        object: crate::control_abi::PACKET_OBJECT,
+    };
+    let packet_space_wake_exact = backpressure.schedule_next()?.id == blocked_producer
+        && backpressure
+            .block_current(blocked_producer, first_context, packet_space)?
+            .id
+            == draining_consumer
+        && backpressure.has_blocked_wait(packet_space)
+        && backpressure.wake_blocked_peer(2, packet_space, 0)
+        && !backpressure.has_blocked_wait(packet_space)
+        && backpressure
+            .yield_current(draining_consumer, second_context)?
+            .id
+            == blocked_producer
+        && backpressure.thread(blocked_producer)?.context.rax == 0;
     Some(
         generation_valid
             && rollback
@@ -2088,7 +2144,8 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             && staged_not_implicitly_admitted
             && staged_explicitly_started
             && blocked_auxiliary_cancelled
-            && timed_wait_released,
+            && timed_wait_released
+            && packet_space_wake_exact,
     )
 }
 

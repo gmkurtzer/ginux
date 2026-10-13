@@ -14362,6 +14362,9 @@ fn dispatch_charged_call(
             let timeout_ms = unsafe { frame.as_ref() }.map(UserTrapFrame::second_argument);
             packet_wait_call(caller_domain, capability, frame, timeout_ms)
         }
+        control_abi::PACKET_SPACE_WAIT_OPERATION => {
+            packet_space_wait_call(caller_domain, capability, frame)
+        }
         _ => u64::MAX,
     }
 }
@@ -14450,7 +14453,12 @@ fn packet_consume_call(caller_domain: u64, capability: u64, frame: *const UserTr
         request.buffer_size,
         |_, packet| address_space::copy_to_current_user(request.buffer_address, packet),
     ) {
-        Ok(metadata) => metadata.length as u64,
+        Ok(metadata) => {
+            if scheduler::wake_packet_space_waiter(caller_domain) {
+                timer::mark_scheduler_preemption_ready();
+            }
+            metadata.length as u64
+        }
         Err(crate::packet::PacketError::Stale) => control_abi::PACKET_RESULT_STALE,
         Err(_) => u64::MAX - 2,
     }
@@ -14537,6 +14545,47 @@ fn packet_wait_call(
             }
             let _ = timer::cancel_packet_wait_timer_for_domain(caller_domain);
             u64::MAX - 2
+        }
+    }
+}
+
+fn packet_space_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return u64::MAX - 2;
+    };
+    if frame.first_argument() != 0
+        || frame.second_argument() != 0
+        || !domain::handle_permits(
+            caller_domain,
+            capability,
+            control_abi::PACKET_OBJECT,
+            Rights::WRITE,
+        )
+    {
+        return u64::MAX - 2;
+    }
+    match crate::packet::space_state(caller_domain) {
+        crate::packet::PacketSpace::Ready => 0,
+        crate::packet::PacketSpace::InvalidProducer
+        | crate::packet::PacketSpace::SequenceExhausted => u64::MAX - 2,
+        crate::packet::PacketSpace::Full => {
+            if !scheduler::packet_space_wait_is_available() {
+                return u64::MAX - 2;
+            }
+            let action = scheduler::block_runtime(
+                frame,
+                USER_CODE_SELECTOR,
+                USER_DATA_SELECTOR,
+                scheduler::WaitReason::PacketSpaceAvailable {
+                    object: control_abi::PACKET_OBJECT,
+                },
+                active_fs_base(),
+            );
+            if matches!(action, RuntimeAction::Invalid) {
+                u64::MAX - 2
+            } else {
+                resume_action(action)
+            }
         }
     }
 }

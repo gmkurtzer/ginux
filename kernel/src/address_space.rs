@@ -17,6 +17,7 @@ use crate::{
 global_asm!(include_str!("../volume-service.S"));
 global_asm!(include_str!("../packet-consumer.S"));
 global_asm!(include_str!("../packet-wait.S"));
+global_asm!(include_str!("../packet-backpressure.S"));
 
 extern "C" {
     fn ginux_volume_writer_start();
@@ -36,6 +37,10 @@ extern "C" {
     fn ginux_packet_wait_timeout_consumer_end();
     fn ginux_packet_wait_timeout_helper_start();
     fn ginux_packet_wait_timeout_helper_end();
+    fn ginux_packet_backpressure_producer_start();
+    fn ginux_packet_backpressure_producer_end();
+    fn ginux_packet_backpressure_consumer_start();
+    fn ginux_packet_backpressure_consumer_end();
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -5358,6 +5363,137 @@ pub(crate) fn verify_packet_wait_timeout() -> bool {
         && packet::next_sequence() == Some(expected_sequence)
 }
 
+pub(crate) fn verify_packet_backpressure_wakeup() -> bool {
+    let Some(expected_sequence) = packet::next_sequence() else {
+        return false;
+    };
+    if expected_sequence == 0 || packet::pending_metadata().is_some() {
+        return false;
+    }
+    let (Some(producer_program), Some(consumer_program)) = (
+        volume_program(
+            ginux_packet_backpressure_producer_start as *const () as usize,
+            ginux_packet_backpressure_producer_end as *const () as usize,
+        ),
+        volume_program(
+            ginux_packet_backpressure_consumer_start as *const () as usize,
+            ginux_packet_backpressure_consumer_end as *const () as usize,
+        ),
+    ) else {
+        return false;
+    };
+    let Some(producer) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) else {
+        return false;
+    };
+    let Some(consumer) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        let _ = domain::discard_unstarted_auxiliary_service(producer);
+        return false;
+    };
+    let (
+        Some(producer_handle),
+        Some(producer_identity),
+        Some(producer_owner),
+        Some(consumer_handle),
+        Some(consumer_owner),
+    ) = (
+        domain::auxiliary_boot_handle(producer, 0),
+        domain::domain_service_identity(producer),
+        memory::FrameOwner::domain(producer),
+        domain::auxiliary_boot_handle(consumer, 0),
+        memory::FrameOwner::domain(consumer),
+    )
+    else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let (Some(producer_space), Some(consumer_space)) = (
+        WxAddressSpace::new(kernel_root, producer_owner),
+        WxAddressSpace::new(kernel_root, consumer_owner),
+    ) else {
+        return false;
+    };
+    if !producer_space.permissions_are_valid(kernel_root)
+        || !consumer_space.permissions_are_valid(kernel_root)
+        || !producer_space.is_disjoint_from(&consumer_space)
+    {
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in producer_program.iter().enumerate() {
+            producer_space.code_frame.add(offset).write(*byte);
+        }
+        for (offset, byte) in consumer_program.iter().enumerate() {
+            consumer_space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let producer_root = producer_space.root;
+    let consumer_root = consumer_space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(producer, producer_space)
+        || !register_auxiliary_address_space(consumer, consumer_space)
+        || !packet::bind_producer(producer, producer_identity)
+        || !scheduler::queue_auxiliary(producer, producer_root, entry, stack, producer_handle)
+        || !scheduler::queue_auxiliary(consumer, consumer_root, entry, stack, consumer_handle)
+        || !scheduler::initialize_staged_packet_auxiliary(consumer, expected_sequence)
+        || !scheduler::start_staged_auxiliary(consumer)
+        || !cpu::activate_user_root(producer_root)
+    {
+        return false;
+    }
+    cpu::execute_packet_consumer(
+        entry,
+        stack,
+        producer_handle,
+        expected_sequence,
+        false,
+        producer,
+        producer_identity,
+    );
+    let producer_retired = packet::retire_producer(producer);
+    let producer_event = domain::take_lifecycle_event();
+    let consumer_event = domain::take_lifecycle_event();
+    let expected_final_sequence = expected_sequence.checked_add(4);
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && scheduler::packet_space_wait_is_available()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(producer_owner) == Some(0)
+        && memory::owner_live_frame_count(consumer_owner) == Some(0)
+        && domain::domain_is_retired(producer)
+        && domain::domain_is_retired(consumer)
+        && producer_retired
+        && producer_event
+            == Some(
+                (53_u64 << 56)
+                    | (producer << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && consumer_event
+            == Some(
+                (54_u64 << 56)
+                    | (consumer << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && domain::take_lifecycle_event().is_none()
+        && packet::last_delivery().is_some_and(|metadata| {
+            Some(metadata.sequence) == expected_final_sequence
+                && metadata.source_domain == producer
+                && metadata.service_identity == producer_identity
+                && metadata.length == 8
+        })
+        && packet::pending_metadata().is_none()
+        && packet::next_sequence() == expected_sequence.checked_add(5)
+}
+
 fn verify_ring3_packet_consumer(expected_sequence: u64, more_pending: bool) -> bool {
     if expected_sequence == 0 || expected_sequence == u64::MAX {
         return false;
@@ -5954,6 +6090,7 @@ pub(crate) fn stop_auxiliary_from_current_user(
         return true;
     }
     scheduler::cancel_auxiliary(domain_id)
+        && packet::retire_producer_if_bound(domain_id)
         && timer::cancel_packet_wait_timer_for_domain(domain_id)
         && release_auxiliary_address_space(domain_id)
         && domain::stop_auxiliary_service(supervisor, capability, domain_id)

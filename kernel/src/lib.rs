@@ -3126,6 +3126,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: replacement packet consumer claimed timed-out sequence");
     serial_write("\r\nginux: replacement packet consumer received post-timeout frame");
     serial_write("\r\nginux: packet publication cancelled pending wait deadline");
+    if !address_space::verify_packet_backpressure_wakeup() {
+        kernel_fail("\r\nginux: packet backpressure wakeup failed\r\n");
+    }
+    serial_write("\r\nginux: full packet FIFO blocked write-only producer");
+    serial_write("\r\nginux: packet consumption woke exactly one blocked producer");
+    serial_write("\r\nginux: woken packet producer retried exact next sequence");
+    serial_write("\r\nginux: packet FIFO ordering survived backpressure wakeup");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

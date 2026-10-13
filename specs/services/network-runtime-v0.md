@@ -164,6 +164,10 @@ The additive timed-wait operation expires an exact wait through the local APIC,
 preempts a non-cooperative peer, and leaves the sequence available to a fresh
 consumer. Publication before a later deadline cancels that timer. See
 [Native Network Packet Wait Timeout v0](network-packet-timeout-v0.md).
+When the four-entry FIFO is full, additive operation 25 blocks the bound
+write-only producer. Removing the head wakes that producer to retry the exact
+next sequence without reserving or mutating a slot during the wake. See
+[Native Network Packet Backpressure v0](network-packet-backpressure-v0.md).
 
 ## Deliberate limits
 
@@ -173,6 +177,7 @@ exchange with the deterministic QEMU gateway; the replenishment generation
 reuses one descriptor exactly once. Packet handoff is one copied four-entry
 FIFO with one bound producer and sequential consumers. Exact-sequence blocking
 is available, control-plane management can stop a blocked consumer, and a
-bounded relative timeout can release its exact sequence. Self-cancellation,
-backpressure notification, concurrent producers, dynamic configuration, and
-container networking remain separate milestones.
+bounded relative timeout can release its exact sequence. A full FIFO also
+blocks and wakes its bound producer without polling. Self-cancellation,
+concurrent producers, dynamic configuration, and container networking remain
+separate milestones.
