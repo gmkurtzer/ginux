@@ -3425,6 +3425,25 @@ pub(crate) fn force_next_network_wait_timeout(domain: u64, request: u64) -> bool
     force_next_notified_wait_timeout_for(domain, control_abi::NETWORK_DEVICE_OBJECT, request)
 }
 
+pub(crate) fn force_next_network_receive_wait_timeout(domain: u64, request: u64) -> bool {
+    let current = VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst);
+    if domain == 0
+        || request != current.checked_add(1).unwrap_or(0)
+        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+        || !VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst)
+        || FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) != 0
+        || FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) != 0
+        || FORCED_NOTIFIED_TIMEOUT_OBJECT.load(Ordering::SeqCst) != 0
+    {
+        return false;
+    }
+    FORCED_NOTIFIED_TIMEOUT_OBJECT.store(control_abi::NETWORK_DEVICE_OBJECT, Ordering::SeqCst);
+    FORCED_NOTIFIED_TIMEOUT_REQUEST.store(request, Ordering::SeqCst);
+    FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(domain, Ordering::SeqCst);
+    true
+}
+
 fn force_next_notified_wait_timeout_for(domain: u64, object: u64, request: u64) -> bool {
     if domain == 0
         || object == 0

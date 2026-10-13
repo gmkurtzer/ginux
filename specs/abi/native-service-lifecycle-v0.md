@@ -84,8 +84,10 @@ after TX command 1/request 1 completes does the kernel advance that exact
 device generation and admit RX command 2/request 2. The second wait unmasks
 vector 34 and returns zero only after its matching interrupt. A duplicate or
 out-of-order command returns `FAILED` without blocking. Both waits must complete
-before clean lifecycle exit is accepted. Receive-stage timeout cancellation is
-not yet part of this contract.
+before clean lifecycle exit is accepted. An RX timeout cancels the whole device
+generation after masking MSI-X, revoking bus mastering, resetting the NIC, and
+retiring both routes. It returns `CANCELLED`, requires `RESTART_REQUIRED`, and
+permits only a fresh domain with new VT-d and DMA leases to retry.
 
 ## Sources and compatibility
 

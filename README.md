@@ -146,6 +146,9 @@ one-buffer reply, and the kernel independently validates both rings, packet
 identities, lengths, canaries, and interrupt completions before retiring both
 routes and all DMA authority. See
 [Native Network Service Receive v0](specs/services/network-receive-v0.md).
+If the RX-stage wait expires after TX completion, the kernel cancels the whole
+ambiguous device generation and the service exits `RESTART_REQUIRED`; a fresh
+generation with new DMA and VT-d leases must complete another ARP exchange.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

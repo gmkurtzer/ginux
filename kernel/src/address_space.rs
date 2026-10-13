@@ -4580,6 +4580,7 @@ enum NativeNetworkRunMode {
     Transmit,
     TransmitTimeout,
     ReceiveArp,
+    ReceiveArpTimeout,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4729,6 +4730,26 @@ pub(crate) fn verify_native_network_receive_arp(
     )
 }
 
+pub(crate) fn verify_native_network_receive_timeout(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReceiveArpTimeout,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    )
+}
+
 fn verify_native_network_bootstrap_run(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -4752,9 +4773,14 @@ fn verify_native_network_bootstrap_run(
         NativeNetworkRunMode::Transmit
             | NativeNetworkRunMode::TransmitTimeout
             | NativeNetworkRunMode::ReceiveArp
+            | NativeNetworkRunMode::ReceiveArpTimeout
     );
-    let force_network_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
-    let receive_arp = mode == NativeNetworkRunMode::ReceiveArp;
+    let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
+    let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
+    let receive_arp = matches!(
+        mode,
+        NativeNetworkRunMode::ReceiveArp | NativeNetworkRunMode::ReceiveArpTimeout
+    );
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4918,7 +4944,9 @@ fn verify_native_network_bootstrap_run(
                     receive_arp,
                 )
             })
-            && (!force_network_timeout || pci::force_next_network_wait_timeout(auxiliary, 1))
+            && (!force_transmit_timeout || pci::force_next_network_wait_timeout(auxiliary, 1))
+            && (!force_receive_timeout
+                || pci::force_next_network_receive_wait_timeout(auxiliary, 2))
     });
     if activate_iommu && iommu_evidence.is_none()
         || !active_device_ready
@@ -4935,7 +4963,7 @@ fn verify_native_network_bootstrap_run(
     } else {
         crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
     };
-    let expected_detail = if force_network_timeout {
+    let expected_detail = if force_transmit_timeout || force_receive_timeout {
         ginux_native_abi::NATIVE_SERVICE_EXIT_RESTART_REQUIRED
     } else {
         ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED

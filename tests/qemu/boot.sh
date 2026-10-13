@@ -257,7 +257,11 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: native network service validated gateway ARP reply' "$output_file" ||
     ! grep -q '^ginux: kernel validated native network RX descriptor and ARP reply' "$output_file" ||
     ! grep -q '^ginux: native network RX payload guards preserved' "$output_file" ||
-    ! grep -q '^ginux: native network TX and RX interrupt routes retired cleanly' "$output_file"; then
+    ! grep -q '^ginux: native network TX and RX interrupt routes retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: native network RX timeout followed completed TX' "$output_file" ||
+    ! grep -q '^ginux: ambiguous native network RX generation retired' "$output_file" ||
+    ! grep -q '^ginux: fresh native network generation recovered after RX timeout' "$output_file" ||
+    ! grep -q '^ginux: recovered network generation validated gateway ARP reply' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2
     exit 1
 fi

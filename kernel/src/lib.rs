@@ -2976,6 +2976,32 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: kernel validated native network RX descriptor and ARP reply");
     serial_write("\r\nginux: native network RX payload guards preserved");
     serial_write("\r\nginux: native network TX and RX interrupt routes retired cleanly");
+    if !address_space::verify_native_network_receive_timeout(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+        virtio_network_msix_mmio,
+        &local_apic,
+    ) {
+        kernel_fail("\r\nginux: native network RX timeout was not contained\r\n");
+    }
+    serial_write("\r\nginux: native network RX timeout followed completed TX");
+    serial_write("\r\nginux: ambiguous native network RX generation retired");
+    if !address_space::verify_native_network_receive_arp(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+        virtio_network_msix_mmio,
+        &local_apic,
+    ) {
+        kernel_fail("\r\nginux: native network RX timeout recovery failed\r\n");
+    }
+    serial_write("\r\nginux: fresh native network generation recovered after RX timeout");
+    serial_write("\r\nginux: recovered network generation validated gateway ARP reply");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

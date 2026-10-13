@@ -25,6 +25,15 @@ two. `RX_POSTED` command 2, request generation two, unmasks vector 34 and
 completes only after exactly one receive interrupt. A duplicate receive wait is
 rejected without blocking.
 
+A notified RX timeout is cancellation, not an empty receive. The kernel keeps
+RX entry 0 masked until the calibrated device-wait timer expires, then masks
+and disables MSI-X, revokes bus mastering, resets the NIC, and retires both
+routes before returning `CANCELLED`. The service exits `RESTART_REQUIRED`; it
+cannot reuse either queue, its DMA page, or its request generations. A fresh
+domain with newly delegated authority, VT-d tables, and DMA must reinitialize
+the reset device. The QEMU gate requires that replacement to complete and
+validate another ARP exchange.
+
 The service accepts only one-buffer modern virtio-net input with a zeroed
 header, `num_buffers` equal to one, one used-ring element with descriptor ID
 zero, and a bounded length. It then validates Ethernet destination/source and
@@ -52,5 +61,4 @@ This proves one serialized receive buffer and a deterministic peer response.
 It does not provide a packet IPC interface, arbitrary Ethernet traffic, receive
 buffer replenishment, batching, multiple in-flight requests, IPv4 packet
 processing, DHCP, sockets, routing, a system-container interface, or production
-network configuration. Timeout and malformed-reply recovery for the receive
-stage are separate milestones.
+network configuration. Malformed-reply recovery remains a separate milestone.

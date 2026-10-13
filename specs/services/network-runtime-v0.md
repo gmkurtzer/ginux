@@ -118,6 +118,13 @@ identities, bounds, canaries, and both interrupt completions before retiring the
 two routes, device, VT-d hierarchy, DMA page, and domain. See
 [Native Network Service Receive v0](network-receive-v0.md).
 
+A separate generation completes TX request one and then has RX request two
+held masked until its APIC deadline. Because the peer may already have written
+the receive buffer, the kernel treats that state as ambiguous: it cancels and
+retires the entire device generation before returning `CANCELLED`. The service
+exits `RESTART_REQUIRED`. A newly authorized generation with fresh DMA and VT-d
+leases must then complete a full ARP exchange.
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The transmit generation
