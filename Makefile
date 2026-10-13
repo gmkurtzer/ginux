@@ -101,6 +101,8 @@ check: manifest
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
 	@cargo clippy --package ginux-native-abi -- -D warnings
 	@cargo test --package ginux-native-abi
+	@cargo clippy --package ginux-protocol-state -- -D warnings
+	@cargo test --package ginux-protocol-state
 	@cargo clippy --package ginux-volume-format -- -D warnings
 	@cargo test --package ginux-volume-format
 	@cargo clippy --package ginux-volume-service -- -D warnings

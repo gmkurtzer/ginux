@@ -12,3 +12,4 @@ bench = false
 
 [dependencies]
 ginux-native-abi = { path = "../../crates/native-abi" }
+ginux-protocol-state = { path = "../../crates/protocol-state" }

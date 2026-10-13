@@ -148,7 +148,12 @@ name = "ginux-protocol-service-runtime"
 version = "0.1.0"
 dependencies = [
  "ginux-native-abi",
+ "ginux-protocol-state",
 ]
+
+[[package]]
+name = "ginux-protocol-state"
+version = "0.1.0"
 
 [[package]]
 name = "ginux-volume-format"

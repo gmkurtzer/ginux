@@ -2,6 +2,7 @@
 members = [
     "boot/efi",
     "crates/native-abi",
+    "crates/protocol-state",
     "crates/volume-format",
     "crates/volume-service",
     "kernel",

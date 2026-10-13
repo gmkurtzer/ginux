@@ -12,6 +12,7 @@ use ginux_native_abi::{
     NATIVE_PACKET_MAX_SIZE, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_WAIT_OPERATION,
     NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
 };
+use ginux_protocol_state::{parse_arp_reply_v4, EndpointV4, NeighborObservation, NeighborStateV4};
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_PROTOCOL_SERVICE_V0";
 
@@ -98,6 +99,13 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
         };
 
     let mut packet = [0_u8; NATIVE_PACKET_MAX_SIZE as usize];
+    let local_mac_bytes = local_mac.to_be_bytes();
+    let local = EndpointV4 {
+        mac: local_mac_bytes[2..8].try_into().unwrap_or_else(|_| fail()),
+        ipv4: local_ipv4,
+    };
+    let mut neighbor = NeighborStateV4::new(peer_ipv4);
+    let mut accepted = 0_u64;
     let publish = NativePacketRequestV0::publish(packet.as_ptr() as u64, 42);
     if packet_publish(capability, &publish) != NATIVE_CALL_FAILED
         || network_probe(capability) != NATIVE_CALL_FAILED
@@ -117,13 +125,33 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
             NATIVE_PACKET_MAX_SIZE,
             sequence,
         );
-        if packet_consume(capability, &consume) != 42
-            || !valid_arp_reply(&packet[..42], local_mac, local_ipv4, peer_ipv4)
+        if packet_consume(capability, &consume) != 42 {
+            fail();
+        }
+        let reply = parse_arp_reply_v4(&packet[..42], local, peer_ipv4).unwrap_or_else(|_| fail());
+        let observation = neighbor.observe(reply);
+        if (accepted == 0 && observation != NeighborObservation::Learned)
+            || (accepted != 0 && observation != NeighborObservation::Refreshed)
         {
             fail();
         }
+        accepted = accepted.checked_add(1).unwrap_or_else(|| fail());
+        if accepted == 1 {
+            packet[11] ^= 1;
+            packet[27] ^= 1;
+            let conflict =
+                parse_arp_reply_v4(&packet[..42], local, peer_ipv4).unwrap_or_else(|_| fail());
+            if neighbor.observe(conflict) != NeighborObservation::Conflict
+                || neighbor.mac() != Some(reply.sender_mac)
+                || neighbor.accepted() != accepted
+            {
+                fail();
+            }
+            packet[11] ^= 1;
+            packet[27] ^= 1;
+        }
         packet[21] = 1;
-        if valid_arp_reply(&packet[..42], local_mac, local_ipv4, peer_ipv4) {
+        if parse_arp_reply_v4(&packet[..42], local, peer_ipv4).is_ok() {
             fail();
         }
         packet[21] = 2;
@@ -143,25 +171,10 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
     if packet_consume(capability, &replay) != NATIVE_CALL_FAILED {
         fail();
     }
-    exit(NATIVE_SERVICE_EXIT_COMPLETED)
-}
-
-fn valid_arp_reply(frame: &[u8], local_mac: u64, local_ipv4: u32, peer_ipv4: u32) -> bool {
-    if frame.len() != 42 || local_mac >> 48 != 0 {
-        return false;
+    if neighbor.accepted() != accepted || neighbor.mac().is_none() {
+        fail();
     }
-    let local_mac = local_mac.to_be_bytes();
-    let source = &frame[6..12];
-    frame[0..6] == local_mac[2..8]
-        && frame[12..14] == [0x08, 0x06]
-        && frame[14..22] == [0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x02]
-        && source == &frame[22..28]
-        && source != [0; 6]
-        && source != [0xff; 6]
-        && source[0] & 1 == 0
-        && frame[28..32] == peer_ipv4.to_be_bytes()
-        && frame[32..38] == local_mac[2..8]
-        && frame[38..42] == local_ipv4.to_be_bytes()
+    exit(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
 fn packet_publish(capability: u64, request: &NativePacketRequestV0) -> u64 {

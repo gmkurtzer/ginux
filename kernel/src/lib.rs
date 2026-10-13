@@ -3177,6 +3177,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: compiled protocol service waited on an empty packet FIFO");
     serial_write("\r\nginux: resident protocol domain consumed two ordered packets");
     serial_write("\r\nginux: protocol domain remained live between packet arrivals");
+    serial_write("\r\nginux: protocol service learned bounded ARP neighbor");
+    serial_write("\r\nginux: protocol service refreshed stable ARP neighbor");
+    serial_write("\r\nginux: conflicting ARP neighbor mapping rejected without mutation");
     serial_write("\r\nginux: resident protocol wait keys and frames retired cleanly");
     if !address_space::verify_supervised_native_protocol_loop(&protocol_image) {
         kernel_fail("\r\nginux: supervised native protocol loop failed\r\n");

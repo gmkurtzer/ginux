@@ -321,6 +321,9 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: compiled protocol service waited on an empty packet FIFO' "$output_file" ||
     ! grep -q '^ginux: resident protocol domain consumed two ordered packets' "$output_file" ||
     ! grep -q '^ginux: protocol domain remained live between packet arrivals' "$output_file" ||
+    ! grep -q '^ginux: protocol service learned bounded ARP neighbor' "$output_file" ||
+    ! grep -q '^ginux: protocol service refreshed stable ARP neighbor' "$output_file" ||
+    ! grep -q '^ginux: conflicting ARP neighbor mapping rejected without mutation' "$output_file" ||
     ! grep -q '^ginux: resident protocol wait keys and frames retired cleanly' "$output_file" ||
     ! grep -q '^ginux: supervised protocol loop consumed multiple packets' "$output_file" ||
     ! grep -q '^ginux: control plane stopped blocked protocol service' "$output_file" ||

@@ -58,6 +58,11 @@ kernel requires both waits to wake through publication, the domain to remain
 live between arrivals, FIFO exhaustion to advance exactly twice, and all wait
 keys, capabilities, address-space frames, and producer frames to be retired.
 
+Ethernet/ARP parsing and one-entry neighbor state live in the reusable
+`ginux-protocol-state` `no_std` crate. The first reply learns the configured
+peer's MAC, the second refreshes it, and a locally constructed conflicting
+mapping must be rejected without mutating the learned entry.
+
 ## Deliberate limits
 
 Bootstrap ABI v2 removes the packet-count limit and leaves the measured service
@@ -69,7 +74,8 @@ granting management authority to the protocol service.
 This remains a fixed ARP proof, not a network stack. The resident path accepts
 exactly two packets under v1; v2 may continue until administratively stopped.
 There is no graceful drain or state handoff protocol. There is no
-Ethernet demultiplexing, ARP request generation, neighbor cache, IPv4
+Ethernet demultiplexing, ARP request generation, multi-entry or expiring
+neighbor cache, IPv4
 validation, ICMP, UDP, TCP, fragmentation, routing, socket API, shared-memory
 packet path, or container network interface. The current FIFO and call gate
 remain single-CPU and copied.

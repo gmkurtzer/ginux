@@ -422,6 +422,12 @@ next exact sequence until the control plane stops it, revokes its authority,
 and reclaims every mapping and frame. Graceful drain and protocol-state handoff
 remain future work.
 
+A reusable memory-safe `no_std` protocol crate now parses the exact Ethernet/ARP
+boundary and maintains one generation-local neighbor. The measured service
+learns the first peer mapping, refreshes the same mapping, and rejects a
+conflicting MAC without mutating accepted state. Expiry, replacement, multiple
+neighbors, and ARP request generation remain future work.
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected
