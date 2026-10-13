@@ -50,7 +50,14 @@ pinned and verified, and the storage-backed image path is next.
 Deliverables:
 
 - A reproducible, digest-pinned Rocky Linux 10 x86-64 container image recipe.
+- Operator-configurable control-domain networking can reach an OCI registry,
+  resolve the x86-64 manifest, verify every digest, and store the image locally.
+- Each container has explicit static or DHCP network configuration independent
+  from the control domain.
 - Rocky's `/sbin/init` executes as container PID 1.
+- Start-and-attach and later console attachment show systemd output; `Ctrl-]`
+  returns to the controller without stopping the container, and boot logs can
+  be inspected after detach.
 - Early systemd reaches a named target or stops at a precisely documented compatibility boundary with machine-readable missing-interface results.
 
 Gate: deterministic console transcript and compatibility matrix. Human verification observes Rocky/systemd boot rather than a custom host userspace.

@@ -154,7 +154,7 @@ _Static_assert(GINUX_NATIVE_CONTAINER_CREATE == UINT64_C(5),
                "container create command");
 _Static_assert(GINUX_NATIVE_CONSOLE_MAX_LINE_BYTES == UINT32_C(256),
                "console line bound");
-_Static_assert(GINUX_NATIVE_CONTAINER_CONFIG_COMPLETE == UINT16_C(15),
+_Static_assert(GINUX_NATIVE_CONTAINER_CONFIG_COMPLETE == UINT16_C(7),
                "complete container configuration flags");
 _Static_assert(sizeof(struct ginux_native_container_request_v0) == 56,
                "container request size");

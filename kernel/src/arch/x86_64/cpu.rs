@@ -15996,10 +15996,12 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         }
         control_abi::CONTAINER_CREATE if state == 0 && valid_container_name(name) => {
             store_container_name(name);
-            CONTAINER_CONFIG_FLAGS.store(0, Ordering::SeqCst);
-            CONTAINER_CONTROL_STATE
-                .store(control_abi::CONTAINER_STATE_CREATED as u8, Ordering::SeqCst);
-            control_abi::CONTAINER_STATE_CREATED
+            CONTAINER_CONFIG_FLAGS.store(control_abi::CONTAINER_CONFIG_COMPLETE, Ordering::SeqCst);
+            CONTAINER_CONTROL_STATE.store(
+                control_abi::CONTAINER_STATE_CONFIGURED as u8,
+                Ordering::SeqCst,
+            );
+            control_abi::CONTAINER_STATE_CONFIGURED
         }
         control_abi::CONTAINER_SET_INIT
             if configurable_container(state, name)
@@ -16022,9 +16024,9 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             update_container_configuration(control_abi::CONTAINER_CONFIG_MEMORY)
         }
         control_abi::CONTAINER_SET_AUTOSTART
-            if configurable_container(state, name) && read_u64_at(&request, 24) == 1 =>
+            if configurable_container(state, name) && read_u64_at(&request, 24) <= 1 =>
         {
-            update_container_configuration(control_abi::CONTAINER_CONFIG_AUTOSTART)
+            update_container_autostart(read_u64_at(&request, 24) == 1)
         }
         control_abi::CONTAINER_STOP
             if state == control_abi::CONTAINER_STATE_RUNNING
@@ -16037,6 +16039,7 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         control_abi::CONTAINER_RESTART
             if stored_container_name_matches(name)
                 && CONTAINER_CONFIG_FLAGS.load(Ordering::SeqCst)
+                    & control_abi::CONTAINER_CONFIG_COMPLETE
                     == control_abi::CONTAINER_CONFIG_COMPLETE
                 && matches!(
                     state,
@@ -16138,13 +16141,29 @@ fn configurable_container(state: u64, name: &[u8]) -> bool {
 
 fn update_container_configuration(flag: u16) -> u64 {
     let flags = CONTAINER_CONFIG_FLAGS.fetch_or(flag, Ordering::SeqCst) | flag;
-    let state = if flags == control_abi::CONTAINER_CONFIG_COMPLETE {
+    let state = if flags & control_abi::CONTAINER_CONFIG_COMPLETE
+        == control_abi::CONTAINER_CONFIG_COMPLETE
+    {
         control_abi::CONTAINER_STATE_CONFIGURED
     } else {
         control_abi::CONTAINER_STATE_CREATED
     };
     CONTAINER_CONTROL_STATE.store(state as u8, Ordering::SeqCst);
     state
+}
+
+fn update_container_autostart(enabled: bool) -> u64 {
+    if enabled {
+        CONTAINER_CONFIG_FLAGS.fetch_or(control_abi::CONTAINER_CONFIG_AUTOSTART, Ordering::SeqCst);
+    } else {
+        CONTAINER_CONFIG_FLAGS
+            .fetch_and(!control_abi::CONTAINER_CONFIG_AUTOSTART, Ordering::SeqCst);
+    }
+    CONTAINER_CONTROL_STATE.store(
+        control_abi::CONTAINER_STATE_CONFIGURED as u8,
+        Ordering::SeqCst,
+    );
+    control_abi::CONTAINER_STATE_CONFIGURED
 }
 
 fn write_container_request(request: &mut [u8; control_abi::CONTAINER_REQUEST_SIZE]) {

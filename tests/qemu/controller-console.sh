@@ -45,8 +45,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     for command in \
         help 'container help' 'container set --help' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
         'container status default' 'container new demo' 'container new demo' 'container list' \
-        'container start' 'container start demo' 'container set demo cpu=1 cpu=1' 'container list' \
-        'container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo cpu 1' 'container list' status \
+        'container start' 'container set demo cpu=1 cpu=1' 'container list' \
+        'container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo autostart=false' 'container set demo cpu 1' 'container list' status \
         'container start demo' 'container list' 'container status demo' 'ls /proc' 'ls /proc/100' ps \
         'container stop demo' 'container status demo' \
         'container start demo' 'container status demo' 'container fail demo' \
@@ -106,17 +106,15 @@ for expected in \
     'containers: 0 configured' \
     'container: not found' \
     'NAME STATE INIT CPU MEM-MIB AUTO' \
-    'demo: created' \
+    'demo: configured with defaults' \
     'container: create rejected' \
-    'demo created - - - -' \
+    'demo configured /sbin/init 1 128 false' \
     'Error: missing arguments' \
     'Usage:' \
-    'container: start rejected' \
     'container: duplicate setting' \
     'demo: settings accepted; configured' \
     'demo: setting accepted; configured' \
-    'demo configured /sbin/init 1 128 true' \
-    'demo running /sbin/init 1 128 true' \
+    'demo running /sbin/init 1 128 false' \
     'containers: 1 runtime (demo)' \
     'demo: configured' \
     'demo: running' \

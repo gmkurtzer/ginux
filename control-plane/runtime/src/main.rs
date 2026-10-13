@@ -382,7 +382,7 @@ fn write_container_configuration(console: u64, request: &NativeContainerRequestV
         if configured(NATIVE_CONTAINER_CONFIG_AUTOSTART) {
             b"true\r\n"
         } else {
-            b"-\r\n"
+            b"false\r\n"
         },
     );
 }
@@ -397,9 +397,9 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: Ar
     match command {
         COMMAND_CONTAINER_NEW => {
             if container_call(host, NATIVE_CONTAINER_CREATE, &mut request)
-                == NATIVE_CONTAINER_STATE_CREATED
+                == NATIVE_CONTAINER_STATE_CONFIGURED
             {
-                write_name_state(console, name, b"created\r\n");
+                write_name_state(console, name, b"configured with defaults\r\n");
             } else {
                 write(console, b"container: create rejected\r\n");
             }
@@ -532,8 +532,8 @@ fn prepare_setting(
                 NATIVE_CONTAINER_SET_MEMORY_MIB,
             ))
         }
-        (b"autostart", b"true") => {
-            request.value = 1;
+        (b"autostart", value @ (b"true" | b"false")) => {
+            request.value = u64::from(value == b"true");
             Some((
                 NATIVE_CONTAINER_CONFIG_AUTOSTART,
                 NATIVE_CONTAINER_SET_AUTOSTART,

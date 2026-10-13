@@ -6,21 +6,26 @@
 covered by the signed root-image digest. It describes the available Linux ABI
 fixture, but it does not create a container or reserve a container name.
 
-The C2 controller creates one bounded runtime container explicitly:
+The C2 controller creates one bounded runtime container explicitly. Creation
+applies usable defaults:
 
 ```text
 container new NAME
-container set NAME init=/sbin/init cpu=1 memory-mib=128 autostart=true
+
+init=/sbin/init
+cpu=1
+memory-mib=128
+autostart=false
 ```
 
 Any number of `FIELD=VALUE` settings that fit on the command line may be
 supplied. The earlier single-setting `container set NAME FIELD VALUE` form
-remains accepted.
+remains accepted. `autostart` accepts `true` or `false`; it is policy rather
+than a prerequisite for manual start.
 
 No name is special. The name is chosen by the operator, and lifecycle commands
 must use that exact name. The current bounded implementation accepts one
-container, the measured `/sbin/init`, one virtual CPU, 128 MiB, and an
-`autostart` value of `true`. All four settings are required before start. The record lives only for
+container, the measured `/sbin/init`, one virtual CPU, and 128 MiB. The record lives only for
 the current boot; authenticated persistent configuration is a later contract.
 
 Container declarations embedded in the system profile are rejected so a build
