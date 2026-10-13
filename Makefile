@@ -9,6 +9,7 @@ EFI_DESTINATION := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 LINUX_PROBE := build/linux-probe.elf
 LINUX_DYNAMIC_DIR := build/linux-dynamic
 VOLUME_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-volume-service-runtime
+CONTROLLER_RUNTIME := target/x86_64-unknown-none/$(PROFILE)/ginux-controller-runtime
 NETWORK_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-network-service-runtime
 PROTOCOL_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-protocol-service-runtime
 INITRAMFS := build/initramfs-v0.cpio
@@ -16,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image linux-probe network-service protocol-service volume-service abi-conformance architecture-check build run test check fmt gate clean
+.PHONY: help doctor manifest system-image linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -25,6 +26,7 @@ help:
 	@echo "  make manifest Regenerate the signed development boot inputs"
 	@echo "  make system-image Build the pinned minimal system-container candidate"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
+	@echo "  make controller-runtime Build the embedded ring-3 controller"
 	@echo "  make network-service Build the freestanding isolated network service"
 	@echo "  make protocol-service Build the freestanding isolated protocol service"
 	@echo "  make volume-service Build the freestanding isolated volume service"
@@ -33,6 +35,7 @@ help:
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build and boot Ginux in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
+	@echo "  make test-c1 Build and verify the interactive controller console"
 	@echo "  make check   Run formatting and lint checks"
 	@echo "  make fmt     Format Rust sources"
 	@echo "  make gate    Run the clean reproducible build and QEMU test gate"
@@ -41,9 +44,9 @@ help:
 doctor:
 	@tools/qemu/doctor.sh
 
-manifest: linux-probe network-service protocol-service volume-service
+manifest: linux-probe controller-runtime network-service protocol-service volume-service
 	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
 	@test -s "$(INITRAMFS)"
 
 system-image: manifest
@@ -67,6 +70,11 @@ volume-service:
 	@cargo build --package ginux-volume-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
 	@test -f "$(VOLUME_SERVICE)"
 	@echo "Built $(VOLUME_SERVICE)"
+
+controller-runtime:
+	@cargo build --package ginux-controller-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
+	@test -f "$(CONTROLLER_RUNTIME)"
+	@echo "Built $(CONTROLLER_RUNTIME)"
 
 network-service:
 	@cargo build --package ginux-network-service-runtime --target x86_64-unknown-none $(CARGO_PROFILE_FLAG)
@@ -96,6 +104,9 @@ run: build
 test: build
 	@tests/qemu/boot.sh
 
+test-c1: build
+	@tests/qemu/controller-console.sh
+
 architecture-check:
 	@bash tools/architecture/check.sh
 
@@ -105,6 +116,7 @@ check: manifest architecture-check
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
 	@cargo clippy --package ginux-native-abi -- -D warnings
 	@cargo test --package ginux-native-abi
+	@cargo clippy --package ginux-controller-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-protocol-state -- -D warnings
 	@cargo test --package ginux-protocol-state
 	@cargo clippy --package ginux-volume-format -- -D warnings
@@ -123,6 +135,7 @@ gate:
 	@$(MAKE) fmt
 	@$(MAKE) clean
 	@$(MAKE) check
+	@$(MAKE) test-c1
 	@$(MAKE) test
 	@git diff --check
 	@echo "Clean build and QEMU test gate passed"

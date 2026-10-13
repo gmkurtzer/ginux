@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "boot/efi",
+    "control-plane/runtime",
     "crates/native-abi",
     "crates/protocol-state",
     "crates/volume-format",

@@ -35,10 +35,18 @@ run_boot() {
     local boot_name="$2"
     local boot_volume="${3:-$volume_image}"
 
-    GINUX_VOLUME_IMAGE="$boot_volume" "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
+    {
+        for _ in {1..60}; do
+            if grep -Fq 'ginux> ' "$boot_output"; then
+                break
+            fi
+            sleep 1
+        done
+        printf 'shutdown\n'
+    } | GINUX_VOLUME_IMAGE="$boot_volume" "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
     qemu_pid=$!
 
-    for _ in {1..30}; do
+    for _ in {1..60}; do
         if ! kill -0 "$qemu_pid" 2>/dev/null; then
             break
         fi
@@ -50,7 +58,7 @@ run_boot() {
         wait "$qemu_pid" 2>/dev/null || true
         qemu_pid=""
         cat "$boot_output"
-        echo "Boot test failed: $boot_name QEMU boot did not finish within 30 seconds." >&2
+        echo "Boot test failed: $boot_name QEMU boot did not finish within 60 seconds." >&2
         exit 1
     fi
 

@@ -1,0 +1,15 @@
+[package]
+name = "ginux-controller-runtime"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "ginux-controller-runtime"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ginux-native-abi = { path = "../../crates/native-abi" }

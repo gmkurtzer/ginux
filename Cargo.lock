@@ -115,6 +115,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-controller-runtime"
+version = "0.1.0"
+dependencies = [
+ "ginux-native-abi",
+]
+
+[[package]]
 name = "ginux-kernel"
 version = "0.1.0"
 dependencies = [

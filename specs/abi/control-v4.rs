@@ -2,6 +2,8 @@
 pub const VERSION: u16 = 4;
 pub const FEATURES: u16 = 0xffff;
 pub const MAX_BUFFERED_CONSOLE_BYTES: u32 = 64;
+pub const CONSOLE_READ_LINE_OPERATION: u64 = 31;
+pub const CONSOLE_MAX_LINE_BYTES: usize = 32;
 pub const DESCRIPTOR_SIZE: usize = 16;
 pub const FAULT_DESCRIPTOR_SIZE: usize = 48;
 pub const LIFECYCLE_DESCRIPTOR_SIZE: usize = 24;

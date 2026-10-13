@@ -2,8 +2,8 @@ use crate::crypto;
 use ed25519_dalek::{Signature, VerifyingKey};
 
 const MAGIC: &[u8; 8] = b"GINXMNF\0";
-const VERSION: u16 = 3;
-const HEADER_SIZE: usize = 112;
+const VERSION: u16 = 4;
+const HEADER_SIZE: usize = 152;
 const GRANT_SIZE: usize = 16;
 const MAX_GRANTS: usize = 9;
 const ALLOWED_RIGHTS: u64 = 0x0f;
@@ -31,6 +31,8 @@ pub(crate) struct Manifest {
     bundle_sha256: [u8; 32],
     root_size: usize,
     root_sha256: [u8; 32],
+    controller_size: usize,
+    controller_sha256: [u8; 32],
 }
 
 impl Manifest {
@@ -115,6 +117,27 @@ impl Manifest {
         crypto::sha256(bytes) == self.root_sha256
     }
 
+    pub(crate) fn controller_matches(
+        &self,
+        pointer: *const u8,
+        size: usize,
+        mapped_limit: usize,
+    ) -> bool {
+        if pointer.is_null() || size != self.controller_size {
+            return false;
+        }
+        let address = pointer as usize;
+        if address >= mapped_limit
+            || address
+                .checked_add(size.saturating_sub(1))
+                .is_none_or(|end| end >= mapped_limit)
+        {
+            return false;
+        }
+        let bytes = unsafe { core::slice::from_raw_parts(pointer, size) };
+        crypto::sha256(bytes) == self.controller_sha256
+    }
+
     pub(crate) fn verify_root_rejection(
         &self,
         pointer: *const u8,
@@ -147,6 +170,8 @@ fn parse_canonical(bytes: &[u8]) -> Option<Manifest> {
     let bundle_sha256: [u8; 32] = bytes.get(40..72)?.try_into().ok()?;
     let root_size = usize::try_from(read_u64(bytes, 72)?).ok()?;
     let root_sha256: [u8; 32] = bytes.get(80..112)?.try_into().ok()?;
+    let controller_size = usize::try_from(read_u64(bytes, 112)?).ok()?;
+    let controller_sha256: [u8; 32] = bytes.get(120..152)?.try_into().ok()?;
     if version != VERSION
         || header_size != HEADER_SIZE
         || total_size != bytes.len()
@@ -157,6 +182,7 @@ fn parse_canonical(bytes: &[u8]) -> Option<Manifest> {
         || reserved != 0
         || bundle_size == 0
         || root_size == 0
+        || controller_size == 0
         || HEADER_SIZE.checked_add(grant_count.checked_mul(GRANT_SIZE)?)? != bytes.len()
     {
         return None;
@@ -188,6 +214,8 @@ fn parse_canonical(bytes: &[u8]) -> Option<Manifest> {
         bundle_sha256,
         root_size,
         root_sha256,
+        controller_size,
+        controller_sha256,
     })
 }
 
@@ -209,6 +237,11 @@ pub(crate) fn verify_parser_rejections(pointer: *const u8, size: usize) -> bool 
     }
     candidate[..size].copy_from_slice(original);
     candidate[72..80].copy_from_slice(&0_u64.to_le_bytes());
+    if parse_canonical(&candidate[..size]).is_some() {
+        return false;
+    }
+    candidate[..size].copy_from_slice(original);
+    candidate[112..120].copy_from_slice(&0_u64.to_le_bytes());
     if parse_canonical(&candidate[..size]).is_some() {
         return false;
     }

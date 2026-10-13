@@ -982,9 +982,11 @@ pub(crate) fn initialize_control_plane(manifest: &Manifest) -> Option<u64> {
         || !domain
             .capabilities
             .permits(domain.boot_roots[0]?, HOST_CONTROL, Rights::MANAGE)
-        || domain
-            .capabilities
-            .permits(domain.boot_roots[1]?, CONSOLE, Rights::READ)
+        || !domain.capabilities.permits(
+            domain.boot_roots[1]?,
+            CONSOLE,
+            Rights::READ.union(Rights::WRITE),
+        )
     {
         return None;
     }

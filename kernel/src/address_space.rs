@@ -4722,6 +4722,57 @@ pub(crate) fn verify_native_service_materialization(
     valid && space.release()
 }
 
+pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<'_>) -> bool {
+    let rights = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
+    let Some(controller) = domain::initialize_boot_auxiliary_service(1, 2, rights) else {
+        return false;
+    };
+    let (Some(console), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(controller, 0),
+        domain::domain_service_identity(controller),
+        memory::FrameOwner::domain(controller),
+    ) else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+        return false;
+    };
+    if !space.layout_is_valid(image)
+        || !space.relocations_are_valid(image)
+        || !domain::handle_permits(controller, console, 2, rights)
+    {
+        let _ = space.release();
+        return false;
+    }
+    let root = space.root;
+    let Ok(entry) = usize::try_from(space.entry) else {
+        let _ = space.release();
+        return false;
+    };
+    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    if !register_address_space(controller, AuxiliaryAddressSpace::Native(space))
+        || !scheduler::queue_auxiliary(controller, root, entry, stack, console)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_native_auxiliary(entry, stack, console, 0, controller, identity);
+    let event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(controller)
+        && event
+            == Some((controller << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED))
+        && domain::last_lifecycle_event_detail()
+            == Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED)
+        && domain::last_lifecycle_event_has_fault() == Some(false)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none()
+}
+
 pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeImage<'_>) -> bool {
     let Some(auxiliary) = domain::initialize_boot_unprivileged_auxiliary_service() else {
         return false;

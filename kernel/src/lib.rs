@@ -43,7 +43,7 @@ const KERNEL_STACK_SIZE: usize = 128 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
-pub const BOOT_INFO_VERSION: u32 = 4;
+pub const BOOT_INFO_VERSION: u32 = 5;
 
 #[repr(C, align(4096))]
 struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
@@ -93,6 +93,8 @@ pub struct BootInfo {
     pub manifest_signature: [u8; 64],
     pub control_plane_bundle: *const u8,
     pub control_plane_bundle_size: usize,
+    pub controller_runtime: *const u8,
+    pub controller_runtime_size: usize,
     pub root_image: *const u8,
     pub root_image_size: usize,
     pub reset_system: ResetSystem,
@@ -216,6 +218,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: control-plane bundle measurement failed\r\n");
     }
     serial_write("ginux: control-plane bundle measurement accepted\r\n");
+    if !boot_manifest.controller_matches(
+        boot_info.controller_runtime,
+        boot_info.controller_runtime_size,
+        arch::x86_64::paging::INITIAL_IDENTITY_LIMIT,
+    ) {
+        kernel_fail("ginux: controller runtime measurement failed\r\n");
+    }
+    serial_write("ginux: embedded controller runtime measurement accepted\r\n");
     if !boot_manifest.root_matches(
         boot_info.root_image,
         boot_info.root_image_size,
@@ -330,6 +340,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.manifest as usize + boot_info.manifest_size - 1,
         boot_info.control_plane_bundle as usize,
         boot_info.control_plane_bundle as usize + boot_info.control_plane_bundle_size - 1,
+        boot_info.controller_runtime as usize,
+        boot_info.controller_runtime as usize + boot_info.controller_runtime_size - 1,
         boot_info.root_image as usize,
         boot_info.root_image as usize + boot_info.root_image_size - 1,
         privilege_stack_guard + PAGE_SIZE,
@@ -405,6 +417,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     ) || !arch::x86_64::paging::identity_range_is_read_only_data(
         boot_info.control_plane_bundle as usize,
         boot_info.control_plane_bundle_size,
+    ) || !arch::x86_64::paging::identity_range_is_read_only_data(
+        boot_info.controller_runtime as usize,
+        boot_info.controller_runtime_size,
     ) || !arch::x86_64::paging::identity_range_is_read_only_data(
         boot_info.root_image as usize,
         boot_info.root_image_size,
@@ -1462,6 +1477,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(control_plane_image) = executable::parse(control_plane_bundle) else {
         kernel_fail("\r\nginux: control-plane executable container invalid\r\n");
     };
+    let controller_runtime = core::slice::from_raw_parts(
+        boot_info.controller_runtime,
+        boot_info.controller_runtime_size,
+    );
+    let Some(controller_image) = native_elf::inspect(controller_runtime) else {
+        kernel_fail("\r\nginux: embedded controller ELF invalid\r\n");
+    };
     if !executable::verify_parser_rejections(control_plane_bundle) {
         kernel_fail("\r\nginux: malformed executable containers accepted\r\n");
     }
@@ -2282,6 +2304,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !arch::x86_64::paging::identity_range_is_read_only_data(
             boot_info.control_plane_bundle as usize,
             boot_info.control_plane_bundle_size,
+        )
+        || !arch::x86_64::paging::identity_range_is_read_only_data(
+            boot_info.controller_runtime as usize,
+            boot_info.controller_runtime_size,
         )
         || !arch::x86_64::paging::identity_range_is_read_only_data(
             boot_info.root_image as usize,
@@ -3509,6 +3535,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: bootstrap SHA-256 self-test failed\r\n");
     }
     serial_write("\r\nginux: bootstrap SHA-256 known answers verified");
+    serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
+    if !address_space::run_interactive_controller(&controller_image) {
+        kernel_fail("\r\nginux: interactive controller failed\r\n");
+    }
+    serial_write("ginux: controller requested clean shutdown");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
@@ -3721,6 +3752,13 @@ pub(crate) fn serial_write_bytes(bytes: &[u8]) {
         // SAFETY: COM1 was initialized above and is the pinned serial device.
         unsafe { outb(COM1, byte) };
     }
+}
+
+pub(crate) fn serial_read_byte_blocking() -> u8 {
+    while unsafe { inb(COM1 + 5) } & 0x01 == 0 {
+        core::hint::spin_loop();
+    }
+    unsafe { inb(COM1) }
 }
 
 fn serial_write_usize(value: usize) {

@@ -106,6 +106,9 @@ pub const NATIVE_CONTROL_REQUIRED_FEATURES: u16 = NATIVE_CONTROL_FEATURE_OPAQUE_
 pub const NATIVE_CONTROL_DESCRIPTOR_OPERATION: u64 = 10;
 pub const NATIVE_CONTROL_DESCRIPTOR_SIZE: u32 = 16;
 pub const NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES: u32 = 64;
+pub const NATIVE_CONSOLE_WRITE_OPERATION: u64 = 9;
+pub const NATIVE_CONSOLE_READ_LINE_OPERATION: u64 = 31;
+pub const NATIVE_CONSOLE_MAX_LINE_BYTES: u32 = 32;
 
 pub const fn native_control_abi_is_compatible(discovery: u64) -> bool {
     let version = ((discovery >> 16) & u16::MAX as u64) as u16;

@@ -14349,6 +14349,9 @@ fn dispatch_charged_call(
         18 => volume_device_call(caller_domain, capability, frame),
         19 => block_device_call(caller_domain, capability, frame),
         20 => network_wait_call(caller_domain, capability, frame),
+        control_abi::CONSOLE_READ_LINE_OPERATION => {
+            console_read_line(caller_domain, capability, frame)
+        }
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
         }
@@ -15667,6 +15670,47 @@ fn console_write_buffer(domain_id: u64, capability: u64, frame: *const UserTrapF
     length as u64
 }
 
+fn console_read_line(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(domain_id, capability, 2, Rights::READ) {
+        return u64::MAX - 2;
+    }
+    let Ok(capacity) = usize::try_from(frame.second_argument()) else {
+        return u64::MAX - 2;
+    };
+    if !(1..=control_abi::CONSOLE_MAX_LINE_BYTES).contains(&capacity) {
+        return u64::MAX - 2;
+    }
+    let mut line = [0_u8; control_abi::CONSOLE_MAX_LINE_BYTES];
+    let mut length = 0;
+    loop {
+        match crate::serial_read_byte_blocking() {
+            b'\r' | b'\n' => {
+                crate::serial_write_bytes(b"\r\n");
+                break;
+            }
+            0x08 | 0x7f if length != 0 => {
+                length -= 1;
+                crate::serial_write_bytes(b"\x08 \x08");
+            }
+            byte @ 0x20..=0x7e if length < capacity => {
+                line[length] = byte;
+                length += 1;
+                crate::serial_write_bytes(&[byte]);
+            }
+            _ => {}
+        }
+    }
+    if !address_space::copy_to_current_user(frame.first_argument(), &line[..length])
+        || !domain::renew_auxiliary_call_epoch(domain_id)
+    {
+        return u64::MAX - 2;
+    }
+    length as u64
+}
+
 fn write_abi_descriptor(caller_domain: u64, frame: *const UserTrapFrame) -> u64 {
     let mut descriptor = control_abi::descriptor();
     let Some(frame) = (unsafe { frame.as_ref() }) else {
@@ -15810,11 +15854,11 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         }
         if crate::packet::egress_is_empty() {
             if let Some((waiting_domain, sequence)) = scheduler::blocked_egress_waiter() {
-                if domain::take_blocked_auxiliary_drain_request(waiting_domain) {
-                    if !scheduler::wake_egress_waiter_drained(caller_domain, sequence) {
-                        serial_write("ginux: auxiliary exit drain wake failed\r\n");
-                        return u64::MAX;
-                    }
+                if domain::take_blocked_auxiliary_drain_request(waiting_domain)
+                    && !scheduler::wake_egress_waiter_drained(caller_domain, sequence)
+                {
+                    serial_write("ginux: auxiliary exit drain wake failed\r\n");
+                    return u64::MAX;
                 }
             }
         }
