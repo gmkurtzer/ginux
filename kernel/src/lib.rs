@@ -3187,6 +3187,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: supervised protocol loop consumed multiple packets");
     serial_write("\r\nginux: control plane stopped blocked protocol service");
     serial_write("\r\nginux: supervised protocol wait and frames retired cleanly");
+    if !address_space::verify_native_protocol_ipv4_dispatch(&protocol_image) {
+        kernel_fail("\r\nginux: native protocol IPv4 dispatch failed\r\n");
+    }
+    serial_write("\r\nginux: protocol service dispatched ARP then IPv4");
+    serial_write("\r\nginux: protocol service validated IPv4 header checksum");
+    serial_write("\r\nginux: malformed IPv4 header rejected in ring 3");
+    serial_write("\r\nginux: IPv4 protocol generation retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

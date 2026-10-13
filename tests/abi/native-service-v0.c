@@ -134,6 +134,11 @@ _Static_assert(offsetof(struct ginux_native_protocol_boot_v2, packet_count) ==
                "protocol v2 packet count offset");
 _Static_assert(offsetof(struct ginux_native_protocol_boot_v2, reserved) == 52,
                "protocol v2 reserved offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v3, packet_count) ==
+                   48,
+               "protocol v3 packet count offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v3, reserved) == 52,
+               "protocol v3 reserved offset");
 
 #define COMPATIBLE_DISCOVERY                                                   \
     GINUX_NATIVE_CONTROL_DISCOVERY(                                            \

@@ -6,13 +6,16 @@ use core::arch::{asm, global_asm};
 use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
     NativeControlDescriptorV4, NativePacketRequestV0, NativeProtocolBootV0, NativeProtocolBootV1,
-    NativeProtocolBootV2, NATIVE_CALL_FAILED, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
-    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
-    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE, NATIVE_PACKET_CONSUME_OPERATION,
-    NATIVE_PACKET_MAX_SIZE, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_WAIT_OPERATION,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
+    NativeProtocolBootV2, NativeProtocolBootV3, NATIVE_CALL_FAILED,
+    NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_OPERATION,
+    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_PACKET_CONSUME_OPERATION, NATIVE_PACKET_MAX_SIZE,
+    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_WAIT_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION,
 };
-use ginux_protocol_state::{parse_arp_reply_v4, EndpointV4, NeighborObservation, NeighborStateV4};
+use ginux_protocol_state::{
+    parse_arp_reply_v4, parse_ipv4_icmp_v0, EndpointV4, NeighborObservation, NeighborStateV4,
+};
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_PROTOCOL_SERVICE_V0";
 
@@ -46,57 +49,87 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
     let Some(info) = (unsafe { info.as_ref() }) else {
         fail();
     };
-    let (capability, mut sequence, local_mac, local_ipv4, peer_ipv4, mut remaining, wait) =
-        if info.version == 0 {
-            if !info.is_valid_arp_consumer() {
-                fail();
-            }
-            (
-                info.packet_capability,
-                info.expected_sequence,
-                info.local_mac,
-                info.local_ipv4,
-                info.peer_ipv4,
-                Some(1_u32),
-                false,
-            )
-        } else if info.version == 1 {
-            let Some(info) = (unsafe {
-                (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV1).as_ref()
-            }) else {
-                fail();
-            };
-            if !info.is_valid_wait_loop() {
-                fail();
-            }
-            (
-                info.packet_capability,
-                info.expected_sequence,
-                info.local_mac,
-                info.local_ipv4,
-                info.peer_ipv4,
-                Some(info.packet_count),
-                true,
-            )
-        } else {
-            let Some(info) = (unsafe {
-                (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV2).as_ref()
-            }) else {
-                fail();
-            };
-            if !info.is_valid_supervised_loop() {
-                fail();
-            }
-            (
-                info.packet_capability,
-                info.expected_sequence,
-                info.local_mac,
-                info.local_ipv4,
-                info.peer_ipv4,
-                None,
-                true,
-            )
+    let (
+        capability,
+        mut sequence,
+        local_mac,
+        local_ipv4,
+        peer_ipv4,
+        mut remaining,
+        wait,
+        ipv4_dispatch,
+    ) = if info.version == 0 {
+        if !info.is_valid_arp_consumer() {
+            fail();
+        }
+        (
+            info.packet_capability,
+            info.expected_sequence,
+            info.local_mac,
+            info.local_ipv4,
+            info.peer_ipv4,
+            Some(1_u32),
+            false,
+            false,
+        )
+    } else if info.version == 1 {
+        let Some(info) = (unsafe {
+            (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV1).as_ref()
+        }) else {
+            fail();
         };
+        if !info.is_valid_wait_loop() {
+            fail();
+        }
+        (
+            info.packet_capability,
+            info.expected_sequence,
+            info.local_mac,
+            info.local_ipv4,
+            info.peer_ipv4,
+            Some(info.packet_count),
+            true,
+            false,
+        )
+    } else if info.version == 2 {
+        let Some(info) = (unsafe {
+            (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV2).as_ref()
+        }) else {
+            fail();
+        };
+        if !info.is_valid_supervised_loop() {
+            fail();
+        }
+        (
+            info.packet_capability,
+            info.expected_sequence,
+            info.local_mac,
+            info.local_ipv4,
+            info.peer_ipv4,
+            None,
+            true,
+            false,
+        )
+    } else {
+        let Some(info) = (unsafe {
+            (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV3).as_ref()
+        }) else {
+            fail();
+        };
+        if !info.is_valid_ipv4_dispatch() {
+            fail();
+        }
+        (
+            info.packet_capability,
+            info.expected_sequence,
+            info.local_mac,
+            info.local_ipv4,
+            info.peer_ipv4,
+            Some(info.packet_count),
+            true,
+            true,
+        )
+    };
 
     let mut packet = [0_u8; NATIVE_PACKET_MAX_SIZE as usize];
     let local_mac_bytes = local_mac.to_be_bytes();
@@ -127,6 +160,32 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
         );
         if packet_consume(capability, &consume) != 42 {
             fail();
+        }
+        if ipv4_dispatch && accepted == 1 {
+            let Some(peer_mac) = neighbor.mac() else {
+                fail();
+            };
+            let peer = EndpointV4 {
+                mac: peer_mac,
+                ipv4: peer_ipv4,
+            };
+            let ipv4 = parse_ipv4_icmp_v0(&packet[..42], local, peer).unwrap_or_else(|_| fail());
+            if ipv4.payload.len() != 8 {
+                fail();
+            }
+            packet[24] ^= 1;
+            if parse_ipv4_icmp_v0(&packet[..42], local, peer).is_ok() {
+                fail();
+            }
+            packet[24] ^= 1;
+            sequence = sequence.checked_add(1).unwrap_or_else(|| fail());
+            if let Some(left) = remaining.as_mut() {
+                *left -= 1;
+                if *left == 0 {
+                    break;
+                }
+            }
+            continue;
         }
         let reply = parse_arp_reply_v4(&packet[..42], local, peer_ipv4).unwrap_or_else(|_| fail());
         let observation = neighbor.observe(reply);

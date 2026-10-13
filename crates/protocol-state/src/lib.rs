@@ -1,6 +1,7 @@
 #![no_std]
 
 pub const ETHERNET_ARP_FRAME_SIZE: usize = 42;
+pub const ETHERNET_IPV4_MIN_FRAME_SIZE: usize = 34;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EndpointV4 {
@@ -60,6 +61,82 @@ pub fn parse_arp_reply_v4(
         sender_mac,
         sender_ipv4,
     })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Ipv4PacketV0<'a> {
+    pub source_ipv4: u32,
+    pub destination_ipv4: u32,
+    pub protocol: u8,
+    pub payload: &'a [u8],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Ipv4ParseError {
+    Length,
+    Ethernet,
+    Header,
+    Checksum,
+    Fragmented,
+    Endpoint,
+    Protocol,
+}
+
+pub fn parse_ipv4_icmp_v0<'a>(
+    frame: &'a [u8],
+    local: EndpointV4,
+    peer: EndpointV4,
+) -> Result<Ipv4PacketV0<'a>, Ipv4ParseError> {
+    if frame.len() < ETHERNET_IPV4_MIN_FRAME_SIZE {
+        return Err(Ipv4ParseError::Length);
+    }
+    if frame[0..6] != local.mac || frame[6..12] != peer.mac || frame[12..14] != [0x08, 0x00] {
+        return Err(Ipv4ParseError::Ethernet);
+    }
+    let header = &frame[14..34];
+    if header[0] != 0x45 || header[1] != 0 || header[8] == 0 {
+        return Err(Ipv4ParseError::Header);
+    }
+    let total_length = usize::from(u16::from_be_bytes([header[2], header[3]]));
+    if total_length < 20 || frame.len() != 14 + total_length {
+        return Err(Ipv4ParseError::Length);
+    }
+    if checksum(header) != 0 {
+        return Err(Ipv4ParseError::Checksum);
+    }
+    let fragment = u16::from_be_bytes([header[6], header[7]]);
+    if fragment & 0xbfff != 0 {
+        return Err(Ipv4ParseError::Fragmented);
+    }
+    let source_ipv4 = u32::from_be_bytes([header[12], header[13], header[14], header[15]]);
+    let destination_ipv4 = u32::from_be_bytes([header[16], header[17], header[18], header[19]]);
+    if source_ipv4 != peer.ipv4 || destination_ipv4 != local.ipv4 {
+        return Err(Ipv4ParseError::Endpoint);
+    }
+    if header[9] != 1 {
+        return Err(Ipv4ParseError::Protocol);
+    }
+    Ok(Ipv4PacketV0 {
+        source_ipv4,
+        destination_ipv4,
+        protocol: header[9],
+        payload: &frame[34..],
+    })
+}
+
+fn checksum(bytes: &[u8]) -> u16 {
+    let mut sum = 0_u32;
+    let (words, remainder) = bytes.as_chunks::<2>();
+    for word in words {
+        sum += u32::from(u16::from_be_bytes([word[0], word[1]]));
+    }
+    if let Some(last) = remainder.first() {
+        sum += u32::from(*last) << 8;
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    !(sum as u16)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,6 +206,11 @@ mod tests {
         0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x02, 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02, 10, 0, 2, 2,
         0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 10, 0, 2, 15,
     ];
+    const IPV4_FRAME: [u8; 42] = [
+        0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02, 0x08, 0x00, 0x45,
+        0x00, 0x00, 0x1c, 0x12, 0x34, 0x40, 0x00, 0x40, 0x01, 0x10, 0x9d, 10, 0, 2, 2, 10, 0, 2,
+        15, 0x08, 0x00, 0x39, 0x0f, 0xbe, 0xef, 0x00, 0x01,
+    ];
 
     #[test]
     fn parses_exact_arp_reply() {
@@ -166,5 +248,48 @@ mod tests {
         assert_eq!(state.observe(conflict), NeighborObservation::Conflict);
         assert_eq!(state.mac(), Some(reply.sender_mac));
         assert_eq!(state.accepted(), 2);
+    }
+
+    #[test]
+    fn validates_exact_unfragmented_ipv4_icmp_header() {
+        let peer = EndpointV4 {
+            mac: [0x52, 0x55, 0x0a, 0, 2, 2],
+            ipv4: PEER,
+        };
+        let packet = parse_ipv4_icmp_v0(&IPV4_FRAME, LOCAL, peer).unwrap();
+        assert_eq!(packet.source_ipv4, PEER);
+        assert_eq!(packet.destination_ipv4, LOCAL.ipv4);
+        assert_eq!(packet.protocol, 1);
+        assert_eq!(packet.payload, &IPV4_FRAME[34..]);
+    }
+
+    #[test]
+    fn rejects_ipv4_checksum_fragment_and_endpoint_changes() {
+        let peer = EndpointV4 {
+            mac: [0x52, 0x55, 0x0a, 0, 2, 2],
+            ipv4: PEER,
+        };
+        let mut frame = IPV4_FRAME;
+        frame[24] ^= 1;
+        assert_eq!(
+            parse_ipv4_icmp_v0(&frame, LOCAL, peer),
+            Err(Ipv4ParseError::Checksum)
+        );
+        frame = IPV4_FRAME;
+        frame[20] = 0x20;
+        frame[24] = 0x30;
+        frame[25] = 0x9d;
+        assert_eq!(
+            parse_ipv4_icmp_v0(&frame, LOCAL, peer),
+            Err(Ipv4ParseError::Fragmented)
+        );
+        frame = IPV4_FRAME;
+        frame[33] ^= 1;
+        frame[24] = 0x10;
+        frame[25] = 0x9e;
+        assert_eq!(
+            parse_ipv4_icmp_v0(&frame, LOCAL, peer),
+            Err(Ipv4ParseError::Endpoint)
+        );
     }
 }

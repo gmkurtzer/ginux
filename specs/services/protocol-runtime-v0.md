@@ -71,11 +71,15 @@ the third wait is live, and uses control-plane stop authority to cancel and
 fully reclaim the domain. This establishes external lifecycle ownership without
 granting management authority to the protocol service.
 
+Bootstrap ABI v3 is a separate bounded dispatch generation. It learns the peer
+from ARP, then consumes an actual Ethernet/IPv4/ICMP frame, validates its fixed
+IPv4 header and checksum in ring 3, and rejects a locally corrupted checksum.
+
 This remains a fixed ARP proof, not a network stack. The resident path accepts
 exactly two packets under v1; v2 may continue until administratively stopped.
 There is no graceful drain or state handoff protocol. There is no
 Ethernet demultiplexing, ARP request generation, multi-entry or expiring
-neighbor cache, IPv4
-validation, ICMP, UDP, TCP, fragmentation, routing, socket API, shared-memory
+neighbor cache, IPv4 options or reassembly, ICMP processing, UDP, TCP, routing,
+socket API, shared-memory
 packet path, or container network interface. The current FIFO and call gate
 remain single-CPU and copied.

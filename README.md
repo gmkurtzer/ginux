@@ -428,6 +428,13 @@ learns the first peer mapping, refreshes the same mapping, and rejects a
 conflicting MAC without mutating accepted state. Expiry, replacement, multiple
 neighbors, and ARP request generation remain future work.
 
+Protocol bootstrap ABI v3 dispatches a separately delivered IPv4 frame after
+ARP learning. The isolated service validates the fixed IPv4 header, length,
+checksum, fragmentation boundary, protocol, and configured endpoints, then
+rejects a corrupted header without kernel protocol parsing. ICMP message
+handling, IPv4 options/reassembly, UDP, TCP, routing, and sockets remain future
+work.
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected
