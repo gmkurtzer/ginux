@@ -413,8 +413,10 @@ unsafe fn transmit_egress(
     }
     if reliable {
         let acknowledge = NativePacketRequestV0::consume(0, 0, expected_sequence);
-        if acknowledge_egress_packet(egress_capability, &acknowledge) != 0
-            || claim_egress_packet(egress_capability, &transfer) != NATIVE_NETWORK_WAIT_FAILED
+        let acknowledged = acknowledge_egress_packet(egress_capability, &acknowledge);
+        let replay = claim_egress_packet(egress_capability, &transfer);
+        if acknowledged != 0
+            || replay != NATIVE_NETWORK_WAIT_FAILED && replay != NATIVE_PACKET_STALE
         {
             return None;
         }

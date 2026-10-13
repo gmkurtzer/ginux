@@ -506,7 +506,11 @@ consumer frees one slot and wakes only that producer. Wakeup grants no
 reservation, so the producer retries and receives the exact fifth sequence.
 The proof drains all entries in FIFO order and retires both domains and their
 wait/capability state. Reliable acknowledgement also wakes an egress space
-waiter, while a claim alone does not. See
+waiter, while a claim alone does not. A hardware-coupled proof fills the FIFO,
+has the measured network service claim and transmit its head through confined
+DMA, and requires validated MSI-X completion plus acknowledgement before the
+blocked producer wakes and publishes the exact fifth sequence. The remaining
+replies retain FIFO order, and replay of the acknowledged head is stale. See
 [Native Network Egress Backpressure v0](specs/services/network-egress-backpressure-v0.md).
 
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside

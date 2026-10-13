@@ -24,9 +24,20 @@ sequence. The consumer drains all remaining entries in FIFO order, after which
 both domains, capabilities, wait state, frames, and producer binding are
 retired.
 
+A second proof couples the same boundary to the measured network service and
+real virtio-net completion. The producer fills all four slots and blocks on its
+fifth publication. The network service claims the head without freeing a slot,
+transmits it through confined DMA, and blocks for kernel-owned MSI-X. Only the
+kernel-validated operation-27 acknowledgement removes the claimed head and
+wakes the producer. The producer then publishes the exact fifth sequence; a
+replay claim for the acknowledged sequence is rejected as stale, and the
+kernel drains and validates the remaining four replies in FIFO order. Both
+domains and all device, interrupt, VT-d, DMA, capability, claim, wait, and
+producer state retire cleanly.
+
 ## Limits
 
-There is one producer and at most one space waiter per packet object. The proof
-uses destructive consumers; reliable acknowledgement is covered by the
-virtio-net egress proof. Reservation, fairness among multiple producers,
-batching, and dynamic queue sizing are not defined.
+There is one producer and at most one space waiter per packet object. There is
+also one global egress claim. Reservation, fairness among multiple producers,
+batching, continuously resident network service operation, and dynamic queue
+sizing are not defined.

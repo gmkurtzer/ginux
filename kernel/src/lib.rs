@@ -3276,6 +3276,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: egress delivery woke only object-9 space waiter");
     serial_write("\r\nginux: woken egress producer retried exact next sequence");
     serial_write("\r\nginux: egress FIFO ordering survived backpressure wakeup");
+    if !address_space::verify_native_network_ack_backpressure(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: reliable egress acknowledgement backpressure failed\r\n");
+    }
+    serial_write("\r\nginux: full egress FIFO remained full while head was claimed");
+    serial_write("\r\nginux: completed egress acknowledgement woke blocked producer");
+    serial_write("\r\nginux: post-ack producer published exact fifth sequence");
+    serial_write("\r\nginux: hardware-coupled egress backpressure retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

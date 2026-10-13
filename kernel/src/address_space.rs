@@ -23,6 +23,7 @@ global_asm!(include_str!("../packet-ipv4.S"));
 global_asm!(include_str!("../packet-egress-consumer.S"));
 global_asm!(include_str!("../packet-egress-wait.S"));
 global_asm!(include_str!("../packet-egress-backpressure.S"));
+global_asm!(include_str!("../packet-egress-ack-backpressure.S"));
 
 extern "C" {
     fn ginux_volume_writer_start();
@@ -48,6 +49,8 @@ extern "C" {
     fn ginux_packet_egress_backpressure_producer_end();
     fn ginux_packet_egress_backpressure_consumer_start();
     fn ginux_packet_egress_backpressure_consumer_end();
+    fn ginux_packet_egress_ack_backpressure_producer_start();
+    fn ginux_packet_egress_ack_backpressure_producer_end();
     fn ginux_packet_backpressure_producer_start();
     fn ginux_packet_backpressure_producer_end();
     fn ginux_packet_backpressure_consumer_start();
@@ -4782,6 +4785,7 @@ enum NativeNetworkRunMode {
     ReliableEgressTransmit,
     ReliableEgressFault,
     ReliableEgressWait,
+    ReliableEgressAckBackpressure,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -5032,6 +5036,81 @@ pub(crate) fn verify_native_network_egress_wait(
                 && Some(metadata) != previous_delivery
         })
         && scheduler::egress_wait_is_available(expected_sequence)
+}
+
+pub(crate) fn verify_native_network_ack_backpressure(
+    network_image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    interrupt: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
+) -> bool {
+    const ECHO_REPLY: [u8; 42] = [
+        0x52, 0x55, 0x0a, 0x00, 0x02, 0x02, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x00, 0x45,
+        0x00, 0x00, 0x1c, 0x12, 0x34, 0x40, 0x00, 0x40, 0x01, 0x10, 0x9d, 10, 0, 2, 15, 10, 0, 2,
+        2, 0x00, 0x00, 0x41, 0x0f, 0xbe, 0xef, 0x00, 0x01,
+    ];
+    let (common_mapping, msix_mapping, apic) = interrupt;
+    let Some(expected_sequence) = packet::egress_next_sequence() else {
+        return false;
+    };
+    if expected_sequence == 0
+        || expected_sequence.checked_add(5).is_none()
+        || packet::egress_pending_metadata().is_some()
+        || packet::egress_claim().is_some()
+    {
+        return false;
+    }
+    if !verify_native_network_bootstrap_run(
+        network_image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReliableEgressAckBackpressure,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    ) {
+        return false;
+    }
+    let (Some(transmitted), Some(pending)) = (
+        packet::egress_last_delivery(),
+        packet::egress_pending_metadata(),
+    ) else {
+        return false;
+    };
+    if transmitted.sequence != expected_sequence
+        || transmitted.length != ECHO_REPLY.len()
+        || pending.sequence != expected_sequence + 1
+        || pending.source_domain != transmitted.source_domain
+        || pending.service_identity != transmitted.service_identity
+        || pending.length != ECHO_REPLY.len()
+        || packet::egress_claim().is_some()
+        || packet::egress_next_sequence() != expected_sequence.checked_add(5)
+    {
+        return false;
+    }
+    for offset in 1..=4 {
+        let sequence = expected_sequence + offset;
+        let consumed =
+            packet::consume_egress_with(sequence, ECHO_REPLY.len(), |metadata, bytes| {
+                metadata.sequence == sequence
+                    && metadata.source_domain == transmitted.source_domain
+                    && metadata.service_identity == transmitted.service_identity
+                    && metadata.length == ECHO_REPLY.len()
+                    && bytes == ECHO_REPLY
+            });
+        if consumed.is_err() {
+            return false;
+        }
+    }
+    packet::egress_pending_metadata().is_none()
+        && packet::egress_claim().is_none()
+        && packet::egress_last_delivery().is_some_and(|metadata| {
+            metadata.sequence == expected_sequence + 4
+                && metadata.source_domain == transmitted.source_domain
+                && metadata.service_identity == transmitted.service_identity
+                && metadata.length == ECHO_REPLY.len()
+        })
 }
 
 pub(crate) fn verify_native_network_receive_arp(
@@ -6891,6 +6970,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressTransmit
             | NativeNetworkRunMode::ReliableEgressFault
             | NativeNetworkRunMode::ReliableEgressWait
+            | NativeNetworkRunMode::ReliableEgressAckBackpressure
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -6926,15 +7006,22 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressTransmit
             | NativeNetworkRunMode::ReliableEgressFault
             | NativeNetworkRunMode::ReliableEgressWait
+            | NativeNetworkRunMode::ReliableEgressAckBackpressure
     );
     let reliable_egress = matches!(
         mode,
         NativeNetworkRunMode::ReliableEgressTransmit
             | NativeNetworkRunMode::ReliableEgressFault
             | NativeNetworkRunMode::ReliableEgressWait
+            | NativeNetworkRunMode::ReliableEgressAckBackpressure
     );
     let egress_fault = mode == NativeNetworkRunMode::ReliableEgressFault;
-    let egress_wait = mode == NativeNetworkRunMode::ReliableEgressWait;
+    let egress_wait = matches!(
+        mode,
+        NativeNetworkRunMode::ReliableEgressWait
+            | NativeNetworkRunMode::ReliableEgressAckBackpressure
+    );
+    let egress_ack_backpressure = mode == NativeNetworkRunMode::ReliableEgressAckBackpressure;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -7221,10 +7308,18 @@ fn verify_native_network_bootstrap_run(
                 || pci::force_next_network_receive_wait_timeout(auxiliary, 2))
     });
     let egress_producer = if egress_wait {
-        let Some(program) = volume_program(
-            ginux_packet_egress_wait_producer_start as *const () as usize,
-            ginux_packet_egress_wait_producer_end as *const () as usize,
-        ) else {
+        let program = if egress_ack_backpressure {
+            volume_program(
+                ginux_packet_egress_ack_backpressure_producer_start as *const () as usize,
+                ginux_packet_egress_ack_backpressure_producer_end as *const () as usize,
+            )
+        } else {
+            volume_program(
+                ginux_packet_egress_wait_producer_start as *const () as usize,
+                ginux_packet_egress_wait_producer_end as *const () as usize,
+            )
+        };
+        let Some(program) = program else {
             return false;
         };
         let Some(producer) = prepare_egress_wait_producer(kernel_root, program) else {
@@ -7270,10 +7365,18 @@ fn verify_native_network_bootstrap_run(
     let egress_producer_retired = egress_producer
         .as_ref()
         .is_none_or(|producer| !packet::retire_egress_producer(producer.domain));
-    let producer_event = egress_producer
+    let first_event = egress_producer
         .as_ref()
         .map(|_| domain::take_lifecycle_event());
-    let event = domain::take_lifecycle_event();
+    let second_event = domain::take_lifecycle_event();
+    let (producer_event, event) = if egress_ack_backpressure {
+        (
+            egress_producer.as_ref().map(|_| second_event),
+            first_event.flatten(),
+        )
+    } else {
+        (first_event, second_event)
+    };
     let parser_fault_valid = !(corrupt_network_receive || packet_fault || egress_fault)
         || domain::delivered_fault_descriptor().and_then(|descriptor| {
             let vector = descriptor
@@ -7329,11 +7432,32 @@ fn verify_native_network_bootstrap_run(
         });
     let event_valid = event
         == Some((u64::from(expected_detail) << 56) | (auxiliary << 8) | u64::from(expected_kind));
+    let (last_kind, last_domain, last_detail, last_fault, last_identity) =
+        if egress_ack_backpressure {
+            let Some(producer) = egress_producer.as_ref() else {
+                return false;
+            };
+            (
+                crate::control_abi::LIFECYCLE_AUXILIARY_EXITED,
+                producer.domain,
+                62,
+                false,
+                producer.identity,
+            )
+        } else {
+            (
+                expected_kind,
+                auxiliary,
+                expected_detail,
+                expected_fault,
+                identity,
+            )
+        };
     let audit_valid = domain::last_lifecycle_event_audit()
-        .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary);
-    let detail_valid = domain::last_lifecycle_event_detail() == Some(expected_detail);
-    let fault_valid = domain::last_lifecycle_event_has_fault() == Some(expected_fault);
-    let identity_valid = domain::last_lifecycle_service_identity() == Some(identity);
+        .is_some_and(|(kind, audited, _)| kind == last_kind && audited == last_domain);
+    let detail_valid = domain::last_lifecycle_event_detail() == Some(last_detail);
+    let fault_valid = domain::last_lifecycle_event_has_fault() == Some(last_fault);
+    let identity_valid = domain::last_lifecycle_service_identity() == Some(last_identity);
     let no_extra_event = domain::take_lifecycle_event().is_none();
     let lifecycle_valid = event_valid
         && audit_valid
@@ -7342,9 +7466,14 @@ fn verify_native_network_bootstrap_run(
         && identity_valid
         && no_extra_event;
     let producer_lifecycle_valid = egress_producer.as_ref().is_none_or(|producer| {
+        let detail = if egress_ack_backpressure {
+            62_u64
+        } else {
+            59_u64
+        };
         producer_event
             == Some(Some(
-                (59_u64 << 56)
+                (detail << 56)
                     | (producer.domain << 8)
                     | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
             ))

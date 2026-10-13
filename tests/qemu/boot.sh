@@ -365,6 +365,10 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: egress delivery woke only object-9 space waiter' "$output_file" ||
     ! grep -q '^ginux: woken egress producer retried exact next sequence' "$output_file" ||
     ! grep -q '^ginux: egress FIFO ordering survived backpressure wakeup' "$output_file" ||
+    ! grep -q '^ginux: full egress FIFO remained full while head was claimed' "$output_file" ||
+    ! grep -q '^ginux: completed egress acknowledgement woke blocked producer' "$output_file" ||
+    ! grep -q '^ginux: post-ack producer published exact fifth sequence' "$output_file" ||
+    ! grep -q '^ginux: hardware-coupled egress backpressure retired cleanly' "$output_file" ||
     ! grep -q '^ginux: ingress and egress space-wait keys isolated' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
