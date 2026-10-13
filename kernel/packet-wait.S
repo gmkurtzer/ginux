@@ -4,6 +4,8 @@
 .global ginux_packet_wait_producer_end
 .global ginux_packet_wait_consumer_start
 .global ginux_packet_wait_consumer_end
+.global ginux_packet_wait_stop_helper_start
+.global ginux_packet_wait_stop_helper_end
 
 ginux_packet_wait_producer_start:
     mov r12, rbx
@@ -170,3 +172,11 @@ ginux_packet_wait_consumer_start:
     .byte 10, 0, 2, 15
 
 ginux_packet_wait_consumer_end:
+
+.balign 16
+ginux_packet_wait_stop_helper_start:
+    mov esi, 50
+    mov eax, 2
+    int 0x80
+    int3
+ginux_packet_wait_stop_helper_end:

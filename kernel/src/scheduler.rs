@@ -818,13 +818,14 @@ impl Scheduler {
         true
     }
 
-    fn remove_ready_domain(&mut self, domain: u64) -> bool {
+    fn remove_cancellable_domain(&mut self, domain: u64) -> bool {
         let mut slot = None;
         for (index, thread) in self.threads.iter().enumerate() {
             if thread.is_some_and(|thread| thread.domain == domain) {
                 if slot.is_some()
-                    || thread
-                        .is_some_and(|thread| !matches!(thread.state, State::Staged | State::Ready))
+                    || thread.is_some_and(|thread| {
+                        !matches!(thread.state, State::Staged | State::Ready | State::Blocked)
+                    })
                 {
                     return false;
                 }
@@ -1123,7 +1124,7 @@ pub(crate) fn queue_auxiliary(
         true
     } else {
         let Some(next) = runtime.scheduler.schedule_next() else {
-            let _ = runtime.scheduler.remove_ready_domain(domain_id);
+            let _ = runtime.scheduler.remove_cancellable_domain(domain_id);
             let _ = domain::detach_thread(domain_id);
             return false;
         };
@@ -1131,12 +1132,12 @@ pub(crate) fn queue_auxiliary(
     }
 }
 
-pub(crate) fn cancel_ready_auxiliary(domain_id: u64) -> bool {
+pub(crate) fn cancel_auxiliary(domain_id: u64) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;
     };
     if domain::service_failure_policy(domain_id) != Some(domain::ServiceFailurePolicy::StopOnly)
-        || !runtime.scheduler.remove_ready_domain(domain_id)
+        || !runtime.scheduler.remove_cancellable_domain(domain_id)
     {
         return false;
     }
@@ -1262,7 +1263,7 @@ pub(crate) fn rollback_service_restart(domain: u64, prior_owner: u64) -> bool {
     };
     if runtime.restarts != 1
         || runtime.service_address_space_owner != domain
-        || !runtime.scheduler.remove_ready_domain(domain)
+        || !runtime.scheduler.remove_cancellable_domain(domain)
         || !domain::detach_thread(domain)
     {
         return false;
@@ -1696,10 +1697,8 @@ pub(crate) fn exit_runtime(
             address_space_root: next.context.address_space_root,
             fs_base: next.context.fs_base,
         }
-    } else if runtime.scheduler.threads.iter().all(Option::is_none) {
-        RuntimeAction::Complete
     } else {
-        RuntimeAction::Invalid
+        RuntimeAction::Complete
     }
 }
 
@@ -1963,10 +1962,10 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
     let survivor = restart_rollback.create(1, first_context)?;
     let replacement = restart_rollback.create(2, second_context)?;
     let replacement_removed = restart_rollback.schedule_next()?.id == survivor
-        && restart_rollback.remove_ready_domain(2)
+        && restart_rollback.remove_cancellable_domain(2)
         && restart_rollback.thread(replacement).is_none()
         && restart_rollback.current == Some(survivor)
-        && !restart_rollback.remove_ready_domain(2);
+        && !restart_rollback.remove_cancellable_domain(2);
     let mut staged = Scheduler::new();
     let staging_control = staged.create(1, first_context)?;
     let staged_workload = staged.create(2, second_context)?;
@@ -1984,13 +1983,32 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && staged.start_staged_domain(2)
         && !staged.start_staged_domain(2)
         && staged.yield_current(staging_control, first_context)?.id == staged_workload;
+    let mut cancellable = Scheduler::new();
+    let packet_waiter = cancellable.create(1, first_context)?;
+    let exiting_peer = cancellable.create(2, second_context)?;
+    let packet_wait = WaitReason::PacketAvailable {
+        object: crate::control_abi::PACKET_OBJECT,
+        sequence: 9,
+    };
+    let blocked_auxiliary_cancelled = cancellable.schedule_next()?.id == packet_waiter
+        && cancellable
+            .block_current(packet_waiter, first_context, packet_wait)?
+            .id
+            == exiting_peer
+        && cancellable.exit_current(exiting_peer).is_none()
+        && cancellable.current.is_none()
+        && cancellable.has_blocked_wait(packet_wait)
+        && cancellable.remove_cancellable_domain(1)
+        && !cancellable.has_blocked_wait(packet_wait)
+        && cancellable.threads.iter().all(Option::is_none);
     Some(
         generation_valid
             && rollback
             && interrupt_idle_valid
             && replacement_removed
             && staged_not_implicitly_admitted
-            && staged_explicitly_started,
+            && staged_explicitly_started
+            && blocked_auxiliary_cancelled,
     )
 }
 

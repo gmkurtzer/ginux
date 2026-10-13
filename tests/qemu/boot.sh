@@ -289,6 +289,11 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: packet publication woke exactly one read-only consumer' "$output_file" ||
     ! grep -q '^ginux: stale packet waits rejected without blocking' "$output_file" ||
     ! grep -q '^ginux: woken packet consumer received exact frame' "$output_file" ||
+    ! grep -q '^ginux: blocked packet consumer stopped by control authority' "$output_file" ||
+    ! grep -q '^ginux: cancelled packet wait key released' "$output_file" ||
+    ! grep -q '^ginux: cancelled packet consumer frames and capability retired' "$output_file" ||
+    ! grep -q '^ginux: replacement packet consumer claimed cancelled sequence' "$output_file" ||
+    ! grep -q '^ginux: replacement packet consumer received exact frame' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2

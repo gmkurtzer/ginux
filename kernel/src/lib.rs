@@ -3103,6 +3103,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: packet publication woke exactly one read-only consumer");
     serial_write("\r\nginux: stale packet waits rejected without blocking");
     serial_write("\r\nginux: woken packet consumer received exact frame");
+    if !address_space::verify_packet_wait_cancellation() {
+        kernel_fail("\r\nginux: blocked packet wait cancellation failed\r\n");
+    }
+    serial_write("\r\nginux: blocked packet consumer stopped by control authority");
+    serial_write("\r\nginux: cancelled packet wait key released");
+    serial_write("\r\nginux: cancelled packet consumer frames and capability retired");
+    if !address_space::verify_packet_wait_wakeup() {
+        kernel_fail("\r\nginux: replacement packet wait failed\r\n");
+    }
+    serial_write("\r\nginux: replacement packet consumer claimed cancelled sequence");
+    serial_write("\r\nginux: replacement packet consumer received exact frame");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

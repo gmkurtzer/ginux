@@ -15477,7 +15477,12 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         })
     };
     let action = scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR, close_wait);
-    if matches!(action, RuntimeAction::Invalid) || !domain::detach_thread(caller_domain) {
+    if matches!(action, RuntimeAction::Invalid) {
+        serial_write("ginux: runtime exit scheduling failed\r\n");
+        return u64::MAX;
+    }
+    if !domain::detach_thread(caller_domain) {
+        serial_write("ginux: runtime exit thread detach failed\r\n");
         return u64::MAX;
     }
     if service_exit
@@ -15485,16 +15490,28 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
     {
         return u64::MAX;
     }
-    if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly)
-        && (!domain::begin_auxiliary_runtime_exit(
-            caller_domain,
-            auxiliary_exit_status.unwrap_or(0),
-        ) || !address_space::quiesce_auxiliary_device(caller_domain)
-            || !address_space::activate_kernel_root_for_auxiliary(caller_domain)
-            || !address_space::release_auxiliary_address_space(caller_domain)
-            || !domain::retire_stopped_auxiliary_service(caller_domain))
-    {
-        return u64::MAX;
+    if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly) {
+        if !domain::begin_auxiliary_runtime_exit(caller_domain, auxiliary_exit_status.unwrap_or(0))
+        {
+            serial_write("ginux: auxiliary exit transition failed\r\n");
+            return u64::MAX;
+        }
+        if !address_space::quiesce_auxiliary_device(caller_domain) {
+            serial_write("ginux: auxiliary exit quiesce failed\r\n");
+            return u64::MAX;
+        }
+        if !address_space::activate_kernel_root_for_auxiliary(caller_domain) {
+            serial_write("ginux: auxiliary exit kernel-root restoration failed\r\n");
+            return u64::MAX;
+        }
+        if !address_space::release_auxiliary_address_space(caller_domain) {
+            serial_write("ginux: auxiliary exit address-space release failed\r\n");
+            return u64::MAX;
+        }
+        if !domain::retire_stopped_auxiliary_service(caller_domain) {
+            serial_write("ginux: auxiliary exit retirement failed\r\n");
+            return u64::MAX;
+        }
     }
     resume_action(action)
 }

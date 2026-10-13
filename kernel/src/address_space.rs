@@ -30,6 +30,8 @@ extern "C" {
     fn ginux_packet_wait_producer_end();
     fn ginux_packet_wait_consumer_start();
     fn ginux_packet_wait_consumer_end();
+    fn ginux_packet_wait_stop_helper_start();
+    fn ginux_packet_wait_stop_helper_end();
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -5097,6 +5099,142 @@ pub(crate) fn verify_packet_wait_wakeup() -> bool {
         && packet::next_sequence() == expected_sequence.checked_add(1)
 }
 
+pub(crate) fn verify_packet_wait_cancellation() -> bool {
+    let Some(expected_sequence) = packet::next_sequence() else {
+        return false;
+    };
+    if expected_sequence == 0 || packet::pending_metadata().is_some() {
+        return false;
+    }
+    let (Some(waiter_program), Some(helper_program)) = (
+        volume_program(
+            ginux_packet_wait_consumer_start as *const () as usize,
+            ginux_packet_wait_consumer_end as *const () as usize,
+        ),
+        volume_program(
+            ginux_packet_wait_stop_helper_start as *const () as usize,
+            ginux_packet_wait_stop_helper_end as *const () as usize,
+        ),
+    ) else {
+        return false;
+    };
+    let Some(waiter) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        return false;
+    };
+    let Some(helper) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        let _ = domain::discard_unstarted_auxiliary_service(waiter);
+        return false;
+    };
+    let (Some(waiter_handle), Some(waiter_owner), Some(helper_handle), Some(helper_owner)) = (
+        domain::auxiliary_boot_handle(waiter, 0),
+        memory::FrameOwner::domain(waiter),
+        domain::auxiliary_boot_handle(helper, 0),
+        memory::FrameOwner::domain(helper),
+    ) else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let (Some(waiter_space), Some(helper_space)) = (
+        WxAddressSpace::new(kernel_root, waiter_owner),
+        WxAddressSpace::new(kernel_root, helper_owner),
+    ) else {
+        return false;
+    };
+    if !waiter_space.permissions_are_valid(kernel_root)
+        || !helper_space.permissions_are_valid(kernel_root)
+        || !waiter_space.is_disjoint_from(&helper_space)
+    {
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in waiter_program.iter().enumerate() {
+            waiter_space.code_frame.add(offset).write(*byte);
+        }
+        for (offset, byte) in helper_program.iter().enumerate() {
+            helper_space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let waiter_root = waiter_space.root;
+    let helper_root = helper_space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(waiter, waiter_space)
+        || !register_auxiliary_address_space(helper, helper_space)
+        || !scheduler::queue_auxiliary(waiter, waiter_root, entry, stack, waiter_handle)
+        || !scheduler::queue_auxiliary(helper, helper_root, entry, stack, helper_handle)
+        || !scheduler::initialize_staged_auxiliary(helper, 0, 0)
+        || !scheduler::start_staged_auxiliary(helper)
+        || !cpu::activate_user_root(waiter_root)
+    {
+        return false;
+    }
+    cpu::execute_packet_consumer(
+        entry,
+        stack,
+        waiter_handle,
+        expected_sequence,
+        false,
+        waiter,
+        domain::domain_service_identity(waiter).unwrap_or(0),
+    );
+    let helper_event = domain::take_lifecycle_event();
+    let root_restored = current_root() == kernel_root;
+    let no_current = scheduler::current_domain().is_none();
+    let waiter_state = scheduler::auxiliary_runtime_state(waiter);
+    let wait_claimed = !scheduler::packet_wait_is_available(expected_sequence);
+    let registry_before = registered_auxiliary_address_space_count();
+    let waiter_frames_before = memory::owner_live_frame_count(waiter_owner);
+    let helper_frames_before = memory::owner_live_frame_count(helper_owner);
+    let helper_retired = domain::domain_is_retired(helper);
+    let blocked = root_restored
+        && no_current
+        && waiter_state == Some(crate::control_abi::AUXILIARY_STATE_BLOCKED)
+        && wait_claimed
+        && registry_before == 1
+        && waiter_frames_before == Some(USER_ADDRESS_SPACE_FRAMES)
+        && helper_frames_before == Some(0)
+        && helper_retired
+        && helper_event
+            == Some(
+                (50_u64 << 56)
+                    | (helper << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            );
+    let (Some(supervisor), Some(manage_handle)) = (
+        domain::control_plane_id(),
+        domain::control_plane_boot_handle(0),
+    ) else {
+        return false;
+    };
+    let stopped = stop_auxiliary_from_current_user(supervisor, manage_handle, waiter);
+    let stop_event = domain::take_lifecycle_event();
+    blocked
+        && stopped
+        && stop_event
+            == Some((waiter << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
+        && domain::take_lifecycle_event().is_none()
+        && scheduler::packet_wait_is_available(expected_sequence)
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(waiter_owner) == Some(0)
+        && domain::domain_is_retired(waiter)
+        && !domain::handle_permits(
+            waiter,
+            waiter_handle,
+            crate::control_abi::PACKET_OBJECT,
+            crate::capability::Rights::READ,
+        )
+        && packet::pending_metadata().is_none()
+        && packet::next_sequence() == Some(expected_sequence)
+}
+
 fn verify_ring3_packet_consumer(expected_sequence: u64, more_pending: bool) -> bool {
     if expected_sequence == 0 || expected_sequence == u64::MAX {
         return false;
@@ -5692,7 +5830,7 @@ pub(crate) fn stop_auxiliary_from_current_user(
     if domain::stop_auxiliary_service(supervisor, capability, domain_id) {
         return true;
     }
-    scheduler::cancel_ready_auxiliary(domain_id)
+    scheduler::cancel_auxiliary(domain_id)
         && release_auxiliary_address_space(domain_id)
         && domain::stop_auxiliary_service(supervisor, capability, domain_id)
 }

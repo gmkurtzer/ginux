@@ -26,11 +26,17 @@ publishes one 42-byte Ethernet/ARP frame, and the scheduler wakes that consumer.
 The consumer validates and removes the exact frame, proves a replayed wait is
 stale, and exits. Both address spaces and capabilities are then retired.
 
+A second proof blocks a consumer on sequence six and returns to the kernel
+after its runnable helper exits. The control plane stops the blocked domain,
+which releases the exact-sequence wait key and all domain resources. A fresh
+consumer then claims sequence six and receives it from a fresh producer. See
+[Blocked Auxiliary Cancellation v0](../kernel/blocked-auxiliary-cancellation-v0.md).
+
 ## Limits
 
-The wait is FIFO-head specific and has no timeout, cancellation operation,
-fanout, readiness set, or multi-object poll interface. It remains valid across
-producer exit or replacement because the queue and sequence space are
-kernel-owned. A stopped blocked consumer is not yet asynchronously cancelled;
-that requires the general blocked-auxiliary cancellation contract. SMP requires
-locking around the current single-CPU check-and-block transition.
+The wait is FIFO-head specific and has no timeout, self-cancellation operation,
+fanout, readiness set, or multi-object poll interface. The control plane may
+stop its blocked auxiliary domain through the general management operation. A
+wait remains valid across producer exit or replacement because the queue and
+sequence space are kernel-owned. SMP requires locking around the current
+single-CPU check-and-block transition.
