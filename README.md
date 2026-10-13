@@ -2,6 +2,9 @@
 
 Ginux is an immutable, capability-secure, container-native operating system for AI infrastructure. The native host is intentionally small: an immutable kernel boots one constrained control-plane domain, which creates isolated services and containers through stable interfaces.
 
+Ginux is licensed under the [Apache License, Version 2.0](LICENSE). See
+[NOTICE](NOTICE) for attribution information.
+
 The first M6 storage primitive is a canonical two-sector persistent-volume
 record. It preserves the older generation while preparing and flushing an
 inactive slot, writes the commit marker last, and accepts the new generation
