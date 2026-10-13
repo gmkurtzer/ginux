@@ -6,6 +6,10 @@
 .global ginux_packet_wait_consumer_end
 .global ginux_packet_wait_stop_helper_start
 .global ginux_packet_wait_stop_helper_end
+.global ginux_packet_wait_timeout_consumer_start
+.global ginux_packet_wait_timeout_consumer_end
+.global ginux_packet_wait_timeout_helper_start
+.global ginux_packet_wait_timeout_helper_end
 
 ginux_packet_wait_producer_start:
     mov r12, rbx
@@ -21,7 +25,14 @@ ginux_packet_wait_producer_start:
     mov qword ptr [rsp + 24], r12
     mov rdi, r14
     lea rsi, [rsp]
+    test r15, r15
+    jz .consumer_exact_infinite_wait
+    mov edx, 1000
+    mov eax, 24
+    jmp .consumer_issue_exact_wait
+.consumer_exact_infinite_wait:
     mov eax, 23
+.consumer_issue_exact_wait:
     int 0x80
     mov r12, qword ptr [rsp + 0x78]
     mov r14, qword ptr [rsp + 0x70]
@@ -76,6 +87,7 @@ ginux_packet_wait_producer_end:
 ginux_packet_wait_consumer_start:
     mov r12, rbx
     mov r14, rcx
+    mov r15, rdx
     sub rsp, 0x90
     mov qword ptr [rsp + 0x70], r14
     mov qword ptr [rsp + 0x78], r12
@@ -90,7 +102,14 @@ ginux_packet_wait_consumer_start:
     # A future sequence is stale rather than an unbounded wait.
     mov rdi, r14
     lea rsi, [rsp]
+    test r15, r15
+    jz .consumer_infinite_wait
+    mov edx, 1000
+    mov eax, 24
+    jmp .consumer_issue_wait
+.consumer_infinite_wait:
     mov eax, 23
+.consumer_issue_wait:
     int 0x80
     cmp rax, -5
     je .future_rejected
@@ -180,3 +199,75 @@ ginux_packet_wait_stop_helper_start:
     int 0x80
     int3
 ginux_packet_wait_stop_helper_end:
+
+.balign 16
+ginux_packet_wait_timeout_consumer_start:
+    mov r12, rbx
+    mov r14, rcx
+    sub rsp, 0x40
+    mov qword ptr [rsp], 0x20
+    mov qword ptr [rsp + 8], 0
+    mov qword ptr [rsp + 16], 0
+    mov qword ptr [rsp + 24], r12
+
+    # The bounded ABI rejects deadlines above one second.
+    mov rdi, r14
+    lea rsi, [rsp]
+    mov edx, 1001
+    mov eax, 24
+    int 0x80
+    cmp rax, -3
+    jne .timeout_consumer_failed
+
+    # A zero deadline performs an immediate availability query.
+    mov rdi, r14
+    lea rsi, [rsp]
+    xor edx, edx
+    mov eax, 24
+    int 0x80
+    cmp rax, -6
+    jne .timeout_consumer_failed
+
+    # The exact empty sequence becomes runnable at its APIC deadline.
+    mov rdi, r14
+    lea rsi, [rsp]
+    mov edx, 10
+    mov eax, 24
+    int 0x80
+    cmp rax, -6
+    jne .timeout_consumer_failed
+
+    mov esi, 51
+    mov eax, 2
+    int 0x80
+
+.timeout_consumer_failed:
+    mov esi, eax
+    and esi, 0xff
+    mov eax, 2
+    int 0x80
+    int3
+ginux_packet_wait_timeout_consumer_end:
+
+.balign 16
+ginux_packet_wait_timeout_helper_start:
+    # Stay in ring 3 across the deadline. The timer must make the blocked
+    # consumer runnable and preempt this peer; ordinary cooperative yield is
+    # deliberately absent.
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    mov r12, rax
+.timeout_helper_spin:
+    pause
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    sub rax, r12
+    cmp rax, 100000000
+    jb .timeout_helper_spin
+    mov esi, 52
+    mov eax, 2
+    int 0x80
+    int3
+ginux_packet_wait_timeout_helper_end:

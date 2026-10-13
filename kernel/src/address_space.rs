@@ -32,6 +32,10 @@ extern "C" {
     fn ginux_packet_wait_consumer_end();
     fn ginux_packet_wait_stop_helper_start();
     fn ginux_packet_wait_stop_helper_end();
+    fn ginux_packet_wait_timeout_consumer_start();
+    fn ginux_packet_wait_timeout_consumer_end();
+    fn ginux_packet_wait_timeout_helper_start();
+    fn ginux_packet_wait_timeout_helper_end();
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -4933,7 +4937,7 @@ pub(crate) fn verify_native_network_packet_batch(
         && packet::pending_metadata().is_none()
 }
 
-pub(crate) fn verify_packet_wait_wakeup() -> bool {
+pub(crate) fn verify_packet_wait_wakeup(timed: bool) -> bool {
     let Some(expected_sequence) = packet::next_sequence() else {
         return false;
     };
@@ -5032,6 +5036,7 @@ pub(crate) fn verify_packet_wait_wakeup() -> bool {
     let producer_entry = USER_TEST_ADDRESS;
     let consumer_entry = USER_TEST_ADDRESS;
     let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    let timeout_count = timer::packet_wait_timeout_count();
     if !register_auxiliary_address_space(producer, producer_space)
         || !register_auxiliary_address_space(consumer, consumer_space)
         || !packet::bind_producer(producer, producer_identity)
@@ -5060,7 +5065,7 @@ pub(crate) fn verify_packet_wait_wakeup() -> bool {
         stack,
         producer_handle,
         expected_sequence,
-        false,
+        timed,
         producer,
         producer_identity,
     );
@@ -5097,6 +5102,8 @@ pub(crate) fn verify_packet_wait_wakeup() -> bool {
         })
         && packet::pending_metadata().is_none()
         && packet::next_sequence() == expected_sequence.checked_add(1)
+        && timer::packet_wait_timeout_count() == timeout_count
+        && timer::packet_wait_timer_is_clear()
 }
 
 pub(crate) fn verify_packet_wait_cancellation() -> bool {
@@ -5231,6 +5238,122 @@ pub(crate) fn verify_packet_wait_cancellation() -> bool {
             crate::control_abi::PACKET_OBJECT,
             crate::capability::Rights::READ,
         )
+        && packet::pending_metadata().is_none()
+        && packet::next_sequence() == Some(expected_sequence)
+}
+
+pub(crate) fn verify_packet_wait_timeout() -> bool {
+    let Some(expected_sequence) = packet::next_sequence() else {
+        return false;
+    };
+    if expected_sequence == 0 || packet::pending_metadata().is_some() {
+        return false;
+    }
+    let (Some(waiter_program), Some(helper_program)) = (
+        volume_program(
+            ginux_packet_wait_timeout_consumer_start as *const () as usize,
+            ginux_packet_wait_timeout_consumer_end as *const () as usize,
+        ),
+        volume_program(
+            ginux_packet_wait_timeout_helper_start as *const () as usize,
+            ginux_packet_wait_timeout_helper_end as *const () as usize,
+        ),
+    ) else {
+        return false;
+    };
+    let Some(waiter) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        return false;
+    };
+    let Some(helper) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        let _ = domain::discard_unstarted_auxiliary_service(waiter);
+        return false;
+    };
+    let (Some(waiter_handle), Some(waiter_owner), Some(helper_handle), Some(helper_owner)) = (
+        domain::auxiliary_boot_handle(waiter, 0),
+        memory::FrameOwner::domain(waiter),
+        domain::auxiliary_boot_handle(helper, 0),
+        memory::FrameOwner::domain(helper),
+    ) else {
+        return false;
+    };
+    let kernel_root = current_root();
+    let (Some(waiter_space), Some(helper_space)) = (
+        WxAddressSpace::new(kernel_root, waiter_owner),
+        WxAddressSpace::new(kernel_root, helper_owner),
+    ) else {
+        return false;
+    };
+    if !waiter_space.permissions_are_valid(kernel_root)
+        || !helper_space.permissions_are_valid(kernel_root)
+        || !waiter_space.is_disjoint_from(&helper_space)
+    {
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in waiter_program.iter().enumerate() {
+            waiter_space.code_frame.add(offset).write(*byte);
+        }
+        for (offset, byte) in helper_program.iter().enumerate() {
+            helper_space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let waiter_root = waiter_space.root;
+    let helper_root = helper_space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    let timeout_count = timer::packet_wait_timeout_count();
+    if !register_auxiliary_address_space(waiter, waiter_space)
+        || !register_auxiliary_address_space(helper, helper_space)
+        || !scheduler::queue_auxiliary(waiter, waiter_root, entry, stack, waiter_handle)
+        || !scheduler::queue_auxiliary(helper, helper_root, entry, stack, helper_handle)
+        || !scheduler::initialize_staged_auxiliary(helper, 0, 0)
+        || !scheduler::start_staged_auxiliary(helper)
+        || !cpu::activate_user_root(waiter_root)
+    {
+        return false;
+    }
+    cpu::execute_packet_consumer(
+        entry,
+        stack,
+        waiter_handle,
+        expected_sequence,
+        false,
+        waiter,
+        domain::domain_service_identity(waiter).unwrap_or(0),
+    );
+    let waiter_event = domain::take_lifecycle_event();
+    let helper_event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && scheduler::packet_wait_is_available(expected_sequence)
+        && timer::packet_wait_timeout_count() == timeout_count.checked_add(1).unwrap_or(0)
+        && timer::packet_wait_timer_is_clear()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(waiter_owner) == Some(0)
+        && memory::owner_live_frame_count(helper_owner) == Some(0)
+        && domain::domain_is_retired(waiter)
+        && domain::domain_is_retired(helper)
+        && waiter_event
+            == Some(
+                (51_u64 << 56)
+                    | (waiter << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && helper_event
+            == Some(
+                (52_u64 << 56)
+                    | (helper << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && domain::take_lifecycle_event().is_none()
         && packet::pending_metadata().is_none()
         && packet::next_sequence() == Some(expected_sequence)
 }
@@ -5831,6 +5954,7 @@ pub(crate) fn stop_auxiliary_from_current_user(
         return true;
     }
     scheduler::cancel_auxiliary(domain_id)
+        && timer::cancel_packet_wait_timer_for_domain(domain_id)
         && release_auxiliary_address_space(domain_id)
         && domain::stop_auxiliary_service(supervisor, capability, domain_id)
 }

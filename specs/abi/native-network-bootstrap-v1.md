@@ -77,7 +77,8 @@ wraparound, and preserves monotonic sequence allocation.
 
 There is one global four-entry FIFO, one bound producer generation, and a
 maximum Ethernet frame size of 1514 bytes. Publication uses a bounded copy
-rather than shared memory. There is no wait timeout or cancellation,
-backpressure notification, production batching interface, multi-consumer
-fanout, VLAN-sized frame support, or zero-copy lease. The single-CPU call gate
-serializes access; SMP requires locking.
+rather than shared memory. Exact packet waits support external control-plane
+cancellation and one bounded relative APIC deadline. There is no
+self-cancellation, backpressure notification, production batching interface,
+multi-consumer fanout, VLAN-sized frame support, or zero-copy lease. The
+single-CPU call gate serializes access; SMP requires locking and a timer queue.

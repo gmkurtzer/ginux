@@ -5731,6 +5731,7 @@ extern "sysv64" fn syscall_handler(number: u64, capability: u64, frame: *mut Use
     let Some(caller_domain) = scheduler::current_domain() else {
         return u64::MAX;
     };
+    let _ = timer::cancel_packet_wait_timer_for_domain(caller_domain);
     // Termination must remain available after a domain exhausts its budget.
     if number == 2 {
         SYSCALL_STATE.fetch_or(4, Ordering::SeqCst);
@@ -14354,7 +14355,13 @@ fn dispatch_charged_call(
         control_abi::PACKET_CONSUME_OPERATION => {
             packet_consume_call(caller_domain, capability, frame)
         }
-        control_abi::PACKET_WAIT_OPERATION => packet_wait_call(caller_domain, capability, frame),
+        control_abi::PACKET_WAIT_OPERATION => {
+            packet_wait_call(caller_domain, capability, frame, None)
+        }
+        control_abi::PACKET_WAIT_TIMEOUT_OPERATION => {
+            let timeout_ms = unsafe { frame.as_ref() }.map(UserTrapFrame::second_argument);
+            packet_wait_call(caller_domain, capability, frame, timeout_ms)
+        }
         _ => u64::MAX,
     }
 }
@@ -14410,7 +14417,9 @@ fn packet_publish_call(caller_domain: u64, capability: u64, frame: *const UserTr
     }
     match crate::packet::publish(caller_domain, &packet[..request.buffer_size]) {
         Ok(sequence) => {
-            let _ = scheduler::wake_packet_waiter(caller_domain, sequence);
+            if scheduler::wake_packet_waiter(caller_domain, sequence) {
+                let _ = timer::cancel_packet_wait_timer_for_sequence(sequence);
+            }
             timer::mark_scheduler_preemption_ready();
             sequence
         }
@@ -14447,14 +14456,22 @@ fn packet_consume_call(caller_domain: u64, capability: u64, frame: *const UserTr
     }
 }
 
-fn packet_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+fn packet_wait_call(
+    caller_domain: u64,
+    capability: u64,
+    frame: *mut UserTrapFrame,
+    timeout_ms: Option<u64>,
+) -> u64 {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX - 2;
     };
     let Some(request) = packet_request(frame.first_argument()) else {
         return u64::MAX - 2;
     };
-    if request.buffer_address != 0 || request.buffer_size != 0 {
+    if request.buffer_address != 0
+        || request.buffer_size != 0
+        || timeout_ms.is_some_and(|timeout| timeout > control_abi::PACKET_WAIT_MAX_TIMEOUT_MS)
+    {
         return u64::MAX - 2;
     }
     if request.expected_sequence == 0 {
@@ -14472,24 +14489,54 @@ fn packet_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFra
         crate::packet::PacketWait::Ready => request.expected_sequence,
         crate::packet::PacketWait::Stale => control_abi::PACKET_RESULT_STALE,
         crate::packet::PacketWait::Empty => {
+            if timeout_ms == Some(0) {
+                return control_abi::PACKET_RESULT_TIMED_OUT;
+            }
             if !scheduler::packet_wait_is_available(request.expected_sequence) {
                 return u64::MAX - 2;
             }
+            if timeout_ms.is_some_and(|timeout| {
+                !timer::arm_packet_wait_timer(caller_domain, request.expected_sequence, timeout)
+            }) {
+                return u64::MAX - 2;
+            }
+            let reason = scheduler::WaitReason::PacketAvailable {
+                object: control_abi::PACKET_OBJECT,
+                sequence: request.expected_sequence,
+            };
             let action = scheduler::block_runtime(
                 frame,
                 USER_CODE_SELECTOR,
                 USER_DATA_SELECTOR,
-                scheduler::WaitReason::PacketAvailable {
-                    object: control_abi::PACKET_OBJECT,
-                    sequence: request.expected_sequence,
-                },
+                reason,
                 active_fs_base(),
             );
-            if matches!(action, RuntimeAction::Invalid) {
-                u64::MAX - 2
-            } else {
-                resume_action(action)
+            if !matches!(action, RuntimeAction::Invalid) {
+                return resume_action(action);
             }
+            if timeout_ms.is_some()
+                && scheduler::block_runtime_idle(
+                    frame,
+                    USER_CODE_SELECTOR,
+                    USER_DATA_SELECTOR,
+                    reason,
+                    active_fs_base(),
+                )
+            {
+                while !timer::packet_wait_timed_out(caller_domain, request.expected_sequence) {
+                    unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
+                }
+                return if timer::finish_packet_wait_timer(caller_domain, request.expected_sequence)
+                    == Some(true)
+                    && scheduler::current_domain() == Some(caller_domain)
+                {
+                    control_abi::PACKET_RESULT_TIMED_OUT
+                } else {
+                    u64::MAX - 2
+                };
+            }
+            let _ = timer::cancel_packet_wait_timer_for_domain(caller_domain);
+            u64::MAX - 2
         }
     }
 }

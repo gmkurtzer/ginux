@@ -61,6 +61,7 @@ static DEVICE_WAIT_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static DEVICE_WAIT_REQUEST: AtomicU64 = AtomicU64::new(0);
 static DEVICE_WAIT_OBJECT: AtomicU64 = AtomicU64::new(0);
 static DEVICE_WAIT_TIMEOUT_COUNT: AtomicU64 = AtomicU64::new(0);
+static PACKET_WAIT_TIMEOUT_COUNT: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_BASE: AtomicU64 = AtomicU64::new(0);
 static INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 static INTERRUPT_COUNTER_HZ: AtomicU64 = AtomicU64::new(0);
@@ -479,15 +480,43 @@ pub(crate) fn arm_network_device_wait_timer(domain: u64, request: u64) -> bool {
 
 fn arm_device_wait_timer_for(domain: u64, object: u64, request: u64) -> bool {
     let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
+    let initial_count =
+        (counter_hz / DEVICE_WAIT_TIMEOUTS_PER_SECOND).clamp(1, u64::from(u32::MAX)) as u32;
+    arm_wait_timer_for(domain, object, request, initial_count)
+}
+
+pub(crate) fn arm_packet_wait_timer(domain: u64, sequence: u64, timeout_ms: u64) -> bool {
+    let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
+    let Some(initial_count) = counter_hz
+        .checked_mul(timeout_ms)
+        .map(|ticks| ticks / 1_000)
+        .filter(|ticks| (1..=u64::from(u32::MAX)).contains(ticks))
+        .and_then(|ticks| u32::try_from(ticks).ok())
+    else {
+        return false;
+    };
+    if !(1..=control_abi::PACKET_WAIT_MAX_TIMEOUT_MS).contains(&timeout_ms) {
+        return false;
+    }
+    arm_wait_timer_for(domain, control_abi::PACKET_OBJECT, sequence, initial_count)
+}
+
+fn arm_wait_timer_for(domain: u64, object: u64, request: u64, initial_count: u32) -> bool {
+    let counter_hz = INTERRUPT_COUNTER_HZ.load(Ordering::SeqCst);
     if domain == 0
         || object == 0
         || request == 0
+        || initial_count == 0
         || counter_hz == 0
         || PREEMPTION_ARMED.load(Ordering::SeqCst)
         || LINUX_WAIT_TIMER_ARMED.load(Ordering::SeqCst)
-        || DEVICE_WAIT_TIMER_ARMED.swap(true, Ordering::SeqCst)
     {
-        DEVICE_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
+        return false;
+    }
+    if DEVICE_WAIT_TIMER_ARMED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         return false;
     }
     let mode = if INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
@@ -500,8 +529,6 @@ fn arm_device_wait_timer_for(domain: u64, object: u64, request: u64) -> bool {
         DEVICE_WAIT_TIMER_ARMED.store(false, Ordering::SeqCst);
         return false;
     };
-    let initial_count =
-        (counter_hz / DEVICE_WAIT_TIMEOUTS_PER_SECOND).clamp(1, u64::from(u32::MAX)) as u32;
     DEVICE_WAIT_DOMAIN.store(domain, Ordering::SeqCst);
     DEVICE_WAIT_REQUEST.store(request, Ordering::SeqCst);
     DEVICE_WAIT_OBJECT.store(object, Ordering::SeqCst);
@@ -526,8 +553,38 @@ pub(crate) fn device_wait_timeout_count() -> u64 {
     DEVICE_WAIT_TIMEOUT_COUNT.load(Ordering::SeqCst)
 }
 
+pub(crate) fn packet_wait_timeout_count() -> u64 {
+    PACKET_WAIT_TIMEOUT_COUNT.load(Ordering::SeqCst)
+}
+
+pub(crate) fn packet_wait_timer_is_clear() -> bool {
+    DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
+}
+
+pub(crate) fn packet_wait_timed_out(domain: u64, sequence: u64) -> bool {
+    DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) == control_abi::PACKET_OBJECT
+        && device_wait_timed_out(domain, sequence)
+}
+
 /// Stops the device timeout and reports whether it won the interrupt race.
 pub(crate) fn finish_device_wait_timer(domain: u64, request: u64) -> Option<bool> {
+    if !matches!(
+        DEVICE_WAIT_OBJECT.load(Ordering::SeqCst),
+        control_abi::BLOCK_DEVICE_OBJECT | control_abi::NETWORK_DEVICE_OBJECT
+    ) {
+        return None;
+    }
+    finish_wait_timer(domain, request)
+}
+
+pub(crate) fn finish_packet_wait_timer(domain: u64, sequence: u64) -> Option<bool> {
+    if DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT {
+        return None;
+    }
+    finish_wait_timer(domain, sequence)
+}
+
+fn finish_wait_timer(domain: u64, request: u64) -> Option<bool> {
     if DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst) != domain
         || DEVICE_WAIT_REQUEST.load(Ordering::SeqCst) != request
     {
@@ -554,6 +611,26 @@ pub(crate) fn finish_device_wait_timer(domain: u64, request: u64) -> Option<bool
     DEVICE_WAIT_REQUEST.store(0, Ordering::SeqCst);
     DEVICE_WAIT_OBJECT.store(0, Ordering::SeqCst);
     Some(timed_out)
+}
+
+pub(crate) fn cancel_packet_wait_timer_for_sequence(sequence: u64) -> bool {
+    if DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
+        || DEVICE_WAIT_REQUEST.load(Ordering::SeqCst) != sequence
+    {
+        return true;
+    }
+    let domain = DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst);
+    finish_packet_wait_timer(domain, sequence) == Some(false)
+}
+
+pub(crate) fn cancel_packet_wait_timer_for_domain(domain: u64) -> bool {
+    if DEVICE_WAIT_OBJECT.load(Ordering::SeqCst) != control_abi::PACKET_OBJECT
+        || DEVICE_WAIT_DOMAIN.load(Ordering::SeqCst) != domain
+    {
+        return true;
+    }
+    let sequence = DEVICE_WAIT_REQUEST.load(Ordering::SeqCst);
+    finish_packet_wait_timer(domain, sequence).is_some()
 }
 
 /// Proves the device-wait timeout source independently of a real device IRQ.
@@ -598,6 +675,33 @@ extern "sysv64" fn timer_interrupt_handler(frame: *mut UserInterruptFrame) {
         }
         if domain == DEVICE_WAIT_TEST_DOMAIN {
             DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);
+        } else if object == control_abi::PACKET_OBJECT {
+            if scheduler::timeout_packet_waiter(domain, request) {
+                PACKET_WAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
+                DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);
+                if scheduler::current_domain() != Some(domain) {
+                    let Some(frame) = (unsafe { frame.as_mut() }) else {
+                        return;
+                    };
+                    if let RuntimeAction::Resume {
+                        address_space_root,
+                        fs_base,
+                        ..
+                    } = scheduler::preempt_runtime(
+                        frame,
+                        cpu::USER_CODE_SELECTOR,
+                        cpu::USER_DATA_SELECTOR,
+                        cpu::active_fs_base(),
+                    ) {
+                        let _ = cpu::activate_user_context(address_space_root, fs_base);
+                    }
+                }
+            } else {
+                DEVICE_WAIT_DOMAIN.store(0, Ordering::SeqCst);
+                DEVICE_WAIT_REQUEST.store(0, Ordering::SeqCst);
+                DEVICE_WAIT_OBJECT.store(0, Ordering::SeqCst);
+                DEVICE_WAIT_TIMED_OUT.store(false, Ordering::SeqCst);
+            }
         } else if scheduler::wake_device_completion(domain, object, request, u64::MAX - 2) {
             DEVICE_WAIT_TIMEOUT_COUNT.fetch_add(1, Ordering::SeqCst);
             DEVICE_WAIT_TIMED_OUT.store(true, Ordering::SeqCst);

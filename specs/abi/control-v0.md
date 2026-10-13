@@ -38,7 +38,8 @@ version and an overlap period when practical. Version 4 preserves operations
 0 through 17 and adds the persistent-volume object at operation 18 plus the
 block-device wait at operation 19. Operation 20 is the generation-bound native
 network transmit wait. Operations 21 and 22 publish and consume bounded packet
-objects; operation 23 waits for an exact packet sequence. The
+objects; operation 23 waits indefinitely for an exact packet sequence, and
+operation 24 adds a bounded relative packet-wait deadline. The
 pre-release bootstrap switches atomically to v4 rather than carrying adapters;
 `control-v1.rs`, `control-v2.rs`, and `control-v3.rs` remain frozen as drift
 evidence. The scalar discovery word and

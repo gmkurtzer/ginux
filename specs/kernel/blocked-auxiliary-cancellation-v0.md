@@ -21,7 +21,8 @@ write-only producer, and consumes the exact frame.
 
 ## Limits
 
-Cancellation is explicit and external; there is no packet-wait deadline or
-self-cancellation operation. It applies only to stop-only auxiliary domains and
-does not preempt a running domain. Device-owning domains still require their
-device-specific quiescence and lease-retirement paths before memory release.
+Cancellation is explicit and external; operation 24 separately provides a
+bounded packet-wait deadline, but there is no self-cancellation operation. STOP
+applies only to stop-only auxiliary domains and does not preempt a running
+domain. Device-owning domains still require their device-specific quiescence
+and lease-retirement paths before memory release.

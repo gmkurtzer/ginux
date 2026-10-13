@@ -770,6 +770,34 @@ impl Scheduler {
         true
     }
 
+    fn wake_blocked_domain(&mut self, domain: u64, reason: WaitReason, result: u64) -> bool {
+        let mut blocked_slot = None;
+        for (slot, thread) in self.threads.iter().enumerate() {
+            let Some(thread) = thread else {
+                continue;
+            };
+            if thread.state == State::Blocked
+                && thread.domain == domain
+                && thread.wait == Some(reason)
+            {
+                if blocked_slot.is_some() {
+                    return false;
+                }
+                blocked_slot = Some(slot);
+            }
+        }
+        let Some(slot) = blocked_slot else {
+            return false;
+        };
+        let Some(thread) = self.threads[slot].as_mut() else {
+            return false;
+        };
+        thread.context.rax = result;
+        thread.state = State::Ready;
+        thread.wait = None;
+        true
+    }
+
     fn has_blocked_wait(&self, reason: WaitReason) -> bool {
         self.threads
             .iter()
@@ -1645,6 +1673,44 @@ pub(crate) fn wake_packet_waiter(sender_domain: u64, sequence: u64) -> bool {
     true
 }
 
+pub(crate) fn timeout_packet_waiter(domain: u64, sequence: u64) -> bool {
+    if domain == 0 || sequence == 0 {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(wakes) = runtime.wakes.checked_add(1) else {
+        return false;
+    };
+    let was_idle = runtime.scheduler.current.is_none();
+    if !runtime.scheduler.wake_blocked_domain(
+        domain,
+        WaitReason::PacketAvailable {
+            object: crate::control_abi::PACKET_OBJECT,
+            sequence,
+        },
+        crate::control_abi::PACKET_RESULT_TIMED_OUT,
+    ) {
+        return false;
+    }
+    if was_idle {
+        let Some(scheduled) = runtime.scheduler.schedule_next() else {
+            return false;
+        };
+        if runtime
+            .scheduler
+            .thread(scheduled.id)
+            .map(|thread| thread.domain)
+            != Some(domain)
+        {
+            return false;
+        }
+    }
+    runtime.wakes = wakes;
+    true
+}
+
 pub(crate) fn exit_runtime(
     frame: &mut UserTrapFrame,
     code_selector: u16,
@@ -2001,6 +2067,19 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && cancellable.remove_cancellable_domain(1)
         && !cancellable.has_blocked_wait(packet_wait)
         && cancellable.threads.iter().all(Option::is_none);
+    let mut timed = Scheduler::new();
+    let timed_waiter = timed.create(1, first_context)?;
+    let timed_peer = timed.create(2, second_context)?;
+    let timed_wait_released = timed.schedule_next()?.id == timed_waiter
+        && timed
+            .block_current(timed_waiter, first_context, packet_wait)?
+            .id
+            == timed_peer
+        && timed.has_blocked_wait(packet_wait)
+        && timed.wake_blocked_domain(1, packet_wait, crate::control_abi::PACKET_RESULT_TIMED_OUT)
+        && !timed.has_blocked_wait(packet_wait)
+        && timed.yield_current(timed_peer, second_context)?.id == timed_waiter
+        && timed.thread(timed_waiter)?.context.rax == crate::control_abi::PACKET_RESULT_TIMED_OUT;
     Some(
         generation_valid
             && rollback
@@ -2008,7 +2087,8 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             && replacement_removed
             && staged_not_implicitly_admitted
             && staged_explicitly_started
-            && blocked_auxiliary_cancelled,
+            && blocked_auxiliary_cancelled
+            && timed_wait_released,
     )
 }
 
