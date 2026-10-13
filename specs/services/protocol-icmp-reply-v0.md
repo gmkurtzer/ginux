@@ -18,6 +18,10 @@ rejects publication and a future sequence without modifying its output,
 receives the exact reply, and proves destructive delivery by rejecting replay.
 Capability checks also deny ingress and network-device authority.
 
-The egress consumer is a contract proof, not the virtio-net transmit driver.
-Hardware transmission, egress blocking/wakeup, arbitrary payload policy, rate
-limiting, routing, sockets, and container endpoints remain later milestones.
+An additive network bootstrap v2 proof now gives a fresh measured network
+service egress `READ` plus independent NIC authority. It consumes a second
+reply into confined DMA and transmits it through virtio-net without giving the
+protocol service device authority. See
+[Native Network Protocol Egress Transmit v0](network-egress-transmit-v0.md).
+Egress blocking/wakeup, arbitrary payload policy, rate limiting, routing,
+sockets, and container endpoints remain later milestones.

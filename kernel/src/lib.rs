@@ -3210,6 +3210,26 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: egress packet survived protocol service retirement");
     serial_write("\r\nginux: isolated egress consumer received exact echo reply");
     serial_write("\r\nginux: protocol egress sequence consumed exactly once");
+    if !address_space::verify_native_network_egress_transmit(
+        &network_image,
+        &protocol_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: protocol egress virtio transmit failed\r\n");
+    }
+    serial_write("\r\nginux: protocol service published second ICMP echo reply");
+    serial_write("\r\nginux: network service consumed read-only egress sequence");
+    serial_write("\r\nginux: network service copied echo reply into confined DMA");
+    serial_write("\r\nginux: network service transmitted protocol egress through virtio-net");
+    serial_write("\r\nginux: kernel validated egress descriptor and exact echo reply");
+    serial_write("\r\nginux: protocol-to-device egress retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

@@ -9,14 +9,14 @@ use core::{
 
 use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
-    NativeControlDescriptorV4, NativeNetworkBootV0, NativeNetworkBootV1, NativePacketRequestV0,
-    NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    NativeControlDescriptorV4, NativeNetworkBootV0, NativeNetworkBootV1, NativeNetworkBootV2,
+    NativePacketRequestV0, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
     NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
     NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
     NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED,
-    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
-    NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
+    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
@@ -61,6 +61,11 @@ const FEATURE_ACCESS_PLATFORM: u32 = 1 << 1;
 const RESET_POLL_LIMIT: usize = 100_000;
 const COMPLETION_POLL_LIMIT: usize = 10_000_000;
 const TX_INTERRUPT_REQUEST: u64 = 1;
+const ECHO_REPLY: [u8; 42] = [
+    0x52, 0x55, 0x0a, 0x00, 0x02, 0x02, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x00, 0x45, 0x00,
+    0x00, 0x1c, 0x12, 0x34, 0x40, 0x00, 0x40, 0x01, 0x10, 0x9d, 10, 0, 2, 15, 10, 0, 2, 2, 0x00,
+    0x00, 0x41, 0x0f, 0xbe, 0xef, 0x00, 0x01,
+];
 
 global_asm!(
     r#"
@@ -92,29 +97,49 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         let Some(info) = (unsafe { info.as_ref() }) else {
             fail();
         };
-        let (info, packet_capability, fault_after_packet, packet_batch) = if info.version == 0 {
-            if !info.is_valid_virtio_network() {
-                fail();
-            }
-            (*info, None, false, false)
-        } else {
-            let Some(v1) = (unsafe {
-                (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV1).as_ref()
-            }) else {
-                fail();
+        let (info, packet_capability, fault_after_packet, packet_batch, egress) =
+            if info.version == 0 {
+                if !info.is_valid_virtio_network() {
+                    fail();
+                }
+                (*info, None, false, false, None)
+            } else if info.version == 1 {
+                let Some(v1) = (unsafe {
+                    (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV1).as_ref()
+                }) else {
+                    fail();
+                };
+                if !v1.is_valid_packet_handoff()
+                    || !native_control_abi_supports_packet_handoff(discovery)
+                {
+                    fail();
+                }
+                (
+                    v1.v0_prefix(),
+                    Some(v1.packet_capability),
+                    v1.requests_packet_fault(),
+                    v1.requests_packet_batch(),
+                    None,
+                )
+            } else {
+                let Some(v2) = (unsafe {
+                    (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV2).as_ref()
+                }) else {
+                    fail();
+                };
+                if !v2.is_valid_egress_transmit()
+                    || !native_control_abi_supports_packet_handoff(discovery)
+                {
+                    fail();
+                }
+                (
+                    v2.v0_prefix(),
+                    None,
+                    false,
+                    false,
+                    Some((v2.egress_capability, v2.expected_egress_sequence)),
+                )
             };
-            if !v1.is_valid_packet_handoff()
-                || !native_control_abi_supports_packet_handoff(discovery)
-            {
-                fail();
-            }
-            (
-                v1.v0_prefix(),
-                Some(v1.packet_capability),
-                v1.requests_packet_fault(),
-                v1.requests_packet_batch(),
-            )
-        };
         if info.mac_address != 0x5254_0012_3456
             || probe_network_device(info.device_capability) != NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD
         {
@@ -127,7 +152,9 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
             fail();
         }
         if info.requests_transmit_probe() {
-            let status = if info.requests_arp_probe() {
+            let status = if let Some((capability, sequence)) = egress {
+                unsafe { transmit_egress(&info, capability, sequence) }
+            } else if info.requests_arp_probe() {
                 unsafe { arp_probe(&info, packet_capability, fault_after_packet, packet_batch) }
             } else {
                 unsafe { transmit_probe(&info) }
@@ -203,6 +230,74 @@ unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> Option<u8> {
         if !completed {
             return None;
         }
+    }
+    compiler_fence(Ordering::SeqCst);
+    (read_u16(dma + TX_USED_OFFSET as usize + 2) == 1
+        && read_u32(dma + TX_USED_OFFSET as usize + 4) == 0
+        && read_u8(common + COMMON_DEVICE_STATUS)
+            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK)
+        .then_some(NATIVE_SERVICE_EXIT_COMPLETED)
+}
+
+unsafe fn transmit_egress(
+    info: &NativeNetworkBootV0,
+    egress_capability: u64,
+    expected_sequence: u64,
+) -> Option<u8> {
+    let dma = usize::try_from(info.dma_virtual_address).ok()?;
+    let notification = usize::try_from(info.transmit_notification_address).ok()?;
+    let common = usize::try_from(info.common_config_address).ok()?;
+    let frame = dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH;
+    let future_sequence = expected_sequence.checked_add(1)?;
+    for offset in 0..ECHO_REPLY.len() {
+        write_u8(frame + offset, 0xcc);
+    }
+    let publish = NativePacketRequestV0::publish(frame as u64, ECHO_REPLY.len() as u32);
+    let future =
+        NativePacketRequestV0::consume(frame as u64, ECHO_REPLY.len() as u32, future_sequence);
+    if publish_packet(egress_capability, &publish) != NATIVE_NETWORK_WAIT_FAILED
+        || consume_packet(egress_capability, &future) != NATIVE_PACKET_STALE
+        || (0..ECHO_REPLY.len()).any(|offset| read_u8(frame + offset) != 0xcc)
+    {
+        return None;
+    }
+    let consume =
+        NativePacketRequestV0::consume(frame as u64, ECHO_REPLY.len() as u32, expected_sequence);
+    if consume_packet(egress_capability, &consume) != ECHO_REPLY.len() as u64
+        || !bytes_match(frame, &ECHO_REPLY)
+        || consume_packet(egress_capability, &consume) != NATIVE_NETWORK_WAIT_FAILED
+    {
+        return None;
+    }
+
+    let payload_length = TX_HEADER_LENGTH + ECHO_REPLY.len();
+    write_u64(
+        dma + TX_DESC_OFFSET as usize,
+        info.dma_device_address + TX_BUFFER_OFFSET,
+    );
+    write_u32(dma + TX_DESC_OFFSET as usize + 8, payload_length as u32);
+    write_u16(dma + TX_DESC_OFFSET as usize + 12, 0);
+    write_u16(dma + TX_DESC_OFFSET as usize + 14, 0);
+    for offset in 0..TX_HEADER_LENGTH {
+        write_u8(dma + TX_BUFFER_OFFSET as usize + offset, 0);
+    }
+    write_u8(dma + TX_BUFFER_OFFSET as usize - 1, 0x3c);
+    write_u8(dma + TX_BUFFER_OFFSET as usize + payload_length, 0xc3);
+    write_u16(dma + TX_AVAIL_OFFSET as usize, 0);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 4, 0);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 2, 1);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(notification, 1);
+    match wait_for_tx_interrupt(info.device_capability, TX_INTERRUPT_REQUEST) {
+        0 => {}
+        NATIVE_NETWORK_WAIT_CANCELLED => return Some(NATIVE_SERVICE_EXIT_RESTART_REQUIRED),
+        _ => return None,
+    }
+    if wait_for_tx_interrupt(info.device_capability, TX_INTERRUPT_REQUEST)
+        != NATIVE_NETWORK_WAIT_FAILED
+    {
+        return None;
     }
     compiler_fence(Ordering::SeqCst);
     (read_u16(dma + TX_USED_OFFSET as usize + 2) == 1
@@ -354,8 +449,7 @@ unsafe fn arp_probe(
             ..request
         };
         let sequence = publish_packet(capability, &request);
-        if consume_packet_with_write_capability(capability, &read_request)
-            != NATIVE_NETWORK_WAIT_FAILED
+        if consume_packet(capability, &read_request) != NATIVE_NETWORK_WAIT_FAILED
             || matches!(sequence, 0 | NATIVE_NETWORK_WAIT_FAILED)
         {
             return None;
@@ -584,7 +678,7 @@ fn publish_packet(capability: u64, request: &NativePacketRequestV0) -> u64 {
     result
 }
 
-fn consume_packet_with_write_capability(capability: u64, request: &NativePacketRequestV0) -> u64 {
+fn consume_packet(capability: u64, request: &NativePacketRequestV0) -> u64 {
     let mut result = 22_u64;
     unsafe {
         asm!(

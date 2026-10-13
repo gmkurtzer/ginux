@@ -73,6 +73,16 @@ _Static_assert(offsetof(struct ginux_native_network_boot_v1,
                "network packet capability offset");
 _Static_assert(offsetof(struct ginux_native_network_boot_v1, reserved) == 80,
                "network bootstrap v1 reserved offset");
+_Static_assert(sizeof(struct ginux_native_network_boot_v2) == 96,
+               "network bootstrap v2 size");
+_Static_assert(offsetof(struct ginux_native_network_boot_v2,
+                        egress_capability) == 72,
+               "network egress capability offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v2,
+                        expected_egress_sequence) == 80,
+               "network expected egress sequence offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v2, reserved) == 88,
+               "network bootstrap v2 reserved offset");
 _Static_assert(sizeof(struct ginux_native_packet_request_v0) == 32,
                "native packet request size");
 _Static_assert(offsetof(struct ginux_native_packet_request_v0,
@@ -84,6 +94,8 @@ _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_FAULT == UINT32_C(128),
                "network packet fault feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_BATCH == UINT32_C(256),
                "network packet batch feature bit");
+_Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_EGRESS == UINT32_C(512),
+               "network packet egress feature bit");
 _Static_assert(GINUX_NATIVE_PACKET_QUEUE_CAPACITY == UINT32_C(4),
                "native packet queue capacity");
 _Static_assert(GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF == UINT16_C(2048),

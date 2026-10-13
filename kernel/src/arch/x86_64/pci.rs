@@ -1719,6 +1719,47 @@ pub(crate) fn network_service_transmit_is_complete(dma_physical: u64, dma_virtua
     })
 }
 
+pub(crate) fn network_service_egress_transmit_is_complete(
+    dma_physical: u64,
+    dma_virtual: usize,
+) -> bool {
+    const HEADER_LENGTH: usize = 12;
+    const ICMP_ECHO_REPLY: [u8; 42] = [
+        0x52, 0x55, 0x0a, 0x00, 0x02, 0x02, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x00, 0x45,
+        0x00, 0x00, 0x1c, 0x12, 0x34, 0x40, 0x00, 0x40, 0x01, 0x10, 0x9d, 10, 0, 2, 15, 10, 0, 2,
+        2, 0x00, 0x00, 0x41, 0x0f, 0xbe, 0xef, 0x00, 0x01,
+    ];
+    const PAYLOAD_LENGTH: usize = HEADER_LENGTH + ICMP_ECHO_REPLY.len();
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || read_dma_u64(dma_virtual + NET_TX_DESC_OFFSET)
+            != dma_physical + NET_TX_BUFFER_OFFSET as u64
+        || read_dma_u32(dma_virtual + NET_TX_DESC_OFFSET + 8) != PAYLOAD_LENGTH as u32
+        || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 12) != 0
+        || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 14) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2) != 1
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 4) != 0
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET) & !1 != 0
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) != 1
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4) != 0
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 8) > PAYLOAD_LENGTH as u32
+        || (0..HEADER_LENGTH)
+            .any(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) != 0)
+        || ICMP_ECHO_REPLY.iter().enumerate().any(|(offset, byte)| {
+            read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset) != *byte
+        })
+        || read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET - 1) != 0x3c
+        || read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + PAYLOAD_LENGTH) != 0xc3
+    {
+        return false;
+    }
+    (1..usize::from(QUEUE_SIZE)).all(|descriptor| {
+        (0..16)
+            .all(|byte| read_dma_u8(dma_virtual + NET_TX_DESC_OFFSET + descriptor * 16 + byte) == 0)
+    })
+}
+
 pub(crate) fn network_service_arp_exchange_is_complete(
     dma_physical: u64,
     dma_virtual: usize,

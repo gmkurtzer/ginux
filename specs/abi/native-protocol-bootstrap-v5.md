@@ -28,6 +28,7 @@ capabilities retire. A fresh domain with object 9 `READ` only rejects
 publication and a future sequence, consumes the exact reply, and rejects
 replay.
 
-Version 5 does not connect the egress queue to virtio-net, define egress waits
-or backpressure calls, transmit arbitrary packets, route traffic, or expose a
-socket or container endpoint.
+Version 5 itself grants no device authority. A separate network bootstrap v2
+consumer now connects a subsequent egress sequence to virtio-net while keeping
+that separation. Neither contract defines egress waits or backpressure calls,
+arbitrary packet transmission, routing, sockets, or container endpoints.

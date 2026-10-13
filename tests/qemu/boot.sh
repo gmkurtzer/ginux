@@ -342,6 +342,12 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: egress packet survived protocol service retirement' "$output_file" ||
     ! grep -q '^ginux: isolated egress consumer received exact echo reply' "$output_file" ||
     ! grep -q '^ginux: protocol egress sequence consumed exactly once' "$output_file" ||
+    ! grep -q '^ginux: protocol service published second ICMP echo reply' "$output_file" ||
+    ! grep -q '^ginux: network service consumed read-only egress sequence' "$output_file" ||
+    ! grep -q '^ginux: network service copied echo reply into confined DMA' "$output_file" ||
+    ! grep -q '^ginux: network service transmitted protocol egress through virtio-net' "$output_file" ||
+    ! grep -q '^ginux: kernel validated egress descriptor and exact echo reply' "$output_file" ||
+    ! grep -q '^ginux: protocol-to-device egress retired cleanly' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2

@@ -169,6 +169,14 @@ write-only producer. Removing the head wakes that producer to retry the exact
 next sequence without reserving or mutating a slot during the wake. See
 [Native Network Packet Backpressure v0](network-packet-backpressure-v0.md).
 
+Bootstrap v2 adds a read-only packet-egress capability to a fresh device
+generation. The service rejects publication and future-sequence access,
+consumes the exact protocol-generated ICMP reply into its confined DMA page,
+rejects replay, and transmits the bytes through queue 1. The kernel validates
+the exact descriptor, reply, guards, and MSI-X completion before ordered
+teardown. See
+[Native Network Protocol Egress Transmit v0](network-egress-transmit-v0.md).
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The transmit generation
@@ -179,5 +187,5 @@ FIFO with one bound producer and sequential consumers. Exact-sequence blocking
 is available, control-plane management can stop a blocked consumer, and a
 bounded relative timeout can release its exact sequence. A full FIFO also
 blocks and wakes its bound producer without polling. Self-cancellation,
-concurrent producers, dynamic configuration, and container networking remain
-separate milestones.
+concurrent producers, dynamic configuration, peer reception of the protocol
+egress proof, and container networking remain separate milestones.
