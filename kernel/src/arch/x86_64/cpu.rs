@@ -14384,6 +14384,9 @@ fn dispatch_charged_call(
             frame,
             control_abi::PACKET_EGRESS_OBJECT,
         ),
+        control_abi::PACKET_EGRESS_DRAIN_WAIT_OPERATION => {
+            packet_egress_drain_wait_call(caller_domain, capability, frame)
+        }
         _ => u64::MAX,
     }
 }
@@ -14582,6 +14585,11 @@ fn packet_egress_ack_call(caller_domain: u64, capability: u64, frame: *const Use
             if scheduler::wake_egress_space_waiter(caller_domain) {
                 timer::mark_scheduler_preemption_ready();
             }
+            if crate::packet::egress_is_empty()
+                && scheduler::wake_egress_drain_waiter(caller_domain)
+            {
+                timer::mark_scheduler_preemption_ready();
+            }
             0
         }
         Err(crate::packet::PacketError::Stale) => control_abi::PACKET_RESULT_STALE,
@@ -14749,6 +14757,47 @@ fn packet_space_wait_call_for_object(
                 resume_action(action)
             }
         }
+    }
+}
+
+fn packet_egress_drain_wait_call(
+    caller_domain: u64,
+    capability: u64,
+    frame: *mut UserTrapFrame,
+) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return u64::MAX - 2;
+    };
+    if frame.first_argument() != 0
+        || frame.second_argument() != 0
+        || !domain::handle_permits(
+            caller_domain,
+            capability,
+            control_abi::PACKET_EGRESS_OBJECT,
+            Rights::WRITE,
+        )
+    {
+        return u64::MAX - 2;
+    }
+    if crate::packet::egress_is_empty() {
+        return 0;
+    }
+    if !scheduler::egress_drain_wait_is_available() {
+        return u64::MAX - 2;
+    }
+    let action = scheduler::block_runtime(
+        frame,
+        USER_CODE_SELECTOR,
+        USER_DATA_SELECTOR,
+        scheduler::WaitReason::PacketQueueDrained {
+            object: control_abi::PACKET_EGRESS_OBJECT,
+        },
+        active_fs_base(),
+    );
+    if matches!(action, RuntimeAction::Invalid) {
+        u64::MAX - 2
+    } else {
+        resume_action(action)
     }
 }
 

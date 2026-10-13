@@ -3331,6 +3331,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: validated device progress renewed service call epochs");
     serial_write("\r\nginux: four network interrupt generations advanced in order");
     serial_write("\r\nginux: resident reliable egress batch retired cleanly");
+    if !address_space::verify_native_network_egress_resident_stop(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: resident reliable egress stop failed\r\n");
+    }
+    serial_write("\r\nginux: resident network service blocked on fifth sequence");
+    serial_write("\r\nginux: control plane stopped resident network service");
+    serial_write("\r\nginux: resident stop quiesced device before DMA retirement");
+    serial_write("\r\nginux: resident egress wait and authority retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

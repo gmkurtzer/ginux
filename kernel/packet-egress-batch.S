@@ -9,6 +9,7 @@ ginux_packet_egress_batch_producer_start:
     sub rsp, 0x90
     mov qword ptr [rsp + 0x70], r14
     mov qword ptr [rsp + 0x78], r12
+    mov qword ptr [rsp + 0x80], r8
 
     # A write-only producer cannot use the consumer wait operation.
     mov qword ptr [rsp], 0x20
@@ -59,6 +60,20 @@ ginux_packet_egress_batch_producer_start:
     cmp r13, 4
     jb .egress_batch_publish
 
+    # A supervised resident proof parks this producer until all four replies
+    # have been acknowledged. The final wake lets the driver block on the
+    # following sequence before producer exit returns control to the kernel.
+    cmp qword ptr [rsp + 0x80], 0
+    je .egress_batch_complete
+    mov rdi, r14
+    xor esi, esi
+    xor edx, edx
+    mov eax, 30
+    int 0x80
+    test rax, rax
+    jne .egress_batch_failed
+
+.egress_batch_complete:
     mov esi, 64
     mov eax, 2
     int 0x80

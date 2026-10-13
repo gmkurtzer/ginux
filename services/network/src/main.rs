@@ -11,15 +11,15 @@ use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
     NativeControlDescriptorV4, NativeNetworkBootV0, NativeNetworkBootV1, NativeNetworkBootV2,
     NativeNetworkBootV3, NativeNetworkBootV4, NativeNetworkBootV5, NativeNetworkBootV6,
-    NativePacketRequestV0, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
-    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
-    NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
-    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
-    NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED,
-    NATIVE_PACKET_EGRESS_ACK_OPERATION, NATIVE_PACKET_EGRESS_CLAIM_OPERATION,
-    NATIVE_PACKET_EGRESS_WAIT_OPERATION, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
-    NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
+    NativeNetworkBootV7, NativePacketRequestV0, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
+    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
+    NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES, NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD,
+    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED,
+    NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED,
+    NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_EGRESS_ACK_OPERATION,
+    NATIVE_PACKET_EGRESS_CLAIM_OPERATION, NATIVE_PACKET_EGRESS_WAIT_OPERATION,
+    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
@@ -249,6 +249,31 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         4,
                     )),
                 )
+            } else if info.version == 7 {
+                let Some(v7) = (unsafe {
+                    (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV7).as_ref()
+                }) else {
+                    fail();
+                };
+                if !v7.is_valid_resident_reliable_egress_loop()
+                    || !native_control_abi_supports_packet_handoff(discovery)
+                {
+                    fail();
+                }
+                (
+                    v7.v0_prefix(),
+                    None,
+                    false,
+                    false,
+                    Some((
+                        v7.egress_capability,
+                        v7.expected_egress_sequence,
+                        true,
+                        false,
+                        true,
+                        0,
+                    )),
+                )
             } else {
                 fail();
             };
@@ -378,10 +403,11 @@ unsafe fn transmit_egress(
     wait: bool,
     transmissions: u64,
 ) -> Option<u8> {
-    if !(1..=u64::from(QUEUE_SIZE)).contains(&transmissions) {
+    if transmissions > u64::from(QUEUE_SIZE) {
         return None;
     }
-    for index in 0..transmissions {
+    let mut index = 0_u64;
+    loop {
         let sequence = expected_sequence.checked_add(index)?;
         let request = index.checked_add(1)?;
         let status = transmit_egress_packet(
@@ -396,8 +422,11 @@ unsafe fn transmit_egress(
         if status != NATIVE_SERVICE_EXIT_COMPLETED {
             return Some(status);
         }
+        index = index.checked_add(1)?;
+        if transmissions != 0 && index == transmissions {
+            return Some(NATIVE_SERVICE_EXIT_COMPLETED);
+        }
     }
-    Some(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
 unsafe fn transmit_egress_packet(

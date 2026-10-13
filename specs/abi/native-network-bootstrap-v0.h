@@ -21,6 +21,7 @@
 #define GINUX_NATIVE_NETWORK_FEATURE_EGRESS_WAIT UINT32_C(4096)
 #define GINUX_NATIVE_NETWORK_FEATURE_EGRESS_REUSE UINT32_C(8192)
 #define GINUX_NATIVE_NETWORK_FEATURE_EGRESS_BATCH UINT32_C(16384)
+#define GINUX_NATIVE_NETWORK_FEATURE_EGRESS_RESIDENT UINT32_C(32768)
 #define GINUX_NATIVE_NETWORK_BOOT_V1_VERSION UINT16_C(1)
 #define GINUX_NATIVE_NETWORK_BOOT_V1_SIZE UINT16_C(88)
 #define GINUX_NATIVE_NETWORK_BOOT_V2_VERSION UINT16_C(2)
@@ -33,6 +34,8 @@
 #define GINUX_NATIVE_NETWORK_BOOT_V5_SIZE UINT16_C(96)
 #define GINUX_NATIVE_NETWORK_BOOT_V6_VERSION UINT16_C(6)
 #define GINUX_NATIVE_NETWORK_BOOT_V6_SIZE UINT16_C(96)
+#define GINUX_NATIVE_NETWORK_BOOT_V7_VERSION UINT16_C(7)
+#define GINUX_NATIVE_NETWORK_BOOT_V7_SIZE UINT16_C(96)
 #define GINUX_NATIVE_PACKET_PUBLISH_OPERATION UINT64_C(21)
 #define GINUX_NATIVE_PACKET_CONSUME_OPERATION UINT64_C(22)
 #define GINUX_NATIVE_PACKET_WAIT_OPERATION UINT64_C(23)
@@ -42,6 +45,7 @@
 #define GINUX_NATIVE_PACKET_EGRESS_ACK_OPERATION UINT64_C(27)
 #define GINUX_NATIVE_PACKET_EGRESS_WAIT_OPERATION UINT64_C(28)
 #define GINUX_NATIVE_PACKET_EGRESS_SPACE_WAIT_OPERATION UINT64_C(29)
+#define GINUX_NATIVE_PACKET_EGRESS_DRAIN_WAIT_OPERATION UINT64_C(30)
 #define GINUX_NATIVE_PACKET_REQUEST_VERSION UINT16_C(0)
 #define GINUX_NATIVE_PACKET_REQUEST_SIZE UINT32_C(32)
 #define GINUX_NATIVE_PACKET_MAX_SIZE UINT32_C(1514)
@@ -191,6 +195,25 @@ struct ginux_native_network_boot_v6 {
 
 _Static_assert(sizeof(struct ginux_native_network_boot_v6) == 96,
                "ginux native network bootstrap v6 size");
+struct ginux_native_network_boot_v7 {
+    uint64_t magic;
+    uint16_t version;
+    uint16_t size;
+    uint32_t features;
+    uint64_t common_config_address;
+    uint64_t receive_notification_address;
+    uint64_t transmit_notification_address;
+    uint64_t dma_virtual_address;
+    uint64_t dma_device_address;
+    uint64_t device_capability;
+    uint64_t mac_address;
+    uint64_t egress_capability;
+    uint64_t expected_egress_sequence;
+    uint64_t reserved;
+};
+
+_Static_assert(sizeof(struct ginux_native_network_boot_v7) == 96,
+               "ginux native network bootstrap v7 size");
 _Static_assert(sizeof(struct ginux_native_packet_request_v0) == 32,
                "ginux native packet request v0 size");
 

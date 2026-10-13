@@ -44,6 +44,9 @@ pub(crate) enum WaitReason {
     PacketSpaceAvailable {
         object: u64,
     },
+    PacketQueueDrained {
+        object: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -1739,6 +1742,40 @@ pub(crate) fn wake_egress_space_waiter(sender_domain: u64) -> bool {
     wake_packet_object_space_waiter(sender_domain, crate::control_abi::PACKET_EGRESS_OBJECT)
 }
 
+pub(crate) fn egress_drain_wait_is_available() -> bool {
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    !runtime
+        .scheduler
+        .has_blocked_wait(WaitReason::PacketQueueDrained {
+            object: crate::control_abi::PACKET_EGRESS_OBJECT,
+        })
+}
+
+pub(crate) fn wake_egress_drain_waiter(sender_domain: u64) -> bool {
+    if sender_domain == 0 {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(wakes) = runtime.wakes.checked_add(1) else {
+        return false;
+    };
+    if !runtime.scheduler.wake_blocked_peer(
+        sender_domain,
+        WaitReason::PacketQueueDrained {
+            object: crate::control_abi::PACKET_EGRESS_OBJECT,
+        },
+        0,
+    ) {
+        return false;
+    }
+    runtime.wakes = wakes;
+    true
+}
+
 fn wake_packet_object_space_waiter(sender_domain: u64, object: u64) -> bool {
     if sender_domain == 0 {
         return false;
@@ -2253,6 +2290,24 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
         && packet_space_objects.thread(ingress_producer)?.state == State::Blocked
         && packet_space_objects.thread(egress_producer)?.state == State::Ready
         && packet_space_objects.thread(egress_producer)?.context.rax == 0;
+    let mut packet_drain = Scheduler::new();
+    let drain_producer = packet_drain.create(1, first_context)?;
+    let drain_consumer = packet_drain.create(2, second_context)?;
+    let drain_wait = WaitReason::PacketQueueDrained {
+        object: crate::control_abi::PACKET_EGRESS_OBJECT,
+    };
+    let packet_drain_wake_exact = packet_drain.schedule_next()?.id == drain_producer
+        && packet_drain
+            .block_current(drain_producer, first_context, drain_wait)?
+            .id
+            == drain_consumer
+        && packet_drain.has_blocked_wait(drain_wait)
+        && !packet_drain.wake_blocked_peer(2, egress_space_wait, 0)
+        && packet_drain.has_blocked_wait(drain_wait)
+        && packet_drain.wake_blocked_peer(2, drain_wait, 0)
+        && !packet_drain.has_blocked_wait(drain_wait)
+        && packet_drain.thread(drain_producer)?.state == State::Ready
+        && packet_drain.thread(drain_producer)?.context.rax == 0;
     Some(
         generation_valid
             && rollback
@@ -2264,7 +2319,8 @@ fn verify_scheduler_invariants_inner() -> Option<bool> {
             && timed_wait_released
             && packet_space_wake_exact
             && packet_object_wake_exact
-            && packet_space_object_wake_exact,
+            && packet_space_object_wake_exact
+            && packet_drain_wake_exact,
     )
 }
 

@@ -377,6 +377,10 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: validated device progress renewed service call epochs' "$output_file" ||
     ! grep -q '^ginux: four network interrupt generations advanced in order' "$output_file" ||
     ! grep -q '^ginux: resident reliable egress batch retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: resident network service blocked on fifth sequence' "$output_file" ||
+    ! grep -q '^ginux: control plane stopped resident network service' "$output_file" ||
+    ! grep -q '^ginux: resident stop quiesced device before DMA retirement' "$output_file" ||
+    ! grep -q '^ginux: resident egress wait and authority retired cleanly' "$output_file" ||
     ! grep -q '^ginux: ingress and egress space-wait keys isolated' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then

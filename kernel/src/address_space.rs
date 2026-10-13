@@ -4503,6 +4503,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_network_boot_info_v7(&self, info: ginux_native_abi::NativeNetworkBootV7) -> bool {
+        if !info.is_valid_resident_reliable_egress_loop() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeNetworkBootV7>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn write_protocol_boot_info(&self, info: ginux_native_abi::NativeProtocolBootV0) -> bool {
         if !info.is_valid_arp_consumer() {
             return false;
@@ -4827,6 +4842,7 @@ enum NativeNetworkRunMode {
     ReliableEgressAckBackpressure,
     ReliableEgressReuse,
     ReliableEgressBatch,
+    ReliableEgressResident,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -5215,6 +5231,43 @@ pub(crate) fn verify_native_network_egress_batch(
         initialization,
         iommu_profile,
         NativeNetworkRunMode::ReliableEgressBatch,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    ) {
+        return false;
+    }
+    packet::egress_pending_metadata().is_none()
+        && packet::egress_claim().is_none()
+        && packet::egress_next_sequence() == expected_sequence.checked_add(4)
+        && packet::egress_last_delivery().is_some_and(|metadata| {
+            metadata.sequence == expected_sequence + 3 && metadata.length == 42
+        })
+}
+
+pub(crate) fn verify_native_network_egress_resident_stop(
+    network_image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    interrupt: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
+) -> bool {
+    let (common_mapping, msix_mapping, apic) = interrupt;
+    let Some(expected_sequence) = packet::egress_next_sequence() else {
+        return false;
+    };
+    if expected_sequence == 0
+        || expected_sequence.checked_add(4).is_none()
+        || packet::egress_pending_metadata().is_some()
+        || packet::egress_claim().is_some()
+    {
+        return false;
+    }
+    if !verify_native_network_bootstrap_run(
+        network_image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReliableEgressResident,
         Some(common_mapping),
         Some((msix_mapping, apic)),
     ) {
@@ -7088,6 +7141,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressAckBackpressure
             | NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
+            | NativeNetworkRunMode::ReliableEgressResident
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -7126,6 +7180,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressAckBackpressure
             | NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
+            | NativeNetworkRunMode::ReliableEgressResident
     );
     let reliable_egress = matches!(
         mode,
@@ -7135,6 +7190,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressAckBackpressure
             | NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
+            | NativeNetworkRunMode::ReliableEgressResident
     );
     let egress_fault = mode == NativeNetworkRunMode::ReliableEgressFault;
     let egress_wait = matches!(
@@ -7143,13 +7199,20 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReliableEgressAckBackpressure
             | NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
+            | NativeNetworkRunMode::ReliableEgressResident
     );
     let egress_ack_backpressure = mode == NativeNetworkRunMode::ReliableEgressAckBackpressure;
     let egress_reuse = matches!(
         mode,
-        NativeNetworkRunMode::ReliableEgressReuse | NativeNetworkRunMode::ReliableEgressBatch
+        NativeNetworkRunMode::ReliableEgressReuse
+            | NativeNetworkRunMode::ReliableEgressBatch
+            | NativeNetworkRunMode::ReliableEgressResident
     );
-    let egress_batch = mode == NativeNetworkRunMode::ReliableEgressBatch;
+    let egress_batch = matches!(
+        mode,
+        NativeNetworkRunMode::ReliableEgressBatch | NativeNetworkRunMode::ReliableEgressResident
+    );
+    let egress_resident = mode == NativeNetworkRunMode::ReliableEgressResident;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -7328,7 +7391,19 @@ fn verify_native_network_bootstrap_run(
             }
         }
     }
-    let boot_written = if egress_batch {
+    let boot_written = if egress_resident {
+        packet_handle.is_some_and(|packet_handle| {
+            packet::egress_next_sequence().is_some_and(|sequence| {
+                space.write_network_boot_info_v7(
+                    ginux_native_abi::NativeNetworkBootV7::resident_reliable_egress_loop(
+                        boot,
+                        packet_handle,
+                        sequence,
+                    ),
+                )
+            })
+        })
+    } else if egress_batch {
         packet_handle.is_some_and(|packet_handle| {
             packet::egress_next_sequence().is_some_and(|sequence| {
                 space.write_network_boot_info_v6(
@@ -7522,13 +7597,27 @@ fn verify_native_network_bootstrap_run(
             producer.stack,
             producer.handle,
             sequence,
-            false,
+            egress_resident,
             producer.domain,
             producer.identity,
         );
     } else {
         cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     }
+    let resident_wait_blocked = !egress_resident
+        || packet::egress_next_sequence()
+            .is_some_and(|sequence| !scheduler::egress_wait_is_available(sequence));
+    let resident_stopped = if egress_resident {
+        let (Some(supervisor), Some(manage_handle)) = (
+            domain::control_plane_id(),
+            domain::control_plane_boot_handle(0),
+        ) else {
+            return false;
+        };
+        stop_auxiliary_from_current_user(supervisor, manage_handle, auxiliary)
+    } else {
+        true
+    };
     let packet_retired = !packet_handoff || packet::retire_producer(auxiliary);
     let egress_producer_retired = egress_producer
         .as_ref()
@@ -7569,6 +7658,8 @@ fn verify_native_network_bootstrap_run(
         || egress_fault;
     let expected_kind = if expected_fault {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
+    } else if egress_resident {
+        crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
     } else {
         crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
     };
@@ -7657,7 +7748,11 @@ fn verify_native_network_bootstrap_run(
     let fault_ordering_valid =
         !(fail_after_activation || corrupt_network_receive || packet_fault || egress_fault)
             || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
+    let stop_ordering_valid =
+        !egress_resident || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
     execution_retired
+        && resident_wait_blocked
+        && resident_stopped
         && packet_retired
         && egress_producer_retired
         && lifecycle_valid
@@ -7666,6 +7761,7 @@ fn verify_native_network_bootstrap_run(
         && interrupt_retired
         && parser_fault_valid
         && fault_ordering_valid
+        && stop_ordering_valid
 }
 
 pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
@@ -7824,6 +7920,7 @@ pub(crate) fn stop_auxiliary_from_current_user(
         && packet::retire_producer_if_bound(domain_id)
         && packet::retire_egress_producer_if_bound(domain_id)
         && timer::cancel_packet_wait_timer_for_domain(domain_id)
+        && quiesce_faulted_auxiliary_device(domain_id)
         && release_auxiliary_address_space(domain_id)
         && domain::stop_auxiliary_service(supervisor, capability, domain_id)
 }

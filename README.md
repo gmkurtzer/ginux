@@ -533,6 +533,16 @@ advance from one through four, and every packet retains independent
 claim/completion/acknowledgement ordering before complete teardown. See
 [Native Network Service Bootstrap ABI v6](specs/abi/native-network-bootstrap-v6.md).
 
+Network bootstrap ABI v7 makes that service genuinely resident. After four
+reliable transmissions it advances to sequence five and blocks indefinitely
+on the empty FIFO. The write-only producer waits for complete drain without
+remaining runnable during device interrupts, then exits only after the service
+has installed its next exact wait. The persistent control plane stops the
+blocked driver; the kernel cancels its wait, quiesces the still-active NIC, and
+retires interrupt, VT-d, DMA, capability, address-space, and domain state in
+order. See
+[Native Network Service Bootstrap ABI v7](specs/abi/native-network-bootstrap-v7.md).
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected

@@ -31,6 +31,14 @@ when the IPC object, endpoint direction, and expected peer generation exactly
 match the saved wait key. Object, direction, or generation mismatches leave the
 waiter unchanged. Waking does not grant authority or attach a new thread.
 
+Packet scheduling uses distinct exact wait reasons for ingress availability,
+egress availability, ingress/egress space, and complete egress drain. Only the
+currently bound object-9 write-only producer may install the single drain wait.
+Removing an intermediate queue head leaves it blocked; acknowledgement of the
+final head wakes it without granting a packet reservation. This lets a
+resident device service perform interrupt-idle waits with no competing runnable
+producer and later block on the next exact sequence before that producer exits.
+
 The scheduler also models a distinct interrupt-idle transition for an exact
 device object, domain generation, and request generation. It is admitted only
 when the caller is the current running thread and no other thread is ready or

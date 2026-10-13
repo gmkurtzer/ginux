@@ -202,17 +202,29 @@ events, advances four queue and interrupt generations, and acknowledges every
 sequence only after its own completion. See
 [Native Network Service Bootstrap ABI v6](../abi/native-network-bootstrap-v6.md).
 
+Bootstrap v7 converts that bounded batch into the resident driver lifecycle.
+A zero transmission count loops over exact egress sequences indefinitely. The
+proof drains four replies, then leaves the service blocked on sequence five.
+Its write-only producer remains dormant through operation 30 until the final
+acknowledgement empties the FIFO, so it cannot interfere with any synchronous
+device wait. After the producer exits, the persistent control plane stops the
+blocked driver. Stop cancels its wait and quiesces the active NIC before
+retiring interrupt, VT-d, DMA, capability, address-space, and domain state.
+See [Native Network Service Bootstrap ABI v7](../abi/native-network-bootstrap-v7.md).
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The basic transmit
 generation sends one fixed probe, while the latest reliable-egress generation
-reuses one descriptor for exactly four fixed replies. The receive generation
+reuses one descriptor for fixed replies and can remain blocked for future work
+until externally stopped. The receive generation
 performs only one fixed ARP exchange with the deterministic QEMU gateway; the
 replenishment generation reuses one descriptor exactly once. Packet handoff is one copied four-entry
 FIFO with one bound producer and sequential consumers. Exact-sequence blocking
 is available, control-plane management can stop a blocked consumer, and a
 bounded relative timeout can release its exact sequence. A full FIFO also
-blocks and wakes its bound producer without polling. Self-cancellation,
-concurrent producers, an unbounded service loop, dynamic configuration, claim
+blocks and wakes its bound producer without polling, and its producer can wait
+for complete drain. Self-cancellation, concurrent producers, graceful drain,
+state handoff, dynamic configuration, claim
 deadlines, peer reception of the protocol egress proof, and container
 networking remain separate milestones.
