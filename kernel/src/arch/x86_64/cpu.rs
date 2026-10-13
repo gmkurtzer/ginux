@@ -1523,6 +1523,32 @@ pub(crate) fn execute_auxiliary(
     };
 }
 
+pub(crate) fn execute_packet_consumer(
+    entry: usize,
+    stack: usize,
+    packet_handle: u64,
+    expected_sequence: u64,
+    domain_id: u64,
+    service_identity: u64,
+) {
+    if !install_current_scheduler_fs_base() {
+        return;
+    }
+    unsafe {
+        ginux_user_enter(
+            entry,
+            stack,
+            expected_sequence,
+            packet_handle,
+            0,
+            4,
+            domain_id,
+            service_identity,
+            0,
+        )
+    };
+}
+
 pub(crate) fn execute_native_auxiliary(
     entry: usize,
     stack: usize,

@@ -146,6 +146,10 @@ write-only packet capability. After validating the second reply, it copies the
 consumer receives the packet after complete driver and DMA retirement without
 receiving any device authority. See
 [Native Network Packet Handoff v0](network-packet-handoff-v0.md).
+An explicit test-only v1 feature then faults a new producer immediately after
+publishing sequence two. Fault containment tears down the still-active device
+generation while preserving the copied packet for another fresh read-only
+consumer.
 
 ## Deliberate limits
 

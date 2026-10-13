@@ -92,11 +92,11 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         let Some(info) = (unsafe { info.as_ref() }) else {
             fail();
         };
-        let (info, packet_capability) = if info.version == 0 {
+        let (info, packet_capability, fault_after_packet) = if info.version == 0 {
             if !info.is_valid_virtio_network() {
                 fail();
             }
-            (*info, None)
+            (*info, None, false)
         } else {
             let Some(v1) = (unsafe {
                 (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV1).as_ref()
@@ -108,7 +108,11 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
             {
                 fail();
             }
-            (v1.v0_prefix(), Some(v1.packet_capability))
+            (
+                v1.v0_prefix(),
+                Some(v1.packet_capability),
+                v1.requests_packet_fault(),
+            )
         };
         if info.mac_address != 0x5254_0012_3456
             || probe_network_device(info.device_capability) != NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD
@@ -123,7 +127,7 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         }
         if info.requests_transmit_probe() {
             let status = if info.requests_arp_probe() {
-                unsafe { arp_probe(&info, packet_capability) }
+                unsafe { arp_probe(&info, packet_capability, fault_after_packet) }
             } else {
                 unsafe { transmit_probe(&info) }
             };
@@ -207,7 +211,11 @@ unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> Option<u8> {
         .then_some(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
-unsafe fn arp_probe(info: &NativeNetworkBootV0, packet_capability: Option<u64>) -> Option<u8> {
+unsafe fn arp_probe(
+    info: &NativeNetworkBootV0,
+    packet_capability: Option<u64>,
+    fault_after_packet: bool,
+) -> Option<u8> {
     const ARP_REQUEST: [u8; 60] = [
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
         0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 10, 0, 2, 15,
@@ -338,6 +346,9 @@ unsafe fn arp_probe(info: &NativeNetworkBootV0, packet_capability: Option<u64>) 
             || publish_packet(capability, &request) != NATIVE_NETWORK_WAIT_FAILED
         {
             return None;
+        }
+        if fault_after_packet {
+            fail();
         }
     }
     Some(NATIVE_SERVICE_EXIT_COMPLETED)

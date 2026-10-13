@@ -25,3 +25,11 @@ This milestone establishes the protected boundary between a disposable device
 driver and a non-device packet consumer. It does not yet provide a persistent
 control-plane event loop or a container network endpoint. See
 [Native Network Service Bootstrap ABI v1](../abi/native-network-bootstrap-v1.md).
+
+A second generation repeats publication as sequence two and then takes its
+compiled fatal `HLT` path while queues, MSI-X, bus mastering, and translation
+are live. The kernel records the ring-3 fault, quiesces the device before
+retiring VT-d and DMA, revokes both producer capabilities, and deliberately
+retains the copied packet. Another fresh read-only consumer validates and
+consumes sequence two. This proves packet lifetime is independent of both clean
+producer exit and producer failure.

@@ -4603,6 +4603,7 @@ enum NativeNetworkRunMode {
     ReceiveArpMalformed,
     ReceiveArpReuse,
     PacketHandoff,
+    PacketHandoffFault,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4821,12 +4822,53 @@ pub(crate) fn verify_native_network_packet_handoff(
     msix_mapping: paging::MmioMapping,
     apic: &LocalApic,
 ) -> bool {
+    verify_native_network_packet_handoff_mode(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        (common_mapping, msix_mapping, apic),
+        NativeNetworkRunMode::PacketHandoff,
+        1,
+    )
+}
+
+pub(crate) fn verify_native_network_packet_fault_handoff(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    verify_native_network_packet_handoff_mode(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        (common_mapping, msix_mapping, apic),
+        NativeNetworkRunMode::PacketHandoffFault,
+        2,
+    )
+}
+
+fn verify_native_network_packet_handoff_mode(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    hardware: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
+    mode: NativeNetworkRunMode,
+    expected_sequence: u64,
+) -> bool {
+    let (common_mapping, msix_mapping, apic) = hardware;
     if !verify_native_network_bootstrap_run(
         image,
         device,
         initialization,
         iommu_profile,
-        NativeNetworkRunMode::PacketHandoff,
+        mode,
         Some(common_mapping),
         Some((msix_mapping, apic)),
     ) {
@@ -4835,13 +4877,16 @@ pub(crate) fn verify_native_network_packet_handoff(
     let Some(expected) = packet::pending_metadata() else {
         return false;
     };
-    expected.sequence == 1
+    expected.sequence == expected_sequence
         && expected.length == 42
-        && verify_ring3_packet_consumer()
+        && verify_ring3_packet_consumer(expected.sequence)
         && packet::last_delivery() == Some(expected)
 }
 
-fn verify_ring3_packet_consumer() -> bool {
+fn verify_ring3_packet_consumer(expected_sequence: u64) -> bool {
+    if expected_sequence == 0 || expected_sequence == u64::MAX {
+        return false;
+    }
     let Some(program) = volume_program(
         ginux_packet_consumer_start as *const () as usize,
         ginux_packet_consumer_end as *const () as usize,
@@ -4901,7 +4946,7 @@ fn verify_ring3_packet_consumer() -> bool {
     {
         return false;
     }
-    cpu::execute_auxiliary(entry, stack, handle, auxiliary, identity);
+    cpu::execute_packet_consumer(entry, stack, handle, expected_sequence, auxiliary, identity);
     let event = domain::take_lifecycle_event();
     current_root() == kernel_root
         && scheduler::current_domain().is_none()
@@ -4946,6 +4991,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReceiveArpMalformed
             | NativeNetworkRunMode::ReceiveArpReuse
             | NativeNetworkRunMode::PacketHandoff
+            | NativeNetworkRunMode::PacketHandoffFault
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -4956,13 +5002,20 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReceiveArpMalformed
             | NativeNetworkRunMode::ReceiveArpReuse
             | NativeNetworkRunMode::PacketHandoff
+            | NativeNetworkRunMode::PacketHandoffFault
     );
     let corrupt_network_receive = mode == NativeNetworkRunMode::ReceiveArpMalformed;
     let receive_reuse = matches!(
         mode,
-        NativeNetworkRunMode::ReceiveArpReuse | NativeNetworkRunMode::PacketHandoff
+        NativeNetworkRunMode::ReceiveArpReuse
+            | NativeNetworkRunMode::PacketHandoff
+            | NativeNetworkRunMode::PacketHandoffFault
     );
-    let packet_handoff = mode == NativeNetworkRunMode::PacketHandoff;
+    let packet_handoff = matches!(
+        mode,
+        NativeNetworkRunMode::PacketHandoff | NativeNetworkRunMode::PacketHandoffFault
+    );
+    let packet_fault = mode == NativeNetworkRunMode::PacketHandoffFault;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -5112,10 +5165,11 @@ fn verify_native_network_bootstrap_run(
     }
     let boot_written = if packet_handoff {
         packet_handle.is_some_and(|packet_handle| {
-            space.write_network_boot_info_v1(ginux_native_abi::NativeNetworkBootV1::from_v0(
-                boot,
-                packet_handle,
-            ))
+            let mut boot = ginux_native_abi::NativeNetworkBootV1::from_v0(boot, packet_handle);
+            if packet_fault {
+                boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_PACKET_FAULT;
+            }
+            space.write_network_boot_info_v1(boot)
         })
     } else if reject_reserved {
         !boot.is_valid_virtio_network() && space.write_network_boot_info_raw(boot)
@@ -5186,7 +5240,7 @@ fn verify_native_network_bootstrap_run(
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     let packet_retired = !packet_handoff || packet::retire_producer(auxiliary);
     let event = domain::take_lifecycle_event();
-    let parser_fault_valid = !corrupt_network_receive
+    let parser_fault_valid = !(corrupt_network_receive || packet_fault)
         || domain::delivered_fault_descriptor().and_then(|descriptor| {
             let vector = descriptor
                 .get(6..8)
@@ -5203,7 +5257,8 @@ fn verify_native_network_bootstrap_run(
                 image.byte_at_virtual(relative),
             ))
         }) == Some((13, true, Some(0xf4)));
-    let expected_fault = reject_reserved || fail_after_activation || corrupt_network_receive;
+    let expected_fault =
+        reject_reserved || fail_after_activation || corrupt_network_receive || packet_fault;
     let expected_kind = if expected_fault {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
     } else {
@@ -5243,7 +5298,7 @@ fn verify_native_network_bootstrap_run(
         && iommu_evidence.is_none_or(iommu::TranslationEvidence::is_retired)
         && pci::network_function_is_disabled(device);
     let interrupt_retired = pci::network_msix_is_disabled(device);
-    let fault_ordering_valid = !(fail_after_activation || corrupt_network_receive)
+    let fault_ordering_valid = !(fail_after_activation || corrupt_network_receive || packet_fault)
         || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
     execution_retired
         && packet_retired

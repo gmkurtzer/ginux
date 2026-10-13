@@ -44,6 +44,15 @@ and DMA retirement. A distinct ring-3 consumer has packet `READ` only, no
 packet `WRITE`, and no network-device authority; it validates all bytes and
 can consume the sequence only once.
 
+Optional feature bit seven `PACKET_FAULT` requires bit six and is accepted only
+with the otherwise complete v1 feature set. It is a test-only request for the
+measured producer to execute its ordinary fatal path immediately after a
+successful publication. The copied packet remains sequence two while fault
+containment resets the live NIC, retires both interrupt routes and VT-d, scrubs
+DMA, and revokes the producer's capabilities. A fresh read-only consumer then
+receives the exact packet. No public operation can inject this feature into an
+already running generation.
+
 ## Limits
 
 There is one global slot, one producer generation, and a maximum Ethernet

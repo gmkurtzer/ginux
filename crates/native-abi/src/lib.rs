@@ -14,6 +14,7 @@ pub const NATIVE_NETWORK_FEATURE_TX_INTERRUPT: u32 = 1 << 3;
 pub const NATIVE_NETWORK_FEATURE_ARP_PROBE: u32 = 1 << 4;
 pub const NATIVE_NETWORK_FEATURE_RX_REUSE: u32 = 1 << 5;
 pub const NATIVE_NETWORK_FEATURE_PACKET_HANDOFF: u32 = 1 << 6;
+pub const NATIVE_NETWORK_FEATURE_PACKET_FAULT: u32 = 1 << 7;
 pub const NATIVE_NETWORK_BOOT_V1_VERSION: u16 = 1;
 pub const NATIVE_NETWORK_BOOT_V1_SIZE: u16 = 88;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
@@ -300,7 +301,7 @@ impl NativeNetworkBootV1 {
         self.magic == NATIVE_NETWORK_BOOT_MAGIC
             && self.version == NATIVE_NETWORK_BOOT_V1_VERSION
             && self.size == NATIVE_NETWORK_BOOT_V1_SIZE
-            && self.features
+            && (self.features
                 == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
                     | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
                     | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
@@ -308,6 +309,15 @@ impl NativeNetworkBootV1 {
                     | NATIVE_NETWORK_FEATURE_ARP_PROBE
                     | NATIVE_NETWORK_FEATURE_RX_REUSE
                     | NATIVE_NETWORK_FEATURE_PACKET_HANDOFF
+                || self.features
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                        | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                        | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
+                        | NATIVE_NETWORK_FEATURE_ARP_PROBE
+                        | NATIVE_NETWORK_FEATURE_RX_REUSE
+                        | NATIVE_NETWORK_FEATURE_PACKET_HANDOFF
+                        | NATIVE_NETWORK_FEATURE_PACKET_FAULT)
             && self.common_config_address != 0
             && self.receive_notification_address != 0
             && self.transmit_notification_address != 0
@@ -326,7 +336,8 @@ impl NativeNetworkBootV1 {
             magic: self.magic,
             version: NATIVE_NETWORK_BOOT_VERSION,
             size: NATIVE_NETWORK_BOOT_SIZE,
-            features: self.features & !NATIVE_NETWORK_FEATURE_PACKET_HANDOFF,
+            features: self.features
+                & !(NATIVE_NETWORK_FEATURE_PACKET_HANDOFF | NATIVE_NETWORK_FEATURE_PACKET_FAULT),
             common_config_address: self.common_config_address,
             receive_notification_address: self.receive_notification_address,
             transmit_notification_address: self.transmit_notification_address,
@@ -336,6 +347,10 @@ impl NativeNetworkBootV1 {
             mac_address: self.mac_address,
             reserved: 0,
         }
+    }
+
+    pub const fn requests_packet_fault(&self) -> bool {
+        self.features & NATIVE_NETWORK_FEATURE_PACKET_FAULT != 0
     }
 }
 
@@ -414,6 +429,7 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_ARP_PROBE UINT32_C(16)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_RX_REUSE UINT32_C(32)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_PACKET_HANDOFF UINT32_C(64)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_PACKET_FAULT UINT32_C(128)"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v1) == 88"));
         assert!(network_header.contains("sizeof(struct ginux_native_packet_request_v0) == 32"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
@@ -547,6 +563,14 @@ mod tests {
         assert!(reused.requests_rx_reuse());
         let handoff = NativeNetworkBootV1::from_v0(reused, 7);
         assert!(handoff.is_valid_packet_handoff());
+        assert!(!handoff.requests_packet_fault());
+        let faulting_handoff = NativeNetworkBootV1 {
+            features: handoff.features | NATIVE_NETWORK_FEATURE_PACKET_FAULT,
+            ..handoff
+        };
+        assert!(faulting_handoff.is_valid_packet_handoff());
+        assert!(faulting_handoff.requests_packet_fault());
+        assert_eq!(faulting_handoff.v0_prefix(), reused);
         assert_eq!(core::mem::size_of::<NativeNetworkBootV1>(), 88);
         assert_eq!(
             core::mem::offset_of!(NativeNetworkBootV1, packet_capability),
@@ -561,6 +585,11 @@ mod tests {
             },
             NativeNetworkBootV1 {
                 size: 80,
+                ..handoff
+            },
+            NativeNetworkBootV1 {
+                features: handoff.features & !NATIVE_NETWORK_FEATURE_PACKET_HANDOFF
+                    | NATIVE_NETWORK_FEATURE_PACKET_FAULT,
                 ..handoff
             },
             NativeNetworkBootV1 {

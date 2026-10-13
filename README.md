@@ -163,6 +163,9 @@ the validated 42-byte Ethernet frame out of DMA. The write-only driver then
 retires completely; a separate read-only ring-3 consumer with no NIC authority
 receives sequence one exactly once and validates every byte. See
 [Native Network Packet Handoff v0](specs/services/network-packet-handoff-v0.md).
+A following generation deliberately faults after publishing sequence two;
+device, interrupt, VT-d, DMA, and producer authority are retired while the
+copied frame survives for a fresh read-only consumer.
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

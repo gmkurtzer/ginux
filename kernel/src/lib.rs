@@ -3065,6 +3065,21 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: packet consumer retained no device or write authority");
     serial_write("\r\nginux: packet survived producer and device retirement");
     serial_write("\r\nginux: ring-3 consumer received exact Ethernet frame once");
+    if !address_space::verify_native_network_packet_fault_handoff(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+        virtio_network_msix_mmio,
+        &local_apic,
+    ) {
+        kernel_fail("\r\nginux: faulted native packet handoff failed\r\n");
+    }
+    serial_write("\r\nginux: network driver faulted after packet publication");
+    serial_write("\r\nginux: faulted packet producer authority revoked");
+    serial_write("\r\nginux: fault teardown preserved copied packet sequence two");
+    serial_write("\r\nginux: fresh ring-3 consumer received fault-surviving packet");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

@@ -4,7 +4,8 @@
 .global ginux_packet_consumer_end
 
 ginux_packet_consumer_start:
-    mov rbx, rcx
+    mov r12, rbx
+    mov r14, rcx
     mov rdi, rcx
     sub rsp, 0x90
 
@@ -28,7 +29,8 @@ ginux_packet_consumer_start:
     jne .consumer_failed
 
     # A future sequence is rejected without consuming or modifying output.
-    mov qword ptr [rsp + 24], 2
+    lea r13, [r12 + 1]
+    mov qword ptr [rsp + 24], r13
     lea rsi, [rsp]
     mov eax, 22
     int 0x80
@@ -39,7 +41,7 @@ ginux_packet_consumer_start:
     jne .consumer_failed
 
     # Consume exact sequence one and compare all 42 Ethernet/ARP bytes.
-    mov qword ptr [rsp + 24], 1
+    mov qword ptr [rsp + 24], r12
     lea rsi, [rsp]
     mov eax, 22
     int 0x80
@@ -52,8 +54,8 @@ ginux_packet_consumer_start:
     jne .consumer_failed
 
     # Delivery is destructive only after a successful copy.
-    mov rdi, rbx
-    mov qword ptr [rsp + 24], 1
+    mov rdi, r14
+    mov qword ptr [rsp + 24], r12
     lea rsi, [rsp]
     mov eax, 22
     int 0x80
