@@ -32,6 +32,7 @@ field offsets. All multibyte scalar fields use native little-endian storage;
 MAC and IPv4 values represent network-order integers so conversion to wire
 bytes is explicit.
 
-This version bootstraps one deterministic ARP validation request. It does not
-define interface configuration, routing, neighbor-cache lifetime, asynchronous
-packet loops, transmit authority, sockets, or container endpoints.
+This version bootstraps one deterministic ARP validation request. Bootstrap
+ABI v1 retains the 56-byte layout and adds a bounded two-packet wait loop. v0
+does not define interface configuration, routing, neighbor-cache lifetime,
+asynchronous packet loops, transmit authority, sockets, or container endpoints.

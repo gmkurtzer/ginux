@@ -3171,6 +3171,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: packet consumption woke exactly one blocked producer");
     serial_write("\r\nginux: woken packet producer retried exact next sequence");
     serial_write("\r\nginux: packet FIFO ordering survived backpressure wakeup");
+    if !address_space::verify_native_protocol_wait_loop(&protocol_image) {
+        kernel_fail("\r\nginux: resident native protocol wait loop failed\r\n");
+    }
+    serial_write("\r\nginux: compiled protocol service waited on an empty packet FIFO");
+    serial_write("\r\nginux: resident protocol domain consumed two ordered packets");
+    serial_write("\r\nginux: protocol domain remained live between packet arrivals");
+    serial_write("\r\nginux: resident protocol wait keys and frames retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

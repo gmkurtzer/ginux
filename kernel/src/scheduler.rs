@@ -1225,6 +1225,30 @@ pub(crate) fn initialize_staged_packet_auxiliary(domain_id: u64, sequence: u64) 
     true
 }
 
+pub(crate) fn initialize_staged_native_auxiliary(domain_id: u64, boot_info: u64) -> bool {
+    if boot_info == 0 {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let mut matched = None;
+    for thread in runtime.scheduler.threads.iter_mut().flatten() {
+        if thread.domain == domain_id {
+            if matched.is_some() || thread.state != State::Staged || thread.initialized {
+                return false;
+            }
+            matched = Some(thread);
+        }
+    }
+    let Some(thread) = matched else {
+        return false;
+    };
+    thread.context.rbx = boot_info;
+    thread.initialized = true;
+    true
+}
+
 pub(crate) fn auxiliary_is_staged(domain_id: u64) -> bool {
     let Some(runtime) = runtime_mut() else {
         return false;

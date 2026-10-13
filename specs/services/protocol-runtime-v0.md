@@ -1,7 +1,8 @@
 # Native Protocol Service Runtime v0
 
-**Status:** A measured freestanding Rust service consumes and validates one
-real virtio-net Ethernet/ARP reply in an isolated ring-3 domain under QEMU/TCG.
+**Status:** A measured freestanding Rust service consumes and validates real
+Ethernet/ARP replies in an isolated ring-3 domain under QEMU/TCG, including a
+bounded resident wait-loop proof across two separately published packets.
 
 ## Boundary
 
@@ -18,8 +19,8 @@ sealed capability table contains only one packet-object `READ` grant.
 The isolated virtio-net driver first validates an interrupt-completed gateway
 ARP reply and copies its 42 Ethernet bytes into the kernel FIFO. Driver
 teardown then removes PCI, MSI-X, VT-d, DMA, and packet-producer authority.
-Only afterward does the protocol service start with bootstrap ABI v0 and the
-exact pending sequence.
+Only afterward does the first protocol-service proof start with bootstrap ABI
+v0 and the exact pending sequence.
 
 ## Runtime proof
 
@@ -42,10 +43,26 @@ through lifecycle ABI v0. The kernel requires clean exit, exact delivery
 metadata, capability revocation, root restoration, and complete frame
 reclamation.
 
+## Resident wait-loop proof
+
+A separate generation starts before any packet is pending with bootstrap ABI
+v1, the next exact sequence, and a fixed packet count of two. A write-only
+ring-3 producer remains runnable while the service blocks. It publishes one
+validated ARP frame, yields until the service consumes it and blocks for the
+next sequence, then publishes the second frame.
+
+The same measured protocol domain consumes both consecutive sequences and
+performs the full Ethernet/ARP validation and malformed-copy rejection for
+each. It then rejects replay of the second sequence and exits cleanly. The
+kernel requires both waits to wake through publication, the domain to remain
+live between arrivals, FIFO exhaustion to advance exactly twice, and all wait
+keys, capabilities, address-space frames, and producer frames to be retired.
+
 ## Deliberate limits
 
-This is one synchronous ARP reply, not a network stack. There is no Ethernet
-demultiplexing loop, ARP request generation, neighbor cache, IPv4 validation,
-ICMP, UDP, TCP, fragmentation, routing, socket API, shared-memory packet path,
-or container network interface. The current FIFO and call gate remain
-single-CPU and copied.
+This remains a fixed ARP proof, not a network stack. The resident path accepts
+exactly two packets and has no administrative shutdown protocol. There is no
+Ethernet demultiplexing, ARP request generation, neighbor cache, IPv4
+validation, ICMP, UDP, TCP, fragmentation, routing, socket API, shared-memory
+packet path, or container network interface. The current FIFO and call gate
+remain single-CPU and copied.

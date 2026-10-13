@@ -124,6 +124,11 @@ _Static_assert(offsetof(struct ginux_native_protocol_boot_v0, peer_ipv4) == 44,
                "protocol peer IPv4 offset");
 _Static_assert(offsetof(struct ginux_native_protocol_boot_v0, reserved) == 48,
                "protocol reserved offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v1, packet_count) ==
+                   48,
+               "protocol packet count offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v1, reserved) == 52,
+               "protocol v1 reserved offset");
 
 #define COMPATIBLE_DISCOVERY                                                   \
     GINUX_NATIVE_CONTROL_DISCOVERY(                                            \

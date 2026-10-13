@@ -53,6 +53,9 @@ pub const NATIVE_PROTOCOL_BOOT_VERSION: u16 = 0;
 pub const NATIVE_PROTOCOL_BOOT_SIZE: u16 = 56;
 pub const NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER: u32 = 1 << 0;
 pub const NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP: u32 = 1 << 1;
+pub const NATIVE_PROTOCOL_FEATURE_WAIT_LOOP: u32 = 1 << 2;
+pub const NATIVE_PROTOCOL_BOOT_V1_VERSION: u16 = 1;
+pub const NATIVE_PROTOCOL_BOOT_V1_SIZE: u16 = 56;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -486,6 +489,65 @@ impl NativeProtocolBootV0 {
 const _: () = assert!(core::mem::size_of::<NativeProtocolBootV0>() == 56);
 const _: () = assert!(core::mem::align_of::<NativeProtocolBootV0>() == 8);
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeProtocolBootV1 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub packet_capability: u64,
+    pub expected_sequence: u64,
+    pub local_mac: u64,
+    pub local_ipv4: u32,
+    pub peer_ipv4: u32,
+    pub packet_count: u32,
+    pub reserved: u32,
+}
+
+impl NativeProtocolBootV1 {
+    pub const fn wait_loop(v0: NativeProtocolBootV0, packet_count: u32) -> Self {
+        Self {
+            magic: v0.magic,
+            version: NATIVE_PROTOCOL_BOOT_V1_VERSION,
+            size: NATIVE_PROTOCOL_BOOT_V1_SIZE,
+            features: NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+                | NATIVE_PROTOCOL_FEATURE_WAIT_LOOP,
+            packet_capability: v0.packet_capability,
+            expected_sequence: v0.expected_sequence,
+            local_mac: v0.local_mac,
+            local_ipv4: v0.local_ipv4,
+            peer_ipv4: v0.peer_ipv4,
+            packet_count,
+            reserved: 0,
+        }
+    }
+
+    pub const fn is_valid_wait_loop(&self) -> bool {
+        self.magic == NATIVE_PROTOCOL_BOOT_MAGIC
+            && self.version == NATIVE_PROTOCOL_BOOT_V1_VERSION
+            && self.size == NATIVE_PROTOCOL_BOOT_V1_SIZE
+            && self.features
+                == NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                    | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+                    | NATIVE_PROTOCOL_FEATURE_WAIT_LOOP
+            && self.packet_capability != 0
+            && self.expected_sequence != 0
+            && self.expected_sequence < u64::MAX - 1
+            && self.local_mac != 0
+            && self.local_mac >> 48 == 0
+            && self.local_ipv4 != 0
+            && self.peer_ipv4 != 0
+            && self.local_ipv4 != self.peer_ipv4
+            && self.packet_count == 2
+            && self.reserved == 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeProtocolBootV1>() == 56);
+const _: () = assert!(core::mem::align_of::<NativeProtocolBootV1>() == 8);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,6 +607,7 @@ mod tests {
         assert!(protocol_header.contains("UINT64_C(0x30425058554e4947)"));
         assert!(protocol_header.contains("GINUX_NATIVE_PROTOCOL_BOOT_SIZE UINT16_C(56)"));
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v0) == 56"));
+        assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v1) == 56"));
     }
 
     #[test]
@@ -593,6 +656,19 @@ mod tests {
         ] {
             assert!(!invalid.is_valid_arp_consumer());
         }
+        let wait = NativeProtocolBootV1::wait_loop(valid, 2);
+        assert!(wait.is_valid_wait_loop());
+        assert_eq!(core::mem::size_of::<NativeProtocolBootV1>(), 56);
+        assert_eq!(
+            core::mem::offset_of!(NativeProtocolBootV1, packet_count),
+            48
+        );
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV1, reserved), 52);
+        assert!(!NativeProtocolBootV1 {
+            packet_count: 1,
+            ..wait
+        }
+        .is_valid_wait_loop());
     }
 
     #[test]

@@ -5,11 +5,12 @@ use core::arch::{asm, global_asm};
 
 use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
-    NativeControlDescriptorV4, NativePacketRequestV0, NativeProtocolBootV0, NATIVE_CALL_FAILED,
-    NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    NativeControlDescriptorV4, NativePacketRequestV0, NativeProtocolBootV0, NativeProtocolBootV1,
+    NATIVE_CALL_FAILED, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_OPERATION,
     NATIVE_NETWORK_DEVICE_PROBE, NATIVE_PACKET_CONSUME_OPERATION, NATIVE_PACKET_MAX_SIZE,
-    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
+    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_WAIT_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_PROTOCOL_SERVICE_V0";
@@ -44,42 +45,78 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
     let Some(info) = (unsafe { info.as_ref() }) else {
         fail();
     };
-    if !info.is_valid_arp_consumer() {
-        fail();
-    }
+    let (capability, mut sequence, local_mac, local_ipv4, peer_ipv4, packet_count, wait) =
+        if info.version == 0 {
+            if !info.is_valid_arp_consumer() {
+                fail();
+            }
+            (
+                info.packet_capability,
+                info.expected_sequence,
+                info.local_mac,
+                info.local_ipv4,
+                info.peer_ipv4,
+                1,
+                false,
+            )
+        } else {
+            let Some(info) = (unsafe {
+                (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV1).as_ref()
+            }) else {
+                fail();
+            };
+            if !info.is_valid_wait_loop() {
+                fail();
+            }
+            (
+                info.packet_capability,
+                info.expected_sequence,
+                info.local_mac,
+                info.local_ipv4,
+                info.peer_ipv4,
+                info.packet_count,
+                true,
+            )
+        };
 
     let mut packet = [0_u8; NATIVE_PACKET_MAX_SIZE as usize];
     let publish = NativePacketRequestV0::publish(packet.as_ptr() as u64, 42);
-    if packet_publish(info.packet_capability, &publish) != NATIVE_CALL_FAILED
-        || network_probe(info.packet_capability) != NATIVE_CALL_FAILED
+    if packet_publish(capability, &publish) != NATIVE_CALL_FAILED
+        || network_probe(capability) != NATIVE_CALL_FAILED
     {
         fail();
     }
 
-    let consume = NativePacketRequestV0::consume(
+    for _ in 0..packet_count {
+        if wait {
+            let request = NativePacketRequestV0::consume(0, 0, sequence);
+            if packet_wait(capability, &request) != sequence {
+                fail();
+            }
+        }
+        let consume = NativePacketRequestV0::consume(
+            packet.as_mut_ptr() as u64,
+            NATIVE_PACKET_MAX_SIZE,
+            sequence,
+        );
+        if packet_consume(capability, &consume) != 42
+            || !valid_arp_reply(&packet[..42], local_mac, local_ipv4, peer_ipv4)
+        {
+            fail();
+        }
+        packet[21] = 1;
+        if valid_arp_reply(&packet[..42], local_mac, local_ipv4, peer_ipv4) {
+            fail();
+        }
+        packet[21] = 2;
+        sequence = sequence.checked_add(1).unwrap_or_else(|| fail());
+    }
+    let replay = NativePacketRequestV0::consume(
         packet.as_mut_ptr() as u64,
         NATIVE_PACKET_MAX_SIZE,
-        info.expected_sequence,
+        sequence - 1,
     );
-    if packet_consume(info.packet_capability, &consume) != 42
-        || !valid_arp_reply(
-            &packet[..42],
-            info.local_mac,
-            info.local_ipv4,
-            info.peer_ipv4,
-        )
-    {
-        fail();
-    }
-
-    packet[21] = 1;
-    if valid_arp_reply(
-        &packet[..42],
-        info.local_mac,
-        info.local_ipv4,
-        info.peer_ipv4,
-    ) || packet_consume(info.packet_capability, &consume) != NATIVE_CALL_FAILED
-    {
+    if packet_consume(capability, &replay) != NATIVE_CALL_FAILED {
         fail();
     }
     exit(NATIVE_SERVICE_EXIT_COMPLETED)
@@ -115,6 +152,15 @@ fn packet_publish(capability: u64, request: &NativePacketRequestV0) -> u64 {
 fn packet_consume(capability: u64, request: &NativePacketRequestV0) -> u64 {
     native_call(
         NATIVE_PACKET_CONSUME_OPERATION,
+        capability,
+        request as *const _ as u64,
+        0,
+    )
+}
+
+fn packet_wait(capability: u64, request: &NativePacketRequestV0) -> u64 {
+    native_call(
+        NATIVE_PACKET_WAIT_OPERATION,
         capability,
         request as *const _ as u64,
         0,
