@@ -12,8 +12,9 @@ use ginux_native_abi::{
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
     NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
-    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION,
-    NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
+    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
+    NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
@@ -98,22 +99,27 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         {
             fail();
         }
-        if info.requests_transmit_probe() && !unsafe { transmit_probe(info) } {
-            fail();
+        if info.requests_transmit_probe() {
+            let Some(status) = (unsafe { transmit_probe(info) }) else {
+                fail();
+            };
+            if status != NATIVE_SERVICE_EXIT_COMPLETED {
+                exit(status);
+            }
         }
     }
     exit(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
-unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> bool {
+unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> Option<u8> {
     let Ok(dma) = usize::try_from(info.dma_virtual_address) else {
-        return false;
+        return None;
     };
     let Ok(notification) = usize::try_from(info.transmit_notification_address) else {
-        return false;
+        return None;
     };
     let Ok(common) = usize::try_from(info.common_config_address) else {
-        return false;
+        return None;
     };
     let payload_length = TX_HEADER_LENGTH + TX_FRAME.len();
     write_u64(
@@ -141,11 +147,17 @@ unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> bool {
     compiler_fence(Ordering::SeqCst);
     write_u16(notification, 1);
     if info.requests_tx_interrupt() {
-        if wait_for_tx_interrupt(info.device_capability, TX_INTERRUPT_REQUEST) != 0
-            || wait_for_tx_interrupt(info.device_capability, TX_INTERRUPT_REQUEST)
-                != NATIVE_NETWORK_WAIT_FAILED
+        match wait_for_tx_interrupt(info.device_capability, TX_INTERRUPT_REQUEST) {
+            0 => {}
+            NATIVE_NETWORK_WAIT_CANCELLED => {
+                return Some(NATIVE_SERVICE_EXIT_RESTART_REQUIRED);
+            }
+            _ => return None,
+        }
+        if wait_for_tx_interrupt(info.device_capability, TX_INTERRUPT_REQUEST)
+            != NATIVE_NETWORK_WAIT_FAILED
         {
-            return false;
+            return None;
         }
     } else {
         let mut completed = false;
@@ -157,14 +169,15 @@ unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> bool {
             core::hint::spin_loop();
         }
         if !completed {
-            return false;
+            return None;
         }
     }
     compiler_fence(Ordering::SeqCst);
-    read_u16(dma + TX_USED_OFFSET as usize + 2) == 1
+    (read_u16(dma + TX_USED_OFFSET as usize + 2) == 1
         && read_u32(dma + TX_USED_OFFSET as usize + 4) == 0
         && read_u8(common + COMMON_DEVICE_STATUS)
-            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
+            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK)
+        .then_some(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
 unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {

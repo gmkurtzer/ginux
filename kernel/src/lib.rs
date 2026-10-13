@@ -2931,6 +2931,32 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: native network TX payload guards preserved");
     serial_write("\r\nginux: native network service transmitted Ethernet probe");
     serial_write("\r\nginux: native network TX interrupt route retired cleanly");
+    if !address_space::verify_native_network_transmit_timeout(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+        virtio_network_msix_mmio,
+        &local_apic,
+    ) {
+        kernel_fail("\r\nginux: native network notified timeout was not contained\r\n");
+    }
+    serial_write("\r\nginux: notified native network timeout cancelled safely");
+    serial_write("\r\nginux: ambiguous native network generation retired");
+    if !address_space::verify_native_network_transmit_probe(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+        virtio_network_msix_mmio,
+        &local_apic,
+    ) {
+        kernel_fail("\r\nginux: native network timeout recovery failed\r\n");
+    }
+    serial_write("\r\nginux: fresh native network generation recovered after timeout");
+    serial_write("\r\nginux: recovered network generation completed TX interrupt");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

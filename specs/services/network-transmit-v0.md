@@ -27,8 +27,10 @@ caller, capability, VT-d lease, queue binding, vector selection, and request,
 saves the ring-3 context as blocked, unmasks MSI-X, and waits with a bounded
 APIC timer. Vector 35 wakes only the matching network-device wait. Success
 requires exactly one interrupt. Reusing request generation one is rejected
-without blocking. A timeout or malformed completion drives the normal ring-3
-driver fault path.
+without blocking. A notified timeout returns `CANCELLED`, after the kernel has
+quiesced the ambiguous device generation, and the service exits
+`RESTART_REQUIRED`. A malformed completion drives the normal ring-3 driver
+fault path.
 
 ## Independent validation and teardown
 
@@ -44,5 +46,4 @@ translation and DMA frames in that order.
 
 This proves device consumption, not peer reception. It sends one fixed frame,
 uses one serialized request generation, and has no general packet API,
-batching, multi-buffer support, receive path, or container interface. Network
-timeout cancellation and restart are the next contract extension.
+batching, multi-buffer support, receive path, or container interface.

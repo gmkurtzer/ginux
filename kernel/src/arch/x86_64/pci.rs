@@ -115,6 +115,7 @@ static VIRTIO_INTERRUPT_REQUEST: AtomicU64 = AtomicU64::new(0);
 static VIRTIO_INTERRUPT_OBJECT: AtomicU64 = AtomicU64::new(0);
 static FORCED_NOTIFIED_TIMEOUT_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static FORCED_NOTIFIED_TIMEOUT_REQUEST: AtomicU64 = AtomicU64::new(0);
+static FORCED_NOTIFIED_TIMEOUT_OBJECT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum IsolatedInterruptCompletion {
@@ -982,6 +983,7 @@ fn install_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
     FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
     FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
+    FORCED_NOTIFIED_TIMEOUT_OBJECT.store(0, Ordering::SeqCst);
     cpu::install_interrupt_gate(vector, ginux_virtio_interrupt_entry as *const () as usize)
 }
 
@@ -1002,6 +1004,7 @@ fn retire_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
         VIRTIO_INTERRUPT_OBJECT.store(0, Ordering::SeqCst);
         FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
         FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
+        FORCED_NOTIFIED_TIMEOUT_OBJECT.store(0, Ordering::SeqCst);
     }
     cleared
 }
@@ -1499,11 +1502,24 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
     {
         return IsolatedInterruptCompletion::Failed;
     }
+    let force_timeout = FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) == domain
+        && FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) == request
+        && FORCED_NOTIFIED_TIMEOUT_OBJECT.load(Ordering::SeqCst)
+            == control_abi::NETWORK_DEVICE_OBJECT;
+    if force_timeout {
+        FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
+        FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
+        FORCED_NOTIFIED_TIMEOUT_OBJECT.store(0, Ordering::SeqCst);
+    }
     VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
-    let interrupt_configured =
+    let interrupt_configured = if force_timeout {
+        set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true)
+            && set_msix_control_raw(device.msix_target(), true, true)
+    } else {
         set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, false)
-            && set_msix_control_raw(device.msix_target(), true, false);
-    if !timer::arm_device_wait_timer(domain, request) || !interrupt_configured {
+            && set_msix_control_raw(device.msix_target(), true, false)
+    };
+    if !timer::arm_network_device_wait_timer(domain, request) || !interrupt_configured {
         VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
         let _ = timer::finish_device_wait_timer(domain, request);
         let _ = scheduler::wake_device_completion(
@@ -3187,10 +3203,13 @@ pub(crate) fn complete_isolated_interrupt_wait(
     }
     let force_timeout = notified
         && FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) == domain
-        && FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) == request;
+        && FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) == request
+        && FORCED_NOTIFIED_TIMEOUT_OBJECT.load(Ordering::SeqCst)
+            == control_abi::BLOCK_DEVICE_OBJECT;
     if force_timeout {
         FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
         FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
+        FORCED_NOTIFIED_TIMEOUT_OBJECT.store(0, Ordering::SeqCst);
     }
     VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
     let interrupt_configured = if force_timeout {
@@ -3234,16 +3253,27 @@ pub(crate) fn complete_isolated_interrupt_wait(
 }
 
 pub(crate) fn force_next_notified_wait_timeout(domain: u64, request: u64) -> bool {
+    force_next_notified_wait_timeout_for(domain, control_abi::BLOCK_DEVICE_OBJECT, request)
+}
+
+pub(crate) fn force_next_network_wait_timeout(domain: u64, request: u64) -> bool {
+    force_next_notified_wait_timeout_for(domain, control_abi::NETWORK_DEVICE_OBJECT, request)
+}
+
+fn force_next_notified_wait_timeout_for(domain: u64, object: u64, request: u64) -> bool {
     if domain == 0
+        || object == 0
         || request == 0
         || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
         || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
-        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != object
         || FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) != 0
         || FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) != 0
+        || FORCED_NOTIFIED_TIMEOUT_OBJECT.load(Ordering::SeqCst) != 0
     {
         return false;
     }
+    FORCED_NOTIFIED_TIMEOUT_OBJECT.store(object, Ordering::SeqCst);
     FORCED_NOTIFIED_TIMEOUT_REQUEST.store(request, Ordering::SeqCst);
     FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(domain, Ordering::SeqCst);
     true

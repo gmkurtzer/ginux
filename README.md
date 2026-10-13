@@ -133,6 +133,10 @@ generation; replay of generation one is rejected. The kernel independently
 validates the single interrupt, descriptor, unchanged payload, used entry, and
 canaries, then retires the route before VT-d and DMA teardown. This proves
 device consumption, not peer reception.
+A separately forced notified timeout keeps the interrupt masked until the APIC
+timer expires, cancels and retires the ambiguous device generation, and returns
+`RESTART_REQUIRED` to the service. A fresh generation with new authority, DMA,
+and VT-d leases then reinitializes the NIC and completes the transmit.
 See [Native Network Service Transmit v0](specs/services/network-transmit-v0.md).
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).

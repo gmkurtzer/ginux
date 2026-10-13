@@ -14357,16 +14357,21 @@ fn network_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFr
     ) {
         return u64::MAX - 2;
     }
-    if address_space::complete_auxiliary_network_wait(caller_domain, request) {
-        0
-    } else {
-        let _ = scheduler::wake_device_completion(
-            caller_domain,
-            control_abi::NETWORK_DEVICE_OBJECT,
-            request,
-            u64::MAX - 2,
-        );
-        u64::MAX - 2
+    match address_space::complete_auxiliary_network_wait(caller_domain, request) {
+        address_space::AuxiliaryDeviceWaitCompletion::Completed => 0,
+        address_space::AuxiliaryDeviceWaitCompletion::Cancelled => {
+            control_abi::NETWORK_DEVICE_RESULT_CANCELLED
+        }
+        address_space::AuxiliaryDeviceWaitCompletion::TimedOut
+        | address_space::AuxiliaryDeviceWaitCompletion::Failed => {
+            let _ = scheduler::wake_device_completion(
+                caller_domain,
+                control_abi::NETWORK_DEVICE_OBJECT,
+                request,
+                u64::MAX - 2,
+            );
+            u64::MAX - 2
+        }
     }
 }
 

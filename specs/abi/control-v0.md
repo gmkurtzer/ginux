@@ -449,7 +449,10 @@ entry 1, the queue is live, and the caller has notified the device. It blocks
 the caller, unmasks vector 35, and returns zero only after one matching
 interrupt. A stale or duplicate request returns `UINT64_MAX - 2` without
 blocking. The route is masked, disabled, and retired before VT-d or DMA during
-clean or fault teardown.
+clean or fault teardown. A timeout after notification is ambiguous: the kernel
+quiesces and retires that device generation, returns `UINT64_MAX - 5`, and
+requires the service to report `RESTART_REQUIRED`. A fresh domain generation
+with new capability, DMA, and VT-d leases may then reinitialize the reset NIC.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler

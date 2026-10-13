@@ -101,6 +101,13 @@ and checks the complete descriptor, fixed Ethernet payload, completion identity,
 and canaries before ordered teardown.
 See [Native Network Service Transmit v0](network-transmit-v0.md).
 
+A separate notified-timeout generation keeps MSI-X masked until the calibrated
+device timer expires. The kernel cancels that ambiguous generation by disabling
+MSI-X, revoking bus mastering, resetting the NIC, retiring vector 35, and then
+retiring VT-d and DMA. The service receives `CANCELLED` and exits
+`RESTART_REQUIRED`. A fresh generation with newly delegated authority and
+leases must then configure the reset device and complete the same transmit.
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The transmit generation

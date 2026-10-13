@@ -4576,6 +4576,7 @@ enum NativeNetworkRunMode {
     Active,
     ActiveFault,
     Transmit,
+    TransmitTimeout,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4685,6 +4686,26 @@ pub(crate) fn verify_native_network_transmit_probe(
     )
 }
 
+pub(crate) fn verify_native_network_transmit_timeout(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::TransmitTimeout,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    )
+}
+
 fn verify_native_network_bootstrap_run(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -4703,7 +4724,11 @@ fn verify_native_network_bootstrap_run(
         NativeNetworkRunMode::Inert | NativeNetworkRunMode::RejectBootstrap
     );
     let fail_after_activation = mode == NativeNetworkRunMode::ActiveFault;
-    let transmit_probe = mode == NativeNetworkRunMode::Transmit;
+    let transmit_probe = matches!(
+        mode,
+        NativeNetworkRunMode::Transmit | NativeNetworkRunMode::TransmitTimeout
+    );
+    let force_network_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4862,6 +4887,7 @@ fn verify_native_network_bootstrap_run(
                     1,
                 )
             })
+            && (!force_network_timeout || pci::force_next_network_wait_timeout(auxiliary, 1))
     });
     if activate_iommu && iommu_evidence.is_none()
         || !active_device_ready
@@ -4878,7 +4904,12 @@ fn verify_native_network_bootstrap_run(
     } else {
         crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
     };
-    current_root() == kernel_root
+    let expected_detail = if force_network_timeout {
+        ginux_native_abi::NATIVE_SERVICE_EXIT_RESTART_REQUIRED
+    } else {
+        ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED
+    };
+    let execution_retired = current_root() == kernel_root
         && scheduler::current_domain().is_none()
         && registered_auxiliary_address_space_count() == 0
         && memory::owner_live_frame_count(owner) == Some(0)
@@ -4888,19 +4919,32 @@ fn verify_native_network_bootstrap_run(
             handle,
             crate::control_abi::NETWORK_DEVICE_OBJECT,
             crate::capability::Rights::READ,
-        )
-        && event == Some((auxiliary << 8) | u64::from(expected_kind))
-        && domain::last_lifecycle_event_audit()
-            .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary)
-        && domain::last_lifecycle_event_detail() == Some(0)
-        && domain::last_lifecycle_event_has_fault() == Some(expected_fault)
-        && domain::last_lifecycle_service_identity() == Some(identity)
-        && domain::take_lifecycle_event().is_none()
-        && iommu_profile.is_inactive()
+        );
+    let event_valid = event
+        == Some((u64::from(expected_detail) << 56) | (auxiliary << 8) | u64::from(expected_kind));
+    let audit_valid = domain::last_lifecycle_event_audit()
+        .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary);
+    let detail_valid = domain::last_lifecycle_event_detail() == Some(expected_detail);
+    let fault_valid = domain::last_lifecycle_event_has_fault() == Some(expected_fault);
+    let identity_valid = domain::last_lifecycle_service_identity() == Some(identity);
+    let no_extra_event = domain::take_lifecycle_event().is_none();
+    let lifecycle_valid = event_valid
+        && audit_valid
+        && detail_valid
+        && fault_valid
+        && identity_valid
+        && no_extra_event;
+    let translation_retired = iommu_profile.is_inactive()
         && iommu_evidence.is_none_or(iommu::TranslationEvidence::is_retired)
-        && pci::network_function_is_disabled(device)
-        && pci::network_msix_is_disabled(device)
-        && (!fail_after_activation || unsafe_device_quiesce_was_active(auxiliary) == Some(true))
+        && pci::network_function_is_disabled(device);
+    let interrupt_retired = pci::network_msix_is_disabled(device);
+    let fault_ordering_valid =
+        !fail_after_activation || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
+    execution_retired
+        && lifecycle_valid
+        && translation_retired
+        && interrupt_retired
+        && fault_ordering_valid
 }
 
 pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {
@@ -5374,36 +5418,47 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, request: u64) -> bool
         )
 }
 
-pub(crate) fn complete_auxiliary_network_wait(domain_id: u64, request: u64) -> bool {
+pub(crate) fn complete_auxiliary_network_wait(
+    domain_id: u64,
+    request: u64,
+) -> AuxiliaryDeviceWaitCompletion {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
         .find(|registered| registered.domain == domain_id)
     else {
-        return false;
+        return AuxiliaryDeviceWaitCompletion::Failed;
     };
     let Some(teardown) = registered.network_teardown else {
-        return false;
+        return AuxiliaryDeviceWaitCompletion::Failed;
     };
     let Some(msix_mapping) = teardown.msix_mapping else {
-        return false;
+        return AuxiliaryDeviceWaitCompletion::Failed;
     };
     if registered.device_quiesced
         || registered.network_interrupt_completed
         || teardown.interrupt_request != request
     {
-        return false;
+        return AuxiliaryDeviceWaitCompletion::Failed;
     }
-    if pci::complete_isolated_network_interrupt_wait(
+    match pci::complete_isolated_network_interrupt_wait(
         teardown.device,
         msix_mapping,
         domain_id,
         request,
-    ) != pci::IsolatedInterruptCompletion::Completed
-    {
-        return false;
+    ) {
+        pci::IsolatedInterruptCompletion::Completed => {
+            registered.network_interrupt_completed = true;
+            AuxiliaryDeviceWaitCompletion::Completed
+        }
+        pci::IsolatedInterruptCompletion::TimedOut => {
+            if quiesce_auxiliary_device_for(domain_id, false) {
+                AuxiliaryDeviceWaitCompletion::Cancelled
+            } else {
+                AuxiliaryDeviceWaitCompletion::Failed
+            }
+        }
+        pci::IsolatedInterruptCompletion::Failed => AuxiliaryDeviceWaitCompletion::Failed,
     }
-    registered.network_interrupt_completed = true;
-    true
 }
 
 pub(crate) fn bind_auxiliary_device_teardown(

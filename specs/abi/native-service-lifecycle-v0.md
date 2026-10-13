@@ -71,9 +71,12 @@ Native network wait operation 20 currently accepts only `TX_NOTIFIED` command
 network capability, live exact VT-d lease, TX queue 1 bound to MSI-X entry 1,
 and an active confined device. The kernel blocks the service, unmasks vector
 35, and returns zero only after one matching interrupt. A stale or duplicate
-request returns `FAILED` without blocking. Timeout currently fails the service
-and uses fault teardown; an explicit restart-required cancellation result is
-reserved for the next milestone.
+request returns `FAILED` without blocking. A timeout returns only after masking
+and disabling MSI-X, revoking bus mastering, resetting the device, and retiring
+the route. It returns `CANCELLED`; the service exits with
+`RESTART_REQUIRED`, and only a fresh domain generation with a new DMA and VT-d
+lease may retry. The QEMU proof forces this path and requires the replacement
+generation to complete an interrupt-driven transmit.
 
 ## Sources and compatibility
 
