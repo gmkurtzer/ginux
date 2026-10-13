@@ -26,6 +26,8 @@ Gate: automated serial-console test exercises every command and clean shutdown. 
 
 ## C2: Configured container autostart
 
+**Implementation status:** Complete; awaiting human verification.
+
 Deliverables:
 
 - Authenticated local configuration names the `default` pinned minimal fixture,

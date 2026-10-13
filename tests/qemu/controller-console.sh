@@ -22,13 +22,42 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         if grep -Fq 'ginux> ' "$output_file"; then
             break
         fi
+        if grep -Fq 'GINUX_KERNEL_PANIC' "$output_file"; then
+            break
+        fi
         sleep 1
     done
-    printf 'help\nstatus\ncomponents\nls\nls /etc\nls /proc\nls /proc/1\nps\nunknown\nshutdown\n'
+    prompt_count=1
+    send_command() {
+        printf '%s\n' "$1"
+        prompt_count=$((prompt_count + 1))
+        for _ in {1..60}; do
+            observed="$(grep -Fo 'ginux> ' "$output_file" | wc -l | tr -d ' ')"
+            if [[ "$observed" -ge "$prompt_count" ]]; then
+                return
+            fi
+            if grep -Fq 'GINUX_KERNEL_PANIC' "$output_file"; then
+                return
+            fi
+            sleep 1
+        done
+    }
+    for command in \
+        help status components ls 'ls /etc' 'ls /proc' 'ls /proc/1' 'ls /proc/100' ps \
+        'container status default' 'container stop default' 'container status default' \
+        'container start default' 'container status default' 'container fail default' \
+        'container status default' 'container start default' 'container status default' unknown; do
+        send_command "$command"
+    done
+    printf 'shutdown\n'
 } | GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
 for _ in {1..75}; do
+    if grep -Fq 'GINUX_KERNEL_PANIC' "$output_file"; then
+        kill "$qemu_pid" 2>/dev/null || true
+        break
+    fi
     if ! kill -0 "$qemu_pid" 2>/dev/null; then
         break
     fi
@@ -57,9 +86,10 @@ for expected in \
     'Ginux controller v0 (ring 3)' \
     'help        Show this command list' \
     'ls [PATH]   List the embedded measured root' \
-    'ps          Show live native domains' \
+    'ps          Show live host processes' \
     'controller: running (ring 3)' \
-    'containers: 0 (C1)' \
+    'containers: 1 configured (default)' \
+    'default: running' \
     'integrity: sealed' \
     'GINUX.EFI component catalog v0:' \
     '- kernel: active, ring 0' \
@@ -72,9 +102,15 @@ for expected in \
     'os-release' \
     'motd' \
     '1/' \
+    '100/' \
     'status' \
     'PID PPID STATE NAME' \
     '1 0 R controller' \
+    '100 0 R default:init' \
+    'default: stopped' \
+    'default: restarting' \
+    'default: failed (contained)' \
+    'ginux: restarting configured container default' \
     "Unknown command. Type 'help'." \
     'Shutting down Ginux.' \
     'ginux: controller requested clean shutdown' \

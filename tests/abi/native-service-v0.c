@@ -140,6 +140,16 @@ _Static_assert(GINUX_NATIVE_PACKET_QUEUE_CAPACITY == UINT32_C(4),
                "native packet queue capacity");
 _Static_assert(GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF == UINT16_C(2048),
                "control packet handoff feature bit");
+_Static_assert(GINUX_NATIVE_HOST_INSPECT_OPERATION == UINT64_C(32),
+               "host inspection operation");
+_Static_assert(GINUX_NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT == UINT16_C(2),
+               "container init host process kind");
+_Static_assert(GINUX_NATIVE_CONTAINER_CONTROL_OPERATION == UINT64_C(33),
+               "container control operation");
+_Static_assert(GINUX_NATIVE_CONTAINER_HOST_SHUTDOWN == UINT64_C(4),
+               "container host shutdown command");
+_Static_assert(GINUX_NATIVE_CONTAINER_STATE_FAILED == UINT64_C(3),
+               "failed container state");
 _Static_assert(GINUX_NATIVE_PACKET_CONSUME_OPERATION == UINT64_C(22),
                "native packet consume operation");
 _Static_assert(GINUX_NATIVE_PACKET_WAIT_OPERATION == UINT64_C(23),

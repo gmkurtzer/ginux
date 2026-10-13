@@ -6,15 +6,18 @@ use ginux_native_abi::{
     native_control_abi_is_compatible, NativeControlDescriptorV4, NativeHostInspectRecordV0,
     NativeHostInspectRequestV0, NativeRootDirectoryRequestV4, NATIVE_CALL_FAILED,
     NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION,
-    NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_HOST_SHUTDOWN,
+    NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_QUERY, NATIVE_CONTAINER_RESTART,
+    NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING, NATIVE_CONTAINER_STATE_STOPPED,
+    NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_HOST_INSPECT_OPERATION,
     NATIVE_HOST_INSPECT_RECORD_SIZE, NATIVE_HOST_INSPECT_REQUEST_SIZE,
     NATIVE_HOST_INSPECT_STATE_READY, NATIVE_HOST_INSPECT_STATE_STOPPING,
-    NATIVE_HOST_INSPECT_VERSION, NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROC_ENUMERATE,
-    NATIVE_HOST_PROC_STATUS, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
-    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
-    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_HOST_INSPECT_VERSION, NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT,
+    NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS,
+    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
+    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = 32;
@@ -93,12 +96,19 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                 write(console, b"status      Show controller and host state\r\n");
                 write(console, b"components  Show embedded image components\r\n");
                 write(console, b"ls [PATH]   List the embedded measured root\r\n");
-                write(console, b"ps          Show live native domains\r\n");
+                write(console, b"ps          Show live host processes\r\n");
+                write(console, b"container status default\r\n");
+                write(console, b"container stop default\r\n");
+                write(console, b"container start default\r\n");
+                write(console, b"container restart default\r\n");
+                write(console, b"container fail default\r\n");
                 write(console, b"shutdown    Shut down Ginux cleanly\r\n");
             }
             b"status" => {
                 write(console, b"controller: running (ring 3)\r\n");
-                write(console, b"containers: 0 (C1)\r\n");
+                write(console, b"containers: 1 configured (default)\r\n");
+                write(console, b"default: ");
+                write_container_state(console, query_container(host));
                 write(console, b"integrity: sealed\r\n");
             }
             b"components" => {
@@ -108,8 +118,62 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                 write(console, b"- boot modules: embedded, sealed\r\n");
             }
             b"ps" => show_processes(console, host),
+            b"container status default" => {
+                write(console, b"default: ");
+                write_container_state(console, query_container(host));
+            }
+            b"container stop default" => {
+                if call(
+                    NATIVE_CONTAINER_CONTROL_OPERATION,
+                    host,
+                    NATIVE_CONTAINER_STOP,
+                    0,
+                ) == NATIVE_CONTAINER_STATE_STOPPED
+                {
+                    write(console, b"default: stopped\r\n");
+                    exit(NATIVE_SERVICE_EXIT_COMPLETED);
+                } else {
+                    write(console, b"container: stop rejected\r\n");
+                }
+            }
+            b"container start default" | b"container restart default" => {
+                if call(
+                    NATIVE_CONTAINER_CONTROL_OPERATION,
+                    host,
+                    NATIVE_CONTAINER_RESTART,
+                    0,
+                ) == NATIVE_CONTAINER_STATE_STOPPED
+                {
+                    write(console, b"default: restarting\r\n");
+                    exit(NATIVE_SERVICE_EXIT_COMPLETED);
+                }
+                write(console, b"container: restart rejected\r\n");
+            }
+            b"container fail default" => {
+                if call(
+                    NATIVE_CONTAINER_CONTROL_OPERATION,
+                    host,
+                    NATIVE_CONTAINER_INJECT_FAILURE,
+                    0,
+                ) == NATIVE_CONTAINER_STATE_FAILED
+                {
+                    write(console, b"default: failed (contained)\r\n");
+                    exit(NATIVE_SERVICE_EXIT_COMPLETED);
+                } else {
+                    write(console, b"container: failure injection rejected\r\n");
+                }
+            }
             b"shutdown" => {
                 write(console, b"Shutting down Ginux.\r\n");
+                if call(
+                    NATIVE_CONTAINER_CONTROL_OPERATION,
+                    host,
+                    NATIVE_CONTAINER_HOST_SHUTDOWN,
+                    0,
+                ) == NATIVE_CALL_FAILED
+                {
+                    exit(NATIVE_SERVICE_EXIT_REJECTED);
+                }
                 exit(NATIVE_SERVICE_EXIT_COMPLETED);
             }
             b"" => {}
@@ -128,6 +192,27 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
             _ => write(console, b"Unknown command. Type 'help'.\r\n"),
         }
     }
+}
+
+fn query_container(host: u64) -> u64 {
+    call(
+        NATIVE_CONTAINER_CONTROL_OPERATION,
+        host,
+        NATIVE_CONTAINER_QUERY,
+        0,
+    )
+}
+
+fn write_container_state(console: u64, state: u64) {
+    write(
+        console,
+        match state {
+            NATIVE_CONTAINER_STATE_RUNNING => b"running\r\n",
+            NATIVE_CONTAINER_STATE_STOPPED => b"stopped\r\n",
+            NATIVE_CONTAINER_STATE_FAILED => b"failed\r\n",
+            _ => b"unknown\r\n",
+        },
+    );
 }
 
 fn write(console: u64, bytes: &[u8]) {
@@ -248,6 +333,7 @@ fn show_processes(console: u64, host: u64) {
             console,
             match record.kind {
                 NATIVE_HOST_PROCESS_KIND_CONTROLLER => b"controller",
+                NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT => b"default:init",
                 _ => b"unknown",
             },
         );

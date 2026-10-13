@@ -1484,6 +1484,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(controller_image) = native_elf::inspect(controller_runtime) else {
         kernel_fail("\r\nginux: embedded controller ELF invalid\r\n");
     };
+    if !address_space::install_interactive_controller_image(&controller_image) {
+        kernel_fail("\r\nginux: embedded controller installation failed\r\n");
+    }
     if !executable::verify_parser_rejections(control_plane_bundle) {
         kernel_fail("\r\nginux: malformed executable containers accepted\r\n");
     }
@@ -3535,11 +3538,40 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: bootstrap SHA-256 self-test failed\r\n");
     }
     serial_write("\r\nginux: bootstrap SHA-256 known answers verified");
-    serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
-    if !address_space::run_interactive_controller(&controller_image) {
-        kernel_fail("\r\nginux: interactive controller failed\r\n");
+    if !arch::x86_64::cpu::enable_container_management() {
+        kernel_fail("\r\nginux: container management activation failed\r\n");
     }
-    serial_write("ginux: controller requested clean shutdown");
+    'managed: loop {
+        serial_write("\r\nginux: launching configured container default");
+        serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
+        if !linux_elf::verify_mapped_system_init_plan(
+            boot_info.image_base as u64,
+            boot_info.image_size,
+        ) {
+            kernel_fail("ginux: minimal system init execution failed\r\n");
+        }
+        if arch::x86_64::cpu::take_container_host_shutdown_request() {
+            break;
+        }
+        if arch::x86_64::cpu::take_container_restart_request() {
+            serial_write("ginux: restarting configured container default\r\n");
+            continue;
+        }
+        serial_write("ginux: relaunching controller with container inactive\r\n");
+        if !address_space::run_installed_interactive_controller() {
+            kernel_fail("ginux: inactive container controller failed\r\n");
+        }
+        if arch::x86_64::cpu::take_container_host_shutdown_request() {
+            break 'managed;
+        }
+        if arch::x86_64::cpu::take_container_restart_request() {
+            serial_write("ginux: restarting configured container default\r\n");
+            continue 'managed;
+        }
+        kernel_fail("ginux: controller exited without a lifecycle request\r\n");
+    }
+    serial_write("ginux: configured container default exited cleanly\r\n");
+    serial_write("\r\nginux: controller requested clean shutdown");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 
     (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());

@@ -4,7 +4,7 @@ Ginux is an immutable, capability-secure, container-native operating system for 
 
 See [Architecture](ARCHITECTURE.md) for the design and [Verification Roadmap](docs/ROADMAP.md) for the hard implementation-and-review checkpoints.
 
-## Run the C1 interactive checkpoint
+## Run the C2 configured-container checkpoint
 
 On macOS with QEMU installed:
 
@@ -13,9 +13,11 @@ make doctor
 make run
 ```
 
-Wait for the `ginux>` prompt, then use `help`, `status`, `components`, or
-`shutdown`. The initial boot performs the existing hardware and isolation proof
-suite before presenting the controller. See the [C1 verification guide](docs/checkpoints/C1.md).
+Wait for the `ginux>` prompt, then use `help`, `ps`, `ls /proc`, and the
+`container status|stop|start|restart|fail default` lifecycle commands. The
+initial boot performs the existing hardware and isolation proof suite before
+presenting the controller. Run `make test-c2` for the automated gate. See the
+[C2 verification guide](docs/checkpoints/C2.md).
 
 Ginux is licensed under the [Apache License, Version 2.0](LICENSE). See
 [NOTICE](NOTICE) for attribution information.

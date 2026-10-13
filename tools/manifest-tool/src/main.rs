@@ -32,9 +32,9 @@ const DEVELOPMENT_SEED: [u8; 32] = [
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 12 {
+    if arguments.len() != 11 {
         fail(
-            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS CONTROLLER_RUNTIME NETWORK_SERVICE PROTOCOL_SERVICE VOLUME_SERVICE SYSTEM_PROFILE CONTAINER_CONFIG OUTPUT_RS",
+            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS CONTROLLER_RUNTIME NETWORK_SERVICE PROTOCOL_SERVICE VOLUME_SERVICE SYSTEM_PROFILE OUTPUT_RS",
         );
     }
     let config = fs::read_to_string(&arguments[1]).unwrap_or_else(|error| {
@@ -69,17 +69,12 @@ fn main() {
         fail(&format!("cannot read {}: {error}", arguments[9]));
     });
     validate_system_profile(&system_profile);
-    let container_config = fs::read(&arguments[10]).unwrap_or_else(|error| {
-        fail(&format!("cannot read {}: {error}", arguments[10]));
-    });
-    validate_container_config(&container_config);
     let root_image = build_initramfs(
         &arguments[4],
         &network_service,
         &protocol_service,
         &volume_service,
         &system_profile,
-        &container_config,
     );
     if root_image.len() > ROOT_IMAGE_MAX_SIZE {
         fail("generated root image exceeds the 48-page publication capacity");
@@ -124,7 +119,7 @@ fn main() {
         &root_image,
         &controller_runtime,
     );
-    let output_path = Path::new(&arguments[11]);
+    let output_path = Path::new(&arguments[10]);
     fs::write(output_path, output).unwrap_or_else(|error| {
         fail(&format!("cannot write {}: {error}", output_path.display()));
     });
@@ -141,7 +136,6 @@ fn build_initramfs(
     protocol_service: &[u8],
     volume_service: &[u8],
     system_profile: &[u8],
-    container_config: &[u8],
 ) -> Vec<u8> {
     let artifacts = Path::new(linux_artifacts);
     let linux_init = read_root_artifact(&artifacts.join("linux-linked-graph-main.elf"));
@@ -173,7 +167,6 @@ fn build_initramfs(
         (19, 0o040555, "bin", &b""[..]),
         (23, 0o040555, "sbin", &b""[..]),
         (22, 0o100444, "etc/ginux-system-profile", system_profile),
-        (29, 0o100444, "etc/ginux-containers", container_config),
     ] {
         append_newc_entry(&mut archive, inode, mode, name, data);
     }
@@ -196,36 +189,6 @@ fn build_initramfs(
     archive
 }
 
-fn validate_container_config(bytes: &[u8]) {
-    let text = std::str::from_utf8(bytes).unwrap_or_else(|_| fail("container config is not UTF-8"));
-    if !text.ends_with('\n') || text.contains('\r') || text.contains('\0') {
-        fail("container config must use newline-terminated LF text");
-    }
-    let mut lines = text.lines();
-    if lines.next() != Some("GINUX_CONTAINERS_V0") {
-        fail("container config has an unsupported version");
-    }
-    let Some(line) = lines.next() else {
-        fail("container config is missing the default container");
-    };
-    let fields: Vec<_> = line.split('\t').collect();
-    if fields.as_slice()
-        != [
-            "container",
-            "default",
-            "autostart",
-            "/sbin/init",
-            "cpu=1",
-            "memory_mib=128",
-        ]
-    {
-        fail("container config is outside the minimal v0 profile");
-    }
-    if lines.next().is_some() {
-        fail("container config contains unsupported additional entries");
-    }
-}
-
 fn validate_system_profile(bytes: &[u8]) {
     let text = std::str::from_utf8(bytes).unwrap_or_else(|_| fail("system profile is not UTF-8"));
     if !text.ends_with('\n') || text.contains('\r') || text.contains('\0') {
@@ -237,8 +200,16 @@ fn validate_system_profile(bytes: &[u8]) {
     }
     let mut names = BTreeSet::new();
     let mut ready = false;
+    let mut container = false;
     let mut metadata = [false; 4];
     for line in lines {
+        if line == "container\tdefault\tautostart\t/sbin/init\tcpu=1\tmemory_mib=128" {
+            if container {
+                fail("system profile contains a duplicate container configuration");
+            }
+            container = true;
+            continue;
+        }
         let mut fields = line.split('\t');
         let Some(kind) = fields.next() else {
             fail("system profile row has no kind");
@@ -279,6 +250,9 @@ fn validate_system_profile(bytes: &[u8]) {
     }
     if metadata != [true; 4] {
         fail("system profile is missing required metadata");
+    }
+    if !container {
+        fail("system profile is missing the minimal container configuration");
     }
     if !ready {
         fail("system profile must expose at least one ready requirement");

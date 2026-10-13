@@ -1,2 +1,0 @@
-GINUX_CONTAINERS_V0
-container	default	autostart	/sbin/init	cpu=1	memory_mib=128

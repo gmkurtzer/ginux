@@ -1,7 +1,7 @@
 use core::{
     arch::{asm, global_asm},
     mem::size_of,
-    sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering},
 };
 
 use crate::{
@@ -101,6 +101,46 @@ static mut AUXILIARY_ADDRESS_SPACES: [Option<RegisteredAuxiliaryAddressSpace>;
 static NATIVE_VOLUME_COMPLETION: AtomicU8 = AtomicU8::new(0);
 static LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE: AtomicBool = AtomicBool::new(false);
+static INTERACTIVE_CONTROLLER_IMAGE: AtomicUsize = AtomicUsize::new(0);
+static INTERACTIVE_CONTROLLER_IMAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn install_interactive_controller_image(
+    image: &crate::native_elf::NativeImage<'_>,
+) -> bool {
+    if image.bytes.is_empty()
+        || INTERACTIVE_CONTROLLER_IMAGE
+            .compare_exchange(
+                0,
+                image.bytes.as_ptr() as usize,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+    {
+        return false;
+    }
+    INTERACTIVE_CONTROLLER_IMAGE_SIZE.store(image.bytes.len(), Ordering::Release);
+    true
+}
+
+pub(crate) fn run_installed_interactive_controller() -> bool {
+    let address = INTERACTIVE_CONTROLLER_IMAGE.load(Ordering::Acquire);
+    let size = INTERACTIVE_CONTROLLER_IMAGE_SIZE.load(Ordering::Acquire);
+    if address == 0 || size == 0 {
+        return false;
+    }
+    // SAFETY: installation accepts the measured controller slice embedded in
+    // the boot image, whose storage remains immutable for the entire boot.
+    let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, size) };
+    let linux_root = current_root();
+    let kernel_root = paging::kernel_root_address();
+    unsafe { activate(kernel_root) };
+    let valid = current_root() == kernel_root
+        && crate::native_elf::inspect(bytes)
+            .is_some_and(|image| run_interactive_controller(&image));
+    unsafe { activate(linux_root) };
+    valid && current_root() == linux_root
+}
 
 pub(crate) fn verify_linux_elf_mapping(
     plan: &crate::linux_elf::LoadPlan<'_>,
@@ -4724,15 +4764,17 @@ pub(crate) fn verify_native_service_materialization(
 
 pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<'_>) -> bool {
     let rights = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
+    let host_rights = crate::capability::Rights::READ.union(crate::capability::Rights::MANAGE);
     let Some(controller) = domain::initialize_boot_auxiliary_service_with_three_grants([
         (1, 2, rights),
-        (0, 1, crate::capability::Rights::READ),
+        (0, 1, host_rights),
         (
             4,
             crate::control_abi::ROOT_OBJECT,
             crate::capability::Rights::READ,
         ),
     ]) else {
+        crate::serial_write("ginux: controller domain admission failed\r\n");
         return false;
     };
     let (Some(console), Some(host), Some(root_handle), Some(identity), Some(owner)) = (
@@ -4742,16 +4784,18 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         domain::domain_service_identity(controller),
         memory::FrameOwner::domain(controller),
     ) else {
+        crate::serial_write("ginux: controller capability setup failed\r\n");
         return false;
     };
     let kernel_root = current_root();
     let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+        crate::serial_write("ginux: controller address-space creation failed\r\n");
         return false;
     };
     if !space.layout_is_valid(image)
         || !space.relocations_are_valid(image)
         || !domain::handle_permits(controller, console, 2, rights)
-        || !domain::handle_permits(controller, host, 1, crate::capability::Rights::READ)
+        || !domain::handle_permits(controller, host, 1, host_rights)
         || !domain::handle_permits(
             controller,
             root_handle,
@@ -4759,20 +4803,31 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
             crate::capability::Rights::READ,
         )
     {
+        crate::serial_write("ginux: controller authority validation failed\r\n");
         let _ = space.release();
         return false;
     }
     let root = space.root;
     let Ok(entry) = usize::try_from(space.entry) else {
+        crate::serial_write("ginux: controller entry conversion failed\r\n");
         let _ = space.release();
         return false;
     };
     let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
-    if domain::publish_controller_process(controller) != Some(1)
-        || !register_address_space(controller, AuxiliaryAddressSpace::Native(space))
-        || !scheduler::queue_auxiliary(controller, root, entry, stack, console)
-        || !cpu::activate_user_root(root)
-    {
+    if domain::publish_controller_process(controller).is_none() {
+        crate::serial_write("ginux: controller process publication failed\r\n");
+        return false;
+    }
+    if !register_address_space(controller, AuxiliaryAddressSpace::Native(space)) {
+        crate::serial_write("ginux: controller address-space registration failed\r\n");
+        return false;
+    }
+    if !scheduler::queue_auxiliary(controller, root, entry, stack, console) {
+        crate::serial_write("ginux: controller scheduler queue failed\r\n");
+        return false;
+    }
+    if !cpu::activate_user_root(root) {
+        crate::serial_write("ginux: controller root activation failed\r\n");
         return false;
     }
     cpu::execute_native_controller(

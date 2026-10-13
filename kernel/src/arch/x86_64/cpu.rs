@@ -785,6 +785,10 @@ static LINUX_SIGNAL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SIGNAL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: AtomicU32 = AtomicU32::new(0);
+static CONTAINER_CONTROL_STATE: AtomicU8 = AtomicU8::new(0);
+static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
+static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -2251,8 +2255,27 @@ fn resume_linux_system_supervisor() -> bool {
                 parent_pid: 0,
                 state: linux_process::LiveProcessState::Running,
             })
-        || !wake_linux_signal_wait(LINUX_SIGTERM, LINUX_SI_KERNEL)
     {
+        return false;
+    }
+    if !CONTAINER_MANAGEMENT_ENABLED.load(Ordering::SeqCst) {
+        return resume_linux_system_supervisor_legacy();
+    }
+    CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
+    crate::serial_write("ginux: configured container default reached ready state\r\n");
+    if !address_space::run_installed_interactive_controller() {
+        return false;
+    }
+    if LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.load(Ordering::SeqCst) == 0
+        && !shutdown_linux_system_supervisor(false)
+    {
+        return false;
+    }
+    LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.load(Ordering::SeqCst) == 1
+}
+
+fn resume_linux_system_supervisor_legacy() -> bool {
+    if !wake_linux_signal_wait(LINUX_SIGTERM, LINUX_SI_KERNEL) {
         return false;
     }
     let Some(thread) = ready_linux_thread_handle() else {
@@ -2287,6 +2310,82 @@ fn resume_linux_system_supervisor() -> bool {
         process.general,
         process.rflags,
     )
+}
+
+fn shutdown_linux_system_supervisor(failed: bool) -> bool {
+    if LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT.load(Ordering::SeqCst) != 1
+        || LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.load(Ordering::SeqCst) != 0
+        || current_linux_thread_handle().is_some()
+        || linux_process::live_process_status(1)
+            != Some(linux_process::LiveProcessStatus {
+                pid: 1,
+                parent_pid: 0,
+                state: linux_process::LiveProcessState::Running,
+            })
+        || !wake_linux_signal_wait(LINUX_SIGTERM, LINUX_SI_KERNEL)
+    {
+        return false;
+    }
+    let Some(thread) = ready_linux_thread_handle() else {
+        return false;
+    };
+    let Some(context) = linux_thread_return_context(thread) else {
+        return false;
+    };
+    let Some(process) = linux_process::dispatch_live_init_with_return(LINUX_SIGTERM) else {
+        return false;
+    };
+    if process.pid != 1
+        || context.rax != LINUX_SIGTERM
+        || process.general
+            != context
+                .registers
+                .process_general(context.rax, context.rip, context.rflags)
+        || process.rip != context.rip
+        || process.rsp != context.rsp
+        || process.rflags != context.rflags
+        || process.fs_base != context.fs_base
+        || !switch_linux_thread(thread)
+    {
+        return false;
+    }
+    LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.fetch_add(1, Ordering::SeqCst);
+    let resumed = address_space::resume_live_linux_process(
+        process.root,
+        process.rip,
+        process.rsp,
+        process.fs_base,
+        process.general,
+        process.rflags,
+    );
+    if resumed
+        && CONTAINER_CONTROL_STATE.load(Ordering::SeqCst)
+            == control_abi::CONTAINER_STATE_RUNNING as u8
+    {
+        CONTAINER_CONTROL_STATE.store(
+            if failed {
+                control_abi::CONTAINER_STATE_FAILED as u8
+            } else {
+                control_abi::CONTAINER_STATE_STOPPED as u8
+            },
+            Ordering::SeqCst,
+        );
+    }
+    resumed
+}
+
+pub(crate) fn take_container_restart_request() -> bool {
+    CONTAINER_RESTART_REQUESTED.swap(false, Ordering::SeqCst)
+}
+
+pub(crate) fn take_container_host_shutdown_request() -> bool {
+    CONTAINER_HOST_SHUTDOWN_REQUESTED.swap(false, Ordering::SeqCst)
+}
+
+pub(crate) fn enable_container_management() -> bool {
+    CONTAINER_MANAGEMENT_ENABLED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
 }
 
 fn linux_active_image_writable_index(address: u64) -> Option<usize> {
@@ -14380,6 +14479,9 @@ fn dispatch_charged_call(
             console_read_line(caller_domain, capability, frame)
         }
         control_abi::HOST_INSPECT_OPERATION => host_inspect(caller_domain, capability, frame),
+        control_abi::CONTAINER_CONTROL_OPERATION => {
+            container_control(caller_domain, capability, frame)
+        }
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
         }
@@ -15766,19 +15868,58 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
             let Ok(cursor) = usize::try_from(selector) else {
                 return u64::MAX - 2;
             };
+            if selector == domain::HOST_DOMAIN_CURSOR_END + 1 {
+                return if domain::renew_auxiliary_call_epoch(domain_id) {
+                    0
+                } else {
+                    u64::MAX - 2
+                };
+            }
             let Some(record) = domain::inspect_live_domain(cursor) else {
                 return u64::MAX - 2;
             };
-            let Some(record) = record else {
-                return 0;
-            };
-            record
+            match record {
+                Some(record) => record,
+                None if CONTAINER_CONTROL_STATE.load(Ordering::SeqCst)
+                    == control_abi::CONTAINER_STATE_RUNNING as u8 =>
+                {
+                    domain::InspectionRecord {
+                        pid: 100,
+                        parent_pid: 0,
+                        kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+                        state: control_abi::HOST_INSPECT_STATE_READY,
+                        active_threads: 1,
+                        next_cursor: domain::HOST_DOMAIN_CURSOR_END + 1,
+                    }
+                }
+                None => {
+                    return if domain::renew_auxiliary_call_epoch(domain_id) {
+                        0
+                    } else {
+                        u64::MAX - 2
+                    };
+                }
+            }
         }
         control_abi::HOST_PROC_STATUS => {
-            let Some(record) = domain::inspect_host_process(selector) else {
-                return u64::MAX - 2;
-            };
-            record
+            if selector == 100
+                && CONTAINER_CONTROL_STATE.load(Ordering::SeqCst)
+                    == control_abi::CONTAINER_STATE_RUNNING as u8
+            {
+                domain::InspectionRecord {
+                    pid: 100,
+                    parent_pid: 0,
+                    kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+                    state: control_abi::HOST_INSPECT_STATE_READY,
+                    active_threads: 1,
+                    next_cursor: 0,
+                }
+            } else {
+                let Some(record) = domain::inspect_host_process(selector) else {
+                    return u64::MAX - 2;
+                };
+                record
+            }
         }
         _ => return u64::MAX - 2,
     };
@@ -15791,10 +15932,53 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
     output[16..24].copy_from_slice(&record.pid.to_le_bytes());
     output[24..32].copy_from_slice(&record.parent_pid.to_le_bytes());
     output[32..40].copy_from_slice(&record.next_cursor.to_le_bytes());
-    if address_space::copy_to_current_user(output_address, &output) {
+    if address_space::copy_to_current_user(output_address, &output)
+        && domain::renew_auxiliary_call_epoch(domain_id)
+    {
         output.len() as u64
     } else {
         u64::MAX - 2
+    }
+}
+
+fn container_control(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(domain_id, capability, 1, Rights::MANAGE)
+        || frame.second_argument() != 0
+    {
+        return u64::MAX - 2;
+    }
+    let state = u64::from(CONTAINER_CONTROL_STATE.load(Ordering::SeqCst));
+    match frame.first_argument() {
+        control_abi::CONTAINER_QUERY => state,
+        control_abi::CONTAINER_STOP if state == control_abi::CONTAINER_STATE_RUNNING => {
+            CONTAINER_CONTROL_STATE
+                .store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
+            control_abi::CONTAINER_STATE_STOPPED
+        }
+        control_abi::CONTAINER_RESTART
+            if matches!(
+                state,
+                control_abi::CONTAINER_STATE_RUNNING
+                    | control_abi::CONTAINER_STATE_STOPPED
+                    | control_abi::CONTAINER_STATE_FAILED
+            ) =>
+        {
+            CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
+            control_abi::CONTAINER_STATE_STOPPED
+        }
+        control_abi::CONTAINER_INJECT_FAILURE if state == control_abi::CONTAINER_STATE_RUNNING => {
+            CONTAINER_CONTROL_STATE
+                .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+            control_abi::CONTAINER_STATE_FAILED
+        }
+        control_abi::CONTAINER_HOST_SHUTDOWN => {
+            CONTAINER_HOST_SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+            state
+        }
+        _ => u64::MAX - 2,
     }
 }
 

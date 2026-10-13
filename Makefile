@@ -14,11 +14,10 @@ NETWORK_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-network-service-r
 PROTOCOL_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-protocol-service-runtime
 INITRAMFS := build/initramfs-v0.cpio
 SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
-CONTAINER_CONFIG := profiles/minimal-system-v0/containers.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 fmt gate clean
+.PHONY: help doctor manifest system-image linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -37,6 +36,7 @@ help:
 	@echo "  make run     Build and boot Ginux in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
 	@echo "  make test-c1 Build and verify the interactive controller console"
+	@echo "  make test-c2 Verify configured container lifecycle management"
 	@echo "  make check   Run formatting and lint checks"
 	@echo "  make fmt     Format Rust sources"
 	@echo "  make gate    Run the clean reproducible build and QEMU test gate"
@@ -47,7 +47,7 @@ doctor:
 
 manifest: linux-probe controller-runtime network-service protocol-service volume-service
 	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" "$(CONTAINER_CONFIG)" boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
 	@test -s "$(INITRAMFS)"
 
 system-image: manifest
@@ -108,6 +108,9 @@ test: build
 test-c1: build
 	@tests/qemu/controller-console.sh
 
+test-c2: test-c1
+	@tests/config/container-config.sh
+
 architecture-check:
 	@bash tools/architecture/check.sh
 
@@ -136,7 +139,7 @@ gate:
 	@$(MAKE) fmt
 	@$(MAKE) clean
 	@$(MAKE) check
-	@$(MAKE) test-c1
+	@$(MAKE) test-c2
 	@$(MAKE) test
 	@git diff --check
 	@echo "Clean build and QEMU test gate passed"

@@ -2,12 +2,11 @@
 
 **Status:** C2 minimal profile.
 
-`/etc/ginux-containers` is part of the immutable measured root and therefore
-covered by the signed root-image digest. The v0 profile accepts exactly one
-newline-terminated record:
+`/etc/ginux-system-profile` is part of the immutable measured root and
+therefore covered by the signed root-image digest. The v0 profile includes the
+following record:
 
 ```text
-GINUX_CONTAINERS_V0
 container	default	autostart	/sbin/init	cpu=1	memory_mib=128
 ```
 

@@ -339,6 +339,10 @@ fn single_user_table_entry(table_address: u64) -> Option<u64> {
 struct PageTable([u64; ENTRY_COUNT]);
 
 static mut PML4: PageTable = PageTable([0; ENTRY_COUNT]);
+
+pub(crate) fn kernel_root_address() -> u64 {
+    core::ptr::addr_of!(PML4) as u64
+}
 static mut PDPT: PageTable = PageTable([0; ENTRY_COUNT]);
 static mut DIRECT_PDPT: PageTable = PageTable([0; ENTRY_COUNT]);
 static mut PAGE_DIRECTORIES: [PageTable; DIRECTORY_COUNT] =

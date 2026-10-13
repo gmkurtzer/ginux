@@ -4,6 +4,7 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
+pub(crate) const HOST_DOMAIN_CURSOR_END: u64 = MAX_DOMAINS as u64;
 const MAX_BOOT_GRANTS: usize = 9;
 const CONTROL_CALL_BUDGET: u16 = 79;
 const SERVICE_CALL_BUDGET: u16 = 23;
