@@ -7,10 +7,12 @@ use ginux_native_abi::{
     native_control_abi_is_compatible, NativeContainerRequestV0, NativeControlDescriptorV4,
     NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
     NATIVE_CALL_FAILED, NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION,
-    NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE, NATIVE_CONTAINER_HOST_SHUTDOWN,
-    NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY,
-    NATIVE_CONTAINER_RESTART, NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU,
-    NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_STATE_CONFIGURED,
+    NATIVE_CONTAINER_CONFIG_AUTOSTART, NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_CONFIG_INIT,
+    NATIVE_CONTAINER_CONFIG_MEMORY, NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE,
+    NATIVE_CONTAINER_HOST_SHUTDOWN, NATIVE_CONTAINER_INJECT_FAILURE,
+    NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY, NATIVE_CONTAINER_RESTART,
+    NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU, NATIVE_CONTAINER_SET_INIT,
+    NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_STATE_CONFIGURED,
     NATIVE_CONTAINER_STATE_CREATED, NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING,
     NATIVE_CONTAINER_STATE_STOPPED, NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
     NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
@@ -39,8 +41,16 @@ const COMMAND_CONTAINER_START: u16 = 9;
 const COMMAND_CONTAINER_STOP: u16 = 10;
 const COMMAND_CONTAINER_RESTART: u16 = 11;
 const COMMAND_CONTAINER_FAIL: u16 = 12;
+const COMMAND_CONTAINER_LIST: u16 = 13;
 
 const CONTAINER_COMMANDS: &[Command<'static>] = &[
+    Command::leaf(
+        b"list",
+        b"container list",
+        b"List all containers",
+        COMMAND_CONTAINER_LIST,
+        Arity::exact(0),
+    ),
     Command::leaf(
         b"new",
         b"container new NAME",
@@ -273,6 +283,7 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
             COMMAND_CONTAINER_NEW..=COMMAND_CONTAINER_FAIL => {
                 handle_container_command(console, host, invocation.id(), invocation.arguments())
             }
+            COMMAND_CONTAINER_LIST => show_container_list(console, host),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
         }
     }
@@ -296,13 +307,80 @@ fn write_container_summary(console: u64, host: u64) {
 fn write_container_state(console: u64, state: u64) {
     write(
         console,
-        match state {
-            NATIVE_CONTAINER_STATE_RUNNING => b"running\r\n",
-            NATIVE_CONTAINER_STATE_STOPPED => b"stopped\r\n",
-            NATIVE_CONTAINER_STATE_FAILED => b"failed\r\n",
-            NATIVE_CONTAINER_STATE_CREATED => b"created (incomplete)\r\n",
-            NATIVE_CONTAINER_STATE_CONFIGURED => b"configured\r\n",
-            _ => b"unknown\r\n",
+        if state == NATIVE_CONTAINER_STATE_CREATED {
+            b"created (incomplete)"
+        } else {
+            container_state_name(state)
+        },
+    );
+    write(console, b"\r\n");
+}
+
+fn container_state_name(state: u64) -> &'static [u8] {
+    match state {
+        NATIVE_CONTAINER_STATE_RUNNING => b"running",
+        NATIVE_CONTAINER_STATE_STOPPED => b"stopped",
+        NATIVE_CONTAINER_STATE_FAILED => b"failed",
+        NATIVE_CONTAINER_STATE_CREATED => b"created",
+        NATIVE_CONTAINER_STATE_CONFIGURED => b"configured",
+        _ => b"unknown",
+    }
+}
+
+fn show_container_list(console: u64, host: u64) {
+    write(console, b"NAME STATE INIT CPU MEM-MIB AUTO\r\n");
+    let mut request = NativeContainerRequestV0::zeroed();
+    let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
+    if state == 0 {
+        return;
+    }
+    if state == NATIVE_CALL_FAILED {
+        write(console, b"container: list failed\r\n");
+        return;
+    }
+    write(console, request_name(&request));
+    write(console, b" ");
+    write(console, container_state_name(state));
+    write(console, b" ");
+    write_container_configuration(console, &request);
+}
+
+fn write_container_configuration(console: u64, request: &NativeContainerRequestV0) {
+    let configured = |flag| request.config_flags & flag != 0;
+    if configured(NATIVE_CONTAINER_CONFIG_INIT) {
+        let init = request
+            .init
+            .get(..usize::from(request.init_size))
+            .unwrap_or_default();
+        write(console, init);
+    } else {
+        write(console, b"-");
+    }
+    write(console, b" ");
+    write(
+        console,
+        if configured(NATIVE_CONTAINER_CONFIG_CPU) {
+            b"1"
+        } else {
+            b"-"
+        },
+    );
+    write(console, b" ");
+    write(
+        console,
+        if configured(NATIVE_CONTAINER_CONFIG_MEMORY) {
+            b"128"
+        } else {
+            b"-"
+        },
+    );
+    write(console, b" ");
+    write(
+        console,
+        if configured(NATIVE_CONTAINER_CONFIG_AUTOSTART) {
+            b"true\r\n"
+        } else {
+            b"-\r\n"
         },
     );
 }
