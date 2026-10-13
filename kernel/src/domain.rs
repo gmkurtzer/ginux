@@ -50,9 +50,9 @@ pub(crate) enum ServiceFailurePolicy {
 
 #[derive(Clone, Copy)]
 pub(crate) struct InspectionRecord {
-    pub(crate) domain: u64,
-    pub(crate) service: u64,
-    pub(crate) role: u16,
+    pub(crate) pid: u64,
+    pub(crate) parent_pid: u64,
+    pub(crate) kind: u16,
     pub(crate) state: u16,
     pub(crate) active_threads: u32,
     pub(crate) next_cursor: u64,
@@ -78,6 +78,8 @@ struct Domain {
     terminal_exit_status: Option<u8>,
     drain_requested: bool,
     readiness_published: bool,
+    host_pid: Option<u32>,
+    process_kind: u16,
     role: Role,
     state: State,
     capabilities: CapabilityTable,
@@ -236,6 +238,7 @@ pub(crate) struct Manager {
     service_started: bool,
     remaining_service_restarts: u16,
     total_service_restarts: u16,
+    next_host_pid: u32,
     quarantined_frame_owners: [Option<FrameQuarantine>; MAX_SERVICE_IDENTITIES],
 }
 
@@ -261,6 +264,7 @@ impl Manager {
             service_started: false,
             remaining_service_restarts: SERVICE_RESTART_BUDGET,
             total_service_restarts: 0,
+            next_host_pid: 1,
             quarantined_frame_owners: [None; MAX_SERVICE_IDENTITIES],
         }
     }
@@ -286,6 +290,8 @@ impl Manager {
             terminal_exit_status: None,
             drain_requested: false,
             readiness_published: false,
+            host_pid: None,
+            process_kind: 0,
             role: Role::ControlPlane,
             state: State::Ready,
             capabilities,
@@ -482,6 +488,8 @@ impl Manager {
             terminal_exit_status: None,
             drain_requested: false,
             readiness_published: false,
+            host_pid: None,
+            process_kind: 0,
             role,
             state: State::Ready,
             capabilities,
@@ -2806,22 +2814,39 @@ pub(crate) fn domain_is_retired(domain_raw: u64) -> bool {
     global_manager().is_some_and(|manager| manager.domain(id).is_none())
 }
 
+pub(crate) fn publish_controller_process(domain_raw: u64) -> Option<u32> {
+    let id = decode_id(domain_raw)?;
+    let manager = global_manager_mut()?;
+    let pid = manager.next_host_pid;
+    if pid == 0 {
+        return None;
+    }
+    let domain = manager.domain(id)?;
+    if domain.role != Role::AuxiliaryService || domain.host_pid.is_some() {
+        return None;
+    }
+    manager.next_host_pid = pid.checked_add(1)?;
+    let domain = manager.domains.get_mut(usize::from(id.slot))?.as_mut()?;
+    if domain.id != id {
+        return None;
+    }
+    domain.host_pid = Some(pid);
+    domain.process_kind = crate::control_abi::HOST_PROCESS_KIND_CONTROLLER;
+    Some(pid)
+}
+
 pub(crate) fn inspect_live_domain(cursor: usize) -> Option<Option<InspectionRecord>> {
     let manager = global_manager()?;
     if cursor > MAX_DOMAINS {
         return None;
     }
     for (index, domain) in manager.domains[cursor..].iter().enumerate() {
-        if let Some(domain) = domain {
+        if let Some(domain) = domain.as_ref().filter(|domain| domain.host_pid.is_some()) {
             let next_cursor = cursor.checked_add(index)?.checked_add(1)?;
             return Some(Some(InspectionRecord {
-                domain: encode_id(domain.id),
-                service: domain.service.map_or(0, encode_service_id),
-                role: match domain.role {
-                    Role::ControlPlane => crate::control_abi::HOST_INSPECT_ROLE_CONTROL,
-                    Role::SupervisedService => crate::control_abi::HOST_INSPECT_ROLE_SERVICE,
-                    Role::AuxiliaryService => crate::control_abi::HOST_INSPECT_ROLE_AUXILIARY,
-                },
+                pid: u64::from(domain.host_pid?),
+                parent_pid: 0,
+                kind: domain.process_kind,
                 state: match domain.state {
                     State::Ready => crate::control_abi::HOST_INSPECT_STATE_READY,
                     State::Stopping => crate::control_abi::HOST_INSPECT_STATE_STOPPING,
@@ -2832,6 +2857,25 @@ pub(crate) fn inspect_live_domain(cursor: usize) -> Option<Option<InspectionReco
         }
     }
     Some(None)
+}
+
+pub(crate) fn inspect_host_process(pid: u64) -> Option<InspectionRecord> {
+    global_manager()?
+        .domains
+        .iter()
+        .flatten()
+        .find(|domain| domain.host_pid.map(u64::from) == Some(pid))
+        .map(|domain| InspectionRecord {
+            pid,
+            parent_pid: 0,
+            kind: domain.process_kind,
+            state: match domain.state {
+                State::Ready => crate::control_abi::HOST_INSPECT_STATE_READY,
+                State::Stopping => crate::control_abi::HOST_INSPECT_STATE_STOPPING,
+            },
+            active_threads: u32::from(domain.active_threads),
+            next_cursor: 0,
+        })
 }
 
 pub(crate) fn last_retired_service_domain() -> Option<u64> {

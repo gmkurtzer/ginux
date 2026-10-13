@@ -9,12 +9,12 @@ use ginux_native_abi::{
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_HOST_INSPECT_OPERATION,
     NATIVE_HOST_INSPECT_RECORD_SIZE, NATIVE_HOST_INSPECT_REQUEST_SIZE,
-    NATIVE_HOST_INSPECT_ROLE_AUXILIARY, NATIVE_HOST_INSPECT_ROLE_CONTROL,
-    NATIVE_HOST_INSPECT_ROLE_SERVICE, NATIVE_HOST_INSPECT_STATE_READY,
-    NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
-    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
-    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_HOST_INSPECT_STATE_READY, NATIVE_HOST_INSPECT_STATE_STOPPING,
+    NATIVE_HOST_INSPECT_VERSION, NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROC_ENUMERATE,
+    NATIVE_HOST_PROC_STATUS, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
+    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
+    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = 32;
@@ -117,7 +117,13 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                 let supplied = command.get(2..).unwrap_or_default();
                 let supplied = supplied.strip_prefix(b" ").unwrap_or(supplied);
                 let path = supplied.strip_prefix(b"/").unwrap_or(supplied);
-                list_directory(console, root, path);
+                if path == b"proc" {
+                    list_proc_directory(console, host, b"");
+                } else if let Some(path) = path.strip_prefix(b"proc/") {
+                    list_proc_directory(console, host, path);
+                } else {
+                    list_directory(console, root, path);
+                }
             }
             _ => write(console, b"Unknown command. Type 'help'.\r\n"),
         }
@@ -211,61 +217,111 @@ fn list_directory(console: u64, root: u64, path: &[u8]) {
 }
 
 fn show_processes(console: u64, host: u64) {
-    write(console, b"DOMAIN ROLE STATE THREADS\r\n");
+    write(console, b"PID PPID STATE NAME\r\n");
     let mut cursor = 0;
     loop {
-        let mut record = NativeHostInspectRecordV0::zeroed();
-        let request = NativeHostInspectRequestV0 {
-            size: NATIVE_HOST_INSPECT_REQUEST_SIZE,
-            version: NATIVE_HOST_INSPECT_VERSION,
-            reserved: 0,
-            cursor,
-            output_address: (&mut record as *mut NativeHostInspectRecordV0) as u64,
-            output_size: u64::from(NATIVE_HOST_INSPECT_RECORD_SIZE),
-        };
-        let result = call(
-            NATIVE_HOST_INSPECT_OPERATION,
-            host,
-            (&request as *const NativeHostInspectRequestV0) as u64,
-            0,
-        );
-        if result == 0 {
+        let Some(directory_record) = proc_request(host, NATIVE_HOST_PROC_ENUMERATE, cursor) else {
             return;
-        }
-        if result != u64::from(NATIVE_HOST_INSPECT_RECORD_SIZE)
-            || record.size != NATIVE_HOST_INSPECT_RECORD_SIZE
-            || record.version != NATIVE_HOST_INSPECT_VERSION
-            || record.reserved != 0
-            || record.next_cursor <= cursor
-        {
+        };
+        if directory_record.next_cursor <= cursor {
             write(console, b"ps: inspection failed\r\n");
             return;
         }
-        write_decimal(console, record.domain);
+        let Some(record) = proc_request(host, NATIVE_HOST_PROC_STATUS, directory_record.pid) else {
+            write(console, b"ps: inspection failed\r\n");
+            return;
+        };
+        write_decimal(console, record.pid);
         write(console, b" ");
-        write(
-            console,
-            match record.role {
-                NATIVE_HOST_INSPECT_ROLE_CONTROL => b"control",
-                NATIVE_HOST_INSPECT_ROLE_SERVICE => b"service",
-                NATIVE_HOST_INSPECT_ROLE_AUXILIARY => b"auxiliary",
-                _ => b"unknown",
-            },
-        );
+        write_decimal(console, record.parent_pid);
         write(console, b" ");
         write(
             console,
             match record.state {
-                NATIVE_HOST_INSPECT_STATE_READY => b"ready",
-                NATIVE_HOST_INSPECT_STATE_STOPPING => b"stopping",
+                NATIVE_HOST_INSPECT_STATE_READY => b"R",
+                NATIVE_HOST_INSPECT_STATE_STOPPING => b"S",
                 _ => b"unknown",
             },
         );
         write(console, b" ");
-        write_decimal(console, u64::from(record.active_threads));
+        write(
+            console,
+            match record.kind {
+                NATIVE_HOST_PROCESS_KIND_CONTROLLER => b"controller",
+                _ => b"unknown",
+            },
+        );
         write(console, b"\r\n");
+        cursor = directory_record.next_cursor;
+    }
+}
+
+fn list_proc_directory(console: u64, host: u64, path: &[u8]) {
+    if path.is_empty() {
+        let mut cursor = 0;
+        loop {
+            let Some(record) = next_process(host, cursor) else {
+                return;
+            };
+            write_decimal(console, record.pid);
+            write(console, b"/\r\n");
+            cursor = record.next_cursor;
+        }
+    }
+    let Some(pid) = parse_decimal(path) else {
+        write(console, b"ls: path not found or not a directory\r\n");
+        return;
+    };
+    let mut cursor = 0;
+    loop {
+        let Some(record) = next_process(host, cursor) else {
+            write(console, b"ls: path not found or not a directory\r\n");
+            return;
+        };
+        if record.pid == pid {
+            write(console, b"status\r\n");
+            return;
+        }
         cursor = record.next_cursor;
     }
+}
+
+fn next_process(host: u64, cursor: u64) -> Option<NativeHostInspectRecordV0> {
+    proc_request(host, NATIVE_HOST_PROC_ENUMERATE, cursor)
+}
+
+fn proc_request(host: u64, command: u16, selector: u64) -> Option<NativeHostInspectRecordV0> {
+    let mut record = NativeHostInspectRecordV0::zeroed();
+    let request = NativeHostInspectRequestV0 {
+        size: NATIVE_HOST_INSPECT_REQUEST_SIZE,
+        version: NATIVE_HOST_INSPECT_VERSION,
+        command,
+        cursor: selector,
+        output_address: (&mut record as *mut NativeHostInspectRecordV0) as u64,
+        output_size: u64::from(NATIVE_HOST_INSPECT_RECORD_SIZE),
+    };
+    let result = call(
+        NATIVE_HOST_INSPECT_OPERATION,
+        host,
+        (&request as *const NativeHostInspectRequestV0) as u64,
+        0,
+    );
+    (result == u64::from(NATIVE_HOST_INSPECT_RECORD_SIZE)
+        && record.size == NATIVE_HOST_INSPECT_RECORD_SIZE
+        && record.version == NATIVE_HOST_INSPECT_VERSION
+        && record.reserved == 0)
+        .then_some(record)
+}
+
+fn parse_decimal(bytes: &[u8]) -> Option<u64> {
+    if bytes.is_empty() {
+        return None;
+    }
+    bytes.iter().try_fold(0_u64, |value, byte| {
+        value.checked_mul(10)?.checked_add(u64::from(
+            byte.checked_sub(b'0').filter(|digit| *digit <= 9)?,
+        ))
+    })
 }
 
 fn write_decimal(console: u64, mut value: u64) {

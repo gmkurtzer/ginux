@@ -18,7 +18,8 @@ Deliverables:
 
 - `GINUX.EFI` contains an inspectable component catalog and the controller payload.
 - The controller starts in ring 3 and owns the interactive console.
-- Commands: `help`, `status`, `components`, and `shutdown`.
+- Commands include `help`, `status`, `components`, measured-root `ls`, global
+  host `/proc` inspection, `ps`, and `shutdown`.
 - `make run` provides the intuitive Mac/QEMU path; documentation covers optional UTM and later KVM acceleration on x86-64 Linux.
 
 Gate: automated serial-console test exercises every command and clean shutdown. Human verification boots it and interacts with the console. No container starts yet.

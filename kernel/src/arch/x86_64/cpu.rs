@@ -15753,30 +15753,43 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
         || u32::from_le_bytes(request[0..4].try_into().unwrap()) as usize != request.len()
         || u16::from_le_bytes(request[4..6].try_into().unwrap())
             != control_abi::HOST_INSPECT_VERSION
-        || request[6..8] != [0, 0]
         || u64::from_le_bytes(request[24..32].try_into().unwrap())
             != control_abi::HOST_INSPECT_RECORD_SIZE as u64
     {
         return u64::MAX - 2;
     }
-    let Ok(cursor) = usize::try_from(u64::from_le_bytes(request[8..16].try_into().unwrap())) else {
-        return u64::MAX - 2;
-    };
+    let command = u16::from_le_bytes(request[6..8].try_into().unwrap());
+    let selector = u64::from_le_bytes(request[8..16].try_into().unwrap());
     let output_address = u64::from_le_bytes(request[16..24].try_into().unwrap());
-    let Some(record) = domain::inspect_live_domain(cursor) else {
-        return u64::MAX - 2;
-    };
-    let Some(record) = record else {
-        return 0;
+    let record = match command {
+        control_abi::HOST_PROC_ENUMERATE => {
+            let Ok(cursor) = usize::try_from(selector) else {
+                return u64::MAX - 2;
+            };
+            let Some(record) = domain::inspect_live_domain(cursor) else {
+                return u64::MAX - 2;
+            };
+            let Some(record) = record else {
+                return 0;
+            };
+            record
+        }
+        control_abi::HOST_PROC_STATUS => {
+            let Some(record) = domain::inspect_host_process(selector) else {
+                return u64::MAX - 2;
+            };
+            record
+        }
+        _ => return u64::MAX - 2,
     };
     let mut output = [0_u8; control_abi::HOST_INSPECT_RECORD_SIZE];
     output[0..4].copy_from_slice(&(control_abi::HOST_INSPECT_RECORD_SIZE as u32).to_le_bytes());
     output[4..6].copy_from_slice(&control_abi::HOST_INSPECT_VERSION.to_le_bytes());
-    output[6..8].copy_from_slice(&record.role.to_le_bytes());
+    output[6..8].copy_from_slice(&record.kind.to_le_bytes());
     output[8..10].copy_from_slice(&record.state.to_le_bytes());
     output[12..16].copy_from_slice(&record.active_threads.to_le_bytes());
-    output[16..24].copy_from_slice(&record.domain.to_le_bytes());
-    output[24..32].copy_from_slice(&record.service.to_le_bytes());
+    output[16..24].copy_from_slice(&record.pid.to_le_bytes());
+    output[24..32].copy_from_slice(&record.parent_pid.to_le_bytes());
     output[32..40].copy_from_slice(&record.next_cursor.to_le_bytes());
     if address_space::copy_to_current_user(output_address, &output) {
         output.len() as u64

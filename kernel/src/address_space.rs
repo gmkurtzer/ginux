@@ -4768,7 +4768,8 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         return false;
     };
     let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
-    if !register_address_space(controller, AuxiliaryAddressSpace::Native(space))
+    if domain::publish_controller_process(controller) != Some(1)
+        || !register_address_space(controller, AuxiliaryAddressSpace::Native(space))
         || !scheduler::queue_auxiliary(controller, root, entry, stack, console)
         || !cpu::activate_user_root(root)
     {

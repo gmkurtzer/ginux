@@ -27,7 +27,9 @@ It owns a read/write console capability and separate read-only measured-root
 and host-inspection capabilities. It parses `help`, `status`, `components`,
 `ls`, `ps`, and `shutdown` in ring 3, and exits cleanly to request firmware
 shutdown. `ls` enumerates the retained authenticated root rather than a
-synthetic shell namespace. The kernel never interprets controller commands.
+synthetic shell namespace, except that `/proc` is overlaid with the dynamic
+global host PID view. `ps` enumerates that procfs view and separately reads each
+PID status record. The kernel never interprets controller commands.
 
 This is a synchronous bootstrap primitive, not a production console service.
 It spins on QEMU COM1 in kernel context and has no multiplexing, Unicode policy,

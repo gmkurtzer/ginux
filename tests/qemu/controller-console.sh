@@ -24,7 +24,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         fi
         sleep 1
     done
-    printf 'help\nstatus\ncomponents\nls\nls /etc\nps\nunknown\nshutdown\n'
+    printf 'help\nstatus\ncomponents\nls\nls /etc\nls /proc\nls /proc/1\nps\nunknown\nshutdown\n'
 } | GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
@@ -71,9 +71,10 @@ for expected in \
     'hostname' \
     'os-release' \
     'motd' \
-    'DOMAIN ROLE STATE THREADS' \
-    'control ready 0' \
-    'auxiliary ready 1' \
+    '1/' \
+    'status' \
+    'PID PPID STATE NAME' \
+    '1 0 R controller' \
     "Unknown command. Type 'help'." \
     'Shutting down Ginux.' \
     'ginux: controller requested clean shutdown' \

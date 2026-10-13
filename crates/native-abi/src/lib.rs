@@ -113,9 +113,9 @@ pub const NATIVE_HOST_INSPECT_OPERATION: u64 = 32;
 pub const NATIVE_HOST_INSPECT_REQUEST_SIZE: u32 = 32;
 pub const NATIVE_HOST_INSPECT_RECORD_SIZE: u32 = 40;
 pub const NATIVE_HOST_INSPECT_VERSION: u16 = 0;
-pub const NATIVE_HOST_INSPECT_ROLE_CONTROL: u16 = 1;
-pub const NATIVE_HOST_INSPECT_ROLE_SERVICE: u16 = 2;
-pub const NATIVE_HOST_INSPECT_ROLE_AUXILIARY: u16 = 3;
+pub const NATIVE_HOST_PROC_ENUMERATE: u16 = 1;
+pub const NATIVE_HOST_PROC_STATUS: u16 = 2;
+pub const NATIVE_HOST_PROCESS_KIND_CONTROLLER: u16 = 1;
 pub const NATIVE_HOST_INSPECT_STATE_READY: u16 = 1;
 pub const NATIVE_HOST_INSPECT_STATE_STOPPING: u16 = 2;
 pub const NATIVE_ROOT_OPERATION: u64 = 17;
@@ -188,7 +188,7 @@ pub struct NativeRootDirectoryRequestV4 {
 pub struct NativeHostInspectRequestV0 {
     pub size: u32,
     pub version: u16,
-    pub reserved: u16,
+    pub command: u16,
     pub cursor: u64,
     pub output_address: u64,
     pub output_size: u64,
@@ -199,12 +199,12 @@ pub struct NativeHostInspectRequestV0 {
 pub struct NativeHostInspectRecordV0 {
     pub size: u32,
     pub version: u16,
-    pub role: u16,
+    pub kind: u16,
     pub state: u16,
     pub reserved: u16,
     pub active_threads: u32,
-    pub domain: u64,
-    pub service: u64,
+    pub pid: u64,
+    pub parent_pid: u64,
     pub next_cursor: u64,
 }
 
@@ -213,12 +213,12 @@ impl NativeHostInspectRecordV0 {
         Self {
             size: 0,
             version: 0,
-            role: 0,
+            kind: 0,
             state: 0,
             reserved: 0,
             active_threads: 0,
-            domain: 0,
-            service: 0,
+            pid: 0,
+            parent_pid: 0,
             next_cursor: 0,
         }
     }

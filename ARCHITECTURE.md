@@ -72,6 +72,13 @@ This is a **logical** architecture, not a requirement that every operation trave
 
 A **domain** is the native unit of isolation, ownership, accounting, and failure containment. A domain owns processes/address spaces, a capability table, memory and CPU budgets, IPC endpoints, device grants, network endpoints, filesystem views, and failure policy. Linux system containers are domains with Linux-compatible behavior; the controller and optional native services are domains without a Linux ABI requirement.
 
+The kernel maintains one global host PID namespace spanning native userspace
+processes and Linux-compatible processes in every container. The controller's
+capability-gated `/proc` view exposes that complete namespace. Each container
+receives a filtered PID-namespace projection with its own init as PID 1; a
+container-local PID therefore maps to a distinct host PID. Domain generations
+remain internal isolation identities and are never presented as PIDs.
+
 The kernel creates exactly one initial userspace authority: the native control-plane domain. All other domains descend from authority it delegates. Process ancestry determines lifecycle and accounting, but never grants authority by itself.
 
 ### Embedded native controller

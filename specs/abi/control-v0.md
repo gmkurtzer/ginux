@@ -388,15 +388,17 @@ non-directory path, or insufficient capacity fails without partial output.
 Profile v2 adds this command; the other operation-17 commands retain their
 profile-v1 layouts. Enumeration does not grant mutation or mount authority.
 
-Operation 32 is the additive v4 host-inspection call and requires `READ`
-authority on host-control object 1. `RSI` points to a 32-byte version-0 request
-containing its size, version, reserved zero, cursor, output address, and exact
-40-byte output size; `RDX` must be zero. Each successful call copies one staged
-record containing size, version, role, state, active-thread count, exact
-generation-tagged domain ID, service identity or zero, and the next cursor.
-The return value is 40, or zero at the end. Invalid cursors, malformed buffers,
-and authority denial fail without copying. The call exposes no management or
-mutation operation.
+Operation 32 is the additive v4 host-procfs call and requires `READ` authority
+on host-control object 1. `RSI` points to a 32-byte version-0 request containing
+its size, version, command, selector, output address, and exact 40-byte output
+size; `RDX` must be zero. Command 1 enumerates the global host PID directory;
+its selector is a cursor and zero return means end of directory. Command 2
+reads the status record for the host PID in its selector. Each successful call
+copies one staged record containing size, version, process kind, state,
+active-thread count, host PID, host parent PID, and next directory cursor. The
+return value is 40. Invalid cursors or PIDs, malformed buffers, and authority
+denial fail without copying. `ps` uses command 1 to discover PIDs and command 2
+to read their status. The call exposes no management or mutation operation.
 
 Operation 18 is the v4 persistent-volume call and requires authority on volume
 object 6. `RSI` selects the command and `RDX` supplies its argument. Read-only
