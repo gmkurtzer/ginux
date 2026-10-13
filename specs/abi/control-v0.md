@@ -388,6 +388,16 @@ non-directory path, or insufficient capacity fails without partial output.
 Profile v2 adds this command; the other operation-17 commands retain their
 profile-v1 layouts. Enumeration does not grant mutation or mount authority.
 
+Operation 32 is the additive v4 host-inspection call and requires `READ`
+authority on host-control object 1. `RSI` points to a 32-byte version-0 request
+containing its size, version, reserved zero, cursor, output address, and exact
+40-byte output size; `RDX` must be zero. Each successful call copies one staged
+record containing size, version, role, state, active-thread count, exact
+generation-tagged domain ID, service identity or zero, and the next cursor.
+The return value is 40, or zero at the end. Invalid cursors, malformed buffers,
+and authority denial fail without copying. The call exposes no management or
+mutation operation.
+
 Operation 18 is the v4 persistent-volume call and requires authority on volume
 object 6. `RSI` selects the command and `RDX` supplies its argument. Read-only
 command 0 requires argument zero and returns descriptor

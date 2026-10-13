@@ -3,11 +3,18 @@
 
 use core::arch::{asm, global_asm};
 use ginux_native_abi::{
-    native_control_abi_is_compatible, NativeControlDescriptorV4, NATIVE_CALL_FAILED,
+    native_control_abi_is_compatible, NativeControlDescriptorV4, NativeHostInspectRecordV0,
+    NativeHostInspectRequestV0, NativeRootDirectoryRequestV4, NATIVE_CALL_FAILED,
     NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION,
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
-    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_HOST_INSPECT_OPERATION,
+    NATIVE_HOST_INSPECT_RECORD_SIZE, NATIVE_HOST_INSPECT_REQUEST_SIZE,
+    NATIVE_HOST_INSPECT_ROLE_AUXILIARY, NATIVE_HOST_INSPECT_ROLE_CONTROL,
+    NATIVE_HOST_INSPECT_ROLE_SERVICE, NATIVE_HOST_INSPECT_STATE_READY,
+    NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
+    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
+    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = 32;
@@ -19,6 +26,8 @@ global_asm!(
     .global _start
 _start:
     mov rdi, rbx
+    mov rsi, rcx
+    mov rdx, r14
     call ginux_controller_main
     ud2
 "#
@@ -30,10 +39,12 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 }
 
 #[no_mangle]
-extern "C" fn ginux_controller_main(console: u64) -> ! {
+extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
     let identity = unsafe { core::ptr::read_volatile(&CONTROLLER_IDENTITY) };
     if identity != b"GINUX_CONTROLLER_V0"
         || console == 0
+        || host == 0
+        || root == 0
         || !native_control_abi_is_compatible(call(NATIVE_CONTROL_DISCOVERY_OPERATION, 0, 0, 0))
     {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
@@ -81,6 +92,8 @@ extern "C" fn ginux_controller_main(console: u64) -> ! {
                 write(console, b"help        Show this command list\r\n");
                 write(console, b"status      Show controller and host state\r\n");
                 write(console, b"components  Show embedded image components\r\n");
+                write(console, b"ls [PATH]   List the embedded measured root\r\n");
+                write(console, b"ps          Show live native domains\r\n");
                 write(console, b"shutdown    Shut down Ginux cleanly\r\n");
             }
             b"status" => {
@@ -94,27 +107,191 @@ extern "C" fn ginux_controller_main(console: u64) -> ! {
                 write(console, b"- controller: active, ring 3\r\n");
                 write(console, b"- boot modules: embedded, sealed\r\n");
             }
+            b"ps" => show_processes(console, host),
             b"shutdown" => {
                 write(console, b"Shutting down Ginux.\r\n");
                 exit(NATIVE_SERVICE_EXIT_COMPLETED);
             }
             b"" => {}
+            command if command == b"ls" || command.starts_with(b"ls ") => {
+                let supplied = command.get(2..).unwrap_or_default();
+                let supplied = supplied.strip_prefix(b" ").unwrap_or(supplied);
+                let path = supplied.strip_prefix(b"/").unwrap_or(supplied);
+                list_directory(console, root, path);
+            }
             _ => write(console, b"Unknown command. Type 'help'.\r\n"),
         }
     }
 }
 
 fn write(console: u64, bytes: &[u8]) {
-    if bytes.is_empty()
-        || call(
-            NATIVE_CONSOLE_WRITE_OPERATION,
-            console,
-            bytes.as_ptr() as u64,
-            bytes.len() as u64,
-        ) != bytes.len() as u64
-    {
+    if bytes.is_empty() {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
+    for chunk in bytes.chunks(64) {
+        if call(
+            NATIVE_CONSOLE_WRITE_OPERATION,
+            console,
+            chunk.as_ptr() as u64,
+            chunk.len() as u64,
+        ) != chunk.len() as u64
+        {
+            exit(NATIVE_SERVICE_EXIT_REJECTED);
+        }
+    }
+}
+
+fn list_directory(console: u64, root: u64, path: &[u8]) {
+    let (path_address, path_size) = if path.is_empty() {
+        (0, 0)
+    } else {
+        (path.as_ptr() as u64, path.len() as u64)
+    };
+    let mut cursor = 0;
+    let mut output = [0_u8; NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE];
+    loop {
+        let request = NativeRootDirectoryRequestV4 {
+            size: NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
+            version: 4,
+            reserved: 0,
+            path_address,
+            path_size,
+            cursor,
+            output_address: output.as_mut_ptr() as u64,
+            output_capacity: output.len() as u64,
+        };
+        let result = call(
+            NATIVE_ROOT_OPERATION,
+            root,
+            NATIVE_ROOT_READ_DIRECTORY,
+            (&request as *const NativeRootDirectoryRequestV4) as u64,
+        );
+        if result == 0 {
+            return;
+        }
+        let Ok(record_size) = usize::try_from(result) else {
+            write(console, b"ls: inspection failed\r\n");
+            return;
+        };
+        if record_size > output.len()
+            || record_size < NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE
+            || read_u32(&output, 0) as usize != record_size
+            || read_u16(&output, 4) != 4
+        {
+            write(console, b"ls: path not found or not a directory\r\n");
+            return;
+        }
+        let next_cursor = read_u64(&output, 8);
+        let mode = read_u32(&output, 16);
+        let name_size = read_u32(&output, 20) as usize;
+        let Some(name_end) = NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE.checked_add(name_size) else {
+            write(console, b"ls: invalid root record\r\n");
+            return;
+        };
+        let Some(name) = output.get(NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE..name_end) else {
+            write(console, b"ls: invalid root record\r\n");
+            return;
+        };
+        let mut line = [0_u8; 258];
+        line[..name.len()].copy_from_slice(name);
+        let mut line_size = name.len();
+        if mode & 0o170000 == 0o040000 {
+            line[line_size] = b'/';
+            line_size += 1;
+        }
+        line[line_size..line_size + 2].copy_from_slice(b"\r\n");
+        line_size += 2;
+        write(console, &line[..line_size]);
+        if next_cursor <= cursor {
+            write(console, b"ls: invalid root cursor\r\n");
+            return;
+        }
+        cursor = next_cursor;
+    }
+}
+
+fn show_processes(console: u64, host: u64) {
+    write(console, b"DOMAIN ROLE STATE THREADS\r\n");
+    let mut cursor = 0;
+    loop {
+        let mut record = NativeHostInspectRecordV0::zeroed();
+        let request = NativeHostInspectRequestV0 {
+            size: NATIVE_HOST_INSPECT_REQUEST_SIZE,
+            version: NATIVE_HOST_INSPECT_VERSION,
+            reserved: 0,
+            cursor,
+            output_address: (&mut record as *mut NativeHostInspectRecordV0) as u64,
+            output_size: u64::from(NATIVE_HOST_INSPECT_RECORD_SIZE),
+        };
+        let result = call(
+            NATIVE_HOST_INSPECT_OPERATION,
+            host,
+            (&request as *const NativeHostInspectRequestV0) as u64,
+            0,
+        );
+        if result == 0 {
+            return;
+        }
+        if result != u64::from(NATIVE_HOST_INSPECT_RECORD_SIZE)
+            || record.size != NATIVE_HOST_INSPECT_RECORD_SIZE
+            || record.version != NATIVE_HOST_INSPECT_VERSION
+            || record.reserved != 0
+            || record.next_cursor <= cursor
+        {
+            write(console, b"ps: inspection failed\r\n");
+            return;
+        }
+        write_decimal(console, record.domain);
+        write(console, b" ");
+        write(
+            console,
+            match record.role {
+                NATIVE_HOST_INSPECT_ROLE_CONTROL => b"control",
+                NATIVE_HOST_INSPECT_ROLE_SERVICE => b"service",
+                NATIVE_HOST_INSPECT_ROLE_AUXILIARY => b"auxiliary",
+                _ => b"unknown",
+            },
+        );
+        write(console, b" ");
+        write(
+            console,
+            match record.state {
+                NATIVE_HOST_INSPECT_STATE_READY => b"ready",
+                NATIVE_HOST_INSPECT_STATE_STOPPING => b"stopping",
+                _ => b"unknown",
+            },
+        );
+        write(console, b" ");
+        write_decimal(console, u64::from(record.active_threads));
+        write(console, b"\r\n");
+        cursor = record.next_cursor;
+    }
+}
+
+fn write_decimal(console: u64, mut value: u64) {
+    let mut bytes = [0_u8; 20];
+    let mut start = bytes.len();
+    loop {
+        start -= 1;
+        bytes[start] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    write(console, &bytes[start..]);
+}
+
+fn read_u16(bytes: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([bytes[offset], bytes[offset + 1]])
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
 fn call(number: u64, capability: u64, first: u64, second: u64) -> u64 {

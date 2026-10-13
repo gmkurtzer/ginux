@@ -24,7 +24,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         fi
         sleep 1
     done
-    printf 'help\nstatus\ncomponents\nunknown\nshutdown\n'
+    printf 'help\nstatus\ncomponents\nls\nls /etc\nps\nunknown\nshutdown\n'
 } | GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
@@ -56,6 +56,8 @@ for expected in \
     'ginux: launching embedded controller in ring 3' \
     'Ginux controller v0 (ring 3)' \
     'help        Show this command list' \
+    'ls [PATH]   List the embedded measured root' \
+    'ps          Show live native domains' \
     'controller: running (ring 3)' \
     'containers: 0 (C1)' \
     'integrity: sealed' \
@@ -63,6 +65,15 @@ for expected in \
     '- kernel: active, ring 0' \
     '- controller: active, ring 3' \
     '- boot modules: embedded, sealed' \
+    'bin/' \
+    'etc/' \
+    'sbin/' \
+    'hostname' \
+    'os-release' \
+    'motd' \
+    'DOMAIN ROLE STATE THREADS' \
+    'control ready 0' \
+    'auxiliary ready 1' \
     "Unknown command. Type 'help'." \
     'Shutting down Ginux.' \
     'ginux: controller requested clean shutdown' \

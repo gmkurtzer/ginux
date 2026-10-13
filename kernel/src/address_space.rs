@@ -4724,11 +4724,21 @@ pub(crate) fn verify_native_service_materialization(
 
 pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<'_>) -> bool {
     let rights = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
-    let Some(controller) = domain::initialize_boot_auxiliary_service(1, 2, rights) else {
+    let Some(controller) = domain::initialize_boot_auxiliary_service_with_three_grants([
+        (1, 2, rights),
+        (0, 1, crate::capability::Rights::READ),
+        (
+            4,
+            crate::control_abi::ROOT_OBJECT,
+            crate::capability::Rights::READ,
+        ),
+    ]) else {
         return false;
     };
-    let (Some(console), Some(identity), Some(owner)) = (
+    let (Some(console), Some(host), Some(root_handle), Some(identity), Some(owner)) = (
         domain::auxiliary_boot_handle(controller, 0),
+        domain::auxiliary_boot_handle(controller, 1),
+        domain::auxiliary_boot_handle(controller, 2),
         domain::domain_service_identity(controller),
         memory::FrameOwner::domain(controller),
     ) else {
@@ -4741,6 +4751,13 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
     if !space.layout_is_valid(image)
         || !space.relocations_are_valid(image)
         || !domain::handle_permits(controller, console, 2, rights)
+        || !domain::handle_permits(controller, host, 1, crate::capability::Rights::READ)
+        || !domain::handle_permits(
+            controller,
+            root_handle,
+            crate::control_abi::ROOT_OBJECT,
+            crate::capability::Rights::READ,
+        )
     {
         let _ = space.release();
         return false;
@@ -4757,7 +4774,15 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
     {
         return false;
     }
-    cpu::execute_native_auxiliary(entry, stack, console, 0, controller, identity);
+    cpu::execute_native_controller(
+        entry,
+        stack,
+        console,
+        host,
+        root_handle,
+        controller,
+        identity,
+    );
     let event = domain::take_lifecycle_event();
     current_root() == kernel_root
         && scheduler::current_domain().is_none()

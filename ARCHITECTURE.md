@@ -286,7 +286,7 @@ Work proceeds through hard verification checkpoints. Complete the implementation
 | Checkpoint | Demonstrable result | Human verification boundary |
 |---|---|---|
 | C0: Architecture alignment | This document, ADRs, and roadmap consistently describe the unified image, embedded ring-3 controller, kernel/module device boundary, Rocky benchmark, and future `.ko` path | Review documentation and signed commit |
-| C1: Interactive unified boot | One `GINUX.EFI` boots on the Mac QEMU profile and presents controller `help`, `status`, `components`, and `shutdown` commands | User boots and interacts; no container yet |
+| C1: Interactive unified boot | One `GINUX.EFI` boots on the Mac QEMU profile and presents controller diagnostics, including measured-root `ls` and live-domain `ps` | User boots and interacts; no container yet |
 | C2: Configured container autostart | Authenticated local configuration selects one minimal fixture and init path; controller starts, observes, stops, and restarts it | User verifies lifecycle and failure recovery |
 | C3: Rocky systemd early boot | Pinned Rocky Linux 10 x86-64 image executes `/sbin/init`; early systemd reaches a documented target or a precise compatibility boundary | User inspects console and compatibility report |
 | C4: Operational Rocky | Required mounts, devices, processes, credentials, cgroups, clocks, and console behavior work normally | User interacts with a functioning Rocky system |

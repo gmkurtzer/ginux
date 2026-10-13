@@ -49,6 +49,16 @@ pub(crate) enum ServiceFailurePolicy {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) struct InspectionRecord {
+    pub(crate) domain: u64,
+    pub(crate) service: u64,
+    pub(crate) role: u16,
+    pub(crate) state: u16,
+    pub(crate) active_threads: u32,
+    pub(crate) next_cursor: u64,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct BootGrant {
     object: u64,
     rights: Rights,
@@ -1113,6 +1123,34 @@ pub(crate) fn initialize_boot_auxiliary_service_with_two_grants(
         && domain.state == State::Ready
         && domain.thread_limit == 0
         && domain.boot_root_count == 2
+        && domain.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
+pub(crate) fn initialize_boot_auxiliary_service_with_three_grants(
+    grants: [(usize, u64, Rights); 3],
+) -> Option<u64> {
+    let manager = global_manager_mut()?;
+    let control = manager.domain(manager.control_plane_id?)?;
+    let placeholder = control.boot_roots.first().copied().flatten()?;
+    let mut delegated = [DelegationGrant {
+        source: placeholder,
+        object: 1,
+        rights: Rights::READ,
+    }; 3];
+    for (index, (root_index, object, rights)) in grants.into_iter().enumerate() {
+        delegated[index] = DelegationGrant {
+            source: control.boot_roots.get(root_index).copied().flatten()?,
+            object,
+            rights,
+        };
+    }
+    let id = manager.create_auxiliary_service_with_delegations(&delegated)?;
+    let domain = manager.domain(id)?;
+    (domain.role == Role::AuxiliaryService
+        && domain.state == State::Ready
+        && domain.thread_limit == 0
+        && domain.boot_root_count == 3
         && domain.capabilities.boot_authority_is_sealed())
     .then_some(encode_id(id))
 }
@@ -2766,6 +2804,34 @@ pub(crate) fn domain_is_retired(domain_raw: u64) -> bool {
         return false;
     };
     global_manager().is_some_and(|manager| manager.domain(id).is_none())
+}
+
+pub(crate) fn inspect_live_domain(cursor: usize) -> Option<Option<InspectionRecord>> {
+    let manager = global_manager()?;
+    if cursor > MAX_DOMAINS {
+        return None;
+    }
+    for (index, domain) in manager.domains[cursor..].iter().enumerate() {
+        if let Some(domain) = domain {
+            let next_cursor = cursor.checked_add(index)?.checked_add(1)?;
+            return Some(Some(InspectionRecord {
+                domain: encode_id(domain.id),
+                service: domain.service.map_or(0, encode_service_id),
+                role: match domain.role {
+                    Role::ControlPlane => crate::control_abi::HOST_INSPECT_ROLE_CONTROL,
+                    Role::SupervisedService => crate::control_abi::HOST_INSPECT_ROLE_SERVICE,
+                    Role::AuxiliaryService => crate::control_abi::HOST_INSPECT_ROLE_AUXILIARY,
+                },
+                state: match domain.state {
+                    State::Ready => crate::control_abi::HOST_INSPECT_STATE_READY,
+                    State::Stopping => crate::control_abi::HOST_INSPECT_STATE_STOPPING,
+                },
+                active_threads: u32::from(domain.active_threads),
+                next_cursor: next_cursor as u64,
+            }));
+        }
+    }
+    Some(None)
 }
 
 pub(crate) fn last_retired_service_domain() -> Option<u64> {

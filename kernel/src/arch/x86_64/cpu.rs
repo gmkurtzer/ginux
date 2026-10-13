@@ -1576,6 +1576,33 @@ pub(crate) fn execute_native_auxiliary(
     };
 }
 
+pub(crate) fn execute_native_controller(
+    entry: usize,
+    stack: usize,
+    console_handle: u64,
+    host_handle: u64,
+    root_handle: u64,
+    domain_id: u64,
+    service_identity: u64,
+) {
+    if !install_current_scheduler_fs_base() {
+        return;
+    }
+    unsafe {
+        ginux_user_enter(
+            entry,
+            stack,
+            console_handle,
+            host_handle,
+            0,
+            4,
+            domain_id,
+            service_identity,
+            root_handle,
+        )
+    };
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct LinuxFileMapping {
     pub(crate) address: usize,
@@ -14352,6 +14379,7 @@ fn dispatch_charged_call(
         control_abi::CONSOLE_READ_LINE_OPERATION => {
             console_read_line(caller_domain, capability, frame)
         }
+        control_abi::HOST_INSPECT_OPERATION => host_inspect(caller_domain, capability, frame),
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
         }
@@ -15709,6 +15737,52 @@ fn console_read_line(domain_id: u64, capability: u64, frame: *const UserTrapFram
         return u64::MAX - 2;
     }
     length as u64
+}
+
+fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(domain_id, capability, 1, Rights::READ)
+        || frame.second_argument() != 0
+    {
+        return u64::MAX - 2;
+    }
+    let mut request = [0_u8; control_abi::HOST_INSPECT_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(frame.first_argument(), &mut request)
+        || u32::from_le_bytes(request[0..4].try_into().unwrap()) as usize != request.len()
+        || u16::from_le_bytes(request[4..6].try_into().unwrap())
+            != control_abi::HOST_INSPECT_VERSION
+        || request[6..8] != [0, 0]
+        || u64::from_le_bytes(request[24..32].try_into().unwrap())
+            != control_abi::HOST_INSPECT_RECORD_SIZE as u64
+    {
+        return u64::MAX - 2;
+    }
+    let Ok(cursor) = usize::try_from(u64::from_le_bytes(request[8..16].try_into().unwrap())) else {
+        return u64::MAX - 2;
+    };
+    let output_address = u64::from_le_bytes(request[16..24].try_into().unwrap());
+    let Some(record) = domain::inspect_live_domain(cursor) else {
+        return u64::MAX - 2;
+    };
+    let Some(record) = record else {
+        return 0;
+    };
+    let mut output = [0_u8; control_abi::HOST_INSPECT_RECORD_SIZE];
+    output[0..4].copy_from_slice(&(control_abi::HOST_INSPECT_RECORD_SIZE as u32).to_le_bytes());
+    output[4..6].copy_from_slice(&control_abi::HOST_INSPECT_VERSION.to_le_bytes());
+    output[6..8].copy_from_slice(&record.role.to_le_bytes());
+    output[8..10].copy_from_slice(&record.state.to_le_bytes());
+    output[12..16].copy_from_slice(&record.active_threads.to_le_bytes());
+    output[16..24].copy_from_slice(&record.domain.to_le_bytes());
+    output[24..32].copy_from_slice(&record.service.to_le_bytes());
+    output[32..40].copy_from_slice(&record.next_cursor.to_le_bytes());
+    if address_space::copy_to_current_user(output_address, &output) {
+        output.len() as u64
+    } else {
+        u64::MAX - 2
+    }
 }
 
 fn write_abi_descriptor(caller_domain: u64, frame: *const UserTrapFrame) -> u64 {
