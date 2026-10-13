@@ -28,7 +28,8 @@ Gate: automated serial-console test exercises every command and clean shutdown. 
 
 Deliverables:
 
-- Authenticated local configuration names a pinned minimal fixture, `/sbin/init`, resource grants, and autostart policy.
+- Authenticated local configuration names the `default` pinned minimal fixture,
+  `/sbin/init`, bounded CPU/memory grants, and autostart policy.
 - The controller starts, observes, stops, and restarts the container.
 - A container or controller failure cannot panic the kernel and leaves no stale authority.
 

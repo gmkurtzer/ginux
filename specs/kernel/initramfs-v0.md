@@ -24,7 +24,8 @@ executable regular file named `init`.
 The generated proof contains `bin`, `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
 `var/lib`, `var/lib/state`, `var/lib/version`, the native `init` marker,
 `etc/hostname`, `etc/os-release`, `etc/motd`, the validated
-`etc/ginux-system-profile`, and four build-produced Linux ELF artifacts
+`etc/ginux-system-profile`, authenticated `etc/ginux-containers`, and the
+build-produced Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and auxiliary
 DSO. Two distinct static exec targets are published at their Linux-visible
 measured-root paths `bin/signal-probe` and `bin/exec-second`. Both use separately

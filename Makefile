@@ -14,6 +14,7 @@ NETWORK_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-network-service-r
 PROTOCOL_SERVICE := target/x86_64-unknown-none/$(PROFILE)/ginux-protocol-service-runtime
 INITRAMFS := build/initramfs-v0.cpio
 SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
+CONTAINER_CONFIG := profiles/minimal-system-v0/containers.tsv
 
 .DEFAULT_GOAL := help
 
@@ -46,7 +47,7 @@ doctor:
 
 manifest: linux-probe controller-runtime network-service protocol-service volume-service
 	@mkdir -p "$(dir $(INITRAMFS))"
-	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" boot/efi/src/generated_boot.rs
+	@cargo run --quiet --package ginux-manifest-tool -- boot/manifest-v0.conf control-plane/bootstrap.hex "$(INITRAMFS)" "$(LINUX_DYNAMIC_DIR)" "$(CONTROLLER_RUNTIME)" "$(NETWORK_SERVICE)" "$(PROTOCOL_SERVICE)" "$(VOLUME_SERVICE)" "$(SYSTEM_PROFILE)" "$(CONTAINER_CONFIG)" boot/efi/src/generated_boot.rs
 	@test -s "$(INITRAMFS)"
 
 system-image: manifest

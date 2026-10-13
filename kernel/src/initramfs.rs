@@ -18,6 +18,8 @@ const DIRECTORY: u32 = 0o040000;
 const REGULAR: u32 = 0o100000;
 const SYMLINK: u32 = 0o120000;
 const SYSTEM_PROFILE_HEADER: &[u8] = b"GINUX_SYSTEM_PROFILE_V0\n";
+const CONTAINER_CONFIG_V0: &[u8] = b"GINUX_CONTAINERS_V0\n\
+container\tdefault\tautostart\t/sbin/init\tcpu=1\tmemory_mib=128\n";
 
 static ROOT_PUBLISHED: AtomicBool = AtomicBool::new(false);
 static ROOT_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -220,7 +222,7 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
     let Some(archive) = parse(bytes) else {
         return false;
     };
-    archive.entry_count() == 26
+    archive.entry_count() == 27
         && archive.find(b"init").is_some_and(|entry| {
             entry.mode == 0o100555 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
         })
@@ -252,6 +254,9 @@ pub(crate) fn verify_pinned_image(bytes: &[u8]) -> bool {
         && archive
             .find(b"etc/ginux-system-profile")
             .is_some_and(|entry| entry.mode == 0o100444 && valid_system_profile(entry.data))
+        && archive
+            .find(b"etc/ginux-containers")
+            .is_some_and(|entry| entry.mode == 0o100444 && entry.data == CONTAINER_CONFIG_V0)
         && archive
             .find(b"var/lib")
             .is_some_and(|entry| entry.mode == 0o040555 && entry.data.is_empty())
@@ -799,7 +804,7 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
     };
     let base = root.image.frames[0].direct_map_address();
     let init = root.lookup(b"init");
-    let valid = root.node_count == 26
+    let valid = root.node_count == 27
         && init.is_some_and(|entry| {
             entry.mode == 0o100555
                 && entry.data == b"GINUX_INITRAMFS_INIT_V0\n"
@@ -835,6 +840,9 @@ pub(crate) fn verify_read_only_index(source: &[u8]) -> bool {
         && root
             .lookup(b"etc/ginux-system-profile")
             .is_some_and(|entry| entry.mode == 0o100444 && valid_system_profile(entry.data))
+        && root
+            .lookup(b"etc/ginux-containers")
+            .is_some_and(|entry| entry.mode == 0o100444 && entry.data == CONTAINER_CONFIG_V0)
         && root
             .lookup(b"var/lib")
             .is_some_and(|entry| entry.mode == 0o040555 && entry.data.is_empty())
