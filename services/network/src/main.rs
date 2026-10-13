@@ -92,11 +92,11 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         let Some(info) = (unsafe { info.as_ref() }) else {
             fail();
         };
-        let (info, packet_capability, fault_after_packet) = if info.version == 0 {
+        let (info, packet_capability, fault_after_packet, packet_batch) = if info.version == 0 {
             if !info.is_valid_virtio_network() {
                 fail();
             }
-            (*info, None, false)
+            (*info, None, false, false)
         } else {
             let Some(v1) = (unsafe {
                 (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV1).as_ref()
@@ -112,6 +112,7 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                 v1.v0_prefix(),
                 Some(v1.packet_capability),
                 v1.requests_packet_fault(),
+                v1.requests_packet_batch(),
             )
         };
         if info.mac_address != 0x5254_0012_3456
@@ -127,7 +128,7 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         }
         if info.requests_transmit_probe() {
             let status = if info.requests_arp_probe() {
-                unsafe { arp_probe(&info, packet_capability, fault_after_packet) }
+                unsafe { arp_probe(&info, packet_capability, fault_after_packet, packet_batch) }
             } else {
                 unsafe { transmit_probe(&info) }
             };
@@ -215,6 +216,7 @@ unsafe fn arp_probe(
     info: &NativeNetworkBootV0,
     packet_capability: Option<u64>,
     fault_after_packet: bool,
+    packet_batch: bool,
 ) -> Option<u8> {
     const ARP_REQUEST: [u8; 60] = [
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
@@ -293,6 +295,17 @@ unsafe fn arp_probe(
     if !arp_reply_is_valid(dma, common, tx_length, 1) {
         return None;
     }
+    if packet_batch {
+        let capability = packet_capability?;
+        let frame = (dma + RX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH) as u64;
+        let request = NativePacketRequestV0::publish(frame, 42);
+        if matches!(
+            publish_packet(capability, &request),
+            0 | NATIVE_NETWORK_WAIT_FAILED
+        ) {
+            return None;
+        }
+    }
     if !info.requests_rx_reuse() {
         return Some(NATIVE_SERVICE_EXIT_COMPLETED);
     }
@@ -340,10 +353,10 @@ unsafe fn arp_probe(
             expected_sequence: 1,
             ..request
         };
+        let sequence = publish_packet(capability, &request);
         if consume_packet_with_write_capability(capability, &read_request)
             != NATIVE_NETWORK_WAIT_FAILED
-            || publish_packet(capability, &request) != 1
-            || publish_packet(capability, &request) != NATIVE_NETWORK_WAIT_FAILED
+            || matches!(sequence, 0 | NATIVE_NETWORK_WAIT_FAILED)
         {
             return None;
         }

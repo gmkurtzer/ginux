@@ -4604,6 +4604,7 @@ enum NativeNetworkRunMode {
     ReceiveArpReuse,
     PacketHandoff,
     PacketHandoffFault,
+    PacketBatch,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4879,11 +4880,53 @@ fn verify_native_network_packet_handoff_mode(
     };
     expected.sequence == expected_sequence
         && expected.length == 42
-        && verify_ring3_packet_consumer(expected.sequence)
+        && verify_ring3_packet_consumer(expected.sequence, false)
         && packet::last_delivery() == Some(expected)
 }
 
-fn verify_ring3_packet_consumer(expected_sequence: u64) -> bool {
+pub(crate) fn verify_native_network_packet_batch(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    if !verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::PacketBatch,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    ) {
+        return false;
+    }
+    let Some(first) = packet::pending_metadata() else {
+        return false;
+    };
+    if first.sequence != 3
+        || first.length != 42
+        || !verify_ring3_packet_consumer(first.sequence, true)
+        || packet::last_delivery() != Some(first)
+    {
+        return false;
+    }
+    let Some(second) = packet::pending_metadata() else {
+        return false;
+    };
+    second.sequence == 4
+        && second.length == 42
+        && second.source_domain == first.source_domain
+        && second.service_identity == first.service_identity
+        && verify_ring3_packet_consumer(second.sequence, false)
+        && packet::last_delivery() == Some(second)
+        && packet::pending_metadata().is_none()
+}
+
+fn verify_ring3_packet_consumer(expected_sequence: u64, more_pending: bool) -> bool {
     if expected_sequence == 0 || expected_sequence == u64::MAX {
         return false;
     }
@@ -4946,7 +4989,15 @@ fn verify_ring3_packet_consumer(expected_sequence: u64) -> bool {
     {
         return false;
     }
-    cpu::execute_packet_consumer(entry, stack, handle, expected_sequence, auxiliary, identity);
+    cpu::execute_packet_consumer(
+        entry,
+        stack,
+        handle,
+        expected_sequence,
+        more_pending,
+        auxiliary,
+        identity,
+    );
     let event = domain::take_lifecycle_event();
     current_root() == kernel_root
         && scheduler::current_domain().is_none()
@@ -4992,6 +5043,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReceiveArpReuse
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
+            | NativeNetworkRunMode::PacketBatch
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -5003,6 +5055,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReceiveArpReuse
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
+            | NativeNetworkRunMode::PacketBatch
     );
     let corrupt_network_receive = mode == NativeNetworkRunMode::ReceiveArpMalformed;
     let receive_reuse = matches!(
@@ -5010,12 +5063,16 @@ fn verify_native_network_bootstrap_run(
         NativeNetworkRunMode::ReceiveArpReuse
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
+            | NativeNetworkRunMode::PacketBatch
     );
     let packet_handoff = matches!(
         mode,
-        NativeNetworkRunMode::PacketHandoff | NativeNetworkRunMode::PacketHandoffFault
+        NativeNetworkRunMode::PacketHandoff
+            | NativeNetworkRunMode::PacketHandoffFault
+            | NativeNetworkRunMode::PacketBatch
     );
     let packet_fault = mode == NativeNetworkRunMode::PacketHandoffFault;
+    let packet_batch = mode == NativeNetworkRunMode::PacketBatch;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -5168,6 +5225,9 @@ fn verify_native_network_bootstrap_run(
             let mut boot = ginux_native_abi::NativeNetworkBootV1::from_v0(boot, packet_handle);
             if packet_fault {
                 boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_PACKET_FAULT;
+            }
+            if packet_batch {
+                boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_PACKET_BATCH;
             }
             space.write_network_boot_info_v1(boot)
         })

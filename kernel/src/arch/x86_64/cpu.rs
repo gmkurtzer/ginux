@@ -1528,6 +1528,7 @@ pub(crate) fn execute_packet_consumer(
     stack: usize,
     packet_handle: u64,
     expected_sequence: u64,
+    more_pending: bool,
     domain_id: u64,
     service_identity: u64,
 ) {
@@ -1540,7 +1541,7 @@ pub(crate) fn execute_packet_consumer(
             stack,
             expected_sequence,
             packet_handle,
-            0,
+            u64::from(more_pending),
             4,
             domain_id,
             service_identity,

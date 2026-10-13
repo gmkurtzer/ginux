@@ -86,4 +86,5 @@ pub const PACKET_CONSUME_OPERATION: u64 = 22;
 pub const PACKET_REQUEST_VERSION: u16 = 0;
 pub const PACKET_REQUEST_SIZE: usize = 32;
 pub const PACKET_MAX_SIZE: usize = 1514;
+pub const PACKET_QUEUE_CAPACITY: usize = 4;
 pub const PACKET_RESULT_STALE: u64 = u64::MAX - 4;

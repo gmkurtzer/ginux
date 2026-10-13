@@ -150,13 +150,16 @@ An explicit test-only v1 feature then faults a new producer immediately after
 publishing sequence two. Fault containment tears down the still-active device
 generation while preserving the copied packet for another fresh read-only
 consumer.
+A second test-only v1 feature publishes both validated replies as sequences
+three and four before retirement. Two independent read-only ring-3 consumers
+drain the bounded four-entry FIFO in order after device teardown.
 
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The transmit generation
 sends only one fixed probe. The receive generation performs only one fixed ARP
 exchange with the deterministic QEMU gateway; the replenishment generation
-reuses one descriptor exactly once. Packet handoff is one copied slot with one
-producer and one consumer. General packet queues, ring wraparound,
-multiple in-flight packets, dynamic configuration, and container networking
-remain separate milestones.
+reuses one descriptor exactly once. Packet handoff is one copied four-entry
+FIFO with one bound producer and sequential consumers. Blocking receive,
+backpressure notification, concurrent producers, dynamic configuration, and
+container networking remain separate milestones.

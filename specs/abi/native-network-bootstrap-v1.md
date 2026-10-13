@@ -32,11 +32,13 @@ Packet publication and consumption use an exact 32-byte little-endian request:
 | 24 | 8 | expected sequence; zero for publication |
 
 Operation 21 requires packet `WRITE`, copies the complete input into the
-kernel-owned one-slot mailbox, and returns its nonzero monotonic sequence.
+kernel-owned four-entry FIFO, and returns its nonzero monotonic sequence.
 Operation 22 requires packet `READ`, requires an exact expected sequence, and
 copies the packet before removing it. A future or stale sequence returns the
 stale result without modifying userspace or consuming the packet. A failed
-copy also retains the packet. Publication fails while the slot is occupied.
+copy also retains the packet. Publication returns busy while all four entries
+are occupied. Producer retirement does not discard queued entries, and a fresh
+producer generation may bind while older entries await consumption.
 
 The current bootstrap proof publishes exactly the validated 42-byte
 Ethernet/ARP reply as sequence one. The packet survives producer, NIC, VT-d,
@@ -53,10 +55,20 @@ DMA, and revokes the producer's capabilities. A fresh read-only consumer then
 receives the exact packet. No public operation can inject this feature into an
 already running generation.
 
+Optional feature bit eight `PACKET_BATCH` requires bit six and is accepted
+only with the otherwise complete v1 feature set. It is a test-only request for
+the measured producer to publish both validated 42-byte replies before clean
+retirement. They receive sequences three and four. Two distinct read-only
+ring-3 consumers drain them in FIFO order, and each consumer proves that the
+already-consumed sequence is stale while a later packet remains. The kernel
+also fills the queue, rejects a fifth publication as busy, drains through
+wraparound, and preserves monotonic sequence allocation.
+
 ## Limits
 
-There is one global slot, one producer generation, and a maximum Ethernet
-frame size of 1514 bytes. Publication uses a bounded copy rather than shared
-memory. There is no blocking receive, backpressure notification, batching,
-multi-consumer fanout, VLAN-sized frame support, or zero-copy lease. The
-single-CPU call gate serializes access; SMP requires locking.
+There is one global four-entry FIFO, one bound producer generation, and a
+maximum Ethernet frame size of 1514 bytes. Publication uses a bounded copy
+rather than shared memory. There is no blocking receive, backpressure
+notification, production batching interface, multi-consumer fanout,
+VLAN-sized frame support, or zero-copy lease. The single-CPU call gate
+serializes access; SMP requires locking.

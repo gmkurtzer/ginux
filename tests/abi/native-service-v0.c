@@ -81,6 +81,10 @@ _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_HANDOFF == UINT32_C(64),
                "network packet handoff feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_FAULT == UINT32_C(128),
                "network packet fault feature bit");
+_Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_BATCH == UINT32_C(256),
+               "network packet batch feature bit");
+_Static_assert(GINUX_NATIVE_PACKET_QUEUE_CAPACITY == UINT32_C(4),
+               "native packet queue capacity");
 _Static_assert(GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF == UINT16_C(2048),
                "control packet handoff feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_WAIT_TX_NOTIFIED == UINT64_C(1),

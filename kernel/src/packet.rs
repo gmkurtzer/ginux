@@ -4,6 +4,7 @@ use core::{
 };
 
 pub(crate) const MAX_PACKET_SIZE: usize = 1514;
+pub(crate) const PACKET_CAPACITY: usize = crate::control_abi::PACKET_QUEUE_CAPACITY;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PacketMetadata {
@@ -26,8 +27,10 @@ pub(crate) enum PacketError {
 struct Mailbox {
     producer: Option<(u64, u64)>,
     next_sequence: u64,
-    packet: [u8; MAX_PACKET_SIZE],
-    metadata: Option<PacketMetadata>,
+    packets: [[u8; MAX_PACKET_SIZE]; PACKET_CAPACITY],
+    metadata: [Option<PacketMetadata>; PACKET_CAPACITY],
+    head: usize,
+    len: usize,
     last_delivery: Option<PacketMetadata>,
 }
 
@@ -36,14 +39,16 @@ impl Mailbox {
         Self {
             producer: None,
             next_sequence: 1,
-            packet: [0; MAX_PACKET_SIZE],
-            metadata: None,
+            packets: [[0; MAX_PACKET_SIZE]; PACKET_CAPACITY],
+            metadata: [None; PACKET_CAPACITY],
+            head: 0,
+            len: 0,
             last_delivery: None,
         }
     }
 
     fn bind(&mut self, domain: u64, service: u64) -> bool {
-        if domain == 0 || service == 0 || self.producer.is_some() || self.metadata.is_some() {
+        if domain == 0 || service == 0 || self.producer.is_some() {
             return false;
         }
         self.producer = Some((domain, service));
@@ -60,20 +65,22 @@ impl Mailbox {
         if input.is_empty() || input.len() > MAX_PACKET_SIZE {
             return Err(PacketError::TooLarge);
         }
-        if self.metadata.is_some() {
+        if self.len == PACKET_CAPACITY {
             return Err(PacketError::Busy);
         }
         let Some(next) = self.next_sequence.checked_add(1) else {
             return Err(PacketError::SequenceExhausted);
         };
         let sequence = self.next_sequence;
-        self.packet[..input.len()].copy_from_slice(input);
-        self.metadata = Some(PacketMetadata {
+        let tail = (self.head + self.len) % PACKET_CAPACITY;
+        self.packets[tail][..input.len()].copy_from_slice(input);
+        self.metadata[tail] = Some(PacketMetadata {
             source_domain: domain,
             service_identity,
             sequence,
             length: input.len(),
         });
+        self.len += 1;
         self.next_sequence = next;
         Ok(sequence)
     }
@@ -92,7 +99,10 @@ impl Mailbox {
         capacity: usize,
         deliver: impl FnOnce(PacketMetadata, &[u8]) -> bool,
     ) -> Result<PacketMetadata, PacketError> {
-        let Some(metadata) = self.metadata else {
+        if self.len == 0 {
+            return Err(PacketError::Empty);
+        }
+        let Some(metadata) = self.metadata[self.head] else {
             return Err(PacketError::Empty);
         };
         if expected_sequence != metadata.sequence {
@@ -101,11 +111,13 @@ impl Mailbox {
         if capacity < metadata.length {
             return Err(PacketError::TooLarge);
         }
-        if !deliver(metadata, &self.packet[..metadata.length]) {
+        if !deliver(metadata, &self.packets[self.head][..metadata.length]) {
             return Err(PacketError::TooLarge);
         }
-        self.packet[..metadata.length].fill(0);
-        self.metadata = None;
+        self.packets[self.head][..metadata.length].fill(0);
+        self.metadata[self.head] = None;
+        self.head = (self.head + 1) % PACKET_CAPACITY;
+        self.len -= 1;
         self.last_delivery = Some(metadata);
         Ok(metadata)
     }
@@ -153,7 +165,11 @@ pub(crate) fn last_delivery() -> Option<PacketMetadata> {
 }
 
 pub(crate) fn pending_metadata() -> Option<PacketMetadata> {
-    mailbox_mut()?.metadata
+    let mailbox = mailbox_mut()?;
+    if mailbox.len == 0 {
+        return None;
+    }
+    mailbox.metadata[mailbox.head]
 }
 
 fn mailbox_mut() -> Option<&'static mut Mailbox> {
@@ -173,9 +189,14 @@ pub(crate) fn verify_invariants() -> bool {
         && mailbox.publish(2, &[]) == Err(PacketError::TooLarge)
         && mailbox.publish(2, &[0; MAX_PACKET_SIZE + 1]) == Err(PacketError::TooLarge)
         && mailbox.publish(2, &packet) == Ok(1)
+        && mailbox.publish(2, &packet) == Ok(2)
+        && mailbox.publish(2, &packet) == Ok(3)
+        && mailbox.publish(2, &packet) == Ok(4)
         && mailbox.publish(2, &packet) == Err(PacketError::Busy)
         && mailbox.retire(2)
         && mailbox.publish(2, &packet) == Err(PacketError::InvalidProducer)
+        && mailbox.bind(3, 8)
+        && mailbox.publish(3, &packet) == Err(PacketError::Busy)
         && mailbox.consume_with(2, output.len(), |_, _| false) == Err(PacketError::Stale)
         && mailbox.consume_with(1, output.len(), |_, packet| {
             output.copy_from_slice(packet);
@@ -187,5 +208,11 @@ pub(crate) fn verify_invariants() -> bool {
             length: packet.len(),
         })
         && output == packet
-        && mailbox.consume_with(1, output.len(), |_, _| false) == Err(PacketError::Empty)
+        && mailbox.publish(3, &packet) == Ok(5)
+        && mailbox.consume_with(1, output.len(), |_, _| false) == Err(PacketError::Stale)
+        && mailbox.consume_with(2, output.len(), |_, _| true).is_ok()
+        && mailbox.consume_with(3, output.len(), |_, _| true).is_ok()
+        && mailbox.consume_with(4, output.len(), |_, _| true).is_ok()
+        && mailbox.consume_with(5, output.len(), |_, _| true).is_ok()
+        && mailbox.consume_with(5, output.len(), |_, _| false) == Err(PacketError::Empty)
 }

@@ -6,6 +6,7 @@
 ginux_packet_consumer_start:
     mov r12, rbx
     mov r14, rcx
+    mov r15, r8
     mov rdi, rcx
     sub rsp, 0x90
 
@@ -59,8 +60,15 @@ ginux_packet_consumer_start:
     lea rsi, [rsp]
     mov eax, 22
     int 0x80
+    test r15, r15
+    jz .expect_empty
+    cmp rax, -5
+    jne .consumer_failed
+    jmp .replay_checked
+.expect_empty:
     cmp rax, -3
     jne .consumer_failed
+.replay_checked:
 
     mov esi, 47
     mov eax, 2

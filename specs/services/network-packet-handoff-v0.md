@@ -10,10 +10,9 @@ producer's packet-object write capability and copies from its current user
 mapping into a bounded kernel mailbox. No DMA address, DMA page, MMIO mapping,
 MSI-X route, IOMMU table, or network-device capability is transferred.
 
-The producer first proves its write capability cannot consume. Duplicate
-publication is rejected while sequence one is pending. Normal service teardown
-then resets the NIC, retires interrupt routes and translation, scrubs DMA, and
-revokes both producer capabilities without deleting the copied packet.
+The producer first proves its write capability cannot consume. Normal service
+teardown then resets the NIC, retires interrupt routes and translation, scrubs
+DMA, and revokes both producer capabilities without deleting the copied packet.
 
 A fresh auxiliary consumer receives only packet-object read authority. It has
 neither packet write nor network-device read authority. In ring 3 it proves a
@@ -33,3 +32,10 @@ retiring VT-d and DMA, revokes both producer capabilities, and deliberately
 retains the copied packet. Another fresh read-only consumer validates and
 consumes sequence two. This proves packet lifetime is independent of both clean
 producer exit and producer failure.
+
+A bounded-batch generation publishes both validated replies as sequences three
+and four before clean driver retirement. Two fresh read-only domains consume
+them in order after all device authority is gone. The kernel's four-entry FIFO
+invariant also proves full-queue backpressure, retained entries across producer
+replacement, wraparound reuse, and monotonic sequence allocation. This is a
+bounded copied queue, not yet a blocking or zero-copy container endpoint.

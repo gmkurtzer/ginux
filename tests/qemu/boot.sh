@@ -280,6 +280,10 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: faulted packet producer authority revoked' "$output_file" ||
     ! grep -q '^ginux: fault teardown preserved copied packet sequence two' "$output_file" ||
     ! grep -q '^ginux: fresh ring-3 consumer received fault-surviving packet' "$output_file" ||
+    ! grep -q '^ginux: network producer queued two packets before retirement' "$output_file" ||
+    ! grep -q '^ginux: packet FIFO preserved sequence three before four' "$output_file" ||
+    ! grep -q '^ginux: separate ring-3 consumers drained packet FIFO in order' "$output_file" ||
+    ! grep -q '^ginux: bounded packet FIFO backpressure invariant verified' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2
