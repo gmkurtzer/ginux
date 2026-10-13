@@ -2957,6 +2957,25 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: fresh native network generation recovered after timeout");
     serial_write("\r\nginux: recovered network generation completed TX interrupt");
+    if !address_space::verify_native_network_receive_arp(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+        virtio_network_msix_mmio,
+        &local_apic,
+    ) {
+        kernel_fail("\r\nginux: native network service ARP receive failed\r\n");
+    }
+    serial_write("\r\nginux: native network service published bounded RX descriptor");
+    serial_write("\r\nginux: native network service transmitted ARP request");
+    serial_write("\r\nginux: native network service blocked for RX interrupt");
+    serial_write("\r\nginux: native network RX replay rejected");
+    serial_write("\r\nginux: native network service validated gateway ARP reply");
+    serial_write("\r\nginux: kernel validated native network RX descriptor and ARP reply");
+    serial_write("\r\nginux: native network RX payload guards preserved");
+    serial_write("\r\nginux: native network TX and RX interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized

@@ -61,6 +61,12 @@ _Static_assert(offsetof(struct ginux_native_network_boot_v0, mac_address) == 64,
                "network bootstrap MAC offset");
 _Static_assert(offsetof(struct ginux_native_network_boot_v0, reserved) == 72,
                "network bootstrap reserved offset");
+_Static_assert(GINUX_NATIVE_NETWORK_FEATURE_ARP_PROBE == UINT32_C(16),
+               "network ARP feature bit");
+_Static_assert(GINUX_NATIVE_NETWORK_WAIT_TX_NOTIFIED == UINT64_C(1),
+               "network TX wait command");
+_Static_assert(GINUX_NATIVE_NETWORK_WAIT_RX_POSTED == UINT64_C(2),
+               "network RX wait command");
 _Static_assert(offsetof(struct ginux_native_control_descriptor_v4, size) == 0,
                "control descriptor size offset");
 _Static_assert(offsetof(struct ginux_native_control_descriptor_v4, version) ==

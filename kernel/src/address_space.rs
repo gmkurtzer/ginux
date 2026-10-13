@@ -2277,7 +2277,9 @@ struct RegisteredAuxiliaryAddressSpace {
     device_quiesced: bool,
     fail_network_activation_return: bool,
     expect_network_transmit: bool,
-    network_interrupt_completed: bool,
+    expect_network_receive: bool,
+    network_tx_interrupt_completed: bool,
+    network_rx_interrupt_completed: bool,
 }
 
 enum AuxiliaryAddressSpace {
@@ -4577,6 +4579,7 @@ enum NativeNetworkRunMode {
     ActiveFault,
     Transmit,
     TransmitTimeout,
+    ReceiveArp,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4706,6 +4709,26 @@ pub(crate) fn verify_native_network_transmit_timeout(
     )
 }
 
+pub(crate) fn verify_native_network_receive_arp(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReceiveArp,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    )
+}
+
 fn verify_native_network_bootstrap_run(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -4726,9 +4749,12 @@ fn verify_native_network_bootstrap_run(
     let fail_after_activation = mode == NativeNetworkRunMode::ActiveFault;
     let transmit_probe = matches!(
         mode,
-        NativeNetworkRunMode::Transmit | NativeNetworkRunMode::TransmitTimeout
+        NativeNetworkRunMode::Transmit
+            | NativeNetworkRunMode::TransmitTimeout
+            | NativeNetworkRunMode::ReceiveArp
     );
     let force_network_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
+    let receive_arp = mode == NativeNetworkRunMode::ReceiveArp;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4836,6 +4862,9 @@ fn verify_native_network_bootstrap_run(
         if transmit_probe {
             boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE;
             boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_TX_INTERRUPT;
+            if receive_arp {
+                boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_ARP_PROBE;
+            }
         }
     }
     let boot_written = if reject_reserved {
@@ -4876,6 +4905,7 @@ fn verify_native_network_bootstrap_run(
         bind_auxiliary_network_teardown(auxiliary, device, mapping, interrupt_mapping)
             && (!fail_after_activation || arm_auxiliary_network_activation_fault(auxiliary))
             && (!transmit_probe || arm_auxiliary_network_transmit_expectation(auxiliary))
+            && (!receive_arp || arm_auxiliary_network_receive_expectation(auxiliary))
             && pci::prepare_network_for_isolated_service(device, mapping)
             && interrupt.is_none_or(|(msix_mapping, apic)| {
                 pci::arm_isolated_network_tx_interrupt(
@@ -4885,6 +4915,7 @@ fn verify_native_network_bootstrap_run(
                     apic,
                     auxiliary,
                     1,
+                    receive_arp,
                 )
             })
             && (!force_network_timeout || pci::force_next_network_wait_timeout(auxiliary, 1))
@@ -5188,7 +5219,9 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             device_quiesced: false,
             fail_network_activation_return: false,
             expect_network_transmit: false,
-            network_interrupt_completed: false,
+            expect_network_receive: false,
+            network_tx_interrupt_completed: false,
+            network_rx_interrupt_completed: false,
         });
     }
     true
@@ -5388,7 +5421,25 @@ fn arm_auxiliary_network_transmit_expectation(domain_id: u64) -> bool {
     true
 }
 
-pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, request: u64) -> bool {
+fn arm_auxiliary_network_receive_expectation(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if registered.network_teardown.is_none()
+        || !registered.expect_network_transmit
+        || registered.expect_network_receive
+        || registered.device_quiesced
+    {
+        return false;
+    }
+    registered.expect_network_receive = true;
+    true
+}
+
+pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request: u64) -> bool {
     let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) =
         (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
@@ -5401,8 +5452,20 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, request: u64) -> bool
     let Some(dma_physical) = registered.space.dma_physical() else {
         return false;
     };
+    let stage_ready = match command {
+        crate::control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED => {
+            request == 1 && !registered.network_tx_interrupt_completed
+        }
+        crate::control_abi::NETWORK_DEVICE_WAIT_RX_POSTED => {
+            request == 2
+                && registered.expect_network_receive
+                && registered.network_tx_interrupt_completed
+                && !registered.network_rx_interrupt_completed
+        }
+        _ => false,
+    };
     !registered.device_quiesced
-        && !registered.network_interrupt_completed
+        && stage_ready
         && teardown.msix_mapping.is_some()
         && teardown.interrupt_request == request
         && registered
@@ -5420,6 +5483,7 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, request: u64) -> bool
 
 pub(crate) fn complete_auxiliary_network_wait(
     domain_id: u64,
+    command: u64,
     request: u64,
 ) -> AuxiliaryDeviceWaitCompletion {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
@@ -5428,16 +5492,29 @@ pub(crate) fn complete_auxiliary_network_wait(
     else {
         return AuxiliaryDeviceWaitCompletion::Failed;
     };
-    let Some(teardown) = registered.network_teardown else {
+    let Some(mut teardown) = registered.network_teardown else {
         return AuxiliaryDeviceWaitCompletion::Failed;
     };
     let Some(msix_mapping) = teardown.msix_mapping else {
         return AuxiliaryDeviceWaitCompletion::Failed;
     };
-    if registered.device_quiesced
-        || registered.network_interrupt_completed
-        || teardown.interrupt_request != request
-    {
+    let queue = match command {
+        crate::control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED
+            if request == 1 && !registered.network_tx_interrupt_completed =>
+        {
+            1
+        }
+        crate::control_abi::NETWORK_DEVICE_WAIT_RX_POSTED
+            if request == 2
+                && registered.expect_network_receive
+                && registered.network_tx_interrupt_completed
+                && !registered.network_rx_interrupt_completed =>
+        {
+            0
+        }
+        _ => return AuxiliaryDeviceWaitCompletion::Failed,
+    };
+    if registered.device_quiesced || teardown.interrupt_request != request {
         return AuxiliaryDeviceWaitCompletion::Failed;
     }
     match pci::complete_isolated_network_interrupt_wait(
@@ -5445,9 +5522,28 @@ pub(crate) fn complete_auxiliary_network_wait(
         msix_mapping,
         domain_id,
         request,
+        queue,
     ) {
         pci::IsolatedInterruptCompletion::Completed => {
-            registered.network_interrupt_completed = true;
+            if queue == 1 {
+                registered.network_tx_interrupt_completed = true;
+                if registered.expect_network_receive {
+                    let Some(next_request) = request.checked_add(1) else {
+                        return AuxiliaryDeviceWaitCompletion::Failed;
+                    };
+                    if !pci::advance_isolated_network_interrupt_wait(
+                        domain_id,
+                        request,
+                        next_request,
+                    ) {
+                        return AuxiliaryDeviceWaitCompletion::Failed;
+                    }
+                    teardown.interrupt_request = next_request;
+                    registered.network_teardown = Some(teardown);
+                }
+            } else {
+                registered.network_rx_interrupt_completed = true;
+            }
             AuxiliaryDeviceWaitCompletion::Completed
         }
         pci::IsolatedInterruptCompletion::TimedOut => {
@@ -5625,14 +5721,20 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
                 true,
             )
         };
-        let transmit_complete = !registered.expect_network_transmit
-            || pci::network_service_transmit_is_complete(dma.address(), dma_virtual);
+        let transmit_complete = if registered.expect_network_receive {
+            pci::network_service_arp_exchange_is_complete(dma.address(), dma_virtual)
+        } else {
+            !registered.expect_network_transmit
+                || pci::network_service_transmit_is_complete(dma.address(), dma_virtual)
+        };
         if !require_completed_dma {
             LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.store(active, Ordering::Release);
             LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.store(domain_id, Ordering::Release);
         }
-        let interrupt_complete =
-            teardown.msix_mapping.is_none() || registered.network_interrupt_completed;
+        let interrupt_complete = teardown.msix_mapping.is_none()
+            || registered.network_tx_interrupt_completed
+                && (!registered.expect_network_receive
+                    || registered.network_rx_interrupt_completed);
         let quiesced = if let Some(msix_mapping) = teardown.msix_mapping {
             pci::quiesce_isolated_network_interrupt(
                 teardown.device,

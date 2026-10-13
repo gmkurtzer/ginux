@@ -250,6 +250,18 @@ if ! grep -q '^ginux: native network service published bounded TX descriptor' "$
     exit 1
 fi
 
+if ! grep -q '^ginux: native network service published bounded RX descriptor' "$output_file" ||
+    ! grep -q '^ginux: native network service transmitted ARP request' "$output_file" ||
+    ! grep -q '^ginux: native network service blocked for RX interrupt' "$output_file" ||
+    ! grep -q '^ginux: native network RX replay rejected' "$output_file" ||
+    ! grep -q '^ginux: native network service validated gateway ARP reply' "$output_file" ||
+    ! grep -q '^ginux: kernel validated native network RX descriptor and ARP reply' "$output_file" ||
+    ! grep -q '^ginux: native network RX payload guards preserved' "$output_file" ||
+    ! grep -q '^ginux: native network TX and RX interrupt routes retired cleanly' "$output_file"; then
+    echo "Boot test failed: native network service ARP receive was not verified." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: disk-backed volume generation: 1' "$output_file" ||
     ! grep -q '^ginux: disk-backed volume initialized and flushed' "$output_file" ||
     ! grep -q '^ginux: bounded virtio volume transaction completed' "$output_file" ||

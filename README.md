@@ -138,6 +138,14 @@ timer expires, cancels and retires the ambiguous device generation, and returns
 `RESTART_REQUIRED` to the service. A fresh generation with new authority, DMA,
 and VT-d leases then reinitializes the NIC and completes the transmit.
 See [Native Network Service Transmit v0](specs/services/network-transmit-v0.md).
+The following generation binds both queues to distinct kernel-owned MSI-X
+routes, publishes one guarded write-only receive descriptor, and sends a padded
+ARP request to the deterministic QEMU gateway. TX request generation one must
+complete before RX generation two is admitted. The service validates the exact
+one-buffer reply, and the kernel independently validates both rings, packet
+identities, lengths, canaries, and interrupt completions before retiring both
+routes and all DMA authority. See
+[Native Network Service Receive v0](specs/services/network-receive-v0.md).
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

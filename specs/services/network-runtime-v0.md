@@ -108,9 +108,20 @@ retiring VT-d and DMA. The service receives `CANCELLED` and exits
 `RESTART_REQUIRED`. A fresh generation with newly delegated authority and
 leases must then configure the reset device and complete the same transmit.
 
+Bootstrap feature `ARP_PROBE` advances another fresh generation to the first
+service-owned receive. The driver binds RX queue 0 to MSI-X entry 0, publishes
+one guarded write-only receive descriptor, transmits a padded ARP request, and
+waits for TX request one before RX request two. It validates the complete
+one-buffer modern virtio header and deterministic QEMU gateway ARP reply. The
+kernel independently validates both rings, the request and reply, endpoint
+identities, bounds, canaries, and both interrupt completions before retiring the
+two routes, device, VT-d hierarchy, DMA page, and domain. See
+[Native Network Service Receive v0](network-receive-v0.md).
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The transmit generation
-sends only one fixed probe and proves device consumption rather than peer
-reception. Interrupt delivery, receive processing, general packet APIs, and
-container networking remain separate milestones.
+sends only one fixed probe. The receive generation performs only one fixed ARP
+exchange with the deterministic QEMU gateway. General packet APIs, buffer
+replenishment, multiple in-flight packets, dynamic configuration, and container
+networking remain separate milestones.

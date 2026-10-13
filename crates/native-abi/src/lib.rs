@@ -11,6 +11,7 @@ pub const NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK: u32 = 1 << 0;
 pub const NATIVE_NETWORK_FEATURE_EMPTY_QUEUES: u32 = 1 << 1;
 pub const NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE: u32 = 1 << 2;
 pub const NATIVE_NETWORK_FEATURE_TX_INTERRUPT: u32 = 1 << 3;
+pub const NATIVE_NETWORK_FEATURE_ARP_PROBE: u32 = 1 << 4;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -26,6 +27,7 @@ pub const NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES: u64 = 12;
 pub const NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD: u64 = 0x0000_0001_05dc_0009;
 pub const NATIVE_NETWORK_WAIT_OPERATION: u64 = 20;
 pub const NATIVE_NETWORK_WAIT_TX_NOTIFIED: u64 = 1;
+pub const NATIVE_NETWORK_WAIT_RX_POSTED: u64 = 2;
 pub const NATIVE_NETWORK_WAIT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_NETWORK_WAIT_CANCELLED: u64 = u64::MAX - 5;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
@@ -193,7 +195,13 @@ impl NativeNetworkBootV0 {
                     == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
                         | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
                         | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
-                        | NATIVE_NETWORK_FEATURE_TX_INTERRUPT)
+                        | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
+                || self.features
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                        | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                        | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
+                        | NATIVE_NETWORK_FEATURE_ARP_PROBE)
             && self.common_config_address != 0
             && self.receive_notification_address != 0
             && self.transmit_notification_address != 0
@@ -216,6 +224,10 @@ impl NativeNetworkBootV0 {
 
     pub const fn requests_tx_interrupt(&self) -> bool {
         self.features & NATIVE_NETWORK_FEATURE_TX_INTERRUPT != 0
+    }
+
+    pub const fn requests_arp_probe(&self) -> bool {
+        self.features & NATIVE_NETWORK_FEATURE_ARP_PROBE != 0
     }
 }
 
@@ -262,6 +274,7 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_EMPTY_QUEUES UINT32_C(2)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE UINT32_C(4)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TX_INTERRUPT UINT32_C(8)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_ARP_PROBE UINT32_C(16)"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
     }
 
@@ -283,6 +296,7 @@ mod tests {
             .contains("GINUX_NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD UINT64_C(0x0000000105dc0009)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_WAIT_OPERATION UINT64_C(20)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_WAIT_TX_NOTIFIED UINT64_C(1)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_WAIT_RX_POSTED UINT64_C(2)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_WAIT_CANCELLED (UINT64_MAX - UINT64_C(5))"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_DISCOVERY_OPERATION UINT64_C(0)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_ABI_VERSION UINT16_C(4)"));
@@ -375,6 +389,13 @@ mod tests {
         };
         assert!(interrupted.is_valid_virtio_network());
         assert!(interrupted.requests_tx_interrupt());
+        assert!(!interrupted.requests_arp_probe());
+        let arp = NativeNetworkBootV0 {
+            features: interrupted.features | NATIVE_NETWORK_FEATURE_ARP_PROBE,
+            ..interrupted
+        };
+        assert!(arp.is_valid_virtio_network());
+        assert!(arp.requests_arp_probe());
         for invalid in [
             NativeNetworkBootV0 { magic: 0, ..valid },
             NativeNetworkBootV0 {
@@ -392,7 +413,7 @@ mod tests {
                 ..valid
             },
             NativeNetworkBootV0 {
-                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 4,
+                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 5,
                 ..valid
             },
             NativeNetworkBootV0 {

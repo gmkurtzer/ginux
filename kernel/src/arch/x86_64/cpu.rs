@@ -14331,15 +14331,17 @@ fn network_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFr
     };
     let command = frame.first_argument();
     let request = frame.second_argument();
-    if command != control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED
-        || request == 0
+    if !matches!(
+        command,
+        control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED | control_abi::NETWORK_DEVICE_WAIT_RX_POSTED
+    ) || request == 0
         || !domain::handle_permits(
             caller_domain,
             capability,
             control_abi::NETWORK_DEVICE_OBJECT,
             Rights::WRITE,
         )
-        || !address_space::auxiliary_network_wait_ready(caller_domain, request)
+        || !address_space::auxiliary_network_wait_ready(caller_domain, command, request)
     {
         return u64::MAX - 2;
     }
@@ -14357,7 +14359,7 @@ fn network_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFr
     ) {
         return u64::MAX - 2;
     }
-    match address_space::complete_auxiliary_network_wait(caller_domain, request) {
+    match address_space::complete_auxiliary_network_wait(caller_domain, command, request) {
         address_space::AuxiliaryDeviceWaitCompletion::Completed => 0,
         address_space::AuxiliaryDeviceWaitCompletion::Cancelled => {
             control_abi::NETWORK_DEVICE_RESULT_CANCELLED

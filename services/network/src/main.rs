@@ -13,8 +13,9 @@ use ginux_native_abi::{
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
     NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
     NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
-    NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
+    NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
+    NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
@@ -28,6 +29,8 @@ const TX_DESC_OFFSET: u64 = 0x180;
 const TX_AVAIL_OFFSET: u64 = 0x200;
 const TX_USED_OFFSET: u64 = 0x280;
 const TX_BUFFER_OFFSET: u64 = 0xa00;
+const RX_BUFFER_OFFSET: u64 = 0x400;
+const RX_DESCRIPTOR_LENGTH: usize = 0x5ff;
 const TX_HEADER_LENGTH: usize = 12;
 const TX_FRAME: [u8; 19] = [
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x88, 0xb5, b'G', b'I',
@@ -100,7 +103,12 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
             fail();
         }
         if info.requests_transmit_probe() {
-            let Some(status) = (unsafe { transmit_probe(info) }) else {
+            let status = if info.requests_arp_probe() {
+                unsafe { arp_probe(info) }
+            } else {
+                unsafe { transmit_probe(info) }
+            };
+            let Some(status) = status else {
                 fail();
             };
             if status != NATIVE_SERVICE_EXIT_COMPLETED {
@@ -180,6 +188,119 @@ unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> Option<u8> {
         .then_some(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
+unsafe fn arp_probe(info: &NativeNetworkBootV0) -> Option<u8> {
+    const ARP_REQUEST: [u8; 60] = [
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
+        0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 10, 0, 2, 15,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 10, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0,
+    ];
+    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
+    const GUEST_IP: [u8; 4] = [10, 0, 2, 15];
+    const GATEWAY_IP: [u8; 4] = [10, 0, 2, 2];
+    let dma = usize::try_from(info.dma_virtual_address).ok()?;
+    let receive_notification = usize::try_from(info.receive_notification_address).ok()?;
+    let transmit_notification = usize::try_from(info.transmit_notification_address).ok()?;
+    let common = usize::try_from(info.common_config_address).ok()?;
+    let tx_length = TX_HEADER_LENGTH + ARP_REQUEST.len();
+
+    write_u64(
+        dma + RX_DESC_OFFSET as usize,
+        info.dma_device_address + RX_BUFFER_OFFSET,
+    );
+    write_u32(
+        dma + RX_DESC_OFFSET as usize + 8,
+        RX_DESCRIPTOR_LENGTH as u32,
+    );
+    write_u16(dma + RX_DESC_OFFSET as usize + 12, 2);
+    write_u16(dma + RX_DESC_OFFSET as usize + 14, 0);
+    write_u8(dma + RX_BUFFER_OFFSET as usize - 1, 0x3c);
+    write_u8(dma + RX_BUFFER_OFFSET as usize + RX_DESCRIPTOR_LENGTH, 0xc3);
+    write_u16(dma + RX_AVAIL_OFFSET as usize, 0);
+    write_u16(dma + RX_AVAIL_OFFSET as usize + 4, 0);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + RX_AVAIL_OFFSET as usize + 2, 1);
+
+    write_u64(
+        dma + TX_DESC_OFFSET as usize,
+        info.dma_device_address + TX_BUFFER_OFFSET,
+    );
+    write_u32(dma + TX_DESC_OFFSET as usize + 8, tx_length as u32);
+    write_u16(dma + TX_DESC_OFFSET as usize + 12, 0);
+    write_u16(dma + TX_DESC_OFFSET as usize + 14, 0);
+    for offset in 0..TX_HEADER_LENGTH {
+        write_u8(dma + TX_BUFFER_OFFSET as usize + offset, 0);
+    }
+    for (offset, byte) in ARP_REQUEST.into_iter().enumerate() {
+        write_u8(
+            dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH + offset,
+            byte,
+        );
+    }
+    write_u8(dma + TX_BUFFER_OFFSET as usize + tx_length, 0xa5);
+    write_u16(dma + TX_AVAIL_OFFSET as usize, 0);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 4, 0);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 2, 1);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(receive_notification, 0);
+    write_u16(transmit_notification, 1);
+
+    match wait_for_network_interrupt(info.device_capability, NATIVE_NETWORK_WAIT_TX_NOTIFIED, 1) {
+        0 => {}
+        NATIVE_NETWORK_WAIT_CANCELLED => return Some(NATIVE_SERVICE_EXIT_RESTART_REQUIRED),
+        _ => return None,
+    }
+    if read_u16(dma + TX_USED_OFFSET as usize + 2) != 1
+        || read_u32(dma + TX_USED_OFFSET as usize + 4) != 0
+    {
+        return None;
+    }
+    match wait_for_network_interrupt(info.device_capability, NATIVE_NETWORK_WAIT_RX_POSTED, 2) {
+        0 => {}
+        NATIVE_NETWORK_WAIT_CANCELLED => return Some(NATIVE_SERVICE_EXIT_RESTART_REQUIRED),
+        _ => return None,
+    }
+    if wait_for_network_interrupt(info.device_capability, NATIVE_NETWORK_WAIT_RX_POSTED, 2)
+        != NATIVE_NETWORK_WAIT_FAILED
+    {
+        return None;
+    }
+    let used_length = read_u32(dma + RX_USED_OFFSET as usize + 8) as usize;
+    let buffer = dma + RX_BUFFER_OFFSET as usize;
+    let frame = buffer + TX_HEADER_LENGTH;
+    (read_u16(dma + RX_USED_OFFSET as usize + 2) == 1
+        && read_u32(dma + RX_USED_OFFSET as usize + 4) == 0
+        && (TX_HEADER_LENGTH + 42..=RX_DESCRIPTOR_LENGTH).contains(&used_length)
+        && (0..10).all(|offset| read_u8(buffer + offset) == 0)
+        && read_u16(buffer + 10) == 1
+        && bytes_match(frame, &GUEST_MAC)
+        && bytes_match(frame + 6, &GATEWAY_MAC)
+        && bytes_match(frame + 12, &[0x08, 0x06])
+        && bytes_match(
+            frame + 14,
+            &[0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x02],
+        )
+        && bytes_match(frame + 22, &GATEWAY_MAC)
+        && bytes_match(frame + 28, &GATEWAY_IP)
+        && bytes_match(frame + 32, &GUEST_MAC)
+        && bytes_match(frame + 38, &GUEST_IP)
+        && read_u8(dma + RX_BUFFER_OFFSET as usize - 1) == 0x3c
+        && read_u8(dma + RX_BUFFER_OFFSET as usize + RX_DESCRIPTOR_LENGTH) == 0xc3
+        && read_u8(dma + TX_BUFFER_OFFSET as usize + tx_length) == 0xa5
+        && read_u8(common + COMMON_DEVICE_STATUS)
+            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK)
+        .then_some(NATIVE_SERVICE_EXIT_COMPLETED)
+}
+
+unsafe fn bytes_match(address: usize, expected: &[u8]) -> bool {
+    expected
+        .iter()
+        .enumerate()
+        .all(|(offset, byte)| read_u8(address + offset) == *byte)
+}
+
 unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {
     let Ok(common) = usize::try_from(info.common_config_address) else {
         return false;
@@ -250,7 +371,11 @@ unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {
             RX_DESC_OFFSET,
             RX_AVAIL_OFFSET,
             RX_USED_OFFSET,
-            u16::MAX,
+            if info.requests_arp_probe() {
+                0
+            } else {
+                u16::MAX
+            },
         ),
         (
             1_u16,
@@ -304,13 +429,17 @@ unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {
 }
 
 fn wait_for_tx_interrupt(capability: u64, request: u64) -> u64 {
+    wait_for_network_interrupt(capability, NATIVE_NETWORK_WAIT_TX_NOTIFIED, request)
+}
+
+fn wait_for_network_interrupt(capability: u64, command: u64, request: u64) -> u64 {
     let mut result = NATIVE_NETWORK_WAIT_OPERATION;
     unsafe {
         asm!(
             "int 0x80",
             inlateout("rax") result,
             in("rdi") capability,
-            in("rsi") NATIVE_NETWORK_WAIT_TX_NOTIFIED,
+            in("rsi") command,
             in("rdx") request,
             options(nostack),
         );

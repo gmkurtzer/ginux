@@ -113,6 +113,7 @@ static VIRTIO_INTERRUPT_COUNT: AtomicU8 = AtomicU8::new(0);
 static VIRTIO_INTERRUPT_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static VIRTIO_INTERRUPT_REQUEST: AtomicU64 = AtomicU64::new(0);
 static VIRTIO_INTERRUPT_OBJECT: AtomicU64 = AtomicU64::new(0);
+static VIRTIO_NETWORK_RX_ARMED: AtomicBool = AtomicBool::new(false);
 static FORCED_NOTIFIED_TIMEOUT_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static FORCED_NOTIFIED_TIMEOUT_REQUEST: AtomicU64 = AtomicU64::new(0);
 static FORCED_NOTIFIED_TIMEOUT_OBJECT: AtomicU64 = AtomicU64::new(0);
@@ -1325,6 +1326,7 @@ pub(crate) fn arm_isolated_network_tx_interrupt(
     apic: &LocalApic,
     domain: u64,
     request: u64,
+    receive: bool,
 ) -> bool {
     if domain == 0
         || request == 0
@@ -1344,14 +1346,30 @@ pub(crate) fn arm_isolated_network_tx_interrupt(
     {
         return false;
     }
+    if receive
+        && (!program_masked_msix_vector_raw(
+            device.msix_target(),
+            msix_mapping,
+            0,
+            apic.id,
+            VIRTIO_NETWORK_RX_VECTOR,
+        ) || !install_virtio_interrupt_at(apic, VIRTIO_NETWORK_RX_VECTOR))
+    {
+        let _ = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR);
+        return false;
+    }
     if !set_msix_control_raw(device.msix_target(), true, true) {
         let _ = set_msix_control_raw(device.msix_target(), false, true);
+        if receive {
+            let _ = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_RX_VECTOR);
+        }
         let _ = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR);
         return false;
     }
     VIRTIO_INTERRUPT_DOMAIN.store(domain, Ordering::SeqCst);
     VIRTIO_INTERRUPT_REQUEST.store(request, Ordering::SeqCst);
     VIRTIO_INTERRUPT_OBJECT.store(control_abi::NETWORK_DEVICE_OBJECT, Ordering::SeqCst);
+    VIRTIO_NETWORK_RX_ARMED.store(receive, Ordering::SeqCst);
     true
 }
 
@@ -1372,7 +1390,18 @@ pub(crate) fn activate_isolated_network_interrupt_queues(
             & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
             != COMMAND_MEMORY_SPACE
         || !(0..DMA_PAGE_SIZE).all(|offset| read_dma_u8(dma_virtual + offset) == 0)
-        || !network_queues_are_bound(device, common_mapping, dma_physical, false, 1)
+        || !network_queues_are_bound(
+            device,
+            common_mapping,
+            dma_physical,
+            false,
+            if VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst) {
+                0
+            } else {
+                u16::MAX
+            },
+            1,
+        )
     {
         return false;
     }
@@ -1388,7 +1417,18 @@ pub(crate) fn activate_isolated_network_interrupt_queues(
     network_function_command(device)
         & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
         == COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER
-        && network_queues_are_bound(device, common_mapping, dma_physical, true, 1)
+        && network_queues_are_bound(
+            device,
+            common_mapping,
+            dma_physical,
+            true,
+            if VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst) {
+                0
+            } else {
+                u16::MAX
+            },
+            1,
+        )
 }
 
 pub(crate) fn network_empty_queues_are_bound(
@@ -1403,6 +1443,7 @@ pub(crate) fn network_empty_queues_are_bound(
         dma_physical,
         require_bus_master,
         u16::MAX,
+        u16::MAX,
     )
 }
 
@@ -1412,7 +1453,18 @@ pub(crate) fn network_interrupt_queues_are_bound(
     dma_physical: u64,
     require_bus_master: bool,
 ) -> bool {
-    network_queues_are_bound(device, common_mapping, dma_physical, require_bus_master, 1)
+    network_queues_are_bound(
+        device,
+        common_mapping,
+        dma_physical,
+        require_bus_master,
+        if VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst) {
+            0
+        } else {
+            u16::MAX
+        },
+        1,
+    )
 }
 
 fn network_queues_are_bound(
@@ -1420,6 +1472,7 @@ fn network_queues_are_bound(
     common_mapping: MmioMapping,
     dma_physical: u64,
     require_bus_master: bool,
+    receive_vector: u16,
     transmit_vector: u16,
 ) -> bool {
     let Some((common_physical, common_length)) = device.common_region() else {
@@ -1448,7 +1501,7 @@ fn network_queues_are_bound(
             NET_RX_DESC_OFFSET,
             NET_RX_AVAIL_OFFSET,
             NET_RX_USED_OFFSET,
-            u16::MAX,
+            receive_vector,
         ),
         (
             1_u16,
@@ -1487,7 +1540,18 @@ pub(crate) fn isolated_network_interrupt_wait_ready(
         && !VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
         && !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
         && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 0
-        && network_queues_are_bound(device, common_mapping, dma_physical, true, 1)
+        && network_queues_are_bound(
+            device,
+            common_mapping,
+            dma_physical,
+            true,
+            if VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst) {
+                0
+            } else {
+                u16::MAX
+            },
+            1,
+        )
 }
 
 pub(crate) fn complete_isolated_network_interrupt_wait(
@@ -1495,10 +1559,13 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
     msix_mapping: MmioMapping,
     domain: u64,
     request: u64,
+    queue: u16,
 ) -> IsolatedInterruptCompletion {
     if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
         || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
         || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+        || !matches!(queue, 0 | 1)
+        || queue == 0 && !VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst)
     {
         return IsolatedInterruptCompletion::Failed;
     }
@@ -1513,10 +1580,10 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
     }
     VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
     let interrupt_configured = if force_timeout {
-        set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true)
+        set_msix_entry_mask_raw(device.msix_target(), msix_mapping, queue, true)
             && set_msix_control_raw(device.msix_target(), true, true)
     } else {
-        set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, false)
+        set_msix_entry_mask_raw(device.msix_target(), msix_mapping, queue, false)
             && set_msix_control_raw(device.msix_target(), true, false)
     };
     if !timer::arm_network_device_wait_timer(domain, request) || !interrupt_configured {
@@ -1536,7 +1603,7 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
         unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
     }
     let function_masked = set_msix_control_raw(device.msix_target(), true, true);
-    let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
+    let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, queue, true);
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
     let Some(timed_out) = timer::finish_device_wait_timer(domain, request) else {
         return IsolatedInterruptCompletion::Failed;
@@ -1550,6 +1617,28 @@ pub(crate) fn complete_isolated_network_interrupt_wait(
     } else {
         IsolatedInterruptCompletion::Failed
     }
+}
+
+pub(crate) fn advance_isolated_network_interrupt_wait(
+    domain: u64,
+    completed_request: u64,
+    next_request: u64,
+) -> bool {
+    if domain == 0
+        || next_request != completed_request.checked_add(1).unwrap_or(0)
+        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != completed_request
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+        || VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
+        || !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+        || VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) != 1
+    {
+        return false;
+    }
+    VIRTIO_INTERRUPT_FIRED.store(false, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_REQUEST.store(next_request, Ordering::SeqCst);
+    true
 }
 
 pub(crate) fn quiesce_isolated_network_interrupt(
@@ -1576,15 +1665,22 @@ pub(crate) fn quiesce_isolated_network_interrupt(
         return false;
     };
     let function_masked = set_msix_control_raw(device.msix_target(), true, true);
+    let receive_masked = !VIRTIO_NETWORK_RX_ARMED.load(Ordering::SeqCst)
+        || set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 0, true);
     let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
     let msix_disabled = set_msix_control_raw(device.msix_target(), false, true);
     let device_quiesced = quiesce_isolated_network(device, common_mapping);
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    let transmit_retired = retire_virtio_interrupt_at(&apic, VIRTIO_NETWORK_TX_VECTOR);
+    let receive_retired = !VIRTIO_NETWORK_RX_ARMED.swap(false, Ordering::SeqCst)
+        || retire_virtio_interrupt_at(&apic, VIRTIO_NETWORK_RX_VECTOR);
     function_masked
+        && receive_masked
         && entry_masked
         && msix_disabled
         && device_quiesced
-        && retire_virtio_interrupt_at(&apic, VIRTIO_NETWORK_TX_VECTOR)
+        && transmit_retired
+        && receive_retired
 }
 
 pub(crate) fn network_service_transmit_is_complete(dma_physical: u64, dma_virtual: usize) -> bool {
@@ -1620,6 +1716,75 @@ pub(crate) fn network_service_transmit_is_complete(dma_physical: u64, dma_virtua
     (1..usize::from(QUEUE_SIZE)).all(|descriptor| {
         (0..16)
             .all(|byte| read_dma_u8(dma_virtual + NET_TX_DESC_OFFSET + descriptor * 16 + byte) == 0)
+    })
+}
+
+pub(crate) fn network_service_arp_exchange_is_complete(
+    dma_physical: u64,
+    dma_virtual: usize,
+) -> bool {
+    const HEADER_LENGTH: usize = 12;
+    const RX_LENGTH: usize = NET_BUFFER_LENGTH - 1;
+    const ARP_REQUEST: [u8; 60] = [
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
+        0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 10, 0, 2, 15,
+        0, 0, 0, 0, 0, 0, 10, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
+    const GUEST_IP: [u8; 4] = [10, 0, 2, 15];
+    const GATEWAY_IP: [u8; 4] = [10, 0, 2, 2];
+    let tx_length = HEADER_LENGTH + ARP_REQUEST.len();
+    let receive_length = read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 8);
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || read_dma_u64(dma_virtual + NET_RX_DESC_OFFSET)
+            != dma_physical + NET_RX_BUFFER_OFFSET as u64
+        || read_dma_u32(dma_virtual + NET_RX_DESC_OFFSET + 8) != RX_LENGTH as u32
+        || read_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 12) != DESC_WRITE
+        || read_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 14) != 0
+        || read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET) != 0
+        || read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 2) != 1
+        || read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 4) != 0
+        || read_dma_u16(dma_virtual + NET_RX_USED_OFFSET) & !1 != 0
+        || read_dma_u16(dma_virtual + NET_RX_USED_OFFSET + 2) != 1
+        || read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 4) != 0
+        || read_dma_u64(dma_virtual + NET_TX_DESC_OFFSET)
+            != dma_physical + NET_TX_BUFFER_OFFSET as u64
+        || read_dma_u32(dma_virtual + NET_TX_DESC_OFFSET + 8) != tx_length as u32
+        || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 12) != 0
+        || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 14) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2) != 1
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 4) != 0
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET) & !1 != 0
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) != 1
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4) != 0
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 8) > tx_length as u32
+        || (0..HEADER_LENGTH)
+            .any(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) != 0)
+        || ARP_REQUEST.iter().enumerate().any(|(offset, byte)| {
+            read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset) != *byte
+        })
+        || read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + tx_length) != 0xa5
+        || read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1) != 0x3c
+        || read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET + RX_LENGTH) != 0xc3
+        || !network_arp_reply_is_valid(
+            dma_virtual + NET_RX_BUFFER_OFFSET,
+            receive_length,
+            GUEST_MAC,
+            GATEWAY_MAC,
+            GUEST_IP,
+            GATEWAY_IP,
+        )
+    {
+        return false;
+    }
+    (1..usize::from(QUEUE_SIZE)).all(|descriptor| {
+        (0..16).all(|byte| {
+            read_dma_u8(dma_virtual + NET_RX_DESC_OFFSET + descriptor * 16 + byte) == 0
+                && read_dma_u8(dma_virtual + NET_TX_DESC_OFFSET + descriptor * 16 + byte) == 0
+        })
     })
 }
 

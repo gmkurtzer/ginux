@@ -64,10 +64,11 @@ DMA state, and returns `CANCELLED`; that request generation can never be
 retried. The service must then exit with `RESTART_REQUIRED`. A fresh domain
 generation reinitializes the reset device with a new DMA lease.
 
-## Network transmit wait
+## Network device wait
 
-Native network wait operation 20 currently accepts only `TX_NOTIFIED` command
-1 and request generation one. It requires the same domain's write-authorized
+Native network wait operation 20 accepts `TX_NOTIFIED` command 1 and
+`RX_POSTED` command 2. A transmit-only generation admits only command 1 with
+request generation one. It requires the same domain's write-authorized
 network capability, live exact VT-d lease, TX queue 1 bound to MSI-X entry 1,
 and an active confined device. The kernel blocks the service, unmasks vector
 35, and returns zero only after one matching interrupt. A stale or duplicate
@@ -77,6 +78,14 @@ the route. It returns `CANCELLED`; the service exits with
 `RESTART_REQUIRED`, and only a fresh domain generation with a new DMA and VT-d
 lease may retry. The QEMU proof forces this path and requires the replacement
 generation to complete an interrupt-driven transmit.
+
+An `ARP_PROBE` generation additionally binds RX queue 0 to MSI-X entry 0. Only
+after TX command 1/request 1 completes does the kernel advance that exact
+device generation and admit RX command 2/request 2. The second wait unmasks
+vector 34 and returns zero only after its matching interrupt. A duplicate or
+out-of-order command returns `FAILED` without blocking. Both waits must complete
+before clean lifecycle exit is accepted. Receive-stage timeout cancellation is
+not yet part of this contract.
 
 ## Sources and compatibility
 

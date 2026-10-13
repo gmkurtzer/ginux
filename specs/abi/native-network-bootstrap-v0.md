@@ -30,7 +30,9 @@ Feature bit zero is required `VIRTIO_NETWORK`. Optional bit one is
 contract. Optional bit two is `TRANSMIT_PROBE`, requires bit one, and requests
 one fixed transmit. Optional bit three is `TX_INTERRUPT`, requires bits one and
 two, and requires TX completion through the generation-bound network wait ABI.
-No other combination is accepted. Every
+Optional bit four is `ARP_PROBE`, requires bits one through three, and requests
+one fixed interrupt-completed ARP exchange using both queues. No other
+combination is accepted. Every
 address, capability, and MAC field must be nonzero, and the two notification
 addresses must be distinct. A wrong magic, version, size, feature bitmap,
 nonzero reserved field, or nonzero MAC high bits is rejected before device
@@ -85,4 +87,12 @@ publish exactly one bounded queue-1 descriptor, notify the supplied transmit
 register, and block on operation 20 with request generation one. The kernel
 validates the descriptor, fixed payload, exact interrupt, completion ID, and
 guards before clean teardown. Duplicate generation one is rejected. Receive
-traffic remains outside the feature.
+traffic remains outside that feature.
+
+A seventh generation adds `ARP_PROBE`. It also binds receive queue 0 to MSI-X
+entry 0, publishes one bounded write-only receive descriptor before notifying
+the transmit queue, and serializes TX command 1/request 1 followed by RX command
+2/request 2. The service and kernel independently validate the deterministic
+QEMU gateway ARP reply and buffer guards before both routes and the device are
+retired. See
+[Native Network Service Receive v0](../services/network-receive-v0.md).
