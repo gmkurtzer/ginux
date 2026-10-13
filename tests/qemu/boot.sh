@@ -271,6 +271,11 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: native network service completed second ARP exchange' "$output_file" ||
     ! grep -q '^ginux: native network request generations one through four completed' "$output_file" ||
     ! grep -q '^ginux: kernel validated both native network ARP exchanges' "$output_file" ||
+    ! grep -q '^ginux: native network service copied validated frame out of DMA' "$output_file" ||
+    ! grep -q '^ginux: packet producer retained no read authority' "$output_file" ||
+    ! grep -q '^ginux: packet consumer retained no device or write authority' "$output_file" ||
+    ! grep -q '^ginux: packet survived producer and device retirement' "$output_file" ||
+    ! grep -q '^ginux: ring-3 consumer received exact Ethernet frame once' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2
@@ -482,8 +487,8 @@ if ! grep -q '^ginux: malformed boot manifests rejected' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: manifest authority grants: 7' "$output_file"; then
-    echo "Boot test failed: the signed block-device authority grant is missing." >&2
+if ! grep -q '^ginux: manifest authority grants: 8' "$output_file"; then
+    echo "Boot test failed: the signed packet-handoff authority grant is missing." >&2
     exit 1
 fi
 

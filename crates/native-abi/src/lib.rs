@@ -13,6 +13,9 @@ pub const NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE: u32 = 1 << 2;
 pub const NATIVE_NETWORK_FEATURE_TX_INTERRUPT: u32 = 1 << 3;
 pub const NATIVE_NETWORK_FEATURE_ARP_PROBE: u32 = 1 << 4;
 pub const NATIVE_NETWORK_FEATURE_RX_REUSE: u32 = 1 << 5;
+pub const NATIVE_NETWORK_FEATURE_PACKET_HANDOFF: u32 = 1 << 6;
+pub const NATIVE_NETWORK_BOOT_V1_VERSION: u16 = 1;
+pub const NATIVE_NETWORK_BOOT_V1_SIZE: u16 = 88;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -31,11 +34,16 @@ pub const NATIVE_NETWORK_WAIT_TX_NOTIFIED: u64 = 1;
 pub const NATIVE_NETWORK_WAIT_RX_POSTED: u64 = 2;
 pub const NATIVE_NETWORK_WAIT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_NETWORK_WAIT_CANCELLED: u64 = u64::MAX - 5;
+pub const NATIVE_PACKET_PUBLISH_OPERATION: u64 = 21;
+pub const NATIVE_PACKET_REQUEST_VERSION: u16 = 0;
+pub const NATIVE_PACKET_REQUEST_SIZE: u32 = 32;
+pub const NATIVE_PACKET_MAX_SIZE: u32 = 1514;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
 pub const NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT: u16 = 1 << 4;
 pub const NATIVE_CONTROL_FEATURE_STRUCTURED_DESCRIPTOR: u16 = 1 << 10;
+pub const NATIVE_CONTROL_FEATURE_PACKET_HANDOFF: u16 = 1 << 11;
 pub const NATIVE_CONTROL_REQUIRED_FEATURES: u16 = NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES
     | NATIVE_CONTROL_FEATURE_FAULT_CONTAINMENT
     | NATIVE_CONTROL_FEATURE_STRUCTURED_DESCRIPTOR;
@@ -49,6 +57,11 @@ pub const fn native_control_abi_is_compatible(discovery: u64) -> bool {
     discovery >> 32 == 0
         && version == NATIVE_CONTROL_ABI_VERSION
         && features & NATIVE_CONTROL_REQUIRED_FEATURES == NATIVE_CONTROL_REQUIRED_FEATURES
+}
+
+pub const fn native_control_abi_supports_packet_handoff(discovery: u64) -> bool {
+    native_control_abi_is_compatible(discovery)
+        && discovery as u16 & NATIVE_CONTROL_FEATURE_PACKET_HANDOFF != 0
 }
 
 #[repr(C)]
@@ -246,6 +259,118 @@ impl NativeNetworkBootV0 {
 const _: () = assert!(core::mem::size_of::<NativeNetworkBootV0>() == 80);
 const _: () = assert!(core::mem::align_of::<NativeNetworkBootV0>() == 8);
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeNetworkBootV1 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub common_config_address: u64,
+    pub receive_notification_address: u64,
+    pub transmit_notification_address: u64,
+    pub dma_virtual_address: u64,
+    pub dma_device_address: u64,
+    pub device_capability: u64,
+    pub mac_address: u64,
+    pub packet_capability: u64,
+    pub reserved: u64,
+}
+
+impl NativeNetworkBootV1 {
+    pub const fn from_v0(v0: NativeNetworkBootV0, packet_capability: u64) -> Self {
+        Self {
+            magic: v0.magic,
+            version: NATIVE_NETWORK_BOOT_V1_VERSION,
+            size: NATIVE_NETWORK_BOOT_V1_SIZE,
+            features: v0.features | NATIVE_NETWORK_FEATURE_PACKET_HANDOFF,
+            common_config_address: v0.common_config_address,
+            receive_notification_address: v0.receive_notification_address,
+            transmit_notification_address: v0.transmit_notification_address,
+            dma_virtual_address: v0.dma_virtual_address,
+            dma_device_address: v0.dma_device_address,
+            device_capability: v0.device_capability,
+            mac_address: v0.mac_address,
+            packet_capability,
+            reserved: 0,
+        }
+    }
+
+    pub const fn is_valid_packet_handoff(&self) -> bool {
+        self.magic == NATIVE_NETWORK_BOOT_MAGIC
+            && self.version == NATIVE_NETWORK_BOOT_V1_VERSION
+            && self.size == NATIVE_NETWORK_BOOT_V1_SIZE
+            && self.features
+                == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                    | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                    | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                    | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
+                    | NATIVE_NETWORK_FEATURE_ARP_PROBE
+                    | NATIVE_NETWORK_FEATURE_RX_REUSE
+                    | NATIVE_NETWORK_FEATURE_PACKET_HANDOFF
+            && self.common_config_address != 0
+            && self.receive_notification_address != 0
+            && self.transmit_notification_address != 0
+            && self.receive_notification_address != self.transmit_notification_address
+            && self.dma_virtual_address != 0
+            && self.dma_device_address != 0
+            && self.device_capability != 0
+            && self.mac_address != 0
+            && self.mac_address >> 48 == 0
+            && self.packet_capability != 0
+            && self.reserved == 0
+    }
+
+    pub const fn v0_prefix(&self) -> NativeNetworkBootV0 {
+        NativeNetworkBootV0 {
+            magic: self.magic,
+            version: NATIVE_NETWORK_BOOT_VERSION,
+            size: NATIVE_NETWORK_BOOT_SIZE,
+            features: self.features & !NATIVE_NETWORK_FEATURE_PACKET_HANDOFF,
+            common_config_address: self.common_config_address,
+            receive_notification_address: self.receive_notification_address,
+            transmit_notification_address: self.transmit_notification_address,
+            dma_virtual_address: self.dma_virtual_address,
+            dma_device_address: self.dma_device_address,
+            device_capability: self.device_capability,
+            mac_address: self.mac_address,
+            reserved: 0,
+        }
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeNetworkBootV1>() == 88);
+const _: () = assert!(core::mem::align_of::<NativeNetworkBootV1>() == 8);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativePacketRequestV0 {
+    pub size: u32,
+    pub version: u16,
+    pub reserved: u16,
+    pub buffer_address: u64,
+    pub buffer_size: u32,
+    pub reserved1: u32,
+    pub expected_sequence: u64,
+}
+
+impl NativePacketRequestV0 {
+    pub const fn publish(buffer_address: u64, buffer_size: u32) -> Self {
+        Self {
+            size: NATIVE_PACKET_REQUEST_SIZE,
+            version: NATIVE_PACKET_REQUEST_VERSION,
+            reserved: 0,
+            buffer_address,
+            buffer_size,
+            reserved1: 0,
+            expected_sequence: 0,
+        }
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativePacketRequestV0>() == 32);
+const _: () = assert!(core::mem::align_of::<NativePacketRequestV0>() == 8);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +413,9 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TX_INTERRUPT UINT32_C(8)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_ARP_PROBE UINT32_C(16)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_RX_REUSE UINT32_C(32)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_PACKET_HANDOFF UINT32_C(64)"));
+        assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v1) == 88"));
+        assert!(network_header.contains("sizeof(struct ginux_native_packet_request_v0) == 32"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
     }
 
@@ -315,6 +443,7 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_CONTROL_ABI_VERSION UINT16_C(4)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_REQUIRED_FEATURES UINT16_C(1041)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_DESCRIPTOR_OPERATION UINT64_C(10)"));
+        assert!(header.contains("GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF UINT16_C(2048)"));
         assert!(header.contains("sizeof(struct ginux_native_control_descriptor_v4) == 16"));
     }
 
@@ -416,6 +545,35 @@ mod tests {
         };
         assert!(reused.is_valid_virtio_network());
         assert!(reused.requests_rx_reuse());
+        let handoff = NativeNetworkBootV1::from_v0(reused, 7);
+        assert!(handoff.is_valid_packet_handoff());
+        assert_eq!(core::mem::size_of::<NativeNetworkBootV1>(), 88);
+        assert_eq!(
+            core::mem::offset_of!(NativeNetworkBootV1, packet_capability),
+            72
+        );
+        assert_eq!(core::mem::offset_of!(NativeNetworkBootV1, reserved), 80);
+        assert_eq!(handoff.v0_prefix(), reused);
+        for invalid in [
+            NativeNetworkBootV1 {
+                version: 0,
+                ..handoff
+            },
+            NativeNetworkBootV1 {
+                size: 80,
+                ..handoff
+            },
+            NativeNetworkBootV1 {
+                packet_capability: 0,
+                ..handoff
+            },
+            NativeNetworkBootV1 {
+                reserved: 1,
+                ..handoff
+            },
+        ] {
+            assert!(!invalid.is_valid_packet_handoff());
+        }
         for invalid in [
             NativeNetworkBootV0 { magic: 0, ..valid },
             NativeNetworkBootV0 {
@@ -470,6 +628,10 @@ mod tests {
         let compatible = (u64::from(NATIVE_CONTROL_ABI_VERSION) << 16)
             | u64::from(NATIVE_CONTROL_REQUIRED_FEATURES);
         assert!(native_control_abi_is_compatible(compatible));
+        assert!(!native_control_abi_supports_packet_handoff(compatible));
+        assert!(native_control_abi_supports_packet_handoff(
+            compatible | u64::from(NATIVE_CONTROL_FEATURE_PACKET_HANDOFF)
+        ));
         assert!(native_control_abi_is_compatible(
             compatible | u64::from(1_u16 << 15)
         ));

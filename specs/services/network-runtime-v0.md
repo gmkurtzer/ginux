@@ -140,11 +140,19 @@ four. Kernel teardown requires both used elements, the overwritten poison, the
 second valid reply, and intact guards. See
 [Native Network Receive Replenishment v0](network-replenishment-v0.md).
 
+The next additive generation uses bootstrap v1 and receives a second,
+write-only packet capability. After validating the second reply, it copies the
+42 Ethernet bytes into a bounded kernel mailbox. A separate read-only ring-3
+consumer receives the packet after complete driver and DMA retirement without
+receiving any device authority. See
+[Native Network Packet Handoff v0](network-packet-handoff-v0.md).
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The transmit generation
 sends only one fixed probe. The receive generation performs only one fixed ARP
 exchange with the deterministic QEMU gateway; the replenishment generation
-reuses one descriptor exactly once. General packet APIs, ring wraparound,
+reuses one descriptor exactly once. Packet handoff is one copied slot with one
+producer and one consumer. General packet queues, ring wraparound,
 multiple in-flight packets, dynamic configuration, and container networking
 remain separate milestones.

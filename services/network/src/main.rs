@@ -8,13 +8,14 @@ use core::{
 };
 
 use ginux_native_abi::{
-    native_control_abi_is_compatible, NativeControlDescriptorV4, NativeNetworkBootV0,
+    native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
+    NativeControlDescriptorV4, NativeNetworkBootV0, NativeNetworkBootV1, NativePacketRequestV0,
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
     NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
     NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
     NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
+    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
     NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 
@@ -80,8 +81,9 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 #[no_mangle]
 extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! {
     let identity = unsafe { core::ptr::read_volatile(&SERVICE_IDENTITY) };
+    let discovery = discover_control_abi();
     if identity != b"GINUX_NETWORK_SERVICE_V0"
-        || !native_control_abi_is_compatible(discover_control_abi())
+        || !native_control_abi_is_compatible(discovery)
         || !discover_control_descriptor().is_compatible()
     {
         fail();
@@ -90,23 +92,40 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         let Some(info) = (unsafe { info.as_ref() }) else {
             fail();
         };
-        if !info.is_valid_virtio_network()
-            || info.mac_address != 0x5254_0012_3456
+        let (info, packet_capability) = if info.version == 0 {
+            if !info.is_valid_virtio_network() {
+                fail();
+            }
+            (*info, None)
+        } else {
+            let Some(v1) = (unsafe {
+                (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV1).as_ref()
+            }) else {
+                fail();
+            };
+            if !v1.is_valid_packet_handoff()
+                || !native_control_abi_supports_packet_handoff(discovery)
+            {
+                fail();
+            }
+            (v1.v0_prefix(), Some(v1.packet_capability))
+        };
+        if info.mac_address != 0x5254_0012_3456
             || probe_network_device(info.device_capability) != NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD
         {
             fail();
         }
         if info.requests_empty_queues()
-            && (!unsafe { configure_empty_queues(info) }
+            && (!unsafe { configure_empty_queues(&info) }
                 || activate_empty_queues(info.device_capability) != 0)
         {
             fail();
         }
         if info.requests_transmit_probe() {
             let status = if info.requests_arp_probe() {
-                unsafe { arp_probe(info) }
+                unsafe { arp_probe(&info, packet_capability) }
             } else {
-                unsafe { transmit_probe(info) }
+                unsafe { transmit_probe(&info) }
             };
             let Some(status) = status else {
                 fail();
@@ -188,7 +207,7 @@ unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> Option<u8> {
         .then_some(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
-unsafe fn arp_probe(info: &NativeNetworkBootV0) -> Option<u8> {
+unsafe fn arp_probe(info: &NativeNetworkBootV0, packet_capability: Option<u64>) -> Option<u8> {
     const ARP_REQUEST: [u8; 60] = [
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
         0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 10, 0, 2, 15,
@@ -303,7 +322,25 @@ unsafe fn arp_probe(info: &NativeNetworkBootV0) -> Option<u8> {
     {
         return None;
     }
-    arp_reply_is_valid(dma, common, tx_length, 2).then_some(NATIVE_SERVICE_EXIT_COMPLETED)
+    if !arp_reply_is_valid(dma, common, tx_length, 2) {
+        return None;
+    }
+    if let Some(capability) = packet_capability {
+        let frame = (dma + RX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH) as u64;
+        let request = NativePacketRequestV0::publish(frame, 42);
+        let read_request = NativePacketRequestV0 {
+            expected_sequence: 1,
+            ..request
+        };
+        if consume_packet_with_write_capability(capability, &read_request)
+            != NATIVE_NETWORK_WAIT_FAILED
+            || publish_packet(capability, &request) != 1
+            || publish_packet(capability, &request) != NATIVE_NETWORK_WAIT_FAILED
+        {
+            return None;
+        }
+    }
+    Some(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
 unsafe fn arp_reply_is_valid(dma: usize, common: usize, tx_length: usize, used_index: u16) -> bool {
@@ -503,6 +540,34 @@ fn activate_empty_queues(capability: u64) -> u64 {
             in("rdi") capability,
             in("rsi") NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
             in("rdx") 0_u64,
+            options(nostack),
+        );
+    }
+    result
+}
+
+fn publish_packet(capability: u64, request: &NativePacketRequestV0) -> u64 {
+    let mut result = NATIVE_PACKET_PUBLISH_OPERATION;
+    unsafe {
+        asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("rdi") capability,
+            in("rsi") request as *const NativePacketRequestV0 as u64,
+            options(nostack),
+        );
+    }
+    result
+}
+
+fn consume_packet_with_write_capability(capability: u64, request: &NativePacketRequestV0) -> u64 {
+    let mut result = 22_u64;
+    unsafe {
+        asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("rdi") capability,
+            in("rsi") request as *const NativePacketRequestV0 as u64,
             options(nostack),
         );
     }

@@ -105,3 +105,7 @@ slot one and advances both queues to index two. TX request three and RX request
 four complete a second exchange without resetting the device. The kernel
 validates both used elements and the final reply before teardown. See
 [Native Network Receive Replenishment v0](../services/network-replenishment-v0.md).
+
+Packet transfer is deliberately not added to this frozen layout. Bootstrap v1
+adds a distinct packet-producer capability while preserving the v0 common
+prefix. See [Native Network Service Bootstrap ABI v1](native-network-bootstrap-v1.md).

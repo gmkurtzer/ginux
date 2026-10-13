@@ -11,10 +11,11 @@ use crate::{
         pci::{self, VirtioBlockDevice, VirtioNetworkDevice, VirtioNetworkInitialization},
         timer::{self, LocalApicCalibration},
     },
-    domain, ipc, memory, network, scheduler, volume,
+    domain, ipc, memory, network, packet, scheduler, volume,
 };
 
 global_asm!(include_str!("../volume-service.S"));
+global_asm!(include_str!("../packet-consumer.S"));
 
 extern "C" {
     fn ginux_volume_writer_start();
@@ -22,6 +23,8 @@ extern "C" {
     fn ginux_volume_writer_end();
     fn ginux_volume_reader_start();
     fn ginux_volume_reader_end();
+    fn ginux_packet_consumer_start();
+    fn ginux_packet_consumer_end();
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -4364,6 +4367,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_network_boot_info_v1(&self, info: ginux_native_abi::NativeNetworkBootV1) -> bool {
+        if !info.is_valid_packet_handoff() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeNetworkBootV1>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn release(self) -> bool {
         let dma = self.dma_frame;
         memory::scrub_and_release_frames(self.owner, &self.frames)
@@ -4584,6 +4602,7 @@ enum NativeNetworkRunMode {
     ReceiveArpTimeout,
     ReceiveArpMalformed,
     ReceiveArpReuse,
+    PacketHandoff,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4793,6 +4812,113 @@ pub(crate) fn verify_native_network_receive_reuse(
     )
 }
 
+pub(crate) fn verify_native_network_packet_handoff(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    if !verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::PacketHandoff,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    ) {
+        return false;
+    }
+    let Some(expected) = packet::pending_metadata() else {
+        return false;
+    };
+    expected.sequence == 1
+        && expected.length == 42
+        && verify_ring3_packet_consumer()
+        && packet::last_delivery() == Some(expected)
+}
+
+fn verify_ring3_packet_consumer() -> bool {
+    let Some(program) = volume_program(
+        ginux_packet_consumer_start as *const () as usize,
+        ginux_packet_consumer_end as *const () as usize,
+    ) else {
+        return false;
+    };
+    let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        return false;
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    if !domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) || domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) || domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::NETWORK_DEVICE_OBJECT,
+        crate::capability::Rights::READ,
+    ) {
+        return false;
+    }
+    let kernel_root = current_root();
+    let Some(space) = WxAddressSpace::new(kernel_root, owner) else {
+        return false;
+    };
+    if !space.permissions_are_valid(kernel_root) {
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in program.iter().enumerate() {
+            space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let root = space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(auxiliary, space)
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_auxiliary(entry, stack, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && event
+            == Some(
+                (47_u64 << 56)
+                    | (auxiliary << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && domain::last_lifecycle_event_detail() == Some(47)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none()
+}
+
 fn verify_native_network_bootstrap_run(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -4819,6 +4945,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReceiveArpTimeout
             | NativeNetworkRunMode::ReceiveArpMalformed
             | NativeNetworkRunMode::ReceiveArpReuse
+            | NativeNetworkRunMode::PacketHandoff
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -4828,9 +4955,14 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReceiveArpTimeout
             | NativeNetworkRunMode::ReceiveArpMalformed
             | NativeNetworkRunMode::ReceiveArpReuse
+            | NativeNetworkRunMode::PacketHandoff
     );
     let corrupt_network_receive = mode == NativeNetworkRunMode::ReceiveArpMalformed;
-    let receive_reuse = mode == NativeNetworkRunMode::ReceiveArpReuse;
+    let receive_reuse = matches!(
+        mode,
+        NativeNetworkRunMode::ReceiveArpReuse | NativeNetworkRunMode::PacketHandoff
+    );
+    let packet_handoff = mode == NativeNetworkRunMode::PacketHandoff;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4869,11 +5001,23 @@ fn verify_native_network_bootstrap_run(
     } else {
         crate::capability::Rights::READ
     };
-    let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
-        3,
-        crate::control_abi::NETWORK_DEVICE_OBJECT,
-        rights,
-    ) else {
+    let auxiliary = if packet_handoff {
+        domain::initialize_boot_auxiliary_service_with_two_grants(
+            3,
+            crate::control_abi::NETWORK_DEVICE_OBJECT,
+            rights,
+            7,
+            crate::control_abi::PACKET_OBJECT,
+            crate::capability::Rights::WRITE,
+        )
+    } else {
+        domain::initialize_boot_auxiliary_service(
+            3,
+            crate::control_abi::NETWORK_DEVICE_OBJECT,
+            rights,
+        )
+    };
+    let Some(auxiliary) = auxiliary else {
         return false;
     };
     let (Some(handle), Some(identity), Some(owner)) = (
@@ -4883,6 +5027,26 @@ fn verify_native_network_bootstrap_run(
     ) else {
         return false;
     };
+    let packet_handle = packet_handoff
+        .then(|| domain::auxiliary_boot_handle(auxiliary, 1))
+        .flatten();
+    if packet_handoff
+        && packet_handle.is_none_or(|packet_handle| {
+            !domain::handle_permits(
+                auxiliary,
+                packet_handle,
+                crate::control_abi::PACKET_OBJECT,
+                crate::capability::Rights::WRITE,
+            ) || domain::handle_permits(
+                auxiliary,
+                packet_handle,
+                crate::control_abi::PACKET_OBJECT,
+                crate::capability::Rights::READ,
+            )
+        })
+    {
+        return false;
+    }
     let kernel_root = current_root();
     let Some(mut space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
         return false;
@@ -4946,7 +5110,14 @@ fn verify_native_network_bootstrap_run(
             }
         }
     }
-    let boot_written = if reject_reserved {
+    let boot_written = if packet_handoff {
+        packet_handle.is_some_and(|packet_handle| {
+            space.write_network_boot_info_v1(ginux_native_abi::NativeNetworkBootV1::from_v0(
+                boot,
+                packet_handle,
+            ))
+        })
+    } else if reject_reserved {
         !boot.is_valid_virtio_network() && space.write_network_boot_info_raw(boot)
     } else {
         space.write_network_boot_info(boot)
@@ -4976,6 +5147,7 @@ fn verify_native_network_bootstrap_run(
     if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space)) {
         return false;
     }
+    let packet_bound = !packet_handoff || packet::bind_producer(auxiliary, identity);
     let iommu_evidence = activate_iommu
         .then(|| bind_auxiliary_network_iommu_translation(auxiliary, iommu_profile, device))
         .flatten();
@@ -5003,7 +5175,8 @@ fn verify_native_network_bootstrap_run(
             && (!force_receive_timeout
                 || pci::force_next_network_receive_wait_timeout(auxiliary, 2))
     });
-    if activate_iommu && iommu_evidence.is_none()
+    if !packet_bound
+        || activate_iommu && iommu_evidence.is_none()
         || !active_device_ready
         || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
         || !cpu::activate_user_root(root)
@@ -5011,6 +5184,7 @@ fn verify_native_network_bootstrap_run(
         return false;
     }
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
+    let packet_retired = !packet_handoff || packet::retire_producer(auxiliary);
     let event = domain::take_lifecycle_event();
     let parser_fault_valid = !corrupt_network_receive
         || domain::delivered_fault_descriptor().and_then(|descriptor| {
@@ -5072,6 +5246,7 @@ fn verify_native_network_bootstrap_run(
     let fault_ordering_valid = !(fail_after_activation || corrupt_network_receive)
         || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
     execution_retired
+        && packet_retired
         && lifecycle_valid
         && translation_retired
         && interrupt_retired

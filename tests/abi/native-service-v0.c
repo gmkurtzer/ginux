@@ -65,6 +65,22 @@ _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_ARP_PROBE == UINT32_C(16),
                "network ARP feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_RX_REUSE == UINT32_C(32),
                "network RX reuse feature bit");
+_Static_assert(sizeof(struct ginux_native_network_boot_v1) == 88,
+               "network bootstrap v1 size");
+_Static_assert(offsetof(struct ginux_native_network_boot_v1,
+                        packet_capability) == 72,
+               "network packet capability offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v1, reserved) == 80,
+               "network bootstrap v1 reserved offset");
+_Static_assert(sizeof(struct ginux_native_packet_request_v0) == 32,
+               "native packet request size");
+_Static_assert(offsetof(struct ginux_native_packet_request_v0,
+                        expected_sequence) == 24,
+               "native packet sequence offset");
+_Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_HANDOFF == UINT32_C(64),
+               "network packet handoff feature bit");
+_Static_assert(GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF == UINT16_C(2048),
+               "control packet handoff feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_WAIT_TX_NOTIFIED == UINT64_C(1),
                "network TX wait command");
 _Static_assert(GINUX_NATIVE_NETWORK_WAIT_RX_POSTED == UINT64_C(2),

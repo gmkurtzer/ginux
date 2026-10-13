@@ -983,6 +983,47 @@ pub(crate) fn initialize_boot_auxiliary_service(
     .then_some(encode_id(id))
 }
 
+pub(crate) fn initialize_boot_auxiliary_service_with_two_grants(
+    first_root_index: usize,
+    first_object: u64,
+    first_rights: Rights,
+    second_root_index: usize,
+    second_object: u64,
+    second_rights: Rights,
+) -> Option<u64> {
+    let manager = global_manager_mut()?;
+    let control = manager.domain(manager.control_plane_id?)?;
+    let first_source = control
+        .boot_roots
+        .get(first_root_index)
+        .copied()
+        .flatten()?;
+    let second_source = control
+        .boot_roots
+        .get(second_root_index)
+        .copied()
+        .flatten()?;
+    let id = manager.create_auxiliary_service_with_delegations(&[
+        DelegationGrant {
+            source: first_source,
+            object: first_object,
+            rights: first_rights,
+        },
+        DelegationGrant {
+            source: second_source,
+            object: second_object,
+            rights: second_rights,
+        },
+    ])?;
+    let domain = manager.domain(id)?;
+    (domain.role == Role::AuxiliaryService
+        && domain.state == State::Ready
+        && domain.thread_limit == 0
+        && domain.boot_root_count == 2
+        && domain.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
 pub(crate) fn initialize_boot_unprivileged_auxiliary_service() -> Option<u64> {
     let manager = global_manager_mut()?;
     let id = manager.create_auxiliary_service_with_delegations(&[])?;

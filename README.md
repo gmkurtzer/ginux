@@ -158,6 +158,11 @@ zero for a second ARP exchange, and advances interrupt requests from one through
 four. The kernel validates the first reply before reuse and the final two-entry
 rings before ordered teardown. See
 [Native Network Receive Replenishment v0](specs/services/network-replenishment-v0.md).
+The next generation uses an additive bootstrap v1 packet capability to copy
+the validated 42-byte Ethernet frame out of DMA. The write-only driver then
+retires completely; a separate read-only ring-3 consumer with no NIC authority
+receives sequence one exactly once and validates every byte. See
+[Native Network Packet Handoff v0](specs/services/network-packet-handoff-v0.md).
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,
@@ -404,7 +409,7 @@ lease while preserving both guard pages, and retires the complete old
 interpreter/main/DSO graph. The archive
 is not yet a general mount or a system-container image.
 
-The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. A separate isolated service probes and configures link, IPv4, default-gateway, and one static-route record through the first manifest-authorized network-device contract in control ABI v2; a monotonic generation makes effective configuration changes observable and rejects stale whole-state applies. Distinct read-only and write-only services prove that observation and mutation authority can be delegated independently, and a faulted network service is retired without losing mediated state or panicking the kernel. Packet I/O and a general route table remain deliberately unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
+The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. Isolated services configure bounded network state and perform interrupt-driven virtio-net transmission and reception. A copied one-slot handoff now separates the write-only device producer from a read-only non-device consumer. Persistent packet queues, general routing, and container networking remain unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
 
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption

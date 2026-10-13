@@ -18,6 +18,7 @@ mod manifest;
 mod memory;
 mod native_elf;
 mod network;
+mod packet;
 mod pe;
 mod scheduler;
 mod volume;
@@ -2143,6 +2144,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }
+    if !packet::verify_invariants() || !packet::install() {
+        kernel_fail("\r\nginux: bounded packet handoff invariant failed\r\n");
+    }
+    serial_write("ginux: bounded packet handoff invariants verified\r\n");
     serial_write("ginux: generation-scoped IPC diagnostics verified\r\n");
     serial_write("ginux: monotonic sequence exhaustion contained\r\n");
     let (
@@ -3044,6 +3049,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: native network service completed second ARP exchange");
     serial_write("\r\nginux: native network request generations one through four completed");
     serial_write("\r\nginux: kernel validated both native network ARP exchanges");
+    if !address_space::verify_native_network_packet_handoff(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+        virtio_network_msix_mmio,
+        &local_apic,
+    ) {
+        kernel_fail("\r\nginux: bounded native packet handoff failed\r\n");
+    }
+    serial_write("\r\nginux: native network service copied validated frame out of DMA");
+    serial_write("\r\nginux: packet producer retained no read authority");
+    serial_write("\r\nginux: packet consumer retained no device or write authority");
+    serial_write("\r\nginux: packet survived producer and device retirement");
+    serial_write("\r\nginux: ring-3 consumer received exact Ethernet frame once");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

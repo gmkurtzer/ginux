@@ -14321,7 +14321,94 @@ fn dispatch_charged_call(
         18 => volume_device_call(caller_domain, capability, frame),
         19 => block_device_call(caller_domain, capability, frame),
         20 => network_wait_call(caller_domain, capability, frame),
+        control_abi::PACKET_PUBLISH_OPERATION => {
+            packet_publish_call(caller_domain, capability, frame)
+        }
+        control_abi::PACKET_CONSUME_OPERATION => {
+            packet_consume_call(caller_domain, capability, frame)
+        }
         _ => u64::MAX,
+    }
+}
+
+struct PacketRequest {
+    buffer_address: u64,
+    buffer_size: usize,
+    expected_sequence: u64,
+}
+
+fn packet_request(address: u64) -> Option<PacketRequest> {
+    let mut bytes = [0_u8; control_abi::PACKET_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(address, &mut bytes)
+        || u32::from_le_bytes(bytes[0..4].try_into().ok()?) as usize
+            != control_abi::PACKET_REQUEST_SIZE
+        || u16::from_le_bytes(bytes[4..6].try_into().ok()?) != control_abi::PACKET_REQUEST_VERSION
+        || bytes[6..8] != [0, 0]
+        || bytes[20..24] != [0, 0, 0, 0]
+    {
+        return None;
+    }
+    Some(PacketRequest {
+        buffer_address: u64::from_le_bytes(bytes[8..16].try_into().ok()?),
+        buffer_size: usize::try_from(u32::from_le_bytes(bytes[16..20].try_into().ok()?)).ok()?,
+        expected_sequence: u64::from_le_bytes(bytes[24..32].try_into().ok()?),
+    })
+}
+
+fn packet_publish_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    let Some(request) = packet_request(frame.first_argument()) else {
+        return u64::MAX - 2;
+    };
+    if request.expected_sequence != 0
+        || !(1..=control_abi::PACKET_MAX_SIZE).contains(&request.buffer_size)
+        || !domain::handle_permits(
+            caller_domain,
+            capability,
+            control_abi::PACKET_OBJECT,
+            Rights::WRITE,
+        )
+    {
+        return u64::MAX - 2;
+    }
+    let mut packet = [0_u8; control_abi::PACKET_MAX_SIZE];
+    if !address_space::copy_from_current_user(
+        request.buffer_address,
+        &mut packet[..request.buffer_size],
+    ) {
+        return u64::MAX - 2;
+    }
+    crate::packet::publish(caller_domain, &packet[..request.buffer_size]).unwrap_or(u64::MAX - 2)
+}
+
+fn packet_consume_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    let Some(request) = packet_request(frame.first_argument()) else {
+        return u64::MAX - 2;
+    };
+    if request.expected_sequence == 0
+        || !(1..=control_abi::PACKET_MAX_SIZE).contains(&request.buffer_size)
+        || !domain::handle_permits(
+            caller_domain,
+            capability,
+            control_abi::PACKET_OBJECT,
+            Rights::READ,
+        )
+    {
+        return u64::MAX - 2;
+    }
+    match crate::packet::consume_with(
+        request.expected_sequence,
+        request.buffer_size,
+        |_, packet| address_space::copy_to_current_user(request.buffer_address, packet),
+    ) {
+        Ok(metadata) => metadata.length as u64,
+        Err(crate::packet::PacketError::Stale) => control_abi::PACKET_RESULT_STALE,
+        Err(_) => u64::MAX - 2,
     }
 }
 
