@@ -103,6 +103,7 @@ static LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE: AtomicBool = AtomicBool::new(false);
 static INTERACTIVE_CONTROLLER_IMAGE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_IMAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
+static INTERACTIVE_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn install_interactive_controller_image(
     image: &crate::native_elf::NativeImage<'_>,
@@ -4763,6 +4764,20 @@ pub(crate) fn verify_native_service_materialization(
 }
 
 pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<'_>) -> bool {
+    let kernel_root = current_root();
+    let resident = INTERACTIVE_CONTROLLER_DOMAIN.load(Ordering::Acquire);
+    if resident != 0 {
+        let (Some(identity), Some(owner)) = (
+            domain::domain_service_identity(resident),
+            memory::FrameOwner::domain(resident),
+        ) else {
+            return false;
+        };
+        if !cpu::resume_native_controller(resident) {
+            return false;
+        }
+        return interactive_controller_return_is_valid(resident, owner, identity, kernel_root);
+    }
     let rights = crate::capability::Rights::READ.union(crate::capability::Rights::WRITE);
     let host_rights = crate::capability::Rights::READ.union(crate::capability::Rights::MANAGE);
     let Some(controller) = domain::initialize_boot_auxiliary_service_with_three_grants([
@@ -4787,7 +4802,6 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         crate::serial_write("ginux: controller capability setup failed\r\n");
         return false;
     };
-    let kernel_root = current_root();
     let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
         crate::serial_write("ginux: controller address-space creation failed\r\n");
         return false;
@@ -4830,6 +4844,13 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         crate::serial_write("ginux: controller root activation failed\r\n");
         return false;
     }
+    if INTERACTIVE_CONTROLLER_DOMAIN
+        .compare_exchange(0, controller, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        crate::serial_write("ginux: controller residency publication failed\r\n");
+        return false;
+    }
     cpu::execute_native_controller(
         entry,
         stack,
@@ -4839,6 +4860,30 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         controller,
         identity,
     );
+    interactive_controller_return_is_valid(controller, owner, identity, kernel_root)
+}
+
+fn interactive_controller_return_is_valid(
+    controller: u64,
+    owner: memory::FrameOwner,
+    identity: u64,
+    kernel_root: u64,
+) -> bool {
+    if scheduler::current_domain().is_none()
+        && scheduler::auxiliary_runtime_state(controller)
+            == Some(crate::control_abi::AUXILIARY_STATE_BLOCKED)
+        && registered_auxiliary_address_space_count() == 1
+        && memory::owner_live_frame_count(owner).is_some_and(|count| count != 0)
+        && !domain::domain_is_retired(controller)
+    {
+        return true;
+    }
+    if INTERACTIVE_CONTROLLER_DOMAIN
+        .compare_exchange(controller, 0, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
     let event = domain::take_lifecycle_event();
     current_root() == kernel_root
         && scheduler::current_domain().is_none()

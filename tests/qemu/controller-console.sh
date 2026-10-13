@@ -142,4 +142,16 @@ if grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
     exit 1
 fi
 
+if [[ "$(grep -Fc 'Ginux controller v0 (ring 3)' "$output_file")" -ne 1 ]]; then
+    cat "$output_file"
+    echo "Controller console test failed: controller was relaunched." >&2
+    exit 1
+fi
+
+if grep -qE '^([2-9]|[1-9][0-9]+) 0 R controller' "$output_file"; then
+    cat "$output_file"
+    echo "Controller console test failed: replacement controller PID was published." >&2
+    exit 1
+fi
+
 echo "Interactive controller console test passed."

@@ -1611,6 +1611,27 @@ pub(crate) fn execute_native_controller(
     };
 }
 
+pub(crate) fn resume_native_controller(domain_id: u64) -> bool {
+    let Some(context) = scheduler::resume_container_lifecycle(domain_id) else {
+        return false;
+    };
+    let (Ok(entry), Ok(stack)) = (
+        usize::try_from(context.instruction()),
+        usize::try_from(context.stack()),
+    ) else {
+        return false;
+    };
+    if !activate_user_root(context.address_space_root()) || !install_user_fs_base(context.fs_base())
+    {
+        return false;
+    }
+    let general = context.general();
+    // SAFETY: the scheduler retained the complete validated controller trap
+    // context while its lifecycle request was serviced by the kernel.
+    unsafe { ginux_process_user_enter(entry, stack, general.as_ptr(), context.flags()) };
+    true
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct LinuxFileMapping {
     pub(crate) address: usize,
@@ -15945,8 +15966,8 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
     }
 }
 
-fn container_control(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
-    let Some(frame) = (unsafe { frame.as_ref() }) else {
+fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX - 2;
     };
     if !domain::handle_permits(domain_id, capability, 1, Rights::MANAGE) {
@@ -16039,7 +16060,26 @@ fn container_control(domain_id: u64, capability: u64, frame: *const UserTrapFram
         _ => u64::MAX - 2,
     };
     if result != u64::MAX - 2 {
-        let _ = domain::renew_auxiliary_call_epoch(domain_id);
+        if !domain::renew_auxiliary_call_epoch(domain_id) {
+            return u64::MAX - 2;
+        }
+        if matches!(
+            operation,
+            control_abi::CONTAINER_STOP
+                | control_abi::CONTAINER_RESTART
+                | control_abi::CONTAINER_INJECT_FAILURE
+        ) {
+            if !scheduler::suspend_container_lifecycle(
+                frame,
+                USER_CODE_SELECTOR,
+                USER_DATA_SELECTOR,
+                result,
+                active_fs_base(),
+            ) {
+                return u64::MAX - 2;
+            }
+            return u64::MAX;
+        }
     }
     result
 }

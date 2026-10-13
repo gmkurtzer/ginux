@@ -27,6 +27,7 @@ enum State {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum WaitReason {
+    ContainerLifecycle,
     IpcReceive {
         object: u64,
         service_side: bool,
@@ -518,6 +519,52 @@ pub(crate) fn process_user_context(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ProcessSchedulerContext(UserContext);
+
+#[derive(Clone, Copy)]
+pub(crate) struct NativeResumeContext(UserContext);
+
+impl NativeResumeContext {
+    pub(crate) const fn general(self) -> [u64; 15] {
+        let context = self.0;
+        [
+            context.rax,
+            context.rbx,
+            context.rcx,
+            context.rdx,
+            context.rsi,
+            context.rdi,
+            context.rbp,
+            context.r8,
+            context.r9,
+            context.r10,
+            context.r11,
+            context.r12,
+            context.r13,
+            context.r14,
+            context.r15,
+        ]
+    }
+
+    pub(crate) const fn instruction(self) -> u64 {
+        self.0.rip
+    }
+
+    pub(crate) const fn stack(self) -> u64 {
+        self.0.rsp
+    }
+
+    pub(crate) const fn flags(self) -> u64 {
+        self.0.rflags
+    }
+
+    pub(crate) const fn address_space_root(self) -> u64 {
+        self.0.address_space_root
+    }
+
+    pub(crate) const fn fs_base(self) -> u64 {
+        self.0.fs_base
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ProcessThreadHandle(ThreadId);
@@ -1600,6 +1647,63 @@ pub(crate) fn block_runtime_idle(
     }
     runtime.blocks = blocks;
     true
+}
+
+pub(crate) fn suspend_container_lifecycle(
+    frame: &mut UserTrapFrame,
+    code_selector: u16,
+    data_selector: u16,
+    result: u64,
+    fs_base: u64,
+) -> bool {
+    if !frame.selectors_match(code_selector, data_selector) {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(current) = runtime.scheduler.current else {
+        return false;
+    };
+    let Some(root) = runtime
+        .scheduler
+        .thread(current)
+        .map(|thread| thread.context.address_space_root)
+    else {
+        return false;
+    };
+    let Some(blocks) = runtime.blocks.checked_add(1) else {
+        return false;
+    };
+    let saved = frame.saved_context(result, root, fs_base);
+    if !runtime
+        .scheduler
+        .block_current_idle(current, saved, WaitReason::ContainerLifecycle)
+    {
+        return false;
+    }
+    runtime.blocks = blocks;
+    true
+}
+
+pub(crate) fn resume_container_lifecycle(domain: u64) -> Option<NativeResumeContext> {
+    let runtime = runtime_mut()?;
+    let result = runtime
+        .scheduler
+        .threads
+        .iter()
+        .flatten()
+        .find(|thread| {
+            thread.domain == domain && thread.wait == Some(WaitReason::ContainerLifecycle)
+        })?
+        .context
+        .rax;
+    let scheduled =
+        runtime
+            .scheduler
+            .wake_idle_domain(domain, WaitReason::ContainerLifecycle, result)?;
+    (runtime.scheduler.thread(scheduled.id)?.domain == domain)
+        .then_some(NativeResumeContext(scheduled.context))
 }
 
 pub(crate) fn wake_device_completion(domain: u64, object: u64, request: u64, result: u64) -> bool {

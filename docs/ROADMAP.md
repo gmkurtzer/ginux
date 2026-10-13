@@ -34,6 +34,7 @@ Deliverables:
 - The controller explicitly creates a named runtime record and sets the pinned
   minimal fixture, `/sbin/init`, bounded CPU/memory grants, and autostart policy.
 - The controller starts, observes, stops, and restarts the container.
+- The controller remains resident as host PID 1 across every lifecycle transition.
 - A container or controller failure cannot panic the kernel and leaves no stale authority.
 
 Gate: absent-at-boot, explicit creation/configuration, readiness, stop, restart,

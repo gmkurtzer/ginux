@@ -249,7 +249,6 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 == NATIVE_CONTAINER_STATE_STOPPED
             {
                 write_name_state(console, name, b"starting\r\n");
-                exit(NATIVE_SERVICE_EXIT_COMPLETED);
             } else {
                 write(console, b"container: start rejected\r\n");
             }
@@ -259,7 +258,6 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 == NATIVE_CONTAINER_STATE_STOPPED
             {
                 write_name_state(console, name, b"stopped\r\n");
-                exit(NATIVE_SERVICE_EXIT_COMPLETED);
             } else {
                 write(console, b"container: stop rejected\r\n");
             }
@@ -269,7 +267,6 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 == NATIVE_CONTAINER_STATE_FAILED
             {
                 write_name_state(console, name, b"failed (contained)\r\n");
-                exit(NATIVE_SERVICE_EXIT_COMPLETED);
             } else {
                 write(console, b"container: failure injection rejected\r\n");
             }
