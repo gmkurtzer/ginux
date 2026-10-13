@@ -27,3 +27,6 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+[profile.release.package.ginux-controller-runtime]
+opt-level = "z"

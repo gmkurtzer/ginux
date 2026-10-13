@@ -45,8 +45,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     for command in \
         help 'container help' 'container set --help' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
         'container status default' 'container new demo' 'container new demo' 'container list' \
-        'container start' 'container start demo' 'container set demo init /sbin/init' 'container set demo cpu 1' \
-        'container set demo memory-mib 128' 'container set demo autostart true' 'container list' status \
+        'container start' 'container start demo' 'container set demo cpu=1 cpu=1' 'container list' \
+        'container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo cpu 1' 'container list' status \
         'container start demo' 'container list' 'container status demo' 'ls /proc' 'ls /proc/100' ps \
         'container stop demo' 'container status demo' \
         'container start demo' 'container status demo' 'container fail demo' \
@@ -100,8 +100,8 @@ for expected in \
     'container list' \
     'List all containers' \
     'container new NAME' \
-    'container set NAME FIELD VALUE' \
-    'Set init=/sbin/init, cpu=1, memory-mib=128, or autostart=true' \
+    'container set NAME FIELD=VALUE...' \
+    'Set one or more container fields' \
     'controller: running (ring 3)' \
     'containers: 0 configured' \
     'container: not found' \
@@ -112,7 +112,8 @@ for expected in \
     'Error: missing arguments' \
     'Usage:' \
     'container: start rejected' \
-    'demo: setting accepted; created (incomplete)' \
+    'container: duplicate setting' \
+    'demo: settings accepted; configured' \
     'demo: setting accepted; configured' \
     'demo configured /sbin/init 1 128 true' \
     'demo running /sbin/init 1 128 true' \

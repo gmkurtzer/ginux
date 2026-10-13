@@ -3,7 +3,7 @@
 #[cfg(test)]
 extern crate std;
 
-pub const MAX_ARGUMENTS: usize = 4;
+pub const MAX_ARGUMENTS: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Arity {
@@ -260,10 +260,10 @@ mod tests {
     );
     const SET: Command<'static> = Command::leaf(
         b"set",
-        b"container set NAME FIELD VALUE",
-        b"Set one container field",
+        b"container set NAME FIELD=VALUE...",
+        b"Set container fields",
         4,
-        Arity::exact(3),
+        Arity::range(2, 5),
     );
     const CONTAINER_CHILDREN: &[Command<'static>] = &[START, SET];
     const CONTAINER: Command<'static> = Command::group(
@@ -287,6 +287,25 @@ mod tests {
         };
         assert_eq!(invocation.id(), 4);
         let expected: &[&[u8]] = &[b"demo", b"cpu", b"1"];
+        assert_eq!(invocation.arguments(), expected);
+    }
+
+    #[test]
+    fn parses_multiple_container_settings() {
+        let ParseOutcome::Invoke(invocation) = parse(
+            &ROOT,
+            b"container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true",
+        )
+        .unwrap() else {
+            panic!("expected invocation");
+        };
+        let expected: &[&[u8]] = &[
+            b"demo",
+            b"init=/sbin/init",
+            b"cpu=1",
+            b"memory-mib=128",
+            b"autostart=true",
+        ];
         assert_eq!(invocation.arguments(), expected);
     }
 

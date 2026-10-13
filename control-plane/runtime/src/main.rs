@@ -6,13 +6,13 @@ use ginux_command::{parse, write_error, write_help, Arity, Command, HelpWriter, 
 use ginux_native_abi::{
     native_control_abi_is_compatible, NativeContainerRequestV0, NativeControlDescriptorV4,
     NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
-    NATIVE_CALL_FAILED, NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION,
-    NATIVE_CONTAINER_CONFIG_AUTOSTART, NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_CONFIG_INIT,
-    NATIVE_CONTAINER_CONFIG_MEMORY, NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE,
-    NATIVE_CONTAINER_HOST_SHUTDOWN, NATIVE_CONTAINER_INJECT_FAILURE,
-    NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY, NATIVE_CONTAINER_RESTART,
-    NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU, NATIVE_CONTAINER_SET_INIT,
-    NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_STATE_CONFIGURED,
+    NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_LINE_OPERATION,
+    NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_CONFIG_AUTOSTART, NATIVE_CONTAINER_CONFIG_CPU,
+    NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_CONFIG_MEMORY,
+    NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE, NATIVE_CONTAINER_HOST_SHUTDOWN,
+    NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY,
+    NATIVE_CONTAINER_RESTART, NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU,
+    NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_STATE_CONFIGURED,
     NATIVE_CONTAINER_STATE_CREATED, NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING,
     NATIVE_CONTAINER_STATE_STOPPED, NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
     NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
@@ -26,7 +26,7 @@ use ginux_native_abi::{
     NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
-const MAX_LINE: usize = 64;
+const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
 
 const COMMAND_STATUS: u16 = 1;
@@ -60,10 +60,10 @@ const CONTAINER_COMMANDS: &[Command<'static>] = &[
     ),
     Command::leaf(
         b"set",
-        b"container set NAME FIELD VALUE",
-        b"Set init=/sbin/init, cpu=1, memory-mib=128, or autostart=true",
+        b"container set NAME FIELD=VALUE...",
+        b"Set one or more container fields",
         COMMAND_CONTAINER_SET,
-        Arity::exact(3),
+        Arity::range(2, 5),
     ),
     Command::leaf(
         b"status",
@@ -403,33 +403,7 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: &[
             }
         }
         COMMAND_CONTAINER_SET => {
-            let field = arguments.get(1).copied().unwrap_or_default();
-            let value = arguments.get(2).copied().unwrap_or_default();
-            if !set_request_value(&mut request, field, value) {
-                write(console, b"container: invalid setting\r\n");
-                return;
-            }
-            let operation = match field {
-                b"init" => NATIVE_CONTAINER_SET_INIT,
-                b"cpu" => NATIVE_CONTAINER_SET_CPU,
-                b"memory-mib" => NATIVE_CONTAINER_SET_MEMORY_MIB,
-                b"autostart" => NATIVE_CONTAINER_SET_AUTOSTART,
-                _ => {
-                    write(console, b"container: invalid setting\r\n");
-                    return;
-                }
-            };
-            let state = container_call(host, operation, &mut request);
-            if matches!(
-                state,
-                NATIVE_CONTAINER_STATE_CREATED | NATIVE_CONTAINER_STATE_CONFIGURED
-            ) {
-                write(console, name);
-                write(console, b": setting accepted; ");
-                write_container_state(console, state);
-            } else {
-                write(console, b"container: setting rejected\r\n");
-            }
+            set_container_configuration(console, host, name, arguments);
         }
         COMMAND_CONTAINER_STATUS => {
             let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
@@ -469,6 +443,100 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: &[
             }
         }
         _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
+    }
+}
+
+fn set_container_configuration(console: u64, host: u64, name: &[u8], arguments: &[&[u8]]) {
+    let legacy = arguments.len() == 3 && !arguments[1].contains(&b'=');
+    let mut configured = 0_u16;
+    for setting in &arguments[1..if legacy { 2 } else { arguments.len() }] {
+        let (field, value) = if legacy {
+            (*setting, arguments[2])
+        } else if let Some(pair) = split_setting(setting) {
+            pair
+        } else {
+            write(console, b"container: invalid setting\r\n");
+            return;
+        };
+        let mut request = request_for_name(name);
+        let Some((flag, _)) = prepare_setting(&mut request, field, value) else {
+            write(console, b"container: invalid setting\r\n");
+            return;
+        };
+        if configured & flag != 0 {
+            write(console, b"container: duplicate setting\r\n");
+            return;
+        }
+        configured |= flag;
+    }
+
+    let mut state = NATIVE_CALL_FAILED;
+    for setting in &arguments[1..if legacy { 2 } else { arguments.len() }] {
+        let (field, value) = if legacy {
+            (*setting, arguments[2])
+        } else {
+            split_setting(setting).unwrap()
+        };
+        let mut request = request_for_name(name);
+        let (_, operation) = prepare_setting(&mut request, field, value).unwrap();
+        state = container_call(host, operation, &mut request);
+        if !matches!(
+            state,
+            NATIVE_CONTAINER_STATE_CREATED | NATIVE_CONTAINER_STATE_CONFIGURED
+        ) {
+            write(console, b"container: setting rejected\r\n");
+            return;
+        }
+    }
+    write(console, name);
+    write(
+        console,
+        if legacy || arguments.len() == 2 {
+            b": setting accepted; "
+        } else {
+            b": settings accepted; "
+        },
+    );
+    write_container_state(console, state);
+}
+
+fn split_setting(setting: &[u8]) -> Option<(&[u8], &[u8])> {
+    let separator = setting.iter().position(|byte| *byte == b'=')?;
+    let (field, value) = setting.split_at(separator);
+    let value = value.get(1..)?;
+    (!field.is_empty() && !value.is_empty() && !value.contains(&b'=')).then_some((field, value))
+}
+
+fn prepare_setting(
+    request: &mut NativeContainerRequestV0,
+    field: &[u8],
+    value: &[u8],
+) -> Option<(u16, u64)> {
+    match (field, value) {
+        (b"init", b"/sbin/init") => {
+            request.init_size = value.len() as u16;
+            request.init[..value.len()].copy_from_slice(value);
+            Some((NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_SET_INIT))
+        }
+        (b"cpu", b"1") => {
+            request.value = 1;
+            Some((NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_SET_CPU))
+        }
+        (b"memory-mib", b"128") => {
+            request.value = 128;
+            Some((
+                NATIVE_CONTAINER_CONFIG_MEMORY,
+                NATIVE_CONTAINER_SET_MEMORY_MIB,
+            ))
+        }
+        (b"autostart", b"true") => {
+            request.value = 1;
+            Some((
+                NATIVE_CONTAINER_CONFIG_AUTOSTART,
+                NATIVE_CONTAINER_SET_AUTOSTART,
+            ))
+        }
+        _ => None,
     }
 }
 
@@ -530,29 +598,6 @@ fn valid_container_name(name: &[u8]) -> bool {
         && name
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-}
-
-fn set_request_value(request: &mut NativeContainerRequestV0, field: &[u8], value: &[u8]) -> bool {
-    match (field, value) {
-        (b"init", b"/sbin/init") => {
-            request.init_size = value.len() as u16;
-            request.init[..value.len()].copy_from_slice(value);
-            true
-        }
-        (b"cpu", b"1") => {
-            request.value = 1;
-            true
-        }
-        (b"memory-mib", b"128") => {
-            request.value = 128;
-            true
-        }
-        (b"autostart", b"true") => {
-            request.value = 1;
-            true
-        }
-        _ => false,
-    }
 }
 
 fn container_call(host: u64, operation: u64, request: &mut NativeContainerRequestV0) -> u64 {

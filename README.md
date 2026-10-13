@@ -14,7 +14,8 @@ make run
 ```
 
 Wait for the `ginux>` prompt, create a runtime container with `container new
-default`, configure it using the `container set` commands shown by `help`, then
+default`, configure it with `container set default init=/sbin/init cpu=1
+memory-mib=128 autostart=true`, then
 use `container start default`, `ps`, `ls /proc`, and the remaining lifecycle
 commands. The
 initial boot performs the existing hardware and isolation proof suite before
