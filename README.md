@@ -1,6 +1,8 @@
 # Ginux
 
-Ginux is an immutable, capability-secure, container-native operating system for AI infrastructure. The native host is intentionally small: an immutable kernel boots one constrained control-plane domain, which creates isolated services and containers through stable interfaces.
+Ginux is an immutable, capability-secure, container-native operating system for AI infrastructure. One unified EFI image contains the kernel, boot-required modules, and an embedded controller that executes in ring 3. The host has no conventional distribution; it exists to boot and manage strongly isolated Linux system containers. The first product compatibility benchmark is Rocky Linux 10 x86-64 running systemd as container PID 1.
+
+See [Architecture](ARCHITECTURE.md) for the design and [Verification Roadmap](docs/ROADMAP.md) for the hard implementation-and-review checkpoints.
 
 Ginux is licensed under the [Apache License, Version 2.0](LICENSE). See
 [NOTICE](NOTICE) for attribution information.

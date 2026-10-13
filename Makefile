@@ -16,7 +16,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image linux-probe network-service protocol-service volume-service abi-conformance build run test check fmt gate clean
+.PHONY: help doctor manifest system-image linux-probe network-service protocol-service volume-service abi-conformance architecture-check build run test check fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -29,6 +29,7 @@ help:
 	@echo "  make protocol-service Build the freestanding isolated protocol service"
 	@echo "  make volume-service Build the freestanding isolated volume service"
 	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
+	@echo "  make architecture-check Check architecture and roadmap consistency"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build and boot Ginux in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
@@ -95,7 +96,10 @@ run: build
 test: build
 	@tests/qemu/boot.sh
 
-check: manifest
+architecture-check:
+	@bash tools/architecture/check.sh
+
+check: manifest architecture-check
 	@$(MAKE) abi-conformance
 	@cargo fmt --all -- --check
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings

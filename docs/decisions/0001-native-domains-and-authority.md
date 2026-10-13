@@ -1,13 +1,13 @@
 # ADR 0001: Native Domains and Boot-Bounded Authority
 
-- **Status:** Accepted
+- **Status:** Accepted; driver-placement portions superseded by ADR 0002
 - **Date:** 2026-10-10
 
 ## Context
 
 Ginux needs a small immutable host, isolated and restartable system services, Linux-compatible containers, and a native control plane that can manage every workload without becoming able to rewrite the kernel or manufacture new privilege.
 
-Process ancestry is useful for lifecycle and accounting but is not a safe authority mechanism. UID 0 is required inside Linux containers but must not imply native host authority. Third-party drivers and services must be replaceable without executing in the kernel address space.
+Process ancestry is useful for lifecycle and accounting but is not a safe authority mechanism. UID 0 is required inside Linux containers but must not imply native host authority. Drivers and services need explicit authentication, authority, lifetime, and failure rules regardless of whether they are native modules or isolated domains.
 
 ## Decision
 
@@ -29,7 +29,7 @@ The kernel enforces these invariants:
 3. Process ancestry establishes ownership, accounting, and default cleanup, but grants no authority by itself.
 4. Revoked or destroyed handles cannot regain validity through identifier reuse; handles carry generations or an equivalent freshness mechanism.
 5. No userspace component can modify kernel code, kernel read-only data, trust roots, or the active authority ceiling.
-6. No third-party code executes in the kernel address space.
+6. Kernel modules must be authenticated, ABI-compatible, authorized by the boot manifest, and immutable after the boot seal.
 7. UID 0 is authoritative only within its Linux-compatible domain and has no implicit native-host rights.
 
 Control-plane powers are distinct capabilities. Process enumeration, lifecycle control, resource assignment, memory debugging, device assignment, and capability delegation are not bundled into one ambient superuser privilege. Production policy may allow the control plane to stop every workload without allowing it to read every workload's memory.
@@ -38,7 +38,7 @@ Control-plane powers are distinct capabilities. Process enumeration, lifecycle c
 
 - The control plane is highly trusted but remains constrained by kernel-enforced boot policy.
 - Compromising the control plane may expose or destroy resources it was authorized to manage, but must not permit kernel modification or authority expansion.
-- Native drivers, filesystems, networking, cryptography, and Linux compatibility run as isolated domains behind stable interfaces.
+- Boot-critical drivers, filesystems, networking, and primary-device support run in the kernel or authenticated modules; nonessential components may run as isolated domains behind stable interfaces.
 - Linux containers are domains with additional Linux ABI, namespace, credential, and virtual-filesystem behavior.
 - Capability derivation, revocation, domain teardown, and resource cleanup become early specification and verification targets.
 - Fast paths may use shared mappings or hardware queues only after a protected control path establishes the necessary grants.
