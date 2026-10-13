@@ -43,7 +43,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         done
     }
     for command in \
-        help 'container help' 'container set --help' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
+        help 'container help' 'container set --help' 'network help' 'network set help' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
+        'network status' 'network set static 10.0.2.15/99 10.0.2.2' 'network set static 10.0.2.15/24 10.0.2.2' 'network status' 'network down' 'network status' \
         'container status default' 'container new demo' 'container new demo' 'container list' \
         'container start' 'container set demo cpu=1 cpu=1' 'container list' \
         'container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo autostart=false' 'container set demo cpu 1' 'container list' status \
@@ -97,6 +98,15 @@ for expected in \
     'Show live host processes' \
     'container COMMAND' \
     'Manage runtime containers' \
+    'network COMMAND' \
+    'Manage control-domain networking' \
+    'network set static ADDRESS/PREFIX GATEWAY' \
+    'Configure a static control-domain address' \
+    'network: invalid address or prefix' \
+    'control: static network configured' \
+    'control up 10.0.2.15/24 10.0.2.2' \
+    'control: network disabled' \
+    'control down - -' \
     'container list' \
     'List all containers' \
     'container new NAME' \

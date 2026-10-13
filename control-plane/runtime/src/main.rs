@@ -22,7 +22,10 @@ use ginux_native_abi::{
     NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
     NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
     NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT, NATIVE_HOST_PROCESS_KIND_CONTROLLER,
-    NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
+    NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_NETWORK_APPLY_VERSION,
+    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_OPERATION,
+    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_SNAPSHOT_SIZE,
+    NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
     NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
     NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
     NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
@@ -44,6 +47,40 @@ const COMMAND_CONTAINER_STOP: u16 = 10;
 const COMMAND_CONTAINER_RESTART: u16 = 11;
 const COMMAND_CONTAINER_FAIL: u16 = 12;
 const COMMAND_CONTAINER_LIST: u16 = 13;
+const COMMAND_NETWORK_STATUS: u16 = 14;
+const COMMAND_NETWORK_SET_STATIC: u16 = 15;
+const COMMAND_NETWORK_DOWN: u16 = 16;
+
+const NETWORK_SET_COMMANDS: &[Command<'static>] = &[Command::leaf(
+    b"static",
+    b"network set static ADDRESS/PREFIX GATEWAY",
+    b"Configure a static control-domain address",
+    COMMAND_NETWORK_SET_STATIC,
+    Arity::exact(2),
+)];
+
+const NETWORK_COMMANDS: &[Command<'static>] = &[
+    Command::leaf(
+        b"status",
+        b"network status",
+        b"Show control-domain network configuration",
+        COMMAND_NETWORK_STATUS,
+        Arity::exact(0),
+    ),
+    Command::group(
+        b"set",
+        b"network set COMMAND",
+        b"Configure control-domain networking",
+        NETWORK_SET_COMMANDS,
+    ),
+    Command::leaf(
+        b"down",
+        b"network down",
+        b"Disable control-domain networking",
+        COMMAND_NETWORK_DOWN,
+        Arity::exact(0),
+    ),
+];
 
 const CONTAINER_COMMANDS: &[Command<'static>] = &[
     Command::leaf(
@@ -146,6 +183,12 @@ const ROOT_COMMANDS: &[Command<'static>] = &[
         b"Manage runtime containers",
         CONTAINER_COMMANDS,
     ),
+    Command::group(
+        b"network",
+        b"network COMMAND",
+        b"Manage control-domain networking",
+        NETWORK_COMMANDS,
+    ),
     Command::leaf(
         b"shutdown",
         b"shutdown",
@@ -170,6 +213,7 @@ _start:
     mov rdi, rbx
     mov rsi, rcx
     mov rdx, r14
+    mov rcx, r8
     call ginux_controller_main
     ud2
 "#
@@ -181,12 +225,13 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 }
 
 #[no_mangle]
-extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
+extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network: u64) -> ! {
     let identity = unsafe { core::ptr::read_volatile(&CONTROLLER_IDENTITY) };
     if identity != b"GINUX_CONTROLLER_V0"
         || console == 0
         || host == 0
         || root == 0
+        || network == 0
         || !native_control_abi_is_compatible(call(NATIVE_CONTROL_DISCOVERY_OPERATION, 0, 0, 0))
     {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
@@ -286,9 +331,149 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                 handle_container_command(console, host, invocation.id(), invocation.arguments())
             }
             COMMAND_CONTAINER_LIST => show_container_list(console, host),
+            COMMAND_NETWORK_STATUS => show_network_status(console, network),
+            COMMAND_NETWORK_SET_STATIC => {
+                set_static_network(console, network, invocation.arguments())
+            }
+            COMMAND_NETWORK_DOWN => set_network_down(console, network),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
         }
     }
+}
+
+fn show_network_status(console: u64, network: u64) {
+    let Some(snapshot) = network_snapshot(network) else {
+        write(console, b"network: status failed\r\n");
+        return;
+    };
+    write(console, b"DOMAIN LINK ADDRESS GATEWAY GENERATION\r\n");
+    write(console, b"control ");
+    write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
+    if snapshot[3] == 0 {
+        write(console, b"- - ");
+    } else {
+        write_ipv4(console, snapshot[3] as u32);
+        write(console, b"/");
+        write_decimal(console, snapshot[3] >> 32);
+        write(console, b" ");
+        write_ipv4(console, snapshot[4] as u32);
+        write(console, b" ");
+    }
+    write_decimal(console, snapshot[1]);
+    write(console, b"\r\n");
+}
+
+fn set_static_network(console: u64, network: u64, arguments: Arguments<'_>) {
+    let Some((address, prefix)) = arguments.first().and_then(parse_ipv4_prefix) else {
+        write(console, b"network: invalid address or prefix\r\n");
+        return;
+    };
+    let Some(gateway) = arguments.get(1).and_then(parse_ipv4) else {
+        write(console, b"network: invalid gateway\r\n");
+        return;
+    };
+    let Some(snapshot) = network_snapshot(network) else {
+        write(console, b"network: status failed\r\n");
+        return;
+    };
+    let request = [
+        NATIVE_NETWORK_APPLY_VERSION,
+        snapshot[1],
+        1,
+        u64::from(address) | (u64::from(prefix) << 32),
+        u64::from(gateway),
+        0,
+        0,
+        0,
+    ];
+    let generation = call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_APPLY,
+        request.as_ptr() as u64,
+    );
+    if generation == NATIVE_CALL_FAILED {
+        write(console, b"network: configuration rejected\r\n");
+        return;
+    }
+    write(console, b"control: static network configured\r\n");
+}
+
+fn set_network_down(console: u64, network: u64) {
+    let Some(snapshot) = network_snapshot(network) else {
+        write(console, b"network: status failed\r\n");
+        return;
+    };
+    let request = [NATIVE_NETWORK_APPLY_VERSION, snapshot[1], 0, 0, 0, 0, 0, 0];
+    if call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_APPLY,
+        request.as_ptr() as u64,
+    ) == NATIVE_CALL_FAILED
+    {
+        write(console, b"network: configuration rejected\r\n");
+        return;
+    }
+    write(console, b"control: network disabled\r\n");
+}
+
+fn network_snapshot(network: u64) -> Option<[u64; 7]> {
+    let mut snapshot = [0_u64; 7];
+    let result = call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
+        snapshot.as_mut_ptr() as u64,
+    );
+    (result == NATIVE_NETWORK_SNAPSHOT_SIZE && snapshot[0] == NATIVE_NETWORK_SNAPSHOT_VERSION)
+        .then_some(snapshot)
+}
+
+fn parse_ipv4_prefix(bytes: &[u8]) -> Option<(u32, u8)> {
+    let separator = bytes.iter().position(|byte| *byte == b'/')?;
+    let address = parse_ipv4(&bytes[..separator])?;
+    let prefix = u8::try_from(parse_decimal(bytes.get(separator + 1..)?)?).ok()?;
+    (prefix <= 32).then_some((address, prefix))
+}
+
+fn parse_ipv4(bytes: &[u8]) -> Option<u32> {
+    let mut octets = [0_u8; 4];
+    let mut parts = bytes.split(|byte| *byte == b'.');
+    for octet in &mut octets {
+        *octet = u8::try_from(parse_decimal(parts.next()?)?).ok()?;
+    }
+    parts.next().is_none().then_some(u32::from_be_bytes(octets))
+}
+
+fn write_ipv4(console: u64, address: u32) {
+    let mut bytes = [0_u8; 15];
+    let mut length = 0;
+    for (index, octet) in address.to_be_bytes().iter().enumerate() {
+        if index != 0 {
+            bytes[length] = b'.';
+            length += 1;
+        }
+        length += append_decimal(&mut bytes[length..], u64::from(*octet));
+    }
+    write(console, &bytes[..length]);
+}
+
+fn append_decimal(output: &mut [u8], mut value: u64) -> usize {
+    let mut reversed = [0_u8; 20];
+    let mut count = 0;
+    loop {
+        reversed[count] = b'0' + (value % 10) as u8;
+        count += 1;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    for index in 0..count {
+        output[index] = reversed[count - index - 1];
+    }
+    count
 }
 
 fn write_container_summary(console: u64, host: u64) {

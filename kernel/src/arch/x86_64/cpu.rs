@@ -1590,6 +1590,7 @@ pub(crate) fn execute_native_controller(
     console_handle: u64,
     host_handle: u64,
     root_handle: u64,
+    network_handle: u64,
     domain_id: u64,
     service_identity: u64,
 ) {
@@ -1602,7 +1603,7 @@ pub(crate) fn execute_native_controller(
             stack,
             console_handle,
             host_handle,
-            0,
+            network_handle,
             4,
             domain_id,
             service_identity,
