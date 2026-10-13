@@ -36,7 +36,8 @@ version before invoking other operations. Existing operation semantics cannot
 be silently changed within a version; incompatible changes require a new
 version and an overlap period when practical. Version 4 preserves operations
 0 through 17 and adds the persistent-volume object at operation 18 plus the
-block-device wait at operation 19. The
+block-device wait at operation 19. Operation 20 is the generation-bound native
+network transmit wait. The
 pre-release bootstrap switches atomically to v4 rather than carrying adapters;
 `control-v1.rs`, `control-v2.rs`, and `control-v3.rs` remain frozen as drift
 evidence. The scalar discovery word and
@@ -441,6 +442,14 @@ reset, and interrupt-gate retirement must complete before its address space or
 DMA lease can be released. A usable device driver still requires a later,
 separately specified request/cancellation contract rather than an implicit
 extension of operation 18.
+Operation 20 requires the calling network service's object-4 `WRITE` handle in
+`RDI`, command 1 in `RSI`, and request generation one in `RDX`. The kernel
+accepts it only after the exact VT-d lease is active, TX queue 1 selects MSI-X
+entry 1, the queue is live, and the caller has notified the device. It blocks
+the caller, unmasks vector 35, and returns zero only after one matching
+interrupt. A stale or duplicate request returns `UINT64_MAX - 2` without
+blocking. The route is masked, disabled, and retired before VT-d or DMA during
+clean or fault teardown.
 Each charged entry first acquires a bounded in-flight operation reference on
 the exact caller generation and releases it before returning through the call
 gate, even when dispatch is denied, the budget is exhausted, or the scheduler

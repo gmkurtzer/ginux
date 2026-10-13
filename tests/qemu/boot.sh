@@ -236,11 +236,12 @@ fi
 
 if ! grep -q '^ginux: native network service published bounded TX descriptor' "$output_file" ||
     ! grep -q '^ginux: native network service notified transmit queue' "$output_file" ||
-    ! grep -q '^ginux: native network service polled TX completion' "$output_file" ||
+    ! grep -q '^ginux: native network service blocked for TX interrupt' "$output_file" ||
+    ! grep -q '^ginux: native network TX replay rejected' "$output_file" ||
     ! grep -q '^ginux: kernel validated native network TX descriptor and payload' "$output_file" ||
     ! grep -q '^ginux: native network TX payload guards preserved' "$output_file" ||
     ! grep -q '^ginux: native network service transmitted Ethernet probe' "$output_file" ||
-    ! grep -q '^ginux: native network polled TX generation retired cleanly' "$output_file"; then
+    ! grep -q '^ginux: native network TX interrupt route retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service transmit was not verified." >&2
     exit 1
 fi

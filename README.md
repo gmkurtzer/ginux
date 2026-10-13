@@ -126,10 +126,13 @@ disables the NIC, retires translation, and only then scrubs service memory.
 A separate generation receives a kernel-injected failed activation return only
 after bus mastering is live; the compiled service faults naturally and the
 fault path proves the same device-before-VT-d-before-DMA teardown ordering.
-A subsequent generation publishes one fixed transmit descriptor, notifies
-queue 1, and polls its completion while MSI-X remains disabled. The kernel
-independently validates the descriptor, unchanged payload, used entry, and
-canaries before teardown. This proves device consumption, not peer reception.
+A subsequent generation binds TX queue 1 to MSI-X entry 1, publishes one fixed
+transmit descriptor, notifies queue 1, and blocks through native operation 20.
+Kernel-owned vector 35 wakes only the exact domain, object, and request
+generation; replay of generation one is rejected. The kernel independently
+validates the single interrupt, descriptor, unchanged payload, used entry, and
+canaries, then retires the route before VT-d and DMA teardown. This proves
+device consumption, not peer reception.
 See [Native Network Service Transmit v0](specs/services/network-transmit-v0.md).
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).

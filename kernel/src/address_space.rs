@@ -2277,6 +2277,7 @@ struct RegisteredAuxiliaryAddressSpace {
     device_quiesced: bool,
     fail_network_activation_return: bool,
     expect_network_transmit: bool,
+    network_interrupt_completed: bool,
 }
 
 enum AuxiliaryAddressSpace {
@@ -2297,6 +2298,8 @@ struct AuxiliaryDeviceTeardown {
 struct AuxiliaryNetworkTeardown {
     device: VirtioNetworkDevice,
     mapping: paging::MmioMapping,
+    msix_mapping: Option<paging::MmioMapping>,
+    interrupt_request: u64,
 }
 
 pub(crate) fn expected_service_fault_instruction(service_entry_offset: usize) -> Option<u64> {
@@ -4588,6 +4591,7 @@ pub(crate) fn verify_native_network_bootstrap(
         iommu_profile,
         NativeNetworkRunMode::Inert,
         None,
+        None,
     )
 }
 
@@ -4604,6 +4608,7 @@ pub(crate) fn verify_native_network_bootstrap_rejection(
         iommu_profile,
         NativeNetworkRunMode::RejectBootstrap,
         None,
+        None,
     )
 }
 
@@ -4619,6 +4624,7 @@ pub(crate) fn verify_native_network_dma_confinement(
         initialization,
         iommu_profile,
         NativeNetworkRunMode::Confined,
+        None,
         None,
     )
 }
@@ -4637,6 +4643,7 @@ pub(crate) fn verify_native_network_empty_queue_activation(
         iommu_profile,
         NativeNetworkRunMode::Active,
         Some(common_mapping),
+        None,
     )
 }
 
@@ -4654,6 +4661,7 @@ pub(crate) fn verify_native_network_active_fault_teardown(
         iommu_profile,
         NativeNetworkRunMode::ActiveFault,
         Some(common_mapping),
+        None,
     )
 }
 
@@ -4663,6 +4671,8 @@ pub(crate) fn verify_native_network_transmit_probe(
     initialization: VirtioNetworkInitialization,
     iommu_profile: iommu::DeviceTranslationProfile,
     common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
 ) -> bool {
     verify_native_network_bootstrap_run(
         image,
@@ -4671,6 +4681,7 @@ pub(crate) fn verify_native_network_transmit_probe(
         iommu_profile,
         NativeNetworkRunMode::Transmit,
         Some(common_mapping),
+        Some((msix_mapping, apic)),
     )
 }
 
@@ -4681,6 +4692,7 @@ fn verify_native_network_bootstrap_run(
     iommu_profile: iommu::DeviceTranslationProfile,
     mode: NativeNetworkRunMode,
     active_mapping: Option<paging::MmioMapping>,
+    interrupt: Option<(paging::MmioMapping, &LocalApic)>,
 ) -> bool {
     let reject_reserved = matches!(
         mode,
@@ -4721,6 +4733,7 @@ fn verify_native_network_bootstrap_run(
     }
     if active_mapping.is_some() && (!activate_iommu || reject_reserved)
         || fail_after_activation && active_mapping.is_none()
+        || transmit_probe != interrupt.is_some()
     {
         return false;
     }
@@ -4797,6 +4810,7 @@ fn verify_native_network_bootstrap_run(
         boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_EMPTY_QUEUES;
         if transmit_probe {
             boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE;
+            boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_TX_INTERRUPT;
         }
     }
     let boot_written = if reject_reserved {
@@ -4833,10 +4847,21 @@ fn verify_native_network_bootstrap_run(
         .then(|| bind_auxiliary_network_iommu_translation(auxiliary, iommu_profile, device))
         .flatten();
     let active_device_ready = active_mapping.is_none_or(|mapping| {
-        bind_auxiliary_network_teardown(auxiliary, device, mapping)
+        let interrupt_mapping = interrupt.map(|(mapping, _)| mapping);
+        bind_auxiliary_network_teardown(auxiliary, device, mapping, interrupt_mapping)
             && (!fail_after_activation || arm_auxiliary_network_activation_fault(auxiliary))
             && (!transmit_probe || arm_auxiliary_network_transmit_expectation(auxiliary))
             && pci::prepare_network_for_isolated_service(device, mapping)
+            && interrupt.is_none_or(|(msix_mapping, apic)| {
+                pci::arm_isolated_network_tx_interrupt(
+                    device,
+                    mapping,
+                    msix_mapping,
+                    apic,
+                    auxiliary,
+                    1,
+                )
+            })
     });
     if activate_iommu && iommu_evidence.is_none()
         || !active_device_ready
@@ -5083,6 +5108,7 @@ pub(crate) fn verify_native_network_dma_fault_teardown(
         iommu_profile,
         NativeNetworkRunMode::ConfinedReject,
         None,
+        None,
     )
 }
 
@@ -5118,6 +5144,7 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             device_quiesced: false,
             fail_network_activation_return: false,
             expect_network_transmit: false,
+            network_interrupt_completed: false,
         });
     }
     true
@@ -5217,6 +5244,7 @@ fn bind_auxiliary_network_teardown(
     domain_id: u64,
     device: VirtioNetworkDevice,
     mapping: paging::MmioMapping,
+    msix_mapping: Option<paging::MmioMapping>,
 ) -> bool {
     let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
@@ -5232,7 +5260,12 @@ fn bind_auxiliary_network_teardown(
     {
         return false;
     }
-    registered.network_teardown = Some(AuxiliaryNetworkTeardown { device, mapping });
+    registered.network_teardown = Some(AuxiliaryNetworkTeardown {
+        device,
+        mapping,
+        msix_mapping,
+        interrupt_request: u64::from(msix_mapping.is_some()),
+    });
     true
 }
 
@@ -5257,12 +5290,23 @@ pub(crate) fn activate_auxiliary_network_empty_queues(domain_id: u64) -> bool {
             .iommu_translation
             .as_ref()
             .is_some_and(iommu::DeviceTranslation::is_active)
-        && pci::activate_isolated_network_empty_queues(
-            teardown.device,
-            teardown.mapping,
-            dma.address(),
-            dma_virtual,
-        );
+        && if teardown.msix_mapping.is_some() {
+            pci::activate_isolated_network_interrupt_queues(
+                teardown.device,
+                teardown.mapping,
+                dma.address(),
+                dma_virtual,
+                domain_id,
+                teardown.interrupt_request,
+            )
+        } else {
+            pci::activate_isolated_network_empty_queues(
+                teardown.device,
+                teardown.mapping,
+                dma.address(),
+                dma_virtual,
+            )
+        };
     activated && !registered.fail_network_activation_return
 }
 
@@ -5297,6 +5341,68 @@ fn arm_auxiliary_network_transmit_expectation(domain_id: u64) -> bool {
         return false;
     }
     registered.expect_network_transmit = true;
+    true
+}
+
+pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, request: u64) -> bool {
+    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) =
+        (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    let Some(teardown) = registered.network_teardown else {
+        return false;
+    };
+    let Some(dma_physical) = registered.space.dma_physical() else {
+        return false;
+    };
+    !registered.device_quiesced
+        && !registered.network_interrupt_completed
+        && teardown.msix_mapping.is_some()
+        && teardown.interrupt_request == request
+        && registered
+            .iommu_translation
+            .as_ref()
+            .is_some_and(iommu::DeviceTranslation::is_active)
+        && pci::isolated_network_interrupt_wait_ready(
+            teardown.device,
+            teardown.mapping,
+            domain_id,
+            request,
+            dma_physical,
+        )
+}
+
+pub(crate) fn complete_auxiliary_network_wait(domain_id: u64, request: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    let Some(teardown) = registered.network_teardown else {
+        return false;
+    };
+    let Some(msix_mapping) = teardown.msix_mapping else {
+        return false;
+    };
+    if registered.device_quiesced
+        || registered.network_interrupt_completed
+        || teardown.interrupt_request != request
+    {
+        return false;
+    }
+    if pci::complete_isolated_network_interrupt_wait(
+        teardown.device,
+        msix_mapping,
+        domain_id,
+        request,
+    ) != pci::IsolatedInterruptCompletion::Completed
+    {
+        return false;
+    }
+    registered.network_interrupt_completed = true;
     true
 }
 
@@ -5449,20 +5555,42 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
         let Some(dma_virtual) = dma.direct_map_address() else {
             return false;
         };
-        let active = pci::network_empty_queues_are_bound(
-            teardown.device,
-            teardown.mapping,
-            dma.address(),
-            true,
-        );
+        let active = if teardown.msix_mapping.is_some() {
+            pci::network_interrupt_queues_are_bound(
+                teardown.device,
+                teardown.mapping,
+                dma.address(),
+                true,
+            )
+        } else {
+            pci::network_empty_queues_are_bound(
+                teardown.device,
+                teardown.mapping,
+                dma.address(),
+                true,
+            )
+        };
         let transmit_complete = !registered.expect_network_transmit
             || pci::network_service_transmit_is_complete(dma.address(), dma_virtual);
         if !require_completed_dma {
             LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.store(active, Ordering::Release);
             LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.store(domain_id, Ordering::Release);
         }
-        if require_completed_dma && (!active || !transmit_complete)
-            || !pci::quiesce_isolated_network(teardown.device, teardown.mapping)
+        let interrupt_complete =
+            teardown.msix_mapping.is_none() || registered.network_interrupt_completed;
+        let quiesced = if let Some(msix_mapping) = teardown.msix_mapping {
+            pci::quiesce_isolated_network_interrupt(
+                teardown.device,
+                teardown.mapping,
+                msix_mapping,
+                domain_id,
+                teardown.interrupt_request,
+            )
+        } else {
+            pci::quiesce_isolated_network(teardown.device, teardown.mapping)
+        };
+        if require_completed_dma && (!active || !transmit_complete || !interrupt_complete)
+            || !quiesced
         {
             return false;
         }

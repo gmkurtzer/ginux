@@ -12,7 +12,8 @@ use ginux_native_abi::{
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
     NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
-    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
+    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION,
+    NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
@@ -54,6 +55,7 @@ const FEATURE_VERSION_1: u32 = 1;
 const FEATURE_ACCESS_PLATFORM: u32 = 1 << 1;
 const RESET_POLL_LIMIT: usize = 100_000;
 const COMPLETION_POLL_LIMIT: usize = 10_000_000;
+const TX_INTERRUPT_REQUEST: u64 = 1;
 
 global_asm!(
     r#"
@@ -138,16 +140,31 @@ unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> bool {
     write_u16(dma + TX_AVAIL_OFFSET as usize + 2, 1);
     compiler_fence(Ordering::SeqCst);
     write_u16(notification, 1);
-    for _ in 0..COMPLETION_POLL_LIMIT {
-        if read_u16(dma + TX_USED_OFFSET as usize + 2) == 1 {
-            compiler_fence(Ordering::SeqCst);
-            return read_u32(dma + TX_USED_OFFSET as usize + 4) == 0
-                && read_u8(common + COMMON_DEVICE_STATUS)
-                    == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK;
+    if info.requests_tx_interrupt() {
+        if wait_for_tx_interrupt(info.device_capability, TX_INTERRUPT_REQUEST) != 0
+            || wait_for_tx_interrupt(info.device_capability, TX_INTERRUPT_REQUEST)
+                != NATIVE_NETWORK_WAIT_FAILED
+        {
+            return false;
         }
-        core::hint::spin_loop();
+    } else {
+        let mut completed = false;
+        for _ in 0..COMPLETION_POLL_LIMIT {
+            if read_u16(dma + TX_USED_OFFSET as usize + 2) == 1 {
+                completed = true;
+                break;
+            }
+            core::hint::spin_loop();
+        }
+        if !completed {
+            return false;
+        }
     }
-    false
+    compiler_fence(Ordering::SeqCst);
+    read_u16(dma + TX_USED_OFFSET as usize + 2) == 1
+        && read_u32(dma + TX_USED_OFFSET as usize + 4) == 0
+        && read_u8(common + COMMON_DEVICE_STATUS)
+            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
 }
 
 unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {
@@ -214,9 +231,25 @@ unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {
     {
         return false;
     }
-    for (queue, descriptor, available, used) in [
-        (0_u16, RX_DESC_OFFSET, RX_AVAIL_OFFSET, RX_USED_OFFSET),
-        (1_u16, TX_DESC_OFFSET, TX_AVAIL_OFFSET, TX_USED_OFFSET),
+    for (queue, descriptor, available, used, vector) in [
+        (
+            0_u16,
+            RX_DESC_OFFSET,
+            RX_AVAIL_OFFSET,
+            RX_USED_OFFSET,
+            u16::MAX,
+        ),
+        (
+            1_u16,
+            TX_DESC_OFFSET,
+            TX_AVAIL_OFFSET,
+            TX_USED_OFFSET,
+            if info.requests_tx_interrupt() {
+                1
+            } else {
+                u16::MAX
+            },
+        ),
     ] {
         write_u16(common + COMMON_QUEUE_SELECT, queue);
         let maximum = read_u16(common + COMMON_QUEUE_SIZE);
@@ -228,6 +261,7 @@ unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {
             return false;
         }
         write_u16(common + COMMON_QUEUE_SIZE, QUEUE_SIZE);
+        write_u16(common + COMMON_QUEUE_MSIX_VECTOR, vector);
         write_u64(
             common + COMMON_QUEUE_DESC,
             info.dma_device_address + descriptor,
@@ -240,6 +274,7 @@ unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {
         write_u16(common + COMMON_QUEUE_ENABLE, 1);
         if read_u16(common + COMMON_QUEUE_SIZE) != QUEUE_SIZE
             || read_u16(common + COMMON_QUEUE_ENABLE) != 1
+            || read_u16(common + COMMON_QUEUE_MSIX_VECTOR) != vector
             || read_u64(common + COMMON_QUEUE_DESC) != info.dma_device_address + descriptor
             || read_u64(common + COMMON_QUEUE_DRIVER) != info.dma_device_address + available
             || read_u64(common + COMMON_QUEUE_DEVICE) != info.dma_device_address + used
@@ -253,6 +288,21 @@ unsafe fn configure_empty_queues(info: &NativeNetworkBootV0) -> bool {
     );
     read_u8(common + COMMON_DEVICE_STATUS)
         == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
+}
+
+fn wait_for_tx_interrupt(capability: u64, request: u64) -> u64 {
+    let mut result = NATIVE_NETWORK_WAIT_OPERATION;
+    unsafe {
+        asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("rdi") capability,
+            in("rsi") NATIVE_NETWORK_WAIT_TX_NOTIFIED,
+            in("rdx") request,
+            options(nostack),
+        );
+    }
+    result
 }
 
 fn activate_empty_queues(capability: u64) -> u64 {

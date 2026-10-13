@@ -14320,7 +14320,53 @@ fn dispatch_charged_call(
         17 => root_device_call(caller_domain, capability, frame),
         18 => volume_device_call(caller_domain, capability, frame),
         19 => block_device_call(caller_domain, capability, frame),
+        20 => network_wait_call(caller_domain, capability, frame),
         _ => u64::MAX,
+    }
+}
+
+fn network_wait_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        return u64::MAX - 2;
+    };
+    let command = frame.first_argument();
+    let request = frame.second_argument();
+    if command != control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED
+        || request == 0
+        || !domain::handle_permits(
+            caller_domain,
+            capability,
+            control_abi::NETWORK_DEVICE_OBJECT,
+            Rights::WRITE,
+        )
+        || !address_space::auxiliary_network_wait_ready(caller_domain, request)
+    {
+        return u64::MAX - 2;
+    }
+    let reason = scheduler::WaitReason::DeviceCompletion {
+        object: control_abi::NETWORK_DEVICE_OBJECT,
+        domain: caller_domain,
+        request,
+    };
+    if !scheduler::block_runtime_idle(
+        frame,
+        USER_CODE_SELECTOR,
+        USER_DATA_SELECTOR,
+        reason,
+        active_fs_base(),
+    ) {
+        return u64::MAX - 2;
+    }
+    if address_space::complete_auxiliary_network_wait(caller_domain, request) {
+        0
+    } else {
+        let _ = scheduler::wake_device_completion(
+            caller_domain,
+            control_abi::NETWORK_DEVICE_OBJECT,
+            request,
+            u64::MAX - 2,
+        );
+        u64::MAX - 2
     }
 }
 

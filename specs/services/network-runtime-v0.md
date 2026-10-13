@@ -93,9 +93,12 @@ without trusting a clean service exit.
 Bootstrap feature `TRANSMIT_PROBE` advances a fresh generation to the first
 service-owned packet operation. After activation, the service builds one
 bounded queue-1 descriptor, publishes available index one, notifies the exact
-transmit register, and polls the used ring with a fixed limit while MSI-X stays
-disabled. The kernel independently validates the complete descriptor, fixed
-Ethernet payload, completion identity, and canaries before ordered teardown.
+transmit register, and blocks through operation 20 on request generation one.
+Bootstrap feature `TX_INTERRUPT` binds TX queue 1 to MSI-X entry 1; the kernel
+owns entry programming, vector 35, masking, and route retirement. The kernel
+independently validates the exact interrupt, rejects replay of generation one,
+and checks the complete descriptor, fixed Ethernet payload, completion identity,
+and canaries before ordered teardown.
 See [Native Network Service Transmit v0](network-transmit-v0.md).
 
 ## Deliberate limits

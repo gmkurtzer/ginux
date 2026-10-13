@@ -64,6 +64,17 @@ DMA state, and returns `CANCELLED`; that request generation can never be
 retried. The service must then exit with `RESTART_REQUIRED`. A fresh domain
 generation reinitializes the reset device with a new DMA lease.
 
+## Network transmit wait
+
+Native network wait operation 20 currently accepts only `TX_NOTIFIED` command
+1 and request generation one. It requires the same domain's write-authorized
+network capability, live exact VT-d lease, TX queue 1 bound to MSI-X entry 1,
+and an active confined device. The kernel blocks the service, unmasks vector
+35, and returns zero only after one matching interrupt. A stale or duplicate
+request returns `FAILED` without blocking. Timeout currently fails the service
+and uses fault teardown; an explicit restart-required cancellation result is
+reserved for the next milestone.
+
 ## Sources and compatibility
 
 `ginux-native-abi` is the canonical `no_std` Rust source. The matching

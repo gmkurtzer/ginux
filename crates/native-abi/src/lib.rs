@@ -10,6 +10,7 @@ pub const NATIVE_NETWORK_BOOT_SIZE: u16 = 80;
 pub const NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK: u32 = 1 << 0;
 pub const NATIVE_NETWORK_FEATURE_EMPTY_QUEUES: u32 = 1 << 1;
 pub const NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE: u32 = 1 << 2;
+pub const NATIVE_NETWORK_FEATURE_TX_INTERRUPT: u32 = 1 << 3;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -23,6 +24,9 @@ pub const NATIVE_NETWORK_DEVICE_OPERATION: u64 = 16;
 pub const NATIVE_NETWORK_DEVICE_PROBE: u64 = 0;
 pub const NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES: u64 = 12;
 pub const NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD: u64 = 0x0000_0001_05dc_0009;
+pub const NATIVE_NETWORK_WAIT_OPERATION: u64 = 20;
+pub const NATIVE_NETWORK_WAIT_TX_NOTIFIED: u64 = 1;
+pub const NATIVE_NETWORK_WAIT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -183,7 +187,12 @@ impl NativeNetworkBootV0 {
                 || self.features
                     == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
                         | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
-                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE)
+                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                || self.features
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                        | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                        | NATIVE_NETWORK_FEATURE_TX_INTERRUPT)
             && self.common_config_address != 0
             && self.receive_notification_address != 0
             && self.transmit_notification_address != 0
@@ -202,6 +211,10 @@ impl NativeNetworkBootV0 {
 
     pub const fn requests_transmit_probe(&self) -> bool {
         self.features & NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE != 0
+    }
+
+    pub const fn requests_tx_interrupt(&self) -> bool {
+        self.features & NATIVE_NETWORK_FEATURE_TX_INTERRUPT != 0
     }
 }
 
@@ -247,6 +260,7 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK UINT32_C(1)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_EMPTY_QUEUES UINT32_C(2)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE UINT32_C(4)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TX_INTERRUPT UINT32_C(8)"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
     }
 
@@ -266,6 +280,8 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES UINT64_C(12)"));
         assert!(header
             .contains("GINUX_NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD UINT64_C(0x0000000105dc0009)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_WAIT_OPERATION UINT64_C(20)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_WAIT_TX_NOTIFIED UINT64_C(1)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_DISCOVERY_OPERATION UINT64_C(0)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_ABI_VERSION UINT16_C(4)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_REQUIRED_FEATURES UINT16_C(1041)"));
@@ -350,6 +366,13 @@ mod tests {
         assert!(transmit.is_valid_virtio_network());
         assert!(transmit.requests_empty_queues());
         assert!(transmit.requests_transmit_probe());
+        assert!(!transmit.requests_tx_interrupt());
+        let interrupted = NativeNetworkBootV0 {
+            features: transmit.features | NATIVE_NETWORK_FEATURE_TX_INTERRUPT,
+            ..transmit
+        };
+        assert!(interrupted.is_valid_virtio_network());
+        assert!(interrupted.requests_tx_interrupt());
         for invalid in [
             NativeNetworkBootV0 { magic: 0, ..valid },
             NativeNetworkBootV0 {
@@ -362,7 +385,12 @@ mod tests {
                 ..valid
             },
             NativeNetworkBootV0 {
-                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 3,
+                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                    | NATIVE_NETWORK_FEATURE_TX_INTERRUPT,
+                ..valid
+            },
+            NativeNetworkBootV0 {
+                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 4,
                 ..valid
             },
             NativeNetworkBootV0 {

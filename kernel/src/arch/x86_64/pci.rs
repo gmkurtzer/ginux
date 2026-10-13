@@ -112,6 +112,7 @@ static VIRTIO_INTERRUPT_APIC_MODE: AtomicU8 = AtomicU8::new(0);
 static VIRTIO_INTERRUPT_COUNT: AtomicU8 = AtomicU8::new(0);
 static VIRTIO_INTERRUPT_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static VIRTIO_INTERRUPT_REQUEST: AtomicU64 = AtomicU64::new(0);
+static VIRTIO_INTERRUPT_OBJECT: AtomicU64 = AtomicU64::new(0);
 static FORCED_NOTIFIED_TIMEOUT_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static FORCED_NOTIFIED_TIMEOUT_REQUEST: AtomicU64 = AtomicU64::new(0);
 
@@ -977,6 +978,7 @@ fn install_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
     VIRTIO_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
     VIRTIO_INTERRUPT_DOMAIN.store(0, Ordering::SeqCst);
     VIRTIO_INTERRUPT_REQUEST.store(0, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_OBJECT.store(0, Ordering::SeqCst);
     VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
     FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
     FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
@@ -997,6 +999,7 @@ fn retire_virtio_interrupt_at(apic: &LocalApic, vector: u8) -> bool {
         VIRTIO_INTERRUPT_APIC_MODE.store(0, Ordering::SeqCst);
         VIRTIO_INTERRUPT_DOMAIN.store(0, Ordering::SeqCst);
         VIRTIO_INTERRUPT_REQUEST.store(0, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_OBJECT.store(0, Ordering::SeqCst);
         FORCED_NOTIFIED_TIMEOUT_DOMAIN.store(0, Ordering::SeqCst);
         FORCED_NOTIFIED_TIMEOUT_REQUEST.store(0, Ordering::SeqCst);
     }
@@ -1008,13 +1011,10 @@ extern "sysv64" fn virtio_interrupt_handler(_frame: *mut UserInterruptFrame) {
     if VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst) {
         let domain = VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst);
         let request = VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst);
+        let object = VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst);
         if domain == 0
-            || scheduler::wake_device_completion(
-                domain,
-                control_abi::BLOCK_DEVICE_OBJECT,
-                request,
-                0,
-            )
+            || object == 0
+            || scheduler::wake_device_completion(domain, object, request, 0)
         {
             VIRTIO_INTERRUPT_FIRED.store(true, Ordering::SeqCst);
         }
@@ -1315,11 +1315,109 @@ pub(crate) fn activate_isolated_network_empty_queues(
         && network_empty_queues_are_bound(device, common_mapping, dma_physical, true)
 }
 
+pub(crate) fn arm_isolated_network_tx_interrupt(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    apic: &LocalApic,
+    domain: u64,
+    request: u64,
+) -> bool {
+    if domain == 0
+        || request == 0
+        || network_function_command(device)
+            & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+            != COMMAND_MEMORY_SPACE
+        || !network_msix_is_disabled(device)
+        || !network_device_is_reset(device, common_mapping)
+        || !program_masked_msix_vector_raw(
+            device.msix_target(),
+            msix_mapping,
+            1,
+            apic.id,
+            VIRTIO_NETWORK_TX_VECTOR,
+        )
+        || !install_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR)
+    {
+        return false;
+    }
+    if !set_msix_control_raw(device.msix_target(), true, true) {
+        let _ = set_msix_control_raw(device.msix_target(), false, true);
+        let _ = retire_virtio_interrupt_at(apic, VIRTIO_NETWORK_TX_VECTOR);
+        return false;
+    }
+    VIRTIO_INTERRUPT_DOMAIN.store(domain, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_REQUEST.store(request, Ordering::SeqCst);
+    VIRTIO_INTERRUPT_OBJECT.store(control_abi::NETWORK_DEVICE_OBJECT, Ordering::SeqCst);
+    true
+}
+
+pub(crate) fn activate_isolated_network_interrupt_queues(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    dma_physical: u64,
+    dma_virtual: usize,
+    domain: u64,
+    request: u64,
+) -> bool {
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+        || network_function_command(device)
+            & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+            != COMMAND_MEMORY_SPACE
+        || !(0..DMA_PAGE_SIZE).all(|offset| read_dma_u8(dma_virtual + offset) == 0)
+        || !network_queues_are_bound(device, common_mapping, dma_physical, false, 1)
+    {
+        return false;
+    }
+    unsafe {
+        write_config_u16(
+            device.bus,
+            device.device,
+            device.function,
+            PCI_COMMAND,
+            COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER,
+        );
+    }
+    network_function_command(device)
+        & (COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER)
+        == COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER
+        && network_queues_are_bound(device, common_mapping, dma_physical, true, 1)
+}
+
 pub(crate) fn network_empty_queues_are_bound(
     device: VirtioNetworkDevice,
     common_mapping: MmioMapping,
     dma_physical: u64,
     require_bus_master: bool,
+) -> bool {
+    network_queues_are_bound(
+        device,
+        common_mapping,
+        dma_physical,
+        require_bus_master,
+        u16::MAX,
+    )
+}
+
+pub(crate) fn network_interrupt_queues_are_bound(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    dma_physical: u64,
+    require_bus_master: bool,
+) -> bool {
+    network_queues_are_bound(device, common_mapping, dma_physical, require_bus_master, 1)
+}
+
+fn network_queues_are_bound(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    dma_physical: u64,
+    require_bus_master: bool,
+    transmit_vector: u16,
 ) -> bool {
     let Some((common_physical, common_length)) = device.common_region() else {
         return false;
@@ -1341,24 +1439,26 @@ pub(crate) fn network_empty_queues_are_bound(
     {
         return false;
     }
-    for (queue, descriptor, available, used) in [
+    for (queue, descriptor, available, used, vector) in [
         (
             0_u16,
             NET_RX_DESC_OFFSET,
             NET_RX_AVAIL_OFFSET,
             NET_RX_USED_OFFSET,
+            u16::MAX,
         ),
         (
             1_u16,
             NET_TX_DESC_OFFSET,
             NET_TX_AVAIL_OFFSET,
             NET_TX_USED_OFFSET,
+            transmit_vector,
         ),
     ] {
         write_common_u16(common, COMMON_QUEUE_SELECT, queue);
         if read_common_u16(common, COMMON_QUEUE_SIZE) != QUEUE_SIZE
             || read_common_u16(common, COMMON_QUEUE_ENABLE) != 1
-            || read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) != u16::MAX
+            || read_common_u16(common, COMMON_QUEUE_MSIX_VECTOR) != vector
             || read_common_u64(common, COMMON_QUEUE_DESC) != dma_physical + descriptor as u64
             || read_common_u64(common, COMMON_QUEUE_DRIVER) != dma_physical + available as u64
             || read_common_u64(common, COMMON_QUEUE_DEVICE) != dma_physical + used as u64
@@ -1367,6 +1467,108 @@ pub(crate) fn network_empty_queues_are_bound(
         }
     }
     true
+}
+
+pub(crate) fn isolated_network_interrupt_wait_ready(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    domain: u64,
+    request: u64,
+    dma_physical: u64,
+) -> bool {
+    domain != 0
+        && request != 0
+        && VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) == domain
+        && VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) == request
+        && VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) == control_abi::NETWORK_DEVICE_OBJECT
+        && !VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
+        && !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+        && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 0
+        && network_queues_are_bound(device, common_mapping, dma_physical, true, 1)
+}
+
+pub(crate) fn complete_isolated_network_interrupt_wait(
+    device: VirtioNetworkDevice,
+    msix_mapping: MmioMapping,
+    domain: u64,
+    request: u64,
+) -> IsolatedInterruptCompletion {
+    if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+    {
+        return IsolatedInterruptCompletion::Failed;
+    }
+    VIRTIO_INTERRUPT_ACTIVE.store(true, Ordering::SeqCst);
+    let interrupt_configured =
+        set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, false)
+            && set_msix_control_raw(device.msix_target(), true, false);
+    if !timer::arm_device_wait_timer(domain, request) || !interrupt_configured {
+        VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+        let _ = timer::finish_device_wait_timer(domain, request);
+        let _ = scheduler::wake_device_completion(
+            domain,
+            control_abi::NETWORK_DEVICE_OBJECT,
+            request,
+            u64::MAX - 2,
+        );
+        return IsolatedInterruptCompletion::Failed;
+    }
+    while !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
+        && !timer::device_wait_timed_out(domain, request)
+    {
+        unsafe { asm!("sti", "hlt", "cli", options(nomem, nostack)) };
+    }
+    let function_masked = set_msix_control_raw(device.msix_target(), true, true);
+    let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    let Some(timed_out) = timer::finish_device_wait_timer(domain, request) else {
+        return IsolatedInterruptCompletion::Failed;
+    };
+    if !function_masked || !entry_masked || scheduler::current_domain() != Some(domain) {
+        IsolatedInterruptCompletion::Failed
+    } else if timed_out {
+        IsolatedInterruptCompletion::TimedOut
+    } else if VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 1 {
+        IsolatedInterruptCompletion::Completed
+    } else {
+        IsolatedInterruptCompletion::Failed
+    }
+}
+
+pub(crate) fn quiesce_isolated_network_interrupt(
+    device: VirtioNetworkDevice,
+    common_mapping: MmioMapping,
+    msix_mapping: MmioMapping,
+    domain: u64,
+    request: u64,
+) -> bool {
+    if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
+        || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::NETWORK_DEVICE_OBJECT
+    {
+        return false;
+    }
+    let mode = if VIRTIO_INTERRUPT_APIC_MODE.load(Ordering::SeqCst) == 1 {
+        Mode::X2Apic
+    } else {
+        Mode::XApic
+    };
+    let Some(apic) =
+        LocalApic::from_saved(0, mode, VIRTIO_INTERRUPT_APIC_BASE.load(Ordering::SeqCst))
+    else {
+        return false;
+    };
+    let function_masked = set_msix_control_raw(device.msix_target(), true, true);
+    let entry_masked = set_msix_entry_mask_raw(device.msix_target(), msix_mapping, 1, true);
+    let msix_disabled = set_msix_control_raw(device.msix_target(), false, true);
+    let device_quiesced = quiesce_isolated_network(device, common_mapping);
+    VIRTIO_INTERRUPT_ACTIVE.store(false, Ordering::SeqCst);
+    function_masked
+        && entry_masked
+        && msix_disabled
+        && device_quiesced
+        && retire_virtio_interrupt_at(&apic, VIRTIO_NETWORK_TX_VECTOR)
 }
 
 pub(crate) fn network_service_transmit_is_complete(dma_physical: u64, dma_virtual: usize) -> bool {
@@ -2933,6 +3135,7 @@ pub(crate) fn arm_isolated_device_interrupt(
     if armed {
         VIRTIO_INTERRUPT_DOMAIN.store(domain, Ordering::SeqCst);
         VIRTIO_INTERRUPT_REQUEST.store(request, Ordering::SeqCst);
+        VIRTIO_INTERRUPT_OBJECT.store(control_abi::BLOCK_DEVICE_OBJECT, Ordering::SeqCst);
         return true;
     }
     let _ = set_msix_control(device, true, true);
@@ -2961,6 +3164,7 @@ pub(crate) fn isolated_interrupt_wait_ready(
         && request != 0
         && VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) == domain
         && VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) == request
+        && VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) == control_abi::BLOCK_DEVICE_OBJECT
         && !VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
         && !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
         && VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) == 0
@@ -2977,6 +3181,7 @@ pub(crate) fn complete_isolated_interrupt_wait(
 ) -> IsolatedInterruptCompletion {
     if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
         || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
     {
         return IsolatedInterruptCompletion::Failed;
     }
@@ -3033,6 +3238,7 @@ pub(crate) fn force_next_notified_wait_timeout(domain: u64, request: u64) -> boo
         || request == 0
         || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
         || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
         || FORCED_NOTIFIED_TIMEOUT_DOMAIN.load(Ordering::SeqCst) != 0
         || FORCED_NOTIFIED_TIMEOUT_REQUEST.load(Ordering::SeqCst) != 0
     {
@@ -3052,6 +3258,7 @@ pub(crate) fn advance_isolated_interrupt_wait(
         || next_request != completed_request.checked_add(1).unwrap_or(0)
         || VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
         || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != completed_request
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
         || VIRTIO_INTERRUPT_ACTIVE.load(Ordering::SeqCst)
         || !VIRTIO_INTERRUPT_FIRED.load(Ordering::SeqCst)
         || VIRTIO_INTERRUPT_COUNT.load(Ordering::SeqCst) != 1
@@ -3073,6 +3280,7 @@ pub(crate) fn quiesce_isolated_interrupt(
 ) -> bool {
     if VIRTIO_INTERRUPT_DOMAIN.load(Ordering::SeqCst) != domain
         || VIRTIO_INTERRUPT_REQUEST.load(Ordering::SeqCst) != request
+        || VIRTIO_INTERRUPT_OBJECT.load(Ordering::SeqCst) != control_abi::BLOCK_DEVICE_OBJECT
     {
         return false;
     }
