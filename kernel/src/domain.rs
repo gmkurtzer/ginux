@@ -1086,6 +1086,54 @@ pub(crate) fn initialize_boot_auxiliary_service_restart(
     .then_some(encode_id(id))
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn initialize_boot_auxiliary_service_restart_with_two_grants(
+    first_root_index: usize,
+    first_object: u64,
+    first_rights: Rights,
+    second_root_index: usize,
+    second_object: u64,
+    second_rights: Rights,
+    service_raw: u64,
+) -> Option<u64> {
+    let service = decode_service_id(service_raw)?;
+    let manager = global_manager_mut()?;
+    let control = manager.domain(manager.control_plane_id?)?;
+    let first_source = control
+        .boot_roots
+        .get(first_root_index)
+        .copied()
+        .flatten()?;
+    let second_source = control
+        .boot_roots
+        .get(second_root_index)
+        .copied()
+        .flatten()?;
+    let id = manager.restart_auxiliary_service_with_delegations(
+        service,
+        &[
+            DelegationGrant {
+                source: first_source,
+                object: first_object,
+                rights: first_rights,
+            },
+            DelegationGrant {
+                source: second_source,
+                object: second_object,
+                rights: second_rights,
+            },
+        ],
+    )?;
+    let domain = manager.domain(id)?;
+    (domain.role == Role::AuxiliaryService
+        && domain.service == Some(service)
+        && domain.state == State::Ready
+        && domain.thread_limit == 0
+        && domain.boot_root_count == 2
+        && domain.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
 pub(crate) fn auxiliary_boot_handle(domain_raw: u64, root_index: usize) -> Option<u64> {
     let id = decode_id(domain_raw)?;
     let domain = global_manager()?.domain(id)?;

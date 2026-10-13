@@ -197,6 +197,13 @@ least-authority property, retires a child, rejects its stale ancestry, and then
 requires a replacement generation to be attached to the persistent control
 parent.
 
+The auxiliary restart constructor also supports two freshly derived boot
+grants while preserving one retired auxiliary's logical service identity. The
+resident-network replacement proof uses it for separate network-device and
+egress-read roots. The replacement must have a distinct domain generation;
+neither handle provenance nor stable service identity allows it to retain the
+prior generation's DMA, VT-d, scheduler, or address-space resources.
+
 The domains own distinct W^X address spaces and scheduler contexts. When the
 service's sole thread faults, the exception path first removes the scheduler
 slot, then retires the service domain record and its entire capability table

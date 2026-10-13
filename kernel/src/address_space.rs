@@ -4845,6 +4845,21 @@ enum NativeNetworkRunMode {
     ReliableEgressResident,
 }
 
+#[derive(Clone, Copy)]
+struct NativeNetworkRun {
+    domain: u64,
+    service_identity: u64,
+    iommu_evidence: iommu::TranslationEvidence,
+}
+
+impl NativeNetworkRun {
+    fn is_fresh_after(self, prior: Self) -> bool {
+        self.domain != prior.domain
+            && self.service_identity == prior.service_identity
+            && self.iommu_evidence.is_fresh_after(prior.iommu_evidence)
+    }
+}
+
 pub(crate) fn verify_native_network_bootstrap(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -5278,6 +5293,64 @@ pub(crate) fn verify_native_network_egress_resident_stop(
         && packet::egress_next_sequence() == expected_sequence.checked_add(4)
         && packet::egress_last_delivery().is_some_and(|metadata| {
             metadata.sequence == expected_sequence + 3 && metadata.length == 42
+        })
+}
+
+pub(crate) fn verify_native_network_egress_resident_restart(
+    network_image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    interrupt: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
+) -> bool {
+    let (common_mapping, msix_mapping, apic) = interrupt;
+    let Some(first_sequence) = packet::egress_next_sequence() else {
+        return false;
+    };
+    let Some(expected_final_sequence) = first_sequence.checked_add(8) else {
+        return false;
+    };
+    if first_sequence == 0
+        || packet::egress_pending_metadata().is_some()
+        || packet::egress_claim().is_some()
+    {
+        return false;
+    }
+    let Some(first) = verify_native_network_bootstrap_run_evidence(
+        network_image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReliableEgressResident,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+        None,
+    ) else {
+        return false;
+    };
+    if packet::egress_next_sequence() != first_sequence.checked_add(4) {
+        return false;
+    }
+    let Some(replacement) = verify_native_network_bootstrap_run_evidence(
+        network_image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReliableEgressResident,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+        Some(first.service_identity),
+    ) else {
+        return false;
+    };
+    replacement.is_fresh_after(first)
+        && first.iommu_evidence.is_retired()
+        && replacement.iommu_evidence.is_retired()
+        && packet::egress_pending_metadata().is_none()
+        && packet::egress_claim().is_none()
+        && packet::egress_next_sequence() == Some(expected_final_sequence)
+        && packet::egress_last_delivery().is_some_and(|metadata| {
+            metadata.sequence == expected_final_sequence - 1 && metadata.length == 42
         })
 }
 
@@ -7114,6 +7187,58 @@ fn verify_native_network_bootstrap_run(
     active_mapping: Option<paging::MmioMapping>,
     interrupt: Option<(paging::MmioMapping, &LocalApic)>,
 ) -> bool {
+    verify_native_network_bootstrap_run_with_evidence(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        mode,
+        active_mapping,
+        interrupt,
+        None,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_native_network_bootstrap_run_evidence(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    mode: NativeNetworkRunMode,
+    active_mapping: Option<paging::MmioMapping>,
+    interrupt: Option<(paging::MmioMapping, &LocalApic)>,
+    restart_identity: Option<u64>,
+) -> Option<NativeNetworkRun> {
+    let mut evidence = None;
+    verify_native_network_bootstrap_run_with_evidence(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        mode,
+        active_mapping,
+        interrupt,
+        restart_identity,
+        Some(&mut evidence),
+    )
+    .then_some(())?;
+    evidence
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_native_network_bootstrap_run_with_evidence(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    mode: NativeNetworkRunMode,
+    active_mapping: Option<paging::MmioMapping>,
+    interrupt: Option<(paging::MmioMapping, &LocalApic)>,
+    restart_identity: Option<u64>,
+    evidence_output: Option<&mut Option<NativeNetworkRun>>,
+) -> bool {
     let reject_reserved = matches!(
         mode,
         NativeNetworkRunMode::RejectBootstrap | NativeNetworkRunMode::ConfinedReject
@@ -7261,14 +7386,26 @@ fn verify_native_network_bootstrap_run(
             crate::capability::Rights::WRITE,
         )
     } else if packet_egress {
-        domain::initialize_boot_auxiliary_service_with_two_grants(
-            3,
-            crate::control_abi::NETWORK_DEVICE_OBJECT,
-            rights,
-            8,
-            crate::control_abi::PACKET_EGRESS_OBJECT,
-            crate::capability::Rights::READ,
-        )
+        if let Some(restart_identity) = restart_identity {
+            domain::initialize_boot_auxiliary_service_restart_with_two_grants(
+                3,
+                crate::control_abi::NETWORK_DEVICE_OBJECT,
+                rights,
+                8,
+                crate::control_abi::PACKET_EGRESS_OBJECT,
+                crate::capability::Rights::READ,
+                restart_identity,
+            )
+        } else {
+            domain::initialize_boot_auxiliary_service_with_two_grants(
+                3,
+                crate::control_abi::NETWORK_DEVICE_OBJECT,
+                rights,
+                8,
+                crate::control_abi::PACKET_EGRESS_OBJECT,
+                crate::capability::Rights::READ,
+            )
+        }
     } else {
         domain::initialize_boot_auxiliary_service(
             3,
@@ -7750,7 +7887,7 @@ fn verify_native_network_bootstrap_run(
             || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
     let stop_ordering_valid =
         !egress_resident || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
-    execution_retired
+    let valid = execution_retired
         && resident_wait_blocked
         && resident_stopped
         && packet_retired
@@ -7761,7 +7898,17 @@ fn verify_native_network_bootstrap_run(
         && interrupt_retired
         && parser_fault_valid
         && fault_ordering_valid
-        && stop_ordering_valid
+        && stop_ordering_valid;
+    if valid {
+        if let (Some(evidence_output), Some(iommu_evidence)) = (evidence_output, iommu_evidence) {
+            *evidence_output = Some(NativeNetworkRun {
+                domain: auxiliary,
+                service_identity: identity,
+                iommu_evidence,
+            });
+        }
+    }
+    valid
 }
 
 pub(crate) fn verify_auxiliary_address_space_lifecycle() -> bool {

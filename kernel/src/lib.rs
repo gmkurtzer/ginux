@@ -3348,6 +3348,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: control plane stopped resident network service");
     serial_write("\r\nginux: resident stop quiesced device before DMA retirement");
     serial_write("\r\nginux: resident egress wait and authority retired cleanly");
+    if !address_space::verify_native_network_egress_resident_restart(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: resident network replacement failed\r\n");
+    }
+    serial_write("\r\nginux: stopped resident network service replaced cleanly");
+    serial_write("\r\nginux: replacement network domain generation was distinct");
+    serial_write("\r\nginux: replacement network DMA and VT-d leases were fresh");
+    serial_write("\r\nginux: replacement resident service resumed exact egress sequence");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

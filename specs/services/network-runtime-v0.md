@@ -212,6 +212,14 @@ blocked driver. Stop cancels its wait and quiesces the active NIC before
 retiring interrupt, VT-d, DMA, capability, address-space, and domain state.
 See [Native Network Service Bootstrap ABI v7](../abi/native-network-bootstrap-v7.md).
 
+A controlled replacement proof repeats the v7 lifecycle with the prior
+generation's stable logical service identity. The replacement must use a
+distinct domain generation and entirely fresh DMA and VT-d table leases,
+reinitialize the reset NIC, and continue from the next monotonic egress
+sequence. Both generations end blocked and are stopped with complete ordered
+retirement. See
+[Resident Network Service Replacement v0](network-resident-restart-v0.md).
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The basic transmit

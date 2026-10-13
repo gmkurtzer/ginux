@@ -36,7 +36,9 @@ or owned frame to remain afterward.
 ## Limits
 
 The service loop has no graceful drain request, state handoff, dynamic queue
-size, claim deadline, watchdog, or automatic restart policy. Operation 30 is
+size, claim deadline, watchdog, or automatic restart policy. A separate proof
+performs explicit clean replacement with stable logical identity and fresh
+device authority, but does not overlap generations. Operation 30 is
 single-waiter and applies only to the currently bound object-9 write-only
 producer. The proof transmits four fixed ICMP replies before external stop;
 container sockets, routing, UDP/TCP, multi-queue operation, and peer-receipt

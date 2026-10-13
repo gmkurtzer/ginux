@@ -543,6 +543,13 @@ retires interrupt, VT-d, DMA, capability, address-space, and domain state in
 order. See
 [Native Network Service Bootstrap ABI v7](specs/abi/native-network-bootstrap-v7.md).
 
+The control-plane replacement proof then stops one resident generation and
+starts another with the same logical service identity. The replacement has a
+distinct domain generation and fresh DMA plus VT-d table leases, reinitializes
+the reset NIC, and resumes at the exact next egress sequence before undergoing
+the same clean stop. See
+[Resident Network Service Replacement v0](specs/services/network-resident-restart-v0.md).
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected
