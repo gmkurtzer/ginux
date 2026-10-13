@@ -75,11 +75,16 @@ Bootstrap ABI v3 is a separate bounded dispatch generation. It learns the peer
 from ARP, then consumes an actual Ethernet/IPv4/ICMP frame, validates its fixed
 IPv4 header and checksum in ring 3, and rejects a locally corrupted checksum.
 
+Bootstrap ABI v4 additionally validates the ICMPv4 echo-request type, code,
+complete-message checksum, identifier, sequence, and bounded payload profile.
+The service corrupts its copied ICMP checksum and requires rejection without
+gaining packet-write authority.
+
 This remains a fixed ARP proof, not a network stack. The resident path accepts
 exactly two packets under v1; v2 may continue until administratively stopped.
 There is no graceful drain or state handoff protocol. There is no
 Ethernet demultiplexing, ARP request generation, multi-entry or expiring
-neighbor cache, IPv4 options or reassembly, ICMP processing, UDP, TCP, routing,
+neighbor cache, IPv4 options or reassembly, ICMP replies or errors, UDP, TCP, routing,
 socket API, shared-memory
 packet path, or container network interface. The current FIFO and call gate
 remain single-CPU and copied.

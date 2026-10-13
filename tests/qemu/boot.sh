@@ -332,6 +332,10 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: protocol service validated IPv4 header checksum' "$output_file" ||
     ! grep -q '^ginux: malformed IPv4 header rejected in ring 3' "$output_file" ||
     ! grep -q '^ginux: IPv4 protocol generation retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: protocol service validated ICMP echo request' "$output_file" ||
+    ! grep -q '^ginux: ICMP type code identifier and sequence accepted' "$output_file" ||
+    ! grep -q '^ginux: malformed ICMP checksum rejected in ring 3' "$output_file" ||
+    ! grep -q '^ginux: ICMP protocol generation retired cleanly' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2

@@ -4464,6 +4464,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_protocol_boot_info_v4(&self, info: ginux_native_abi::NativeProtocolBootV4) -> bool {
+        if !info.is_valid_icmp_echo() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeProtocolBootV4>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn release(self) -> bool {
         let dma = self.dma_frame;
         memory::scrub_and_release_frames(self.owner, &self.frames)
@@ -6025,6 +6040,17 @@ pub(crate) fn verify_supervised_native_protocol_loop(
 pub(crate) fn verify_native_protocol_ipv4_dispatch(
     image: &crate::native_elf::NativeImage<'_>,
 ) -> bool {
+    verify_native_protocol_ipv4_mode(image, false)
+}
+
+pub(crate) fn verify_native_protocol_icmp_echo(image: &crate::native_elf::NativeImage<'_>) -> bool {
+    verify_native_protocol_ipv4_mode(image, true)
+}
+
+fn verify_native_protocol_ipv4_mode(
+    image: &crate::native_elf::NativeImage<'_>,
+    icmp_echo: bool,
+) -> bool {
     let Some(first_sequence) = packet::next_sequence() else {
         return false;
     };
@@ -6079,11 +6105,20 @@ pub(crate) fn verify_native_protocol_ipv4_dispatch(
         u32::from_be_bytes([10, 0, 2, 15]),
         u32::from_be_bytes([10, 0, 2, 2]),
     );
-    let boot = ginux_native_abi::NativeProtocolBootV3::ipv4_dispatch(boot_v0);
-    if !consumer_space.layout_is_valid(image)
-        || !consumer_space.relocations_are_valid(image)
-        || !consumer_space.write_protocol_boot_info_v3(boot)
-    {
+    if !consumer_space.layout_is_valid(image) || !consumer_space.relocations_are_valid(image) {
+        let _ = consumer_space.release();
+        let _ = domain::discard_unstarted_auxiliary_service(consumer);
+        return false;
+    }
+    let boot_written = if icmp_echo {
+        consumer_space
+            .write_protocol_boot_info_v4(ginux_native_abi::NativeProtocolBootV4::icmp_echo(boot_v0))
+    } else {
+        consumer_space.write_protocol_boot_info_v3(
+            ginux_native_abi::NativeProtocolBootV3::ipv4_dispatch(boot_v0),
+        )
+    };
+    if !boot_written {
         let _ = consumer_space.release();
         let _ = domain::discard_unstarted_auxiliary_service(consumer);
         return false;

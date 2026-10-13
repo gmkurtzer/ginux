@@ -21,6 +21,6 @@ requires rejection before restoring the byte, proving malformed input does not
 need kernel parsing. The generation then exits with its capability and frames
 fully reclaimed.
 
-This milestone only dispatches and validates the IPv4 header. It does not
-interpret or verify the ICMP message, accept IPv4 options, reassemble fragments,
-route packets, transmit replies, or expose sockets.
+Bootstrap ABI v3 only dispatches and validates the IPv4 header. Additive ABI v4
+also validates the bounded ICMP echo request. Neither accepts IPv4 options,
+reassembles fragments, routes packets, transmits replies, or exposes sockets.

@@ -3194,6 +3194,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: protocol service validated IPv4 header checksum");
     serial_write("\r\nginux: malformed IPv4 header rejected in ring 3");
     serial_write("\r\nginux: IPv4 protocol generation retired cleanly");
+    if !address_space::verify_native_protocol_icmp_echo(&protocol_image) {
+        kernel_fail("\r\nginux: native protocol ICMP echo validation failed\r\n");
+    }
+    serial_write("\r\nginux: protocol service validated ICMP echo request");
+    serial_write("\r\nginux: ICMP type code identifier and sequence accepted");
+    serial_write("\r\nginux: malformed ICMP checksum rejected in ring 3");
+    serial_write("\r\nginux: ICMP protocol generation retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

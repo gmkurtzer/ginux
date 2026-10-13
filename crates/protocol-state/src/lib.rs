@@ -124,6 +124,37 @@ pub fn parse_ipv4_icmp_v0<'a>(
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IcmpEchoRequestV0<'a> {
+    pub identifier: u16,
+    pub sequence: u16,
+    pub payload: &'a [u8],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IcmpParseError {
+    Length,
+    TypeCode,
+    Checksum,
+}
+
+pub fn parse_icmp_echo_request_v0(message: &[u8]) -> Result<IcmpEchoRequestV0<'_>, IcmpParseError> {
+    if message.len() < 8 {
+        return Err(IcmpParseError::Length);
+    }
+    if message[0] != 8 || message[1] != 0 {
+        return Err(IcmpParseError::TypeCode);
+    }
+    if checksum(message) != 0 {
+        return Err(IcmpParseError::Checksum);
+    }
+    Ok(IcmpEchoRequestV0 {
+        identifier: u16::from_be_bytes([message[4], message[5]]),
+        sequence: u16::from_be_bytes([message[6], message[7]]),
+        payload: &message[8..],
+    })
+}
+
 fn checksum(bytes: &[u8]) -> u16 {
     let mut sum = 0_u32;
     let (words, remainder) = bytes.as_chunks::<2>();
@@ -290,6 +321,31 @@ mod tests {
         assert_eq!(
             parse_ipv4_icmp_v0(&frame, LOCAL, peer),
             Err(Ipv4ParseError::Endpoint)
+        );
+    }
+
+    #[test]
+    fn validates_icmp_echo_request_fields_and_checksum() {
+        let echo = parse_icmp_echo_request_v0(&IPV4_FRAME[34..]).unwrap();
+        assert_eq!(echo.identifier, 0xbeef);
+        assert_eq!(echo.sequence, 1);
+        assert!(echo.payload.is_empty());
+    }
+
+    #[test]
+    fn rejects_icmp_type_code_and_checksum_changes() {
+        let mut message: [u8; 8] = IPV4_FRAME[34..].try_into().unwrap();
+        message[0] = 3;
+        message[2] = 0x3e;
+        assert_eq!(
+            parse_icmp_echo_request_v0(&message),
+            Err(IcmpParseError::TypeCode)
+        );
+        message = IPV4_FRAME[34..].try_into().unwrap();
+        message[2] ^= 1;
+        assert_eq!(
+            parse_icmp_echo_request_v0(&message),
+            Err(IcmpParseError::Checksum)
         );
     }
 }

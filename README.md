@@ -435,6 +435,11 @@ rejects a corrupted header without kernel protocol parsing. ICMP message
 handling, IPv4 options/reassembly, UDP, TCP, routing, and sockets remain future
 work.
 
+Protocol bootstrap ABI v4 validates the delivered ICMPv4 echo-request type,
+code, checksum, identifier, sequence, and empty proof payload. A corrupted ICMP
+checksum is rejected in ring 3. The service remains read-only, so echo-reply
+construction and transmit delegation remain separate milestones.
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected

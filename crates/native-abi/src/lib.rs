@@ -56,12 +56,15 @@ pub const NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP: u32 = 1 << 1;
 pub const NATIVE_PROTOCOL_FEATURE_WAIT_LOOP: u32 = 1 << 2;
 pub const NATIVE_PROTOCOL_FEATURE_SUPERVISED_LOOP: u32 = 1 << 3;
 pub const NATIVE_PROTOCOL_FEATURE_IPV4_DISPATCH: u32 = 1 << 4;
+pub const NATIVE_PROTOCOL_FEATURE_ICMP_ECHO: u32 = 1 << 5;
 pub const NATIVE_PROTOCOL_BOOT_V1_VERSION: u16 = 1;
 pub const NATIVE_PROTOCOL_BOOT_V1_SIZE: u16 = 56;
 pub const NATIVE_PROTOCOL_BOOT_V2_VERSION: u16 = 2;
 pub const NATIVE_PROTOCOL_BOOT_V2_SIZE: u16 = 56;
 pub const NATIVE_PROTOCOL_BOOT_V3_VERSION: u16 = 3;
 pub const NATIVE_PROTOCOL_BOOT_V3_SIZE: u16 = 56;
+pub const NATIVE_PROTOCOL_BOOT_V4_VERSION: u16 = 4;
+pub const NATIVE_PROTOCOL_BOOT_V4_SIZE: u16 = 56;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -676,6 +679,69 @@ impl NativeProtocolBootV3 {
 const _: () = assert!(core::mem::size_of::<NativeProtocolBootV3>() == 56);
 const _: () = assert!(core::mem::align_of::<NativeProtocolBootV3>() == 8);
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeProtocolBootV4 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub packet_capability: u64,
+    pub expected_sequence: u64,
+    pub local_mac: u64,
+    pub local_ipv4: u32,
+    pub peer_ipv4: u32,
+    pub packet_count: u32,
+    pub reserved: u32,
+}
+
+impl NativeProtocolBootV4 {
+    pub const fn icmp_echo(v0: NativeProtocolBootV0) -> Self {
+        Self {
+            magic: v0.magic,
+            version: NATIVE_PROTOCOL_BOOT_V4_VERSION,
+            size: NATIVE_PROTOCOL_BOOT_V4_SIZE,
+            features: NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+                | NATIVE_PROTOCOL_FEATURE_WAIT_LOOP
+                | NATIVE_PROTOCOL_FEATURE_IPV4_DISPATCH
+                | NATIVE_PROTOCOL_FEATURE_ICMP_ECHO,
+            packet_capability: v0.packet_capability,
+            expected_sequence: v0.expected_sequence,
+            local_mac: v0.local_mac,
+            local_ipv4: v0.local_ipv4,
+            peer_ipv4: v0.peer_ipv4,
+            packet_count: 2,
+            reserved: 0,
+        }
+    }
+
+    pub const fn is_valid_icmp_echo(&self) -> bool {
+        self.magic == NATIVE_PROTOCOL_BOOT_MAGIC
+            && self.version == NATIVE_PROTOCOL_BOOT_V4_VERSION
+            && self.size == NATIVE_PROTOCOL_BOOT_V4_SIZE
+            && self.features
+                == NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                    | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+                    | NATIVE_PROTOCOL_FEATURE_WAIT_LOOP
+                    | NATIVE_PROTOCOL_FEATURE_IPV4_DISPATCH
+                    | NATIVE_PROTOCOL_FEATURE_ICMP_ECHO
+            && self.packet_capability != 0
+            && self.expected_sequence != 0
+            && self.expected_sequence < u64::MAX - 1
+            && self.local_mac != 0
+            && self.local_mac >> 48 == 0
+            && self.local_ipv4 != 0
+            && self.peer_ipv4 != 0
+            && self.local_ipv4 != self.peer_ipv4
+            && self.packet_count == 2
+            && self.reserved == 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeProtocolBootV4>() == 56);
+const _: () = assert!(core::mem::align_of::<NativeProtocolBootV4>() == 8);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,6 +804,7 @@ mod tests {
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v1) == 56"));
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v2) == 56"));
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v3) == 56"));
+        assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v4) == 56"));
     }
 
     #[test]
@@ -814,6 +881,13 @@ mod tests {
             ..ipv4
         }
         .is_valid_ipv4_dispatch());
+        let icmp = NativeProtocolBootV4::icmp_echo(valid);
+        assert!(icmp.is_valid_icmp_echo());
+        assert!(!NativeProtocolBootV4 {
+            packet_count: 1,
+            ..icmp
+        }
+        .is_valid_icmp_echo());
     }
 
     #[test]

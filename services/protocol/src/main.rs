@@ -6,7 +6,7 @@ use core::arch::{asm, global_asm};
 use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
     NativeControlDescriptorV4, NativePacketRequestV0, NativeProtocolBootV0, NativeProtocolBootV1,
-    NativeProtocolBootV2, NativeProtocolBootV3, NATIVE_CALL_FAILED,
+    NativeProtocolBootV2, NativeProtocolBootV3, NativeProtocolBootV4, NATIVE_CALL_FAILED,
     NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_OPERATION,
     NATIVE_NETWORK_DEVICE_PROBE, NATIVE_PACKET_CONSUME_OPERATION, NATIVE_PACKET_MAX_SIZE,
@@ -14,7 +14,8 @@ use ginux_native_abi::{
     NATIVE_SERVICE_EXIT_OPERATION,
 };
 use ginux_protocol_state::{
-    parse_arp_reply_v4, parse_ipv4_icmp_v0, EndpointV4, NeighborObservation, NeighborStateV4,
+    parse_arp_reply_v4, parse_icmp_echo_request_v0, parse_ipv4_icmp_v0, EndpointV4,
+    NeighborObservation, NeighborStateV4,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_PROTOCOL_SERVICE_V0";
@@ -58,6 +59,7 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
         mut remaining,
         wait,
         ipv4_dispatch,
+        icmp_echo,
     ) = if info.version == 0 {
         if !info.is_valid_arp_consumer() {
             fail();
@@ -69,6 +71,7 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
             info.local_ipv4,
             info.peer_ipv4,
             Some(1_u32),
+            false,
             false,
             false,
         )
@@ -90,6 +93,7 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
             Some(info.packet_count),
             true,
             false,
+            false,
         )
     } else if info.version == 2 {
         let Some(info) = (unsafe {
@@ -109,8 +113,9 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
             None,
             true,
             false,
+            false,
         )
-    } else {
+    } else if info.version == 3 {
         let Some(info) = (unsafe {
             (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV3).as_ref()
         }) else {
@@ -126,6 +131,27 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
             info.local_ipv4,
             info.peer_ipv4,
             Some(info.packet_count),
+            true,
+            true,
+            false,
+        )
+    } else {
+        let Some(info) = (unsafe {
+            (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV4).as_ref()
+        }) else {
+            fail();
+        };
+        if !info.is_valid_icmp_echo() {
+            fail();
+        }
+        (
+            info.packet_capability,
+            info.expected_sequence,
+            info.local_mac,
+            info.local_ipv4,
+            info.peer_ipv4,
+            Some(info.packet_count),
+            true,
             true,
             true,
         )
@@ -172,6 +198,17 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
             let ipv4 = parse_ipv4_icmp_v0(&packet[..42], local, peer).unwrap_or_else(|_| fail());
             if ipv4.payload.len() != 8 {
                 fail();
+            }
+            if icmp_echo {
+                let echo = parse_icmp_echo_request_v0(ipv4.payload).unwrap_or_else(|_| fail());
+                if echo.identifier != 0xbeef || echo.sequence != 1 || !echo.payload.is_empty() {
+                    fail();
+                }
+                packet[36] ^= 1;
+                if parse_icmp_echo_request_v0(&packet[34..42]).is_ok() {
+                    fail();
+                }
+                packet[36] ^= 1;
             }
             packet[24] ^= 1;
             if parse_ipv4_icmp_v0(&packet[..42], local, peer).is_ok() {
