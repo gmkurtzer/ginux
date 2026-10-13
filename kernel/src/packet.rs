@@ -174,6 +174,7 @@ impl Mailbox {
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static mut MAILBOX: MaybeUninit<Mailbox> = MaybeUninit::uninit();
+static mut EGRESS_MAILBOX: MaybeUninit<Mailbox> = MaybeUninit::uninit();
 
 pub(crate) fn install() -> bool {
     if INSTALLED.swap(true, Ordering::AcqRel) {
@@ -181,6 +182,7 @@ pub(crate) fn install() -> bool {
     }
     unsafe {
         core::ptr::addr_of_mut!(MAILBOX).write(MaybeUninit::new(Mailbox::new()));
+        core::ptr::addr_of_mut!(EGRESS_MAILBOX).write(MaybeUninit::new(Mailbox::new()));
     }
     true
 }
@@ -193,6 +195,24 @@ pub(crate) fn publish(domain: u64, input: &[u8]) -> Result<u64, PacketError> {
     mailbox_mut()
         .ok_or(PacketError::InvalidProducer)?
         .publish(domain, input)
+}
+
+pub(crate) fn bind_egress_producer(domain: u64, service: u64) -> bool {
+    egress_mailbox_mut().is_some_and(|mailbox| mailbox.bind(domain, service))
+}
+
+pub(crate) fn publish_egress(domain: u64, input: &[u8]) -> Result<u64, PacketError> {
+    egress_mailbox_mut()
+        .ok_or(PacketError::InvalidProducer)?
+        .publish(domain, input)
+}
+
+pub(crate) fn retire_egress_producer(domain: u64) -> bool {
+    egress_mailbox_mut().is_some_and(|mailbox| mailbox.retire(domain))
+}
+
+pub(crate) fn retire_egress_producer_if_bound(domain: u64) -> bool {
+    domain != 0 && egress_mailbox_mut().is_some_and(|mailbox| mailbox.retire_if_bound(domain))
 }
 
 pub(crate) fn retire_producer(domain: u64) -> bool {
@@ -213,6 +233,16 @@ pub(crate) fn consume_with(
         .consume_with(expected_sequence, capacity, deliver)
 }
 
+pub(crate) fn consume_egress_with(
+    expected_sequence: u64,
+    capacity: usize,
+    deliver: impl FnOnce(PacketMetadata, &[u8]) -> bool,
+) -> Result<PacketMetadata, PacketError> {
+    egress_mailbox_mut()
+        .ok_or(PacketError::Empty)?
+        .consume_with(expected_sequence, capacity, deliver)
+}
+
 pub(crate) fn last_delivery() -> Option<PacketMetadata> {
     mailbox_mut()?.last_delivery
 }
@@ -223,6 +253,18 @@ pub(crate) fn pending_metadata() -> Option<PacketMetadata> {
         return None;
     }
     mailbox.metadata[mailbox.head]
+}
+
+pub(crate) fn egress_pending_metadata() -> Option<PacketMetadata> {
+    let mailbox = egress_mailbox_mut()?;
+    if mailbox.len == 0 {
+        return None;
+    }
+    mailbox.metadata[mailbox.head]
+}
+
+pub(crate) fn egress_last_delivery() -> Option<PacketMetadata> {
+    egress_mailbox_mut()?.last_delivery
 }
 
 pub(crate) fn wait_state(expected_sequence: u64) -> PacketWait {
@@ -242,16 +284,27 @@ pub(crate) fn next_sequence() -> Option<u64> {
     Some(mailbox_mut()?.next_sequence)
 }
 
+pub(crate) fn egress_next_sequence() -> Option<u64> {
+    Some(egress_mailbox_mut()?.next_sequence)
+}
+
 fn mailbox_mut() -> Option<&'static mut Mailbox> {
     INSTALLED
         .load(Ordering::Acquire)
         .then(|| unsafe { &mut *core::ptr::addr_of_mut!(MAILBOX).cast::<Mailbox>() })
 }
 
+fn egress_mailbox_mut() -> Option<&'static mut Mailbox> {
+    INSTALLED
+        .load(Ordering::Acquire)
+        .then(|| unsafe { &mut *core::ptr::addr_of_mut!(EGRESS_MAILBOX).cast::<Mailbox>() })
+}
+
 pub(crate) fn verify_invariants() -> bool {
     let mut mailbox = Mailbox::new();
     let packet = [0x5a; 42];
     let mut output = [0; 42];
+    let mut egress = Mailbox::new();
     !mailbox.bind(0, 1)
         && mailbox.bind(2, 7)
         && mailbox.retire_if_bound(3)
@@ -301,4 +354,15 @@ pub(crate) fn verify_invariants() -> bool {
             mailbox.wait_state(u64::MAX) == PacketWait::Stale
                 && mailbox.space_state(3) == PacketSpace::SequenceExhausted
         }
+        && egress.bind(9, 10)
+        && egress.publish(9, &[0xa5; 8]) == Ok(1)
+        && egress.len == 1
+        && mailbox.len == 0
+        && egress
+            .consume_with(1, 8, |metadata, packet| {
+                metadata.source_domain == 9
+                    && metadata.service_identity == 10
+                    && packet == [0xa5; 8]
+            })
+            .is_ok()
 }

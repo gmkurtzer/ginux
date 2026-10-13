@@ -14400,14 +14400,21 @@ fn packet_publish_call(caller_domain: u64, capability: u64, frame: *const UserTr
     let Some(request) = packet_request(frame.first_argument()) else {
         return u64::MAX - 2;
     };
+    let ingress = domain::handle_permits(
+        caller_domain,
+        capability,
+        control_abi::PACKET_OBJECT,
+        Rights::WRITE,
+    );
+    let egress = domain::handle_permits(
+        caller_domain,
+        capability,
+        control_abi::PACKET_EGRESS_OBJECT,
+        Rights::WRITE,
+    );
     if request.expected_sequence != 0
         || !(1..=control_abi::PACKET_MAX_SIZE).contains(&request.buffer_size)
-        || !domain::handle_permits(
-            caller_domain,
-            capability,
-            control_abi::PACKET_OBJECT,
-            Rights::WRITE,
-        )
+        || ingress == egress
     {
         return u64::MAX - 2;
     }
@@ -14418,9 +14425,14 @@ fn packet_publish_call(caller_domain: u64, capability: u64, frame: *const UserTr
     ) {
         return u64::MAX - 2;
     }
-    match crate::packet::publish(caller_domain, &packet[..request.buffer_size]) {
+    let result = if egress {
+        crate::packet::publish_egress(caller_domain, &packet[..request.buffer_size])
+    } else {
+        crate::packet::publish(caller_domain, &packet[..request.buffer_size])
+    };
+    match result {
         Ok(sequence) => {
-            if scheduler::wake_packet_waiter(caller_domain, sequence) {
+            if ingress && scheduler::wake_packet_waiter(caller_domain, sequence) {
                 let _ = timer::cancel_packet_wait_timer_for_sequence(sequence);
             }
             timer::mark_scheduler_preemption_ready();
@@ -14437,24 +14449,40 @@ fn packet_consume_call(caller_domain: u64, capability: u64, frame: *const UserTr
     let Some(request) = packet_request(frame.first_argument()) else {
         return u64::MAX - 2;
     };
+    let ingress = domain::handle_permits(
+        caller_domain,
+        capability,
+        control_abi::PACKET_OBJECT,
+        Rights::READ,
+    );
+    let egress = domain::handle_permits(
+        caller_domain,
+        capability,
+        control_abi::PACKET_EGRESS_OBJECT,
+        Rights::READ,
+    );
     if request.expected_sequence == 0
         || !(1..=control_abi::PACKET_MAX_SIZE).contains(&request.buffer_size)
-        || !domain::handle_permits(
-            caller_domain,
-            capability,
-            control_abi::PACKET_OBJECT,
-            Rights::READ,
-        )
+        || ingress == egress
     {
         return u64::MAX - 2;
     }
-    match crate::packet::consume_with(
-        request.expected_sequence,
-        request.buffer_size,
-        |_, packet| address_space::copy_to_current_user(request.buffer_address, packet),
-    ) {
+    let result = if egress {
+        crate::packet::consume_egress_with(
+            request.expected_sequence,
+            request.buffer_size,
+            |_, packet| address_space::copy_to_current_user(request.buffer_address, packet),
+        )
+    } else {
+        crate::packet::consume_with(
+            request.expected_sequence,
+            request.buffer_size,
+            |_, packet| address_space::copy_to_current_user(request.buffer_address, packet),
+        )
+    };
+    match result {
         Ok(metadata) => {
-            if scheduler::wake_packet_space_waiter(caller_domain) {
+            if ingress && scheduler::wake_packet_space_waiter(caller_domain) {
                 timer::mark_scheduler_preemption_ready();
             }
             metadata.length as u64
@@ -15592,6 +15620,10 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
             serial_write("ginux: auxiliary exit transition failed\r\n");
             return u64::MAX;
         }
+        if !crate::packet::retire_egress_producer_if_bound(caller_domain) {
+            serial_write("ginux: auxiliary exit egress retirement failed\r\n");
+            return u64::MAX;
+        }
         if !address_space::quiesce_auxiliary_device(caller_domain) {
             serial_write("ginux: auxiliary exit quiesce failed\r\n");
             return u64::MAX;
@@ -15694,6 +15726,10 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
     if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly) {
         if !domain::begin_auxiliary_runtime_fault(fault_domain, fault_metadata) {
             serial_write("ginux: auxiliary fault transition failed\r\n");
+            return u64::MAX;
+        }
+        if !crate::packet::retire_egress_producer_if_bound(fault_domain) {
+            serial_write("ginux: auxiliary fault egress retirement failed\r\n");
             return u64::MAX;
         }
         if !address_space::quiesce_faulted_auxiliary_device(fault_domain) {

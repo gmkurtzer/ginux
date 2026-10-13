@@ -3201,6 +3201,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: ICMP type code identifier and sequence accepted");
     serial_write("\r\nginux: malformed ICMP checksum rejected in ring 3");
     serial_write("\r\nginux: ICMP protocol generation retired cleanly");
+    if !address_space::verify_native_protocol_icmp_reply(&protocol_image) {
+        kernel_fail("\r\nginux: native protocol ICMP echo reply failed\r\n");
+    }
+    serial_write("\r\nginux: protocol service constructed exact ICMP echo reply");
+    serial_write("\r\nginux: protocol egress authority remained write only");
+    serial_write("\r\nginux: isolated egress consumer retained read-only authority");
+    serial_write("\r\nginux: egress packet survived protocol service retirement");
+    serial_write("\r\nginux: isolated egress consumer received exact echo reply");
+    serial_write("\r\nginux: protocol egress sequence consumed exactly once");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

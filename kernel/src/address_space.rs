@@ -20,6 +20,7 @@ global_asm!(include_str!("../packet-wait.S"));
 global_asm!(include_str!("../packet-backpressure.S"));
 global_asm!(include_str!("../packet-protocol-loop.S"));
 global_asm!(include_str!("../packet-ipv4.S"));
+global_asm!(include_str!("../packet-egress-consumer.S"));
 
 extern "C" {
     fn ginux_volume_writer_start();
@@ -47,6 +48,8 @@ extern "C" {
     fn ginux_packet_protocol_loop_producer_end();
     fn ginux_packet_ipv4_producer_start();
     fn ginux_packet_ipv4_producer_end();
+    fn ginux_packet_egress_consumer_start();
+    fn ginux_packet_egress_consumer_end();
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -4479,6 +4482,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_protocol_boot_info_v5(&self, info: ginux_native_abi::NativeProtocolBootV5) -> bool {
+        if !info.is_valid_icmp_echo_reply() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeProtocolBootV5>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn release(self) -> bool {
         let dma = self.dma_frame;
         memory::scrub_and_release_frames(self.owner, &self.frames)
@@ -6040,16 +6058,23 @@ pub(crate) fn verify_supervised_native_protocol_loop(
 pub(crate) fn verify_native_protocol_ipv4_dispatch(
     image: &crate::native_elf::NativeImage<'_>,
 ) -> bool {
-    verify_native_protocol_ipv4_mode(image, false)
+    verify_native_protocol_ipv4_mode(image, false, false)
 }
 
 pub(crate) fn verify_native_protocol_icmp_echo(image: &crate::native_elf::NativeImage<'_>) -> bool {
-    verify_native_protocol_ipv4_mode(image, true)
+    verify_native_protocol_ipv4_mode(image, true, false)
+}
+
+pub(crate) fn verify_native_protocol_icmp_reply(
+    image: &crate::native_elf::NativeImage<'_>,
+) -> bool {
+    verify_native_protocol_ipv4_mode(image, true, true)
 }
 
 fn verify_native_protocol_ipv4_mode(
     image: &crate::native_elf::NativeImage<'_>,
     icmp_echo: bool,
+    icmp_reply: bool,
 ) -> bool {
     let Some(first_sequence) = packet::next_sequence() else {
         return false;
@@ -6057,7 +6082,15 @@ fn verify_native_protocol_ipv4_mode(
     let Some(second_sequence) = first_sequence.checked_add(1) else {
         return false;
     };
-    if first_sequence == 0 || second_sequence == u64::MAX || packet::pending_metadata().is_some() {
+    let expected_egress_sequence = packet::egress_next_sequence();
+    if first_sequence == 0
+        || second_sequence == u64::MAX
+        || packet::pending_metadata().is_some()
+        || icmp_reply
+            && (expected_egress_sequence
+                .is_none_or(|sequence| sequence == 0 || sequence == u64::MAX)
+                || packet::egress_pending_metadata().is_some())
+    {
         return false;
     }
     let Some(producer_program) = volume_program(
@@ -6066,11 +6099,23 @@ fn verify_native_protocol_ipv4_mode(
     ) else {
         return false;
     };
-    let Some(consumer) = domain::initialize_boot_auxiliary_service(
-        7,
-        crate::control_abi::PACKET_OBJECT,
-        crate::capability::Rights::READ,
-    ) else {
+    let consumer = if icmp_reply {
+        domain::initialize_boot_auxiliary_service_with_two_grants(
+            7,
+            crate::control_abi::PACKET_OBJECT,
+            crate::capability::Rights::READ,
+            8,
+            crate::control_abi::PACKET_EGRESS_OBJECT,
+            crate::capability::Rights::WRITE,
+        )
+    } else {
+        domain::initialize_boot_auxiliary_service(
+            7,
+            crate::control_abi::PACKET_OBJECT,
+            crate::capability::Rights::READ,
+        )
+    };
+    let Some(consumer) = consumer else {
         return false;
     };
     let (Some(consumer_handle), Some(consumer_identity), Some(consumer_owner)) = (
@@ -6080,6 +6125,9 @@ fn verify_native_protocol_ipv4_mode(
     ) else {
         return false;
     };
+    let egress_handle = icmp_reply
+        .then(|| domain::auxiliary_boot_handle(consumer, 1))
+        .flatten();
     if !domain::handle_permits(
         consumer,
         consumer_handle,
@@ -6090,7 +6138,38 @@ fn verify_native_protocol_ipv4_mode(
         consumer_handle,
         crate::control_abi::PACKET_OBJECT,
         crate::capability::Rights::WRITE,
-    ) {
+    ) || icmp_reply
+        && egress_handle.is_none_or(|handle| {
+            !domain::handle_permits(
+                consumer,
+                handle,
+                crate::control_abi::PACKET_EGRESS_OBJECT,
+                crate::capability::Rights::WRITE,
+            ) || domain::handle_permits(
+                consumer,
+                handle,
+                crate::control_abi::PACKET_EGRESS_OBJECT,
+                crate::capability::Rights::READ,
+            ) || domain::handle_permits(
+                consumer,
+                handle,
+                crate::control_abi::PACKET_OBJECT,
+                crate::capability::Rights::READ,
+            ) || domain::handle_permits(
+                consumer,
+                handle,
+                crate::control_abi::NETWORK_DEVICE_OBJECT,
+                crate::capability::Rights::WRITE,
+            )
+        })
+        || !icmp_reply
+            && domain::handle_permits(
+                consumer,
+                consumer_handle,
+                crate::control_abi::PACKET_EGRESS_OBJECT,
+                crate::capability::Rights::WRITE,
+            )
+    {
         return false;
     }
     let kernel_root = current_root();
@@ -6110,7 +6189,15 @@ fn verify_native_protocol_ipv4_mode(
         let _ = domain::discard_unstarted_auxiliary_service(consumer);
         return false;
     }
-    let boot_written = if icmp_echo {
+    let boot_written = if icmp_reply {
+        consumer_space.write_protocol_boot_info_v5(
+            ginux_native_abi::NativeProtocolBootV5::icmp_echo_reply(
+                boot_v0,
+                egress_handle.unwrap_or(0),
+                expected_egress_sequence.unwrap_or(0),
+            ),
+        )
+    } else if icmp_echo {
         consumer_space
             .write_protocol_boot_info_v4(ginux_native_abi::NativeProtocolBootV4::icmp_echo(boot_v0))
     } else {
@@ -6118,7 +6205,7 @@ fn verify_native_protocol_ipv4_mode(
             ginux_native_abi::NativeProtocolBootV3::ipv4_dispatch(boot_v0),
         )
     };
-    if !boot_written {
+    if !boot_written || icmp_reply && !packet::bind_egress_producer(consumer, consumer_identity) {
         let _ = consumer_space.release();
         let _ = domain::discard_unstarted_auxiliary_service(consumer);
         return false;
@@ -6157,10 +6244,11 @@ fn verify_native_protocol_ipv4_mode(
         producer.identity,
     );
     let producer_retired = packet::retire_producer(producer.domain);
+    let egress_producer_retired = !icmp_reply || !packet::retire_egress_producer(consumer);
     let producer_event = domain::take_lifecycle_event();
     let consumer_event = domain::take_lifecycle_event();
     let second_delivery = packet::last_delivery();
-    current_root() == kernel_root
+    let base_valid = current_root() == kernel_root
         && scheduler::current_domain().is_none()
         && scheduler::packet_wait_is_available(second_sequence)
         && registered_auxiliary_address_space_count() == 0
@@ -6169,6 +6257,7 @@ fn verify_native_protocol_ipv4_mode(
         && domain::domain_is_retired(producer.domain)
         && domain::domain_is_retired(consumer)
         && producer_retired
+        && egress_producer_retired
         && producer_event
             == Some(
                 (55_u64 << 56)
@@ -6188,7 +6277,130 @@ fn verify_native_protocol_ipv4_mode(
                 && metadata.length == 42
         })
         && packet::pending_metadata().is_none()
-        && packet::next_sequence() == second_sequence.checked_add(1)
+        && packet::next_sequence() == second_sequence.checked_add(1);
+    if !base_valid {
+        return false;
+    }
+    if !icmp_reply {
+        return true;
+    }
+    let Some(expected_egress_sequence) = expected_egress_sequence else {
+        return false;
+    };
+    let pending_valid = packet::egress_pending_metadata().is_some_and(|metadata| {
+        metadata.source_domain == consumer
+            && metadata.service_identity == consumer_identity
+            && metadata.sequence == expected_egress_sequence
+            && metadata.length == 42
+    });
+    if !pending_valid {
+        return false;
+    }
+    if !verify_ring3_egress_consumer(expected_egress_sequence) {
+        return false;
+    }
+    packet::egress_pending_metadata().is_none()
+        && packet::egress_next_sequence() == expected_egress_sequence.checked_add(1)
+        && packet::egress_last_delivery().is_some_and(|metadata| {
+            metadata.source_domain == consumer
+                && metadata.service_identity == consumer_identity
+                && metadata.sequence == expected_egress_sequence
+                && metadata.length == 42
+        })
+}
+
+fn verify_ring3_egress_consumer(expected_sequence: u64) -> bool {
+    if expected_sequence == 0 || expected_sequence == u64::MAX {
+        return false;
+    }
+    let Some(program) = volume_program(
+        ginux_packet_egress_consumer_start as *const () as usize,
+        ginux_packet_egress_consumer_end as *const () as usize,
+    ) else {
+        return false;
+    };
+    let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
+        8,
+        crate::control_abi::PACKET_EGRESS_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        return false;
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    if !domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::PACKET_EGRESS_OBJECT,
+        crate::capability::Rights::READ,
+    ) || domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::PACKET_EGRESS_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) || domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) || domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::NETWORK_DEVICE_OBJECT,
+        crate::capability::Rights::READ,
+    ) {
+        return false;
+    }
+    let kernel_root = current_root();
+    let Some(space) = WxAddressSpace::new(kernel_root, owner) else {
+        return false;
+    };
+    if !space.permissions_are_valid(kernel_root) {
+        return false;
+    }
+    unsafe {
+        for (offset, byte) in program.iter().enumerate() {
+            space.code_frame.add(offset).write(*byte);
+        }
+    }
+    let root = space.root;
+    let entry = USER_TEST_ADDRESS;
+    let stack = USER_TEST_ADDRESS + 3 * PAGE_SIZE;
+    if !register_auxiliary_address_space(auxiliary, space)
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_packet_consumer(
+        entry,
+        stack,
+        handle,
+        expected_sequence,
+        false,
+        auxiliary,
+        identity,
+    );
+    let event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && event
+            == Some(
+                (56_u64 << 56)
+                    | (auxiliary << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && domain::last_lifecycle_event_detail() == Some(56)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none()
 }
 
 fn verify_ring3_packet_consumer(expected_sequence: u64, more_pending: bool) -> bool {
@@ -6788,6 +7000,7 @@ pub(crate) fn stop_auxiliary_from_current_user(
     }
     scheduler::cancel_auxiliary(domain_id)
         && packet::retire_producer_if_bound(domain_id)
+        && packet::retire_egress_producer_if_bound(domain_id)
         && timer::cancel_packet_wait_timer_for_domain(domain_id)
         && release_auxiliary_address_space(domain_id)
         && domain::stop_auxiliary_service(supervisor, capability, domain_id)

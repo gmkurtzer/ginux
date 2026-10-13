@@ -12,6 +12,7 @@
 #define GINUX_NATIVE_PROTOCOL_FEATURE_SUPERVISED_LOOP UINT32_C(8)
 #define GINUX_NATIVE_PROTOCOL_FEATURE_IPV4_DISPATCH UINT32_C(16)
 #define GINUX_NATIVE_PROTOCOL_FEATURE_ICMP_ECHO UINT32_C(32)
+#define GINUX_NATIVE_PROTOCOL_FEATURE_PACKET_EGRESS UINT32_C(64)
 #define GINUX_NATIVE_PROTOCOL_BOOT_V1_VERSION UINT16_C(1)
 #define GINUX_NATIVE_PROTOCOL_BOOT_V1_SIZE UINT16_C(56)
 #define GINUX_NATIVE_PROTOCOL_BOOT_V2_VERSION UINT16_C(2)
@@ -20,6 +21,8 @@
 #define GINUX_NATIVE_PROTOCOL_BOOT_V3_SIZE UINT16_C(56)
 #define GINUX_NATIVE_PROTOCOL_BOOT_V4_VERSION UINT16_C(4)
 #define GINUX_NATIVE_PROTOCOL_BOOT_V4_SIZE UINT16_C(56)
+#define GINUX_NATIVE_PROTOCOL_BOOT_V5_VERSION UINT16_C(5)
+#define GINUX_NATIVE_PROTOCOL_BOOT_V5_SIZE UINT16_C(72)
 
 struct ginux_native_protocol_boot_v0 {
     uint64_t magic;
@@ -104,5 +107,24 @@ struct ginux_native_protocol_boot_v4 {
 
 _Static_assert(sizeof(struct ginux_native_protocol_boot_v4) == 56,
                "native protocol bootstrap v4 size");
+
+struct ginux_native_protocol_boot_v5 {
+    uint64_t magic;
+    uint16_t version;
+    uint16_t size;
+    uint32_t features;
+    uint64_t packet_capability;
+    uint64_t expected_sequence;
+    uint64_t local_mac;
+    uint32_t local_ipv4;
+    uint32_t peer_ipv4;
+    uint32_t packet_count;
+    uint32_t reserved;
+    uint64_t egress_capability;
+    uint64_t expected_egress_sequence;
+};
+
+_Static_assert(sizeof(struct ginux_native_protocol_boot_v5) == 72,
+               "native protocol bootstrap v5 size");
 
 #endif

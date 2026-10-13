@@ -20,7 +20,7 @@ All integers are little-endian. The canonical byte layout is:
 | 80 | 32 | root-image SHA-256 |
 | 112 | 16 each | `(object: u64, rights: u64)` grants |
 
-The parser permits one through eight grants, requires the total size to equal
+The parser permits one through nine grants, requires the total size to equal
 the header plus all records, rejects zero objects/rights, unknown right bits,
 duplicate objects, trailing data, and nonzero reserved fields. The current
 manifest authorizes host-control object 1 with read/write/manage and console
@@ -44,6 +44,12 @@ additional page-granular mapping containing queue zero's validated notification
 register. The current proof publishes one available entry, writes queue index
 zero once, validates the bounded blank-sector completion, and then faults
 without reusing the grant.
+Object 8 grants read/write authority over the bounded ingress packet object;
+the kernel attenuates it into device-producer `WRITE` and protocol-consumer
+`READ` handles. Object 9 independently grants read/write authority over the
+bounded egress packet object. The protocol service receives only its `WRITE`
+half and a later isolated network consumer receives only its `READ` half.
+Neither object implies authority over the other or over a network device.
 The bundle and root-image ranges in handoff v4 must exactly match their
 recorded sizes and digests. Only verified bundle bytes are copied into the
 ring-3 executable mapping, and only the verified root image reaches the

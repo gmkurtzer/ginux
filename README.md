@@ -412,7 +412,7 @@ lease while preserving both guard pages, and retires the complete old
 interpreter/main/DSO graph. The archive
 is not yet a general mount or a system-container image.
 
-The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. Isolated services configure bounded network state and perform interrupt-driven virtio-net transmission and reception. A copied four-entry FIFO now separates the write-only device producer from read-only non-device consumers, preserves ordered packets across clean exit and driver failure, and wakes an exact-sequence consumer without polling. A measured freestanding Rust protocol service receives only packet-read authority after driver retirement, validates the Ethernet/ARP reply, proves device and publication denial, and exits with complete reclamation. A full FIFO blocks its bound producer until consumption frees a slot, after which the producer retries the exact next sequence. Control-plane management can stop a blocked consumer, retire its resources, and let a replacement claim the unchanged sequence. A bounded relative wait can also expire through the local APIC, preempt a non-cooperative peer, release the sequence, and cancel its timer when publication wins. General IPv4 processing, routing, sockets, and container networking remain unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
+The initial executable milestone is an x86-64 unified EFI image tested under QEMU. Its boot component passes a development-signed authority manifest and measured control-plane bundle, exits firmware boot services, and transfers control to a separate `no_std` kernel. The kernel establishes protected CPU and memory state, seals manifest-derived capabilities into one native domain, and runs the measured W^X control-plane payload at ring 3 through a capability-checked call gate. Calibrated APIC one-shots preempt the control context to run an isolated service and its replacement generation, while bounded IPC carries the request and reply. The control plane can also create, bounded-load, stage, cancel, and retire stop-only auxiliary workloads without placing third-party code in the kernel. Isolated services configure bounded network state and perform interrupt-driven virtio-net transmission and reception. A copied four-entry ingress FIFO separates the write-only device producer from read-only protocol consumers, preserves ordered packets across clean exit and driver failure, and wakes an exact-sequence consumer without polling. A measured freestanding Rust protocol service learns one ARP neighbor and validates Ethernet, IPv4, and ICMP echo requests without device authority. It can receive an independent write-only egress grant, construct a checksummed echo reply, and publish it into a separate four-entry FIFO. The reply survives protocol-domain retirement and is received exactly once by a fresh read-only egress consumer. The proof consumer is not yet connected to virtio-net transmission. A full ingress FIFO blocks its bound producer until consumption frees a slot, after which the producer retries the exact next sequence. Control-plane management can stop a blocked consumer, retire its resources, and let a replacement claim the unchanged sequence. A bounded relative wait can also expire through the local APIC, preempt a non-cooperative peer, release the sequence, and cancel its timer when publication wins. General routing, UDP/TCP, sockets, and container networking remain unimplemented. On Apple Silicon development hosts it uses QEMU TCG emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
 
 Protocol bootstrap ABI v1 also exercises a bounded resident-service path: one
 measured Rust protocol domain blocks on an empty FIFO, wakes for two separately
@@ -431,14 +431,21 @@ neighbors, and ARP request generation remain future work.
 Protocol bootstrap ABI v3 dispatches a separately delivered IPv4 frame after
 ARP learning. The isolated service validates the fixed IPv4 header, length,
 checksum, fragmentation boundary, protocol, and configured endpoints, then
-rejects a corrupted header without kernel protocol parsing. ICMP message
-handling, IPv4 options/reassembly, UDP, TCP, routing, and sockets remain future
-work.
+rejects a corrupted header without kernel protocol parsing. IPv4
+options/reassembly, UDP, TCP, routing, and sockets remain future work.
 
 Protocol bootstrap ABI v4 validates the delivered ICMPv4 echo-request type,
 code, checksum, identifier, sequence, and empty proof payload. A corrupted ICMP
 checksum is rejected in ring 3. The service remains read-only, so echo-reply
-construction and transmit delegation remain separate milestones.
+construction is deferred to the next additive ABI.
+
+Protocol bootstrap ABI v5 adds a distinct write-only egress capability and
+expected egress sequence without weakening the ingress handle. The memory-safe
+protocol crate constructs the exact echo reply and recomputes its IPv4 and ICMP
+checksums. A separate read-only ring-3 egress consumer receives it after the
+protocol service retires, while publication, ingress access, device access,
+future sequence use, and replay remain denied. Egress-to-virtio transmission,
+blocking egress waits, and container-facing networking remain future work.
 
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption

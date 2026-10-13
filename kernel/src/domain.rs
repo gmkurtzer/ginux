@@ -4,7 +4,7 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_DOMAINS: usize = 4;
-const MAX_BOOT_GRANTS: usize = 8;
+const MAX_BOOT_GRANTS: usize = 9;
 const CONTROL_CALL_BUDGET: u16 = 79;
 const SERVICE_CALL_BUDGET: u16 = 23;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;

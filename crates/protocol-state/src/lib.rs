@@ -138,6 +138,12 @@ pub enum IcmpParseError {
     Checksum,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IcmpEchoReplyError {
+    Ipv4(Ipv4ParseError),
+    Icmp(IcmpParseError),
+}
+
 pub fn parse_icmp_echo_request_v0(message: &[u8]) -> Result<IcmpEchoRequestV0<'_>, IcmpParseError> {
     if message.len() < 8 {
         return Err(IcmpParseError::Length);
@@ -153,6 +159,31 @@ pub fn parse_icmp_echo_request_v0(message: &[u8]) -> Result<IcmpEchoRequestV0<'_
         sequence: u16::from_be_bytes([message[6], message[7]]),
         payload: &message[8..],
     })
+}
+
+pub fn build_icmp_echo_reply_v0(
+    frame: &mut [u8],
+    local: EndpointV4,
+    peer: EndpointV4,
+) -> Result<(), IcmpEchoReplyError> {
+    {
+        let packet = parse_ipv4_icmp_v0(frame, local, peer).map_err(IcmpEchoReplyError::Ipv4)?;
+        parse_icmp_echo_request_v0(packet.payload).map_err(IcmpEchoReplyError::Icmp)?;
+    }
+
+    frame[0..6].copy_from_slice(&peer.mac);
+    frame[6..12].copy_from_slice(&local.mac);
+    frame[26..30].copy_from_slice(&local.ipv4.to_be_bytes());
+    frame[30..34].copy_from_slice(&peer.ipv4.to_be_bytes());
+    frame[24..26].fill(0);
+    let ipv4_checksum = checksum(&frame[14..34]);
+    frame[24..26].copy_from_slice(&ipv4_checksum.to_be_bytes());
+
+    frame[34] = 0;
+    frame[36..38].fill(0);
+    let icmp_checksum = checksum(&frame[34..]);
+    frame[36..38].copy_from_slice(&icmp_checksum.to_be_bytes());
+    Ok(())
 }
 
 fn checksum(bytes: &[u8]) -> u16 {
@@ -347,5 +378,40 @@ mod tests {
             parse_icmp_echo_request_v0(&message),
             Err(IcmpParseError::Checksum)
         );
+    }
+
+    #[test]
+    fn constructs_exact_icmp_echo_reply() {
+        let peer = EndpointV4 {
+            mac: [0x52, 0x55, 0x0a, 0, 2, 2],
+            ipv4: PEER,
+        };
+        let mut frame = IPV4_FRAME;
+        assert_eq!(build_icmp_echo_reply_v0(&mut frame, LOCAL, peer), Ok(()));
+        assert_eq!(frame[0..6], peer.mac);
+        assert_eq!(frame[6..12], LOCAL.mac);
+        assert_eq!(frame[26..30], LOCAL.ipv4.to_be_bytes());
+        assert_eq!(frame[30..34], peer.ipv4.to_be_bytes());
+        assert_eq!(frame[34], 0);
+        assert_eq!(frame[35], 0);
+        assert_eq!(frame[38..42], [0xbe, 0xef, 0x00, 0x01]);
+        assert_eq!(checksum(&frame[14..34]), 0);
+        assert_eq!(checksum(&frame[34..]), 0);
+    }
+
+    #[test]
+    fn does_not_mutate_rejected_echo_request() {
+        let peer = EndpointV4 {
+            mac: [0x52, 0x55, 0x0a, 0, 2, 2],
+            ipv4: PEER,
+        };
+        let mut frame = IPV4_FRAME;
+        frame[36] ^= 1;
+        let before = frame;
+        assert_eq!(
+            build_icmp_echo_reply_v0(&mut frame, LOCAL, peer),
+            Err(IcmpEchoReplyError::Icmp(IcmpParseError::Checksum))
+        );
+        assert_eq!(frame, before);
     }
 }

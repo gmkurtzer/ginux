@@ -336,6 +336,12 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: ICMP type code identifier and sequence accepted' "$output_file" ||
     ! grep -q '^ginux: malformed ICMP checksum rejected in ring 3' "$output_file" ||
     ! grep -q '^ginux: ICMP protocol generation retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: protocol service constructed exact ICMP echo reply' "$output_file" ||
+    ! grep -q '^ginux: protocol egress authority remained write only' "$output_file" ||
+    ! grep -q '^ginux: isolated egress consumer retained read-only authority' "$output_file" ||
+    ! grep -q '^ginux: egress packet survived protocol service retirement' "$output_file" ||
+    ! grep -q '^ginux: isolated egress consumer received exact echo reply' "$output_file" ||
+    ! grep -q '^ginux: protocol egress sequence consumed exactly once' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2
@@ -547,8 +553,8 @@ if ! grep -q '^ginux: malformed boot manifests rejected' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: manifest authority grants: 8' "$output_file"; then
-    echo "Boot test failed: the signed packet-handoff authority grant is missing." >&2
+if ! grep -q '^ginux: manifest authority grants: 9' "$output_file"; then
+    echo "Boot test failed: a signed directional packet authority grant is missing." >&2
     exit 1
 fi
 

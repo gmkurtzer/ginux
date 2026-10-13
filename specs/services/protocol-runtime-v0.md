@@ -13,8 +13,9 @@ the exact artifact at `native/protocol` in the signed deterministic initramfs.
 
 The bounded native ELF loader requires three load segments, relative-only
 relocations, W^X image mappings, a read-only bootstrap page, a two-page NX
-stack, and guard pages. The live domain receives no DMA or MMIO mapping. Its
-sealed capability table contains only one packet-object `READ` grant.
+stack, and guard pages. The live domain receives no DMA or MMIO mapping. The
+v0 through v4 generations contain only one ingress-packet `READ` grant; v5
+adds an independent egress-packet `WRITE` grant.
 
 The isolated virtio-net driver first validates an interrupt-completed gateway
 ARP reply and copies its 42 Ethernet bytes into the kernel FIFO. Driver
@@ -80,11 +81,16 @@ complete-message checksum, identifier, sequence, and bounded payload profile.
 The service corrupts its copied ICMP checksum and requires rejection without
 gaining packet-write authority.
 
+Bootstrap ABI v5 constructs the validated echo reply and publishes it through
+object 9 `WRITE` without gaining ingress-write, egress-read, or device
+authority. A fresh egress-read-only domain consumes the exact reply after the
+protocol generation retires.
+
 This remains a fixed ARP proof, not a network stack. The resident path accepts
 exactly two packets under v1; v2 may continue until administratively stopped.
 There is no graceful drain or state handoff protocol. There is no
 Ethernet demultiplexing, ARP request generation, multi-entry or expiring
-neighbor cache, IPv4 options or reassembly, ICMP replies or errors, UDP, TCP, routing,
-socket API, shared-memory
-packet path, or container network interface. The current FIFO and call gate
-remain single-CPU and copied.
+neighbor cache, IPv4 options or reassembly, non-echo ICMP handling, UDP, TCP,
+routing, socket API, shared-memory packet path, hardware egress connection, or
+container network interface. The current FIFOs and call gate remain single-CPU
+and copied.

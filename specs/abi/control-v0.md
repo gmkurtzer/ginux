@@ -462,6 +462,19 @@ gate, even when dispatch is denied, the budget is exhausted, or the scheduler
 selects another context. A service capability table cannot be retired while
 such a reference remains. Operation 2 is uncharged and unreferenced so it can
 remove the current thread before retiring the service.
+Operations 21 and 22 select a packet queue through the supplied capability,
+not through an ambient direction flag. Object 8 is the bounded ingress queue;
+object 9 is a distinct bounded egress queue with independent storage, producer
+binding, delivery metadata, and monotonic sequence allocation. Operation 21
+requires `WRITE`, copies 1 through 1514 bytes before publication, requires a
+zero request sequence, and returns the allocated sequence. Operation 22
+requires `READ`, an exact nonzero sequence, and sufficient output capacity; it
+copies before destructive delivery. A future or consumed sequence returns the
+stale result without changing userspace or queue state. A capability for one
+packet object never selects the other queue. Operations 23 through 25 retain
+their established ingress-only wait and backpressure contract in v4; an
+object-9 handle is denied until a separate egress scheduling contract is
+specified.
 Before either bounded copy direction touches user memory, the kernel requires
 active CR3 to equal the scheduler's current root, revalidates the complete
 fixed page-table hierarchy, and confirms every page-table and payload frame is

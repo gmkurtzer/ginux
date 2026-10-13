@@ -57,6 +57,7 @@ pub const NATIVE_PROTOCOL_FEATURE_WAIT_LOOP: u32 = 1 << 2;
 pub const NATIVE_PROTOCOL_FEATURE_SUPERVISED_LOOP: u32 = 1 << 3;
 pub const NATIVE_PROTOCOL_FEATURE_IPV4_DISPATCH: u32 = 1 << 4;
 pub const NATIVE_PROTOCOL_FEATURE_ICMP_ECHO: u32 = 1 << 5;
+pub const NATIVE_PROTOCOL_FEATURE_PACKET_EGRESS: u32 = 1 << 6;
 pub const NATIVE_PROTOCOL_BOOT_V1_VERSION: u16 = 1;
 pub const NATIVE_PROTOCOL_BOOT_V1_SIZE: u16 = 56;
 pub const NATIVE_PROTOCOL_BOOT_V2_VERSION: u16 = 2;
@@ -65,6 +66,8 @@ pub const NATIVE_PROTOCOL_BOOT_V3_VERSION: u16 = 3;
 pub const NATIVE_PROTOCOL_BOOT_V3_SIZE: u16 = 56;
 pub const NATIVE_PROTOCOL_BOOT_V4_VERSION: u16 = 4;
 pub const NATIVE_PROTOCOL_BOOT_V4_SIZE: u16 = 56;
+pub const NATIVE_PROTOCOL_BOOT_V5_VERSION: u16 = 5;
+pub const NATIVE_PROTOCOL_BOOT_V5_SIZE: u16 = 72;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -742,6 +745,83 @@ impl NativeProtocolBootV4 {
 const _: () = assert!(core::mem::size_of::<NativeProtocolBootV4>() == 56);
 const _: () = assert!(core::mem::align_of::<NativeProtocolBootV4>() == 8);
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeProtocolBootV5 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub packet_capability: u64,
+    pub expected_sequence: u64,
+    pub local_mac: u64,
+    pub local_ipv4: u32,
+    pub peer_ipv4: u32,
+    pub packet_count: u32,
+    pub reserved: u32,
+    pub egress_capability: u64,
+    pub expected_egress_sequence: u64,
+}
+
+impl NativeProtocolBootV5 {
+    pub const fn icmp_echo_reply(
+        v0: NativeProtocolBootV0,
+        egress_capability: u64,
+        expected_egress_sequence: u64,
+    ) -> Self {
+        Self {
+            magic: v0.magic,
+            version: NATIVE_PROTOCOL_BOOT_V5_VERSION,
+            size: NATIVE_PROTOCOL_BOOT_V5_SIZE,
+            features: NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+                | NATIVE_PROTOCOL_FEATURE_WAIT_LOOP
+                | NATIVE_PROTOCOL_FEATURE_IPV4_DISPATCH
+                | NATIVE_PROTOCOL_FEATURE_ICMP_ECHO
+                | NATIVE_PROTOCOL_FEATURE_PACKET_EGRESS,
+            packet_capability: v0.packet_capability,
+            expected_sequence: v0.expected_sequence,
+            local_mac: v0.local_mac,
+            local_ipv4: v0.local_ipv4,
+            peer_ipv4: v0.peer_ipv4,
+            packet_count: 2,
+            reserved: 0,
+            egress_capability,
+            expected_egress_sequence,
+        }
+    }
+
+    pub const fn is_valid_icmp_echo_reply(&self) -> bool {
+        self.magic == NATIVE_PROTOCOL_BOOT_MAGIC
+            && self.version == NATIVE_PROTOCOL_BOOT_V5_VERSION
+            && self.size == NATIVE_PROTOCOL_BOOT_V5_SIZE
+            && self.features
+                == NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                    | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+                    | NATIVE_PROTOCOL_FEATURE_WAIT_LOOP
+                    | NATIVE_PROTOCOL_FEATURE_IPV4_DISPATCH
+                    | NATIVE_PROTOCOL_FEATURE_ICMP_ECHO
+                    | NATIVE_PROTOCOL_FEATURE_PACKET_EGRESS
+            && self.packet_capability != 0
+            && self.egress_capability != 0
+            && self.packet_capability != self.egress_capability
+            && self.expected_sequence != 0
+            && self.expected_sequence < u64::MAX - 1
+            && self.expected_egress_sequence != 0
+            && self.expected_egress_sequence != u64::MAX
+            && self.local_mac != 0
+            && self.local_mac >> 48 == 0
+            && self.local_ipv4 != 0
+            && self.peer_ipv4 != 0
+            && self.local_ipv4 != self.peer_ipv4
+            && self.packet_count == 2
+            && self.reserved == 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeProtocolBootV5>() == 72);
+const _: () = assert!(core::mem::align_of::<NativeProtocolBootV5>() == 8);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -805,6 +885,7 @@ mod tests {
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v2) == 56"));
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v3) == 56"));
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v4) == 56"));
+        assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v5) == 72"));
     }
 
     #[test]
@@ -888,6 +969,27 @@ mod tests {
             ..icmp
         }
         .is_valid_icmp_echo());
+        let reply = NativeProtocolBootV5::icmp_echo_reply(valid, 3, 1);
+        assert!(reply.is_valid_icmp_echo_reply());
+        assert_eq!(core::mem::size_of::<NativeProtocolBootV5>(), 72);
+        assert_eq!(
+            core::mem::offset_of!(NativeProtocolBootV5, egress_capability),
+            56
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeProtocolBootV5, expected_egress_sequence),
+            64
+        );
+        assert!(!NativeProtocolBootV5 {
+            egress_capability: reply.packet_capability,
+            ..reply
+        }
+        .is_valid_icmp_echo_reply());
+        assert!(!NativeProtocolBootV5 {
+            expected_egress_sequence: 0,
+            ..reply
+        }
+        .is_valid_icmp_echo_reply());
     }
 
     #[test]
