@@ -3178,6 +3178,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: resident protocol domain consumed two ordered packets");
     serial_write("\r\nginux: protocol domain remained live between packet arrivals");
     serial_write("\r\nginux: resident protocol wait keys and frames retired cleanly");
+    if !address_space::verify_supervised_native_protocol_loop(&protocol_image) {
+        kernel_fail("\r\nginux: supervised native protocol loop failed\r\n");
+    }
+    serial_write("\r\nginux: supervised protocol loop consumed multiple packets");
+    serial_write("\r\nginux: control plane stopped blocked protocol service");
+    serial_write("\r\nginux: supervised protocol wait and frames retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

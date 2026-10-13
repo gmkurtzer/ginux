@@ -6,11 +6,11 @@ use core::arch::{asm, global_asm};
 use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
     NativeControlDescriptorV4, NativePacketRequestV0, NativeProtocolBootV0, NativeProtocolBootV1,
-    NATIVE_CALL_FAILED, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
-    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_DEVICE_OPERATION,
-    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_PACKET_CONSUME_OPERATION, NATIVE_PACKET_MAX_SIZE,
-    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_WAIT_OPERATION, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION,
+    NativeProtocolBootV2, NATIVE_CALL_FAILED, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
+    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
+    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE, NATIVE_PACKET_CONSUME_OPERATION,
+    NATIVE_PACKET_MAX_SIZE, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_WAIT_OPERATION,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_PROTOCOL_SERVICE_V0";
@@ -45,7 +45,7 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
     let Some(info) = (unsafe { info.as_ref() }) else {
         fail();
     };
-    let (capability, mut sequence, local_mac, local_ipv4, peer_ipv4, packet_count, wait) =
+    let (capability, mut sequence, local_mac, local_ipv4, peer_ipv4, mut remaining, wait) =
         if info.version == 0 {
             if !info.is_valid_arp_consumer() {
                 fail();
@@ -56,10 +56,10 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
                 info.local_mac,
                 info.local_ipv4,
                 info.peer_ipv4,
-                1,
+                Some(1_u32),
                 false,
             )
-        } else {
+        } else if info.version == 1 {
             let Some(info) = (unsafe {
                 (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV1).as_ref()
             }) else {
@@ -74,7 +74,25 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
                 info.local_mac,
                 info.local_ipv4,
                 info.peer_ipv4,
-                info.packet_count,
+                Some(info.packet_count),
+                true,
+            )
+        } else {
+            let Some(info) = (unsafe {
+                (info as *const NativeProtocolBootV0 as *const NativeProtocolBootV2).as_ref()
+            }) else {
+                fail();
+            };
+            if !info.is_valid_supervised_loop() {
+                fail();
+            }
+            (
+                info.packet_capability,
+                info.expected_sequence,
+                info.local_mac,
+                info.local_ipv4,
+                info.peer_ipv4,
+                None,
                 true,
             )
         };
@@ -87,7 +105,7 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
         fail();
     }
 
-    for _ in 0..packet_count {
+    loop {
         if wait {
             let request = NativePacketRequestV0::consume(0, 0, sequence);
             if packet_wait(capability, &request) != sequence {
@@ -110,6 +128,12 @@ extern "C" fn ginux_protocol_service_main(info: *const NativeProtocolBootV0) -> 
         }
         packet[21] = 2;
         sequence = sequence.checked_add(1).unwrap_or_else(|| fail());
+        if let Some(left) = remaining.as_mut() {
+            *left -= 1;
+            if *left == 0 {
+                break;
+            }
+        }
     }
     let replay = NativePacketRequestV0::consume(
         packet.as_mut_ptr() as u64,

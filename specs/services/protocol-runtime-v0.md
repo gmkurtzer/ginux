@@ -60,8 +60,15 @@ keys, capabilities, address-space frames, and producer frames to be retired.
 
 ## Deliberate limits
 
+Bootstrap ABI v2 removes the packet-count limit and leaves the measured service
+blocked on its next exact sequence. The QEMU proof delivers two frames, confirms
+the third wait is live, and uses control-plane stop authority to cancel and
+fully reclaim the domain. This establishes external lifecycle ownership without
+granting management authority to the protocol service.
+
 This remains a fixed ARP proof, not a network stack. The resident path accepts
-exactly two packets and has no administrative shutdown protocol. There is no
+exactly two packets under v1; v2 may continue until administratively stopped.
+There is no graceful drain or state handoff protocol. There is no
 Ethernet demultiplexing, ARP request generation, neighbor cache, IPv4
 validation, ICMP, UDP, TCP, fragmentation, routing, socket API, shared-memory
 packet path, or container network interface. The current FIFO and call gate

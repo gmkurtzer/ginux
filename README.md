@@ -417,8 +417,10 @@ The initial executable milestone is an x86-64 unified EFI image tested under QEM
 Protocol bootstrap ABI v1 also exercises a bounded resident-service path: one
 measured Rust protocol domain blocks on an empty FIFO, wakes for two separately
 published consecutive packets, validates both, rejects replay, and retires all
-wait keys and frames. This proves residency across arrivals; it is not yet an
-indefinite administratively supervised protocol loop.
+wait keys and frames. Additive ABI v2 then leaves that domain blocked on the
+next exact sequence until the control plane stops it, revokes its authority,
+and reclaims every mapping and frame. Graceful drain and protocol-state handoff
+remain future work.
 
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption

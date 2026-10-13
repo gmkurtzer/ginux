@@ -322,6 +322,9 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: resident protocol domain consumed two ordered packets' "$output_file" ||
     ! grep -q '^ginux: protocol domain remained live between packet arrivals' "$output_file" ||
     ! grep -q '^ginux: resident protocol wait keys and frames retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: supervised protocol loop consumed multiple packets' "$output_file" ||
+    ! grep -q '^ginux: control plane stopped blocked protocol service' "$output_file" ||
+    ! grep -q '^ginux: supervised protocol wait and frames retired cleanly' "$output_file" ||
     ! grep -q '^ginux: replenished network buffer guards preserved' "$output_file" ||
     ! grep -q '^ginux: replenished network interrupt routes retired cleanly' "$output_file"; then
     echo "Boot test failed: native network service ARP receive was not verified." >&2

@@ -54,8 +54,11 @@ pub const NATIVE_PROTOCOL_BOOT_SIZE: u16 = 56;
 pub const NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER: u32 = 1 << 0;
 pub const NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP: u32 = 1 << 1;
 pub const NATIVE_PROTOCOL_FEATURE_WAIT_LOOP: u32 = 1 << 2;
+pub const NATIVE_PROTOCOL_FEATURE_SUPERVISED_LOOP: u32 = 1 << 3;
 pub const NATIVE_PROTOCOL_BOOT_V1_VERSION: u16 = 1;
 pub const NATIVE_PROTOCOL_BOOT_V1_SIZE: u16 = 56;
+pub const NATIVE_PROTOCOL_BOOT_V2_VERSION: u16 = 2;
+pub const NATIVE_PROTOCOL_BOOT_V2_SIZE: u16 = 56;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -548,6 +551,67 @@ impl NativeProtocolBootV1 {
 const _: () = assert!(core::mem::size_of::<NativeProtocolBootV1>() == 56);
 const _: () = assert!(core::mem::align_of::<NativeProtocolBootV1>() == 8);
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeProtocolBootV2 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub packet_capability: u64,
+    pub expected_sequence: u64,
+    pub local_mac: u64,
+    pub local_ipv4: u32,
+    pub peer_ipv4: u32,
+    pub packet_count: u32,
+    pub reserved: u32,
+}
+
+impl NativeProtocolBootV2 {
+    pub const fn supervised_loop(v0: NativeProtocolBootV0) -> Self {
+        Self {
+            magic: v0.magic,
+            version: NATIVE_PROTOCOL_BOOT_V2_VERSION,
+            size: NATIVE_PROTOCOL_BOOT_V2_SIZE,
+            features: NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+                | NATIVE_PROTOCOL_FEATURE_WAIT_LOOP
+                | NATIVE_PROTOCOL_FEATURE_SUPERVISED_LOOP,
+            packet_capability: v0.packet_capability,
+            expected_sequence: v0.expected_sequence,
+            local_mac: v0.local_mac,
+            local_ipv4: v0.local_ipv4,
+            peer_ipv4: v0.peer_ipv4,
+            packet_count: 0,
+            reserved: 0,
+        }
+    }
+
+    pub const fn is_valid_supervised_loop(&self) -> bool {
+        self.magic == NATIVE_PROTOCOL_BOOT_MAGIC
+            && self.version == NATIVE_PROTOCOL_BOOT_V2_VERSION
+            && self.size == NATIVE_PROTOCOL_BOOT_V2_SIZE
+            && self.features
+                == NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                    | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+                    | NATIVE_PROTOCOL_FEATURE_WAIT_LOOP
+                    | NATIVE_PROTOCOL_FEATURE_SUPERVISED_LOOP
+            && self.packet_capability != 0
+            && self.expected_sequence != 0
+            && self.expected_sequence != u64::MAX
+            && self.local_mac != 0
+            && self.local_mac >> 48 == 0
+            && self.local_ipv4 != 0
+            && self.peer_ipv4 != 0
+            && self.local_ipv4 != self.peer_ipv4
+            && self.packet_count == 0
+            && self.reserved == 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeProtocolBootV2>() == 56);
+const _: () = assert!(core::mem::align_of::<NativeProtocolBootV2>() == 8);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,6 +672,7 @@ mod tests {
         assert!(protocol_header.contains("GINUX_NATIVE_PROTOCOL_BOOT_SIZE UINT16_C(56)"));
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v0) == 56"));
         assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v1) == 56"));
+        assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v2) == 56"));
     }
 
     #[test]
@@ -669,6 +734,14 @@ mod tests {
             ..wait
         }
         .is_valid_wait_loop());
+        let supervised = NativeProtocolBootV2::supervised_loop(valid);
+        assert!(supervised.is_valid_supervised_loop());
+        assert_eq!(core::mem::size_of::<NativeProtocolBootV2>(), 56);
+        assert!(!NativeProtocolBootV2 {
+            packet_count: 2,
+            ..supervised
+        }
+        .is_valid_supervised_loop());
     }
 
     #[test]

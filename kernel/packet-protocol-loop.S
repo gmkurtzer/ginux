@@ -9,6 +9,7 @@ ginux_packet_protocol_loop_producer_start:
     sub rsp, 0x90
     mov qword ptr [rsp + 0x70], r12
     mov qword ptr [rsp + 0x78], r14
+    mov qword ptr [rsp + 0x80], r8
 
     # Let the compiled read-only protocol service claim the first sequence.
     mov eax, 3
@@ -60,6 +61,18 @@ ginux_packet_protocol_loop_producer_start:
     cmp rax, r12
     jne .protocol_loop_failed
 
+    # A supervised proof requests one final scheduling point so the service can
+    # consume and block on the following sequence before this producer exits.
+    cmp qword ptr [rsp + 0x80], 0
+    je .protocol_loop_complete
+    mov eax, 3
+    int 0x80
+    mov r12, qword ptr [rsp + 0x70]
+    mov r14, qword ptr [rsp + 0x78]
+    test rax, rax
+    jne .protocol_loop_failed
+
+.protocol_loop_complete:
     mov esi, 54
     mov eax, 2
     int 0x80

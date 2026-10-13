@@ -4431,6 +4431,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_protocol_boot_info_v2(&self, info: ginux_native_abi::NativeProtocolBootV2) -> bool {
+        if !info.is_valid_supervised_loop() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeProtocolBootV2>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn release(self) -> bool {
         let dma = self.dma_frame;
         memory::scrub_and_release_frames(self.owner, &self.frames)
@@ -5834,6 +5849,159 @@ pub(crate) fn verify_native_protocol_wait_loop(image: &crate::native_elf::Native
         })
         && packet::pending_metadata().is_none()
         && packet::next_sequence() == second_sequence.checked_add(1)
+}
+
+pub(crate) fn verify_supervised_native_protocol_loop(
+    image: &crate::native_elf::NativeImage<'_>,
+) -> bool {
+    let Some(first_sequence) = packet::next_sequence() else {
+        return false;
+    };
+    let (Some(second_sequence), Some(third_sequence)) =
+        (first_sequence.checked_add(1), first_sequence.checked_add(2))
+    else {
+        return false;
+    };
+    if first_sequence == 0 || third_sequence == u64::MAX || packet::pending_metadata().is_some() {
+        return false;
+    }
+    let Some(producer_program) = volume_program(
+        ginux_packet_protocol_loop_producer_start as *const () as usize,
+        ginux_packet_protocol_loop_producer_end as *const () as usize,
+    ) else {
+        return false;
+    };
+    let Some(consumer) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        return false;
+    };
+    let (Some(consumer_handle), Some(consumer_owner)) = (
+        domain::auxiliary_boot_handle(consumer, 0),
+        memory::FrameOwner::domain(consumer),
+    ) else {
+        return false;
+    };
+    if !domain::handle_permits(
+        consumer,
+        consumer_handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) || domain::handle_permits(
+        consumer,
+        consumer_handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) {
+        return false;
+    }
+    let kernel_root = current_root();
+    let Some(consumer_space) = NativeServiceAddressSpace::new(kernel_root, consumer_owner, image)
+    else {
+        return false;
+    };
+    let boot_v0 = ginux_native_abi::NativeProtocolBootV0::arp_consumer(
+        consumer_handle,
+        first_sequence,
+        0x5254_0012_3456,
+        u32::from_be_bytes([10, 0, 2, 15]),
+        u32::from_be_bytes([10, 0, 2, 2]),
+    );
+    let boot = ginux_native_abi::NativeProtocolBootV2::supervised_loop(boot_v0);
+    if !consumer_space.layout_is_valid(image)
+        || !consumer_space.relocations_are_valid(image)
+        || !consumer_space.write_protocol_boot_info_v2(boot)
+    {
+        let _ = consumer_space.release();
+        let _ = domain::discard_unstarted_auxiliary_service(consumer);
+        return false;
+    }
+    let consumer_root = consumer_space.root;
+    let Ok(consumer_entry) = usize::try_from(consumer_space.entry) else {
+        return false;
+    };
+    let consumer_stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
+    if !register_address_space(consumer, AuxiliaryAddressSpace::Native(consumer_space)) {
+        return false;
+    }
+    let Some(producer) = prepare_packet_wait_producer(kernel_root, producer_program) else {
+        return false;
+    };
+    if !scheduler::queue_auxiliary(
+        consumer,
+        consumer_root,
+        consumer_entry,
+        consumer_stack,
+        consumer_handle,
+    ) || !scheduler::initialize_staged_native_auxiliary(consumer, boot_info as u64)
+        || !scheduler::start_staged_auxiliary(consumer)
+        || !cpu::activate_user_root(producer.root)
+    {
+        return false;
+    }
+    cpu::execute_packet_consumer(
+        producer.entry,
+        producer.stack,
+        producer.handle,
+        first_sequence,
+        true,
+        producer.domain,
+        producer.identity,
+    );
+    let producer_retired = packet::retire_producer(producer.domain);
+    let producer_event = domain::take_lifecycle_event();
+    let no_consumer_event = domain::take_lifecycle_event().is_none();
+    let blocked = current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && !scheduler::packet_wait_is_available(third_sequence)
+        && registered_auxiliary_address_space_count() == 1
+        && memory::owner_live_frame_count(consumer_owner) == Some(NATIVE_SERVICE_FRAME_COUNT)
+        && !domain::domain_is_retired(consumer);
+    let (Some(supervisor), Some(manage_handle)) = (
+        domain::control_plane_id(),
+        domain::control_plane_boot_handle(0),
+    ) else {
+        return false;
+    };
+    let stopped = stop_auxiliary_from_current_user(supervisor, manage_handle, consumer);
+    let stop_event = domain::take_lifecycle_event();
+    let second_delivery = packet::last_delivery();
+    blocked
+        && stopped
+        && producer_retired
+        && producer_event
+            == Some(
+                (54_u64 << 56)
+                    | (producer.domain << 8)
+                    | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED),
+            )
+        && no_consumer_event
+        && stop_event
+            == Some((consumer << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED))
+        && domain::take_lifecycle_event().is_none()
+        && scheduler::packet_wait_is_available(third_sequence)
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(producer.owner) == Some(0)
+        && memory::owner_live_frame_count(consumer_owner) == Some(0)
+        && domain::domain_is_retired(producer.domain)
+        && domain::domain_is_retired(consumer)
+        && !domain::handle_permits(
+            consumer,
+            consumer_handle,
+            crate::control_abi::PACKET_OBJECT,
+            crate::capability::Rights::READ,
+        )
+        && second_delivery.is_some_and(|metadata| {
+            metadata.source_domain == producer.domain
+                && metadata.service_identity == producer.identity
+                && metadata.sequence == second_sequence
+                && metadata.length == 42
+        })
+        && packet::pending_metadata().is_none()
+        && packet::next_sequence() == Some(third_sequence)
 }
 
 fn verify_ring3_packet_consumer(expected_sequence: u64, more_pending: bool) -> bool {
