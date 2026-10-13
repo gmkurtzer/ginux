@@ -43,9 +43,9 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         done
     }
     for command in \
-        help status components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps \
+        help 'container help' 'container set --help' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps \
         'container status default' 'container new demo' 'container new demo' \
-        'container start demo' 'container set demo init /sbin/init' 'container set demo cpu 1' \
+        'container start' 'container start demo' 'container set demo init /sbin/init' 'container set demo cpu 1' \
         'container set demo memory-mib 128' 'container set demo autostart true' status \
         'container start demo' 'container status demo' 'ls /proc' 'ls /proc/100' ps \
         'container stop demo' 'container status demo' \
@@ -88,16 +88,25 @@ for expected in \
     'ginux: embedded controller runtime measurement accepted' \
     'ginux: launching embedded controller in ring 3' \
     'Ginux controller v0 (ring 3)' \
-    'help        Show this command list' \
-    'ls [PATH]   List the embedded measured root' \
-    'ps          Show live host processes' \
+    'Ginux controller shell' \
+    'Available Commands:' \
+    'help [COMMAND...]' \
+    'ls [PATH]' \
+    'List the embedded measured root or /proc' \
+    'ps' \
+    'Show live host processes' \
+    'container COMMAND' \
+    'Manage runtime containers' \
     'container new NAME' \
-    'container set NAME init /sbin/init' \
+    'container set NAME FIELD VALUE' \
+    'Set init=/sbin/init, cpu=1, memory-mib=128, or autostart=true' \
     'controller: running (ring 3)' \
     'containers: 0 configured' \
     'container: not found' \
     'demo: created' \
     'container: create rejected' \
+    'Error: missing arguments' \
+    'Usage:' \
     'container: start rejected' \
     'demo: setting accepted; created (incomplete)' \
     'demo: setting accepted; configured' \
@@ -125,7 +134,7 @@ for expected in \
     'demo: starting' \
     'demo: failed (contained)' \
     'ginux: starting configured runtime container' \
-    "Unknown command. Type 'help'." \
+    'Error: unknown command' \
     'Shutting down Ginux.' \
     'ginux: controller requested clean shutdown' \
     'GINUX_KERNEL_OK'; do

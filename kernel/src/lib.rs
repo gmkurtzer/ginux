@@ -1481,7 +1481,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         boot_info.controller_runtime,
         boot_info.controller_runtime_size,
     );
-    let Some(controller_image) = native_elf::inspect(controller_runtime) else {
+    let Some(controller_image) = native_elf::inspect_controller(controller_runtime) else {
         kernel_fail("\r\nginux: embedded controller ELF invalid\r\n");
     };
     if !address_space::install_interactive_controller_image(&controller_image) {

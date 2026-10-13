@@ -2,6 +2,7 @@
 #![no_main]
 
 use core::arch::{asm, global_asm};
+use ginux_command::{parse, write_error, write_help, Arity, Command, HelpWriter, ParseOutcome};
 use ginux_native_abi::{
     native_control_abi_is_compatible, NativeContainerRequestV0, NativeControlDescriptorV4,
     NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
@@ -25,6 +26,129 @@ use ginux_native_abi::{
 
 const MAX_LINE: usize = 64;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
+
+const COMMAND_STATUS: u16 = 1;
+const COMMAND_COMPONENTS: u16 = 2;
+const COMMAND_LS: u16 = 3;
+const COMMAND_PS: u16 = 4;
+const COMMAND_SHUTDOWN: u16 = 5;
+const COMMAND_CONTAINER_NEW: u16 = 6;
+const COMMAND_CONTAINER_SET: u16 = 7;
+const COMMAND_CONTAINER_STATUS: u16 = 8;
+const COMMAND_CONTAINER_START: u16 = 9;
+const COMMAND_CONTAINER_STOP: u16 = 10;
+const COMMAND_CONTAINER_RESTART: u16 = 11;
+const COMMAND_CONTAINER_FAIL: u16 = 12;
+
+const CONTAINER_COMMANDS: &[Command<'static>] = &[
+    Command::leaf(
+        b"new",
+        b"container new NAME",
+        b"Create a container configuration",
+        COMMAND_CONTAINER_NEW,
+        Arity::exact(1),
+    ),
+    Command::leaf(
+        b"set",
+        b"container set NAME FIELD VALUE",
+        b"Set init=/sbin/init, cpu=1, memory-mib=128, or autostart=true",
+        COMMAND_CONTAINER_SET,
+        Arity::exact(3),
+    ),
+    Command::leaf(
+        b"status",
+        b"container status NAME",
+        b"Show container state",
+        COMMAND_CONTAINER_STATUS,
+        Arity::exact(1),
+    ),
+    Command::leaf(
+        b"start",
+        b"container start NAME",
+        b"Start a configured container",
+        COMMAND_CONTAINER_START,
+        Arity::exact(1),
+    ),
+    Command::leaf(
+        b"stop",
+        b"container stop NAME",
+        b"Stop a running container",
+        COMMAND_CONTAINER_STOP,
+        Arity::exact(1),
+    ),
+    Command::leaf(
+        b"restart",
+        b"container restart NAME",
+        b"Restart a configured container",
+        COMMAND_CONTAINER_RESTART,
+        Arity::exact(1),
+    ),
+    Command::leaf(
+        b"fail",
+        b"container fail NAME",
+        b"Inject a contained container failure",
+        COMMAND_CONTAINER_FAIL,
+        Arity::exact(1),
+    ),
+];
+
+const ROOT_COMMANDS: &[Command<'static>] = &[
+    Command::leaf(
+        b"help",
+        b"help [COMMAND...]",
+        b"Show command help",
+        0,
+        Arity::range(0, 3),
+    ),
+    Command::leaf(
+        b"status",
+        b"status",
+        b"Show controller and host state",
+        COMMAND_STATUS,
+        Arity::exact(0),
+    ),
+    Command::leaf(
+        b"components",
+        b"components",
+        b"Show embedded image components",
+        COMMAND_COMPONENTS,
+        Arity::exact(0),
+    ),
+    Command::leaf(
+        b"ls",
+        b"ls [PATH]",
+        b"List the embedded measured root or /proc",
+        COMMAND_LS,
+        Arity::range(0, 1),
+    ),
+    Command::leaf(
+        b"ps",
+        b"ps",
+        b"Show live host processes",
+        COMMAND_PS,
+        Arity::exact(0),
+    ),
+    Command::group(
+        b"container",
+        b"container COMMAND",
+        b"Manage runtime containers",
+        CONTAINER_COMMANDS,
+    ),
+    Command::leaf(
+        b"shutdown",
+        b"shutdown",
+        b"Shut down Ginux cleanly",
+        COMMAND_SHUTDOWN,
+        Arity::exact(0),
+    ),
+];
+
+const ROOT_COMMAND: Command<'static> = Command::group(
+    b"ginux",
+    b"ginux COMMAND",
+    b"Ginux controller shell",
+    ROOT_COMMANDS,
+);
 
 global_asm!(
     r#"
@@ -93,37 +217,36 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
         let Some(command) = line.get(..length) else {
             exit(NATIVE_SERVICE_EXIT_REJECTED);
         };
-        match command {
-            b"help" => {
-                write(console, b"help        Show this command list\r\n");
-                write(console, b"status      Show controller and host state\r\n");
-                write(console, b"components  Show embedded image components\r\n");
-                write(console, b"ls [PATH]   List the embedded measured root\r\n");
-                write(console, b"ps          Show live host processes\r\n");
-                write(console, b"container new NAME\r\n");
-                write(console, b"container set NAME init /sbin/init\r\n");
-                write(console, b"container set NAME cpu 1\r\n");
-                write(console, b"container set NAME memory-mib 128\r\n");
-                write(console, b"container set NAME autostart true\r\n");
-                write(
-                    console,
-                    b"container status|start|stop|restart|fail NAME\r\n",
-                );
-                write(console, b"shutdown    Shut down Ginux cleanly\r\n");
+        let invocation = match parse(&ROOT_COMMAND, command) {
+            Ok(ParseOutcome::Empty) => continue,
+            Ok(ParseOutcome::Help(command)) => {
+                let mut output = ConsoleHelpWriter::new(console);
+                write_help(command, &mut output);
+                output.finish();
+                continue;
             }
-            b"status" => {
+            Ok(ParseOutcome::Invoke(invocation)) => invocation,
+            Err(error) => {
+                let mut output = ConsoleHelpWriter::new(console);
+                write_error(error, &mut output);
+                output.finish();
+                continue;
+            }
+        };
+        match invocation.id() {
+            COMMAND_STATUS => {
                 write(console, b"controller: running (ring 3)\r\n");
                 write_container_summary(console, host);
                 write(console, b"integrity: sealed\r\n");
             }
-            b"components" => {
+            COMMAND_COMPONENTS => {
                 write(console, b"GINUX.EFI component catalog v0:\r\n");
                 write(console, b"- kernel: active, ring 0\r\n");
                 write(console, b"- controller: active, ring 3\r\n");
                 write(console, b"- boot modules: embedded, sealed\r\n");
             }
-            b"ps" => show_processes(console, host),
-            b"shutdown" => {
+            COMMAND_PS => show_processes(console, host),
+            COMMAND_SHUTDOWN => {
                 write(console, b"Shutting down Ginux.\r\n");
                 if call(
                     NATIVE_CONTAINER_CONTROL_OPERATION,
@@ -136,11 +259,9 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                 }
                 exit(NATIVE_SERVICE_EXIT_COMPLETED);
             }
-            b"" => {}
-            command if command == b"ls" || command.starts_with(b"ls ") => {
-                let supplied = command.get(2..).unwrap_or_default();
-                let supplied = supplied.strip_prefix(b" ").unwrap_or(supplied);
-                let path = supplied.strip_prefix(b"/").unwrap_or(supplied);
+            COMMAND_LS => {
+                let path = invocation.arguments().first().copied().unwrap_or_default();
+                let path = path.strip_prefix(b"/").unwrap_or(path);
                 if path == b"proc" {
                     list_proc_directory(console, host, b"");
                 } else if let Some(path) = path.strip_prefix(b"proc/") {
@@ -149,10 +270,10 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                     list_directory(console, root, path);
                 }
             }
-            command if command.starts_with(b"container ") => {
-                handle_container_command(console, host, command)
+            COMMAND_CONTAINER_NEW..=COMMAND_CONTAINER_FAIL => {
+                handle_container_command(console, host, invocation.id(), invocation.arguments())
             }
-            _ => write(console, b"Unknown command. Type 'help'.\r\n"),
+            _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
         }
     }
 }
@@ -186,17 +307,15 @@ fn write_container_state(console: u64, state: u64) {
     );
 }
 
-fn handle_container_command(console: u64, host: u64, command: &[u8]) {
-    let mut words = command.split(|byte| *byte == b' ');
-    let verb = words.nth(1).unwrap_or_default();
-    let name = words.next().unwrap_or_default();
+fn handle_container_command(console: u64, host: u64, command: u16, arguments: &[&[u8]]) {
+    let name = arguments.first().copied().unwrap_or_default();
     if !valid_container_name(name) {
         write(console, b"container: invalid name\r\n");
         return;
     }
     let mut request = request_for_name(name);
-    match verb {
-        b"new" if words.next().is_none() => {
+    match command {
+        COMMAND_CONTAINER_NEW => {
             if container_call(host, NATIVE_CONTAINER_CREATE, &mut request)
                 == NATIVE_CONTAINER_STATE_CREATED
             {
@@ -205,10 +324,10 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 write(console, b"container: create rejected\r\n");
             }
         }
-        b"set" => {
-            let field = words.next().unwrap_or_default();
-            let value = words.next().unwrap_or_default();
-            if words.next().is_some() || !set_request_value(&mut request, field, value) {
+        COMMAND_CONTAINER_SET => {
+            let field = arguments.get(1).copied().unwrap_or_default();
+            let value = arguments.get(2).copied().unwrap_or_default();
+            if !set_request_value(&mut request, field, value) {
                 write(console, b"container: invalid setting\r\n");
                 return;
             }
@@ -234,7 +353,7 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 write(console, b"container: setting rejected\r\n");
             }
         }
-        b"status" if words.next().is_none() => {
+        COMMAND_CONTAINER_STATUS => {
             let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
             if state == NATIVE_CALL_FAILED {
                 write(console, b"container: not found\r\n");
@@ -244,7 +363,7 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 write_container_state(console, state);
             }
         }
-        b"start" | b"restart" if words.next().is_none() => {
+        COMMAND_CONTAINER_START | COMMAND_CONTAINER_RESTART => {
             if container_call(host, NATIVE_CONTAINER_RESTART, &mut request)
                 == NATIVE_CONTAINER_STATE_STOPPED
             {
@@ -253,7 +372,7 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 write(console, b"container: start rejected\r\n");
             }
         }
-        b"stop" if words.next().is_none() => {
+        COMMAND_CONTAINER_STOP => {
             if container_call(host, NATIVE_CONTAINER_STOP, &mut request)
                 == NATIVE_CONTAINER_STATE_STOPPED
             {
@@ -262,7 +381,7 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 write(console, b"container: stop rejected\r\n");
             }
         }
-        b"fail" if words.next().is_none() => {
+        COMMAND_CONTAINER_FAIL => {
             if container_call(host, NATIVE_CONTAINER_INJECT_FAILURE, &mut request)
                 == NATIVE_CONTAINER_STATE_FAILED
             {
@@ -271,7 +390,45 @@ fn handle_container_command(console: u64, host: u64, command: &[u8]) {
                 write(console, b"container: failure injection rejected\r\n");
             }
         }
-        _ => write(console, b"container: invalid command\r\n"),
+        _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
+    }
+}
+
+struct ConsoleHelpWriter {
+    console: u64,
+    bytes: [u8; 64],
+    length: usize,
+}
+
+impl ConsoleHelpWriter {
+    const fn new(console: u64) -> Self {
+        Self {
+            console,
+            bytes: [0; 64],
+            length: 0,
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.length != 0 {
+            write(self.console, &self.bytes[..self.length]);
+            self.length = 0;
+        }
+    }
+}
+
+impl HelpWriter for ConsoleHelpWriter {
+    fn write(&mut self, mut bytes: &[u8]) {
+        while !bytes.is_empty() {
+            let available = self.bytes.len() - self.length;
+            let count = available.min(bytes.len());
+            self.bytes[self.length..self.length + count].copy_from_slice(&bytes[..count]);
+            self.length += count;
+            bytes = &bytes[count..];
+            if self.length == self.bytes.len() {
+                self.finish();
+            }
+        }
     }
 }
 

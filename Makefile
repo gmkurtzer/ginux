@@ -120,6 +120,8 @@ check: manifest architecture-check
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings
 	@cargo clippy --package ginux-native-abi -- -D warnings
 	@cargo test --package ginux-native-abi
+	@cargo clippy --package ginux-command -- -D warnings
+	@cargo test --package ginux-command
 	@cargo clippy --package ginux-controller-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-protocol-state -- -D warnings
 	@cargo test --package ginux-protocol-state

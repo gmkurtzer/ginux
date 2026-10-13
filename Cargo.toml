@@ -2,6 +2,7 @@
 members = [
     "boot/efi",
     "control-plane/runtime",
+    "crates/command",
     "crates/native-abi",
     "crates/protocol-state",
     "crates/volume-format",

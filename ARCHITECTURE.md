@@ -88,7 +88,8 @@ The controller is packaged inside `GINUX.EFI` but executes in ring 3 as the firs
 - Starts, stops, inspects, and restarts native services and containers.
 - Creates domain process trees and assigns CPU, memory, storage, network, and device resources.
 - Delegates and revokes capabilities within the immutable boot authority envelope.
-- Provides the native administrative API and CLI.
+- Provides the native administrative API and a command-tree CLI with generated
+  help, usage, nested dispatch, and argument validation.
 - Receives health, failure, resource, and audit events.
 - Cannot modify the sealed kernel/module set, kernel memory, the active policy floor, trust roots, or synthesize authority not present in its parent capability set.
 

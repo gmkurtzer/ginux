@@ -137,7 +137,7 @@ pub(crate) fn run_installed_interactive_controller() -> bool {
     let kernel_root = paging::kernel_root_address();
     unsafe { activate(kernel_root) };
     let valid = current_root() == kernel_root
-        && crate::native_elf::inspect(bytes)
+        && crate::native_elf::inspect_controller(bytes)
             .is_some_and(|image| run_interactive_controller(&image));
     unsafe { activate(linux_root) };
     valid && current_root() == linux_root

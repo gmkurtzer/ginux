@@ -6,7 +6,9 @@ const MAX_FILE_SIZE: usize = 64 * 1024;
 const MAX_IMAGE_SIZE: u64 = 64 * 1024;
 const MAX_PROGRAM_HEADERS: usize = 8;
 const MAX_LOAD_SEGMENTS: usize = 3;
-const MAX_RELOCATIONS: usize = 8;
+const MAX_RELOCATIONS: usize = 64;
+const MAX_SERVICE_RELOCATIONS: usize = 8;
+const MAX_CONTROLLER_RELOCATIONS: usize = 64;
 const PAGE_SIZE: u64 = 4096;
 
 const ET_DYN: u16 = 3;
@@ -144,6 +146,17 @@ impl NativeImage<'_> {
 }
 
 pub(crate) fn inspect(bytes: &[u8]) -> Option<NativeImage<'_>> {
+    inspect_with_relocation_limit(bytes, MAX_SERVICE_RELOCATIONS)
+}
+
+pub(crate) fn inspect_controller(bytes: &[u8]) -> Option<NativeImage<'_>> {
+    inspect_with_relocation_limit(bytes, MAX_CONTROLLER_RELOCATIONS)
+}
+
+fn inspect_with_relocation_limit(
+    bytes: &[u8],
+    maximum_relocations: usize,
+) -> Option<NativeImage<'_>> {
     if !(ELF_HEADER_SIZE..=MAX_FILE_SIZE).contains(&bytes.len())
         || bytes.get(..16)? != b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0"
         || read_u16(bytes, 16)? != ET_DYN
@@ -282,7 +295,8 @@ pub(crate) fn inspect(bytes: &[u8]) -> Option<NativeImage<'_>> {
     {
         return None;
     }
-    let (relocations, relocation_count) = parse_dynamic(bytes, &segments, dynamic, writable)?;
+    let (relocations, relocation_count) =
+        parse_dynamic(bytes, &segments, dynamic, writable, maximum_relocations)?;
     Some(NativeImage {
         bytes,
         entry,
@@ -297,6 +311,7 @@ fn parse_dynamic(
     segments: &[Option<LoadSegment>; MAX_LOAD_SEGMENTS],
     dynamic: LoadSegment,
     writable: LoadSegment,
+    maximum_relocations: usize,
 ) -> Option<([Option<RelativeRelocation>; MAX_RELOCATIONS], usize)> {
     let start = usize::try_from(dynamic.file_offset).ok()?;
     let end = start.checked_add(usize::try_from(dynamic.file_size).ok()?)?;
@@ -334,7 +349,7 @@ fn parse_dynamic(
         || !pie
         || rela_entry.is_none()
         || count == 0
-        || count > MAX_RELOCATIONS
+        || count > maximum_relocations
         || rela_size != (count * RELA_ENTRY_SIZE) as u64
     {
         return None;
