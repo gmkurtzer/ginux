@@ -5041,6 +5041,7 @@ enum NativeNetworkRunMode {
     ReceiveArpTimeout,
     ReceiveArpMalformed,
     ReceiveArpReuse,
+    PingGateway,
     PacketHandoff,
     PacketHandoffFault,
     PacketBatch,
@@ -5676,6 +5677,26 @@ pub(crate) fn verify_native_network_receive_reuse(
         initialization,
         iommu_profile,
         NativeNetworkRunMode::ReceiveArpReuse,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    )
+}
+
+pub(crate) fn verify_native_network_ping_gateway(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::PingGateway,
         Some(common_mapping),
         Some((msix_mapping, apic)),
     )
@@ -7486,6 +7507,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
     restart_identity: Option<u64>,
     evidence_output: Option<&mut Option<NativeNetworkRun>>,
 ) -> bool {
+    let baseline_registered = registered_auxiliary_address_space_count();
     let reject_reserved = matches!(
         mode,
         NativeNetworkRunMode::RejectBootstrap | NativeNetworkRunMode::ConfinedReject
@@ -7503,6 +7525,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReceiveArpTimeout
             | NativeNetworkRunMode::ReceiveArpMalformed
             | NativeNetworkRunMode::ReceiveArpReuse
+            | NativeNetworkRunMode::PingGateway
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
             | NativeNetworkRunMode::PacketBatch
@@ -7524,6 +7547,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReceiveArpTimeout
             | NativeNetworkRunMode::ReceiveArpMalformed
             | NativeNetworkRunMode::ReceiveArpReuse
+            | NativeNetworkRunMode::PingGateway
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
             | NativeNetworkRunMode::PacketBatch
@@ -7532,6 +7556,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
     let receive_reuse = matches!(
         mode,
         NativeNetworkRunMode::ReceiveArpReuse
+            | NativeNetworkRunMode::PingGateway
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
             | NativeNetworkRunMode::PacketBatch
@@ -7783,6 +7808,9 @@ fn verify_native_network_bootstrap_run_with_evidence(
                 boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_ARP_PROBE;
                 if receive_reuse {
                     boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_RX_REUSE;
+                    if mode == NativeNetworkRunMode::PingGateway {
+                        boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_ICMP_PROBE;
+                    }
                 }
             }
         }
@@ -8085,7 +8113,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
     };
     let execution_retired = current_root() == kernel_root
         && scheduler::current_domain().is_none()
-        && registered_auxiliary_address_space_count() == 0
+        && registered_auxiliary_address_space_count() == baseline_registered
         && memory::owner_live_frame_count(owner) == Some(0)
         && domain::domain_is_retired(auxiliary)
         && !domain::handle_permits(
@@ -9134,6 +9162,7 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
             )
         } else if registered.expect_network_reuse {
             pci::network_service_arp_reuse_is_complete(dma.address(), dma_virtual)
+                || pci::network_service_icmp_exchange_is_complete(dma.address(), dma_virtual)
         } else if registered.expect_network_receive {
             pci::network_service_arp_exchange_is_complete(dma.address(), dma_virtual)
         } else {

@@ -44,7 +44,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     }
     for command in \
         help 'container help' 'container set --help' 'network help' 'network set help' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
-        'network status' 'network set static 10.0.2.15/99 10.0.2.2' 'network set static 10.0.2.15/24 10.0.2.2' 'network status' 'network down' 'network status' \
+        'network status' 'network set static 10.0.2.15/99 10.0.2.2' 'network set static 10.0.2.15/24 10.0.2.2' 'network status' 'ping 10.0.2.2' 'network down' 'network status' \
         'container status default' 'container new demo' 'container new demo' 'container list' \
         'container start' 'container set demo cpu=1 cpu=1' 'container list' \
         'container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo autostart=false' 'container set demo cpu 1' 'container list' status \
@@ -105,6 +105,10 @@ for expected in \
     'network: invalid address or prefix' \
     'control: static network configured' \
     'control up 10.0.2.15/24 10.0.2.2' \
+    'ping ADDRESS' \
+    'Send one ICMP echo from the control domain' \
+    'PING 10.0.2.2' \
+    '64 bytes from 10.0.2.2: icmp_seq=1 ttl=64' \
     'control: network disabled' \
     'control down - -' \
     'container list' \

@@ -1906,6 +1906,63 @@ pub(crate) fn network_service_arp_reuse_is_complete(dma_physical: u64, dma_virtu
     })
 }
 
+pub(crate) fn network_service_icmp_exchange_is_complete(
+    dma_physical: u64,
+    dma_virtual: usize,
+) -> bool {
+    const HEADER_LENGTH: usize = 12;
+    const RX_LENGTH: usize = NET_BUFFER_LENGTH - 1;
+    const ICMP_REQUEST: [u8; 42] = [
+        0x52, 0x55, 0x0a, 0x00, 0x02, 0x02, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x00, 0x45,
+        0x00, 0x00, 0x1c, 0x12, 0x34, 0x40, 0x00, 0x40, 0x01, 0x10, 0x9d, 10, 0, 2, 15, 10, 0, 2,
+        2, 0x08, 0x00, 0x39, 0x0f, 0xbe, 0xef, 0x00, 0x01,
+    ];
+    const ICMP_REPLY: [u8; 8] = [0x00, 0x00, 0x41, 0x0f, 0xbe, 0xef, 0x00, 0x01];
+    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
+    let tx_length = HEADER_LENGTH + ICMP_REQUEST.len();
+    let receive_length = read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 16) as usize;
+    let frame = dma_virtual + NET_RX_BUFFER_OFFSET + HEADER_LENGTH;
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 2) != 2
+        || read_dma_u16(dma_virtual + NET_RX_USED_OFFSET + 2) != 2
+        || read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 12) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2) != 2
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) != 2
+        || read_dma_u32(dma_virtual + NET_TX_DESC_OFFSET + 8) != tx_length as u32
+        || (0..HEADER_LENGTH)
+            .any(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) != 0)
+        || ICMP_REQUEST.iter().enumerate().any(|(offset, byte)| {
+            read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset) != *byte
+        })
+        || !(HEADER_LENGTH + 42..=RX_LENGTH).contains(&receive_length)
+        || (0..10).any(|offset| read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET + offset) != 0)
+        || read_dma_u16(dma_virtual + NET_RX_BUFFER_OFFSET + 10) != 1
+        || (0..6).any(|offset| read_dma_u8(frame + offset) != GUEST_MAC[offset])
+        || (0..6).any(|offset| read_dma_u8(frame + 6 + offset) != GATEWAY_MAC[offset])
+        || read_dma_u16(frame + 12) != u16::from_be_bytes([0x08, 0x00]).swap_bytes()
+        || read_dma_u8(frame + 14) != 0x45
+        || read_dma_u16(frame + 16) != u16::from_be_bytes([0x00, 0x1c]).swap_bytes()
+        || read_dma_u8(frame + 23) != 1
+        || (0..4).any(|offset| read_dma_u8(frame + 26 + offset) != [10, 0, 2, 2][offset])
+        || (0..4).any(|offset| read_dma_u8(frame + 30 + offset) != [10, 0, 2, 15][offset])
+        || (0..ICMP_REPLY.len())
+            .any(|offset| read_dma_u8(frame + 34 + offset) != ICMP_REPLY[offset])
+        || read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1) != 0x3c
+        || read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET + RX_LENGTH) != 0xc3
+        || read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + tx_length) != 0xa5
+    {
+        return false;
+    }
+    (1..usize::from(QUEUE_SIZE)).all(|descriptor| {
+        (0..16).all(|byte| {
+            read_dma_u8(dma_virtual + NET_RX_DESC_OFFSET + descriptor * 16 + byte) == 0
+                && read_dma_u8(dma_virtual + NET_TX_DESC_OFFSET + descriptor * 16 + byte) == 0
+        })
+    })
+}
+
 pub(crate) fn corrupt_network_service_arp_reply(dma_physical: u64, dma_virtual: usize) -> bool {
     const ARP_OPERATION_LOW_BYTE: usize = NET_RX_BUFFER_OFFSET + 12 + 14 + 7;
     if !network_service_arp_exchange_is_complete(dma_physical, dma_virtual) {

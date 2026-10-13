@@ -23,6 +23,7 @@ pub const NATIVE_NETWORK_FEATURE_EGRESS_WAIT: u32 = 1 << 12;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_REUSE: u32 = 1 << 13;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_BATCH: u32 = 1 << 14;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_RESIDENT: u32 = 1 << 15;
+pub const NATIVE_NETWORK_FEATURE_ICMP_PROBE: u32 = 1 << 16;
 pub const NATIVE_NETWORK_BOOT_V1_VERSION: u16 = 1;
 pub const NATIVE_NETWORK_BOOT_V1_SIZE: u16 = 88;
 pub const NATIVE_NETWORK_BOOT_V2_VERSION: u16 = 2;
@@ -60,6 +61,8 @@ pub const NATIVE_NETWORK_DEVICE_QUERY_ROUTE: u64 = 9;
 pub const NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT: u64 = 10;
 pub const NATIVE_NETWORK_DEVICE_APPLY: u64 = 11;
 pub const NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES: u64 = 12;
+pub const NATIVE_NETWORK_DEVICE_PING: u64 = 13;
+pub const NATIVE_NETWORK_DEVICE_QUERY_PING: u64 = 14;
 pub const NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD: u64 = 0x0000_0001_05dc_0009;
 pub const NATIVE_NETWORK_SNAPSHOT_SIZE: u64 = 56;
 pub const NATIVE_NETWORK_SNAPSHOT_VERSION: u64 = 1;
@@ -424,7 +427,15 @@ impl NativeNetworkBootV0 {
                         | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
                         | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
                         | NATIVE_NETWORK_FEATURE_ARP_PROBE
-                        | NATIVE_NETWORK_FEATURE_RX_REUSE)
+                        | NATIVE_NETWORK_FEATURE_RX_REUSE
+                || self.features
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                        | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                        | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
+                        | NATIVE_NETWORK_FEATURE_ARP_PROBE
+                        | NATIVE_NETWORK_FEATURE_RX_REUSE
+                        | NATIVE_NETWORK_FEATURE_ICMP_PROBE)
             && self.common_config_address != 0
             && self.receive_notification_address != 0
             && self.transmit_notification_address != 0
@@ -455,6 +466,10 @@ impl NativeNetworkBootV0 {
 
     pub const fn requests_rx_reuse(&self) -> bool {
         self.features & NATIVE_NETWORK_FEATURE_RX_REUSE != 0
+    }
+
+    pub const fn requests_icmp_probe(&self) -> bool {
+        self.features & NATIVE_NETWORK_FEATURE_ICMP_PROBE != 0
     }
 }
 

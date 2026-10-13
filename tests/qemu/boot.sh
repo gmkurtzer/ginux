@@ -290,6 +290,8 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: native network service completed second ARP exchange' "$output_file" ||
     ! grep -q '^ginux: native network request generations one through four completed' "$output_file" ||
     ! grep -q '^ginux: kernel validated both native network ARP exchanges' "$output_file" ||
+    ! grep -q '^ginux: native network ICMP gateway request transmitted' "$output_file" ||
+    ! grep -q '^ginux: native network ICMP gateway reply validated' "$output_file" ||
     ! grep -q '^ginux: native network service copied validated frame out of DMA' "$output_file" ||
     ! grep -q '^ginux: packet producer retained no read authority' "$output_file" ||
     ! grep -q '^ginux: compiled Rust protocol service consumed Ethernet frame' "$output_file" ||

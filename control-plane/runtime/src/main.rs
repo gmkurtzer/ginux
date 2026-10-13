@@ -23,12 +23,12 @@ use ginux_native_abi::{
     NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
     NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT, NATIVE_HOST_PROCESS_KIND_CONTROLLER,
     NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_NETWORK_APPLY_VERSION,
-    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_OPERATION,
-    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_SNAPSHOT_SIZE,
-    NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
-    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
-    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING,
+    NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
+    NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
+    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
+    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
@@ -50,6 +50,7 @@ const COMMAND_CONTAINER_LIST: u16 = 13;
 const COMMAND_NETWORK_STATUS: u16 = 14;
 const COMMAND_NETWORK_SET_STATIC: u16 = 15;
 const COMMAND_NETWORK_DOWN: u16 = 16;
+const COMMAND_PING: u16 = 17;
 
 const NETWORK_SET_COMMANDS: &[Command<'static>] = &[Command::leaf(
     b"static",
@@ -188,6 +189,13 @@ const ROOT_COMMANDS: &[Command<'static>] = &[
         b"network COMMAND",
         b"Manage control-domain networking",
         NETWORK_COMMANDS,
+    ),
+    Command::leaf(
+        b"ping",
+        b"ping ADDRESS",
+        b"Send one ICMP echo from the control domain",
+        COMMAND_PING,
+        Arity::exact(1),
     ),
     Command::leaf(
         b"shutdown",
@@ -336,8 +344,47 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
                 set_static_network(console, network, invocation.arguments())
             }
             COMMAND_NETWORK_DOWN => set_network_down(console, network),
+            COMMAND_PING => ping(console, network, invocation.arguments()),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
         }
+    }
+}
+
+fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
+    let address_text = arguments.first().unwrap_or_default();
+    let Some(address) = parse_ipv4(address_text) else {
+        write(console, b"ping: invalid address\r\n");
+        return;
+    };
+    write(console, b"PING ");
+    write(console, address_text);
+    write(console, b"\r\n");
+    if call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_PING,
+        u64::from(address),
+    ) == NATIVE_CALL_FAILED
+    {
+        write(
+            console,
+            b"ping: network unavailable or target is not the configured gateway\r\n",
+        );
+        return;
+    }
+    match call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_QUERY_PING,
+        0,
+    ) {
+        1 => {
+            write(console, b"64 bytes from ");
+            write_ipv4(console, address);
+            write(console, b": icmp_seq=1 ttl=64\r\n");
+        }
+        2 => write(console, b"ping: request timed out\r\n"),
+        _ => write(console, b"ping: result unavailable\r\n"),
     }
 }
 

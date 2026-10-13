@@ -793,6 +793,8 @@ static CONTAINER_NAME: [AtomicU8; control_abi::CONTAINER_MAX_NAME_SIZE] =
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
+static NETWORK_PING_REQUESTED: AtomicU64 = AtomicU64::new(0);
+static NETWORK_PING_RESULT: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -15384,8 +15386,8 @@ fn root_request_word(request: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(request[offset..offset + 8].try_into().unwrap())
 }
 
-fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
-    let Some(frame) = (unsafe { frame.as_ref() }) else {
+fn network_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX - 2;
     };
     let command = frame.first_argument();
@@ -15528,8 +15530,59 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *const UserTr
         {
             0
         }
+        control_abi::NETWORK_DEVICE_PING
+            if argument != 0
+                && network::link_is_up()
+                && network::ipv4_configuration() != 0
+                && network::ipv4_gateway() == argument
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                )
+                && NETWORK_PING_REQUESTED
+                    .compare_exchange(0, argument, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok() =>
+        {
+            NETWORK_PING_RESULT.store(0, Ordering::Release);
+            if !domain::renew_auxiliary_call_epoch(caller_domain)
+                || !scheduler::suspend_container_lifecycle(
+                    frame,
+                    USER_CODE_SELECTOR,
+                    USER_DATA_SELECTOR,
+                    0,
+                    active_fs_base(),
+                )
+            {
+                NETWORK_PING_REQUESTED.store(0, Ordering::Release);
+                return u64::MAX - 2;
+            }
+            u64::MAX
+        }
+        control_abi::NETWORK_DEVICE_QUERY_PING
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            u64::from(NETWORK_PING_RESULT.swap(0, Ordering::AcqRel))
+        }
         _ => u64::MAX - 2,
     }
+}
+
+pub(crate) fn take_network_ping_request() -> Option<u32> {
+    u32::try_from(NETWORK_PING_REQUESTED.swap(0, Ordering::AcqRel))
+        .ok()
+        .filter(|target| *target != 0)
+}
+
+pub(crate) fn complete_network_ping(success: bool) {
+    NETWORK_PING_RESULT.store(if success { 1 } else { 2 }, Ordering::Release);
 }
 
 fn apply_network_configuration(address: u64) -> u64 {

@@ -581,6 +581,11 @@ unsafe fn arp_probe(
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 10, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0,
     ];
+    const ICMP_REQUEST: [u8; 42] = [
+        0x52, 0x55, 0x0a, 0x00, 0x02, 0x02, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x00, 0x45,
+        0x00, 0x00, 0x1c, 0x12, 0x34, 0x40, 0x00, 0x40, 0x01, 0x10, 0x9d, 10, 0, 2, 15, 10, 0, 2,
+        2, 0x08, 0x00, 0x39, 0x0f, 0xbe, 0xef, 0x00, 0x01,
+    ];
     let dma = usize::try_from(info.dma_virtual_address).ok()?;
     let receive_notification = usize::try_from(info.receive_notification_address).ok()?;
     let transmit_notification = usize::try_from(info.transmit_notification_address).ok()?;
@@ -670,6 +675,23 @@ unsafe fn arp_probe(
     for offset in 0..TX_HEADER_LENGTH + 42 {
         write_u8(dma + RX_BUFFER_OFFSET as usize + offset, 0xcc);
     }
+    let reuse_tx_length = if info.requests_icmp_probe() {
+        let length = TX_HEADER_LENGTH + ICMP_REQUEST.len();
+        write_u32(dma + TX_DESC_OFFSET as usize + 8, length as u32);
+        for offset in 0..TX_HEADER_LENGTH {
+            write_u8(dma + TX_BUFFER_OFFSET as usize + offset, 0);
+        }
+        for (offset, byte) in ICMP_REQUEST.into_iter().enumerate() {
+            write_u8(
+                dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH + offset,
+                byte,
+            );
+        }
+        write_u8(dma + TX_BUFFER_OFFSET as usize + length, 0xa5);
+        length
+    } else {
+        tx_length
+    };
     write_u16(dma + RX_AVAIL_OFFSET as usize + 6, 0);
     compiler_fence(Ordering::SeqCst);
     write_u16(dma + RX_AVAIL_OFFSET as usize + 2, 2);
@@ -700,7 +722,11 @@ unsafe fn arp_probe(
     {
         return None;
     }
-    if !arp_reply_is_valid(dma, common, tx_length, 2) {
+    if if info.requests_icmp_probe() {
+        !icmp_reply_is_valid(dma, common, reuse_tx_length)
+    } else {
+        !arp_reply_is_valid(dma, common, reuse_tx_length, 2)
+    } {
         return None;
     }
     if let Some(capability) = packet_capability {
@@ -721,6 +747,34 @@ unsafe fn arp_probe(
         }
     }
     Some(NATIVE_SERVICE_EXIT_COMPLETED)
+}
+
+unsafe fn icmp_reply_is_valid(dma: usize, common: usize, tx_length: usize) -> bool {
+    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
+    const ICMP_REPLY: [u8; 8] = [0x00, 0x00, 0x41, 0x0f, 0xbe, 0xef, 0x00, 0x01];
+    let buffer = dma + RX_BUFFER_OFFSET as usize;
+    let frame = buffer + TX_HEADER_LENGTH;
+    let used_length = read_u32(dma + RX_USED_OFFSET as usize + 16) as usize;
+    read_u16(dma + RX_USED_OFFSET as usize + 2) == 2
+        && read_u32(dma + RX_USED_OFFSET as usize + 12) == 0
+        && (TX_HEADER_LENGTH + 42..=RX_DESCRIPTOR_LENGTH).contains(&used_length)
+        && (0..10).all(|offset| read_u8(buffer + offset) == 0)
+        && read_u16(buffer + 10) == 1
+        && bytes_match(frame, &GUEST_MAC)
+        && bytes_match(frame + 6, &GATEWAY_MAC)
+        && bytes_match(frame + 12, &[0x08, 0x00])
+        && read_u8(frame + 14) == 0x45
+        && bytes_match(frame + 16, &[0x00, 0x1c])
+        && read_u8(frame + 23) == 1
+        && bytes_match(frame + 26, &[10, 0, 2, 2])
+        && bytes_match(frame + 30, &[10, 0, 2, 15])
+        && bytes_match(frame + 34, &ICMP_REPLY)
+        && read_u8(dma + RX_BUFFER_OFFSET as usize - 1) == 0x3c
+        && read_u8(dma + RX_BUFFER_OFFSET as usize + RX_DESCRIPTOR_LENGTH) == 0xc3
+        && read_u8(dma + TX_BUFFER_OFFSET as usize + tx_length) == 0xa5
+        && read_u8(common + COMMON_DEVICE_STATUS)
+            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
 }
 
 unsafe fn arp_reply_is_valid(dma: usize, common: usize, tx_length: usize, used_index: u16) -> bool {
