@@ -482,6 +482,14 @@ exact descriptor and reply before ordered teardown. Blocking egress waits and
 container-facing networking remain future work. See
 [Native Network Protocol Egress Transmit v0](specs/services/network-egress-transmit-v0.md).
 
+Network bootstrap ABI v3 makes egress restart-safe through separate claim and
+acknowledgement operations. A claim copies but retains the queue head; the
+kernel denies acknowledgement until the same device generation completes and
+validates virtio TX. The QEMU proof faults that generation after claiming,
+performs full device and DMA teardown, releases the claim without removing the
+packet, and has a fresh generation transmit and acknowledge the same sequence.
+See [Reliable Protocol Egress v0](specs/services/network-reliable-egress-v0.md).
+
 Native scheduler contexts retain a lower-canonical per-thread FS base alongside
 registers and the address-space root. Yield, blocking, and timer preemption
 capture it; every initial entry and resume programs and reads back the selected

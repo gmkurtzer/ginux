@@ -33,3 +33,8 @@ This proves the complete isolated protocol-to-device ownership path and device
 consumption. It does not prove peer reception. The source request is a
 deterministic copied proof frame rather than a live NIC receive, and there is
 no egress wait, batching, routing, socket layer, or container interface.
+
+This v2 proof destructively consumes before transmission. Bootstrap v3 adds
+claim/ack delivery so a driver fault before acknowledgement preserves the
+packet for a replacement. See
+[Reliable Protocol Egress v0](network-reliable-egress-v0.md).

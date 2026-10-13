@@ -472,9 +472,14 @@ requires `READ`, an exact nonzero sequence, and sufficient output capacity; it
 copies before destructive delivery. A future or consumed sequence returns the
 stale result without changing userspace or queue state. A capability for one
 packet object never selects the other queue. Operations 23 through 25 retain
-their established ingress-only wait and backpressure contract in v4; an
-object-9 handle is denied until a separate egress scheduling contract is
-specified.
+their established ingress-only wait and backpressure contract in v4. Additive
+operations 26 and 27 select object 9 only. Operation 26 copies and
+generation-binds the exact head sequence without removing it. Operation 27
+removes that claimed sequence only after the kernel validates the same network
+generation's completed virtio TX descriptor and interrupt. Exit, stop, or
+fault releases the claim without consuming the packet, allowing a replacement
+generation to retry it. See
+[Native Network Service Bootstrap ABI v3](native-network-bootstrap-v3.md).
 Before either bounded copy direction touches user memory, the kernel requires
 active CR3 to equal the scheduler's current root, revalidates the complete
 fixed page-table hierarchy, and confirms every page-table and payload frame is

@@ -3230,6 +3230,27 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: network service transmitted protocol egress through virtio-net");
     serial_write("\r\nginux: kernel validated egress descriptor and exact echo reply");
     serial_write("\r\nginux: protocol-to-device egress retired cleanly");
+    if !address_space::verify_native_network_reliable_egress(
+        &network_image,
+        &protocol_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: reliable protocol egress transmit failed\r\n");
+    }
+    serial_write("\r\nginux: network service claimed egress without consuming it");
+    serial_write("\r\nginux: premature egress acknowledgement rejected");
+    serial_write("\r\nginux: faulted network generation released egress claim");
+    serial_write("\r\nginux: claimed egress packet survived network driver fault");
+    serial_write("\r\nginux: replacement network generation transmitted preserved reply");
+    serial_write("\r\nginux: egress acknowledged only after TX completion");
+    serial_write("\r\nginux: reliable protocol egress retired cleanly");
     serial_write("\r\nginux: replenished network buffer guards preserved");
     serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");

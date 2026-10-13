@@ -83,6 +83,16 @@ _Static_assert(offsetof(struct ginux_native_network_boot_v2,
                "network expected egress sequence offset");
 _Static_assert(offsetof(struct ginux_native_network_boot_v2, reserved) == 88,
                "network bootstrap v2 reserved offset");
+_Static_assert(sizeof(struct ginux_native_network_boot_v3) == 96,
+               "network bootstrap v3 size");
+_Static_assert(offsetof(struct ginux_native_network_boot_v3,
+                        egress_capability) == 72,
+               "network v3 egress capability offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v3,
+                        expected_egress_sequence) == 80,
+               "network v3 expected egress sequence offset");
+_Static_assert(offsetof(struct ginux_native_network_boot_v3, reserved) == 88,
+               "network bootstrap v3 reserved offset");
 _Static_assert(sizeof(struct ginux_native_packet_request_v0) == 32,
                "native packet request size");
 _Static_assert(offsetof(struct ginux_native_packet_request_v0,
@@ -96,6 +106,14 @@ _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_BATCH == UINT32_C(256),
                "network packet batch feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_PACKET_EGRESS == UINT32_C(512),
                "network packet egress feature bit");
+_Static_assert(GINUX_NATIVE_NETWORK_FEATURE_RELIABLE_EGRESS == UINT32_C(1024),
+               "network reliable egress feature bit");
+_Static_assert(GINUX_NATIVE_NETWORK_FEATURE_EGRESS_FAULT == UINT32_C(2048),
+               "network egress fault feature bit");
+_Static_assert(GINUX_NATIVE_PACKET_EGRESS_CLAIM_OPERATION == UINT64_C(26),
+               "native packet egress claim operation");
+_Static_assert(GINUX_NATIVE_PACKET_EGRESS_ACK_OPERATION == UINT64_C(27),
+               "native packet egress ack operation");
 _Static_assert(GINUX_NATIVE_PACKET_QUEUE_CAPACITY == UINT32_C(4),
                "native packet queue capacity");
 _Static_assert(GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF == UINT16_C(2048),

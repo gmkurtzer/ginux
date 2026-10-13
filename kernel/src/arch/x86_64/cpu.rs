@@ -14365,6 +14365,12 @@ fn dispatch_charged_call(
         control_abi::PACKET_SPACE_WAIT_OPERATION => {
             packet_space_wait_call(caller_domain, capability, frame)
         }
+        control_abi::PACKET_EGRESS_CLAIM_OPERATION => {
+            packet_egress_claim_call(caller_domain, capability, frame)
+        }
+        control_abi::PACKET_EGRESS_ACK_OPERATION => {
+            packet_egress_ack_call(caller_domain, capability, frame)
+        }
         _ => u64::MAX,
     }
 }
@@ -14487,6 +14493,67 @@ fn packet_consume_call(caller_domain: u64, capability: u64, frame: *const UserTr
             }
             metadata.length as u64
         }
+        Err(crate::packet::PacketError::Stale) => control_abi::PACKET_RESULT_STALE,
+        Err(_) => u64::MAX - 2,
+    }
+}
+
+fn packet_egress_claim_call(
+    caller_domain: u64,
+    capability: u64,
+    frame: *const UserTrapFrame,
+) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    let Some(request) = packet_request(frame.first_argument()) else {
+        return u64::MAX - 2;
+    };
+    if request.expected_sequence == 0
+        || !(1..=control_abi::PACKET_MAX_SIZE).contains(&request.buffer_size)
+        || !domain::handle_permits(
+            caller_domain,
+            capability,
+            control_abi::PACKET_EGRESS_OBJECT,
+            Rights::READ,
+        )
+    {
+        return u64::MAX - 2;
+    }
+    match crate::packet::claim_egress_with(
+        caller_domain,
+        request.expected_sequence,
+        request.buffer_size,
+        |_, packet| address_space::copy_to_current_user(request.buffer_address, packet),
+    ) {
+        Ok(metadata) => metadata.length as u64,
+        Err(crate::packet::PacketError::Stale) => control_abi::PACKET_RESULT_STALE,
+        Err(_) => u64::MAX - 2,
+    }
+}
+
+fn packet_egress_ack_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    let Some(request) = packet_request(frame.first_argument()) else {
+        return u64::MAX - 2;
+    };
+    if request.buffer_address != 0
+        || request.buffer_size != 0
+        || request.expected_sequence == 0
+        || !domain::handle_permits(
+            caller_domain,
+            capability,
+            control_abi::PACKET_EGRESS_OBJECT,
+            Rights::READ,
+        )
+        || !address_space::auxiliary_network_egress_transmit_complete(caller_domain)
+    {
+        return u64::MAX - 2;
+    }
+    match crate::packet::acknowledge_egress(caller_domain, request.expected_sequence) {
+        Ok(_) => 0,
         Err(crate::packet::PacketError::Stale) => control_abi::PACKET_RESULT_STALE,
         Err(_) => u64::MAX - 2,
     }

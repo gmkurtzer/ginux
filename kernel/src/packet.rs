@@ -46,6 +46,7 @@ struct Mailbox {
     metadata: [Option<PacketMetadata>; PACKET_CAPACITY],
     head: usize,
     len: usize,
+    claim: Option<(u64, u64)>,
     last_delivery: Option<PacketMetadata>,
 }
 
@@ -58,6 +59,7 @@ impl Mailbox {
             metadata: [None; PACKET_CAPACITY],
             head: 0,
             len: 0,
+            claim: None,
             last_delivery: None,
         }
     }
@@ -148,6 +150,9 @@ impl Mailbox {
         capacity: usize,
         deliver: impl FnOnce(PacketMetadata, &[u8]) -> bool,
     ) -> Result<PacketMetadata, PacketError> {
+        if self.claim.is_some() {
+            return Err(PacketError::Busy);
+        }
         if self.len == 0 {
             return Err(PacketError::Empty);
         }
@@ -169,6 +174,64 @@ impl Mailbox {
         self.len -= 1;
         self.last_delivery = Some(metadata);
         Ok(metadata)
+    }
+
+    fn claim_with(
+        &mut self,
+        domain: u64,
+        expected_sequence: u64,
+        capacity: usize,
+        deliver: impl FnOnce(PacketMetadata, &[u8]) -> bool,
+    ) -> Result<PacketMetadata, PacketError> {
+        if domain == 0 || self.claim.is_some() {
+            return Err(PacketError::Busy);
+        }
+        if self.len == 0 {
+            return Err(PacketError::Empty);
+        }
+        let Some(metadata) = self.metadata[self.head] else {
+            return Err(PacketError::Empty);
+        };
+        if expected_sequence != metadata.sequence {
+            return Err(PacketError::Stale);
+        }
+        if capacity < metadata.length
+            || !deliver(metadata, &self.packets[self.head][..metadata.length])
+        {
+            return Err(PacketError::TooLarge);
+        }
+        self.claim = Some((domain, expected_sequence));
+        Ok(metadata)
+    }
+
+    fn acknowledge(
+        &mut self,
+        domain: u64,
+        expected_sequence: u64,
+    ) -> Result<PacketMetadata, PacketError> {
+        if self.claim != Some((domain, expected_sequence)) {
+            return Err(PacketError::Stale);
+        }
+        let Some(metadata) = self.metadata[self.head] else {
+            return Err(PacketError::Empty);
+        };
+        if metadata.sequence != expected_sequence {
+            return Err(PacketError::Stale);
+        }
+        self.packets[self.head][..metadata.length].fill(0);
+        self.metadata[self.head] = None;
+        self.head = (self.head + 1) % PACKET_CAPACITY;
+        self.len -= 1;
+        self.claim = None;
+        self.last_delivery = Some(metadata);
+        Ok(metadata)
+    }
+
+    fn release_claim_if_bound(&mut self, domain: u64) -> bool {
+        if self.claim.is_some_and(|(bound, _)| bound == domain) {
+            self.claim = None;
+        }
+        true
     }
 }
 
@@ -212,7 +275,10 @@ pub(crate) fn retire_egress_producer(domain: u64) -> bool {
 }
 
 pub(crate) fn retire_egress_producer_if_bound(domain: u64) -> bool {
-    domain != 0 && egress_mailbox_mut().is_some_and(|mailbox| mailbox.retire_if_bound(domain))
+    domain != 0
+        && egress_mailbox_mut().is_some_and(|mailbox| {
+            mailbox.retire_if_bound(domain) && mailbox.release_claim_if_bound(domain)
+        })
 }
 
 pub(crate) fn retire_producer(domain: u64) -> bool {
@@ -243,6 +309,29 @@ pub(crate) fn consume_egress_with(
         .consume_with(expected_sequence, capacity, deliver)
 }
 
+pub(crate) fn claim_egress_with(
+    domain: u64,
+    expected_sequence: u64,
+    capacity: usize,
+    deliver: impl FnOnce(PacketMetadata, &[u8]) -> bool,
+) -> Result<PacketMetadata, PacketError> {
+    egress_mailbox_mut().ok_or(PacketError::Empty)?.claim_with(
+        domain,
+        expected_sequence,
+        capacity,
+        deliver,
+    )
+}
+
+pub(crate) fn acknowledge_egress(
+    domain: u64,
+    expected_sequence: u64,
+) -> Result<PacketMetadata, PacketError> {
+    egress_mailbox_mut()
+        .ok_or(PacketError::Empty)?
+        .acknowledge(domain, expected_sequence)
+}
+
 pub(crate) fn last_delivery() -> Option<PacketMetadata> {
     mailbox_mut()?.last_delivery
 }
@@ -265,6 +354,10 @@ pub(crate) fn egress_pending_metadata() -> Option<PacketMetadata> {
 
 pub(crate) fn egress_last_delivery() -> Option<PacketMetadata> {
     egress_mailbox_mut()?.last_delivery
+}
+
+pub(crate) fn egress_claim() -> Option<(u64, u64)> {
+    egress_mailbox_mut()?.claim
 }
 
 pub(crate) fn wait_state(expected_sequence: u64) -> PacketWait {
@@ -359,10 +452,27 @@ pub(crate) fn verify_invariants() -> bool {
         && egress.len == 1
         && mailbox.len == 0
         && egress
-            .consume_with(1, 8, |metadata, packet| {
+            .claim_with(11, 1, 8, |metadata, packet| {
                 metadata.source_domain == 9
                     && metadata.service_identity == 10
                     && packet == [0xa5; 8]
             })
             .is_ok()
+        && egress.len == 1
+        && egress.claim_with(12, 1, 8, |_, _| true) == Err(PacketError::Busy)
+        && egress.consume_with(1, 8, |_, _| true) == Err(PacketError::Busy)
+        && egress.release_claim_if_bound(12)
+        && egress.claim == Some((11, 1))
+        && egress.release_claim_if_bound(11)
+        && egress.claim.is_none()
+        && egress
+            .claim_with(12, 1, 8, |metadata, packet| {
+                metadata.source_domain == 9
+                    && metadata.service_identity == 10
+                    && packet == [0xa5; 8]
+            })
+            .is_ok()
+        && egress.acknowledge(11, 1) == Err(PacketError::Stale)
+        && egress.acknowledge(12, 1).is_ok()
+        && egress.len == 0
 }

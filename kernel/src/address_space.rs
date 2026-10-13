@@ -4423,6 +4423,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_network_boot_info_v3(&self, info: ginux_native_abi::NativeNetworkBootV3) -> bool {
+        if !info.is_valid_reliable_egress_transmit() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeNetworkBootV3>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn write_protocol_boot_info(&self, info: ginux_native_abi::NativeProtocolBootV0) -> bool {
         if !info.is_valid_arp_consumer() {
             return false;
@@ -4737,6 +4752,8 @@ enum NativeNetworkRunMode {
     PacketHandoffFault,
     PacketBatch,
     PacketEgressTransmit,
+    ReliableEgressTransmit,
+    ReliableEgressFault,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4895,6 +4912,55 @@ pub(crate) fn verify_native_network_egress_transmit(
         return false;
     }
     packet::egress_pending_metadata().is_none()
+        && packet::egress_next_sequence() == expected.sequence.checked_add(1)
+        && packet::egress_last_delivery() == Some(expected)
+}
+
+pub(crate) fn verify_native_network_reliable_egress(
+    network_image: &crate::native_elf::NativeImage<'_>,
+    protocol_image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    interrupt: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
+) -> bool {
+    let (common_mapping, msix_mapping, apic) = interrupt;
+    if !publish_native_protocol_icmp_reply(protocol_image) {
+        return false;
+    }
+    let (Some(expected), previous_delivery) = (
+        packet::egress_pending_metadata(),
+        packet::egress_last_delivery(),
+    ) else {
+        return false;
+    };
+    if expected.length != 42
+        || !verify_native_network_bootstrap_run(
+            network_image,
+            device,
+            initialization,
+            iommu_profile,
+            NativeNetworkRunMode::ReliableEgressFault,
+            Some(common_mapping),
+            Some((msix_mapping, apic)),
+        )
+        || packet::egress_pending_metadata() != Some(expected)
+        || packet::egress_last_delivery() != previous_delivery
+        || packet::egress_claim().is_some()
+        || !verify_native_network_bootstrap_run(
+            network_image,
+            device,
+            initialization,
+            iommu_profile,
+            NativeNetworkRunMode::ReliableEgressTransmit,
+            Some(common_mapping),
+            Some((msix_mapping, apic)),
+        )
+    {
+        return false;
+    }
+    packet::egress_pending_metadata().is_none()
+        && packet::egress_claim().is_none()
         && packet::egress_next_sequence() == expected.sequence.checked_add(1)
         && packet::egress_last_delivery() == Some(expected)
 }
@@ -6580,6 +6646,8 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::PacketHandoffFault
             | NativeNetworkRunMode::PacketBatch
             | NativeNetworkRunMode::PacketEgressTransmit
+            | NativeNetworkRunMode::ReliableEgressTransmit
+            | NativeNetworkRunMode::ReliableEgressFault
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -6609,7 +6677,17 @@ fn verify_native_network_bootstrap_run(
     );
     let packet_fault = mode == NativeNetworkRunMode::PacketHandoffFault;
     let packet_batch = mode == NativeNetworkRunMode::PacketBatch;
-    let packet_egress = mode == NativeNetworkRunMode::PacketEgressTransmit;
+    let packet_egress = matches!(
+        mode,
+        NativeNetworkRunMode::PacketEgressTransmit
+            | NativeNetworkRunMode::ReliableEgressTransmit
+            | NativeNetworkRunMode::ReliableEgressFault
+    );
+    let reliable_egress = matches!(
+        mode,
+        NativeNetworkRunMode::ReliableEgressTransmit | NativeNetworkRunMode::ReliableEgressFault
+    );
+    let egress_fault = mode == NativeNetworkRunMode::ReliableEgressFault;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -6788,7 +6866,20 @@ fn verify_native_network_bootstrap_run(
             }
         }
     }
-    let boot_written = if packet_egress {
+    let boot_written = if reliable_egress {
+        packet_handle.is_some_and(|packet_handle| {
+            packet::egress_pending_metadata().is_some_and(|metadata| {
+                space.write_network_boot_info_v3(
+                    ginux_native_abi::NativeNetworkBootV3::reliable_egress_transmit(
+                        boot,
+                        packet_handle,
+                        metadata.sequence,
+                        egress_fault,
+                    ),
+                )
+            })
+        })
+    } else if packet_egress {
         packet_handle.is_some_and(|packet_handle| {
             packet::egress_pending_metadata().is_some_and(|metadata| {
                 space.write_network_boot_info_v2(
@@ -6881,7 +6972,7 @@ fn verify_native_network_bootstrap_run(
     cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     let packet_retired = !packet_handoff || packet::retire_producer(auxiliary);
     let event = domain::take_lifecycle_event();
-    let parser_fault_valid = !(corrupt_network_receive || packet_fault)
+    let parser_fault_valid = !(corrupt_network_receive || packet_fault || egress_fault)
         || domain::delivered_fault_descriptor().and_then(|descriptor| {
             let vector = descriptor
                 .get(6..8)
@@ -6898,8 +6989,11 @@ fn verify_native_network_bootstrap_run(
                 image.byte_at_virtual(relative),
             ))
         }) == Some((13, true, Some(0xf4)));
-    let expected_fault =
-        reject_reserved || fail_after_activation || corrupt_network_receive || packet_fault;
+    let expected_fault = reject_reserved
+        || fail_after_activation
+        || corrupt_network_receive
+        || packet_fault
+        || egress_fault;
     let expected_kind = if expected_fault {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
     } else {
@@ -6939,8 +7033,9 @@ fn verify_native_network_bootstrap_run(
         && iommu_evidence.is_none_or(iommu::TranslationEvidence::is_retired)
         && pci::network_function_is_disabled(device);
     let interrupt_retired = pci::network_msix_is_disabled(device);
-    let fault_ordering_valid = !(fail_after_activation || corrupt_network_receive || packet_fault)
-        || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
+    let fault_ordering_valid =
+        !(fail_after_activation || corrupt_network_receive || packet_fault || egress_fault)
+            || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
     execution_retired
         && packet_retired
         && lifecycle_valid
@@ -7521,6 +7616,30 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request
             request,
             dma_physical,
         )
+}
+
+pub(crate) fn auxiliary_network_egress_transmit_complete(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) =
+        (unsafe { (*registry).iter().flatten() }).find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    let (Some(teardown), Some(dma)) = (registered.network_teardown, registered.space.dma_lease())
+    else {
+        return false;
+    };
+    let Some(dma_virtual) = dma.direct_map_address() else {
+        return false;
+    };
+    !registered.device_quiesced
+        && registered.expect_network_egress
+        && registered.expect_network_transmit
+        && !registered.expect_network_receive
+        && !registered.expect_network_reuse
+        && teardown.msix_mapping.is_some()
+        && registered.network_interrupt_request_completed == 1
+        && pci::network_service_egress_transmit_is_complete(dma.address(), dma_virtual)
 }
 
 pub(crate) fn complete_auxiliary_network_wait(
