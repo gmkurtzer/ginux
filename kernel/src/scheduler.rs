@@ -1694,6 +1694,50 @@ pub(crate) fn wake_egress_waiter(sender_domain: u64, sequence: u64) -> bool {
     )
 }
 
+pub(crate) fn blocked_egress_waiter() -> Option<(u64, u64)> {
+    let runtime = runtime_mut()?;
+    let mut matched = None;
+    for thread in runtime.scheduler.threads.iter().flatten() {
+        let Some(WaitReason::PacketAvailable { object, sequence }) = thread.wait else {
+            continue;
+        };
+        if thread.state != State::Blocked || object != crate::control_abi::PACKET_EGRESS_OBJECT {
+            continue;
+        }
+        if matched.is_some() {
+            return None;
+        }
+        matched = Some((thread.domain, sequence));
+    }
+    matched
+}
+
+pub(crate) fn wake_egress_waiter_drained(sender_domain: u64, sequence: u64) -> bool {
+    if sender_domain == 0 || sequence == 0 {
+        return false;
+    }
+    let Some(runtime) = runtime_mut() else {
+        return false;
+    };
+    let Some(wakes) = runtime.wakes.checked_add(1) else {
+        return false;
+    };
+    if !runtime.scheduler.wake_blocked_peer(
+        sender_domain,
+        WaitReason::PacketAvailable {
+            object: crate::control_abi::PACKET_EGRESS_OBJECT,
+            sequence,
+        },
+        crate::control_abi::PACKET_RESULT_DRAINED,
+    ) {
+        return false;
+    }
+    runtime.wakes = wakes;
+    runtime.last_wake_source = Some(sender_domain);
+    runtime.last_wake_sequence = Some(sequence);
+    true
+}
+
 fn wake_packet_object_waiter(sender_domain: u64, object: u64, sequence: u64) -> bool {
     if sender_domain == 0 || sequence == 0 {
         return false;

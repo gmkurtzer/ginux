@@ -14648,6 +14648,13 @@ fn packet_wait_call_for_object(
         crate::packet::PacketWait::Ready => request.expected_sequence,
         crate::packet::PacketWait::Stale => control_abi::PACKET_RESULT_STALE,
         crate::packet::PacketWait::Empty => {
+            if object == control_abi::PACKET_EGRESS_OBJECT
+                && timeout_ms.is_none()
+                && !crate::packet::egress_producer_is_bound()
+                && domain::take_auxiliary_drain_request(caller_domain)
+            {
+                return control_abi::PACKET_RESULT_DRAINED;
+            }
             if timeout_ms == Some(0) {
                 return control_abi::PACKET_RESULT_TIMED_OUT;
             }
@@ -15549,6 +15556,13 @@ fn create_auxiliary_service(
         {
             scheduler::auxiliary_runtime_flags(request.source).unwrap_or(u64::MAX - 2)
         }
+        control_abi::MANAGEMENT_DRAIN_AUXILIARY
+            if request.object == 0
+                && request.rights == 0
+                && domain::request_auxiliary_drain(caller_domain, capability, request.source) =>
+        {
+            0
+        }
         _ => u64::MAX - 2,
     }
 }
@@ -15789,6 +15803,22 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
             peer_domain: caller_domain,
         })
     };
+    if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly) {
+        if !crate::packet::retire_egress_producer_if_bound(caller_domain) {
+            serial_write("ginux: auxiliary exit egress retirement failed\r\n");
+            return u64::MAX;
+        }
+        if crate::packet::egress_is_empty() {
+            if let Some((waiting_domain, sequence)) = scheduler::blocked_egress_waiter() {
+                if domain::take_blocked_auxiliary_drain_request(waiting_domain) {
+                    if !scheduler::wake_egress_waiter_drained(caller_domain, sequence) {
+                        serial_write("ginux: auxiliary exit drain wake failed\r\n");
+                        return u64::MAX;
+                    }
+                }
+            }
+        }
+    }
     let action = scheduler::exit_runtime(frame, USER_CODE_SELECTOR, USER_DATA_SELECTOR, close_wait);
     if matches!(action, RuntimeAction::Invalid) {
         serial_write("ginux: runtime exit scheduling failed\r\n");
@@ -15807,10 +15837,6 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
         if !domain::begin_auxiliary_runtime_exit(caller_domain, auxiliary_exit_status.unwrap_or(0))
         {
             serial_write("ginux: auxiliary exit transition failed\r\n");
-            return u64::MAX;
-        }
-        if !crate::packet::retire_egress_producer_if_bound(caller_domain) {
-            serial_write("ginux: auxiliary exit egress retirement failed\r\n");
             return u64::MAX;
         }
         if !address_space::quiesce_auxiliary_device(caller_domain) {

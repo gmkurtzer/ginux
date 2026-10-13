@@ -546,6 +546,14 @@ retires interrupt, VT-d, DMA, capability, address-space, and domain state in
 order. See
 [Native Network Service Bootstrap ABI v7](specs/abi/native-network-bootstrap-v7.md).
 
+The control plane can also request graceful drain of that exact resident
+generation. The driver preserves and transmits every accepted FIFO entry,
+waits for the producer to close, receives a distinct drained result at the
+empty next-sequence boundary, and exits normally. The kernel then validates
+the completed DMA state and performs the same ordered NIC, interrupt, VT-d,
+DMA, capability, address-space, and domain teardown. See
+[Resident Network Service Drain v0](specs/services/network-resident-drain-v0.md).
+
 The control-plane replacement proof then stops one resident generation and
 starts another with the same logical service identity. The replacement has a
 distinct domain generation and fresh DMA plus VT-d table leases, reinitializes

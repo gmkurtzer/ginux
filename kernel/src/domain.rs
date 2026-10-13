@@ -66,6 +66,7 @@ struct Domain {
     failure_policy: Option<ServiceFailurePolicy>,
     terminal_fault: Option<FaultMetadata>,
     terminal_exit_status: Option<u8>,
+    drain_requested: bool,
     readiness_published: bool,
     role: Role,
     state: State,
@@ -273,6 +274,7 @@ impl Manager {
             failure_policy: None,
             terminal_fault: None,
             terminal_exit_status: None,
+            drain_requested: false,
             readiness_published: false,
             role: Role::ControlPlane,
             state: State::Ready,
@@ -468,6 +470,7 @@ impl Manager {
             }),
             terminal_fault: None,
             terminal_exit_status: None,
+            drain_requested: false,
             readiness_published: false,
             role,
             state: State::Ready,
@@ -887,6 +890,72 @@ impl Manager {
         }
         self.begin_auxiliary_runtime_stop(id, None, None, false)
     }
+
+    fn request_auxiliary_drain(
+        &mut self,
+        supervisor: DomainId,
+        capability: Handle,
+        id: DomainId,
+    ) -> bool {
+        const HOST_CONTROL: u64 = 1;
+        if self.control_plane_id != Some(supervisor)
+            || !self.permits(supervisor, capability, HOST_CONTROL, Rights::MANAGE)
+            || !self.auxiliary_service_ids.contains(&Some(id))
+        {
+            return false;
+        }
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if domain.role != Role::AuxiliaryService
+            || domain.failure_policy != Some(ServiceFailurePolicy::StopOnly)
+            || domain.state != State::Ready
+            || domain.active_threads != 1
+            || domain.active_operations != 0
+            || domain.drain_requested
+            || !domain.boot_roots[..domain.boot_root_count]
+                .iter()
+                .flatten()
+                .any(|handle| {
+                    domain.capabilities.permits(
+                        *handle,
+                        crate::control_abi::PACKET_EGRESS_OBJECT,
+                        Rights::READ,
+                    )
+                })
+        {
+            return false;
+        }
+        domain.drain_requested = true;
+        true
+    }
+
+    fn take_auxiliary_drain_request(&mut self, id: DomainId, active_operations: u16) -> bool {
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(id.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == id)
+        else {
+            return false;
+        };
+        if domain.role != Role::AuxiliaryService
+            || domain.failure_policy != Some(ServiceFailurePolicy::StopOnly)
+            || domain.state != State::Ready
+            || domain.active_threads != 1
+            || domain.active_operations != active_operations
+            || !domain.drain_requested
+        {
+            return false;
+        }
+        domain.drain_requested = false;
+        true
+    }
 }
 
 pub(crate) fn initialize_control_plane(manifest: &Manifest) -> Option<u64> {
@@ -1240,6 +1309,36 @@ pub(crate) fn stop_auxiliary_service(
     };
     manager.request_auxiliary_stop(supervisor, host_capability, target)
         && manager.retire_auxiliary_service(target)
+}
+
+pub(crate) fn request_auxiliary_drain(
+    supervisor_raw: u64,
+    host_capability_raw: u64,
+    target_raw: u64,
+) -> bool {
+    let (Some(supervisor), Some(host_capability), Some(target)) = (
+        decode_id(supervisor_raw),
+        Handle::from_raw(host_capability_raw),
+        decode_id(target_raw),
+    ) else {
+        return false;
+    };
+    global_manager_mut()
+        .is_some_and(|manager| manager.request_auxiliary_drain(supervisor, host_capability, target))
+}
+
+pub(crate) fn take_auxiliary_drain_request(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager_mut().is_some_and(|manager| manager.take_auxiliary_drain_request(id, 1))
+}
+
+pub(crate) fn take_blocked_auxiliary_drain_request(domain_raw: u64) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    global_manager_mut().is_some_and(|manager| manager.take_auxiliary_drain_request(id, 0))
 }
 
 pub(crate) fn handle_permits(domain_raw: u64, raw: u64, object: u64, rights: Rights) -> bool {

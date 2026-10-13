@@ -3348,6 +3348,24 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: control plane stopped resident network service");
     serial_write("\r\nginux: resident stop quiesced device before DMA retirement");
     serial_write("\r\nginux: resident egress wait and authority retired cleanly");
+    if !address_space::verify_native_network_egress_resident_drain(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
+    ) {
+        kernel_fail("\r\nginux: resident reliable egress drain failed\r\n");
+    }
+    serial_write("\r\nginux: unauthorized resident drain requests rejected");
+    serial_write("\r\nginux: control plane requested resident network drain");
+    serial_write("\r\nginux: resident network drain preserved four egress replies");
+    serial_write("\r\nginux: drained resident network service exited normally");
+    serial_write("\r\nginux: resident drain quiesced device before DMA retirement");
     if !address_space::verify_native_network_egress_resident_restart(
         &network_image,
         virtio_network,

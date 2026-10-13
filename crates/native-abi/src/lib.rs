@@ -70,6 +70,7 @@ pub const NATIVE_PACKET_REQUEST_SIZE: u32 = 32;
 pub const NATIVE_PACKET_MAX_SIZE: u32 = 1514;
 pub const NATIVE_PACKET_QUEUE_CAPACITY: u32 = 4;
 pub const NATIVE_PACKET_WAIT_TIMED_OUT: u64 = u64::MAX - 5;
+pub const NATIVE_PACKET_DRAINED: u64 = u64::MAX - 6;
 pub const NATIVE_PACKET_WAIT_MAX_TIMEOUT_MS: u64 = 1_000;
 pub const NATIVE_PACKET_STALE: u64 = u64::MAX - 4;
 pub const NATIVE_CALL_FAILED: u64 = u64::MAX - 2;
@@ -1525,6 +1526,7 @@ mod tests {
         );
         assert!(network_header
             .contains("GINUX_NATIVE_PACKET_WAIT_TIMED_OUT (UINT64_MAX - UINT64_C(5))"));
+        assert!(network_header.contains("GINUX_NATIVE_PACKET_DRAINED (UINT64_MAX - UINT64_C(6))"));
         assert!(network_header.contains("GINUX_NATIVE_PACKET_WAIT_MAX_TIMEOUT_MS UINT64_C(1000)"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v1) == 88"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v2) == 96"));

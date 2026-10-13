@@ -398,6 +398,10 @@ pub(crate) fn egress_is_empty() -> bool {
     egress_mailbox_mut().is_some_and(|mailbox| mailbox.len == 0)
 }
 
+pub(crate) fn egress_producer_is_bound() -> bool {
+    egress_mailbox_mut().is_some_and(|mailbox| mailbox.producer.is_some())
+}
+
 fn mailbox_mut() -> Option<&'static mut Mailbox> {
     INSTALLED
         .load(Ordering::Acquire)

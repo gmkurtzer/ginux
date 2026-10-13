@@ -26,6 +26,7 @@ pub(crate) fn parse_management_request(
                 | MANAGEMENT_START_AUXILIARY
                 | MANAGEMENT_QUERY_AUXILIARY
                 | MANAGEMENT_QUERY_AUXILIARY_FLAGS
+                | MANAGEMENT_DRAIN_AUXILIARY
         )
     {
         return None;

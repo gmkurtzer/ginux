@@ -267,6 +267,16 @@ action 4 has installed the private payload; all other bits are zero in version
 1. A created or merely loaded auxiliary returns zero. The ring-3 proof observes
 the bit clear after loading and set after initialization, before action 5 is
 allowed to succeed.
+Action 8 requests graceful drain of the exact auxiliary generation in source;
+object and rights must be zero. The target must be a ready, running stop-only
+auxiliary with packet-egress object 9 `READ`. Only the persistent control plane
+with host-control `MANAGE` may request it. The request is generation-bound and
+single-use; duplicates, wrong callers, wrong capabilities, and ineligible
+targets fail closed. The target continues processing accepted egress entries.
+After the bound producer has observed an empty FIFO and retired, an empty
+object-9 wait consumes the request and returns `UINT64_MAX - 6`. If that wait
+is already blocked, producer retirement wakes that exact waiter with the same
+result. See [Resident Network Service Drain v0](../services/network-resident-drain-v0.md).
 The ring-3 control plane first consumes the replacement service's kind 7 clean
 exit and validates its descriptor at sequence three. It consumes both kind 3 stop records as they are
 published. After action 5 it voluntarily yields, resumes only after the

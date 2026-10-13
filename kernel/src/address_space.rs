@@ -4843,6 +4843,7 @@ enum NativeNetworkRunMode {
     ReliableEgressReuse,
     ReliableEgressBatch,
     ReliableEgressResident,
+    ReliableEgressResidentDrain,
 }
 
 #[derive(Clone, Copy)]
@@ -5283,6 +5284,43 @@ pub(crate) fn verify_native_network_egress_resident_stop(
         initialization,
         iommu_profile,
         NativeNetworkRunMode::ReliableEgressResident,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    ) {
+        return false;
+    }
+    packet::egress_pending_metadata().is_none()
+        && packet::egress_claim().is_none()
+        && packet::egress_next_sequence() == expected_sequence.checked_add(4)
+        && packet::egress_last_delivery().is_some_and(|metadata| {
+            metadata.sequence == expected_sequence + 3 && metadata.length == 42
+        })
+}
+
+pub(crate) fn verify_native_network_egress_resident_drain(
+    network_image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    interrupt: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
+) -> bool {
+    let (common_mapping, msix_mapping, apic) = interrupt;
+    let Some(expected_sequence) = packet::egress_next_sequence() else {
+        return false;
+    };
+    if expected_sequence == 0
+        || expected_sequence.checked_add(4).is_none()
+        || packet::egress_pending_metadata().is_some()
+        || packet::egress_claim().is_some()
+    {
+        return false;
+    }
+    if !verify_native_network_bootstrap_run(
+        network_image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReliableEgressResidentDrain,
         Some(common_mapping),
         Some((msix_mapping, apic)),
     ) {
@@ -7267,6 +7305,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
             | NativeNetworkRunMode::ReliableEgressResident
+            | NativeNetworkRunMode::ReliableEgressResidentDrain
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -7306,6 +7345,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
             | NativeNetworkRunMode::ReliableEgressResident
+            | NativeNetworkRunMode::ReliableEgressResidentDrain
     );
     let reliable_egress = matches!(
         mode,
@@ -7316,6 +7356,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
             | NativeNetworkRunMode::ReliableEgressResident
+            | NativeNetworkRunMode::ReliableEgressResidentDrain
     );
     let egress_fault = mode == NativeNetworkRunMode::ReliableEgressFault;
     let egress_wait = matches!(
@@ -7325,6 +7366,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
             | NativeNetworkRunMode::ReliableEgressResident
+            | NativeNetworkRunMode::ReliableEgressResidentDrain
     );
     let egress_ack_backpressure = mode == NativeNetworkRunMode::ReliableEgressAckBackpressure;
     let egress_reuse = matches!(
@@ -7332,12 +7374,20 @@ fn verify_native_network_bootstrap_run_with_evidence(
         NativeNetworkRunMode::ReliableEgressReuse
             | NativeNetworkRunMode::ReliableEgressBatch
             | NativeNetworkRunMode::ReliableEgressResident
+            | NativeNetworkRunMode::ReliableEgressResidentDrain
     );
     let egress_batch = matches!(
         mode,
-        NativeNetworkRunMode::ReliableEgressBatch | NativeNetworkRunMode::ReliableEgressResident
+        NativeNetworkRunMode::ReliableEgressBatch
+            | NativeNetworkRunMode::ReliableEgressResident
+            | NativeNetworkRunMode::ReliableEgressResidentDrain
     );
-    let egress_resident = mode == NativeNetworkRunMode::ReliableEgressResident;
+    let egress_resident = matches!(
+        mode,
+        NativeNetworkRunMode::ReliableEgressResident
+            | NativeNetworkRunMode::ReliableEgressResidentDrain
+    );
+    let egress_graceful_drain = mode == NativeNetworkRunMode::ReliableEgressResidentDrain;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -7725,6 +7775,24 @@ fn verify_native_network_bootstrap_run_with_evidence(
     {
         return false;
     }
+    let drain_authorized = if egress_graceful_drain {
+        let (Some(supervisor), Some(manage_handle), Some(wrong_handle)) = (
+            domain::control_plane_id(),
+            domain::control_plane_boot_handle(0),
+            domain::control_plane_boot_handle(1),
+        ) else {
+            return false;
+        };
+        !domain::request_auxiliary_drain(auxiliary, handle, auxiliary)
+            && !domain::request_auxiliary_drain(supervisor, wrong_handle, auxiliary)
+            && domain::request_auxiliary_drain(supervisor, manage_handle, auxiliary)
+            && !domain::request_auxiliary_drain(supervisor, manage_handle, auxiliary)
+    } else {
+        true
+    };
+    if !drain_authorized {
+        return false;
+    }
     if let Some(producer) = egress_producer.as_ref() {
         let Some(sequence) = packet::egress_next_sequence() else {
             return false;
@@ -7742,9 +7810,10 @@ fn verify_native_network_bootstrap_run_with_evidence(
         cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
     }
     let resident_wait_blocked = !egress_resident
+        || egress_graceful_drain
         || packet::egress_next_sequence()
             .is_some_and(|sequence| !scheduler::egress_wait_is_available(sequence));
-    let resident_stopped = if egress_resident {
+    let resident_stopped = if egress_resident && !egress_graceful_drain {
         let (Some(supervisor), Some(manage_handle)) = (
             domain::control_plane_id(),
             domain::control_plane_boot_handle(0),
@@ -7795,7 +7864,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
         || egress_fault;
     let expected_kind = if expected_fault {
         crate::control_abi::LIFECYCLE_AUXILIARY_FAULT
-    } else if egress_resident {
+    } else if egress_resident && !egress_graceful_drain {
         crate::control_abi::LIFECYCLE_AUXILIARY_STOPPED
     } else {
         crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
@@ -7833,10 +7902,11 @@ fn verify_native_network_bootstrap_run_with_evidence(
             let Some(producer) = egress_producer.as_ref() else {
                 return false;
             };
+            let producer_detail = if egress_batch { 64 } else { 62 };
             (
                 crate::control_abi::LIFECYCLE_AUXILIARY_EXITED,
                 producer.domain,
-                62,
+                producer_detail,
                 false,
                 producer.identity,
             )
@@ -7885,8 +7955,9 @@ fn verify_native_network_bootstrap_run_with_evidence(
     let fault_ordering_valid =
         !(fail_after_activation || corrupt_network_receive || packet_fault || egress_fault)
             || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
-    let stop_ordering_valid =
-        !egress_resident || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
+    let stop_ordering_valid = !egress_resident
+        || egress_graceful_drain
+        || unsafe_device_quiesce_was_active(auxiliary) == Some(true);
     let valid = execution_retired
         && resident_wait_blocked
         && resident_stopped

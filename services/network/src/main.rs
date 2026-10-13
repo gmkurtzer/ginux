@@ -16,7 +16,7 @@ use ginux_native_abi::{
     NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES, NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD,
     NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED,
     NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED,
-    NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_EGRESS_ACK_OPERATION,
+    NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_DRAINED, NATIVE_PACKET_EGRESS_ACK_OPERATION,
     NATIVE_PACKET_EGRESS_CLAIM_OPERATION, NATIVE_PACKET_EGRESS_WAIT_OPERATION,
     NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE, NATIVE_SERVICE_EXIT_COMPLETED,
     NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
@@ -410,7 +410,7 @@ unsafe fn transmit_egress(
     loop {
         let sequence = expected_sequence.checked_add(index)?;
         let request = index.checked_add(1)?;
-        let status = transmit_egress_packet(
+        let outcome = transmit_egress_packet(
             info,
             egress_capability,
             sequence,
@@ -419,14 +419,22 @@ unsafe fn transmit_egress(
             wait,
             request,
         )?;
-        if status != NATIVE_SERVICE_EXIT_COMPLETED {
-            return Some(status);
+        match outcome {
+            EgressPacketOutcome::Transmitted => {}
+            EgressPacketOutcome::Drained => return Some(NATIVE_SERVICE_EXIT_COMPLETED),
+            EgressPacketOutcome::Exit(status) => return Some(status),
         }
         index = index.checked_add(1)?;
         if transmissions != 0 && index == transmissions {
             return Some(NATIVE_SERVICE_EXIT_COMPLETED);
         }
     }
+}
+
+enum EgressPacketOutcome {
+    Transmitted,
+    Drained,
+    Exit(u8),
 }
 
 unsafe fn transmit_egress_packet(
@@ -437,7 +445,7 @@ unsafe fn transmit_egress_packet(
     fault_after_claim: bool,
     wait: bool,
     interrupt_request: u64,
-) -> Option<u8> {
+) -> Option<EgressPacketOutcome> {
     let dma = usize::try_from(info.dma_virtual_address).ok()?;
     let notification = usize::try_from(info.transmit_notification_address).ok()?;
     let common = usize::try_from(info.common_config_address).ok()?;
@@ -447,9 +455,6 @@ unsafe fn transmit_egress_packet(
     let verify_static_denials = interrupt_request == 1;
     let frame = dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH;
     let future_sequence = expected_sequence.checked_add(1)?;
-    for offset in 0..ECHO_REPLY.len() {
-        write_u8(frame + offset, 0xcc);
-    }
     let publish = NativePacketRequestV0::publish(frame as u64, ECHO_REPLY.len() as u32);
     let future =
         NativePacketRequestV0::consume(frame as u64, ECHO_REPLY.len() as u32, future_sequence);
@@ -474,9 +479,14 @@ unsafe fn transmit_egress_packet(
                 return None;
             }
         }
-        if wait_for_egress_packet(egress_capability, &exact_wait) != expected_sequence {
-            return None;
+        match wait_for_egress_packet(egress_capability, &exact_wait) {
+            result if result == expected_sequence => {}
+            NATIVE_PACKET_DRAINED => return Some(EgressPacketOutcome::Drained),
+            _ => return None,
         }
+    }
+    for offset in 0..ECHO_REPLY.len() {
+        write_u8(frame + offset, 0xcc);
     }
     if (0..ECHO_REPLY.len()).any(|offset| read_u8(frame + offset) != 0xcc) {
         return None;
@@ -526,7 +536,11 @@ unsafe fn transmit_egress_packet(
     write_u16(notification, 1);
     match wait_for_tx_interrupt(info.device_capability, interrupt_request) {
         0 => {}
-        NATIVE_NETWORK_WAIT_CANCELLED => return Some(NATIVE_SERVICE_EXIT_RESTART_REQUIRED),
+        NATIVE_NETWORK_WAIT_CANCELLED => {
+            return Some(EgressPacketOutcome::Exit(
+                NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
+            ));
+        }
         _ => return None,
     }
     if wait_for_tx_interrupt(info.device_capability, interrupt_request)
@@ -552,7 +566,7 @@ unsafe fn transmit_egress_packet(
             return None;
         }
     }
-    Some(NATIVE_SERVICE_EXIT_COMPLETED)
+    Some(EgressPacketOutcome::Transmitted)
 }
 
 unsafe fn arp_probe(

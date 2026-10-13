@@ -212,6 +212,14 @@ blocked driver. Stop cancels its wait and quiesces the active NIC before
 retiring interrupt, VT-d, DMA, capability, address-space, and domain state.
 See [Native Network Service Bootstrap ABI v7](../abi/native-network-bootstrap-v7.md).
 
+The persistent control plane can alternatively request graceful drain of the
+exact v7 generation. The driver finishes all four accepted replies, the
+write-only producer closes after observing the empty FIFO, and the blocked
+next-sequence wait returns a distinct drained result. The driver then exits
+normally and the kernel proves ordered NIC, interrupt, VT-d, DMA, capability,
+address-space, and domain retirement. See
+[Resident Network Service Drain v0](network-resident-drain-v0.md).
+
 A controlled replacement proof repeats the v7 lifecycle with the prior
 generation's stable logical service identity. The replacement must use a
 distinct domain generation and entirely fresh DMA and VT-d table leases,
@@ -232,7 +240,7 @@ FIFO with one bound producer and sequential consumers. Exact-sequence blocking
 is available, control-plane management can stop a blocked consumer, and a
 bounded relative timeout can release its exact sequence. A full FIFO also
 blocks and wakes its bound producer without polling, and its producer can wait
-for complete drain. Self-cancellation, concurrent producers, graceful drain,
-state handoff, dynamic configuration, claim
+for complete drain. Control-plane-authorized graceful driver drain is verified.
+Self-cancellation, concurrent producers, state handoff, dynamic configuration, claim
 deadlines, peer reception of the protocol egress proof, and container
 networking remain separate milestones.

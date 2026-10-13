@@ -381,6 +381,11 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: control plane stopped resident network service' "$output_file" ||
     ! grep -q '^ginux: resident stop quiesced device before DMA retirement' "$output_file" ||
     ! grep -q '^ginux: resident egress wait and authority retired cleanly' "$output_file" ||
+    ! grep -q '^ginux: unauthorized resident drain requests rejected' "$output_file" ||
+    ! grep -q '^ginux: control plane requested resident network drain' "$output_file" ||
+    ! grep -q '^ginux: resident network drain preserved four egress replies' "$output_file" ||
+    ! grep -q '^ginux: drained resident network service exited normally' "$output_file" ||
+    ! grep -q '^ginux: resident drain quiesced device before DMA retirement' "$output_file" ||
     ! grep -q '^ginux: stopped resident network service replaced cleanly' "$output_file" ||
     ! grep -q '^ginux: replacement network domain generation was distinct' "$output_file" ||
     ! grep -q '^ginux: replacement network DMA and VT-d leases were fresh' "$output_file" ||

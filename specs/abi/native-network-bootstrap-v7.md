@@ -1,7 +1,7 @@
 # Native Network Service Bootstrap ABI v7
 
-**Status:** Additive resident reliable-egress loop and control-plane stop
-verified with ordered virtio-net teardown under QEMU/TCG.
+**Status:** Additive resident reliable-egress loop with both control-plane stop
+and graceful drain verified with ordered virtio-net teardown under QEMU/TCG.
 
 Version 7 preserves the complete 96-byte v6 layout and adds
 `EGRESS_RESIDENT`. Its exact feature set is the v6 full-FIFO reliable-egress
@@ -33,10 +33,17 @@ have been active when this ordered quiescence began and requires no packet
 claim, wait key, interrupt route, translation, DMA lease, capability, domain,
 or owned frame to remain afterward.
 
+The same v7 service also supports the separate graceful-drain lifecycle. A
+host-management request marks its exact generation for drain. It preserves
+and acknowledges every accepted FIFO entry, waits for the producer to close,
+receives `PACKET_RESULT_DRAINED` instead of a nonexistent next sequence, and
+exits normally through the same ordered device teardown. See
+[Resident Network Service Drain v0](../services/network-resident-drain-v0.md).
+
 ## Limits
 
-The service loop has no graceful drain request, state handoff, dynamic queue
-size, claim deadline, watchdog, or automatic restart policy. A separate proof
+The service loop has no state handoff, dynamic queue size, claim deadline,
+watchdog, or automatic restart policy. A separate proof
 performs explicit clean replacement with stable logical identity and fresh
 device authority, but does not overlap generations. Operation 30 is
 single-waiter and applies only to the currently bound object-9 write-only
