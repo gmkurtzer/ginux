@@ -24,7 +24,7 @@ executable regular file named `init`.
 The generated proof contains `bin`, `dev`, `etc`, `proc`, `sys`, `tmp`, `var`,
 `var/lib`, `var/lib/state`, `var/lib/version`, the native `init` marker,
 `etc/hostname`, `etc/os-release`, `etc/motd`, the validated
-authenticated `etc/ginux-system-profile` container policy and the build-produced
+authenticated `etc/ginux-system-profile` Linux ABI profile and the build-produced
 Linux ELF artifacts
 under internal `linux/*` names: the main, interpreter, primary DSO, and auxiliary
 DSO. Two distinct static exec targets are published at their Linux-visible
@@ -38,10 +38,12 @@ also contains a separately linked static candidate at `sbin/init`. Its one-page
 RX and one-page RW plan is validated from the measured root. A dedicated
 measured exec workload launches it as PID 1, opens the measured console, emits
 its exact readiness line, and exits with complete descriptor teardown. The
-mode-`0444` profile file binds the
-candidate's architecture, canonical init path, console, root format, and
+mode-`0444` profile file binds the candidate's architecture, canonical init
+path, console, root format, and
 machine-readable ready/partial/missing compatibility rows. The archive layer
-requires nonempty executable entries but does not compare them with
+does not declare or create a container; C2 container records are boot-local and
+created explicitly through the controller. It requires nonempty executable
+entries but does not compare them with
 kernel-embedded artifact bytes. The signed root-image digest authenticates the
 complete archive; after publication, the ELF planners parse and bind the
 selected measured files to their canonical paths, interpreter name, dependency

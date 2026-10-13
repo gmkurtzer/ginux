@@ -43,10 +43,14 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         done
     }
     for command in \
-        help status components ls 'ls /etc' 'ls /proc' 'ls /proc/1' 'ls /proc/100' ps \
-        'container status default' 'container stop default' 'container status default' \
-        'container start default' 'container status default' 'container fail default' \
-        'container status default' 'container start default' 'container status default' unknown; do
+        help status components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps \
+        'container status default' 'container new demo' 'container new demo' \
+        'container start demo' 'container set demo init /sbin/init' 'container set demo cpu 1' \
+        'container set demo memory-mib 128' 'container set demo autostart true' status \
+        'container start demo' 'container status demo' 'ls /proc' 'ls /proc/100' ps \
+        'container stop demo' 'container status demo' \
+        'container start demo' 'container status demo' 'container fail demo' \
+        'container status demo' 'container start demo' 'container status demo' unknown; do
         send_command "$command"
     done
     printf 'shutdown\n'
@@ -87,9 +91,19 @@ for expected in \
     'help        Show this command list' \
     'ls [PATH]   List the embedded measured root' \
     'ps          Show live host processes' \
+    'container new NAME' \
+    'container set NAME init /sbin/init' \
     'controller: running (ring 3)' \
-    'containers: 1 configured (default)' \
-    'default: running' \
+    'containers: 0 configured' \
+    'container: not found' \
+    'demo: created' \
+    'container: create rejected' \
+    'container: start rejected' \
+    'demo: setting accepted; created (incomplete)' \
+    'demo: setting accepted; configured' \
+    'containers: 1 runtime (demo)' \
+    'demo: configured' \
+    'demo: running' \
     'integrity: sealed' \
     'GINUX.EFI component catalog v0:' \
     '- kernel: active, ring 0' \
@@ -106,11 +120,11 @@ for expected in \
     'status' \
     'PID PPID STATE NAME' \
     '1 0 R controller' \
-    '100 0 R default:init' \
-    'default: stopped' \
-    'default: restarting' \
-    'default: failed (contained)' \
-    'ginux: restarting configured container default' \
+    '100 0 R demo:init' \
+    'demo: stopped' \
+    'demo: starting' \
+    'demo: failed (contained)' \
+    'ginux: starting configured runtime container' \
     "Unknown command. Type 'help'." \
     'Shutting down Ginux.' \
     'ginux: controller requested clean shutdown' \

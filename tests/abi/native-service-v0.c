@@ -150,6 +150,20 @@ _Static_assert(GINUX_NATIVE_CONTAINER_HOST_SHUTDOWN == UINT64_C(4),
                "container host shutdown command");
 _Static_assert(GINUX_NATIVE_CONTAINER_STATE_FAILED == UINT64_C(3),
                "failed container state");
+_Static_assert(GINUX_NATIVE_CONTAINER_CREATE == UINT64_C(5),
+               "container create command");
+_Static_assert(GINUX_NATIVE_CONSOLE_MAX_LINE_BYTES == UINT32_C(64),
+               "console line bound");
+_Static_assert(GINUX_NATIVE_CONTAINER_CONFIG_COMPLETE == UINT16_C(15),
+               "complete container configuration flags");
+_Static_assert(sizeof(struct ginux_native_container_request_v0) == 56,
+               "container request size");
+_Static_assert(offsetof(struct ginux_native_container_request_v0, name) == 8,
+               "container request name offset");
+_Static_assert(offsetof(struct ginux_native_container_request_v0, value) == 24,
+               "container request value offset");
+_Static_assert(offsetof(struct ginux_native_container_request_v0, init) == 36,
+               "container request init offset");
 _Static_assert(GINUX_NATIVE_PACKET_CONSUME_OPERATION == UINT64_C(22),
                "native packet consume operation");
 _Static_assert(GINUX_NATIVE_PACKET_WAIT_OPERATION == UINT64_C(23),

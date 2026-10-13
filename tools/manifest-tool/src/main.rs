@@ -200,16 +200,8 @@ fn validate_system_profile(bytes: &[u8]) {
     }
     let mut names = BTreeSet::new();
     let mut ready = false;
-    let mut container = false;
     let mut metadata = [false; 4];
     for line in lines {
-        if line == "container\tdefault\tautostart\t/sbin/init\tcpu=1\tmemory_mib=128" {
-            if container {
-                fail("system profile contains a duplicate container configuration");
-            }
-            container = true;
-            continue;
-        }
         let mut fields = line.split('\t');
         let Some(kind) = fields.next() else {
             fail("system profile row has no kind");
@@ -250,9 +242,6 @@ fn validate_system_profile(bytes: &[u8]) {
     }
     if metadata != [true; 4] {
         fail("system profile is missing required metadata");
-    }
-    if !container {
-        fail("system profile is missing the minimal container configuration");
     }
     if !ready {
         fail("system profile must expose at least one ready requirement");

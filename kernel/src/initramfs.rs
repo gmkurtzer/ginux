@@ -304,7 +304,6 @@ fn valid_system_profile(bytes: &[u8]) -> bool {
             b"meta\tinit\t/sbin/init\trequired\n",
             b"meta\tconsole\t/dev/console\trequired\n",
             b"meta\troot\tnewc-ro\trequired\n",
-            b"container\tdefault\tautostart\t/sbin/init\tcpu=1\tmemory_mib=128\n",
             b"\tready\t",
         ]
         .iter()

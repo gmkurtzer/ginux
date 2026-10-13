@@ -3,7 +3,6 @@ meta	architecture	x86_64	required
 meta	init	/sbin/init	required
 meta	console	/dev/console	required
 meta	root	newc-ro	required
-container	default	autostart	/sbin/init	cpu=1	memory_mib=128
 runtime	elf.static-x86_64	ready	Load a measured static x86-64 ET_EXEC image
 runtime	console.pid1-banner	ready	PID 1 writes an exact readiness banner to the measured console
 runtime	process.identity	ready	PID 1 observes Linux container PID 1

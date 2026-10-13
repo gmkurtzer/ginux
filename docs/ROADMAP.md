@@ -24,18 +24,21 @@ Deliverables:
 
 Gate: automated serial-console test exercises every command and clean shutdown. Human verification boots it and interacts with the console. No container starts yet.
 
-## C2: Configured container autostart
+## C2: Runtime container lifecycle
 
 **Implementation status:** Complete; awaiting human verification.
 
 Deliverables:
 
-- Authenticated local configuration names the `default` pinned minimal fixture,
-  `/sbin/init`, bounded CPU/memory grants, and autostart policy.
+- No container name or entity exists implicitly at boot.
+- The controller explicitly creates a named runtime record and sets the pinned
+  minimal fixture, `/sbin/init`, bounded CPU/memory grants, and autostart policy.
 - The controller starts, observes, stops, and restarts the container.
 - A container or controller failure cannot panic the kernel and leaves no stale authority.
 
-Gate: boot, readiness, stop, restart, injected failure, cleanup, and configuration-rejection tests. Human verification exercises lifecycle commands.
+Gate: absent-at-boot, explicit creation/configuration, readiness, stop, restart,
+injected failure, cleanup, and predefined-profile rejection tests. Human
+verification exercises configuration and lifecycle commands.
 
 ## C3: Rocky systemd early boot
 

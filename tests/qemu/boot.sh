@@ -1623,8 +1623,8 @@ if ! grep -q '^ginux: measured minimal system init planned' "$output_file"; then
     exit 1
 fi
 
-if [[ "$(grep -c '^GINUX_SYSTEM_INIT_V0' "$output_file")" -ne 2 ]] ||
-    [[ "$(grep -c '^SUPERVISOR_SHUTDOWN' "$output_file")" -ne 2 ]] ||
+if [[ "$(grep -c '^GINUX_SYSTEM_INIT_V0' "$output_file")" -ne 1 ]] ||
+    [[ "$(grep -c '^SUPERVISOR_SHUTDOWN' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: Linux PID 1 fork and wait4 lifecycle completed' "$output_file" ||
     ! grep -q '^ginux: measured minimal system init executed as PID 1' "$output_file" ||
     ! grep -q '^ginux: persistent Linux PID 1 supervisor lifecycle validated' "$output_file" ||
@@ -1633,13 +1633,13 @@ if [[ "$(grep -c '^GINUX_SYSTEM_INIT_V0' "$output_file")" -ne 2 ]] ||
     exit 1
 fi
 
-if [[ "$(grep -c '^SIGNAL_READY' "$output_file")" -ne 2 ]] ||
+if [[ "$(grep -c '^SIGNAL_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: bounded Linux standard signal lifecycle validated' "$output_file"; then
     echo "Boot test failed: the bounded Linux standard signal lifecycle was not validated." >&2
     exit 1
 fi
 
-if [[ "$(grep -c '^FUTEX_READY' "$output_file")" -ne 2 ]] ||
+if [[ "$(grep -c '^FUTEX_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: bounded Linux private futex lifecycle validated' "$output_file" ||
     ! grep -q '^ginux: Linux clear-child-TID exit action validated' "$output_file" ||
     ! grep -q '^ginux: Linux scheduler-backed timed futex wait validated' "$output_file"; then
@@ -1678,13 +1678,13 @@ if ! grep -q '^ginux: Linux privilege policy sealed fail-closed' "$output_file" 
     exit 1
 fi
 
-if [[ "$(grep -c '^DEVFS_READY' "$output_file")" -ne 2 ]] ||
+if [[ "$(grep -c '^DEVFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: bounded Linux devfs profile validated' "$output_file"; then
     echo "Boot test failed: the bounded Linux device namespace was not validated." >&2
     exit 1
 fi
 
-if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 2 ]] ||
+if [[ "$(grep -c '^TMPFS_READY' "$output_file")" -ne 1 ]] ||
     ! grep -q '^ginux: generation-safe Linux tmpfs mounted at /tmp' "$output_file" ||
     ! grep -q '^ginux: generation-safe bounded tmpfs lifecycle validated' "$output_file"; then
     echo "Boot test failed: the generation-safe bounded tmpfs lifecycle was not validated." >&2
@@ -1772,7 +1772,7 @@ if ! grep -q '^ginux: toolchain-linked static Linux ELF executed' "$output_file"
     exit 1
 fi
 
-if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 5 ]]; then
+if [[ "$(grep -c '^ginux: measured Linux exec image replaced atomically' "$output_file")" -ne 4 ]]; then
     echo "Boot test failed: measured Linux exec replacement did not complete four times." >&2
     exit 1
 fi
@@ -2642,7 +2642,7 @@ if ! grep -q '^ginux: Linux callable syscall assertion helpers validated' "$outp
     exit 1
 fi
 
-if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 35 ]]; then
+if [[ "$(grep -c '^PROBE!!$' "$output_file")" -ne 28 ]]; then
     echo "Boot test failed: Linux console output record count is invalid." >&2
     exit 1
 fi

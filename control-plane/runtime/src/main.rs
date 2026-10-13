@@ -3,24 +3,27 @@
 
 use core::arch::{asm, global_asm};
 use ginux_native_abi::{
-    native_control_abi_is_compatible, NativeControlDescriptorV4, NativeHostInspectRecordV0,
-    NativeHostInspectRequestV0, NativeRootDirectoryRequestV4, NATIVE_CALL_FAILED,
-    NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION,
-    NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_HOST_SHUTDOWN,
-    NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_QUERY, NATIVE_CONTAINER_RESTART,
-    NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING, NATIVE_CONTAINER_STATE_STOPPED,
-    NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
-    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_HOST_INSPECT_OPERATION,
-    NATIVE_HOST_INSPECT_RECORD_SIZE, NATIVE_HOST_INSPECT_REQUEST_SIZE,
-    NATIVE_HOST_INSPECT_STATE_READY, NATIVE_HOST_INSPECT_STATE_STOPPING,
-    NATIVE_HOST_INSPECT_VERSION, NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT,
-    NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS,
-    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
-    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    native_control_abi_is_compatible, NativeContainerRequestV0, NativeControlDescriptorV4,
+    NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
+    NATIVE_CALL_FAILED, NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION,
+    NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE, NATIVE_CONTAINER_HOST_SHUTDOWN,
+    NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY,
+    NATIVE_CONTAINER_RESTART, NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU,
+    NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_STATE_CONFIGURED,
+    NATIVE_CONTAINER_STATE_CREATED, NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING,
+    NATIVE_CONTAINER_STATE_STOPPED, NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
+    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
+    NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
+    NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
+    NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
+    NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT, NATIVE_HOST_PROCESS_KIND_CONTROLLER,
+    NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
+    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
+    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
-const MAX_LINE: usize = 32;
+const MAX_LINE: usize = 64;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
 
 global_asm!(
@@ -97,18 +100,20 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                 write(console, b"components  Show embedded image components\r\n");
                 write(console, b"ls [PATH]   List the embedded measured root\r\n");
                 write(console, b"ps          Show live host processes\r\n");
-                write(console, b"container status default\r\n");
-                write(console, b"container stop default\r\n");
-                write(console, b"container start default\r\n");
-                write(console, b"container restart default\r\n");
-                write(console, b"container fail default\r\n");
+                write(console, b"container new NAME\r\n");
+                write(console, b"container set NAME init /sbin/init\r\n");
+                write(console, b"container set NAME cpu 1\r\n");
+                write(console, b"container set NAME memory-mib 128\r\n");
+                write(console, b"container set NAME autostart true\r\n");
+                write(
+                    console,
+                    b"container status|start|stop|restart|fail NAME\r\n",
+                );
                 write(console, b"shutdown    Shut down Ginux cleanly\r\n");
             }
             b"status" => {
                 write(console, b"controller: running (ring 3)\r\n");
-                write(console, b"containers: 1 configured (default)\r\n");
-                write(console, b"default: ");
-                write_container_state(console, query_container(host));
+                write_container_summary(console, host);
                 write(console, b"integrity: sealed\r\n");
             }
             b"components" => {
@@ -118,51 +123,6 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                 write(console, b"- boot modules: embedded, sealed\r\n");
             }
             b"ps" => show_processes(console, host),
-            b"container status default" => {
-                write(console, b"default: ");
-                write_container_state(console, query_container(host));
-            }
-            b"container stop default" => {
-                if call(
-                    NATIVE_CONTAINER_CONTROL_OPERATION,
-                    host,
-                    NATIVE_CONTAINER_STOP,
-                    0,
-                ) == NATIVE_CONTAINER_STATE_STOPPED
-                {
-                    write(console, b"default: stopped\r\n");
-                    exit(NATIVE_SERVICE_EXIT_COMPLETED);
-                } else {
-                    write(console, b"container: stop rejected\r\n");
-                }
-            }
-            b"container start default" | b"container restart default" => {
-                if call(
-                    NATIVE_CONTAINER_CONTROL_OPERATION,
-                    host,
-                    NATIVE_CONTAINER_RESTART,
-                    0,
-                ) == NATIVE_CONTAINER_STATE_STOPPED
-                {
-                    write(console, b"default: restarting\r\n");
-                    exit(NATIVE_SERVICE_EXIT_COMPLETED);
-                }
-                write(console, b"container: restart rejected\r\n");
-            }
-            b"container fail default" => {
-                if call(
-                    NATIVE_CONTAINER_CONTROL_OPERATION,
-                    host,
-                    NATIVE_CONTAINER_INJECT_FAILURE,
-                    0,
-                ) == NATIVE_CONTAINER_STATE_FAILED
-                {
-                    write(console, b"default: failed (contained)\r\n");
-                    exit(NATIVE_SERVICE_EXIT_COMPLETED);
-                } else {
-                    write(console, b"container: failure injection rejected\r\n");
-                }
-            }
             b"shutdown" => {
                 write(console, b"Shutting down Ginux.\r\n");
                 if call(
@@ -189,18 +149,27 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64) -> ! {
                     list_directory(console, root, path);
                 }
             }
+            command if command.starts_with(b"container ") => {
+                handle_container_command(console, host, command)
+            }
             _ => write(console, b"Unknown command. Type 'help'.\r\n"),
         }
     }
 }
 
-fn query_container(host: u64) -> u64 {
-    call(
-        NATIVE_CONTAINER_CONTROL_OPERATION,
-        host,
-        NATIVE_CONTAINER_QUERY,
-        0,
-    )
+fn write_container_summary(console: u64, host: u64) {
+    let mut request = NativeContainerRequestV0::zeroed();
+    let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
+    if state == 0 {
+        write(console, b"containers: 0 configured\r\n");
+        return;
+    }
+    write(console, b"containers: 1 runtime (");
+    write(console, request_name(&request));
+    write(console, b")\r\n");
+    write(console, request_name(&request));
+    write(console, b": ");
+    write_container_state(console, state);
 }
 
 fn write_container_state(console: u64, state: u64) {
@@ -210,9 +179,163 @@ fn write_container_state(console: u64, state: u64) {
             NATIVE_CONTAINER_STATE_RUNNING => b"running\r\n",
             NATIVE_CONTAINER_STATE_STOPPED => b"stopped\r\n",
             NATIVE_CONTAINER_STATE_FAILED => b"failed\r\n",
+            NATIVE_CONTAINER_STATE_CREATED => b"created (incomplete)\r\n",
+            NATIVE_CONTAINER_STATE_CONFIGURED => b"configured\r\n",
             _ => b"unknown\r\n",
         },
     );
+}
+
+fn handle_container_command(console: u64, host: u64, command: &[u8]) {
+    let mut words = command.split(|byte| *byte == b' ');
+    let verb = words.nth(1).unwrap_or_default();
+    let name = words.next().unwrap_or_default();
+    if !valid_container_name(name) {
+        write(console, b"container: invalid name\r\n");
+        return;
+    }
+    let mut request = request_for_name(name);
+    match verb {
+        b"new" if words.next().is_none() => {
+            if container_call(host, NATIVE_CONTAINER_CREATE, &mut request)
+                == NATIVE_CONTAINER_STATE_CREATED
+            {
+                write_name_state(console, name, b"created\r\n");
+            } else {
+                write(console, b"container: create rejected\r\n");
+            }
+        }
+        b"set" => {
+            let field = words.next().unwrap_or_default();
+            let value = words.next().unwrap_or_default();
+            if words.next().is_some() || !set_request_value(&mut request, field, value) {
+                write(console, b"container: invalid setting\r\n");
+                return;
+            }
+            let operation = match field {
+                b"init" => NATIVE_CONTAINER_SET_INIT,
+                b"cpu" => NATIVE_CONTAINER_SET_CPU,
+                b"memory-mib" => NATIVE_CONTAINER_SET_MEMORY_MIB,
+                b"autostart" => NATIVE_CONTAINER_SET_AUTOSTART,
+                _ => {
+                    write(console, b"container: invalid setting\r\n");
+                    return;
+                }
+            };
+            let state = container_call(host, operation, &mut request);
+            if matches!(
+                state,
+                NATIVE_CONTAINER_STATE_CREATED | NATIVE_CONTAINER_STATE_CONFIGURED
+            ) {
+                write(console, name);
+                write(console, b": setting accepted; ");
+                write_container_state(console, state);
+            } else {
+                write(console, b"container: setting rejected\r\n");
+            }
+        }
+        b"status" if words.next().is_none() => {
+            let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
+            if state == NATIVE_CALL_FAILED {
+                write(console, b"container: not found\r\n");
+            } else {
+                write(console, name);
+                write(console, b": ");
+                write_container_state(console, state);
+            }
+        }
+        b"start" | b"restart" if words.next().is_none() => {
+            if container_call(host, NATIVE_CONTAINER_RESTART, &mut request)
+                == NATIVE_CONTAINER_STATE_STOPPED
+            {
+                write_name_state(console, name, b"starting\r\n");
+                exit(NATIVE_SERVICE_EXIT_COMPLETED);
+            } else {
+                write(console, b"container: start rejected\r\n");
+            }
+        }
+        b"stop" if words.next().is_none() => {
+            if container_call(host, NATIVE_CONTAINER_STOP, &mut request)
+                == NATIVE_CONTAINER_STATE_STOPPED
+            {
+                write_name_state(console, name, b"stopped\r\n");
+                exit(NATIVE_SERVICE_EXIT_COMPLETED);
+            } else {
+                write(console, b"container: stop rejected\r\n");
+            }
+        }
+        b"fail" if words.next().is_none() => {
+            if container_call(host, NATIVE_CONTAINER_INJECT_FAILURE, &mut request)
+                == NATIVE_CONTAINER_STATE_FAILED
+            {
+                write_name_state(console, name, b"failed (contained)\r\n");
+                exit(NATIVE_SERVICE_EXIT_COMPLETED);
+            } else {
+                write(console, b"container: failure injection rejected\r\n");
+            }
+        }
+        _ => write(console, b"container: invalid command\r\n"),
+    }
+}
+
+fn request_for_name(name: &[u8]) -> NativeContainerRequestV0 {
+    let mut request = NativeContainerRequestV0::zeroed();
+    request.name_size = name.len() as u16;
+    request.name[..name.len()].copy_from_slice(name);
+    request
+}
+
+fn request_name(request: &NativeContainerRequestV0) -> &[u8] {
+    request
+        .name
+        .get(..usize::from(request.name_size))
+        .unwrap_or_default()
+}
+
+fn valid_container_name(name: &[u8]) -> bool {
+    !name.is_empty()
+        && name.len() <= NATIVE_CONTAINER_MAX_NAME_SIZE
+        && name
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn set_request_value(request: &mut NativeContainerRequestV0, field: &[u8], value: &[u8]) -> bool {
+    match (field, value) {
+        (b"init", b"/sbin/init") => {
+            request.init_size = value.len() as u16;
+            request.init[..value.len()].copy_from_slice(value);
+            true
+        }
+        (b"cpu", b"1") => {
+            request.value = 1;
+            true
+        }
+        (b"memory-mib", b"128") => {
+            request.value = 128;
+            true
+        }
+        (b"autostart", b"true") => {
+            request.value = 1;
+            true
+        }
+        _ => false,
+    }
+}
+
+fn container_call(host: u64, operation: u64, request: &mut NativeContainerRequestV0) -> u64 {
+    call(
+        NATIVE_CONTAINER_CONTROL_OPERATION,
+        host,
+        operation,
+        (request as *mut NativeContainerRequestV0) as u64,
+    )
+}
+
+fn write_name_state(console: u64, name: &[u8], state: &[u8]) {
+    write(console, name);
+    write(console, b": ");
+    write(console, state);
 }
 
 fn write(console: u64, bytes: &[u8]) {
@@ -302,6 +425,8 @@ fn list_directory(console: u64, root: u64, path: &[u8]) {
 }
 
 fn show_processes(console: u64, host: u64) {
+    let mut configuration = NativeContainerRequestV0::zeroed();
+    let _ = container_call(host, NATIVE_CONTAINER_QUERY, &mut configuration);
     write(console, b"PID PPID STATE NAME\r\n");
     let mut cursor = 0;
     loop {
@@ -333,10 +458,13 @@ fn show_processes(console: u64, host: u64) {
             console,
             match record.kind {
                 NATIVE_HOST_PROCESS_KIND_CONTROLLER => b"controller",
-                NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT => b"default:init",
+                NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT => request_name(&configuration),
                 _ => b"unknown",
             },
         );
+        if record.kind == NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT {
+            write(console, b":init");
+        }
         write(console, b"\r\n");
         cursor = directory_record.next_cursor;
     }

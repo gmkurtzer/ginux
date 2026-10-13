@@ -9,7 +9,7 @@ trap 'rm -rf "$test_dir"' EXIT
 
 bad_profile="$test_dir/profile.tsv"
 cp profiles/minimal-system-v0/profile.tsv "$bad_profile"
-sed -i.bak 's/memory_mib=128/memory_mib=129/' "$bad_profile"
+printf 'container\tpredefined\tautostart\t/sbin/init\tcpu=1\tmemory_mib=128\n' >>"$bad_profile"
 
 if cargo run --quiet --package ginux-manifest-tool -- \
     boot/manifest-v0.conf \

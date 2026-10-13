@@ -786,6 +786,10 @@ static LINUX_SIGNAL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: AtomicU32 = AtomicU32::new(0);
 static CONTAINER_CONTROL_STATE: AtomicU8 = AtomicU8::new(0);
+static CONTAINER_CONFIG_FLAGS: AtomicU16 = AtomicU16::new(0);
+static CONTAINER_NAME_SIZE: AtomicU8 = AtomicU8::new(0);
+static CONTAINER_NAME: [AtomicU8; control_abi::CONTAINER_MAX_NAME_SIZE] =
+    [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_NAME_SIZE];
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -2262,7 +2266,7 @@ fn resume_linux_system_supervisor() -> bool {
         return resume_linux_system_supervisor_legacy();
     }
     CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
-    crate::serial_write("ginux: configured container default reached ready state\r\n");
+    crate::serial_write("ginux: configured runtime container reached ready state\r\n");
     if !address_space::run_installed_interactive_controller() {
         return false;
     }
@@ -15945,41 +15949,187 @@ fn container_control(domain_id: u64, capability: u64, frame: *const UserTrapFram
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         return u64::MAX - 2;
     };
-    if !domain::handle_permits(domain_id, capability, 1, Rights::MANAGE)
-        || frame.second_argument() != 0
-    {
+    if !domain::handle_permits(domain_id, capability, 1, Rights::MANAGE) {
         return u64::MAX - 2;
     }
     let state = u64::from(CONTAINER_CONTROL_STATE.load(Ordering::SeqCst));
-    match frame.first_argument() {
-        control_abi::CONTAINER_QUERY => state,
-        control_abi::CONTAINER_STOP if state == control_abi::CONTAINER_STATE_RUNNING => {
+    let operation = frame.first_argument();
+    if operation == control_abi::CONTAINER_HOST_SHUTDOWN && frame.second_argument() == 0 {
+        CONTAINER_HOST_SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+        return state;
+    }
+    let Some(mut request) = read_container_request(frame.second_argument()) else {
+        return u64::MAX - 2;
+    };
+    let name = container_request_name(&request);
+    let result = match operation {
+        control_abi::CONTAINER_QUERY if state == 0 && name.is_empty() => 0,
+        control_abi::CONTAINER_QUERY
+            if state != 0 && (name.is_empty() || stored_container_name_matches(name)) =>
+        {
+            write_container_request(&mut request);
+            if !address_space::copy_to_current_user(frame.second_argument(), &request) {
+                return u64::MAX - 2;
+            }
+            state
+        }
+        control_abi::CONTAINER_CREATE if state == 0 && valid_container_name(name) => {
+            store_container_name(name);
+            CONTAINER_CONFIG_FLAGS.store(0, Ordering::SeqCst);
+            CONTAINER_CONTROL_STATE
+                .store(control_abi::CONTAINER_STATE_CREATED as u8, Ordering::SeqCst);
+            control_abi::CONTAINER_STATE_CREATED
+        }
+        control_abi::CONTAINER_SET_INIT
+            if configurable_container(state, name)
+                && request[32..34] == (10_u16).to_le_bytes()
+                && &request[36..46] == b"/sbin/init"
+                && request[46..36 + control_abi::CONTAINER_MAX_INIT_SIZE]
+                    .iter()
+                    .all(|byte| *byte == 0) =>
+        {
+            update_container_configuration(control_abi::CONTAINER_CONFIG_INIT)
+        }
+        control_abi::CONTAINER_SET_CPU
+            if configurable_container(state, name) && read_u64_at(&request, 24) == 1 =>
+        {
+            update_container_configuration(control_abi::CONTAINER_CONFIG_CPU)
+        }
+        control_abi::CONTAINER_SET_MEMORY_MIB
+            if configurable_container(state, name) && read_u64_at(&request, 24) == 128 =>
+        {
+            update_container_configuration(control_abi::CONTAINER_CONFIG_MEMORY)
+        }
+        control_abi::CONTAINER_SET_AUTOSTART
+            if configurable_container(state, name) && read_u64_at(&request, 24) == 1 =>
+        {
+            update_container_configuration(control_abi::CONTAINER_CONFIG_AUTOSTART)
+        }
+        control_abi::CONTAINER_STOP
+            if state == control_abi::CONTAINER_STATE_RUNNING
+                && stored_container_name_matches(name) =>
+        {
             CONTAINER_CONTROL_STATE
                 .store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
             control_abi::CONTAINER_STATE_STOPPED
         }
         control_abi::CONTAINER_RESTART
-            if matches!(
-                state,
-                control_abi::CONTAINER_STATE_RUNNING
-                    | control_abi::CONTAINER_STATE_STOPPED
-                    | control_abi::CONTAINER_STATE_FAILED
-            ) =>
+            if stored_container_name_matches(name)
+                && CONTAINER_CONFIG_FLAGS.load(Ordering::SeqCst)
+                    == control_abi::CONTAINER_CONFIG_COMPLETE
+                && matches!(
+                    state,
+                    control_abi::CONTAINER_STATE_CONFIGURED
+                        | control_abi::CONTAINER_STATE_RUNNING
+                        | control_abi::CONTAINER_STATE_STOPPED
+                        | control_abi::CONTAINER_STATE_FAILED
+                ) =>
         {
             CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
             control_abi::CONTAINER_STATE_STOPPED
         }
-        control_abi::CONTAINER_INJECT_FAILURE if state == control_abi::CONTAINER_STATE_RUNNING => {
+        control_abi::CONTAINER_INJECT_FAILURE
+            if state == control_abi::CONTAINER_STATE_RUNNING
+                && stored_container_name_matches(name) =>
+        {
             CONTAINER_CONTROL_STATE
                 .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
             control_abi::CONTAINER_STATE_FAILED
         }
-        control_abi::CONTAINER_HOST_SHUTDOWN => {
-            CONTAINER_HOST_SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
-            state
-        }
         _ => u64::MAX - 2,
+    };
+    if result != u64::MAX - 2 {
+        let _ = domain::renew_auxiliary_call_epoch(domain_id);
     }
+    result
+}
+
+fn read_container_request(address: u64) -> Option<[u8; control_abi::CONTAINER_REQUEST_SIZE]> {
+    let mut request = [0_u8; control_abi::CONTAINER_REQUEST_SIZE];
+    if !address_space::copy_from_current_user(address, &mut request)
+        || read_u32_at(&request, 0) != control_abi::CONTAINER_REQUEST_SIZE as u32
+        || read_u16_at(&request, 4) != 0
+        || read_u16_at(&request, 34) != 0
+        || read_u32_at(&request, 52) != 0
+    {
+        return None;
+    }
+    Some(request)
+}
+
+fn container_request_name(request: &[u8; control_abi::CONTAINER_REQUEST_SIZE]) -> &[u8] {
+    let size = usize::from(read_u16_at(request, 6));
+    request.get(8..8 + size).unwrap_or_default()
+}
+
+fn valid_container_name(name: &[u8]) -> bool {
+    !name.is_empty()
+        && name.len() <= control_abi::CONTAINER_MAX_NAME_SIZE
+        && name
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn stored_container_name_matches(name: &[u8]) -> bool {
+    let size = usize::from(CONTAINER_NAME_SIZE.load(Ordering::SeqCst));
+    size == name.len()
+        && CONTAINER_NAME[..size]
+            .iter()
+            .zip(name)
+            .all(|(stored, supplied)| stored.load(Ordering::SeqCst) == *supplied)
+}
+
+fn store_container_name(name: &[u8]) {
+    for (index, byte) in CONTAINER_NAME.iter().enumerate() {
+        byte.store(name.get(index).copied().unwrap_or(0), Ordering::SeqCst);
+    }
+    CONTAINER_NAME_SIZE.store(name.len() as u8, Ordering::SeqCst);
+}
+
+fn configurable_container(state: u64, name: &[u8]) -> bool {
+    matches!(
+        state,
+        control_abi::CONTAINER_STATE_CREATED
+            | control_abi::CONTAINER_STATE_CONFIGURED
+            | control_abi::CONTAINER_STATE_STOPPED
+            | control_abi::CONTAINER_STATE_FAILED
+    ) && stored_container_name_matches(name)
+}
+
+fn update_container_configuration(flag: u16) -> u64 {
+    let flags = CONTAINER_CONFIG_FLAGS.fetch_or(flag, Ordering::SeqCst) | flag;
+    let state = if flags == control_abi::CONTAINER_CONFIG_COMPLETE {
+        control_abi::CONTAINER_STATE_CONFIGURED
+    } else {
+        control_abi::CONTAINER_STATE_CREATED
+    };
+    CONTAINER_CONTROL_STATE.store(state as u8, Ordering::SeqCst);
+    state
+}
+
+fn write_container_request(request: &mut [u8; control_abi::CONTAINER_REQUEST_SIZE]) {
+    request.fill(0);
+    request[0..4].copy_from_slice(&(control_abi::CONTAINER_REQUEST_SIZE as u32).to_le_bytes());
+    let size = usize::from(CONTAINER_NAME_SIZE.load(Ordering::SeqCst));
+    request[6..8].copy_from_slice(&(size as u16).to_le_bytes());
+    for (output, stored) in request[8..8 + size].iter_mut().zip(&CONTAINER_NAME[..size]) {
+        *output = stored.load(Ordering::SeqCst);
+    }
+    request[32..34].copy_from_slice(&(10_u16).to_le_bytes());
+    request[34..36].copy_from_slice(&CONTAINER_CONFIG_FLAGS.load(Ordering::SeqCst).to_le_bytes());
+    request[36..46].copy_from_slice(b"/sbin/init");
+}
+
+fn read_u16_at(bytes: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([bytes[offset], bytes[offset + 1]])
+}
+
+fn read_u32_at(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
+fn read_u64_at(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
 fn write_abi_descriptor(caller_domain: u64, frame: *const UserTrapFrame) -> u64 {

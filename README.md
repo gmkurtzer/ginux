@@ -13,8 +13,10 @@ make doctor
 make run
 ```
 
-Wait for the `ginux>` prompt, then use `help`, `ps`, `ls /proc`, and the
-`container status|stop|start|restart|fail default` lifecycle commands. The
+Wait for the `ginux>` prompt, create a runtime container with `container new
+default`, configure it using the `container set` commands shown by `help`, then
+use `container start default`, `ps`, `ls /proc`, and the remaining lifecycle
+commands. The
 initial boot performs the existing hardware and isolation proof suite before
 presenting the controller. Run `make test-c2` for the automated gate. See the
 [C2 verification guide](docs/checkpoints/C2.md).
