@@ -153,6 +153,11 @@ A separate internal fault proof corrupts only the ARP operation after genuine
 RX completion. The measured service rejects it through its ordinary parser;
 the kernel quiesces the active device generation and a fresh generation then
 accepts an unmodified reply.
+An additive replenishment generation keeps the queues live, reuses descriptor
+zero for a second ARP exchange, and advances interrupt requests from one through
+four. The kernel validates the first reply before reuse and the final two-entry
+rings before ordered teardown. See
+[Native Network Receive Replenishment v0](specs/services/network-replenishment-v0.md).
 See
 [Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
 The validated MSI-X table and pending-bit array are now placed in a separate,

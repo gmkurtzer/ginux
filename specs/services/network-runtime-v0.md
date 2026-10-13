@@ -132,10 +132,19 @@ rejects the unsupported operation and faults. Fault containment quiesces the
 active device and both routes before retiring VT-d and DMA; a fresh generation
 then validates an unmodified ARP reply.
 
+Bootstrap feature `RX_REUSE` keeps both queues and routes live after the first
+reply. Once the kernel independently validates request two, the service poisons
+the parsed receive bytes, republishes descriptor zero in available slot one,
+advances both queue indices, and completes TX request three plus RX request
+four. Kernel teardown requires both used elements, the overwritten poison, the
+second valid reply, and intact guards. See
+[Native Network Receive Replenishment v0](network-replenishment-v0.md).
+
 ## Deliberate limits
 
 The empty-queue generations publish no descriptor. The transmit generation
 sends only one fixed probe. The receive generation performs only one fixed ARP
-exchange with the deterministic QEMU gateway. General packet APIs, buffer
-replenishment, multiple in-flight packets, dynamic configuration, and container
-networking remain separate milestones.
+exchange with the deterministic QEMU gateway; the replenishment generation
+reuses one descriptor exactly once. General packet APIs, ring wraparound,
+multiple in-flight packets, dynamic configuration, and container networking
+remain separate milestones.

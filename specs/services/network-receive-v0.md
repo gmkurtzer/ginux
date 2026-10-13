@@ -68,7 +68,9 @@ space. No interrupt route or device-visible page survives the generation.
 
 This proves one serialized receive buffer and a deterministic peer response.
 It does not provide a packet IPC interface, arbitrary Ethernet traffic, receive
-buffer replenishment, batching, multiple in-flight requests, IPv4 packet
-processing, DHCP, sockets, routing, a system-container interface, or production
-network configuration. The malformed proof covers one ARP field; systematic
-parser fuzzing and arbitrary frame classes remain future work.
+batching, multiple in-flight requests, IPv4 packet processing, DHCP, sockets,
+routing, a system-container interface, or production network configuration.
+One bounded descriptor reuse is specified separately by
+[Native Network Receive Replenishment v0](network-replenishment-v0.md). The
+malformed proof covers one ARP field; systematic parser fuzzing and arbitrary
+frame classes remain future work.

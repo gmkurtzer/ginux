@@ -89,6 +89,12 @@ generation after masking MSI-X, revoking bus mastering, resetting the NIC, and
 retiring both routes. It returns `CANCELLED`, requires `RESTART_REQUIRED`, and
 permits only a fresh domain with new VT-d and DMA leases to retry.
 
+An `RX_REUSE` generation continues the same state machine with TX command
+1/request 3 and RX command 2/request 4 after the first reply is independently
+validated. The kernel admits only the next exact generation, uses odd requests
+for TX and even requests for RX, and advances only after one matching
+interrupt. Clean exit requires request four and both queue completions.
+
 ## Sources and compatibility
 
 `ginux-native-abi` is the canonical `no_std` Rust source. The matching

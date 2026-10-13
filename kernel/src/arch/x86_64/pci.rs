@@ -1788,6 +1788,77 @@ pub(crate) fn network_service_arp_exchange_is_complete(
     })
 }
 
+pub(crate) fn network_service_arp_reuse_is_complete(dma_physical: u64, dma_virtual: usize) -> bool {
+    const HEADER_LENGTH: usize = 12;
+    const RX_LENGTH: usize = NET_BUFFER_LENGTH - 1;
+    const ARP_REQUEST: [u8; 60] = [
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
+        0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 10, 0, 2, 15,
+        0, 0, 0, 0, 0, 0, 10, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
+    const GUEST_IP: [u8; 4] = [10, 0, 2, 15];
+    const GATEWAY_IP: [u8; 4] = [10, 0, 2, 2];
+    let tx_length = HEADER_LENGTH + ARP_REQUEST.len();
+    let receive_length = read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 16);
+    if !dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        || !dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        || read_dma_u64(dma_virtual + NET_RX_DESC_OFFSET)
+            != dma_physical + NET_RX_BUFFER_OFFSET as u64
+        || read_dma_u32(dma_virtual + NET_RX_DESC_OFFSET + 8) != RX_LENGTH as u32
+        || read_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 12) != DESC_WRITE
+        || read_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 14) != 0
+        || read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET) != 0
+        || read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 2) != 2
+        || read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 4) != 0
+        || read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 6) != 0
+        || read_dma_u16(dma_virtual + NET_RX_USED_OFFSET) & !1 != 0
+        || read_dma_u16(dma_virtual + NET_RX_USED_OFFSET + 2) != 2
+        || read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 4) != 0
+        || read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 12) != 0
+        || read_dma_u64(dma_virtual + NET_TX_DESC_OFFSET)
+            != dma_physical + NET_TX_BUFFER_OFFSET as u64
+        || read_dma_u32(dma_virtual + NET_TX_DESC_OFFSET + 8) != tx_length as u32
+        || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 12) != 0
+        || read_dma_u16(dma_virtual + NET_TX_DESC_OFFSET + 14) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2) != 2
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 4) != 0
+        || read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 6) != 0
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET) & !1 != 0
+        || read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) != 2
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 4) != 0
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 12) != 0
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 8) > tx_length as u32
+        || read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 16) > tx_length as u32
+        || (0..HEADER_LENGTH)
+            .any(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) != 0)
+        || ARP_REQUEST.iter().enumerate().any(|(offset, byte)| {
+            read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH + offset) != *byte
+        })
+        || read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + tx_length) != 0xa5
+        || read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET - 1) != 0x3c
+        || read_dma_u8(dma_virtual + NET_RX_BUFFER_OFFSET + RX_LENGTH) != 0xc3
+        || !network_arp_reply_is_valid(
+            dma_virtual + NET_RX_BUFFER_OFFSET,
+            receive_length,
+            GUEST_MAC,
+            GATEWAY_MAC,
+            GUEST_IP,
+            GATEWAY_IP,
+        )
+    {
+        return false;
+    }
+    (1..usize::from(QUEUE_SIZE)).all(|descriptor| {
+        (0..16).all(|byte| {
+            read_dma_u8(dma_virtual + NET_RX_DESC_OFFSET + descriptor * 16 + byte) == 0
+                && read_dma_u8(dma_virtual + NET_TX_DESC_OFFSET + descriptor * 16 + byte) == 0
+        })
+    })
+}
+
 pub(crate) fn corrupt_network_service_arp_reply(dma_physical: u64, dma_virtual: usize) -> bool {
     const ARP_OPERATION_LOW_BYTE: usize = NET_RX_BUFFER_OFFSET + 12 + 14 + 7;
     if !network_service_arp_exchange_is_complete(dma_physical, dma_virtual) {

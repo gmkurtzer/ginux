@@ -2278,9 +2278,9 @@ struct RegisteredAuxiliaryAddressSpace {
     fail_network_activation_return: bool,
     expect_network_transmit: bool,
     expect_network_receive: bool,
+    expect_network_reuse: bool,
     corrupt_network_receive: bool,
-    network_tx_interrupt_completed: bool,
-    network_rx_interrupt_completed: bool,
+    network_interrupt_request_completed: u64,
 }
 
 enum AuxiliaryAddressSpace {
@@ -4583,6 +4583,7 @@ enum NativeNetworkRunMode {
     ReceiveArp,
     ReceiveArpTimeout,
     ReceiveArpMalformed,
+    ReceiveArpReuse,
 }
 
 pub(crate) fn verify_native_network_bootstrap(
@@ -4772,6 +4773,26 @@ pub(crate) fn verify_native_network_malformed_receive(
     )
 }
 
+pub(crate) fn verify_native_network_receive_reuse(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::ReceiveArpReuse,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    )
+}
+
 fn verify_native_network_bootstrap_run(
     image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
@@ -4797,6 +4818,7 @@ fn verify_native_network_bootstrap_run(
             | NativeNetworkRunMode::ReceiveArp
             | NativeNetworkRunMode::ReceiveArpTimeout
             | NativeNetworkRunMode::ReceiveArpMalformed
+            | NativeNetworkRunMode::ReceiveArpReuse
     );
     let force_transmit_timeout = mode == NativeNetworkRunMode::TransmitTimeout;
     let force_receive_timeout = mode == NativeNetworkRunMode::ReceiveArpTimeout;
@@ -4805,8 +4827,10 @@ fn verify_native_network_bootstrap_run(
         NativeNetworkRunMode::ReceiveArp
             | NativeNetworkRunMode::ReceiveArpTimeout
             | NativeNetworkRunMode::ReceiveArpMalformed
+            | NativeNetworkRunMode::ReceiveArpReuse
     );
     let corrupt_network_receive = mode == NativeNetworkRunMode::ReceiveArpMalformed;
+    let receive_reuse = mode == NativeNetworkRunMode::ReceiveArpReuse;
     const DMA_PAGE_INDEX: usize = 11;
     const COMMON_PAGE_INDEX: usize = 12;
     const NOTIFICATION_PAGE_INDEX: usize = 13;
@@ -4916,6 +4940,9 @@ fn verify_native_network_bootstrap_run(
             boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_TX_INTERRUPT;
             if receive_arp {
                 boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_ARP_PROBE;
+                if receive_reuse {
+                    boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_RX_REUSE;
+                }
             }
         }
     }
@@ -4958,6 +4985,7 @@ fn verify_native_network_bootstrap_run(
             && (!fail_after_activation || arm_auxiliary_network_activation_fault(auxiliary))
             && (!transmit_probe || arm_auxiliary_network_transmit_expectation(auxiliary))
             && (!receive_arp || arm_auxiliary_network_receive_expectation(auxiliary))
+            && (!receive_reuse || arm_auxiliary_network_reuse_expectation(auxiliary))
             && (!corrupt_network_receive || arm_auxiliary_network_receive_corruption(auxiliary))
             && pci::prepare_network_for_isolated_service(device, mapping)
             && interrupt.is_none_or(|(msix_mapping, apic)| {
@@ -5293,9 +5321,9 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             fail_network_activation_return: false,
             expect_network_transmit: false,
             expect_network_receive: false,
+            expect_network_reuse: false,
             corrupt_network_receive: false,
-            network_tx_interrupt_completed: false,
-            network_rx_interrupt_completed: false,
+            network_interrupt_request_completed: 0,
         });
     }
     true
@@ -5530,6 +5558,24 @@ fn arm_auxiliary_network_receive_corruption(domain_id: u64) -> bool {
     true
 }
 
+fn arm_auxiliary_network_reuse_expectation(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if !registered.expect_network_receive
+        || registered.expect_network_reuse
+        || registered.corrupt_network_receive
+        || registered.device_quiesced
+    {
+        return false;
+    }
+    registered.expect_network_reuse = true;
+    true
+}
+
 pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request: u64) -> bool {
     let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) =
@@ -5543,18 +5589,28 @@ pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request
     let Some(dma_physical) = registered.space.dma_physical() else {
         return false;
     };
-    let stage_ready = match command {
-        crate::control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED => {
-            request == 1 && !registered.network_tx_interrupt_completed
-        }
-        crate::control_abi::NETWORK_DEVICE_WAIT_RX_POSTED => {
-            request == 2
-                && registered.expect_network_receive
-                && registered.network_tx_interrupt_completed
-                && !registered.network_rx_interrupt_completed
-        }
-        _ => false,
+    let final_request = if registered.expect_network_reuse {
+        4
+    } else if registered.expect_network_receive {
+        2
+    } else if registered.expect_network_transmit {
+        1
+    } else {
+        0
     };
+    let next_request = registered
+        .network_interrupt_request_completed
+        .checked_add(1)
+        .unwrap_or(0);
+    let stage_ready = request == next_request
+        && request <= final_request
+        && match command {
+            crate::control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED => request % 2 == 1,
+            crate::control_abi::NETWORK_DEVICE_WAIT_RX_POSTED => {
+                registered.expect_network_receive && request.is_multiple_of(2)
+            }
+            _ => false,
+        };
     !registered.device_quiesced
         && stage_ready
         && teardown.msix_mapping.is_some()
@@ -5589,17 +5645,30 @@ pub(crate) fn complete_auxiliary_network_wait(
     let Some(msix_mapping) = teardown.msix_mapping else {
         return AuxiliaryDeviceWaitCompletion::Failed;
     };
+    let final_request = if registered.expect_network_reuse {
+        4
+    } else if registered.expect_network_receive {
+        2
+    } else if registered.expect_network_transmit {
+        1
+    } else {
+        0
+    };
+    let next_request = registered
+        .network_interrupt_request_completed
+        .checked_add(1)
+        .unwrap_or(0);
     let queue = match command {
         crate::control_abi::NETWORK_DEVICE_WAIT_TX_NOTIFIED
-            if request == 1 && !registered.network_tx_interrupt_completed =>
+            if request == next_request && request <= final_request && request % 2 == 1 =>
         {
             1
         }
         crate::control_abi::NETWORK_DEVICE_WAIT_RX_POSTED
-            if request == 2
-                && registered.expect_network_receive
-                && registered.network_tx_interrupt_completed
-                && !registered.network_rx_interrupt_completed =>
+            if registered.expect_network_receive
+                && request == next_request
+                && request <= final_request
+                && request.is_multiple_of(2) =>
         {
             0
         }
@@ -5616,35 +5685,35 @@ pub(crate) fn complete_auxiliary_network_wait(
         queue,
     ) {
         pci::IsolatedInterruptCompletion::Completed => {
-            if queue == 1 {
-                registered.network_tx_interrupt_completed = true;
-                if registered.expect_network_receive {
-                    let Some(next_request) = request.checked_add(1) else {
-                        return AuxiliaryDeviceWaitCompletion::Failed;
-                    };
-                    if !pci::advance_isolated_network_interrupt_wait(
-                        domain_id,
-                        request,
-                        next_request,
-                    ) {
-                        return AuxiliaryDeviceWaitCompletion::Failed;
-                    }
-                    teardown.interrupt_request = next_request;
-                    registered.network_teardown = Some(teardown);
+            if queue == 0
+                && (registered.corrupt_network_receive
+                    || registered.expect_network_reuse && request == 2)
+            {
+                let Some(dma) = registered.space.dma_lease() else {
+                    return AuxiliaryDeviceWaitCompletion::Failed;
+                };
+                let Some(dma_virtual) = dma.direct_map_address() else {
+                    return AuxiliaryDeviceWaitCompletion::Failed;
+                };
+                if registered.expect_network_reuse
+                    && request == 2
+                    && !pci::network_service_arp_exchange_is_complete(dma.address(), dma_virtual)
+                    || registered.corrupt_network_receive
+                        && !pci::corrupt_network_service_arp_reply(dma.address(), dma_virtual)
+                {
+                    return AuxiliaryDeviceWaitCompletion::Failed;
                 }
-            } else {
-                if registered.corrupt_network_receive {
-                    let Some(dma) = registered.space.dma_lease() else {
-                        return AuxiliaryDeviceWaitCompletion::Failed;
-                    };
-                    let Some(dma_virtual) = dma.direct_map_address() else {
-                        return AuxiliaryDeviceWaitCompletion::Failed;
-                    };
-                    if !pci::corrupt_network_service_arp_reply(dma.address(), dma_virtual) {
-                        return AuxiliaryDeviceWaitCompletion::Failed;
-                    }
+            }
+            registered.network_interrupt_request_completed = request;
+            if request < final_request {
+                let Some(next_request) = request.checked_add(1) else {
+                    return AuxiliaryDeviceWaitCompletion::Failed;
+                };
+                if !pci::advance_isolated_network_interrupt_wait(domain_id, request, next_request) {
+                    return AuxiliaryDeviceWaitCompletion::Failed;
                 }
-                registered.network_rx_interrupt_completed = true;
+                teardown.interrupt_request = next_request;
+                registered.network_teardown = Some(teardown);
             }
             AuxiliaryDeviceWaitCompletion::Completed
         }
@@ -5823,7 +5892,9 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
                 true,
             )
         };
-        let transmit_complete = if registered.expect_network_receive {
+        let transmit_complete = if registered.expect_network_reuse {
+            pci::network_service_arp_reuse_is_complete(dma.address(), dma_virtual)
+        } else if registered.expect_network_receive {
             pci::network_service_arp_exchange_is_complete(dma.address(), dma_virtual)
         } else {
             !registered.expect_network_transmit
@@ -5833,10 +5904,17 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
             LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE.store(active, Ordering::Release);
             LAST_UNSAFE_DEVICE_QUIESCE_DOMAIN.store(domain_id, Ordering::Release);
         }
+        let final_interrupt_request = if registered.expect_network_reuse {
+            4
+        } else if registered.expect_network_receive {
+            2
+        } else if registered.expect_network_transmit {
+            1
+        } else {
+            0
+        };
         let interrupt_complete = teardown.msix_mapping.is_none()
-            || registered.network_tx_interrupt_completed
-                && (!registered.expect_network_receive
-                    || registered.network_rx_interrupt_completed);
+            || registered.network_interrupt_request_completed == final_interrupt_request;
         let quiesced = if let Some(msix_mapping) = teardown.msix_mapping {
             pci::quiesce_isolated_network_interrupt(
                 teardown.device,

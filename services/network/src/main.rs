@@ -195,10 +195,6 @@ unsafe fn arp_probe(info: &NativeNetworkBootV0) -> Option<u8> {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 10, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0,
     ];
-    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
-    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
-    const GUEST_IP: [u8; 4] = [10, 0, 2, 15];
-    const GATEWAY_IP: [u8; 4] = [10, 0, 2, 2];
     let dma = usize::try_from(info.dma_virtual_address).ok()?;
     let receive_notification = usize::try_from(info.receive_notification_address).ok()?;
     let transmit_notification = usize::try_from(info.transmit_notification_address).ok()?;
@@ -267,11 +263,63 @@ unsafe fn arp_probe(info: &NativeNetworkBootV0) -> Option<u8> {
     {
         return None;
     }
-    let used_length = read_u32(dma + RX_USED_OFFSET as usize + 8) as usize;
+    if !arp_reply_is_valid(dma, common, tx_length, 1) {
+        return None;
+    }
+    if !info.requests_rx_reuse() {
+        return Some(NATIVE_SERVICE_EXIT_COMPLETED);
+    }
+
+    for offset in 0..TX_HEADER_LENGTH + 42 {
+        write_u8(dma + RX_BUFFER_OFFSET as usize + offset, 0xcc);
+    }
+    write_u16(dma + RX_AVAIL_OFFSET as usize + 6, 0);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + RX_AVAIL_OFFSET as usize + 2, 2);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 6, 0);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 2, 2);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(receive_notification, 0);
+    write_u16(transmit_notification, 1);
+
+    match wait_for_network_interrupt(info.device_capability, NATIVE_NETWORK_WAIT_TX_NOTIFIED, 3) {
+        0 => {}
+        NATIVE_NETWORK_WAIT_CANCELLED => return Some(NATIVE_SERVICE_EXIT_RESTART_REQUIRED),
+        _ => return None,
+    }
+    if read_u16(dma + TX_USED_OFFSET as usize + 2) != 2
+        || read_u32(dma + TX_USED_OFFSET as usize + 12) != 0
+    {
+        return None;
+    }
+    match wait_for_network_interrupt(info.device_capability, NATIVE_NETWORK_WAIT_RX_POSTED, 4) {
+        0 => {}
+        NATIVE_NETWORK_WAIT_CANCELLED => return Some(NATIVE_SERVICE_EXIT_RESTART_REQUIRED),
+        _ => return None,
+    }
+    if wait_for_network_interrupt(info.device_capability, NATIVE_NETWORK_WAIT_RX_POSTED, 4)
+        != NATIVE_NETWORK_WAIT_FAILED
+    {
+        return None;
+    }
+    arp_reply_is_valid(dma, common, tx_length, 2).then_some(NATIVE_SERVICE_EXIT_COMPLETED)
+}
+
+unsafe fn arp_reply_is_valid(dma: usize, common: usize, tx_length: usize, used_index: u16) -> bool {
+    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
+    const GUEST_IP: [u8; 4] = [10, 0, 2, 15];
+    const GATEWAY_IP: [u8; 4] = [10, 0, 2, 2];
+    if !(1..=2).contains(&used_index) {
+        return false;
+    }
+    let used_element = RX_USED_OFFSET as usize + 4 + (usize::from(used_index) - 1) * 8;
+    let used_length = read_u32(dma + used_element + 4) as usize;
     let buffer = dma + RX_BUFFER_OFFSET as usize;
     let frame = buffer + TX_HEADER_LENGTH;
-    (read_u16(dma + RX_USED_OFFSET as usize + 2) == 1
-        && read_u32(dma + RX_USED_OFFSET as usize + 4) == 0
+    read_u16(dma + RX_USED_OFFSET as usize + 2) == used_index
+        && read_u32(dma + used_element) == 0
         && (TX_HEADER_LENGTH + 42..=RX_DESCRIPTOR_LENGTH).contains(&used_length)
         && (0..10).all(|offset| read_u8(buffer + offset) == 0)
         && read_u16(buffer + 10) == 1
@@ -290,8 +338,7 @@ unsafe fn arp_probe(info: &NativeNetworkBootV0) -> Option<u8> {
         && read_u8(dma + RX_BUFFER_OFFSET as usize + RX_DESCRIPTOR_LENGTH) == 0xc3
         && read_u8(dma + TX_BUFFER_OFFSET as usize + tx_length) == 0xa5
         && read_u8(common + COMMON_DEVICE_STATUS)
-            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK)
-        .then_some(NATIVE_SERVICE_EXIT_COMPLETED)
+            == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
 }
 
 unsafe fn bytes_match(address: usize, expected: &[u8]) -> bool {

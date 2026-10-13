@@ -31,8 +31,10 @@ contract. Optional bit two is `TRANSMIT_PROBE`, requires bit one, and requests
 one fixed transmit. Optional bit three is `TX_INTERRUPT`, requires bits one and
 two, and requires TX completion through the generation-bound network wait ABI.
 Optional bit four is `ARP_PROBE`, requires bits one through three, and requests
-one fixed interrupt-completed ARP exchange using both queues. No other
-combination is accepted. Every
+one fixed interrupt-completed ARP exchange using both queues. Optional bit five
+is `RX_REUSE`, requires bits one through four, and requests one bounded second
+ARP exchange through the same descriptors and live queues. No other combination
+is accepted. Every
 address, capability, and MAC field must be nonzero, and the two notification
 addresses must be distinct. A wrong magic, version, size, feature bitmap,
 nonzero reserved field, or nonzero MAC high bits is rejected before device
@@ -96,3 +98,10 @@ the transmit queue, and serializes TX command 1/request 1 followed by RX command
 QEMU gateway ARP reply and buffer guards before both routes and the device are
 retired. See
 [Native Network Service Receive v0](../services/network-receive-v0.md).
+
+An eighth generation adds `RX_REUSE`. After the kernel validates the first
+exchange at RX request two, the service republishes descriptor zero in available
+slot one and advances both queues to index two. TX request three and RX request
+four complete a second exchange without resetting the device. The kernel
+validates both used elements and the final reply before teardown. See
+[Native Network Receive Replenishment v0](../services/network-replenishment-v0.md).

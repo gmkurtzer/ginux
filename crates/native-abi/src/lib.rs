@@ -12,6 +12,7 @@ pub const NATIVE_NETWORK_FEATURE_EMPTY_QUEUES: u32 = 1 << 1;
 pub const NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE: u32 = 1 << 2;
 pub const NATIVE_NETWORK_FEATURE_TX_INTERRUPT: u32 = 1 << 3;
 pub const NATIVE_NETWORK_FEATURE_ARP_PROBE: u32 = 1 << 4;
+pub const NATIVE_NETWORK_FEATURE_RX_REUSE: u32 = 1 << 5;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -201,7 +202,14 @@ impl NativeNetworkBootV0 {
                         | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
                         | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
                         | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
-                        | NATIVE_NETWORK_FEATURE_ARP_PROBE)
+                        | NATIVE_NETWORK_FEATURE_ARP_PROBE
+                || self.features
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                        | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                        | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
+                        | NATIVE_NETWORK_FEATURE_ARP_PROBE
+                        | NATIVE_NETWORK_FEATURE_RX_REUSE)
             && self.common_config_address != 0
             && self.receive_notification_address != 0
             && self.transmit_notification_address != 0
@@ -228,6 +236,10 @@ impl NativeNetworkBootV0 {
 
     pub const fn requests_arp_probe(&self) -> bool {
         self.features & NATIVE_NETWORK_FEATURE_ARP_PROBE != 0
+    }
+
+    pub const fn requests_rx_reuse(&self) -> bool {
+        self.features & NATIVE_NETWORK_FEATURE_RX_REUSE != 0
     }
 }
 
@@ -275,6 +287,7 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE UINT32_C(4)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TX_INTERRUPT UINT32_C(8)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_ARP_PROBE UINT32_C(16)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_RX_REUSE UINT32_C(32)"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
     }
 
@@ -396,6 +409,13 @@ mod tests {
         };
         assert!(arp.is_valid_virtio_network());
         assert!(arp.requests_arp_probe());
+        assert!(!arp.requests_rx_reuse());
+        let reused = NativeNetworkBootV0 {
+            features: arp.features | NATIVE_NETWORK_FEATURE_RX_REUSE,
+            ..arp
+        };
+        assert!(reused.is_valid_virtio_network());
+        assert!(reused.requests_rx_reuse());
         for invalid in [
             NativeNetworkBootV0 { magic: 0, ..valid },
             NativeNetworkBootV0 {
@@ -413,7 +433,11 @@ mod tests {
                 ..valid
             },
             NativeNetworkBootV0 {
-                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 5,
+                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | NATIVE_NETWORK_FEATURE_RX_REUSE,
+                ..valid
+            },
+            NativeNetworkBootV0 {
+                features: NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK | 1 << 6,
                 ..valid
             },
             NativeNetworkBootV0 {

@@ -3029,6 +3029,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: fresh native network generation recovered after malformed reply");
     serial_write("\r\nginux: post-malformation network generation validated ARP reply");
+    if !address_space::verify_native_network_receive_reuse(
+        &network_image,
+        virtio_network,
+        virtio_network_initialization,
+        virtio_network_iommu_profile,
+        virtio_network_common_mmio,
+        virtio_network_msix_mmio,
+        &local_apic,
+    ) {
+        kernel_fail("\r\nginux: native network receive replenishment failed\r\n");
+    }
+    serial_write("\r\nginux: native network service replenished RX descriptor");
+    serial_write("\r\nginux: native network service completed second ARP exchange");
+    serial_write("\r\nginux: native network request generations one through four completed");
+    serial_write("\r\nginux: kernel validated both native network ARP exchanges");
+    serial_write("\r\nginux: replenished network buffer guards preserved");
+    serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
     serial_write("\r\nginux: post-cancellation native volume generation started");
     serial_write(match native_volume_outcome {
         address_space::NativeVolumeOutcome::Initialized
