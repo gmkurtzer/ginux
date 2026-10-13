@@ -1,0 +1,14 @@
+[package]
+name = "ginux-protocol-service-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "ginux-protocol-service-runtime"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ginux-native-abi = { path = "../../crates/native-abi" }

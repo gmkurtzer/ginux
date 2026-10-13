@@ -1555,6 +1555,38 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: native network service relative relocations applied\r\n");
     serial_write("ginux: native network service W^X address space verified\r\n");
     serial_write("ginux: native network service guard pages verified\r\n");
+    let Some(protocol_service_node) = initramfs::published_regular_file_node(b"native/protocol")
+    else {
+        kernel_fail("ginux: isolated protocol service missing\r\n");
+    };
+    let Some(protocol_service) = initramfs::published_file_by_node(protocol_service_node) else {
+        kernel_fail("ginux: isolated protocol service unreadable\r\n");
+    };
+    let Some(protocol_image) = native_elf::inspect(protocol_service) else {
+        kernel_fail("ginux: isolated protocol service ELF invalid\r\n");
+    };
+    if protocol_image.bytes.len() != protocol_service.len()
+        || protocol_image.entry == 0
+        || protocol_image.segments.iter().flatten().count() != 3
+        || protocol_image.relocation_count == 0
+        || protocol_image.relocations[..protocol_image.relocation_count]
+            .iter()
+            .any(|relocation| {
+                relocation.is_none_or(|relocation| relocation.target == 0 || relocation.addend == 0)
+            })
+    {
+        kernel_fail("ginux: isolated protocol service load plan incomplete\r\n");
+    }
+    serial_write("ginux: measured isolated protocol service discovered\r\n");
+    serial_write("ginux: bounded native protocol PIE load plan accepted\r\n");
+    serial_write("ginux: native protocol service relative relocations accepted\r\n");
+    if !address_space::verify_native_service_materialization(&protocol_image) {
+        kernel_fail("ginux: native protocol service materialization failed\r\n");
+    }
+    serial_write("ginux: native protocol service segments materialized in owned frames\r\n");
+    serial_write("ginux: native protocol service relative relocations applied\r\n");
+    serial_write("ginux: native protocol service W^X address space verified\r\n");
+    serial_write("ginux: native protocol service guard pages verified\r\n");
     if !linux_mount::verify_contract() || !linux_mount::install_initial() {
         kernel_fail("ginux: initial Linux mount namespace invalid\r\n");
     }
@@ -3051,20 +3083,26 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: kernel validated both native network ARP exchanges");
     if !address_space::verify_native_network_packet_handoff(
         &network_image,
+        &protocol_image,
         virtio_network,
         virtio_network_initialization,
         virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
+        (
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ),
     ) {
         kernel_fail("\r\nginux: bounded native packet handoff failed\r\n");
     }
     serial_write("\r\nginux: native network service copied validated frame out of DMA");
     serial_write("\r\nginux: packet producer retained no read authority");
-    serial_write("\r\nginux: packet consumer retained no device or write authority");
+    serial_write("\r\nginux: compiled Rust protocol service consumed Ethernet frame");
+    serial_write("\r\nginux: protocol service validated gateway ARP reply");
+    serial_write("\r\nginux: protocol service rejected malformed ARP metadata");
+    serial_write("\r\nginux: protocol consumer retained no device or write authority");
     serial_write("\r\nginux: packet survived producer and device retirement");
-    serial_write("\r\nginux: ring-3 consumer received exact Ethernet frame once");
+    serial_write("\r\nginux: protocol service address space retired cleanly");
     if !address_space::verify_native_network_packet_fault_handoff(
         &network_image,
         virtio_network,

@@ -6,6 +6,7 @@ members = [
     "crates/volume-service",
     "kernel",
     "services/network",
+    "services/protocol",
     "services/volume",
     "tools/manifest-tool",
 ]

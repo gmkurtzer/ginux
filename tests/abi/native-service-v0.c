@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "specs/abi/native-network-bootstrap-v0.h"
+#include "specs/abi/native-protocol-bootstrap-v0.h"
 #include "specs/abi/native-service-bootstrap-v0.h"
 #include "specs/abi/native-service-lifecycle-v0.h"
 
@@ -109,6 +110,20 @@ _Static_assert(offsetof(struct ginux_native_control_descriptor_v4,
 _Static_assert(
     offsetof(struct ginux_native_control_descriptor_v4, reserved) == 12,
     "control descriptor reserved offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v0,
+                        packet_capability) == 16,
+               "protocol packet capability offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v0,
+                        expected_sequence) == 24,
+               "protocol expected sequence offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v0, local_mac) == 32,
+               "protocol local MAC offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v0, local_ipv4) == 40,
+               "protocol local IPv4 offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v0, peer_ipv4) == 44,
+               "protocol peer IPv4 offset");
+_Static_assert(offsetof(struct ginux_native_protocol_boot_v0, reserved) == 48,
+               "protocol reserved offset");
 
 #define COMPATIBLE_DISCOVERY                                                   \
     GINUX_NATIVE_CONTROL_DISCOVERY(                                            \

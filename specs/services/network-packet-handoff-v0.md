@@ -14,14 +14,15 @@ The producer first proves its write capability cannot consume. Normal service
 teardown then resets the NIC, retires interrupt routes and translation, scrubs
 DMA, and revokes both producer capabilities without deleting the copied packet.
 
-A fresh auxiliary consumer receives only packet-object read authority. It has
-neither packet write nor network-device read authority. In ring 3 it proves a
-future sequence is rejected without changing its output, consumes sequence one,
-compares all 42 bytes with the deterministic gateway reply, and proves replay
-returns empty. Its address space and capability are then retired normally.
+A fresh measured Rust protocol service receives only packet-object read
+authority. It has neither packet write nor network-device read authority. In
+ring 3 it consumes sequence one, validates the Ethernet and ARP structure and
+configured endpoint identities, rejects a locally malformed opcode, and proves
+replay returns empty. Its address space and capability are then retired
+normally. See [Native Protocol Service Runtime v0](protocol-runtime-v0.md).
 
 This milestone establishes the protected boundary between a disposable device
-driver and a non-device packet consumer. It does not yet provide a persistent
+driver and a non-device protocol parser. It does not yet provide a persistent
 control-plane event loop or a container network endpoint. See
 [Native Network Service Bootstrap ABI v1](../abi/native-network-bootstrap-v1.md).
 

@@ -4398,6 +4398,21 @@ impl NativeServiceAddressSpace {
         true
     }
 
+    fn write_protocol_boot_info(&self, info: ginux_native_abi::NativeProtocolBootV0) -> bool {
+        if !info.is_valid_arp_consumer() {
+            return false;
+        }
+        let Some(page) =
+            mapped_frame::<ginux_native_abi::NativeProtocolBootV0>(self.frames[12].address())
+        else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn release(self) -> bool {
         let dma = self.dma_frame;
         memory::scrub_and_release_frames(self.owner, &self.frames)
@@ -4832,22 +4847,31 @@ pub(crate) fn verify_native_network_receive_reuse(
 
 pub(crate) fn verify_native_network_packet_handoff(
     image: &crate::native_elf::NativeImage<'_>,
+    protocol_image: &crate::native_elf::NativeImage<'_>,
     device: VirtioNetworkDevice,
     initialization: VirtioNetworkInitialization,
     iommu_profile: iommu::DeviceTranslationProfile,
-    common_mapping: paging::MmioMapping,
-    msix_mapping: paging::MmioMapping,
-    apic: &LocalApic,
+    hardware: (paging::MmioMapping, paging::MmioMapping, &LocalApic),
 ) -> bool {
-    verify_native_network_packet_handoff_mode(
+    let (common_mapping, msix_mapping, apic) = hardware;
+    if !verify_native_network_bootstrap_run(
         image,
         device,
         initialization,
         iommu_profile,
-        (common_mapping, msix_mapping, apic),
         NativeNetworkRunMode::PacketHandoff,
-        1,
-    )
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    ) {
+        return false;
+    }
+    let Some(expected) = packet::pending_metadata() else {
+        return false;
+    };
+    expected.sequence == 1
+        && expected.length == 42
+        && verify_native_protocol_consumer(protocol_image, expected)
+        && packet::last_delivery() == Some(expected)
 }
 
 pub(crate) fn verify_native_network_packet_fault_handoff(
@@ -5492,6 +5516,112 @@ pub(crate) fn verify_packet_backpressure_wakeup() -> bool {
         })
         && packet::pending_metadata().is_none()
         && packet::next_sequence() == expected_sequence.checked_add(5)
+}
+
+fn verify_native_protocol_consumer(
+    image: &crate::native_elf::NativeImage<'_>,
+    expected: packet::PacketMetadata,
+) -> bool {
+    if expected.sequence == 0 || expected.sequence == u64::MAX || expected.length != 42 {
+        return false;
+    }
+    let Some(auxiliary) = domain::initialize_boot_auxiliary_service(
+        7,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) else {
+        return false;
+    };
+    let (Some(handle), Some(identity), Some(owner)) = (
+        domain::auxiliary_boot_handle(auxiliary, 0),
+        domain::domain_service_identity(auxiliary),
+        memory::FrameOwner::domain(auxiliary),
+    ) else {
+        return false;
+    };
+    if !domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::READ,
+    ) || domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::PACKET_OBJECT,
+        crate::capability::Rights::WRITE,
+    ) || domain::handle_permits(
+        auxiliary,
+        handle,
+        crate::control_abi::NETWORK_DEVICE_OBJECT,
+        crate::capability::Rights::READ,
+    ) {
+        return false;
+    }
+    let kernel_root = current_root();
+    let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+        return false;
+    };
+    let boot = ginux_native_abi::NativeProtocolBootV0::arp_consumer(
+        handle,
+        expected.sequence,
+        0x5254_0012_3456,
+        u32::from_be_bytes([10, 0, 2, 15]),
+        u32::from_be_bytes([10, 0, 2, 2]),
+    );
+    if !space.layout_is_valid(image)
+        || !space.relocations_are_valid(image)
+        || !space.write_protocol_boot_info(boot)
+        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT)
+    {
+        let _ = space.release();
+        let _ = domain::discard_unstarted_auxiliary_service(auxiliary);
+        return false;
+    }
+    let root = space.root;
+    let Ok(entry) = usize::try_from(space.entry) else {
+        let _ = space.release();
+        let _ = domain::discard_unstarted_auxiliary_service(auxiliary);
+        return false;
+    };
+    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
+    let root_frames = paging::validated_user_root_frames(root);
+    if root_frames.as_ref().is_none_or(|frames| {
+        frames.base().len() != 4 + space.image_pages + 3
+            || frames.dma().is_some()
+            || !memory::frame_addresses_owned_by(owner, frames.base())
+    }) {
+        let _ = space.release();
+        let _ = domain::discard_unstarted_auxiliary_service(auxiliary);
+        return false;
+    }
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space))
+        || !scheduler::queue_auxiliary(auxiliary, root, entry, stack, handle)
+        || !cpu::activate_user_root(root)
+    {
+        return false;
+    }
+    cpu::execute_native_auxiliary(entry, stack, boot_info as u64, handle, auxiliary, identity);
+    let event = domain::take_lifecycle_event();
+    current_root() == kernel_root
+        && scheduler::current_domain().is_none()
+        && registered_auxiliary_address_space_count() == 0
+        && memory::owner_live_frame_count(owner) == Some(0)
+        && domain::domain_is_retired(auxiliary)
+        && !domain::handle_permits(
+            auxiliary,
+            handle,
+            crate::control_abi::PACKET_OBJECT,
+            crate::capability::Rights::READ,
+        )
+        && event
+            == Some((auxiliary << 8) | u64::from(crate::control_abi::LIFECYCLE_AUXILIARY_EXITED))
+        && domain::last_lifecycle_event_detail()
+            == Some(ginux_native_abi::NATIVE_SERVICE_EXIT_COMPLETED)
+        && domain::last_lifecycle_event_has_fault() == Some(false)
+        && domain::last_lifecycle_service_identity() == Some(identity)
+        && domain::take_lifecycle_event().is_none()
+        && packet::last_delivery() == Some(expected)
 }
 
 fn verify_ring3_packet_consumer(expected_sequence: u64, more_pending: bool) -> bool {

@@ -51,9 +51,9 @@ still required to copy and remove the packet. See
 
 The current bootstrap proof publishes exactly the validated 42-byte
 Ethernet/ARP reply as sequence one. The packet survives producer, NIC, VT-d,
-and DMA retirement. A distinct ring-3 consumer has packet `READ` only, no
-packet `WRITE`, and no network-device authority; it validates all bytes and
-can consume the sequence only once.
+and DMA retirement. A distinct measured Rust protocol service has packet
+`READ` only, no packet `WRITE`, and no network-device authority; it validates
+the Ethernet/ARP fields and can consume the sequence only once.
 
 Optional feature bit seven `PACKET_FAULT` requires bit six and is accepted only
 with the otherwise complete v1 feature set. It is a test-only request for the

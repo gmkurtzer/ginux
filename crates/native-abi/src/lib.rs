@@ -47,6 +47,12 @@ pub const NATIVE_PACKET_MAX_SIZE: u32 = 1514;
 pub const NATIVE_PACKET_QUEUE_CAPACITY: u32 = 4;
 pub const NATIVE_PACKET_WAIT_TIMED_OUT: u64 = u64::MAX - 5;
 pub const NATIVE_PACKET_WAIT_MAX_TIMEOUT_MS: u64 = 1_000;
+pub const NATIVE_CALL_FAILED: u64 = u64::MAX - 2;
+pub const NATIVE_PROTOCOL_BOOT_MAGIC: u64 = 0x3042_5058_554e_4947;
+pub const NATIVE_PROTOCOL_BOOT_VERSION: u16 = 0;
+pub const NATIVE_PROTOCOL_BOOT_SIZE: u16 = 56;
+pub const NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER: u32 = 1 << 0;
+pub const NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP: u32 = 1 << 1;
 pub const NATIVE_CONTROL_DISCOVERY_OPERATION: u64 = 0;
 pub const NATIVE_CONTROL_ABI_VERSION: u16 = 4;
 pub const NATIVE_CONTROL_FEATURE_OPAQUE_CAPABILITIES: u16 = 1 << 0;
@@ -404,10 +410,81 @@ impl NativePacketRequestV0 {
             expected_sequence: 0,
         }
     }
+
+    pub const fn consume(buffer_address: u64, buffer_size: u32, expected_sequence: u64) -> Self {
+        Self {
+            size: NATIVE_PACKET_REQUEST_SIZE,
+            version: NATIVE_PACKET_REQUEST_VERSION,
+            reserved: 0,
+            buffer_address,
+            buffer_size,
+            reserved1: 0,
+            expected_sequence,
+        }
+    }
 }
 
 const _: () = assert!(core::mem::size_of::<NativePacketRequestV0>() == 32);
 const _: () = assert!(core::mem::align_of::<NativePacketRequestV0>() == 8);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeProtocolBootV0 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub packet_capability: u64,
+    pub expected_sequence: u64,
+    pub local_mac: u64,
+    pub local_ipv4: u32,
+    pub peer_ipv4: u32,
+    pub reserved: u64,
+}
+
+impl NativeProtocolBootV0 {
+    pub const fn arp_consumer(
+        packet_capability: u64,
+        expected_sequence: u64,
+        local_mac: u64,
+        local_ipv4: u32,
+        peer_ipv4: u32,
+    ) -> Self {
+        Self {
+            magic: NATIVE_PROTOCOL_BOOT_MAGIC,
+            version: NATIVE_PROTOCOL_BOOT_VERSION,
+            size: NATIVE_PROTOCOL_BOOT_SIZE,
+            features: NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER
+                | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP,
+            packet_capability,
+            expected_sequence,
+            local_mac,
+            local_ipv4,
+            peer_ipv4,
+            reserved: 0,
+        }
+    }
+
+    pub const fn is_valid_arp_consumer(&self) -> bool {
+        self.magic == NATIVE_PROTOCOL_BOOT_MAGIC
+            && self.version == NATIVE_PROTOCOL_BOOT_VERSION
+            && self.size == NATIVE_PROTOCOL_BOOT_SIZE
+            && self.features
+                == NATIVE_PROTOCOL_FEATURE_PACKET_CONSUMER | NATIVE_PROTOCOL_FEATURE_ETHERNET_ARP
+            && self.packet_capability != 0
+            && self.expected_sequence != 0
+            && self.expected_sequence != u64::MAX
+            && self.local_mac != 0
+            && self.local_mac >> 48 == 0
+            && self.local_ipv4 != 0
+            && self.peer_ipv4 != 0
+            && self.local_ipv4 != self.peer_ipv4
+            && self.reserved == 0
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeProtocolBootV0>() == 56);
+const _: () = assert!(core::mem::align_of::<NativeProtocolBootV0>() == 8);
 
 #[cfg(test)]
 mod tests {
@@ -464,6 +541,58 @@ mod tests {
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v1) == 88"));
         assert!(network_header.contains("sizeof(struct ginux_native_packet_request_v0) == 32"));
         assert!(network_header.contains("sizeof(struct ginux_native_network_boot_v0) == 80"));
+        let protocol_header = include_str!("../../../specs/abi/native-protocol-bootstrap-v0.h");
+        assert!(protocol_header.contains("UINT64_C(0x30425058554e4947)"));
+        assert!(protocol_header.contains("GINUX_NATIVE_PROTOCOL_BOOT_SIZE UINT16_C(56)"));
+        assert!(protocol_header.contains("sizeof(struct ginux_native_protocol_boot_v0) == 56"));
+    }
+
+    #[test]
+    fn protocol_bootstrap_layout_and_validation_are_frozen() {
+        assert_eq!(NATIVE_PROTOCOL_BOOT_MAGIC.to_le_bytes(), *b"GINUXPB0");
+        assert_eq!(core::mem::size_of::<NativeProtocolBootV0>(), 56);
+        assert_eq!(core::mem::align_of::<NativeProtocolBootV0>(), 8);
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV0, magic), 0);
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV0, version), 8);
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV0, size), 10);
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV0, features), 12);
+        assert_eq!(
+            core::mem::offset_of!(NativeProtocolBootV0, packet_capability),
+            16
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeProtocolBootV0, expected_sequence),
+            24
+        );
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV0, local_mac), 32);
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV0, local_ipv4), 40);
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV0, peer_ipv4), 44);
+        assert_eq!(core::mem::offset_of!(NativeProtocolBootV0, reserved), 48);
+        let valid = NativeProtocolBootV0::arp_consumer(
+            1,
+            2,
+            0x5254_0012_3456,
+            u32::from_be_bytes([10, 0, 2, 15]),
+            u32::from_be_bytes([10, 0, 2, 2]),
+        );
+        assert!(valid.is_valid_arp_consumer());
+        for invalid in [
+            NativeProtocolBootV0 { magic: 0, ..valid },
+            NativeProtocolBootV0 {
+                expected_sequence: 0,
+                ..valid
+            },
+            NativeProtocolBootV0 {
+                local_ipv4: valid.peer_ipv4,
+                ..valid
+            },
+            NativeProtocolBootV0 {
+                reserved: 1,
+                ..valid
+            },
+        ] {
+            assert!(!invalid.is_valid_arp_consumer());
+        }
     }
 
     #[test]

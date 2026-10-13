@@ -21,6 +21,7 @@ const EXECUTABLE_VERSION: u16 = 2;
 const EXECUTABLE_HEADER_SIZE: u16 = 40;
 const EXECUTABLE_MAX_CODE_SIZE: usize = 4096;
 const NETWORK_SERVICE_MAX_SIZE: usize = 64 * 1024;
+const PROTOCOL_SERVICE_MAX_SIZE: usize = 64 * 1024;
 const VOLUME_SERVICE_MAX_SIZE: usize = 64 * 1024;
 const ROOT_IMAGE_MAX_SIZE: usize = 48 * 4096;
 const DEVELOPMENT_SEED: [u8; 32] = [
@@ -30,9 +31,9 @@ const DEVELOPMENT_SEED: [u8; 32] = [
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
-    if arguments.len() != 9 {
+    if arguments.len() != 10 {
         fail(
-            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS NETWORK_SERVICE VOLUME_SERVICE SYSTEM_PROFILE OUTPUT_RS",
+            "usage: ginux-manifest-tool MANIFEST_CONFIG BUNDLE_HEX ROOT_IMAGE LINUX_ARTIFACTS NETWORK_SERVICE PROTOCOL_SERVICE VOLUME_SERVICE SYSTEM_PROFILE OUTPUT_RS",
         );
     }
     let config = fs::read_to_string(&arguments[1]).unwrap_or_else(|error| {
@@ -51,17 +52,22 @@ fn main() {
     if network_service.is_empty() || network_service.len() > NETWORK_SERVICE_MAX_SIZE {
         fail("network service must contain 1 through 65536 bytes");
     }
-    let volume_service = read_root_artifact(Path::new(&arguments[6]));
+    let protocol_service = read_root_artifact(Path::new(&arguments[6]));
+    if protocol_service.is_empty() || protocol_service.len() > PROTOCOL_SERVICE_MAX_SIZE {
+        fail("protocol service must contain 1 through 65536 bytes");
+    }
+    let volume_service = read_root_artifact(Path::new(&arguments[7]));
     if volume_service.is_empty() || volume_service.len() > VOLUME_SERVICE_MAX_SIZE {
         fail("volume service must contain 1 through 65536 bytes");
     }
-    let system_profile = fs::read(&arguments[7]).unwrap_or_else(|error| {
-        fail(&format!("cannot read {}: {error}", arguments[7]));
+    let system_profile = fs::read(&arguments[8]).unwrap_or_else(|error| {
+        fail(&format!("cannot read {}: {error}", arguments[8]));
     });
     validate_system_profile(&system_profile);
     let root_image = build_initramfs(
         &arguments[4],
         &network_service,
+        &protocol_service,
         &volume_service,
         &system_profile,
     );
@@ -104,7 +110,7 @@ fn main() {
         &bundle,
         &root_image,
     );
-    let output_path = Path::new(&arguments[8]);
+    let output_path = Path::new(&arguments[9]);
     fs::write(output_path, output).unwrap_or_else(|error| {
         fail(&format!("cannot write {}: {error}", output_path.display()));
     });
@@ -118,6 +124,7 @@ fn main() {
 fn build_initramfs(
     linux_artifacts: &str,
     network_service: &[u8],
+    protocol_service: &[u8],
     volume_service: &[u8],
     system_profile: &[u8],
 ) -> Vec<u8> {
@@ -164,11 +171,12 @@ fn build_initramfs(
         (24, "sbin/init", linux_system_init.as_slice()),
         (25, "native/volume", volume_service),
         (26, "native/network", network_service),
+        (27, "native/protocol", protocol_service),
     ] {
         append_newc_entry(&mut archive, inode, 0o100555, name, data);
     }
     append_newc_entry(&mut archive, 17, 0o100555, "var/lib/version", b"0\n");
-    append_newc_entry(&mut archive, 27, 0, "TRAILER!!!", &[]);
+    append_newc_entry(&mut archive, 28, 0, "TRAILER!!!", &[]);
     archive
 }
 

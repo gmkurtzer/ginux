@@ -171,6 +171,17 @@ if ! grep -q '^ginux: measured isolated network service discovered' "$output_fil
     exit 1
 fi
 
+if ! grep -q '^ginux: measured isolated protocol service discovered' "$output_file" ||
+    ! grep -q '^ginux: bounded native protocol PIE load plan accepted' "$output_file" ||
+    ! grep -q '^ginux: native protocol service relative relocations accepted' "$output_file" ||
+    ! grep -q '^ginux: native protocol service segments materialized in owned frames' "$output_file" ||
+    ! grep -q '^ginux: native protocol service relative relocations applied' "$output_file" ||
+    ! grep -q '^ginux: native protocol service W\^X address space verified' "$output_file" ||
+    ! grep -q '^ginux: native protocol service guard pages verified' "$output_file"; then
+    echo "Boot test failed: the authenticated native protocol-service image was not accepted." >&2
+    exit 1
+fi
+
 if ! grep -q '^ginux: compiled native network service executed in ring 3' "$output_file" ||
     ! grep -q '^ginux: native network service negotiated control ABI v4' "$output_file" ||
     ! grep -q '^ginux: native network service validated control descriptor v4' "$output_file" ||
@@ -273,9 +284,12 @@ if ! grep -q '^ginux: native network service published bounded RX descriptor' "$
     ! grep -q '^ginux: kernel validated both native network ARP exchanges' "$output_file" ||
     ! grep -q '^ginux: native network service copied validated frame out of DMA' "$output_file" ||
     ! grep -q '^ginux: packet producer retained no read authority' "$output_file" ||
-    ! grep -q '^ginux: packet consumer retained no device or write authority' "$output_file" ||
+    ! grep -q '^ginux: compiled Rust protocol service consumed Ethernet frame' "$output_file" ||
+    ! grep -q '^ginux: protocol service validated gateway ARP reply' "$output_file" ||
+    ! grep -q '^ginux: protocol service rejected malformed ARP metadata' "$output_file" ||
+    ! grep -q '^ginux: protocol consumer retained no device or write authority' "$output_file" ||
     ! grep -q '^ginux: packet survived producer and device retirement' "$output_file" ||
-    ! grep -q '^ginux: ring-3 consumer received exact Ethernet frame once' "$output_file" ||
+    ! grep -q '^ginux: protocol service address space retired cleanly' "$output_file" ||
     ! grep -q '^ginux: network driver faulted after packet publication' "$output_file" ||
     ! grep -q '^ginux: faulted packet producer authority revoked' "$output_file" ||
     ! grep -q '^ginux: fault teardown preserved copied packet sequence two' "$output_file" ||

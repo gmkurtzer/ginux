@@ -46,8 +46,9 @@ complete archive; after publication, the ELF planners parse and bind the
 selected measured files to their canonical paths, interpreter name, dependency
 order, SONAMEs, and bounded load layout.
 
-The freestanding volume and network services are stored at the internal
-`native/volume` and `native/network` paths. Like the internal `linux/*` linker
+The freestanding volume, network, and protocol services are stored at the
+internal `native/volume`, `native/network`, and `native/protocol` paths. Like
+the internal `linux/*` linker
 artifacts, they have no corresponding top-level directory entry and therefore
 are not enumerated in the Linux-visible root filesystem. Their bytes remain
 available to the native loader by exact kernel lookup and are covered by the
@@ -64,7 +65,7 @@ broader than this v0 publication capacity; images above 192 KiB fail closed
 during materialization.
 
 A second lifecycle proof constructs a fixed index of at most 64 nodes. The
-25-entry proof crosses the former 16-node limit while remaining representable
+26-entry proof crosses the former 16-node limit while remaining representable
 by the private one-byte descriptor selector. Each
 node stores only checked 32-bit name and data offsets inside the owned image; no node
 retains a pointer into the handed boot source. Exact `init` and directory
