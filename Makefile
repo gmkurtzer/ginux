@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image alpine-image alpine-image-check rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -25,6 +25,8 @@ help:
 	@echo "  make doctor  Check the local development prerequisites"
 	@echo "  make manifest Regenerate the signed development boot inputs"
 	@echo "  make system-image Build the pinned minimal system-container candidate"
+	@echo "  make alpine-image Fetch and verify the pinned Alpine x86-64 OCI image"
+	@echo "  make alpine-image-check Verify the prepared Alpine image without downloading"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
@@ -54,6 +56,12 @@ manifest: linux-probe controller-runtime network-service protocol-service volume
 
 system-image: manifest
 	@echo "Built $(INITRAMFS) from $(SYSTEM_PROFILE)"
+
+alpine-image:
+	@tools/images/prepare-alpine.sh fetch
+
+alpine-image-check:
+	@tools/images/prepare-alpine.sh check
 
 rocky-image:
 	@tools/images/prepare-rocky.sh fetch
