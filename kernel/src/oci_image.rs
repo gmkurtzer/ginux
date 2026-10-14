@@ -18,21 +18,72 @@ pub(crate) fn install_alpine_rootfs(bytes: &'static [u8]) -> bool {
     let Some(rootfs) = Rootfs::parse(bytes) else {
         return false;
     };
+    let shell = rootfs.find(b"bin/busybox");
+    let interpreter = rootfs.find(b"lib/ld-musl-x86_64.so.1");
+    let pie_plan = shell.zip(interpreter).and_then(|(shell, interpreter)| {
+        crate::linux_elf::plan_relocatable_process(
+            shell.data,
+            0x40_0000,
+            b"/lib/ld-musl-x86_64.so.1",
+            interpreter.data,
+            0x60_0000,
+        )
+    });
+    let invalid_pie_plans_rejected = shell.zip(interpreter).is_some_and(|(shell, interpreter)| {
+        crate::linux_elf::plan_relocatable_process(
+            shell.data,
+            0,
+            b"/lib/ld-musl-x86_64.so.1",
+            interpreter.data,
+            0x60_0000,
+        )
+        .is_none()
+            && crate::linux_elf::plan_relocatable_process(
+                shell.data,
+                0x40_0000,
+                b"/wrong-interpreter",
+                interpreter.data,
+                0x60_0000,
+            )
+            .is_none()
+            && crate::linux_elf::plan_relocatable_process(
+                shell.data,
+                0x40_0000,
+                b"/lib/ld-musl-x86_64.so.1",
+                interpreter.data,
+                0x40_0000,
+            )
+            .is_none()
+    });
     let valid = rootfs
         .find(b"bin/sh")
         .is_some_and(|entry| entry.kind == EntryKind::Symlink && entry.link == b"/bin/busybox")
-        && rootfs.find(b"bin/busybox").is_some_and(|entry| {
+        && shell.is_some_and(|entry| {
             entry.kind == EntryKind::File
                 && entry.mode & 0o111 != 0
                 && entry.data.starts_with(b"\x7fELF")
         })
-        && rootfs
-            .find(b"lib/ld-musl-x86_64.so.1")
-            .is_some_and(|entry| {
-                entry.kind == EntryKind::File
-                    && entry.mode & 0o111 != 0
-                    && entry.data.starts_with(b"\x7fELF")
-            });
+        && interpreter.is_some_and(|entry| {
+            entry.kind == EntryKind::File
+                && entry.mode & 0o111 != 0
+                && entry.data.starts_with(b"\x7fELF")
+        })
+        && invalid_pie_plans_rejected
+        && pie_plan.is_some_and(|plan| {
+            plan.main.segment_count == 4
+                && plan.interpreter.segment_count == 4
+                && plan.main.program_header_count == 12
+                && plan.interpreter.program_header_count == 11
+                && plan.main.program_headers == 0x40_0040
+                && plan.interpreter.program_headers == 0x60_0040
+                && plan.main.load_bias == 0x40_0000
+                && plan.interpreter.load_bias == 0x60_0000
+                && plan.initial_entry == plan.interpreter.entry
+                && plan.main.segments[..plan.main.segment_count]
+                    .iter()
+                    .flatten()
+                    .all(|segment| segment.page_count != 0)
+        });
     if !valid {
         return false;
     }

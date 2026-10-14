@@ -5,13 +5,20 @@ pub(crate) const PROGRAM_HEADER_SIZE: usize = 56;
 const MIN_LOAD_SEGMENT_COUNT: usize = 2;
 const MAX_LOAD_SEGMENT_COUNT: usize = 3;
 const MAX_PROGRAM_HEADER_COUNT: usize = 9;
+const MAX_RELOCATABLE_LOAD_SEGMENT_COUNT: usize = 4;
+const MAX_RELOCATABLE_PROGRAM_HEADER_COUNT: usize = 16;
+const MAX_RELOCATABLE_SEGMENT_PAGES: usize = 256;
+const MAX_RELOCATABLE_IMAGE_PAGES: usize = 512;
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
+const PT_NOTE: u32 = 4;
 const PT_PHDR: u32 = 6;
 const PT_TLS: u32 = 7;
+const PT_GNU_EH_FRAME: u32 = 0x6474_e550;
 const PT_GNU_STACK: u32 = 0x6474_e551;
 const PT_GNU_RELRO: u32 = 0x6474_e552;
+const PT_GNU_PROPERTY: u32 = 0x6474_e553;
 const ET_EXEC: u16 = 2;
 const ET_DYN: u16 = 3;
 const EM_X86_64: u16 = 62;
@@ -746,6 +753,31 @@ pub(crate) struct LoadPlan<'a> {
     pub(crate) dynamic_relocations: Option<DynamicRelocations>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct RelocatableLoadPlan<'a> {
+    pub(crate) entry: u64,
+    pub(crate) program_headers: u64,
+    pub(crate) program_header_count: u16,
+    pub(crate) segments: [Option<PlannedSegment<'a>>; MAX_RELOCATABLE_LOAD_SEGMENT_COUNT],
+    pub(crate) segment_count: usize,
+    pub(crate) load_bias: u64,
+}
+
+pub(crate) struct RelocatableProcessPlan<'main, 'interpreter> {
+    pub(crate) main: RelocatableLoadPlan<'main>,
+    pub(crate) interpreter: RelocatableLoadPlan<'interpreter>,
+    pub(crate) initial_entry: u64,
+}
+
+struct RelocatableImage<'a> {
+    entry: u64,
+    program_headers: u64,
+    program_header_count: u16,
+    segments: [Option<Segment<'a>>; MAX_RELOCATABLE_LOAD_SEGMENT_COUNT],
+    segment_count: usize,
+    interpreter: Option<&'a [u8]>,
+}
+
 pub(crate) struct InterpretedLoadPlan<'main, 'interpreter> {
     pub(crate) initial_entry: u64,
     pub(crate) main_entry: u64,
@@ -975,6 +1007,303 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
             .unwrap_or([None; 2]),
         soname: dynamic_metadata.and_then(|metadata| metadata.soname),
     })
+}
+
+pub(crate) fn plan_relocatable_process<'main, 'interpreter>(
+    main_bytes: &'main [u8],
+    main_base: u64,
+    interpreter_path: &[u8],
+    interpreter_bytes: &'interpreter [u8],
+    interpreter_base: u64,
+) -> Option<RelocatableProcessPlan<'main, 'interpreter>> {
+    let main_image = parse_relocatable(main_bytes)?;
+    let interpreter_image = parse_relocatable(interpreter_bytes)?;
+    if main_image.interpreter != Some(interpreter_path) || interpreter_image.interpreter.is_some() {
+        return None;
+    }
+    let main = plan_relocatable(&main_image, main_base)?;
+    let interpreter = plan_relocatable(&interpreter_image, interpreter_base)?;
+    if relocatable_plans_overlap(&main, &interpreter) {
+        return None;
+    }
+    Some(RelocatableProcessPlan {
+        initial_entry: interpreter.entry,
+        main,
+        interpreter,
+    })
+}
+
+fn parse_relocatable(bytes: &[u8]) -> Option<RelocatableImage<'_>> {
+    if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * MIN_LOAD_SEGMENT_COUNT
+        || bytes.get(0..4)? != b"\x7fELF"
+        || bytes[4] != 2
+        || bytes[5] != 1
+        || bytes[6] != 1
+        || !matches!(bytes[7], 0 | 3)
+        || bytes[8] != 0
+        || bytes[9..16].iter().any(|byte| *byte != 0)
+        || read_u16(bytes, 16)? != ET_DYN
+        || read_u16(bytes, 18)? != EM_X86_64
+        || read_u32(bytes, 20)? != 1
+        || read_u64(bytes, 32)? != ELF_HEADER_SIZE as u64
+        || read_u32(bytes, 48)? != 0
+        || read_u16(bytes, 52)? != ELF_HEADER_SIZE as u16
+        || read_u16(bytes, 54)? != PROGRAM_HEADER_SIZE as u16
+    {
+        return None;
+    }
+    let program_header_count = usize::from(read_u16(bytes, 56)?);
+    if !(MIN_LOAD_SEGMENT_COUNT..=MAX_RELOCATABLE_PROGRAM_HEADER_COUNT)
+        .contains(&program_header_count)
+    {
+        return None;
+    }
+    let program_table_end =
+        ELF_HEADER_SIZE.checked_add(PROGRAM_HEADER_SIZE.checked_mul(program_header_count)?)?;
+    if program_table_end > bytes.len() {
+        return None;
+    }
+
+    let mut segments = [None; MAX_RELOCATABLE_LOAD_SEGMENT_COUNT];
+    let mut segment_count = 0;
+    let mut interpreter = None;
+    let mut phdr_address = None;
+    let mut stack_seen = false;
+    let mut dynamic_seen = false;
+    let mut relro_seen = false;
+    for index in 0..program_header_count {
+        let header = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
+        match read_u32(bytes, header)? {
+            PT_LOAD if segment_count < MAX_RELOCATABLE_LOAD_SEGMENT_COUNT => {
+                segments[segment_count] = Some(parse_segment(bytes, header, true)?);
+                segment_count += 1;
+            }
+            PT_INTERP if interpreter.is_none() => {
+                interpreter = Some(parse_interpreter(bytes, header)?);
+            }
+            PT_PHDR if phdr_address.is_none() => {
+                phdr_address = Some(parse_phdr(bytes, header, program_header_count)?);
+            }
+            PT_GNU_STACK if !stack_seen && valid_gnu_stack(bytes, header) => stack_seen = true,
+            PT_DYNAMIC if !dynamic_seen && valid_auxiliary_header(bytes, header, None) => {
+                dynamic_seen = true;
+            }
+            PT_GNU_RELRO if !relro_seen && valid_auxiliary_header(bytes, header, Some(PF_READ)) => {
+                relro_seen = true;
+            }
+            PT_NOTE | PT_GNU_EH_FRAME | PT_GNU_PROPERTY
+                if valid_auxiliary_header(bytes, header, Some(PF_READ)) => {}
+            _ => return None,
+        }
+    }
+    if !(MIN_LOAD_SEGMENT_COUNT..=MAX_RELOCATABLE_LOAD_SEGMENT_COUNT).contains(&segment_count)
+        || !stack_seen
+        || !dynamic_seen
+    {
+        return None;
+    }
+
+    let loads = &segments[..segment_count];
+    if loads
+        .iter()
+        .flatten()
+        .filter(|segment| segment.flags & PF_EXECUTE != 0)
+        .count()
+        != 1
+        || loads
+            .iter()
+            .flatten()
+            .filter(|segment| segment.flags & PF_WRITE != 0)
+            .count()
+            != 1
+    {
+        return None;
+    }
+    for (index, first) in loads.iter().flatten().enumerate() {
+        let first_end = first.virtual_address.checked_add(first.memory_size)?;
+        for second in loads[index + 1..].iter().flatten() {
+            let second_end = second.virtual_address.checked_add(second.memory_size)?;
+            if first.virtual_address < second_end && second.virtual_address < first_end {
+                return None;
+            }
+        }
+    }
+    let entry = read_u64(bytes, 24)?;
+    if !loads.iter().flatten().any(|segment| {
+        segment.flags & PF_EXECUTE != 0
+            && entry >= segment.virtual_address
+            && entry < segment.virtual_address.saturating_add(segment.memory_size)
+    }) {
+        return None;
+    }
+    let mapped_program_headers = loads.iter().flatten().find_map(|segment| {
+        let table_offset = ELF_HEADER_SIZE as u64;
+        let table_end = program_table_end as u64;
+        (segment.file_offset <= table_offset
+            && segment
+                .file_offset
+                .checked_add(segment.bytes.len() as u64)?
+                >= table_end)
+            .then(|| {
+                segment
+                    .virtual_address
+                    .checked_add(table_offset - segment.file_offset)
+            })?
+    })?;
+    if phdr_address.is_some_and(|address| address != mapped_program_headers) {
+        return None;
+    }
+    Some(RelocatableImage {
+        entry,
+        program_headers: mapped_program_headers,
+        program_header_count: program_header_count as u16,
+        segments,
+        segment_count,
+        interpreter,
+    })
+}
+
+fn valid_auxiliary_header(bytes: &[u8], header: usize, expected_flags: Option<u32>) -> bool {
+    let Some(flags) = read_u32(bytes, header + 4) else {
+        return false;
+    };
+    let Some(offset) = read_u64(bytes, header + 8) else {
+        return false;
+    };
+    let Some(virtual_address) = read_u64(bytes, header + 16) else {
+        return false;
+    };
+    let Some(physical_address) = read_u64(bytes, header + 24) else {
+        return false;
+    };
+    let Some(file_size) = read_u64(bytes, header + 32) else {
+        return false;
+    };
+    let Some(memory_size) = read_u64(bytes, header + 40) else {
+        return false;
+    };
+    let Some(alignment) = read_u64(bytes, header + 48) else {
+        return false;
+    };
+    expected_flags.is_none_or(|expected| flags == expected)
+        && flags & !(PF_READ | PF_WRITE | PF_EXECUTE) == 0
+        && flags & PF_EXECUTE == 0
+        && (physical_address == 0 || physical_address == virtual_address)
+        && file_size <= memory_size
+        && offset
+            .checked_add(file_size)
+            .and_then(|end| usize::try_from(end).ok())
+            .is_some_and(|end| end <= bytes.len())
+        && virtual_address.checked_add(memory_size).is_some()
+        && (alignment == 0
+            || alignment.is_power_of_two() && offset % alignment == virtual_address % alignment)
+}
+
+fn plan_relocatable<'a>(
+    image: &RelocatableImage<'a>,
+    load_bias: u64,
+) -> Option<RelocatableLoadPlan<'a>> {
+    if load_bias < MIN_USER_ADDRESS || !load_bias.is_multiple_of(PAGE_SIZE as u64) {
+        return None;
+    }
+    let mut segments = [None; MAX_RELOCATABLE_LOAD_SEGMENT_COUNT];
+    let mut total_pages = 0_usize;
+    for (index, segment) in image.segments[..image.segment_count]
+        .iter()
+        .flatten()
+        .enumerate()
+    {
+        let relocated = relocate_segment(*segment, load_bias)?;
+        let planned = plan_relocatable_segment(relocated)?;
+        total_pages = total_pages.checked_add(planned.page_count)?;
+        segments[index] = Some(planned);
+    }
+    if total_pages > MAX_RELOCATABLE_IMAGE_PAGES {
+        return None;
+    }
+    let plan = RelocatableLoadPlan {
+        entry: image.entry.checked_add(load_bias)?,
+        program_headers: image.program_headers.checked_add(load_bias)?,
+        program_header_count: image.program_header_count,
+        segments,
+        segment_count: image.segment_count,
+        load_bias,
+    };
+    relocatable_plan_valid(&plan).then_some(plan)
+}
+
+fn plan_relocatable_segment(segment: Segment<'_>) -> Option<PlannedSegment<'_>> {
+    let memory_size = usize::try_from(segment.memory_size).ok()?;
+    let virtual_page = segment.virtual_address & !(PAGE_SIZE as u64 - 1);
+    let page_offset = usize::try_from(segment.virtual_address - virtual_page).ok()?;
+    let page_count = page_offset
+        .checked_add(memory_size)?
+        .checked_add(PAGE_SIZE - 1)?
+        / PAGE_SIZE;
+    ((1..=MAX_RELOCATABLE_SEGMENT_PAGES).contains(&page_count)
+        && segment.bytes.len() <= memory_size)
+        .then_some(PlannedSegment {
+            bytes: segment.bytes,
+            file_page: segment.file_offset & !(PAGE_SIZE as u64 - 1),
+            virtual_address: segment.virtual_address,
+            virtual_page,
+            memory_size,
+            page_count,
+            writable: segment.flags & PF_WRITE != 0,
+            executable: segment.flags & PF_EXECUTE != 0,
+        })
+}
+
+fn relocatable_plan_valid(plan: &RelocatableLoadPlan<'_>) -> bool {
+    let segments = &plan.segments[..plan.segment_count];
+    segments.iter().all(Option::is_some)
+        && segments.iter().flatten().enumerate().all(|(index, first)| {
+            let Some(first_end) = first
+                .virtual_page
+                .checked_add(first.page_count as u64 * PAGE_SIZE as u64)
+            else {
+                return false;
+            };
+            !(first.writable && first.executable)
+                && segments[index + 1..].iter().flatten().all(|second| {
+                    let second_end = second
+                        .virtual_page
+                        .saturating_add(second.page_count as u64 * PAGE_SIZE as u64);
+                    first.virtual_page >= second_end || second.virtual_page >= first_end
+                })
+        })
+        && segments.iter().flatten().any(|segment| {
+            segment.executable
+                && plan.entry >= segment.virtual_address
+                && plan.entry
+                    < segment
+                        .virtual_address
+                        .saturating_add(segment.memory_size as u64)
+        })
+        && plan.program_headers >= plan.load_bias
+}
+
+fn relocatable_plans_overlap(
+    first: &RelocatableLoadPlan<'_>,
+    second: &RelocatableLoadPlan<'_>,
+) -> bool {
+    first.segments[..first.segment_count]
+        .iter()
+        .flatten()
+        .any(|left| {
+            let left_end = left
+                .virtual_page
+                .saturating_add(left.page_count as u64 * PAGE_SIZE as u64);
+            second.segments[..second.segment_count]
+                .iter()
+                .flatten()
+                .any(|right| {
+                    let right_end = right
+                        .virtual_page
+                        .saturating_add(right.page_count as u64 * PAGE_SIZE as u64);
+                    left.virtual_page < right_end && right.virtual_page < left_end
+                })
+        })
 }
 
 pub(crate) fn plan<'a>(image: &Image<'a>) -> Option<LoadPlan<'a>> {

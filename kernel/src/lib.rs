@@ -261,6 +261,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         serial_write("ginux: pinned Alpine OCI rootfs accepted\r\n");
         serial_write("ginux: Alpine /bin/sh and musl runtime discovered\r\n");
+        serial_write("ginux: Alpine relocatable PIE load plan accepted\r\n");
     }
 
     let Some(virtio_block) = arch::x86_64::pci::discover_virtio_block() else {
