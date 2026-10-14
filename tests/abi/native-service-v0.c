@@ -66,6 +66,8 @@ _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_ARP_PROBE == UINT32_C(16),
                "network ARP feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_RX_REUSE == UINT32_C(32),
                "network RX reuse feature bit");
+_Static_assert(GINUX_NATIVE_NETWORK_FEATURE_DHCP == UINT32_C(131072),
+               "network DHCP feature bit");
 _Static_assert(sizeof(struct ginux_native_network_boot_v1) == 88,
                "network bootstrap v1 size");
 _Static_assert(offsetof(struct ginux_native_network_boot_v1,

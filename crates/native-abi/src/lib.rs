@@ -24,6 +24,7 @@ pub const NATIVE_NETWORK_FEATURE_EGRESS_REUSE: u32 = 1 << 13;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_BATCH: u32 = 1 << 14;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_RESIDENT: u32 = 1 << 15;
 pub const NATIVE_NETWORK_FEATURE_ICMP_PROBE: u32 = 1 << 16;
+pub const NATIVE_NETWORK_FEATURE_DHCP: u32 = 1 << 17;
 pub const NATIVE_NETWORK_BOOT_V1_VERSION: u16 = 1;
 pub const NATIVE_NETWORK_BOOT_V1_SIZE: u16 = 88;
 pub const NATIVE_NETWORK_BOOT_V2_VERSION: u16 = 2;
@@ -63,6 +64,8 @@ pub const NATIVE_NETWORK_DEVICE_APPLY: u64 = 11;
 pub const NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES: u64 = 12;
 pub const NATIVE_NETWORK_DEVICE_PING: u64 = 13;
 pub const NATIVE_NETWORK_DEVICE_QUERY_PING: u64 = 14;
+pub const NATIVE_NETWORK_DEVICE_DHCP: u64 = 15;
+pub const NATIVE_NETWORK_DEVICE_QUERY_DHCP: u64 = 16;
 pub const NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD: u64 = 0x0000_0001_05dc_0009;
 pub const NATIVE_NETWORK_SNAPSHOT_SIZE: u64 = 56;
 pub const NATIVE_NETWORK_SNAPSHOT_VERSION: u64 = 1;
@@ -435,7 +438,15 @@ impl NativeNetworkBootV0 {
                         | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
                         | NATIVE_NETWORK_FEATURE_ARP_PROBE
                         | NATIVE_NETWORK_FEATURE_RX_REUSE
-                        | NATIVE_NETWORK_FEATURE_ICMP_PROBE)
+                        | NATIVE_NETWORK_FEATURE_ICMP_PROBE
+                || self.features
+                    == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                        | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                        | NATIVE_NETWORK_FEATURE_TRANSMIT_PROBE
+                        | NATIVE_NETWORK_FEATURE_TX_INTERRUPT
+                        | NATIVE_NETWORK_FEATURE_ARP_PROBE
+                        | NATIVE_NETWORK_FEATURE_RX_REUSE
+                        | NATIVE_NETWORK_FEATURE_DHCP)
             && self.common_config_address != 0
             && self.receive_notification_address != 0
             && self.transmit_notification_address != 0
@@ -470,6 +481,10 @@ impl NativeNetworkBootV0 {
 
     pub const fn requests_icmp_probe(&self) -> bool {
         self.features & NATIVE_NETWORK_FEATURE_ICMP_PROBE != 0
+    }
+
+    pub const fn requests_dhcp(&self) -> bool {
+        self.features & NATIVE_NETWORK_FEATURE_DHCP != 0
     }
 }
 
@@ -1658,6 +1673,7 @@ mod tests {
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_TX_INTERRUPT UINT32_C(8)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_ARP_PROBE UINT32_C(16)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_RX_REUSE UINT32_C(32)"));
+        assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_DHCP UINT32_C(131072)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_PACKET_HANDOFF UINT32_C(64)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_PACKET_FAULT UINT32_C(128)"));
         assert!(network_header.contains("GINUX_NATIVE_NETWORK_FEATURE_PACKET_BATCH UINT32_C(256)"));
@@ -1823,6 +1839,8 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_BLOCK_WAIT_CANCELLED (UINT64_MAX - UINT64_C(5))"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_OPERATION UINT64_C(16)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_PROBE UINT64_C(0)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_DHCP UINT64_C(15)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_QUERY_DHCP UINT64_C(16)"));
         assert!(header.contains("GINUX_NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES UINT64_C(12)"));
         assert!(header
             .contains("GINUX_NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD UINT64_C(0x0000000105dc0009)"));

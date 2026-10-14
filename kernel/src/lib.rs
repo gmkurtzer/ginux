@@ -3562,6 +3562,19 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if arch::x86_64::cpu::take_container_host_shutdown_request() {
             break;
         }
+        if arch::x86_64::cpu::take_network_dhcp_request() {
+            let success = address_space::configure_native_network_dhcp(
+                &network_image,
+                virtio_network,
+                virtio_network_initialization,
+                virtio_network_iommu_profile,
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            );
+            arch::x86_64::cpu::complete_network_dhcp(success);
+            continue 'managed;
+        }
         if let Some(target) = arch::x86_64::cpu::take_network_ping_request() {
             let success = target == u32::from_be_bytes([10, 0, 2, 2])
                 && address_space::verify_native_network_ping_gateway(

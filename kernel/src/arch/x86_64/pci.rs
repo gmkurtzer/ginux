@@ -1963,6 +1963,58 @@ pub(crate) fn network_service_icmp_exchange_is_complete(
     })
 }
 
+pub(crate) fn network_service_dhcp_exchange_is_complete(
+    dma_physical: u64,
+    dma_virtual: usize,
+) -> bool {
+    const HEADER_LENGTH: usize = 12;
+    const RX_LENGTH: usize = NET_BUFFER_LENGTH - 1;
+    let tx_length = read_dma_u32(dma_virtual + NET_TX_DESC_OFFSET + 8) as usize;
+    let rx_length = read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 16) as usize;
+    let tx = dma_virtual + NET_TX_BUFFER_OFFSET + HEADER_LENGTH;
+    let rx = dma_virtual + NET_RX_BUFFER_OFFSET + HEADER_LENGTH;
+    dma_physical.is_multiple_of(DMA_PAGE_SIZE as u64)
+        && dma_virtual.is_multiple_of(DMA_PAGE_SIZE)
+        && read_dma_u64(dma_virtual + NET_RX_DESC_OFFSET)
+            == dma_physical + NET_RX_BUFFER_OFFSET as u64
+        && read_dma_u32(dma_virtual + NET_RX_DESC_OFFSET + 8) == RX_LENGTH as u32
+        && read_dma_u16(dma_virtual + NET_RX_DESC_OFFSET + 12) == DESC_WRITE
+        && read_dma_u16(dma_virtual + NET_RX_AVAIL_OFFSET + 2) == 2
+        && read_dma_u16(dma_virtual + NET_RX_USED_OFFSET + 2) == 2
+        && read_dma_u32(dma_virtual + NET_RX_USED_OFFSET + 12) == 0
+        && read_dma_u64(dma_virtual + NET_TX_DESC_OFFSET)
+            == dma_physical + NET_TX_BUFFER_OFFSET as u64
+        && read_dma_u16(dma_virtual + NET_TX_AVAIL_OFFSET + 2) == 2
+        && read_dma_u16(dma_virtual + NET_TX_USED_OFFSET + 2) == 2
+        && read_dma_u32(dma_virtual + NET_TX_USED_OFFSET + 12) == 0
+        && (HEADER_LENGTH + 14 + 20 + 8 + 240..=NET_BUFFER_LENGTH).contains(&tx_length)
+        && (HEADER_LENGTH + 14 + 20 + 8 + 240..=RX_LENGTH).contains(&rx_length)
+        && (0..HEADER_LENGTH)
+            .all(|offset| read_dma_u8(dma_virtual + NET_TX_BUFFER_OFFSET + offset) == 0)
+        && (0..6).all(|offset| read_dma_u8(tx + offset) == 0xff)
+        && (0..6).all(|offset| {
+            read_dma_u8(tx + 6 + offset) == [0x52, 0x54, 0x00, 0x12, 0x34, 0x56][offset]
+        })
+        && read_dma_u8(tx + 12) == 0x08
+        && read_dma_u8(tx + 13) == 0x00
+        && read_dma_u8(tx + 23) == 17
+        && read_dma_u8(tx + 34) == 0
+        && read_dma_u8(tx + 35) == 68
+        && read_dma_u8(tx + 36) == 0
+        && read_dma_u8(tx + 37) == 67
+        && read_dma_u8(tx + 42) == 1
+        && read_dma_u8(tx + 282) == 53
+        && read_dma_u8(tx + 284) == 3
+        && read_dma_u8(rx + 12) == 0x08
+        && read_dma_u8(rx + 13) == 0x00
+        && read_dma_u8(rx + 23) == 17
+        && read_dma_u8(rx + 34) == 0
+        && read_dma_u8(rx + 35) == 67
+        && read_dma_u8(rx + 36) == 0
+        && read_dma_u8(rx + 37) == 68
+        && read_dma_u8(rx + 42) == 2
+}
+
 pub(crate) fn corrupt_network_service_arp_reply(dma_physical: u64, dma_virtual: usize) -> bool {
     const ARP_OPERATION_LOW_BYTE: usize = NET_RX_BUFFER_OFFSET + 12 + 14 + 7;
     if !network_service_arp_exchange_is_complete(dma_physical, dma_virtual) {

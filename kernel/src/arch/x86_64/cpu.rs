@@ -795,6 +795,8 @@ static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
 static NETWORK_PING_REQUESTED: AtomicU64 = AtomicU64::new(0);
 static NETWORK_PING_RESULT: AtomicU8 = AtomicU8::new(0);
+static NETWORK_DHCP_REQUESTED: AtomicBool = AtomicBool::new(false);
+static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -1586,6 +1588,7 @@ pub(crate) fn execute_native_auxiliary(
     };
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_native_controller(
     entry: usize,
     stack: usize,
@@ -15571,6 +15574,44 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrap
         {
             u64::from(NETWORK_PING_RESULT.swap(0, Ordering::AcqRel))
         }
+        ginux_native_abi::NATIVE_NETWORK_DEVICE_DHCP
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::WRITE,
+                )
+                && NETWORK_DHCP_REQUESTED
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok() =>
+        {
+            NETWORK_DHCP_RESULT.store(0, Ordering::Release);
+            if !domain::renew_auxiliary_call_epoch(caller_domain)
+                || !scheduler::suspend_container_lifecycle(
+                    frame,
+                    USER_CODE_SELECTOR,
+                    USER_DATA_SELECTOR,
+                    0,
+                    active_fs_base(),
+                )
+            {
+                NETWORK_DHCP_REQUESTED.store(false, Ordering::Release);
+                return u64::MAX - 2;
+            }
+            u64::MAX
+        }
+        ginux_native_abi::NATIVE_NETWORK_DEVICE_QUERY_DHCP
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            u64::from(NETWORK_DHCP_RESULT.swap(0, Ordering::AcqRel))
+        }
         _ => u64::MAX - 2,
     }
 }
@@ -15583,6 +15624,14 @@ pub(crate) fn take_network_ping_request() -> Option<u32> {
 
 pub(crate) fn complete_network_ping(success: bool) {
     NETWORK_PING_RESULT.store(if success { 1 } else { 2 }, Ordering::Release);
+}
+
+pub(crate) fn take_network_dhcp_request() -> bool {
+    NETWORK_DHCP_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
+pub(crate) fn complete_network_dhcp(success: bool) {
+    NETWORK_DHCP_RESULT.store(if success { 1 } else { 2 }, Ordering::Release);
 }
 
 fn apply_network_configuration(address: u64) -> u64 {
@@ -16418,7 +16467,9 @@ fn exit_result(caller_domain: u64, frame: *mut UserTrapFrame) -> u64 {
             return u64::MAX;
         }
         if !address_space::quiesce_auxiliary_device(caller_domain) {
-            serial_write("ginux: auxiliary exit quiesce failed\r\n");
+            serial_write("ginux: auxiliary exit quiesce failed status: ");
+            serial_write_u64(u64::from(auxiliary_exit_status.unwrap_or(0)));
+            serial_write("\r\n");
             return u64::MAX;
         }
         if !address_space::activate_kernel_root_for_auxiliary(caller_domain) {

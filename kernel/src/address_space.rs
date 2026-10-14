@@ -2368,6 +2368,7 @@ struct RegisteredAuxiliaryAddressSpace {
     network_egress_transmit_limit: u8,
     expect_network_receive: bool,
     expect_network_reuse: bool,
+    expect_network_dhcp: bool,
     corrupt_network_receive: bool,
     network_interrupt_request_completed: u64,
     network_egress_acknowledged: u64,
@@ -5042,6 +5043,7 @@ enum NativeNetworkRunMode {
     ReceiveArpMalformed,
     ReceiveArpReuse,
     PingGateway,
+    Dhcp,
     PacketHandoff,
     PacketHandoffFault,
     PacketBatch,
@@ -5697,6 +5699,26 @@ pub(crate) fn verify_native_network_ping_gateway(
         initialization,
         iommu_profile,
         NativeNetworkRunMode::PingGateway,
+        Some(common_mapping),
+        Some((msix_mapping, apic)),
+    )
+}
+
+pub(crate) fn configure_native_network_dhcp(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    msix_mapping: paging::MmioMapping,
+    apic: &LocalApic,
+) -> bool {
+    verify_native_network_bootstrap_run(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::Dhcp,
         Some(common_mapping),
         Some((msix_mapping, apic)),
     )
@@ -7526,6 +7548,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReceiveArpMalformed
             | NativeNetworkRunMode::ReceiveArpReuse
             | NativeNetworkRunMode::PingGateway
+            | NativeNetworkRunMode::Dhcp
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
             | NativeNetworkRunMode::PacketBatch
@@ -7548,6 +7571,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReceiveArpMalformed
             | NativeNetworkRunMode::ReceiveArpReuse
             | NativeNetworkRunMode::PingGateway
+            | NativeNetworkRunMode::Dhcp
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
             | NativeNetworkRunMode::PacketBatch
@@ -7557,6 +7581,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
         mode,
         NativeNetworkRunMode::ReceiveArpReuse
             | NativeNetworkRunMode::PingGateway
+            | NativeNetworkRunMode::Dhcp
             | NativeNetworkRunMode::PacketHandoff
             | NativeNetworkRunMode::PacketHandoffFault
             | NativeNetworkRunMode::PacketBatch
@@ -7810,6 +7835,8 @@ fn verify_native_network_bootstrap_run_with_evidence(
                     boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_RX_REUSE;
                     if mode == NativeNetworkRunMode::PingGateway {
                         boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_ICMP_PROBE;
+                    } else if mode == NativeNetworkRunMode::Dhcp {
+                        boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_DHCP;
                     }
                 }
             }
@@ -7947,6 +7974,8 @@ fn verify_native_network_bootstrap_run_with_evidence(
                 ))
             && (!receive_arp || arm_auxiliary_network_receive_expectation(auxiliary))
             && (!receive_reuse || arm_auxiliary_network_reuse_expectation(auxiliary))
+            && (mode != NativeNetworkRunMode::Dhcp
+                || arm_auxiliary_network_dhcp_expectation(auxiliary))
             && (!corrupt_network_receive || arm_auxiliary_network_receive_corruption(auxiliary))
             && pci::prepare_network_for_isolated_service(device, mapping)
             && interrupt.is_none_or(|(msix_mapping, apic)| {
@@ -8207,6 +8236,16 @@ fn verify_native_network_bootstrap_run_with_evidence(
         && parser_fault_valid
         && fault_ordering_valid
         && stop_ordering_valid;
+    if mode == NativeNetworkRunMode::Dhcp && !valid {
+        crate::serial_write_bytes(b"\r\nginux: DHCP service lifecycle event/detail/fault: ");
+        crate::serial_write_u64(event.unwrap_or(u64::MAX));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(domain::last_lifecycle_event_detail().map_or(u64::MAX, u64::from));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(u64::from(
+            domain::last_lifecycle_event_has_fault().unwrap_or(true),
+        ));
+    }
     if valid {
         if let (Some(evidence_output), Some(iommu_evidence)) = (evidence_output, iommu_evidence) {
             *evidence_output = Some(NativeNetworkRun {
@@ -8469,6 +8508,7 @@ fn register_address_space(domain_id: u64, space: AuxiliaryAddressSpace) -> bool 
             network_egress_transmit_limit: 0,
             expect_network_receive: false,
             expect_network_reuse: false,
+            expect_network_dhcp: false,
             corrupt_network_receive: false,
             network_interrupt_request_completed: 0,
             network_egress_acknowledged: 0,
@@ -8766,6 +8806,24 @@ fn arm_auxiliary_network_reuse_expectation(domain_id: u64) -> bool {
     true
 }
 
+fn arm_auxiliary_network_dhcp_expectation(domain_id: u64) -> bool {
+    let registry = core::ptr::addr_of_mut!(AUXILIARY_ADDRESS_SPACES);
+    let Some(registered) = (unsafe { (*registry).iter_mut().flatten() })
+        .find(|registered| registered.domain == domain_id)
+    else {
+        return false;
+    };
+    if !registered.expect_network_receive
+        || !registered.expect_network_reuse
+        || registered.expect_network_dhcp
+        || registered.device_quiesced
+    {
+        return false;
+    }
+    registered.expect_network_dhcp = true;
+    true
+}
+
 pub(crate) fn auxiliary_network_wait_ready(domain_id: u64, command: u64, request: u64) -> bool {
     let registry = core::ptr::addr_of!(AUXILIARY_ADDRESS_SPACES);
     let Some(registered) =
@@ -8955,6 +9013,7 @@ pub(crate) fn complete_auxiliary_network_wait(
                 };
                 if registered.expect_network_reuse
                     && request == 2
+                    && !registered.expect_network_dhcp
                     && !pci::network_service_arp_exchange_is_complete(dma.address(), dma_virtual)
                     || registered.corrupt_network_receive
                         && !pci::corrupt_network_service_arp_reply(dma.address(), dma_virtual)
@@ -9150,7 +9209,9 @@ fn quiesce_auxiliary_device_for(domain_id: u64, require_completed_dma: bool) -> 
                 true,
             )
         };
-        let transmit_complete = if registered.expect_network_egress {
+        let transmit_complete = if registered.expect_network_dhcp {
+            pci::network_service_dhcp_exchange_is_complete(dma.address(), dma_virtual)
+        } else if registered.expect_network_egress {
             pci::network_service_egress_transmit_count_is_complete(
                 dma.address(),
                 dma_virtual,

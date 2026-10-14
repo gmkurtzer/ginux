@@ -23,12 +23,13 @@ use ginux_native_abi::{
     NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
     NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT, NATIVE_HOST_PROCESS_KIND_CONTROLLER,
     NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_NETWORK_APPLY_VERSION,
-    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING,
-    NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
-    NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
-    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
-    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION,
+    NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_PING,
+    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_SNAPSHOT_SIZE,
+    NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
+    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
+    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
@@ -51,14 +52,24 @@ const COMMAND_NETWORK_STATUS: u16 = 14;
 const COMMAND_NETWORK_SET_STATIC: u16 = 15;
 const COMMAND_NETWORK_DOWN: u16 = 16;
 const COMMAND_PING: u16 = 17;
+const COMMAND_NETWORK_SET_DHCP: u16 = 18;
 
-const NETWORK_SET_COMMANDS: &[Command<'static>] = &[Command::leaf(
-    b"static",
-    b"network set static ADDRESS/PREFIX GATEWAY",
-    b"Configure a static control-domain address",
-    COMMAND_NETWORK_SET_STATIC,
-    Arity::exact(2),
-)];
+const NETWORK_SET_COMMANDS: &[Command<'static>] = &[
+    Command::leaf(
+        b"static",
+        b"network set static ADDRESS/PREFIX GATEWAY",
+        b"Configure a static control-domain address",
+        COMMAND_NETWORK_SET_STATIC,
+        Arity::exact(2),
+    ),
+    Command::leaf(
+        b"dhcp",
+        b"network set dhcp",
+        b"Configure the control domain using DHCP",
+        COMMAND_NETWORK_SET_DHCP,
+        Arity::exact(0),
+    ),
+];
 
 const NETWORK_COMMANDS: &[Command<'static>] = &[
     Command::leaf(
@@ -343,6 +354,7 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
             COMMAND_NETWORK_SET_STATIC => {
                 set_static_network(console, network, invocation.arguments())
             }
+            COMMAND_NETWORK_SET_DHCP => set_dhcp_network(console, network),
             COMMAND_NETWORK_DOWN => set_network_down(console, network),
             COMMAND_PING => ping(console, network, invocation.arguments()),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
@@ -444,6 +456,37 @@ fn set_static_network(console: u64, network: u64, arguments: Arguments<'_>) {
         return;
     }
     write(console, b"control: static network configured\r\n");
+}
+
+fn set_dhcp_network(console: u64, network: u64) {
+    write(console, b"control: requesting DHCP lease\r\n");
+    if call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_DHCP,
+        0,
+    ) == NATIVE_CALL_FAILED
+        || call(
+            NATIVE_NETWORK_DEVICE_OPERATION,
+            network,
+            NATIVE_NETWORK_DEVICE_QUERY_DHCP,
+            0,
+        ) != 1
+    {
+        write(console, b"network: DHCP failed\r\n");
+        return;
+    }
+    let Some(snapshot) = network_snapshot(network) else {
+        write(console, b"network: DHCP status failed\r\n");
+        return;
+    };
+    write(console, b"control: DHCP configured ");
+    write_ipv4(console, snapshot[3] as u32);
+    write(console, b"/");
+    write_decimal(console, snapshot[3] >> 32);
+    write(console, b" via ");
+    write_ipv4(console, snapshot[4] as u32);
+    write(console, b"\r\n");
 }
 
 fn set_network_down(console: u64, network: u64) {

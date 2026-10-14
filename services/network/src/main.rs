@@ -13,8 +13,10 @@ use ginux_native_abi::{
     NativeNetworkBootV3, NativeNetworkBootV4, NativeNetworkBootV5, NativeNetworkBootV6,
     NativeNetworkBootV7, NativePacketRequestV0, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
     NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
-    NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES, NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD,
-    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_WAIT_CANCELLED,
+    NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
+    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD,
+    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE,
+    NATIVE_NETWORK_DEVICE_QUERY_GENERATION, NATIVE_NETWORK_WAIT_CANCELLED,
     NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED,
     NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_DRAINED, NATIVE_PACKET_EGRESS_ACK_OPERATION,
     NATIVE_PACKET_EGRESS_CLAIM_OPERATION, NATIVE_PACKET_EGRESS_WAIT_OPERATION,
@@ -309,6 +311,8 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         transmissions,
                     )
                 }
+            } else if info.requests_dhcp() {
+                unsafe { dhcp(&info) }
             } else if info.requests_arp_probe() {
                 unsafe { arp_probe(&info, packet_capability, fault_after_packet, packet_batch) }
             } else {
@@ -323,6 +327,344 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         }
     }
     exit(NATIVE_SERVICE_EXIT_COMPLETED)
+}
+
+unsafe fn dhcp(info: &NativeNetworkBootV0) -> Option<u8> {
+    const TRANSACTION: u32 = 0x4758_4448;
+    let dma = usize::try_from(info.dma_virtual_address).ok()?;
+    let receive_notification = usize::try_from(info.receive_notification_address).ok()?;
+    let transmit_notification = usize::try_from(info.transmit_notification_address).ok()?;
+    let mac = info.mac_address.to_be_bytes();
+    let mac = &mac[2..];
+
+    write_u64(
+        dma + RX_DESC_OFFSET as usize,
+        info.dma_device_address + RX_BUFFER_OFFSET,
+    );
+    write_u32(
+        dma + RX_DESC_OFFSET as usize + 8,
+        RX_DESCRIPTOR_LENGTH as u32,
+    );
+    write_u16(dma + RX_DESC_OFFSET as usize + 12, 2);
+    write_u16(dma + RX_DESC_OFFSET as usize + 14, 0);
+    write_u16(dma + RX_AVAIL_OFFSET as usize, 0);
+    write_u16(dma + RX_AVAIL_OFFSET as usize + 4, 0);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + RX_AVAIL_OFFSET as usize + 2, 1);
+
+    let frame = dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH;
+    let Some(discover_length) = build_dhcp_packet(frame, mac, TRANSACTION, 1, 0, 0) else {
+        return Some(10);
+    };
+    prepare_dhcp_transmit(info, dma, discover_length, 1);
+    write_u16(receive_notification, 0);
+    write_u16(transmit_notification, 1);
+    if let Err(stage) = wait_for_dhcp_cycle(info.device_capability, 1, 2, 11) {
+        return Some(stage);
+    }
+
+    let Some(offer) = parse_dhcp_reply(dma, 1, TRANSACTION, 2) else {
+        return Some(12);
+    };
+    let Some(request_length) =
+        build_dhcp_packet(frame, mac, TRANSACTION, 3, offer.address, offer.server)
+    else {
+        return Some(13);
+    };
+    write_u16(dma + RX_AVAIL_OFFSET as usize + 6, 0);
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + RX_AVAIL_OFFSET as usize + 2, 2);
+    prepare_dhcp_transmit(info, dma, request_length, 2);
+    write_u16(receive_notification, 0);
+    write_u16(transmit_notification, 1);
+    if let Err(stage) = wait_for_dhcp_cycle(info.device_capability, 3, 4, 20) {
+        return Some(stage);
+    }
+
+    let Some(lease) = parse_dhcp_reply(dma, 2, TRANSACTION, 5) else {
+        return Some(15);
+    };
+    if lease.address != offer.address || lease.server != offer.server {
+        return Some(16);
+    }
+    let generation = network_device_call(
+        info.device_capability,
+        NATIVE_NETWORK_DEVICE_QUERY_GENERATION,
+        0,
+    );
+    let request = [
+        NATIVE_NETWORK_APPLY_VERSION,
+        generation,
+        1,
+        u64::from(lease.address) | (u64::from(lease.prefix) << 32),
+        u64::from(lease.router),
+        0,
+        0,
+        0,
+    ];
+    Some(
+        if network_device_call(
+            info.device_capability,
+            NATIVE_NETWORK_DEVICE_APPLY,
+            request.as_ptr() as u64,
+        ) != NATIVE_NETWORK_WAIT_FAILED
+        {
+            NATIVE_SERVICE_EXIT_COMPLETED
+        } else {
+            17
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+struct DhcpLease {
+    address: u32,
+    router: u32,
+    server: u32,
+    prefix: u8,
+}
+
+unsafe fn wait_for_dhcp_cycle(
+    capability: u64,
+    tx_request: u64,
+    rx_request: u64,
+    stage: u8,
+) -> Result<(), u8> {
+    match wait_for_network_interrupt(capability, NATIVE_NETWORK_WAIT_TX_NOTIFIED, tx_request) {
+        0 => {}
+        _ => return Err(stage),
+    }
+    match wait_for_network_interrupt(capability, NATIVE_NETWORK_WAIT_RX_POSTED, rx_request) {
+        0 => Ok(()),
+        _ => Err(stage + 1),
+    }
+}
+
+unsafe fn prepare_dhcp_transmit(
+    info: &NativeNetworkBootV0,
+    dma: usize,
+    frame_length: usize,
+    index: u16,
+) {
+    let descriptor = dma + TX_DESC_OFFSET as usize;
+    write_u64(descriptor, info.dma_device_address + TX_BUFFER_OFFSET);
+    write_u32(descriptor + 8, (TX_HEADER_LENGTH + frame_length) as u32);
+    write_u16(descriptor + 12, 0);
+    write_u16(descriptor + 14, 0);
+    for offset in 0..TX_HEADER_LENGTH {
+        write_u8(dma + TX_BUFFER_OFFSET as usize + offset, 0);
+    }
+    write_u16(dma + TX_AVAIL_OFFSET as usize, 0);
+    write_u16(
+        dma + TX_AVAIL_OFFSET as usize + 4 + (usize::from(index) - 1) * 2,
+        0,
+    );
+    compiler_fence(Ordering::SeqCst);
+    write_u16(dma + TX_AVAIL_OFFSET as usize + 2, index);
+    compiler_fence(Ordering::SeqCst);
+}
+
+unsafe fn build_dhcp_packet(
+    frame: usize,
+    mac: &[u8],
+    transaction: u32,
+    message_type: u8,
+    requested: u32,
+    server: u32,
+) -> Option<usize> {
+    const DHCP_PAYLOAD_LENGTH: usize = 300;
+    const UDP_LENGTH: usize = 8 + DHCP_PAYLOAD_LENGTH;
+    const IP_LENGTH: usize = 20 + UDP_LENGTH;
+    const FRAME_LENGTH: usize = 14 + IP_LENGTH;
+    for offset in 0..FRAME_LENGTH {
+        write_u8(frame + offset, 0);
+    }
+    for offset in 0..6 {
+        write_u8(frame + offset, 0xff);
+        write_u8(frame + 6 + offset, *mac.get(offset)?);
+    }
+    write_be_u16(frame + 12, 0x0800);
+    let ip = frame + 14;
+    write_u8(ip, 0x45);
+    write_be_u16(ip + 2, IP_LENGTH as u16);
+    write_be_u16(ip + 4, 0x4448);
+    write_be_u16(ip + 6, 0x4000);
+    write_u8(ip + 8, 64);
+    write_u8(ip + 9, 17);
+    for offset in 0..4 {
+        write_u8(ip + 16 + offset, 0xff);
+    }
+    write_be_u16(ip + 10, ipv4_checksum(ip));
+    let udp = ip + 20;
+    write_be_u16(udp, 68);
+    write_be_u16(udp + 2, 67);
+    write_be_u16(udp + 4, UDP_LENGTH as u16);
+    let bootp = udp + 8;
+    write_u8(bootp, 1);
+    write_u8(bootp + 1, 1);
+    write_u8(bootp + 2, 6);
+    write_be_u32(bootp + 4, transaction);
+    write_be_u16(bootp + 10, 0x8000);
+    for offset in 0..6 {
+        write_u8(bootp + 28 + offset, *mac.get(offset)?);
+    }
+    write_be_u32(bootp + 236, 0x6382_5363);
+    let mut option = bootp + 240;
+    write_u8(option, 53);
+    write_u8(option + 1, 1);
+    write_u8(option + 2, message_type);
+    option += 3;
+    if message_type == 3 {
+        write_u8(option, 50);
+        write_u8(option + 1, 4);
+        write_be_u32(option + 2, requested);
+        option += 6;
+        write_u8(option, 54);
+        write_u8(option + 1, 4);
+        write_be_u32(option + 2, server);
+        option += 6;
+    }
+    write_u8(option, 55);
+    write_u8(option + 1, 3);
+    write_u8(option + 2, 1);
+    write_u8(option + 3, 3);
+    write_u8(option + 4, 6);
+    write_u8(option + 5, 255);
+    Some(FRAME_LENGTH)
+}
+
+unsafe fn parse_dhcp_reply(
+    dma: usize,
+    used_index: u16,
+    transaction: u32,
+    expected_type: u8,
+) -> Option<DhcpLease> {
+    let used = dma + RX_USED_OFFSET as usize + 4 + (usize::from(used_index) - 1) * 8;
+    let used_length = read_u32(used + 4) as usize;
+    let frame = dma + RX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH;
+    let minimum_length = TX_HEADER_LENGTH + 14 + 20 + 8 + 240;
+    if read_u16(dma + RX_USED_OFFSET as usize + 2) != used_index
+        || read_u32(used) != 0
+        || !(minimum_length..=RX_DESCRIPTOR_LENGTH).contains(&used_length)
+        || read_be_u16(frame + 12) != 0x0800
+        || read_u8(frame + 23) != 17
+    {
+        return None;
+    }
+    let frame_length = used_length.checked_sub(TX_HEADER_LENGTH)?;
+    let ip_header = usize::from(read_u8(frame + 14) & 0x0f).checked_mul(4)?;
+    if ip_header < 20 || 14_usize.checked_add(ip_header + 8 + 240)? > frame_length {
+        return None;
+    }
+    let udp = frame + 14 + ip_header;
+    let udp_length = usize::from(read_be_u16(udp + 4));
+    if read_be_u16(udp) != 67
+        || read_be_u16(udp + 2) != 68
+        || udp_length < 8 + 240
+        || 14_usize.checked_add(ip_header + udp_length)? > frame_length
+    {
+        return None;
+    }
+    let bootp = udp + 8;
+    if read_u8(bootp) != 2
+        || read_be_u32(bootp + 4) != transaction
+        || read_be_u32(bootp + 236) != 0x6382_5363
+    {
+        return None;
+    }
+    let address = read_be_u32(bootp + 16);
+    let option_length = udp_length.checked_sub(8 + 240)?;
+    let mut cursor = bootp + 240;
+    let end = cursor.checked_add(option_length)?;
+    let mut message = 0;
+    let mut mask = 0;
+    let mut router = 0;
+    let mut server = 0;
+    while cursor < end {
+        let kind = read_u8(cursor);
+        cursor += 1;
+        if kind == 0 {
+            continue;
+        }
+        if kind == 255 {
+            break;
+        }
+        if cursor >= end {
+            return None;
+        }
+        let length = usize::from(read_u8(cursor));
+        cursor += 1;
+        if cursor.checked_add(length)? > end {
+            return None;
+        }
+        match (kind, length) {
+            (53, 1) => message = read_u8(cursor),
+            (1, 4) => mask = read_be_u32(cursor),
+            (3, value) if value >= 4 => router = read_be_u32(cursor),
+            (54, 4) => server = read_be_u32(cursor),
+            _ => {}
+        }
+        cursor += length;
+    }
+    let prefix = mask_prefix(mask)?;
+    if router == 0 {
+        // QEMU user networking omits option 3 and exposes its router as the DHCP server.
+        router = server;
+    }
+    (message == expected_type && address != 0 && server != 0 && (expected_type == 2 || router != 0))
+        .then_some(DhcpLease {
+            address,
+            router,
+            server,
+            prefix,
+        })
+}
+
+fn mask_prefix(mask: u32) -> Option<u8> {
+    let prefix = mask.leading_ones() as u8;
+    (mask
+        == if prefix == 0 {
+            0
+        } else {
+            u32::MAX << (32 - prefix)
+        })
+    .then_some(prefix)
+}
+
+unsafe fn ipv4_checksum(header: usize) -> u16 {
+    let mut sum = 0_u32;
+    for offset in (0..20).step_by(2) {
+        sum += u32::from(read_be_u16(header + offset));
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
+unsafe fn read_be_u16(address: usize) -> u16 {
+    u16::from_be_bytes([read_u8(address), read_u8(address + 1)])
+}
+
+unsafe fn read_be_u32(address: usize) -> u32 {
+    u32::from_be_bytes([
+        read_u8(address),
+        read_u8(address + 1),
+        read_u8(address + 2),
+        read_u8(address + 3),
+    ])
+}
+
+unsafe fn write_be_u16(address: usize, value: u16) {
+    for (offset, byte) in value.to_be_bytes().into_iter().enumerate() {
+        write_u8(address + offset, byte);
+    }
+}
+
+unsafe fn write_be_u32(address: usize, value: u32) {
+    for (offset, byte) in value.to_be_bytes().into_iter().enumerate() {
+        write_u8(address + offset, byte);
+    }
 }
 
 unsafe fn transmit_probe(info: &NativeNetworkBootV0) -> Option<u8> {
@@ -1103,14 +1445,18 @@ unsafe fn write_u64(address: usize, value: u64) {
 }
 
 fn probe_network_device(capability: u64) -> u64 {
+    network_device_call(capability, NATIVE_NETWORK_DEVICE_PROBE, 0)
+}
+
+fn network_device_call(capability: u64, command: u64, argument: u64) -> u64 {
     let mut result = NATIVE_NETWORK_DEVICE_OPERATION;
     unsafe {
         asm!(
             "int 0x80",
             inlateout("rax") result,
             in("rdi") capability,
-            in("rsi") NATIVE_NETWORK_DEVICE_PROBE,
-            in("rdx") 0_u64,
+            in("rsi") command,
+            in("rdx") argument,
             options(nostack),
         );
     }
