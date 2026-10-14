@@ -4,6 +4,7 @@ members = [
     "control-plane/runtime",
     "crates/command",
     "crates/native-abi",
+    "crates/oci",
     "crates/protocol-state",
     "crates/volume-format",
     "crates/volume-service",

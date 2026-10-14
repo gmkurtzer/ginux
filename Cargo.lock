@@ -132,6 +132,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "ginux-native-abi",
+ "ginux-oci",
  "ginux-volume-format",
  "ginux-volume-service",
 ]
@@ -153,6 +154,13 @@ name = "ginux-network-service-runtime"
 version = "0.1.0"
 dependencies = [
  "ginux-native-abi",
+]
+
+[[package]]
+name = "ginux-oci"
+version = "0.1.0"
+dependencies = [
+ "sha2",
 ]
 
 [[package]]

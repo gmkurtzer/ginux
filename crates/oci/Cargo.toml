@@ -1,0 +1,9 @@
+[package]
+name = "ginux-oci"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+publish = false
+
+[dependencies]
+sha2 = { version = "=0.11.0", default-features = false }

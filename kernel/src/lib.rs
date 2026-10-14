@@ -18,6 +18,7 @@ mod manifest;
 mod memory;
 mod native_elf;
 mod network;
+mod oci_image;
 mod packet;
 mod pe;
 mod scheduler;
@@ -43,7 +44,7 @@ const KERNEL_STACK_SIZE: usize = 128 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
-pub const BOOT_INFO_VERSION: u32 = 5;
+pub const BOOT_INFO_VERSION: u32 = 6;
 
 #[repr(C, align(4096))]
 struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
@@ -97,6 +98,8 @@ pub struct BootInfo {
     pub controller_runtime_size: usize,
     pub root_image: *const u8,
     pub root_image_size: usize,
+    pub alpine_rootfs: *const u8,
+    pub alpine_rootfs_size: usize,
     pub reset_system: ResetSystem,
     pub image_base: *const u8,
     pub image_size: usize,
@@ -242,6 +245,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: modified root-image measurement accepted\r\n");
     }
     serial_write("ginux: root-image measurement rejection verified\r\n");
+    if boot_info.alpine_rootfs_size == 0 {
+        if !boot_info.alpine_rootfs.is_null() {
+            kernel_fail("ginux: invalid empty Alpine rootfs handoff\r\n");
+        }
+        serial_write("ginux: no boot-local OCI image configured\r\n");
+    } else {
+        if boot_info.alpine_rootfs.is_null() {
+            kernel_fail("ginux: missing Alpine rootfs bytes\r\n");
+        }
+        let alpine_rootfs =
+            core::slice::from_raw_parts(boot_info.alpine_rootfs, boot_info.alpine_rootfs_size);
+        if !oci_image::install_alpine_rootfs(alpine_rootfs) {
+            kernel_fail("ginux: pinned Alpine OCI rootfs invalid\r\n");
+        }
+        serial_write("ginux: pinned Alpine OCI rootfs accepted\r\n");
+        serial_write("ginux: Alpine /bin/sh and musl runtime discovered\r\n");
+    }
 
     let Some(virtio_block) = arch::x86_64::pci::discover_virtio_block() else {
         kernel_fail("ginux: modern virtio block device discovery failed\r\n");
