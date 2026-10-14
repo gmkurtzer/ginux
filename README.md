@@ -374,10 +374,12 @@ without per-directory kernel identities; `dev`
 retains its synthetic device entries. The measured `proc` node is populated by
 the bounded synthetic PID 1 directory plus status, root-mount, and user-namespace records;
 it is not yet a general procfs. The measured `tmp` node exposes one admitted
-`ginux-ready` file from a generation-safe, quota-bound RAM store. The backing
-store contract supports multiple named objects, hidden staging, atomic publish,
-quota rejection, abort, unlink, and byte scrubbing; the Linux syscall profile
-currently exposes only the fixture file and is not yet a general tmpfs. A
+`ginux-ready` file from a generation-safe, quota-bound RAM store. Object data
+is allocated in owned pages on demand rather than embedded in the store
+metadata. The backing contract supports multiple named objects, cross-page
+I/O, hidden staging, atomic publish, page-quota rejection, abort, unlink, frame
+scrubbing and complete lease recovery; the Linux syscall profile currently
+exposes only the fixture file and is not yet a general tmpfs. A
 bounded index-driven contract resolves any direct measured regular child below
 an open measured directory; `motd` proves the syscall layer needs no
 per-filename case. Normalized multi-component paths are bounded and `lib` is

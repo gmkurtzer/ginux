@@ -45,7 +45,8 @@ verification exercises configuration and lifecycle commands.
 ## C3: Rocky systemd early boot
 
 **Implementation status:** In progress; the x86-64 systemd image recipe is
-pinned and verified, and the boot-local tmpfs image path is next.
+pinned and verified, and the transactional page-backed tmpfs foundation is
+complete. Scaling it to the pinned image is next.
 
 Deliverables:
 

@@ -1633,7 +1633,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     {
         kernel_fail("ginux: transactional RAM store invalid\r\n");
     }
-    serial_write("ginux: quota-bound transactional RAM store installed\r\n");
+    serial_write("ginux: quota-bound page-backed RAM store installed\r\n");
     serial_write("ginux: generation-safe Linux tmpfs view mounted at /tmp\r\n");
     let Some(system_profile_node) =
         initramfs::published_regular_file_node(b"etc/ginux-system-profile")
@@ -1884,7 +1884,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux private futex lifecycle validated\r\n");
     serial_write("ginux: bounded Linux devfs profile validated\r\n");
     serial_write("ginux: lifecycle-aware bounded procfs validated\r\n");
-    serial_write("ginux: transactional multi-object tmpfs lifecycle validated\r\n");
+    serial_write("ginux: transactional page-backed tmpfs lifecycle validated\r\n");
     serial_write("ginux: minimal system init exited cleanly\r\n");
     if !linux_elf::verify_mapped_interpreted_plan(boot_info.image_base as u64, boot_info.image_size)
     {

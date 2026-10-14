@@ -112,10 +112,12 @@ directories, reads the status record, and verifies the immutable root mount
 and user-namespace records.
 The measured `tmp` node similarly anchors a generation-safe, quota-bound RAM
 store. Its Linux view admits one 64-byte `ginux-ready` file created and
-unlinked at runtime. The backing contract also proves multiple named objects,
-hidden staging, atomic publish, quota rejection, and abort for the later OCI
-cache. Contents are outside the signed archive and are scrubbed at unlink,
-abort, or process teardown.
+unlinked at runtime. Backing bytes occupy dynamically allocated, kernel-owned
+pages rather than inline metadata. The contract also proves multiple named
+objects, cross-page I/O, hidden staging, atomic publish, page-quota rejection,
+abort, frame scrubbing, lease recovery, and stale-handle rejection for the
+later OCI cache. Contents are outside the signed archive and are scrubbed at
+unlink, abort, or process teardown.
 The proof also opens and enumerates the
 otherwise unlisted `var` node, then opens its indexed `lib` child relative to
 the live descriptor. `dev`
