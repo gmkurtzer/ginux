@@ -759,6 +759,7 @@ static ELF_PROBE_STDIO_OCI_DESCRIPTORS: [AtomicU16; 2] = [const { AtomicU16::new
 static ELF_PROBE_STDIO_TMP_FILE_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
 static ELF_PROBE_STDIO_OFFSETS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 static ELF_PROBE_CWD: AtomicU16 = AtomicU16::new(LINUX_ROOT_DIRECTORY);
+static ELF_PROBE_OCI_CWD: AtomicU16 = AtomicU16::new(crate::oci_image::ROOT_HANDLE);
 static ELF_PROBE_EPOLL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
 static ELF_PROBE_EPOLL_EVENTS: AtomicU32 = AtomicU32::new(0);
@@ -4572,6 +4573,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         offset.store(0, Ordering::SeqCst);
     }
     ELF_PROBE_CWD.store(LINUX_ROOT_DIRECTORY, Ordering::SeqCst);
+    ELF_PROBE_OCI_CWD.store(crate::oci_image::ROOT_HANDLE, Ordering::SeqCst);
     ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
     ELF_PROBE_EPOLL_TARGET.store(u64::MAX, Ordering::SeqCst);
     ELF_PROBE_EPOLL_EVENTS.store(0, Ordering::SeqCst);
@@ -5183,6 +5185,8 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let descriptor_state_valid = ELF_PROBE_CONSOLE_DESCRIPTORS.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
+        && ELF_PROBE_OCI_CWD.swap(crate::oci_image::ROOT_HANDLE, Ordering::SeqCst)
+            == crate::oci_image::ROOT_HANDLE
         && devices_closed
         && oci_descriptors_closed
         && ELF_PROBE_EPOLL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
@@ -8748,7 +8752,14 @@ fn linux_getcwd(address: u64, capacity: u64) -> u64 {
     let state = ELF_PROBE_CWD.load(Ordering::SeqCst);
     let mut output = [0_u8; 64];
     output[0] = b'/';
-    let length = if state == LINUX_ROOT_DIRECTORY {
+    let length = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        let Some(path_length) =
+            crate::oci_image::copy_path(ELF_PROBE_OCI_CWD.load(Ordering::SeqCst), &mut output[1..])
+        else {
+            return LINUX_ENOENT;
+        };
+        1 + path_length
+    } else if state == LINUX_ROOT_DIRECTORY {
         1
     } else if state == LINUX_DEVICE_DIRECTORY {
         output[1..4].copy_from_slice(b"dev");
@@ -8780,6 +8791,17 @@ fn linux_chdir(path_address: u64) -> u64 {
         Err(error) => return error,
     };
     let path = &path[..length];
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        let Some((handle, entry)) = linux_oci_path_at(u64::from(LINUX_AT_FDCWD), path) else {
+            return LINUX_ENOENT;
+        };
+        if entry.is_some_and(|entry| entry.kind != ginux_oci::EntryKind::Directory) {
+            return LINUX_ENOTDIR;
+        }
+        ELF_PROBE_OCI_CWD.store(handle, Ordering::SeqCst);
+        ELF_PROBE_CWD.store(LINUX_ROOT_DIRECTORY, Ordering::SeqCst);
+        return 0;
+    }
     let kind = if path.starts_with(b"/") {
         linux_root_directory_kind(path)
     } else {
@@ -8805,6 +8827,13 @@ fn linux_fchdir(descriptor: u64) -> u64 {
     }
     if state & LINUX_DEVICE_DIRECTORY == 0 {
         return LINUX_ENOTDIR;
+    }
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        let handle = linux_oci_descriptor(descriptor);
+        if handle == 0 {
+            return LINUX_ENOENT;
+        }
+        ELF_PROBE_OCI_CWD.store(handle, Ordering::SeqCst);
     }
     ELF_PROBE_CWD.store(state & !3, Ordering::SeqCst);
     0
@@ -9992,17 +10021,42 @@ fn linux_relative_path_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, 
         .ok_or(LINUX_ENOENT)
 }
 
-fn linux_oci_path(path: &[u8]) -> Option<(u16, Option<ginux_oci::Entry<'static>>)> {
+fn linux_oci_path_at(
+    directory: u64,
+    path: &[u8],
+) -> Option<(u16, Option<ginux_oci::Entry<'static>>)> {
     if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         return None;
     }
-    let path = path.strip_prefix(b"/").unwrap_or(path);
-    let path = path.strip_suffix(b"/").unwrap_or(path);
-    if path.is_empty() {
-        Some((crate::oci_image::ROOT_HANDLE, None))
+    let directory = if path.starts_with(b"/") {
+        crate::oci_image::ROOT_HANDLE
+    } else if directory as u32 == LINUX_AT_FDCWD {
+        ELF_PROBE_OCI_CWD.load(Ordering::SeqCst)
     } else {
-        crate::oci_image::lookup(path).map(|(handle, entry)| (handle, Some(entry)))
+        linux_oci_descriptor(directory)
+    };
+    (directory != 0)
+        .then(|| crate::oci_image::lookup_at(directory, path))
+        .flatten()
+}
+
+fn linux_oci_metadata_path_at(
+    directory: u64,
+    path: &[u8],
+) -> Option<(u16, Option<ginux_oci::Entry<'static>>)> {
+    if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return None;
     }
+    let directory = if path.starts_with(b"/") {
+        crate::oci_image::ROOT_HANDLE
+    } else if directory as u32 == LINUX_AT_FDCWD {
+        ELF_PROBE_OCI_CWD.load(Ordering::SeqCst)
+    } else {
+        linux_oci_descriptor(directory)
+    };
+    (directory != 0)
+        .then(|| crate::oci_image::lookup_metadata_at(directory, path))
+        .flatten()
 }
 
 fn linux_oci_descriptor(descriptor: u64) -> u16 {
@@ -10094,30 +10148,12 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
             return LINUX_ENOENT;
         }
         LINUX_FILE_TMP_SCRATCH
-    } else if directory as u32 == LINUX_AT_FDCWD {
-        if let Some((handle, entry)) = linux_oci_path(path) {
-            oci_handle = handle;
-            match entry.map(|entry| entry.kind) {
-                None | Some(ginux_oci::EntryKind::Directory) => LINUX_ROOT_MEASURED_DIRECTORY,
-                Some(ginux_oci::EntryKind::File) => LINUX_FILE_ROOT_GENERIC,
-                Some(ginux_oci::EntryKind::Symlink) => return LINUX_EINVAL,
-            }
-        } else {
-            match linux_relative_path_kind(directory, path) {
-                Ok(Some(kind)) => kind,
-                Ok(None) => match path {
-                    b"/dev/null" => 0,
-                    b"/dev/zero" => LINUX_DEVICE_ZERO,
-                    b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
-                    path => match linux_root_directory_kind(path)
-                        .or_else(|| linux_runtime_file_kind(path))
-                    {
-                        Some(kind) => kind,
-                        None => return LINUX_ENOENT,
-                    },
-                },
-                Err(error) => return error,
-            }
+    } else if let Some((handle, entry)) = linux_oci_path_at(directory, path) {
+        oci_handle = handle;
+        match entry.map(|entry| entry.kind) {
+            None | Some(ginux_oci::EntryKind::Directory) => LINUX_ROOT_MEASURED_DIRECTORY,
+            Some(ginux_oci::EntryKind::File) => LINUX_FILE_ROOT_GENERIC,
+            Some(ginux_oci::EntryKind::Symlink) => return LINUX_EINVAL,
         }
     } else {
         match linux_relative_path_kind(directory, path) {
@@ -10181,11 +10217,11 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    if directory as u32 == LINUX_AT_FDCWD {
+    {
         let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
-            crate::oci_image::lookup_metadata(path).map(|(handle, entry)| (handle, Some(entry)))
+            linux_oci_metadata_path_at(directory, path)
         } else {
-            linux_oci_path(path)
+            linux_oci_path_at(directory, path)
         };
         if let Some((handle, entry)) = oci {
             let stat = linux_oci_stat(handle, entry);
@@ -10266,8 +10302,8 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    if directory as u32 == LINUX_AT_FDCWD {
-        if let Some((_, entry)) = linux_oci_path(path) {
+    {
+        if let Some((_, entry)) = linux_oci_path_at(directory, path) {
             let permissions = entry.map_or(0o555, |entry| entry.mode);
             let denied = mode & 4 != 0 && permissions & 0o444 == 0
                 || mode & 2 != 0 && permissions & 0o222 == 0
@@ -10325,8 +10361,8 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         Err(error) => return error,
     };
     let path = &path[..path_length];
-    if directory as u32 == LINUX_AT_FDCWD {
-        if let Some((handle, entry)) = linux_oci_path(path) {
+    {
+        if let Some((handle, entry)) = linux_oci_path_at(directory, path) {
             let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_oci_mode);
             let size = entry.map_or(0, |entry| entry.data.len() as u64);
             let mut stat = [0_u8; 256];

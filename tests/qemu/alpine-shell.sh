@@ -61,6 +61,10 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'echo /*' \
         'echo /etc/os-*' \
         'pwd' \
+        "ls; printf 'ROOT_CWD_STATUS=%s\\n' \"\$?\"" \
+        "cd /etc; ls .; printf 'RELATIVE_CWD_STATUS=%s\\n' \"\$?\"" \
+        'pwd' \
+        'cd /' \
         '/bin/ls /etc' \
         '/bin/cat /etc/os-release' \
         "printf 'FORK_EXEC_OK\\n'" \
@@ -69,6 +73,9 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'STAT_ABI_OK'
     wait_for_line 'NAME="Alpine Linux"'
     wait_for_line '/'
+    wait_for_line 'ROOT_CWD_STATUS=0'
+    wait_for_line 'RELATIVE_CWD_STATUS=0'
+    wait_for_line '/etc'
     wait_for_line 'FORK_EXEC_OK'
     wait_for_line 'OCI_FILESYSTEM_OK'
     printf '%s\n' 'exit 0'
@@ -106,6 +113,9 @@ for expected in \
     'LIBC_RUNTIME_OK' \
     'STAT_ABI_OK' \
     'NAME="Alpine Linux"' \
+    'ROOT_CWD_STATUS=0' \
+    'RELATIVE_CWD_STATUS=0' \
+    '/etc' \
     'FORK_EXEC_OK' \
     'OCI_FILESYSTEM_OK' \
     'ginux: OCI init exited cleanly' \

@@ -72,20 +72,77 @@ fn rootfs() -> Option<Rootfs<'static>> {
     Rootfs::parse(bytes)
 }
 
-pub(crate) fn lookup(path: &[u8]) -> Option<(u16, Entry<'static>)> {
+pub(crate) fn lookup_at(directory: u16, path: &[u8]) -> Option<(u16, Option<Entry<'static>>)> {
     let rootfs = rootfs()?;
-    let (index, entry) = lookup_in(&rootfs, path)?;
+    let (resolved, length) = resolve_at_in(&rootfs, directory, path)?;
+    if length == 0 {
+        return Some((ROOT_HANDLE, None));
+    }
+    let (index, entry) = lookup_in(&rootfs, &resolved[..length])?;
     let handle = u16::try_from(index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
-    Some((handle, entry))
+    Some((handle, Some(entry)))
 }
 
-pub(crate) fn lookup_metadata(path: &[u8]) -> Option<(u16, Entry<'static>)> {
+pub(crate) fn lookup_metadata_at(
+    directory: u16,
+    path: &[u8],
+) -> Option<(u16, Option<Entry<'static>>)> {
     let rootfs = rootfs()?;
-    let path = path.strip_prefix(b"/").unwrap_or(path);
-    let path = path.strip_suffix(b"/").unwrap_or(path);
-    let (index, entry) = rootfs.find_index(path)?;
+    let (resolved, length) = resolve_at_in(&rootfs, directory, path)?;
+    if length == 0 {
+        return Some((ROOT_HANDLE, None));
+    }
+    let (index, entry) = rootfs.find_index(&resolved[..length])?;
     let handle = u16::try_from(index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
-    Some((handle, entry))
+    Some((handle, Some(entry)))
+}
+
+fn resolve_at_in(
+    rootfs: &Rootfs<'_>,
+    directory: u16,
+    path: &[u8],
+) -> Option<([u8; PATH_CAPACITY], usize)> {
+    let absolute = path.starts_with(b"/");
+    let mut resolved = [0_u8; PATH_CAPACITY];
+    let mut length = if absolute || directory == ROOT_HANDLE {
+        0
+    } else {
+        let index = usize::from(directory).checked_sub(ENTRY_HANDLE_BASE)?;
+        let entry = rootfs.entry(index)?;
+        if entry.kind != EntryKind::Directory {
+            return None;
+        }
+        rootfs.copy_path(index, &mut resolved)?
+    };
+    for component in path.split(|byte| *byte == b'/') {
+        if component.is_empty() || component == b"." {
+            continue;
+        }
+        if component == b".." {
+            length = resolved[..length]
+                .iter()
+                .rposition(|byte| *byte == b'/')
+                .unwrap_or(0);
+            continue;
+        }
+        if length != 0 {
+            *resolved.get_mut(length)? = b'/';
+            length += 1;
+        }
+        resolved
+            .get_mut(length..length.checked_add(component.len())?)?
+            .copy_from_slice(component);
+        length += component.len();
+    }
+    Some((resolved, length))
+}
+
+pub(crate) fn copy_path(handle: u16, output: &mut [u8]) -> Option<usize> {
+    if handle == ROOT_HANDLE {
+        return Some(0);
+    }
+    let index = usize::from(handle).checked_sub(ENTRY_HANDLE_BASE)?;
+    rootfs()?.copy_path(index, output)
 }
 
 fn lookup_in<'a>(rootfs: &Rootfs<'a>, path: &[u8]) -> Option<(usize, Entry<'a>)> {
