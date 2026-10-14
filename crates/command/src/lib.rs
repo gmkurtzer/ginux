@@ -354,14 +354,15 @@ mod tests {
     fn parses_multiple_container_settings() {
         let ParseOutcome::Invoke(invocation) = parse(
             &ROOT,
-            b"container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true",
+            b"container set demo image=registry.example/alpine@sha256:abc init=/bin/sh cpu=1 memory-mib=128 autostart=true",
         )
         .unwrap() else {
             panic!("expected invocation");
         };
         let expected: &[&[u8]] = &[
             b"demo",
-            b"init=/sbin/init",
+            b"image=registry.example/alpine@sha256:abc",
+            b"init=/bin/sh",
             b"cpu=1",
             b"memory-mib=128",
             b"autostart=true",

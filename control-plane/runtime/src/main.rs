@@ -6,31 +6,31 @@ use ginux_command::{
     parse, write_error, write_help, Arguments, Arity, Command, HelpWriter, ParseOutcome,
 };
 use ginux_native_abi::{
-    native_control_abi_is_compatible, NativeContainerRequestV0, NativeControlDescriptorV4,
+    native_control_abi_is_compatible, NativeContainerRequestV1, NativeControlDescriptorV4,
     NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
     NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_LINE_OPERATION,
     NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_CONFIG_AUTOSTART, NATIVE_CONTAINER_CONFIG_CPU,
-    NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_CONFIG_MEMORY,
+    NATIVE_CONTAINER_CONFIG_IMAGE, NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_CONFIG_MEMORY,
     NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE, NATIVE_CONTAINER_HOST_SHUTDOWN,
     NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY,
     NATIVE_CONTAINER_RESTART, NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU,
-    NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_STATE_CONFIGURED,
-    NATIVE_CONTAINER_STATE_CREATED, NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING,
-    NATIVE_CONTAINER_STATE_STOPPED, NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
-    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
-    NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
-    NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
-    NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
-    NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT, NATIVE_HOST_PROCESS_KIND_CONTROLLER,
-    NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_NETWORK_APPLY_VERSION,
-    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION,
-    NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_DNS,
-    NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
-    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_SNAPSHOT_SIZE,
-    NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
-    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
-    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_CONTAINER_SET_IMAGE, NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB,
+    NATIVE_CONTAINER_STATE_CONFIGURED, NATIVE_CONTAINER_STATE_CREATED,
+    NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING, NATIVE_CONTAINER_STATE_STOPPED,
+    NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_HOST_INSPECT_OPERATION,
+    NATIVE_HOST_INSPECT_RECORD_SIZE, NATIVE_HOST_INSPECT_REQUEST_SIZE,
+    NATIVE_HOST_INSPECT_STATE_READY, NATIVE_HOST_INSPECT_STATE_STOPPING,
+    NATIVE_HOST_INSPECT_VERSION, NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT,
+    NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS,
+    NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP,
+    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP,
+    NATIVE_NETWORK_DEVICE_QUERY_DNS, NATIVE_NETWORK_DEVICE_QUERY_PING,
+    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_DEVICE_SET_DNS,
+    NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
+    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
+    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
@@ -772,7 +772,7 @@ fn append_decimal(output: &mut [u8], mut value: u64) -> usize {
 }
 
 fn write_container_summary(console: u64, host: u64) {
-    let mut request = NativeContainerRequestV0::zeroed();
+    let mut request = NativeContainerRequestV1::zeroed();
     let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
     if state == 0 {
         write(console, b"containers: 0 configured\r\n");
@@ -810,8 +810,8 @@ fn container_state_name(state: u64) -> &'static [u8] {
 }
 
 fn show_container_list(console: u64, host: u64) {
-    write(console, b"NAME STATE INIT CPU MEM-MIB AUTO\r\n");
-    let mut request = NativeContainerRequestV0::zeroed();
+    write(console, b"NAME STATE INIT CPU MEM-MIB AUTO IMAGE\r\n");
+    let mut request = NativeContainerRequestV1::zeroed();
     let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
     if state == 0 {
         return;
@@ -827,7 +827,7 @@ fn show_container_list(console: u64, host: u64) {
     write_container_configuration(console, &request);
 }
 
-fn write_container_configuration(console: u64, request: &NativeContainerRequestV0) {
+fn write_container_configuration(console: u64, request: &NativeContainerRequestV1) {
     let configured = |flag| request.config_flags & flag != 0;
     if configured(NATIVE_CONTAINER_CONFIG_INIT) {
         let init = request
@@ -860,11 +860,24 @@ fn write_container_configuration(console: u64, request: &NativeContainerRequestV
     write(
         console,
         if configured(NATIVE_CONTAINER_CONFIG_AUTOSTART) {
-            b"true\r\n"
+            b"true"
         } else {
-            b"false\r\n"
+            b"false"
         },
     );
+    write(console, b" ");
+    if configured(NATIVE_CONTAINER_CONFIG_IMAGE) {
+        write(
+            console,
+            request
+                .image
+                .get(..usize::from(request.image_size))
+                .unwrap_or_default(),
+        );
+    } else {
+        write(console, b"-");
+    }
+    write(console, b"\r\n");
 }
 
 fn handle_container_command(console: u64, host: u64, command: u16, arguments: Arguments<'_>) {
@@ -877,9 +890,9 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: Ar
     match command {
         COMMAND_CONTAINER_NEW => {
             if container_call(host, NATIVE_CONTAINER_CREATE, &mut request)
-                == NATIVE_CONTAINER_STATE_CONFIGURED
+                == NATIVE_CONTAINER_STATE_CREATED
             {
-                write_name_state(console, name, b"configured with defaults\r\n");
+                write_name_state(console, name, b"created (image required)\r\n");
             } else {
                 write(console, b"container: create rejected\r\n");
             }
@@ -991,12 +1004,16 @@ fn split_setting(setting: &[u8]) -> Option<(&[u8], &[u8])> {
 }
 
 fn prepare_setting(
-    request: &mut NativeContainerRequestV0,
+    request: &mut NativeContainerRequestV1,
     field: &[u8],
     value: &[u8],
 ) -> Option<(u16, u64)> {
     match (field, value) {
-        (b"init", b"/sbin/init") => {
+        (b"init", value)
+            if value.starts_with(b"/")
+                && value.len() <= request.init.len()
+                && value.iter().all(|byte| byte.is_ascii_graphic()) =>
+        {
             request.init_size = value.len() as u16;
             request.init[..value.len()].copy_from_slice(value);
             Some((NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_SET_INIT))
@@ -1018,6 +1035,14 @@ fn prepare_setting(
                 NATIVE_CONTAINER_CONFIG_AUTOSTART,
                 NATIVE_CONTAINER_SET_AUTOSTART,
             ))
+        }
+        (b"image", value)
+            if value.len() <= request.image.len()
+                && value.iter().all(|byte| byte.is_ascii_graphic()) =>
+        {
+            request.image_size = value.len() as u16;
+            request.image[..value.len()].copy_from_slice(value);
+            Some((NATIVE_CONTAINER_CONFIG_IMAGE, NATIVE_CONTAINER_SET_IMAGE))
         }
         _ => None,
     }
@@ -1061,14 +1086,14 @@ impl HelpWriter for ConsoleHelpWriter {
     }
 }
 
-fn request_for_name(name: &[u8]) -> NativeContainerRequestV0 {
-    let mut request = NativeContainerRequestV0::zeroed();
+fn request_for_name(name: &[u8]) -> NativeContainerRequestV1 {
+    let mut request = NativeContainerRequestV1::zeroed();
     request.name_size = name.len() as u16;
     request.name[..name.len()].copy_from_slice(name);
     request
 }
 
-fn request_name(request: &NativeContainerRequestV0) -> &[u8] {
+fn request_name(request: &NativeContainerRequestV1) -> &[u8] {
     request
         .name
         .get(..usize::from(request.name_size))
@@ -1083,12 +1108,12 @@ fn valid_container_name(name: &[u8]) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
-fn container_call(host: u64, operation: u64, request: &mut NativeContainerRequestV0) -> u64 {
+fn container_call(host: u64, operation: u64, request: &mut NativeContainerRequestV1) -> u64 {
     call(
         NATIVE_CONTAINER_CONTROL_OPERATION,
         host,
         operation,
-        (request as *mut NativeContainerRequestV0) as u64,
+        (request as *mut NativeContainerRequestV1) as u64,
     )
 }
 
@@ -1185,7 +1210,7 @@ fn list_directory(console: u64, root: u64, path: &[u8]) {
 }
 
 fn show_processes(console: u64, host: u64) {
-    let mut configuration = NativeContainerRequestV0::zeroed();
+    let mut configuration = NativeContainerRequestV1::zeroed();
     let _ = container_call(host, NATIVE_CONTAINER_QUERY, &mut configuration);
     write(console, b"PID PPID STATE NAME\r\n");
     let mut cursor = 0;

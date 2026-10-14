@@ -47,7 +47,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'network list' 'network status eth0' 'network status lo' 'network status eth9' 'network ping lo 127.0.0.1' 'network set lo dns 10.0.2.3' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network set eth0 dns 10.0.2.3' 'network status eth0' 'network ping eth0 10.0.2.15' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
         'container status default' 'container new demo' 'container new demo' 'container list' \
         'container start' 'container set demo cpu=1 cpu=1' 'container list' \
-        'container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo autostart=false' 'container set demo cpu 1' 'container list' status \
+        'container set demo image=embedded://minimal-system-v0 init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo autostart=false' 'container set demo cpu 1' 'container list' status \
         'container start demo' 'container list' 'container status demo' 'ls /proc' 'ls /proc/100' ps \
         'container stop demo' 'container status demo' \
         'container start demo' 'container status demo' 'container fail demo' \
@@ -137,16 +137,16 @@ for expected in \
     'controller: running (ring 3)' \
     'containers: 0 configured' \
     'container: not found' \
-    'NAME STATE INIT CPU MEM-MIB AUTO' \
-    'demo: configured with defaults' \
+    'NAME STATE INIT CPU MEM-MIB AUTO IMAGE' \
+    'demo: created (image required)' \
     'container: create rejected' \
-    'demo configured /sbin/init 1 128 false' \
+    'demo configured /sbin/init 1 128 false embedded://minimal-system-v0' \
     'Error: missing arguments' \
     'Usage:' \
     'container: duplicate setting' \
     'demo: settings accepted; configured' \
     'demo: setting accepted; configured' \
-    'demo running /sbin/init 1 128 false' \
+    'demo running /sbin/init 1 128 false embedded://minimal-system-v0' \
     'containers: 1 runtime (demo)' \
     'demo: configured' \
     'demo: running' \

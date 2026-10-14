@@ -153,15 +153,21 @@ pub const NATIVE_CONTAINER_SET_INIT: u64 = 6;
 pub const NATIVE_CONTAINER_SET_CPU: u64 = 7;
 pub const NATIVE_CONTAINER_SET_MEMORY_MIB: u64 = 8;
 pub const NATIVE_CONTAINER_SET_AUTOSTART: u64 = 9;
-pub const NATIVE_CONTAINER_REQUEST_SIZE: u32 = 56;
+pub const NATIVE_CONTAINER_SET_IMAGE: u64 = 10;
+pub const NATIVE_CONTAINER_REQUEST_SIZE: u32 = 208;
+pub const NATIVE_CONTAINER_REQUEST_VERSION: u16 = 1;
 pub const NATIVE_CONTAINER_MAX_NAME_SIZE: usize = 16;
-pub const NATIVE_CONTAINER_MAX_INIT_SIZE: usize = 16;
+pub const NATIVE_CONTAINER_MAX_INIT_SIZE: usize = 32;
+pub const NATIVE_CONTAINER_MAX_IMAGE_SIZE: usize = 128;
 pub const NATIVE_CONTAINER_CONFIG_INIT: u16 = 1 << 0;
 pub const NATIVE_CONTAINER_CONFIG_CPU: u16 = 1 << 1;
 pub const NATIVE_CONTAINER_CONFIG_MEMORY: u16 = 1 << 2;
 pub const NATIVE_CONTAINER_CONFIG_AUTOSTART: u16 = 1 << 3;
-pub const NATIVE_CONTAINER_CONFIG_COMPLETE: u16 =
-    NATIVE_CONTAINER_CONFIG_INIT | NATIVE_CONTAINER_CONFIG_CPU | NATIVE_CONTAINER_CONFIG_MEMORY;
+pub const NATIVE_CONTAINER_CONFIG_IMAGE: u16 = 1 << 4;
+pub const NATIVE_CONTAINER_CONFIG_COMPLETE: u16 = NATIVE_CONTAINER_CONFIG_INIT
+    | NATIVE_CONTAINER_CONFIG_CPU
+    | NATIVE_CONTAINER_CONFIG_MEMORY
+    | NATIVE_CONTAINER_CONFIG_IMAGE;
 pub const NATIVE_CONTAINER_STATE_RUNNING: u64 = 1;
 pub const NATIVE_CONTAINER_STATE_STOPPED: u64 = 2;
 pub const NATIVE_CONTAINER_STATE_FAILED: u64 = 3;
@@ -259,7 +265,7 @@ pub struct NativeHostInspectRecordV0 {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct NativeContainerRequestV0 {
+pub struct NativeContainerRequestV1 {
     pub size: u32,
     pub version: u16,
     pub name_size: u16,
@@ -268,21 +274,27 @@ pub struct NativeContainerRequestV0 {
     pub init_size: u16,
     pub config_flags: u16,
     pub init: [u8; NATIVE_CONTAINER_MAX_INIT_SIZE],
-    pub reserved: u32,
+    pub image_size: u16,
+    pub reserved16: u16,
+    pub image: [u8; NATIVE_CONTAINER_MAX_IMAGE_SIZE],
+    pub reserved64: u64,
 }
 
-impl NativeContainerRequestV0 {
+impl NativeContainerRequestV1 {
     pub const fn zeroed() -> Self {
         Self {
             size: NATIVE_CONTAINER_REQUEST_SIZE,
-            version: 0,
+            version: NATIVE_CONTAINER_REQUEST_VERSION,
             name_size: 0,
             name: [0; NATIVE_CONTAINER_MAX_NAME_SIZE],
             value: 0,
             init_size: 0,
             config_flags: 0,
             init: [0; NATIVE_CONTAINER_MAX_INIT_SIZE],
-            reserved: 0,
+            image_size: 0,
+            reserved16: 0,
+            image: [0; NATIVE_CONTAINER_MAX_IMAGE_SIZE],
+            reserved64: 0,
         }
     }
 }
@@ -306,7 +318,7 @@ impl NativeHostInspectRecordV0 {
 const _: () = assert!(core::mem::size_of::<NativeRootDirectoryRequestV4>() == 48);
 const _: () = assert!(core::mem::size_of::<NativeHostInspectRequestV0>() == 32);
 const _: () = assert!(core::mem::size_of::<NativeHostInspectRecordV0>() == 40);
-const _: () = assert!(core::mem::size_of::<NativeContainerRequestV0>() == 56);
+const _: () = assert!(core::mem::size_of::<NativeContainerRequestV1>() == 208);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

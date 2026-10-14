@@ -18,15 +18,24 @@ memory-mib=128
 autostart=false
 ```
 
+No image is implied. `container new NAME` therefore creates an incomplete
+record until an explicit OCI image reference is configured:
+
+```text
+container set alpine image=REGISTRY/REPOSITORY@sha256:DIGEST init=/bin/sh
+```
+
 Any number of `FIELD=VALUE` settings that fit on the command line may be
-supplied. The earlier single-setting `container set NAME FIELD VALUE` form
+supplied. `image` is required before start and accepts a bounded explicit OCI
+reference. The earlier single-setting `container set NAME FIELD VALUE` form
 remains accepted. `autostart` accepts `true` or `false`; it is policy rather
 than a prerequisite for manual start.
 
 No name is special. The name is chosen by the operator, and lifecycle commands
 must use that exact name. The current bounded implementation accepts one
-container, the measured `/sbin/init`, one virtual CPU, and 128 MiB. The record lives only for
-the current boot; authenticated persistent configuration is a later contract.
+container, an absolute init path, one virtual CPU, and 128 MiB. The record
+lives only for the current boot; authenticated persistent configuration is a
+later contract.
 
 Container declarations embedded in the system profile are rejected so a build
 cannot silently recreate the former implicit `default` entity.

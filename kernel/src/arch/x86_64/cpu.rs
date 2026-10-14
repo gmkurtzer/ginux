@@ -790,6 +790,12 @@ static CONTAINER_CONFIG_FLAGS: AtomicU16 = AtomicU16::new(0);
 static CONTAINER_NAME_SIZE: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_NAME: [AtomicU8; control_abi::CONTAINER_MAX_NAME_SIZE] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_NAME_SIZE];
+static CONTAINER_INIT_SIZE: AtomicU8 = AtomicU8::new(0);
+static CONTAINER_INIT: [AtomicU8; control_abi::CONTAINER_MAX_INIT_SIZE] =
+    [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_INIT_SIZE];
+static CONTAINER_IMAGE_SIZE: AtomicU8 = AtomicU8::new(0);
+static CONTAINER_IMAGE: [AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE] =
+    [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE];
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -16156,21 +16162,26 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         }
         control_abi::CONTAINER_CREATE if state == 0 && valid_container_name(name) => {
             store_container_name(name);
-            CONTAINER_CONFIG_FLAGS.store(control_abi::CONTAINER_CONFIG_COMPLETE, Ordering::SeqCst);
-            CONTAINER_CONTROL_STATE.store(
-                control_abi::CONTAINER_STATE_CONFIGURED as u8,
+            store_container_value(b"/sbin/init", &CONTAINER_INIT, &CONTAINER_INIT_SIZE);
+            CONTAINER_CONFIG_FLAGS.store(
+                control_abi::CONTAINER_CONFIG_INIT
+                    | control_abi::CONTAINER_CONFIG_CPU
+                    | control_abi::CONTAINER_CONFIG_MEMORY,
                 Ordering::SeqCst,
             );
-            control_abi::CONTAINER_STATE_CONFIGURED
+            CONTAINER_CONTROL_STATE
+                .store(control_abi::CONTAINER_STATE_CREATED as u8, Ordering::SeqCst);
+            control_abi::CONTAINER_STATE_CREATED
         }
         control_abi::CONTAINER_SET_INIT
             if configurable_container(state, name)
-                && request[32..34] == (10_u16).to_le_bytes()
-                && &request[36..46] == b"/sbin/init"
-                && request[46..36 + control_abi::CONTAINER_MAX_INIT_SIZE]
-                    .iter()
-                    .all(|byte| *byte == 0) =>
+                && valid_container_init(container_request_init(&request)) =>
         {
+            store_container_value(
+                container_request_init(&request),
+                &CONTAINER_INIT,
+                &CONTAINER_INIT_SIZE,
+            );
             update_container_configuration(control_abi::CONTAINER_CONFIG_INIT)
         }
         control_abi::CONTAINER_SET_CPU
@@ -16187,6 +16198,17 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             if configurable_container(state, name) && read_u64_at(&request, 24) <= 1 =>
         {
             update_container_autostart(read_u64_at(&request, 24) == 1)
+        }
+        control_abi::CONTAINER_SET_IMAGE
+            if configurable_container(state, name)
+                && valid_container_image(container_request_image(&request)) =>
+        {
+            store_container_value(
+                container_request_image(&request),
+                &CONTAINER_IMAGE,
+                &CONTAINER_IMAGE_SIZE,
+            );
+            update_container_configuration(control_abi::CONTAINER_CONFIG_IMAGE)
         }
         control_abi::CONTAINER_STOP
             if state == control_abi::CONTAINER_STATE_RUNNING
@@ -16251,9 +16273,9 @@ fn read_container_request(address: u64) -> Option<[u8; control_abi::CONTAINER_RE
     let mut request = [0_u8; control_abi::CONTAINER_REQUEST_SIZE];
     if !address_space::copy_from_current_user(address, &mut request)
         || read_u32_at(&request, 0) != control_abi::CONTAINER_REQUEST_SIZE as u32
-        || read_u16_at(&request, 4) != 0
-        || read_u16_at(&request, 34) != 0
-        || read_u32_at(&request, 52) != 0
+        || read_u16_at(&request, 4) != control_abi::CONTAINER_REQUEST_VERSION
+        || read_u16_at(&request, 70) != 0
+        || read_u64_at(&request, 200) != 0
     {
         return None;
     }
@@ -16265,12 +16287,35 @@ fn container_request_name(request: &[u8; control_abi::CONTAINER_REQUEST_SIZE]) -
     request.get(8..8 + size).unwrap_or_default()
 }
 
+fn container_request_init(request: &[u8; control_abi::CONTAINER_REQUEST_SIZE]) -> &[u8] {
+    let size = usize::from(read_u16_at(request, 32));
+    request.get(36..36 + size).unwrap_or_default()
+}
+
+fn container_request_image(request: &[u8; control_abi::CONTAINER_REQUEST_SIZE]) -> &[u8] {
+    let size = usize::from(read_u16_at(request, 68));
+    request.get(72..72 + size).unwrap_or_default()
+}
+
 fn valid_container_name(name: &[u8]) -> bool {
     !name.is_empty()
         && name.len() <= control_abi::CONTAINER_MAX_NAME_SIZE
         && name
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn valid_container_init(init: &[u8]) -> bool {
+    !init.is_empty()
+        && init.len() <= control_abi::CONTAINER_MAX_INIT_SIZE
+        && init[0] == b'/'
+        && init.iter().all(u8::is_ascii_graphic)
+}
+
+fn valid_container_image(image: &[u8]) -> bool {
+    !image.is_empty()
+        && image.len() <= control_abi::CONTAINER_MAX_IMAGE_SIZE
+        && image.iter().all(u8::is_ascii_graphic)
 }
 
 fn stored_container_name_matches(name: &[u8]) -> bool {
@@ -16287,6 +16332,13 @@ fn store_container_name(name: &[u8]) {
         byte.store(name.get(index).copied().unwrap_or(0), Ordering::SeqCst);
     }
     CONTAINER_NAME_SIZE.store(name.len() as u8, Ordering::SeqCst);
+}
+
+fn store_container_value<const N: usize>(value: &[u8], output: &[AtomicU8; N], size: &AtomicU8) {
+    for (index, byte) in output.iter().enumerate() {
+        byte.store(value.get(index).copied().unwrap_or(0), Ordering::SeqCst);
+    }
+    size.store(value.len() as u8, Ordering::SeqCst);
 }
 
 fn configurable_container(state: u64, name: &[u8]) -> bool {
@@ -16319,11 +16371,7 @@ fn update_container_autostart(enabled: bool) -> u64 {
         CONTAINER_CONFIG_FLAGS
             .fetch_and(!control_abi::CONTAINER_CONFIG_AUTOSTART, Ordering::SeqCst);
     }
-    CONTAINER_CONTROL_STATE.store(
-        control_abi::CONTAINER_STATE_CONFIGURED as u8,
-        Ordering::SeqCst,
-    );
-    control_abi::CONTAINER_STATE_CONFIGURED
+    update_container_configuration(0)
 }
 
 fn write_container_request(request: &mut [u8; control_abi::CONTAINER_REQUEST_SIZE]) {
@@ -16334,9 +16382,24 @@ fn write_container_request(request: &mut [u8; control_abi::CONTAINER_REQUEST_SIZ
     for (output, stored) in request[8..8 + size].iter_mut().zip(&CONTAINER_NAME[..size]) {
         *output = stored.load(Ordering::SeqCst);
     }
-    request[32..34].copy_from_slice(&(10_u16).to_le_bytes());
+    request[4..6].copy_from_slice(&control_abi::CONTAINER_REQUEST_VERSION.to_le_bytes());
+    let init_size = usize::from(CONTAINER_INIT_SIZE.load(Ordering::SeqCst));
+    request[32..34].copy_from_slice(&(init_size as u16).to_le_bytes());
     request[34..36].copy_from_slice(&CONTAINER_CONFIG_FLAGS.load(Ordering::SeqCst).to_le_bytes());
-    request[36..46].copy_from_slice(b"/sbin/init");
+    for (output, stored) in request[36..36 + init_size]
+        .iter_mut()
+        .zip(&CONTAINER_INIT[..init_size])
+    {
+        *output = stored.load(Ordering::SeqCst);
+    }
+    let image_size = usize::from(CONTAINER_IMAGE_SIZE.load(Ordering::SeqCst));
+    request[68..70].copy_from_slice(&(image_size as u16).to_le_bytes());
+    for (output, stored) in request[72..72 + image_size]
+        .iter_mut()
+        .zip(&CONTAINER_IMAGE[..image_size])
+    {
+        *output = stored.load(Ordering::SeqCst);
+    }
 }
 
 fn read_u16_at(bytes: &[u8], offset: usize) -> u16 {
