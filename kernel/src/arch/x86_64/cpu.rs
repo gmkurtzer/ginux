@@ -16207,7 +16207,7 @@ fn console_read_line(domain_id: u64, capability: u64, frame: *const UserTrapFram
             _ => {}
         }
     }
-    if !address_space::copy_to_current_user(frame.first_argument(), &line[..length])
+    if length != 0 && !address_space::copy_to_current_user(frame.first_argument(), &line[..length])
         || !domain::renew_auxiliary_call_epoch(domain_id)
     {
         return u64::MAX - 2;

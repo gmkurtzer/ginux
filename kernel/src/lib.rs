@@ -3582,6 +3582,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !network::initialize_runtime() {
         kernel_fail("\r\nginux: runtime network initialization failed\r\n");
     }
+    let mut controller_recovery_attempts = 0_u8;
     'managed: loop {
         serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
         let controller_completed = address_space::run_installed_interactive_controller();
@@ -3595,8 +3596,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             break;
         }
         if !controller_completed {
-            kernel_fail("ginux: runtime container controller failed\r\n");
+            controller_recovery_attempts = controller_recovery_attempts.saturating_add(1);
+            if controller_recovery_attempts <= 3 {
+                serial_write("ginux: controller failed; restarting control plane\r\n");
+                continue 'managed;
+            }
+            kernel_fail("ginux: controller recovery budget exhausted\r\n");
         }
+        controller_recovery_attempts = 0;
         if arch::x86_64::cpu::take_network_dhcp_request() {
             let success = address_space::configure_native_network_dhcp(
                 &network_image,
