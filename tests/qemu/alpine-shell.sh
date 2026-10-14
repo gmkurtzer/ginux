@@ -56,14 +56,20 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'ginux: entering configured OCI init'
     printf '%s\n' \
         "printf 'LIBC_RUNTIME_OK\\n'" \
+        "test -f /bin/busybox && printf 'STAT_ABI_OK\\n'" \
         "while IFS= read -r line; do echo \"\$line\"; done < /etc/os-release" \
         'echo /*' \
         'echo /etc/os-*' \
         'pwd' \
+        '/bin/ls /etc' \
+        '/bin/cat /etc/os-release' \
+        "printf 'FORK_EXEC_OK\\n'" \
         "printf 'OCI_FILESYSTEM_OK\\n'"
     wait_for_line 'LIBC_RUNTIME_OK'
+    wait_for_line 'STAT_ABI_OK'
     wait_for_line 'NAME="Alpine Linux"'
     wait_for_line '/'
+    wait_for_line 'FORK_EXEC_OK'
     wait_for_line 'OCI_FILESYSTEM_OK'
     printf '%s\n' 'exit 0'
     wait_for 'ginux: OCI init exited cleanly'
@@ -98,7 +104,9 @@ qemu_pid=""
 for expected in \
     'ginux: entering configured OCI init' \
     'LIBC_RUNTIME_OK' \
+    'STAT_ABI_OK' \
     'NAME="Alpine Linux"' \
+    'FORK_EXEC_OK' \
     'OCI_FILESYSTEM_OK' \
     'ginux: OCI init exited cleanly' \
     'GINUX_KERNEL_OK'; do

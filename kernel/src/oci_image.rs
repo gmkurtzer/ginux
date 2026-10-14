@@ -79,6 +79,15 @@ pub(crate) fn lookup(path: &[u8]) -> Option<(u16, Entry<'static>)> {
     Some((handle, entry))
 }
 
+pub(crate) fn lookup_metadata(path: &[u8]) -> Option<(u16, Entry<'static>)> {
+    let rootfs = rootfs()?;
+    let path = path.strip_prefix(b"/").unwrap_or(path);
+    let path = path.strip_suffix(b"/").unwrap_or(path);
+    let (index, entry) = rootfs.find_index(path)?;
+    let handle = u16::try_from(index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
+    Some((handle, entry))
+}
+
 fn lookup_in<'a>(rootfs: &Rootfs<'a>, path: &[u8]) -> Option<(usize, Entry<'a>)> {
     let path = path.strip_prefix(b"/").unwrap_or(path);
     let path = path.strip_suffix(b"/").unwrap_or(path);

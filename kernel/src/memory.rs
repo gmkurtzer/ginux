@@ -8,8 +8,8 @@ use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 128;
-const MAX_RECYCLED_FRAMES: usize = 128;
-const MAX_LIVE_FRAMES: usize = 128;
+const MAX_RECYCLED_FRAMES: usize = 256;
+const MAX_LIVE_FRAMES: usize = 256;
 const DOMAIN_FRAME_LIMIT: usize = 16;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -491,6 +491,40 @@ pub(crate) fn allocate_frames<const N: usize>(owner: FrameOwner) -> Option<[Fram
     }
 }
 
+pub(crate) fn allocate_frame_prefix<const N: usize>(
+    owner: FrameOwner,
+    count: usize,
+) -> Option<[FrameLease; N]> {
+    if !INITIALIZED.load(Ordering::Acquire) || count == 0 || count > N {
+        return None;
+    }
+    // SAFETY: As with `allocate_frames`, bootstrap and syscall execution keep
+    // allocator access serialized. A partial reservation is rolled back
+    // atomically before returning failure.
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let mut frames = [FrameLease::EMPTY; N];
+        for index in 0..count {
+            let Some(frame) = (*allocator).allocate_one(owner) else {
+                if index != 0 {
+                    let _ = (*allocator).release_slice(owner, &frames[..index]);
+                }
+                return None;
+            };
+            let Some(address) = frame.direct_map_address() else {
+                let _ = (*allocator).release_slice(owner, core::slice::from_ref(&frame));
+                if index != 0 {
+                    let _ = (*allocator).release_slice(owner, &frames[..index]);
+                }
+                return None;
+            };
+            core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE as usize);
+            frames[index] = frame;
+        }
+        Some(frames)
+    }
+}
+
 pub(crate) fn allocate_contiguous_frames<const N: usize>(
     owner: FrameOwner,
 ) -> Option<[FrameLease; N]> {
@@ -573,6 +607,14 @@ fn runtime_extent_owns(frames: &[FrameLease]) -> bool {
                 && frame.address < end
                 && frame.address.is_multiple_of(PAGE_SIZE)
         })
+}
+
+pub(crate) fn frame_lease_is_runtime(frame: FrameLease) -> bool {
+    runtime_extent_owns(&[frame])
+}
+
+pub(crate) fn frame_address_is_runtime(address: u64) -> bool {
+    FrameLease::from_parts(address, 1).is_some_and(frame_lease_is_runtime)
 }
 
 pub(crate) fn release_frames<const N: usize>(owner: FrameOwner, frames: [FrameLease; N]) -> bool {

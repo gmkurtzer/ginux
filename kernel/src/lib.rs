@@ -40,7 +40,7 @@ const EFI_CONVENTIONAL_MEMORY: u32 = 7;
 const UEFI_PAGES_PER_MIB: u64 = 256;
 const PAGE_SIZE: usize = 4096;
 const Q35_IOMMU_REGISTER_BASE: u64 = 0xfed9_0000;
-const KERNEL_STACK_SIZE: usize = 128 * 1024;
+const KERNEL_STACK_SIZE: usize = 512 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
@@ -387,15 +387,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     // SAFETY: The entry trampoline disabled interrupts. The required live
     // addresses and the page-table objects are checked against the complete
     // transitional identity-map range before CR3 is changed.
-    let Ok(arch::x86_64::paging::InitialMmioMappings {
-        block_transport: virtio_mmio,
-        block_msix: virtio_msix_mmio,
-        iommu: iommu_mmio,
-        network_common: virtio_network_common_mmio,
-        network_device: virtio_network_device_mmio,
-        network_notification: virtio_network_notify_mmio,
-        network_msix: virtio_network_msix_mmio,
-    }) = (unsafe {
+    let result = unsafe {
         arch::x86_64::paging::install_initial_identity_map(
             boot_info,
             &image,
@@ -411,8 +403,22 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 (virtio_network_msix_physical, virtio_network_msix_length),
             ],
         )
-    })
+    };
+    let Ok(arch::x86_64::paging::InitialMmioMappings {
+        block_transport: virtio_mmio,
+        block_msix: virtio_msix_mmio,
+        iommu: iommu_mmio,
+        network_common: virtio_network_common_mmio,
+        network_device: virtio_network_device_mmio,
+        network_notification: virtio_network_notify_mmio,
+        network_msix: virtio_network_msix_mmio,
+    }) = result
     else {
+        if let Err(error) = result {
+            serial_write("ginux: page-table transition error: ");
+            serial_write_u64(error as u64);
+            serial_write("\r\n");
+        }
         kernel_fail("ginux: page-table transition failed\r\n");
     };
     serial_write("ginux: kernel page tables active\r\n");

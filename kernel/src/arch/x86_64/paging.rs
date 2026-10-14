@@ -6,7 +6,7 @@ const ENTRY_COUNT: usize = 512;
 const DIRECTORY_COUNT: usize = 4;
 const LARGE_PAGE_SIZE: u64 = 2 * 1024 * 1024;
 const PAGE_SIZE: usize = 4096;
-const MAX_FINE_TABLES: usize = 10;
+const MAX_FINE_TABLES: usize = 16;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
@@ -371,6 +371,7 @@ static mut MMIO_DIRECTORY: PageTable = PageTable([0; ENTRY_COUNT]);
 static mut MMIO_TABLE: PageTable = PageTable([0; ENTRY_COUNT]);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
 pub(crate) enum PagingError {
     RequiredAddressOutsideMap,
     TableAddressOutsideMap,

@@ -207,6 +207,9 @@ pub(crate) fn run_oci_process(init: &[u8]) -> bool {
         stage = 1;
 
         let mut next_frame = 0;
+        let mut initial_image_mappings =
+            [cpu::LinuxActiveImageMapping::EMPTY; cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+        let mut initial_image_count = 0;
         let mut executable = |image: &crate::linux_elf::RelocatableLoadPlan<'_>| -> Option<()> {
             for segment in image.segments[..image.segment_count].iter().flatten() {
                 for page in 0..segment.page_count {
@@ -232,6 +235,14 @@ pub(crate) fn run_oci_process(init: &[u8]) -> bool {
                     {
                         return None;
                     }
+                    *initial_image_mappings.get_mut(initial_image_count)? =
+                        cpu::LinuxActiveImageMapping {
+                            address: usize::try_from(address).ok()?,
+                            frame,
+                            writable: segment.writable,
+                            executable: segment.executable,
+                        };
+                    initial_image_count += 1;
                     next_frame += 1;
                 }
             }
@@ -369,9 +380,8 @@ pub(crate) fn run_oci_process(init: &[u8]) -> bool {
             dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
             exec_expected: false,
             system_init: false,
-            initial_image_count: 0,
-            initial_image_mappings: [cpu::LinuxActiveImageMapping::EMPTY;
-                cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT],
+            initial_image_count,
+            initial_image_mappings,
         });
         unsafe { activate(kernel_root) };
         stage = 7;
@@ -3280,7 +3290,8 @@ fn prepare_linux_hierarchy_replacement(
             || !(mapping.address as u64).is_multiple_of(PAGE_SIZE as u64)
             || !mapping.frame.is_multiple_of(PAGE_SIZE as u64)
             || mapping.writable && mapping.executable
-            || !memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+            || !(memory::frame_addresses_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                || memory::frame_address_is_runtime(mapping.frame))
         {
             return false;
         }
@@ -3323,7 +3334,11 @@ pub(crate) fn clone_linux_process_hierarchy(
     child_pages: &[memory::FrameLease],
 ) -> bool {
     if parent_mappings.is_empty()
-        || parent_mappings.len() != child_pages.len()
+        || parent_mappings
+            .iter()
+            .filter(|mapping| mapping.writable || !memory::frame_lease_is_runtime(mapping.frame))
+            .count()
+            != child_pages.len()
         || parent_mappings.len() > cpu::LINUX_PROCESS_MAPPING_LIMIT
         || !(4..=6).contains(&parent_hierarchy.len())
         || parent_hierarchy.len() != child_hierarchy.len()
@@ -3346,7 +3361,8 @@ pub(crate) fn clone_linux_process_hierarchy(
             mapping.address == 0
                 || !mapping.address.is_multiple_of(PAGE_SIZE)
                 || mapping.writable && mapping.executable
-                || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                || !(memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                    || memory::frame_lease_is_runtime(mapping.frame))
                 || parent_hierarchy.contains(&mapping.frame)
                 || child_hierarchy.contains(&mapping.frame)
                 || child_pages.contains(&mapping.frame)
@@ -3384,11 +3400,17 @@ pub(crate) fn clone_linux_process_hierarchy(
         writable: false,
         executable: false,
     }; cpu::LINUX_PROCESS_MAPPING_LIMIT];
-    for ((child, parent), frame) in child_mappings
-        .iter_mut()
-        .zip(parent_mappings)
-        .zip(child_pages)
-    {
+    let mut private_index = 0;
+    for (child, parent) in child_mappings.iter_mut().zip(parent_mappings) {
+        let frame = if parent.writable || !memory::frame_lease_is_runtime(parent.frame) {
+            let Some(frame) = child_pages.get(private_index) else {
+                return false;
+            };
+            private_index += 1;
+            *frame
+        } else {
+            parent.frame
+        };
         *child = cpu::LinuxExecMapping {
             address: parent.address,
             frame: frame.address(),
@@ -3396,13 +3418,14 @@ pub(crate) fn clone_linux_process_hierarchy(
             executable: parent.executable,
         };
     }
-    prepare_linux_hierarchy_replacement(
-        &child_mappings[..parent_mappings.len()],
-        parent_mappings,
-        parent_hierarchy,
-        child_hierarchy,
-        false,
-    )
+    private_index == child_pages.len()
+        && prepare_linux_hierarchy_replacement(
+            &child_mappings[..parent_mappings.len()],
+            parent_mappings,
+            parent_hierarchy,
+            child_hierarchy,
+            false,
+        )
 }
 
 pub(crate) fn validate_linux_process_address_space(
@@ -3421,7 +3444,8 @@ pub(crate) fn validate_linux_process_address_space(
             mapping.address == 0
                 || !mapping.address.is_multiple_of(PAGE_SIZE)
                 || mapping.writable && mapping.executable
-                || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                || !(memory::frames_owned_by(memory::FrameOwner::KERNEL, &[mapping.frame])
+                    || memory::frame_lease_is_runtime(mapping.frame))
                 || hierarchy.contains(&mapping.frame)
                 || mappings[..index]
                     .iter()
@@ -4151,6 +4175,43 @@ pub(crate) fn current_linux_mapping_matches(
         entry.read() & (ADDRESS_MASK | PRESENT | WRITABLE | USER | NO_EXECUTE)
             == frame.address() | flags
     })
+}
+
+pub(crate) fn current_linux_mapping_frame_address(address: u64) -> Option<u64> {
+    let entry = current_linux_leaf(address)?;
+    let value = unsafe { entry.read() };
+    (value & (PRESENT | USER) == PRESENT | USER).then_some(value & ADDRESS_MASK)
+}
+
+pub(crate) fn set_current_linux_mapping_permissions(
+    address: u64,
+    frame: memory::FrameLease,
+    writable: bool,
+    executable: bool,
+) -> bool {
+    if address >= 1 << 47
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || writable && executable
+        || !(memory::frames_owned_by(memory::FrameOwner::KERNEL, &[frame])
+            || memory::frame_lease_is_runtime(frame))
+    {
+        return false;
+    }
+    let Some(leaf) = current_linux_leaf(address) else {
+        return false;
+    };
+    let value = unsafe { leaf.read() };
+    if value & (ADDRESS_MASK | PRESENT | USER) != frame.address() | PRESENT | USER {
+        return false;
+    }
+    let value = (value & !(WRITABLE | NO_EXECUTE))
+        | if writable { WRITABLE } else { 0 }
+        | if executable { 0 } else { NO_EXECUTE };
+    unsafe {
+        leaf.write(value);
+        asm!("invlpg [{}]", in(reg) address, options(nostack, preserves_flags));
+    }
+    current_linux_mapping_matches(address, frame, writable, executable)
 }
 
 pub(crate) fn current_linux_page_absent(address: u64) -> bool {
