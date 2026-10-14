@@ -200,6 +200,12 @@ if [[ "$(grep -Fc '64 bytes from 10.0.2.2: icmp_seq=1 ttl=64' "$output_file")" -
     exit 1
 fi
 
+if [[ "$(grep -Fc 'eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3' "$output_file")" -ne 2 ]]; then
+    cat "$output_file"
+    echo "Controller console test failed: DHCP did not retain DNS on both leases." >&2
+    exit 1
+fi
+
 if grep -qE '^([2-9]|[1-9][0-9]+) 0 R controller' "$output_file"; then
     cat "$output_file"
     echo "Controller console test failed: replacement controller PID was published." >&2

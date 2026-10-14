@@ -794,6 +794,7 @@ static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
 static NETWORK_PING_REQUESTED: AtomicU64 = AtomicU64::new(0);
+static NETWORK_PING_ACTIVE: AtomicU64 = AtomicU64::new(0);
 static NETWORK_PING_RESULT: AtomicU8 = AtomicU8::new(0);
 static NETWORK_DHCP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
@@ -15550,9 +15551,10 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrap
         }
         control_abi::NETWORK_DEVICE_PING
             if argument != 0
+                && argument >> 32 == 0
                 && network::link_is_up()
                 && network::ipv4_configuration() != 0
-                && network::ipv4_gateway() == argument
+                && network::ipv4_gateway() != 0
                 && domain::handle_permits(
                     caller_domain,
                     capability,
@@ -15627,6 +15629,17 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrap
         {
             u64::from(NETWORK_DHCP_RESULT.swap(0, Ordering::AcqRel))
         }
+        control_abi::NETWORK_DEVICE_QUERY_PING_TARGET
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            NETWORK_PING_ACTIVE.load(Ordering::Acquire)
+        }
         control_abi::NETWORK_DEVICE_SET_DNS
             if domain::handle_permits(
                 caller_domain,
@@ -15653,12 +15666,13 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrap
 }
 
 pub(crate) fn take_network_ping_request() -> Option<u32> {
-    u32::try_from(NETWORK_PING_REQUESTED.swap(0, Ordering::AcqRel))
-        .ok()
-        .filter(|target| *target != 0)
+    let target = NETWORK_PING_REQUESTED.swap(0, Ordering::AcqRel);
+    NETWORK_PING_ACTIVE.store(target, Ordering::Release);
+    u32::try_from(target).ok().filter(|target| *target != 0)
 }
 
 pub(crate) fn complete_network_ping(success: bool) {
+    NETWORK_PING_ACTIVE.store(0, Ordering::Release);
     NETWORK_PING_RESULT.store(if success { 1 } else { 2 }, Ordering::Release);
 }
 

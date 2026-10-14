@@ -3579,7 +3579,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             continue 'managed;
         }
         if let Some(target) = arch::x86_64::cpu::take_network_ping_request() {
-            let success = target == u32::from_be_bytes([10, 0, 2, 2])
+            let success = target != 0
                 && address_space::verify_native_network_ping_gateway(
                     &network_image,
                     virtio_network,

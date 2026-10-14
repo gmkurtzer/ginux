@@ -419,7 +419,7 @@ fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
     {
         write(
             console,
-            b"ping: network unavailable or target is not local or the configured gateway\r\n",
+            b"ping: network unavailable or target could not be reached\r\n",
         );
         return;
     }

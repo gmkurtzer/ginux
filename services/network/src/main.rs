@@ -16,13 +16,14 @@ use ginux_native_abi::{
     NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
     NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD,
     NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE,
-    NATIVE_NETWORK_DEVICE_QUERY_GENERATION, NATIVE_NETWORK_DEVICE_SET_DNS,
-    NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION,
-    NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_DRAINED,
-    NATIVE_PACKET_EGRESS_ACK_OPERATION, NATIVE_PACKET_EGRESS_CLAIM_OPERATION,
-    NATIVE_PACKET_EGRESS_WAIT_OPERATION, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
-    NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
+    NATIVE_NETWORK_DEVICE_QUERY_GATEWAY, NATIVE_NETWORK_DEVICE_QUERY_GENERATION,
+    NATIVE_NETWORK_DEVICE_QUERY_IPV4, NATIVE_NETWORK_DEVICE_QUERY_PING_TARGET,
+    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
+    NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED,
+    NATIVE_PACKET_DRAINED, NATIVE_PACKET_EGRESS_ACK_OPERATION,
+    NATIVE_PACKET_EGRESS_CLAIM_OPERATION, NATIVE_PACKET_EGRESS_WAIT_OPERATION,
+    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
@@ -411,12 +412,13 @@ unsafe fn dhcp(info: &NativeNetworkBootV0) -> Option<u8> {
     {
         return Some(17);
     }
+    let dns = if lease.dns != 0 { lease.dns } else { offer.dns };
     Some(
-        if lease.dns != 0
+        if dns != 0
             && network_device_call(
                 info.device_capability,
                 NATIVE_NETWORK_DEVICE_SET_DNS,
-                u64::from(lease.dns),
+                u64::from(dns),
             ) == NATIVE_NETWORK_WAIT_FAILED
         {
             18
@@ -931,22 +933,71 @@ unsafe fn arp_probe(
     fault_after_packet: bool,
     packet_batch: bool,
 ) -> Option<u8> {
-    const ARP_REQUEST: [u8; 60] = [
+    let mut arp_request: [u8; 60] = [
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x06, 0x00,
         0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 10, 0, 2, 15,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 10, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0,
     ];
-    const ICMP_REQUEST: [u8; 42] = [
+    let mut icmp_request: [u8; 42] = [
         0x52, 0x55, 0x0a, 0x00, 0x02, 0x02, 0x52, 0x54, 0x00, 0x12, 0x34, 0x56, 0x08, 0x00, 0x45,
         0x00, 0x00, 0x1c, 0x12, 0x34, 0x40, 0x00, 0x40, 0x01, 0x10, 0x9d, 10, 0, 2, 15, 10, 0, 2,
         2, 0x08, 0x00, 0x39, 0x0f, 0xbe, 0xef, 0x00, 0x01,
     ];
+    let guest_mac: [u8; 6] = info.mac_address.to_be_bytes()[2..].try_into().ok()?;
+    let mut local_ip = [10, 0, 2, 15];
+    let mut next_hop_ip = [10, 0, 2, 2];
+    let mut target_ip = next_hop_ip;
+    if info.requests_icmp_probe() {
+        let target = network_device_call(
+            info.device_capability,
+            NATIVE_NETWORK_DEVICE_QUERY_PING_TARGET,
+            0,
+        );
+        if target == NATIVE_NETWORK_WAIT_FAILED || target >> 32 != 0 {
+            return None;
+        }
+        if target != 0 {
+            let configuration =
+                network_device_call(info.device_capability, NATIVE_NETWORK_DEVICE_QUERY_IPV4, 0);
+            let gateway = network_device_call(
+                info.device_capability,
+                NATIVE_NETWORK_DEVICE_QUERY_GATEWAY,
+                0,
+            );
+            let prefix = (configuration >> 32) as u8;
+            if configuration == NATIVE_NETWORK_WAIT_FAILED
+                || gateway == NATIVE_NETWORK_WAIT_FAILED
+                || configuration >> 40 != 0
+                || gateway >> 32 != 0
+                || !(1..=32).contains(&prefix)
+                || configuration as u32 == 0
+                || gateway as u32 == 0
+            {
+                return None;
+            }
+            let local = configuration as u32;
+            let target = target as u32;
+            let mask = u32::MAX << (32 - prefix);
+            let next_hop = if local & mask == target & mask {
+                target
+            } else {
+                gateway as u32
+            };
+            local_ip = local.to_be_bytes();
+            next_hop_ip = next_hop.to_be_bytes();
+            target_ip = target.to_be_bytes();
+        }
+    }
+    arp_request[6..12].copy_from_slice(&guest_mac);
+    arp_request[22..28].copy_from_slice(&guest_mac);
+    arp_request[28..32].copy_from_slice(&local_ip);
+    arp_request[38..42].copy_from_slice(&next_hop_ip);
     let dma = usize::try_from(info.dma_virtual_address).ok()?;
     let receive_notification = usize::try_from(info.receive_notification_address).ok()?;
     let transmit_notification = usize::try_from(info.transmit_notification_address).ok()?;
     let common = usize::try_from(info.common_config_address).ok()?;
-    let tx_length = TX_HEADER_LENGTH + ARP_REQUEST.len();
+    let tx_length = TX_HEADER_LENGTH + arp_request.len();
 
     write_u64(
         dma + RX_DESC_OFFSET as usize,
@@ -975,7 +1026,7 @@ unsafe fn arp_probe(
     for offset in 0..TX_HEADER_LENGTH {
         write_u8(dma + TX_BUFFER_OFFSET as usize + offset, 0);
     }
-    for (offset, byte) in ARP_REQUEST.into_iter().enumerate() {
+    for (offset, byte) in arp_request.into_iter().enumerate() {
         write_u8(
             dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH + offset,
             byte,
@@ -1010,8 +1061,21 @@ unsafe fn arp_probe(
     {
         return None;
     }
-    if !arp_reply_is_valid(dma, common, tx_length, 1) {
+    if !arp_reply_is_valid(
+        dma,
+        common,
+        tx_length,
+        1,
+        &guest_mac,
+        &local_ip,
+        &next_hop_ip,
+    ) {
         return None;
+    }
+    let received_frame = dma + RX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH;
+    let mut next_hop_mac = [0_u8; 6];
+    for (offset, byte) in next_hop_mac.iter_mut().enumerate() {
+        *byte = read_u8(received_frame + 6 + offset);
     }
     if packet_batch {
         let capability = packet_capability?;
@@ -1032,12 +1096,20 @@ unsafe fn arp_probe(
         write_u8(dma + RX_BUFFER_OFFSET as usize + offset, 0xcc);
     }
     let reuse_tx_length = if info.requests_icmp_probe() {
-        let length = TX_HEADER_LENGTH + ICMP_REQUEST.len();
+        icmp_request[..6].copy_from_slice(&next_hop_mac);
+        icmp_request[6..12].copy_from_slice(&guest_mac);
+        icmp_request[26..30].copy_from_slice(&local_ip);
+        icmp_request[30..34].copy_from_slice(&target_ip);
+        icmp_request[24] = 0;
+        icmp_request[25] = 0;
+        let checksum = ipv4_checksum(icmp_request.as_ptr() as usize + 14).to_be_bytes();
+        icmp_request[24..26].copy_from_slice(&checksum);
+        let length = TX_HEADER_LENGTH + icmp_request.len();
         write_u32(dma + TX_DESC_OFFSET as usize + 8, length as u32);
         for offset in 0..TX_HEADER_LENGTH {
             write_u8(dma + TX_BUFFER_OFFSET as usize + offset, 0);
         }
-        for (offset, byte) in ICMP_REQUEST.into_iter().enumerate() {
+        for (offset, byte) in icmp_request.into_iter().enumerate() {
             write_u8(
                 dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH + offset,
                 byte,
@@ -1079,9 +1151,24 @@ unsafe fn arp_probe(
         return None;
     }
     if if info.requests_icmp_probe() {
-        !icmp_reply_is_valid(dma, common, reuse_tx_length)
+        !icmp_reply_is_valid(
+            dma,
+            common,
+            reuse_tx_length,
+            &guest_mac,
+            &local_ip,
+            &target_ip,
+        )
     } else {
-        !arp_reply_is_valid(dma, common, reuse_tx_length, 2)
+        !arp_reply_is_valid(
+            dma,
+            common,
+            reuse_tx_length,
+            2,
+            &guest_mac,
+            &local_ip,
+            &next_hop_ip,
+        )
     } {
         return None;
     }
@@ -1105,9 +1192,14 @@ unsafe fn arp_probe(
     Some(NATIVE_SERVICE_EXIT_COMPLETED)
 }
 
-unsafe fn icmp_reply_is_valid(dma: usize, common: usize, tx_length: usize) -> bool {
-    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
-    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
+unsafe fn icmp_reply_is_valid(
+    dma: usize,
+    common: usize,
+    tx_length: usize,
+    guest_mac: &[u8; 6],
+    local_ip: &[u8; 4],
+    target_ip: &[u8; 4],
+) -> bool {
     const ICMP_REPLY: [u8; 8] = [0x00, 0x00, 0x41, 0x0f, 0xbe, 0xef, 0x00, 0x01];
     let buffer = dma + RX_BUFFER_OFFSET as usize;
     let frame = buffer + TX_HEADER_LENGTH;
@@ -1117,14 +1209,18 @@ unsafe fn icmp_reply_is_valid(dma: usize, common: usize, tx_length: usize) -> bo
         && (TX_HEADER_LENGTH + 42..=RX_DESCRIPTOR_LENGTH).contains(&used_length)
         && (0..10).all(|offset| read_u8(buffer + offset) == 0)
         && read_u16(buffer + 10) == 1
-        && bytes_match(frame, &GUEST_MAC)
-        && bytes_match(frame + 6, &GATEWAY_MAC)
+        && bytes_match(frame, guest_mac)
+        && bytes_match_addresses(
+            frame + 6,
+            dma + TX_BUFFER_OFFSET as usize + TX_HEADER_LENGTH,
+            6,
+        )
         && bytes_match(frame + 12, &[0x08, 0x00])
         && read_u8(frame + 14) == 0x45
         && bytes_match(frame + 16, &[0x00, 0x1c])
         && read_u8(frame + 23) == 1
-        && bytes_match(frame + 26, &[10, 0, 2, 2])
-        && bytes_match(frame + 30, &[10, 0, 2, 15])
+        && bytes_match(frame + 26, target_ip)
+        && bytes_match(frame + 30, local_ip)
         && bytes_match(frame + 34, &ICMP_REPLY)
         && read_u8(dma + RX_BUFFER_OFFSET as usize - 1) == 0x3c
         && read_u8(dma + RX_BUFFER_OFFSET as usize + RX_DESCRIPTOR_LENGTH) == 0xc3
@@ -1133,11 +1229,15 @@ unsafe fn icmp_reply_is_valid(dma: usize, common: usize, tx_length: usize) -> bo
             == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
 }
 
-unsafe fn arp_reply_is_valid(dma: usize, common: usize, tx_length: usize, used_index: u16) -> bool {
-    const GUEST_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
-    const GATEWAY_MAC: [u8; 6] = [0x52, 0x55, 0x0a, 0x00, 0x02, 0x02];
-    const GUEST_IP: [u8; 4] = [10, 0, 2, 15];
-    const GATEWAY_IP: [u8; 4] = [10, 0, 2, 2];
+unsafe fn arp_reply_is_valid(
+    dma: usize,
+    common: usize,
+    tx_length: usize,
+    used_index: u16,
+    guest_mac: &[u8; 6],
+    local_ip: &[u8; 4],
+    next_hop_ip: &[u8; 4],
+) -> bool {
     if !(1..=2).contains(&used_index) {
         return false;
     }
@@ -1150,22 +1250,25 @@ unsafe fn arp_reply_is_valid(dma: usize, common: usize, tx_length: usize, used_i
         && (TX_HEADER_LENGTH + 42..=RX_DESCRIPTOR_LENGTH).contains(&used_length)
         && (0..10).all(|offset| read_u8(buffer + offset) == 0)
         && read_u16(buffer + 10) == 1
-        && bytes_match(frame, &GUEST_MAC)
-        && bytes_match(frame + 6, &GATEWAY_MAC)
+        && bytes_match(frame, guest_mac)
+        && bytes_match_addresses(frame + 6, frame + 22, 6)
         && bytes_match(frame + 12, &[0x08, 0x06])
         && bytes_match(
             frame + 14,
             &[0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x02],
         )
-        && bytes_match(frame + 22, &GATEWAY_MAC)
-        && bytes_match(frame + 28, &GATEWAY_IP)
-        && bytes_match(frame + 32, &GUEST_MAC)
-        && bytes_match(frame + 38, &GUEST_IP)
+        && bytes_match(frame + 28, next_hop_ip)
+        && bytes_match(frame + 32, guest_mac)
+        && bytes_match(frame + 38, local_ip)
         && read_u8(dma + RX_BUFFER_OFFSET as usize - 1) == 0x3c
         && read_u8(dma + RX_BUFFER_OFFSET as usize + RX_DESCRIPTOR_LENGTH) == 0xc3
         && read_u8(dma + TX_BUFFER_OFFSET as usize + tx_length) == 0xa5
         && read_u8(common + COMMON_DEVICE_STATUS)
             == STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK
+}
+
+unsafe fn bytes_match_addresses(left: usize, right: usize, length: usize) -> bool {
+    (0..length).all(|offset| read_u8(left + offset) == read_u8(right + offset))
 }
 
 unsafe fn bytes_match(address: usize, expected: &[u8]) -> bool {
