@@ -53,6 +53,7 @@ const EFER_SCE: u64 = 1;
 const EFER_NXE: u64 = 1 << 11;
 const LINUX_READ_SYSCALL: u64 = 0;
 const LINUX_WRITE_SYSCALL: u64 = 1;
+const LINUX_OPEN_SYSCALL: u64 = 2;
 const LINUX_CLOSE_SYSCALL: u64 = 3;
 const LINUX_FSTAT_SYSCALL: u64 = 5;
 const LINUX_POLL_SYSCALL: u64 = 7;
@@ -194,6 +195,7 @@ const LINUX_TIMERFD_SETTIME_SYSCALL: u64 = 286;
 const LINUX_TIMERFD_GETTIME_SYSCALL: u64 = 287;
 const LINUX_EVENTFD2_SYSCALL: u64 = 290;
 const LINUX_EPOLL_CREATE1_SYSCALL: u64 = 291;
+const LINUX_DUP3_SYSCALL: u64 = 292;
 const LINUX_PIPE2_SYSCALL: u64 = 293;
 const LINUX_PRLIMIT64_SYSCALL: u64 = 302;
 const LINUX_GETCPU_SYSCALL: u64 = 309;
@@ -267,6 +269,9 @@ const LINUX_IOV_LIMIT: usize = 4;
 const LINUX_POLLFD_LIMIT: usize = 4;
 const LINUX_AUX_DESCRIPTOR_FIRST: u64 = 2;
 const LINUX_AUX_DESCRIPTOR_LIMIT: u64 = 6;
+const LINUX_DESCRIPTOR_TABLE_LIMIT: u64 = 16;
+const LINUX_DEVICE_DESCRIPTOR_COUNT: usize =
+    LINUX_DESCRIPTOR_TABLE_LIMIT as usize - LINUX_AUX_DESCRIPTOR_FIRST as usize;
 const LINUX_POLLIN: u16 = 1;
 const LINUX_POLLOUT: u16 = 4;
 const LINUX_POLLERR: u16 = 8;
@@ -351,6 +356,7 @@ const LINUX_O_DIRECTORY: u64 = 0x10000;
 const LINUX_O_CREAT: u64 = 0x40;
 const LINUX_O_EXCL: u64 = 0x80;
 const LINUX_O_NONBLOCK: u64 = 0x800;
+const LINUX_O_LARGEFILE: u64 = 0x8000;
 const LINUX_PR_SET_NAME: u64 = 15;
 const LINUX_PR_GET_NAME: u64 = 16;
 const LINUX_PR_SET_NO_NEW_PRIVS: u64 = 38;
@@ -737,9 +743,17 @@ static ELF_PROBE_EXITED_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU16; 4] = [const { AtomicU16::new(0) }; 4];
-static ELF_PROBE_TMP_FILE_GENERATIONS: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
+static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU16 = AtomicU16::new(0);
+static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { AtomicU16::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static ELF_PROBE_OCI_DESCRIPTORS: [AtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { AtomicU16::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static ELF_PROBE_TMP_FILE_GENERATIONS: [AtomicU32; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { AtomicU32::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static ELF_PROBE_STDIO_DEVICE_DESCRIPTORS: [AtomicU16; 2] = [const { AtomicU16::new(0) }; 2];
+static ELF_PROBE_STDIO_OCI_DESCRIPTORS: [AtomicU16; 2] = [const { AtomicU16::new(0) }; 2];
+static ELF_PROBE_STDIO_TMP_FILE_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
+static ELF_PROBE_STDIO_OFFSETS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 static ELF_PROBE_CWD: AtomicU16 = AtomicU16::new(LINUX_ROOT_DIRECTORY);
 static ELF_PROBE_EPOLL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
 static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
@@ -759,7 +773,8 @@ static ELF_PROBE_PIPE_WRITE_FLAGS: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_LENGTH: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_PIPE_BUFFER: [AtomicU8; LINUX_PIPE_CAPACITY] =
     [const { AtomicU8::new(0) }; LINUX_PIPE_CAPACITY];
-static ELF_PROBE_DESCRIPTOR_OFFSETS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static ELF_PROBE_DESCRIPTOR_OFFSETS: [AtomicU64; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { AtomicU64::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
 static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
@@ -4374,8 +4389,23 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
         descriptor.store(0, Ordering::SeqCst);
     }
+    for descriptor in &ELF_PROBE_OCI_DESCRIPTORS {
+        descriptor.store(0, Ordering::SeqCst);
+    }
     for generation in &ELF_PROBE_TMP_FILE_GENERATIONS {
         generation.store(0, Ordering::SeqCst);
+    }
+    for descriptor in &ELF_PROBE_STDIO_DEVICE_DESCRIPTORS {
+        descriptor.store(0, Ordering::SeqCst);
+    }
+    for descriptor in &ELF_PROBE_STDIO_OCI_DESCRIPTORS {
+        descriptor.store(0, Ordering::SeqCst);
+    }
+    for generation in &ELF_PROBE_STDIO_TMP_FILE_GENERATIONS {
+        generation.store(0, Ordering::SeqCst);
+    }
+    for offset in &ELF_PROBE_STDIO_OFFSETS {
+        offset.store(0, Ordering::SeqCst);
     }
     ELF_PROBE_CWD.store(LINUX_ROOT_DIRECTORY, Ordering::SeqCst);
     ELF_PROBE_EPOLL_DESCRIPTOR.store(0, Ordering::SeqCst);
@@ -4969,6 +4999,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     for descriptor in &ELF_PROBE_DEVICE_DESCRIPTORS {
         devices_closed &= descriptor.swap(0, Ordering::SeqCst) == 0;
     }
+    let mut oci_descriptors_closed = true;
+    for descriptor in &ELF_PROBE_OCI_DESCRIPTORS {
+        oci_descriptors_closed &= descriptor.swap(0, Ordering::SeqCst) == 0;
+    }
     let mut offsets_reset = true;
     for offset in &ELF_PROBE_DESCRIPTOR_OFFSETS {
         offsets_reset &= offset.swap(0, Ordering::SeqCst) == 0;
@@ -4977,6 +5011,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && ELF_PROBE_CONSOLE_CLOEXEC.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_CWD.swap(LINUX_ROOT_DIRECTORY, Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
         && devices_closed
+        && oci_descriptors_closed
         && ELF_PROBE_EPOLL_DESCRIPTOR.swap(0, Ordering::SeqCst) == 0
         && ELF_PROBE_EPOLL_TARGET.swap(u64::MAX, Ordering::SeqCst) == u64::MAX
         && ELF_PROBE_EPOLL_EVENTS.swap(0, Ordering::SeqCst) == 0
@@ -6135,7 +6170,10 @@ extern "sysv64" fn linux_syscall_handler(
             let device = linux_device_descriptor(first_argument);
             if device & LINUX_DEVICE_CONSOLE != 0 {
                 LINUX_ESPIPE
-            } else if linux_regular_file(device).is_some() || linux_tmp_file(device) {
+            } else if linux_oci_entry(first_argument).is_some()
+                || linux_regular_file(device).is_some()
+                || linux_tmp_file(device)
+            {
                 linux_regular_file_seek(first_argument, device, buffer, count)
             } else if device & LINUX_DEVICE_DIRECTORY != 0 {
                 if buffer == 0 && count == 0 {
@@ -6252,6 +6290,8 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_MADVISE_SYSCALL => linux_madvise(first_argument, buffer, count),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
+        LINUX_DUP3_SYSCALL if count == 0 => linux_console_dup2(first_argument, buffer),
+        LINUX_DUP3_SYSCALL => LINUX_EINVAL,
         LINUX_NANOSLEEP_SYSCALL => {
             linux_nanosleep_live_return(registers, syscall_return, first_argument, buffer)
         }
@@ -6583,6 +6623,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_CHDIR_SYSCALL => linux_chdir(first_argument),
         LINUX_FCHDIR_SYSCALL => linux_fchdir(first_argument),
         LINUX_READLINK_SYSCALL => linux_readlink_self(first_argument, buffer, count),
+        LINUX_OPEN_SYSCALL => linux_openat(u64::from(LINUX_AT_FDCWD), first_argument, buffer),
         LINUX_OPENAT_SYSCALL => linux_openat(first_argument, buffer, count),
         LINUX_NEWFSTATAT_SYSCALL => linux_newfstatat(first_argument, buffer, count, register(0)),
         LINUX_UNLINKAT_SYSCALL => linux_unlinkat(first_argument, buffer, count),
@@ -9518,8 +9559,61 @@ fn linux_relative_path_kind(directory: u64, path: &[u8]) -> Result<Option<u16>, 
         .ok_or(LINUX_ENOENT)
 }
 
+fn linux_oci_path(path: &[u8]) -> Option<(u16, Option<ginux_oci::Entry<'static>>)> {
+    if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return None;
+    }
+    let path = path.strip_prefix(b"/").unwrap_or(path);
+    let path = path.strip_suffix(b"/").unwrap_or(path);
+    if path.is_empty() {
+        Some((crate::oci_image::ROOT_HANDLE, None))
+    } else {
+        crate::oci_image::lookup(path).map(|(handle, entry)| (handle, Some(entry)))
+    }
+}
+
+fn linux_oci_descriptor(descriptor: u64) -> u16 {
+    if let Some(handle) = usize::try_from(descriptor)
+        .ok()
+        .and_then(|index| ELF_PROBE_STDIO_OCI_DESCRIPTORS.get(index))
+    {
+        return handle.load(Ordering::SeqCst);
+    }
+    descriptor
+        .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
+        .and_then(|index| ELF_PROBE_OCI_DESCRIPTORS.get(index as usize))
+        .map(|handle| handle.load(Ordering::SeqCst))
+        .unwrap_or(0)
+}
+
+fn linux_oci_entry(descriptor: u64) -> Option<ginux_oci::Entry<'static>> {
+    crate::oci_image::entry(linux_oci_descriptor(descriptor))
+}
+
+fn linux_oci_inode(handle: u16) -> u64 {
+    1024 + u64::from(handle)
+}
+
+fn linux_oci_mode(entry: ginux_oci::Entry<'_>) -> u32 {
+    let kind = match entry.kind {
+        ginux_oci::EntryKind::File => 0o100000,
+        ginux_oci::EntryKind::Directory => 0o040000,
+        ginux_oci::EntryKind::Symlink => 0o120000,
+    };
+    kind | entry.mode & 0o7777
+}
+
+fn linux_oci_stat(handle: u16, entry: Option<ginux_oci::Entry<'_>>) -> [u8; LINUX_STAT_SIZE] {
+    let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_oci_mode);
+    let mut stat = linux_stat(mode, linux_oci_inode(handle));
+    let size = entry.map_or(0, |entry| entry.data.len() as u64);
+    stat[48..56].copy_from_slice(&size.to_ne_bytes());
+    stat[64..72].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
+    stat
+}
+
 fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
-    let mut path = [0_u8; 32];
+    let mut path = [0_u8; 256];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
@@ -9527,7 +9621,14 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
     let path = &path[..path_length];
     let access = flags & 3;
     if access == 3
-        || flags & !(3 | LINUX_O_CLOEXEC | LINUX_O_DIRECTORY | LINUX_O_CREAT | LINUX_O_EXCL) != 0
+        || flags
+            & !(3
+                | LINUX_O_CLOEXEC
+                | LINUX_O_DIRECTORY
+                | LINUX_O_CREAT
+                | LINUX_O_EXCL
+                | LINUX_O_LARGEFILE)
+            != 0
         || flags & LINUX_O_EXCL != 0 && flags & LINUX_O_CREAT == 0
     {
         return LINUX_EINVAL;
@@ -9541,6 +9642,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
     }
     let mut tmp_handle = None;
     let mut tmp_created = false;
+    let mut oci_handle = 0;
     let kind = if tmp_path {
         let existing = linux_tmpfs::open(b"ginux-ready");
         if existing.is_some()
@@ -9559,6 +9661,31 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
             return LINUX_ENOENT;
         }
         LINUX_FILE_TMP_SCRATCH
+    } else if directory as u32 == LINUX_AT_FDCWD {
+        if let Some((handle, entry)) = linux_oci_path(path) {
+            oci_handle = handle;
+            match entry.map(|entry| entry.kind) {
+                None | Some(ginux_oci::EntryKind::Directory) => LINUX_ROOT_MEASURED_DIRECTORY,
+                Some(ginux_oci::EntryKind::File) => LINUX_FILE_ROOT_GENERIC,
+                Some(ginux_oci::EntryKind::Symlink) => return LINUX_EINVAL,
+            }
+        } else {
+            match linux_relative_path_kind(directory, path) {
+                Ok(Some(kind)) => kind,
+                Ok(None) => match path {
+                    b"/dev/null" => 0,
+                    b"/dev/zero" => LINUX_DEVICE_ZERO,
+                    b"/dev/console" | b"/dev/tty" => LINUX_DEVICE_CONSOLE,
+                    path => match linux_root_directory_kind(path)
+                        .or_else(|| linux_runtime_file_kind(path))
+                    {
+                        Some(kind) => kind,
+                        None => return LINUX_ENOENT,
+                    },
+                },
+                Err(error) => return error,
+            }
+        }
     } else {
         match linux_relative_path_kind(directory, path) {
             Ok(Some(kind)) => kind,
@@ -9596,6 +9723,8 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
     };
     ELF_PROBE_DEVICE_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
         .store(state, Ordering::SeqCst);
+    ELF_PROBE_OCI_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+        .store(oci_handle, Ordering::SeqCst);
     ELF_PROBE_TMP_FILE_GENERATIONS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize].store(
         tmp_handle.map_or(0, linux_tmpfs::generation),
         Ordering::SeqCst,
@@ -9613,12 +9742,22 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
     if flags != 0 {
         return LINUX_EINVAL;
     }
-    let mut path = [0_u8; 32];
+    let mut path = [0_u8; 256];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
     };
     let path = &path[..path_length];
+    if directory as u32 == LINUX_AT_FDCWD {
+        if let Some((handle, entry)) = linux_oci_path(path) {
+            let stat = linux_oci_stat(handle, entry);
+            return if copy_to_linux_user(stat_address, &stat) {
+                0
+            } else {
+                LINUX_EFAULT
+            };
+        }
+    }
     let relative_kind = match linux_relative_path_kind(directory, path) {
         Ok(kind) => kind,
         Err(error) => return error,
@@ -9683,12 +9822,21 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
     if flags != 0 || mode & !7 != 0 {
         return LINUX_EINVAL;
     }
-    let mut path = [0_u8; 32];
+    let mut path = [0_u8; 256];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
     };
     let path = &path[..path_length];
+    if directory as u32 == LINUX_AT_FDCWD {
+        if let Some((_, entry)) = linux_oci_path(path) {
+            let permissions = entry.map_or(0o555, |entry| entry.mode);
+            let denied = mode & 4 != 0 && permissions & 0o444 == 0
+                || mode & 2 != 0 && permissions & 0o222 == 0
+                || mode & 1 != 0 && permissions & 0o111 == 0;
+            return if denied { LINUX_EACCES } else { 0 };
+        }
+    }
     let relative_kind = match linux_relative_path_kind(directory, path) {
         Ok(kind) => kind,
         Err(error) => return error,
@@ -9733,12 +9881,31 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
     if flags != 0 || mask & u64::from(LINUX_STATX_RESERVED) != 0 {
         return LINUX_EINVAL;
     }
-    let mut path = [0_u8; 32];
+    let mut path = [0_u8; 256];
     let path_length = match copy_linux_c_string(path_address, &mut path) {
         Ok(length) => length,
         Err(error) => return error,
     };
     let path = &path[..path_length];
+    if directory as u32 == LINUX_AT_FDCWD {
+        if let Some((handle, entry)) = linux_oci_path(path) {
+            let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_oci_mode);
+            let size = entry.map_or(0, |entry| entry.data.len() as u64);
+            let mut stat = [0_u8; 256];
+            stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
+            stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
+            stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
+            stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
+            stat[32..40].copy_from_slice(&linux_oci_inode(handle).to_ne_bytes());
+            stat[40..48].copy_from_slice(&size.to_ne_bytes());
+            stat[48..56].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
+            return if copy_to_linux_user(stat_address, &stat) {
+                0
+            } else {
+                LINUX_EFAULT
+            };
+        }
+    }
     let relative_kind = match linux_relative_path_kind(directory, path) {
         Ok(kind) => kind,
         Err(error) => return error,
@@ -9814,6 +9981,30 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         }
         return 1;
     }
+    if let Some(entry) = linux_oci_entry(descriptor) {
+        if entry.kind == ginux_oci::EntryKind::Directory {
+            return LINUX_EISDIR;
+        }
+        let state = linux_device_descriptor(descriptor);
+        if state & 3 != LINUX_DESCRIPTOR_INPUT {
+            return LINUX_EBADF;
+        }
+        let offset = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
+        let Ok(start) = usize::try_from(offset) else {
+            return 0;
+        };
+        if start >= entry.data.len() || count == 0 {
+            return 0;
+        }
+        let end = start
+            .saturating_add(usize::try_from(count).unwrap_or(usize::MAX))
+            .min(entry.data.len());
+        if !copy_to_linux_user(address, &entry.data[start..end]) {
+            return LINUX_EFAULT;
+        }
+        linux_descriptor_offset(descriptor).store(end as u64, Ordering::SeqCst);
+        return (end - start) as u64;
+    }
     let device = linux_device_descriptor(descriptor);
     if linux_tmp_file(device) {
         return linux_tmp_read(descriptor, device, address, count);
@@ -9862,6 +10053,24 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
 
 fn linux_regular_file_read_at(descriptor: u64, address: u64, count: u64, offset: u64) -> u64 {
     let state = linux_device_descriptor(descriptor);
+    if let Some(entry) = linux_oci_entry(descriptor) {
+        if state & 3 != LINUX_DESCRIPTOR_INPUT {
+            return LINUX_EBADF;
+        }
+        let Ok(start) = usize::try_from(offset) else {
+            return 0;
+        };
+        if start >= entry.data.len() || count == 0 {
+            return 0;
+        }
+        let end = start
+            .saturating_add(usize::try_from(count).unwrap_or(usize::MAX))
+            .min(entry.data.len());
+        if !copy_to_linux_user(address, &entry.data[start..end]) {
+            return LINUX_EFAULT;
+        }
+        return (end - start) as u64;
+    }
     let Some(file) = linux_regular_file(state) else {
         return if linux_descriptor_open(descriptor) {
             LINUX_ESPIPE
@@ -11993,6 +12202,12 @@ fn linux_console_descriptor_open(descriptor: u64) -> bool {
 }
 
 fn linux_device_descriptor(descriptor: u64) -> u16 {
+    if let Some(state) = usize::try_from(descriptor)
+        .ok()
+        .and_then(|index| ELF_PROBE_STDIO_DEVICE_DESCRIPTORS.get(index))
+    {
+        return state.load(Ordering::SeqCst);
+    }
     descriptor
         .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
         .and_then(|index| ELF_PROBE_DEVICE_DESCRIPTORS.get(index as usize))
@@ -12010,10 +12225,17 @@ fn linux_tmp_descriptor_handle(descriptor: u64, state: u16) -> Option<linux_tmpf
     if !linux_tmp_file(state) {
         return None;
     }
-    let index = descriptor.checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)? as usize;
-    let generation = ELF_PROBE_TMP_FILE_GENERATIONS
-        .get(index)?
-        .load(Ordering::SeqCst);
+    let generation = if let Some(generation) = usize::try_from(descriptor)
+        .ok()
+        .and_then(|index| ELF_PROBE_STDIO_TMP_FILE_GENERATIONS.get(index))
+    {
+        generation.load(Ordering::SeqCst)
+    } else {
+        let index = descriptor.checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)? as usize;
+        ELF_PROBE_TMP_FILE_GENERATIONS
+            .get(index)?
+            .load(Ordering::SeqCst)
+    };
     linux_tmpfs::from_generation(generation)
 }
 
@@ -12120,7 +12342,10 @@ fn linux_regular_file_seek(descriptor: u64, state: u16, offset: u64, whence: u64
     let base = match whence {
         0 => 0_i128,
         1 => i128::from(linux_descriptor_offset(descriptor).load(Ordering::SeqCst)),
-        2 => i128::from(linux_file_size(state)),
+        2 => i128::from(
+            linux_oci_entry(descriptor)
+                .map_or_else(|| linux_file_size(state), |entry| entry.data.len() as u64),
+        ),
         _ => return LINUX_EINVAL,
     };
     let next = base + i128::from(offset as i64);
@@ -12191,6 +12416,9 @@ fn linux_tmp_write(descriptor: u64, state: u16, address: u64, count: u64) -> u64
 }
 
 fn linux_descriptor_offset(descriptor: u64) -> &'static AtomicU64 {
+    if descriptor < 2 {
+        return &ELF_PROBE_STDIO_OFFSETS[descriptor as usize];
+    }
     &ELF_PROBE_DESCRIPTOR_OFFSETS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
 }
 
@@ -12227,16 +12455,25 @@ fn linux_descriptor_close(descriptor: u64) -> u64 {
 }
 
 fn linux_close_all_descriptors() -> bool {
-    for descriptor in 0..LINUX_AUX_DESCRIPTOR_LIMIT {
+    for descriptor in 0..LINUX_DESCRIPTOR_TABLE_LIMIT {
         if linux_descriptor_open(descriptor) && linux_descriptor_close(descriptor) != 0 {
             return false;
         }
     }
-    (0..LINUX_AUX_DESCRIPTOR_LIMIT).all(|descriptor| !linux_descriptor_open(descriptor))
+    (0..LINUX_DESCRIPTOR_TABLE_LIMIT).all(|descriptor| !linux_descriptor_open(descriptor))
 }
 
 fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 {
-    if !(LINUX_AUX_DESCRIPTOR_FIRST..LINUX_AUX_DESCRIPTOR_LIMIT).contains(&descriptor) {
+    if descriptor < 2 && linux_device_descriptor(descriptor) != 0 {
+        let index = descriptor as usize;
+        ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_STDIO_OFFSETS[index].store(0, Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << descriptor), Ordering::SeqCst);
+        return 0;
+    }
+    if !(LINUX_AUX_DESCRIPTOR_FIRST..LINUX_DESCRIPTOR_TABLE_LIMIT).contains(&descriptor) {
         return linux_console_close(descriptor);
     }
     if linux_epoll_descriptor(descriptor) {
@@ -12302,6 +12539,8 @@ fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 
     {
         return LINUX_EBADF;
     }
+    ELF_PROBE_OCI_DESCRIPTORS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
+        .store(0, Ordering::SeqCst);
     ELF_PROBE_TMP_FILE_GENERATIONS[(descriptor - LINUX_AUX_DESCRIPTOR_FIRST) as usize]
         .store(0, Ordering::SeqCst);
     linux_descriptor_offset(descriptor).store(0, Ordering::SeqCst);
@@ -12364,7 +12603,29 @@ fn linux_console_dup(descriptor: u64) -> u64 {
 
 fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool) -> u64 {
     if minimum >= 2 {
-        return LINUX_EINVAL;
+        if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+            return LINUX_EINVAL;
+        }
+        let state = linux_console_descriptor(descriptor);
+        if state == 0 || minimum >= LINUX_DESCRIPTOR_TABLE_LIMIT {
+            return if state == 0 {
+                LINUX_EBADF
+            } else {
+                LINUX_EINVAL
+            };
+        }
+        let Some(target) =
+            (minimum..LINUX_DESCRIPTOR_TABLE_LIMIT).find(|target| !linux_descriptor_open(*target))
+        else {
+            return LINUX_EMFILE;
+        };
+        let index = (target - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+        ELF_PROBE_DEVICE_DESCRIPTORS[index]
+            .store(LINUX_DEVICE_CONSOLE | u16::from(state), Ordering::SeqCst);
+        if close_on_exec {
+            ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << target, Ordering::SeqCst);
+        }
+        return target;
     }
     loop {
         let current = ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst);
@@ -12401,6 +12662,35 @@ fn linux_console_dup_at_least(descriptor: u64, minimum: u64, close_on_exec: bool
 }
 
 fn linux_console_dup2(source: u64, target: u64) -> u64 {
+    let device = linux_device_descriptor(source);
+    if device != 0 && target < 2 {
+        if source == target {
+            return target;
+        }
+        if linux_descriptor_open(target) && linux_descriptor_close(target) != 0 {
+            return LINUX_EBADF;
+        }
+        let source_offset = linux_descriptor_offset(source).load(Ordering::SeqCst);
+        let source_oci = linux_oci_descriptor(source);
+        let source_tmp = source
+            .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
+            .and_then(|index| ELF_PROBE_TMP_FILE_GENERATIONS.get(index as usize))
+            .map(|generation| generation.load(Ordering::SeqCst))
+            .unwrap_or(0);
+        let index = target as usize;
+        if device & LINUX_DEVICE_CONSOLE != 0 {
+            let shift = target * 2;
+            ELF_PROBE_CONSOLE_DESCRIPTORS.fetch_or((device as u8 & 3) << shift, Ordering::SeqCst);
+            ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << target), Ordering::SeqCst);
+            return target;
+        }
+        ELF_PROBE_STDIO_DEVICE_DESCRIPTORS[index].store(device, Ordering::SeqCst);
+        ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].store(source_oci, Ordering::SeqCst);
+        ELF_PROBE_STDIO_TMP_FILE_GENERATIONS[index].store(source_tmp, Ordering::SeqCst);
+        ELF_PROBE_STDIO_OFFSETS[index].store(source_offset, Ordering::SeqCst);
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_and(!(1 << target), Ordering::SeqCst);
+        return target;
+    }
     if source >= 2 || target >= 2 {
         return LINUX_EBADF;
     }
@@ -12428,6 +12718,40 @@ fn linux_console_dup2(source: u64, target: u64) -> u64 {
             return target;
         }
     }
+}
+
+fn linux_device_dup_at_least(source: u64, minimum: u64, close_on_exec: bool) -> u64 {
+    let state = linux_device_descriptor(source);
+    if state == 0 || minimum >= LINUX_DESCRIPTOR_TABLE_LIMIT {
+        return if state == 0 {
+            LINUX_EBADF
+        } else {
+            LINUX_EINVAL
+        };
+    }
+    let Some(target) = (minimum..LINUX_DESCRIPTOR_TABLE_LIMIT)
+        .find(|descriptor| !linux_descriptor_open(*descriptor))
+    else {
+        return LINUX_EMFILE;
+    };
+    let source_oci = linux_oci_descriptor(source);
+    let source_tmp = source
+        .checked_sub(LINUX_AUX_DESCRIPTOR_FIRST)
+        .and_then(|index| ELF_PROBE_TMP_FILE_GENERATIONS.get(index as usize))
+        .map(|generation| generation.load(Ordering::SeqCst))
+        .unwrap_or(0);
+    let target_index = (target - LINUX_AUX_DESCRIPTOR_FIRST) as usize;
+    ELF_PROBE_DEVICE_DESCRIPTORS[target_index].store(state, Ordering::SeqCst);
+    ELF_PROBE_OCI_DESCRIPTORS[target_index].store(source_oci, Ordering::SeqCst);
+    ELF_PROBE_TMP_FILE_GENERATIONS[target_index].store(source_tmp, Ordering::SeqCst);
+    linux_descriptor_offset(target).store(
+        linux_descriptor_offset(source).load(Ordering::SeqCst),
+        Ordering::SeqCst,
+    );
+    if close_on_exec {
+        ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << target, Ordering::SeqCst);
+    }
+    target
 }
 
 fn linux_console_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
@@ -12560,6 +12884,12 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
         return linux_console_fcntl(descriptor, command, argument);
     }
     match command {
+        LINUX_F_DUPFD if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) => {
+            linux_device_dup_at_least(descriptor, argument, false)
+        }
+        LINUX_F_DUPFD_CLOEXEC if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) => {
+            linux_device_dup_at_least(descriptor, argument, true)
+        }
         LINUX_F_GETFD => {
             u64::from((ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst) >> descriptor) & 1)
         }
@@ -12601,7 +12931,69 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     let mut entries = [0_u8; 256];
     let mut used = 0_usize;
     let next_offset;
-    if let Some(directory) = linux_measured_directory_path(state) {
+    let oci_directory = linux_oci_descriptor(descriptor);
+    if oci_directory != 0 {
+        let initial = offset == 0;
+        let mut cursor = if initial {
+            0
+        } else {
+            let Some(cursor) = offset
+                .checked_sub(2)
+                .and_then(|cursor| usize::try_from(cursor).ok())
+            else {
+                return LINUX_EINVAL;
+            };
+            cursor
+        };
+        if initial {
+            for (inode, next, name) in [
+                (linux_oci_inode(oci_directory), 1_i64, &b"."[..]),
+                (
+                    linux_oci_inode(crate::oci_image::ROOT_HANDLE),
+                    2,
+                    &b".."[..],
+                ),
+            ] {
+                if !append_linux_dirent(&mut entries, &mut used, inode, next, 4, name) {
+                    return LINUX_EINVAL;
+                }
+            }
+        }
+        loop {
+            let Some(child) = crate::oci_image::next_child(oci_directory, cursor) else {
+                return LINUX_EINVAL;
+            };
+            let Some(child) = child else {
+                break;
+            };
+            let kind = match child.entry.kind {
+                ginux_oci::EntryKind::Directory => 4,
+                ginux_oci::EntryKind::File => 8,
+                ginux_oci::EntryKind::Symlink => 10,
+            };
+            let Ok(next) = i64::try_from(child.next_cursor + 2) else {
+                return LINUX_EINVAL;
+            };
+            if !append_linux_dirent(
+                &mut entries,
+                &mut used,
+                linux_oci_inode(child.handle),
+                next,
+                kind,
+                child.name,
+            ) {
+                if used == 0 {
+                    return LINUX_EINVAL;
+                }
+                break;
+            }
+            cursor = child.next_cursor;
+        }
+        if used == 0 {
+            return 0;
+        }
+        next_offset = u64::try_from(cursor + 2).unwrap_or(u64::MAX);
+    } else if let Some(directory) = linux_measured_directory_path(state) {
         let directory_inode = linux_root_directory_inode(state).unwrap_or(0);
         let parent_inode = if directory.is_empty() {
             directory_inode
@@ -12826,6 +13218,9 @@ fn append_linux_dirent(
 fn linux_resource_limit(resource: u64) -> Option<[u8; 16]> {
     let value = match resource {
         LINUX_RLIMIT_STACK => PAGE_SIZE as u64,
+        LINUX_RLIMIT_NOFILE if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) => {
+            LINUX_DESCRIPTOR_TABLE_LIMIT
+        }
         LINUX_RLIMIT_NOFILE => LINUX_AUX_DESCRIPTOR_LIMIT,
         _ => return None,
     };
@@ -12851,6 +13246,13 @@ fn linux_descriptor_stat(descriptor: u64) -> Option<[u8; LINUX_STAT_SIZE]> {
         || linux_timerfd_descriptor(descriptor)
     {
         return Some(linux_stat(LINUX_STAT_ANONYMOUS_MODE, 4));
+    }
+    let oci_handle = linux_oci_descriptor(descriptor);
+    if oci_handle != 0 {
+        let entry = (oci_handle != crate::oci_image::ROOT_HANDLE)
+            .then(|| crate::oci_image::entry(oci_handle))
+            .flatten();
+        return Some(linux_oci_stat(oci_handle, entry));
     }
     let device = linux_device_descriptor(descriptor);
     (device != 0).then(|| {

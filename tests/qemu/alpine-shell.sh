@@ -54,8 +54,17 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     printf '%s\n' \
         'container start alpine --attach'
     wait_for 'ginux: entering Alpine /bin/sh through musl'
-    printf '%s\n' "printf 'MUSL_RUNTIME_OK\\n'"
+    printf '%s\n' \
+        "printf 'MUSL_RUNTIME_OK\\n'" \
+        "while IFS= read -r line; do echo \"\$line\"; done < /etc/os-release" \
+        'echo /*' \
+        'echo /etc/os-*' \
+        'pwd' \
+        "printf 'OCI_FILESYSTEM_OK\\n'"
     wait_for_line 'MUSL_RUNTIME_OK'
+    wait_for_line 'NAME="Alpine Linux"'
+    wait_for_line '/'
+    wait_for_line 'OCI_FILESYSTEM_OK'
     printf '%s\n' 'exit 0'
     wait_for 'ginux: Alpine /bin/sh exited cleanly'
     wait_for 'ginux> '
@@ -89,6 +98,8 @@ qemu_pid=""
 for expected in \
     'ginux: entering Alpine /bin/sh through musl' \
     'MUSL_RUNTIME_OK' \
+    'NAME="Alpine Linux"' \
+    'OCI_FILESYSTEM_OK' \
     'ginux: Alpine /bin/sh exited cleanly' \
     'GINUX_KERNEL_OK'; do
     if ! grep -Fq "$expected" "$output_file"; then
@@ -98,4 +109,11 @@ for expected in \
     fi
 done
 
-echo "Alpine musl shell execution test passed."
+if ! grep -Eq '(^|[[:space:]])/bin([[:space:]]|$)' "$output_file" \
+    || ! grep -Eq '(^|[[:space:]])/etc/os-release([[:space:]]|$)' "$output_file"; then
+    tail -n 120 "$output_file"
+    echo "Alpine shell test failed: OCI directory contents were not listed." >&2
+    exit 1
+fi
+
+echo "Alpine musl shell and OCI filesystem test passed."

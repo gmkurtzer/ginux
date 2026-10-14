@@ -33,6 +33,14 @@ pub struct Rootfs<'a> {
     entry_count: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Child<'a> {
+    pub index: usize,
+    pub next_cursor: usize,
+    pub entry: Entry<'a>,
+    pub name: &'a [u8],
+}
+
 impl<'a> Rootfs<'a> {
     pub fn parse(bytes: &'a [u8]) -> Option<Self> {
         let mut offset = 0_usize;
@@ -65,18 +73,80 @@ impl<'a> Rootfs<'a> {
     }
 
     pub fn find(&self, path: &[u8]) -> Option<Entry<'a>> {
-        if !valid_path(path) {
+        self.find_index(path).map(|(_, entry)| entry)
+    }
+
+    pub fn entry(&self, wanted: usize) -> Option<Entry<'a>> {
+        if wanted >= self.entry_count {
             return None;
         }
         let mut offset = 0;
-        for _ in 0..self.entry_count {
+        for index in 0..self.entry_count {
             let (entry, next) = parse_entry(self.bytes, offset)?;
-            if entry_path_matches(entry, path) {
+            if index == wanted {
                 return Some(entry);
             }
             offset = next;
         }
         None
+    }
+
+    pub fn find_index(&self, path: &[u8]) -> Option<(usize, Entry<'a>)> {
+        if !valid_path(path) {
+            return None;
+        }
+        let mut offset = 0;
+        for index in 0..self.entry_count {
+            let (entry, next) = parse_entry(self.bytes, offset)?;
+            if entry_path_matches(entry, path) {
+                return Some((index, entry));
+            }
+            offset = next;
+        }
+        None
+    }
+
+    pub fn next_child(&self, parent: &[u8], cursor: usize) -> Option<Option<Child<'a>>> {
+        if !parent.is_empty() && !valid_path(parent) || cursor > self.entry_count {
+            return None;
+        }
+        let mut offset = 0;
+        for index in 0..self.entry_count {
+            let (entry, next) = parse_entry(self.bytes, offset)?;
+            offset = next;
+            if index < cursor {
+                continue;
+            }
+            let mut full_path = [0_u8; TAR_PREFIX_SIZE + 1 + TAR_NAME_SIZE];
+            let length = copy_entry_path(entry, &mut full_path)?;
+            let path = &full_path[..length];
+            let remainder = if parent.is_empty() {
+                path
+            } else {
+                let Some(remainder) = path.strip_prefix(parent) else {
+                    continue;
+                };
+                let Some(remainder) = remainder.strip_prefix(b"/") else {
+                    continue;
+                };
+                remainder
+            };
+            if remainder.is_empty() || remainder.contains(&b'/') {
+                continue;
+            }
+            let name = entry.path.rsplit(|byte| *byte == b'/').next()?;
+            return Some(Some(Child {
+                index,
+                next_cursor: index + 1,
+                entry,
+                name,
+            }));
+        }
+        Some(None)
+    }
+
+    pub fn copy_path(&self, index: usize, output: &mut [u8]) -> Option<usize> {
+        copy_entry_path(self.entry(index)?, output)
     }
 }
 
@@ -140,6 +210,20 @@ fn entry_path_matches(entry: Entry<'_>, wanted: &[u8]) -> bool {
             && wanted[entry.prefix.len()] == b'/'
             && &wanted[entry.prefix.len() + 1..] == entry.path
     }
+}
+
+fn copy_entry_path(entry: Entry<'_>, output: &mut [u8]) -> Option<usize> {
+    let length = entry.prefix.len() + usize::from(!entry.prefix.is_empty()) + entry.path.len();
+    let output = output.get_mut(..length)?;
+    let mut used = 0;
+    if !entry.prefix.is_empty() {
+        output[..entry.prefix.len()].copy_from_slice(entry.prefix);
+        used = entry.prefix.len();
+        output[used] = b'/';
+        used += 1;
+    }
+    output[used..].copy_from_slice(entry.path);
+    Some(length)
 }
 
 fn terminated(field: &[u8]) -> Option<&[u8]> {

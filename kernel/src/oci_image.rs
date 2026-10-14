@@ -1,6 +1,17 @@
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use ginux_oci::{Entry, EntryKind, Rootfs};
 
+pub(crate) const ROOT_HANDLE: u16 = 1;
+const ENTRY_HANDLE_BASE: usize = 2;
+const PATH_CAPACITY: usize = 256;
+
+pub(crate) struct Child {
+    pub(crate) next_cursor: usize,
+    pub(crate) handle: u16,
+    pub(crate) entry: Entry<'static>,
+    pub(crate) name: &'static [u8],
+}
+
 const ALPINE_ROOTFS_SHA256: [u8; 32] = [
     0x74, 0xd9, 0x7c, 0x42, 0x8c, 0x51, 0xa8, 0x28, 0xf9, 0x05, 0x1a, 0x7a, 0x40, 0xa5, 0x3f, 0xf1,
     0xfc, 0x99, 0xe5, 0x4f, 0xc3, 0x03, 0x23, 0xce, 0x36, 0x76, 0x07, 0x01, 0xb0, 0xb7, 0xf7, 0x11,
@@ -94,6 +105,10 @@ pub(crate) fn install_alpine_rootfs(bytes: &'static [u8]) -> bool {
 }
 
 pub(crate) fn file(path: &[u8]) -> Option<Entry<'static>> {
+    rootfs()?.find(path)
+}
+
+fn rootfs() -> Option<Rootfs<'static>> {
     if !INSTALLED.load(Ordering::Acquire) {
         return None;
     }
@@ -105,7 +120,88 @@ pub(crate) fn file(path: &[u8]) -> Option<Entry<'static>> {
     // SAFETY: installation records an immutable slice embedded in the loaded
     // EFI image. The image remains mapped and read-only for the kernel lifetime.
     let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, size) };
-    Rootfs::parse(bytes)?.find(path)
+    Rootfs::parse(bytes)
+}
+
+pub(crate) fn lookup(path: &[u8]) -> Option<(u16, Entry<'static>)> {
+    let path = path.strip_prefix(b"/").unwrap_or(path);
+    let path = path.strip_suffix(b"/").unwrap_or(path);
+    if path.is_empty() {
+        return None;
+    }
+    let rootfs = rootfs()?;
+    let mut current = [0_u8; PATH_CAPACITY];
+    current.get_mut(..path.len())?.copy_from_slice(path);
+    let mut length = path.len();
+    for _ in 0..8 {
+        let (index, entry) = rootfs.find_index(&current[..length])?;
+        if entry.kind != EntryKind::Symlink {
+            let handle = u16::try_from(index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
+            return Some((handle, entry));
+        }
+        let mut source = [0_u8; PATH_CAPACITY];
+        source[..length].copy_from_slice(&current[..length]);
+        length = resolve_link(&source[..length], entry.link, &mut current)?;
+    }
+    None
+}
+
+pub(crate) fn entry(handle: u16) -> Option<Entry<'static>> {
+    let index = usize::from(handle).checked_sub(ENTRY_HANDLE_BASE)?;
+    rootfs()?.entry(index)
+}
+
+pub(crate) fn next_child(directory: u16, cursor: usize) -> Option<Option<Child>> {
+    let rootfs = rootfs()?;
+    let mut parent = [0_u8; PATH_CAPACITY];
+    let parent_length = if directory == ROOT_HANDLE {
+        0
+    } else {
+        let index = usize::from(directory).checked_sub(ENTRY_HANDLE_BASE)?;
+        rootfs.copy_path(index, &mut parent)?
+    };
+    let child = rootfs.next_child(&parent[..parent_length], cursor)?;
+    Some(child.and_then(|child| {
+        let handle = u16::try_from(child.index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
+        Some(Child {
+            next_cursor: child.next_cursor,
+            handle,
+            entry: child.entry,
+            name: child.name,
+        })
+    }))
+}
+
+fn resolve_link(path: &[u8], link: &[u8], output: &mut [u8]) -> Option<usize> {
+    let mut length = if link.starts_with(b"/") {
+        0
+    } else {
+        path.iter().rposition(|byte| *byte == b'/').unwrap_or(0)
+    };
+    if length != 0 {
+        output.get_mut(..length)?.copy_from_slice(&path[..length]);
+    }
+    for component in link.split(|byte| *byte == b'/') {
+        if component.is_empty() || component == b"." {
+            continue;
+        }
+        if component == b".." {
+            length = output[..length]
+                .iter()
+                .rposition(|byte| *byte == b'/')
+                .unwrap_or(0);
+            continue;
+        }
+        if length != 0 {
+            *output.get_mut(length)? = b'/';
+            length += 1;
+        }
+        output
+            .get_mut(length..length.checked_add(component.len())?)?
+            .copy_from_slice(component);
+        length += component.len();
+    }
+    (length != 0).then_some(length)
 }
 
 pub(crate) fn alpine_shell_plan(
