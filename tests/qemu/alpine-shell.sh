@@ -43,6 +43,23 @@ wait_for_line() {
     return 1
 }
 
+wait_for_count() {
+    local marker=$1
+    local expected=$2
+    for _ in {1..60}; do
+        local observed
+        observed=$(grep -Fc "$marker" "$output_file" || true)
+        [[ "$observed" -ge "$expected" ]] && return 0
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
+            break
+        fi
+        sleep 1
+    done
+    tail -n 120 "$output_file" >&2
+    echo "Alpine shell test failed while waiting for $expected occurrences of '$marker'." >&2
+    return 1
+}
+
 dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
 {
     wait_for 'ginux> '
@@ -79,8 +96,25 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'FORK_EXEC_OK'
     wait_for_line 'OCI_FILESYSTEM_OK'
     printf '%s\n' 'exit 0'
-    wait_for 'ginux: OCI init exited cleanly'
-    wait_for 'ginux> '
+    wait_for_count 'ginux: OCI init exited cleanly' 1
+    wait_for_count 'ginux> ' 2
+    printf '%s\n' 'container start alpine --attach'
+    wait_for_count 'ginux: entering configured OCI init' 2
+    printf '%s\n' \
+        "printf 'OCI_RESTART_OK\\n'" \
+        '/bin/ls /etc/os-release' \
+        'exit 0'
+    wait_for_line 'OCI_RESTART_OK'
+    wait_for_count 'ginux: OCI init exited cleanly' 2
+    wait_for_count 'ginux> ' 3
+    printf '%s\n' \
+        'container set alpine init=/missing' \
+        'container start alpine --attach'
+    wait_for 'ginux: OCI init execution failed; container marked failed'
+    wait_for_count 'ginux> ' 4
+    printf '%s\n' 'container status alpine'
+    wait_for_line 'alpine: failed'
+    wait_for_count 'ginux> ' 5
     printf '%s\n' 'shutdown'
 } | GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
@@ -118,6 +152,9 @@ for expected in \
     '/etc' \
     'FORK_EXEC_OK' \
     'OCI_FILESYSTEM_OK' \
+    'OCI_RESTART_OK' \
+    'ginux: OCI init execution failed; container marked failed' \
+    'alpine: failed' \
     'ginux: OCI init exited cleanly' \
     'GINUX_KERNEL_OK'; do
     if ! grep -Fq "$expected" "$output_file"; then
@@ -127,6 +164,13 @@ for expected in \
     fi
 done
 
+if [[ $(grep -Fc 'ginux: entering configured OCI init' "$output_file") -ne 3 ]] \
+    || [[ $(grep -Fc 'ginux: OCI init exited cleanly' "$output_file") -ne 2 ]]; then
+    tail -n 120 "$output_file"
+    echo "Alpine shell test failed: restart lifecycle counts were incorrect." >&2
+    exit 1
+fi
+
 if ! grep -Eq '(^|[[:space:]])/bin([[:space:]]|$)' "$output_file" \
     || ! grep -Eq '(^|[[:space:]])/etc/os-release([[:space:]]|$)' "$output_file"; then
     tail -n 120 "$output_file"
@@ -134,4 +178,4 @@ if ! grep -Eq '(^|[[:space:]])/bin([[:space:]]|$)' "$output_file" \
     exit 1
 fi
 
-echo "Alpine OCI shell and filesystem test passed."
+echo "Alpine OCI shell, restart, and failure-containment test passed."

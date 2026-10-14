@@ -3649,11 +3649,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 let mut init = [0_u8; control_abi::CONTAINER_MAX_INIT_SIZE];
                 let Some(init_size) = arch::x86_64::cpu::configured_container_init(&mut init)
                 else {
-                    kernel_fail("ginux: configured OCI init unavailable\r\n");
+                    serial_write(
+                        "ginux: configured OCI init unavailable; container marked failed\r\n",
+                    );
+                    arch::x86_64::cpu::fail_configured_container();
+                    break;
                 };
                 serial_write("ginux: entering configured OCI init\r\n");
                 if !address_space::run_oci_process(&init[..init_size]) {
-                    kernel_fail("ginux: OCI init execution failed\r\n");
+                    serial_write("ginux: OCI init execution failed; container marked failed\r\n");
+                    arch::x86_64::cpu::fail_configured_container();
+                    break;
                 }
                 serial_write("ginux: OCI init exited cleanly\r\n");
             } else if !linux_elf::verify_mapped_system_init_plan(

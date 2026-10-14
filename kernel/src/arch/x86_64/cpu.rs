@@ -2614,6 +2614,10 @@ pub(crate) fn take_container_host_shutdown_request() -> bool {
     CONTAINER_HOST_SHUTDOWN_REQUESTED.swap(false, Ordering::SeqCst)
 }
 
+pub(crate) fn fail_configured_container() {
+    CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+}
+
 pub(crate) fn enable_container_management() -> bool {
     CONTAINER_MANAGEMENT_ENABLED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -4779,6 +4783,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             }
         }
         let completed = ELF_PROBE_COMPLETED.swap(false, Ordering::SeqCst);
+        let mmap_released = release_linux_runtime_mmaps(execution.mmap as u64);
         let descriptors_closed = linux_close_all_descriptors();
         let registry_finished = linux_process::finish_live_process_registry();
         let mount_deactivated = linux_mount::deactivate_initial();
@@ -4788,6 +4793,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         LINUX_RUNTIME_MODE.store(false, Ordering::SeqCst);
         if !(forks_completed
             && completed
+            && mmap_released
             && descriptors_closed
             && registry_finished
             && mount_deactivated
@@ -4799,6 +4805,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
             for valid in [
                 forks_completed,
                 completed,
+                mmap_released,
                 descriptors_closed,
                 registry_finished,
                 mount_deactivated,
@@ -4814,6 +4821,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         return LinuxElfResult {
             valid: forks_completed
                 && completed
+                && mmap_released
                 && descriptors_closed
                 && registry_finished
                 && mount_deactivated
@@ -7804,6 +7812,30 @@ fn linux_mmap_unmap_and_release_slots(start_slot: usize, pages: usize) -> bool {
         linux_mmap_clear_slot_lease(slot);
     }
     true
+}
+
+fn release_linux_runtime_mmaps(expected_base: u64) -> bool {
+    let address_valid = ELF_PROBE_MMAP.load(Ordering::SeqCst) == expected_base;
+    let mut areas_released = true;
+    for (start_slot, pages) in ELF_PROBE_MMAP_PAGES.iter().enumerate() {
+        let pages = usize::from(pages.load(Ordering::SeqCst));
+        if pages == 0 {
+            continue;
+        }
+        areas_released &= pages <= LINUX_RUNTIME_MMAP_SLOT_COUNT - start_slot
+            && linux_mmap_unmap_and_release_slots(start_slot, pages);
+    }
+
+    let mut leases_released = true;
+    for (slot, pages) in ELF_PROBE_MMAP_PAGES.iter().enumerate() {
+        pages.store(0, Ordering::SeqCst);
+        ELF_PROBE_MMAP_PROTECTION[slot].store(0, Ordering::SeqCst);
+        ELF_PROBE_MMAP_FILE[slot].store(0, Ordering::SeqCst);
+        leases_released &= ELF_PROBE_MMAP_FRAMES[slot].load(Ordering::SeqCst) == 0
+            && ELF_PROBE_MMAP_GENERATIONS[slot].load(Ordering::SeqCst) == 0;
+    }
+    let address_cleared = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == expected_base;
+    address_valid && address_cleared && areas_released && leases_released
 }
 
 fn linux_mmap_slot_occupied(slot: usize) -> bool {
