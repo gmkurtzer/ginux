@@ -156,6 +156,8 @@ check: manifest architecture-check
 	@cargo test --package ginux-command
 	@cargo clippy --package ginux-oci -- -D warnings
 	@cargo test --package ginux-oci
+	@cargo clippy --package ginux-image-store -- -D warnings
+	@cargo test --package ginux-image-store
 	@cargo clippy --package ginux-controller-runtime --target x86_64-unknown-none -- -D warnings
 	@cargo clippy --package ginux-protocol-state -- -D warnings
 	@cargo test --package ginux-protocol-state

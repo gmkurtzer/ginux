@@ -127,6 +127,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-image-store"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "ginux-kernel"
 version = "0.1.0"
 dependencies = [
