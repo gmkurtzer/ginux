@@ -1,1469 +1,292 @@
 # Ginux
 
-Ginux is an immutable, capability-secure, container-native operating system for AI infrastructure. One unified EFI image contains the kernel, boot-required modules, and an embedded controller that executes in ring 3. The host has no conventional distribution; it exists to boot and manage strongly isolated Linux system containers. The first product compatibility benchmark is Rocky Linux 10 x86-64 running systemd as container PID 1.
+**An operating system built around containers, not retrofitted with them.**
 
-See [Architecture](ARCHITECTURE.md) for the design, the
-[Linux Compatibility Matrix](docs/LINUX-COMPATIBILITY.md) for the syscall and
-userspace ABI ledger, and the [Verification Roadmap](docs/ROADMAP.md) for the
-hard implementation-and-review checkpoints.
+Ginux is an experimental, immutable host OS designed to run familiar Linux
+userspaces directly on hardware without a conventional host distribution and
+without a guest kernel for every container.
 
-## Run the C2 configured-container checkpoint
+The kernel provides the mechanisms that must be shared and trusted: CPU
+scheduling, memory isolation, capabilities, IPC, interrupts, device access,
+and container-facing kernel objects. Everything else is divided into explicit
+security domains. A small controller runs in ring 3, services receive only the
+authority they need, and each container gets its own process, filesystem,
+device, network, and identity views.
 
-On macOS with QEMU installed:
+The long-term goal is a host that can run different **userspace personalities**
+side by side. Linux is the first and primary personality. A future BSD
+personality, for example, could run in another domain on the same kernel while
+sharing the same underlying isolation, scheduling, storage, and device
+mechanisms.
 
-```sh
-make doctor
-make run
+Ginux is currently a research and engineering prototype. It boots, runs its
+native controller and isolated services, and executes an unmodified Alpine
+Linux userspace in QEMU. It does not yet provide complete Linux compatibility,
+boot Rocky Linux with systemd, or implement a second userspace personality.
+
+## Why Ginux?
+
+- **Containers are the host abstraction.** There is no general-purpose host
+  distribution competing with workloads for authority, updates, or attack
+  surface.
+- **Isolation is native.** Domains and capabilities are the security boundary;
+  Linux namespaces and UID 0 are compatibility views inside that boundary.
+- **The booted system is fixed.** One EFI image carries the kernel, required
+  components, controller, and recovery metadata. Runtime authority cannot
+  exceed the envelope established at boot.
+- **Failures have owners.** Services, devices, memory, and outstanding work are
+  tied to domain generations so they can be revoked and cleaned up together.
+- **Compatibility lives at the edge.** Applications see the userspace ABI they
+  expect while the host remains purpose-built.
+- **Fast paths stay fast.** Protected control paths establish authority; shared
+  memory, batching, and hardware queues carry authorized data directly.
+
+## The model
+
+```text
++------------------------------------------------------------------+
+| Linux domain             | Future userspace personality domain   |
+| Alpine / Rocky / apps    | e.g. a selected BSD userspace         |
++------------------------------------------------------------------+
+| Personality contracts: syscalls, ELF, processes, VFS, devices    |
++------------------------------------------------------------------+
+| Ring-3 controller        | Isolated native services              |
+| lifecycle and policy     | storage, network, protocol, crypto    |
++------------------------------------------------------------------+
+| Ginux kernel                                                    |
+| scheduling | memory | capabilities | IPC | domains | IOMMU       |
++------------------------------------------------------------------+
+| UEFI firmware and x86-64 hardware                               |
++------------------------------------------------------------------+
 ```
 
-Wait for the `ginux>` prompt, create a runtime container with `container new
-default`, then use `container start default`, `ps`, `ls /proc`, and the remaining lifecycle
-commands. The
-initial boot performs the existing hardware and isolation proof suite before
-presenting the controller. Run `make test-c2` for the automated gate. See the
-[C2 verification guide](docs/checkpoints/C2.md).
+This is a logical layout, not a requirement that every byte cross every
+layer. Control operations remain capability checked. Once authorized, data may
+move through shared pages or device queues without repeatedly traversing the
+controller.
 
-Ginux is licensed under the [Apache License, Version 2.0](LICENSE). See
-[NOTICE](NOTICE) for attribution information.
+## Domains: the unit of separation
 
-The first M6 storage primitive is a canonical two-sector persistent-volume
-record. It preserves the older generation while preparing and flushing an
-inactive slot, writes the commit marker last, and accepts the new generation
-only after the final flush. Its canonical encoder/decoder is now a shared
-`no_std` crate. The complete two-slot transaction/recovery engine is a second
-`no_std` crate depending only on that format and a whole-sector block trait;
-the kernel backend now consumes both, and the isolated service can consume the
-same engine without kernel internals. Every QEMU boot proves recovery at all five commit
-stages, rejects partial commit markers and corrupt records, falls back to the
-older valid slot, and fails closed on generation exhaustion or ambiguity. See
-[Persistent Volume Record v0](specs/kernel/persistent-volume-v0.md).
-Control ABI v4 operation 18 exposes the live reference volume through signed
-object 6. A write-only ring-3 service commits generation one and is then
-faulted; its authority and address space are retired while the volume remains.
-A fresh read-only service recovers the exact payload, cannot mutate it, and
-also loses its attenuated handle at exit. This proves service-restart
-persistence and authority separation; that live service path still uses its
-in-memory reference backend. See
-[Persistent Volume Service v0](specs/kernel/volume-service-v0.md).
-The next M6 layer attaches a deterministic 1 MiB modern virtio-blk function
-and performs bounded, read-only PCI configuration discovery. Every boot
-validates its common, notification, ISR, and device capabilities and rejects
-malformed copied configurations without enabling MMIO, bus mastering, DMA, or
-queues. Discovery also requires one disabled MSI-X capability, validates its
-vector count and memory-BAR-backed table and pending-bit ranges, and rejects
-malformed interrupt metadata without mapping or programming it. See
-[PCI Virtio Block Discovery v0](specs/kernel/pci-virtio-block-v0.md).
-The authoritative Q35 profile now also exposes one modern virtio-net function
-at `00:03.0`. The kernel validates its copied PCI capability chain and malformed
-variants without mapping a network BAR or touching device MMIO. OVMF leaves
-PCI decoding and bus mastering enabled, so the kernel explicitly clears all
-three command bits before physical-memory initialization and requires them to
-remain clear.
-The DMAR scope must resolve the network endpoint exactly. See
-[PCI Virtio Network Discovery v0](specs/kernel/pci-virtio-network-v0.md).
-After that authority boundary is established, the common-configuration page
-and a read-only device-configuration page are mapped supervisor-only, uncached,
-and non-executable. The kernel resets the device, accepts exactly `VERSION_1`,
-`ACCESS_PLATFORM`, `MAC`, and `MRG_RXBUF`, verifies three available queues,
-reads the pinned MAC through a stable configuration-generation snapshot, and
-validates the receive/transmit queue sizes and notification offsets without mapping the
-notification page. Both queues must remain disabled, interrupt-unbound, and
-free of DMA addresses before the device is reset again with all PCI decoding
-disabled.
-No queue, interrupt, DMA lease, packet traffic, or service delegation remains
-active. A subsequent construction proof allocates one zeroed page with exact
-eight-entry RX/TX rings and 1536-byte packet buffers, encodes only that page and
-PCI source `00:03.0` in a fresh six-frame VT-d hierarchy, and then scrubs the
-inactive hierarchy and DMA lease. Translation and bus mastering stay disabled
-throughout. See
-[Virtio Network DMA Confinement v0](specs/kernel/virtio-network-dma-v0.md).
-See [Virtio Network Initialization v0](specs/kernel/virtio-network-init-v0.md).
-The notification capability and exact MSI-X table/PBA span are then added as
-separate writable, uncached, NX supervisor mappings. The sealed MMIO table has
-exactly seven spans, both queue notification registers resolve inside their
-mapping, cacheable aliases are absent, and MSI-X plus all PCI authority remain
-disabled. See
-[Virtio Network Queue MMIO v0](specs/kernel/virtio-network-mmio-v0.md).
-With those prerequisites sealed, the kernel activates the NIC's exact VT-d
-hierarchy first, binds empty eight-entry RX/TX queues inside the permitted DMA
-page, establishes `DRIVER_OK`, and enables bus mastering last. It publishes no
-descriptor and performs no notification. Teardown revokes bus mastering before
-resetting the device and disabling VT-d, then scrubs translation tables before
-the DMA page. See
-[Virtio Network Empty Queue Activation v0](specs/kernel/virtio-network-queue-activation-v0.md).
-The kernel also programs distinct receive and transmit MSI-X messages while
-both entries remain masked and MSI-X remains globally disabled. Invalid table
-indices and reserved vectors are rejected without mutation; temporary PCI
-memory decoding is revoked immediately after readback. See
-[Virtio Network Masked MSI-X v0](specs/kernel/virtio-network-msix-v0.md).
-With the exact VT-d translation active, the kernel now binds TX queue 1 to
-MSI-X vector 35 and publishes one device-readable descriptor containing a
-zeroed virtio-net header and a fixed broadcast Ethernet probe. Bus mastering
-is enabled last and the queue is notified only after the interrupt route is
-live. Success requires exactly one interrupt and used-ring completion, the
-expected descriptor ID, an unchanged payload, and intact boundary canaries.
-MSI-X and bus mastering are then disabled, the device is reset, and the IDT
-gate is retired before VT-d or the DMA lease. This proves device consumption,
-not peer reception. See
-[Virtio Network Transmit v0](specs/kernel/virtio-network-transmit-v0.md).
-The receive proof adds `MRG_RXBUF`, publishes one bounded write-only RX
-descriptor, and sends a padded ARP request to the restricted QEMU gateway. RX
-MSI-X remains masked until the TX completion has been isolated; unmasking
-vector 34 must then deliver exactly one interrupt and one used-ring entry. The
-kernel validates the 12-byte modern header, one-buffer count, exact gateway and
-guest MAC/IP identities, ARP reply fields, length bounds, and canaries before
-retiring both interrupt routes and DMA authority. See
-[Virtio Network Receive v0](specs/kernel/virtio-network-receive-v0.md).
-The negative receive proof redirects that same write-only descriptor to a
-sentinel-filled, owned page deliberately absent from the NIC's VT-d hierarchy.
-The gate requires the page to remain unchanged, validates the exact `00:03.0`
-write-permission fault and attempted address, clears and invalidates the fault,
-then completes a valid ARP exchange through the still-authorized page. Device
-and interrupt authority are quiesced before fault recovery; translation tables,
-the guard, and the authorized DMA page are scrubbed in order afterward. See
-[Virtio Network DMA Fault v0](specs/kernel/virtio-network-dma-fault-v0.md).
-A separate freestanding Rust network-service PIE now builds for
-`x86_64-unknown-none`, validates native control ABI v4, and reports completion
-through the stable lifecycle ABI. Its exact bytes are authenticated in the
-signed root, its bounded native ELF plan is accepted during boot, and a
-temporary owned address space proves relative relocation, W^X mappings, guard
-pages, and complete retirement. The measured entry also executes at ring 3 in
-a fresh domain with no boot capabilities, negotiates control ABI v4, exits
-through lifecycle ABI v0, and leaves no domain frames live. Later generations
-receive narrowly scoped device authority. A separate fixed 80-byte network bootstrap contract
-freezes the common configuration, RX/TX notifications, DMA identity,
-generation capability, and MAC fields. A second service generation validates
-that record and its read-only logical network capability while PCI decoding,
-bus mastering, MSI-X, and VT-d remain disabled, then retires every owned frame.
-A malformed-reserved-field generation is separately contained and retired
-before device activation.
-Another fresh generation receives an exact active VT-d hierarchy for its sole
-DMA page while PCI decoding and bus mastering remain disabled; clean exit
-retires and scrubs the translation tables before releasing DMA.
-A faulted translated generation independently proves the same ordering on
-malformed bootstrap rejection.
-A further read/write generation owns common-MMIO queue negotiation and binds
-zeroed eight-entry RX/TX rings inside its sole DMA page. Its capability call
-lets the kernel validate the exact empty layout and active VT-d domain before
-enabling bus mastering last. Clean exit revokes bus mastering, resets and
-disables the NIC, retires translation, and only then scrubs service memory.
-A separate generation receives a kernel-injected failed activation return only
-after bus mastering is live; the compiled service faults naturally and the
-fault path proves the same device-before-VT-d-before-DMA teardown ordering.
-A subsequent generation binds TX queue 1 to MSI-X entry 1, publishes one fixed
-transmit descriptor, notifies queue 1, and blocks through native operation 20.
-Kernel-owned vector 35 wakes only the exact domain, object, and request
-generation; replay of generation one is rejected. The kernel independently
-validates the single interrupt, descriptor, unchanged payload, used entry, and
-canaries, then retires the route before VT-d and DMA teardown. This proves
-device consumption, not peer reception.
-A separately forced notified timeout keeps the interrupt masked until the APIC
-timer expires, cancels and retires the ambiguous device generation, and returns
-`RESTART_REQUIRED` to the service. A fresh generation with new authority, DMA,
-and VT-d leases then reinitializes the NIC and completes the transmit.
-See [Native Network Service Transmit v0](specs/services/network-transmit-v0.md).
-The following generation binds both queues to distinct kernel-owned MSI-X
-routes, publishes one guarded write-only receive descriptor, and sends a padded
-ARP request to the deterministic QEMU gateway. TX request generation one must
-complete before RX generation two is admitted. The service validates the exact
-one-buffer reply, and the kernel independently validates both rings, packet
-identities, lengths, canaries, and interrupt completions before retiring both
-routes and all DMA authority. See
-[Native Network Service Receive v0](specs/services/network-receive-v0.md).
-If the RX-stage wait expires after TX completion, the kernel cancels the whole
-ambiguous device generation and the service exits `RESTART_REQUIRED`; a fresh
-generation with new DMA and VT-d leases must complete another ARP exchange.
-A separate internal fault proof corrupts only the ARP operation after genuine
-RX completion. The measured service rejects it through its ordinary parser;
-the kernel quiesces the active device generation and a fresh generation then
-accepts an unmodified reply.
-An additive replenishment generation keeps the queues live, reuses descriptor
-zero for a second ARP exchange, and advances interrupt requests from one through
-four. The kernel validates the first reply before reuse and the final two-entry
-rings before ordered teardown. See
-[Native Network Receive Replenishment v0](specs/services/network-replenishment-v0.md).
-The next generation uses an additive bootstrap v1 packet capability to copy
-the validated 42-byte Ethernet frame out of DMA. The write-only driver then
-retires completely; a separate read-only ring-3 consumer with no NIC authority
-receives sequence one exactly once and validates every byte. See
-[Native Network Packet Handoff v0](specs/services/network-packet-handoff-v0.md).
-A following generation deliberately faults after publishing sequence two;
-device, interrupt, VT-d, DMA, and producer authority are retired while the
-copied frame survives for a fresh read-only consumer.
-See
-[Native Network Service Runtime v0](specs/services/network-runtime-v0.md).
-The validated MSI-X table and pending-bit array are now placed in a separate,
-bounded supervisor-only uncached mapping. Their low-memory cacheable aliases
-are removed before page-table activation, and the complete sealed MMIO table
-is verified on every boot. The kernel atomically rejects invalid programming,
-then writes one exact local-APIC message entry while keeping both that entry
-masked and MSI-X disabled. See
-[Virtio MSI-X Mapping v0](specs/kernel/virtio-msix-mapping-v0.md).
-The kernel now temporarily routes table entry zero to local-APIC vector 33,
-binds queue zero to that entry, and accepts a blank-sector read only after
-exactly one MSI-X delivery plus complete used-ring and payload validation.
-Teardown masks and disables MSI-X, revokes bus mastering, resets the device,
-verifies the APIC vector is idle, and removes the temporary IDT gate. See
-[Virtio MSI-X Interrupt v0](specs/kernel/virtio-msix-interrupt-v0.md).
-The validated configuration regions are now mapped through a bounded,
-uncached, supervisor-only higher-half window. The kernel forces PCI bus mastering off,
-resets the device, accepts only modern virtio, platform DMA, and flush support, confirms one
-or more queues, and returns the device to reset without setting `DRIVER_OK` or
-providing DMA memory. See
-[Virtio Block Initialization v0](specs/kernel/virtio-block-init-v0.md).
-The real device path uses one generation-owned 4 KiB DMA lease for a bounded
-split ring. It first reads reserved blank sector two, validating capacity,
-completion length, status, and buffer guard bytes. The same queue then supports
-bounded sector reads, writes, and flushes and binds sectors zero and one to the
-persistent-volume record. The automated gate creates a fresh disk, initializes
-generation one, boots a second VM against the same image, and recovers the exact
-record without rewriting it. A third boot corrupts the committed slot and
-proves nonempty invalid media is rejected without modification after safe
-device and DMA teardown. Teardown revokes bus mastering, resets the device, and
-scrubs the lease before release. This kernel reference transaction remains
-separate from the isolated native service described below, but both paths now
-use the same bounded IOMMU confinement profile. The kernel
-validates the Q35 DMAR unit and maps its single register page supervisor-only,
-writable, uncached, and non-executable. It reads the VT-d version and
-capabilities while requiring a clean disabled state. Because QEMU does not mark the unit as
-covering every PCI device, the kernel validates every bounded DMAR device scope
-and requires an exact endpoint scope for the discovered virtio-blk source ID.
-Six owned frames form an exact 48-bit hierarchy that permits only the one DMA
-page, and the QEMU device is required to advertise and negotiate
-`VIRTIO_F_ACCESS_PLATFORM` rather than using its bypass address space. The gate
-first points a read payload descriptor at a separate sentinel-filled page. It
-requires that page to remain unchanged, validates the exact VT-d source ID,
-address, and write-permission fault, clears the record, invalidates caches, and
-then completes the real storage transaction through the permitted page. It
-finally disables translation and clears the root before scrubbing the tables,
-guard, and DMA lease. See
-[IOMMU Register Access v0](specs/kernel/iommu-v0.md),
-[IOMMU Translation Hierarchy v0](specs/kernel/iommu-translation-v0.md),
-[Virtio-backed Persistent Volume v0](specs/kernel/virtio-volume-v0.md), and
-[Virtio Block Read v0](specs/kernel/virtio-block-read-v0.md).
-Every isolated native volume-service generation receives its own freshly
-allocated six-frame translation hierarchy for its generation-owned DMA page.
-The hierarchy is active before the kernel enables PCI bus mastering. Clean
-exit, ABI and descriptor rejection, driver fault, notified-timeout
-cancellation, restart, recovery, and corrupt-media rejection all pass through
-one ordered teardown: quiesce and reset the device, revoke bus mastering,
-disable translation and clear its root, scrub the translation tables, then
-scrub the DMA and address-space frames. The gate also requires consecutive
-service generations to use distinct generation-tagged DMA and table leases.
-The device boundary delegates manifest object 7 and attenuates it into
-separate ring-3 grants. A read-only observer can inspect reset state but faults
-on mutation. The native volume service receives write-only authority, one
-owned DMA page, the virtio common page, and the exact notification page; PCI
-configuration, MSI-X tables, the IDT, and the local APIC remain kernel-only.
-Control ABI v4 operation 19 validates the capability, domain generation,
-request generation, active queue, and DMA binding before blocking for the
-kernel-owned MSI-X route. A 100 ms APIC deadline safely returns an unnotified
-request without consuming its generation. See
-[Block-device Control Grant v0](specs/kernel/device-grant-v0.md),
-[Isolated DMA Lease v0](specs/kernel/device-dma-lease-v0.md),
-[Isolated Virtio Interrupt Wait v0](specs/kernel/isolated-virtio-interrupt-v0.md),
-and [Isolated Virtio Durability v0](specs/kernel/isolated-virtio-durability-v0.md).
-The same format and transaction crates now build into a freestanding
-`x86_64-unknown-none` Rust service that owns queue negotiation, descriptor
-construction, notification, and generation-bound waits. The measured service
-is authenticated as a bounded static PIE, relocated into exclusively owned
-W^X pages, and executed in a capability-limited ring-3 domain with a guarded
-stack, read-only bootstrap page, one DMA lease, and only the required virtio
-MMIO pages. Kernel and service share the fixed 64-byte native bootstrap ABI v0,
-whose magic, version, size, exact feature bitmap, reserved-zero rule, mapped
-addresses, DMA device address, and opaque capability are independently
-validated. The compiled service also negotiates control ABI v4 and validates
-its fixed structured descriptor plus required capability/fault-containment
-features before touching MMIO. One live generation
-is deliberately offered an older version and another receives a malformed
-descriptor. Both must fault before device activation; the kernel retires each
-and fresh compatible generations recover persistent state.
-A fresh boot commits generation one to reserved sectors four and
-five; a second boot recovers the exact record without rewriting it. Its
-corruption boot invalidates the committed native slot while preserving the
-kernel reference volume, then requires the service to reject the nonempty
-media without modification, quiesce the device, scrub its DMA lease, and let
-the rest of the kernel boot complete. Completed and rejected outcomes use the
-stable native lifecycle ABI rather than deliberate faults; clean exit drives
-mandatory interrupt, device, capability, address-space, and DMA cleanup. A
-separate invalid-opcode auxiliary proves genuine fault containment without
-panicking the kernel. A separate compiled-volume-service run is denied by an
-invalid opaque handle after queue notification and proves an incomplete
-device request can be reset, revoked, and scrubbed without a kernel panic. A
-fresh generation with the same logical identity then recovers the exact record
-or preserves corruption rejection using newly delegated resources. A separate
-notified-request timeout proves ambiguous DMA is cancelled by device reset and
-cannot reuse its request generation; the service exits `RESTART_REQUIRED` and
-another fresh generation recovers from persistent state. The
-volume service's first successful request
-also proves stale-generation rejection, live timeout without generation
-consumption, successful same-generation retry, and consumed-generation replay
-rejection. After teardown, the kernel creates a fresh domain generation with
-the same logical service identity and newly delegated object-7 handle, reloads
-the measured PIE into newly owned frames, rearms the device path, and requires
-the replacement to recover the exact record. Corrupt media must be rejected
-again by the replacement. Both generations finish with zero owned frames and
-no live device authority. See
-[Isolated Volume Runtime v0](specs/services/volume-runtime-v0.md).
-The binary contract is defined by
-[Native Service Bootstrap ABI v0](specs/abi/native-service-bootstrap-v0.md).
+A domain is the native unit of isolation, ownership, accounting, and failure
+containment. It owns or is granted:
 
-The first system-container storage prerequisite is a deterministic, bounded
-ASCII `newc` initramfs independently bound by size and SHA-256 in the signed
-boot manifest. The kernel validates its measurement, normalized metadata, safe relative
-paths, uniqueness, alignment, an executable `init`, and an exact trailer while
-rejecting malformed variants during every QEMU boot. The generated archive now
-contains the build-produced Linux main, interpreter, two DSOs, two static
-exec targets, and a separately linked `/sbin/init` candidate. The validated
-`profiles/minimal-system-v0/profile.tsv` matrix is embedded into the signed
-root and records ready, partial, and missing requirements without treating
-partial behavior as compatibility. The kernel resolves the candidate only
-from the authenticated index and validates its two-page RX/one-page RW ELF
-plan. A dedicated measured exec workload launches it as PID 1, verifies its
-identity, opens `/dev/console`, emits `GINUX_SYSTEM_INIT_V0`, and remains in an
-untimed supervisor wait until the native control plane requests clean shutdown
-while final process teardown closes all inherited descriptors. It enumerates
-the immutable bounded `/dev`, proves `/dev/null` discard/EOF behavior,
-`/dev/zero` zero-fill behavior, and the `/dev/tty` terminal alias before
-publishing `DEVFS_READY`. Before
-readiness it enumerates `/proc` and `/proc/1`, then reads a bounded read-only
-`/proc/1/status` view containing its exact name, running state, PID 1, and
-parent PID 0. Its forked PID 2 appears dynamically with a zombie status and
-parent PID 1, then disappears from `/proc` after `wait4` reaps it. It also
-proves `/tmp` starts empty, creates the generation-bound
-64-byte `ginux-ready` file, enumerates, writes, rereads, unlinks, and confirms
-removal; unlink or final teardown scrubs the backing store. The kernel installs
-the measured root as the sole
-`ro,nosuid,nodev` mount in a generation-bound Linux mount namespace; PID 1
-enumerates and reads `/proc/1/mountinfo` to verify that exact state. A separate
-generation-bound user namespace maps container UID/GID 0 to outside ID 100000,
-denies supplementary-group mutation, carries no Linux or native capabilities,
-and is inherited by the fork child. PID 1 validates its read-only `uid_map`,
-`gid_map`, and `setgroups` proc records. PID 1 also
-proves identity, root, mount, kernel, namespace, raw-I/O, and BPF management
-requests fail with `EPERM`, while an unknown syscall remains `ENOSYS` and its
-credentials and immutable root remain unchanged. PID 1 installs a caught
-`SIGUSR1`, blocks and queues it, observes it through `rt_sigpending`, consumes
-it with `rt_sigtimedwait`, restores the inherited action, and separately proves
-an ignored `SIGUSR2` is discarded without disturbing inherited signal state.
-PID 1 then
-invokes the public Linux `fork` ABI,
-resumes an independently owned PID 2 under its private CR3, and reaps its
-`exit(42)` status through `wait4` before publishing readiness. The kernel
-copies the root into a zeroed, contiguous 32-frame allocation,
-verifies source independence and the complete zero tail, and builds a bounded
-pathname index whose 32-bit offsets resolve only inside the owned image. A
-final indexed copy remains kernel-owned through
-shutdown and is published to the control plane as read-only capability object
-5. The kernel plans the interpreted main/interpreter/two-DSO graph directly
-from those authenticated measured-root bytes, binding canonical names,
-SONAMEs, dependency order, digests, and bounded non-overlapping load windows
-without requiring equality to kernel-embedded ELF artifacts. Substituted,
-reordered, and truncated graph members are rejected. Control ABI v4 provides bounded probe, exact-path metadata lookup, file
-reads, and cursor-based direct-child enumeration; the ring-3 proof reads `init`
-and enumerates `dev` while rejecting the wrong capability,
-traversal, and an invalid output range. The Linux syscall profile now resolves
-`/etc/hostname`, `/etc/os-release`, and `/etc/motd` from that same measured, retained index.
-Linux file descriptors carry a bounded one-based index selector rather than a
-kernel-specialized content identity, so the generic `os-release` file uses the
-same read and metadata path as the executable graph. The ring-3 interpreter
-validates exact contents and metadata and proves writable access is denied. It
-also opens `/etc`, enumerates all three measured children, and verifies directory
-metadata, EOF, cursor rewind, and atomic undersized-buffer rejection. The Linux `/` view enumerates every
-direct measured child, including an explicit `/sbin`; the fixed 256-byte
-staging buffer returns `sbin` on a second cursor page. Measured directory descriptors also carry index
-selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open
-without per-directory kernel identities; `dev`
-retains its synthetic device entries. The measured `proc` node is populated by
-the bounded synthetic PID 1 directory plus status, root-mount, and user-namespace records;
-it is not yet a general procfs. The measured `tmp` node exposes one admitted
-`ginux-ready` file from a generation-safe, quota-bound RAM store. Object data
-is allocated in owned pages on demand rather than embedded in the store
-metadata. The backing contract supports multiple named objects, cross-page
-I/O, hidden staging, atomic publish, page-quota rejection, abort, unlink, frame
-scrubbing and complete lease recovery; the Linux syscall profile currently
-exposes only the fixture file and is not yet a general tmpfs. A
-bounded index-driven contract resolves any direct measured regular child below
-an open measured directory; `motd` proves the syscall layer needs no
-per-filename case. Normalized multi-component paths are bounded and `lib` is
-opened relative to `/var`, while `../lib` is rejected before index lookup.
-The publication index now admits 64 nodes and is exercised beyond its original
-16-node limit. Open, metadata, and access checks share that lookup. The current native
-`init` remains a format marker, not PID 1, but the Linux-visible `/init`,
-and `/lib64/*` paths map to internal measured-root entries, while
-`/bin/signal-probe` and `/bin/exec-second` are direct measured-root nodes. The
-first is a dedicated two-page RX signal-runtime profile, leaving the full
-five-page primary workload unchanged; after its caught and pending-signal
-checks, it proves default `SIGPIPE` process termination and resource cleanup.
-The complete dynamic
-main/interpreter/two-DSO graph executes from those retained bytes. A bounded
-single-threaded `execve` proof atomically replaces two independent static workloads and
-the running interpreted `/init` graph with the selected measured executable, rebuilds up to eight bounded argument and eight environment entries
-plus a deterministic Linux auxiliary vector in a 512-byte initial-stack image,
-and validates every auxiliary pair in ring 3 for both static and interpreted
-replacement. It allocates and materializes up to eight
-measured ELF pages only during the transaction. It derives entry and W^X mappings from that
-runtime selection instead of a boot-predeclared target template, replaces the
-runtime-owned active-image record, removes the old image pages, scrubs and
-releases their exact generation-tagged leases as part of the mapping commit,
-and applies close-on-exec and
-signal/alternate-stack transition rules, installs the replacement process
-name, and exits without reviving the old program. Stale-generation retirement
-and a second release are rejected without mutation, while RELRO permission
-changes remain synchronized with the active-image record. Generation-tagged replacement
-frames are scrubbed and released after the process root becomes inactive, with
-the prior live-frame count restored. Every successful exec materializes its
-bounded initial stack in a fresh zeroed RW/NX page, replaces the exact old
-stack lease in the rollback-capable image transaction, and reclaims the fresh
-lease after the process root is inactive. The execution contract binds every active
-page-table hierarchy frame to its exact allocator generation, verifies that
-the live CR3 and all admitted Linux ranges traverse only that owned hierarchy,
-and rejects a stale root lease without mutation. Every successful exec clones
-the complete hierarchy into fresh generation-bound frames—five for the static
-profile and six for the interpreted profile—applies and verifies the replacement
-only in that inactive clone, switches CR3 after verification, and then scrubs
-and retires the exact old hierarchy. The fresh tables are reclaimed after the
-process root becomes inactive. Every successful exec also
-replaces the bounded heap with a fresh zeroed RW/NX lease and resets the process
-break to the fixed heap base. The old heap is scrubbed at commit and the replacement
-lease is reclaimed after the process root becomes inactive. Scratch `mmap`
-pages have no inactive reserve leases: each successful request allocates fresh
-generation-bound frames, and complete or partial unmap scrubs and releases the
-exact selected leases. Exec requires the scratch registry and its lease slots
-to be empty.
-Interpreted replacement installs the measured
-interpreter first, lets it remap the authenticated main and both DSOs, reapplies
-RELRO, pre-materializes fresh primary and sibling TLS leases from the complete
-authenticated templates in the same transaction, restores FS to the fresh
-primary mapping, replaces the guarded sibling stack with a fresh zeroed RW/NX
-lease while preserving both guard pages, and retires the complete old
-interpreter/main/DSO graph. The archive
-is not yet a general mount or a system-container image.
+- processes, threads, and address spaces;
+- a sealed, domain-local capability table;
+- memory and CPU budgets;
+- IPC endpoints and shared-memory grants;
+- filesystem and kernel-object views;
+- network endpoints and device grants; and
+- a lifecycle and failure policy.
 
-The initial executable milestone is an x86-64 unified EFI image tested under
-QEMU. Its boot component passes a development-signed authority manifest and
-measured control-plane bundle, exits firmware boot services, and transfers
-control to a separate `no_std` kernel. The kernel establishes protected CPU
-and memory state, seals manifest-derived capabilities into one native domain,
-and runs the measured W^X control-plane payload at ring 3 through a
-capability-checked call gate. Calibrated APIC one-shots preempt the control
-context to run an isolated service and its replacement generation, while
-bounded IPC carries the request and reply. The control plane can also create,
-bounded-load, stage, cancel, and retire stop-only auxiliary workloads without
-placing third-party code in the kernel. Isolated services configure bounded
-network state and perform interrupt-driven virtio-net transmission and
-reception. A copied four-entry ingress FIFO separates the write-only device
-producer from read-only protocol consumers, preserves ordered packets across
-clean exit and driver failure, and wakes an exact-sequence consumer without
-polling. A measured freestanding Rust protocol service learns one ARP neighbor
-and validates Ethernet, IPv4, and ICMP echo requests without device authority.
-It can receive an independent write-only egress grant, construct a checksummed
-echo reply, and publish it into a separate four-entry FIFO. The reply survives
-protocol-domain retirement and is received exactly once by a fresh read-only
-egress consumer. A separate measured network generation can now consume the
-next egress reply into confined DMA and transmit it through virtio-net without
-granting NIC authority to the protocol service. A full ingress FIFO blocks its
-bound producer until consumption frees a slot, after which the producer retries
-the exact next sequence. Control-plane management can stop a blocked consumer,
-retire its resources, and let a replacement claim the unchanged sequence. A
-bounded relative wait can also expire through the local APIC, preempt a
-non-cooperative peer, release the sequence, and cancel its timer when
-publication wins. General routing, UDP/TCP, sockets, and container networking
-remain unimplemented. On Apple Silicon development hosts it uses QEMU TCG
-emulation. The same Q35/OVMF profile will use KVM acceleration on x86-64 Linux.
+The kernel creates one initial userspace authority: the embedded control-plane
+domain. Every later service or container receives authority delegated from an
+existing holder. Delegation may narrow authority but cannot create rights that
+were absent from the authenticated boot envelope.
 
-Protocol bootstrap ABI v1 also exercises a bounded resident-service path: one
-measured Rust protocol domain blocks on an empty FIFO, wakes for two separately
-published consecutive packets, validates both, rejects replay, and retires all
-wait keys and frames. Additive ABI v2 then leaves that domain blocked on the
-next exact sequence until the control plane stops it, revokes its authority,
-and reclaims every mapping and frame. Graceful drain and protocol-state handoff
-remain future work.
+Process ancestry controls lifecycle and accounting; it does not grant
+authority. A process may be root inside a Linux domain while having no implicit
+right to inspect the host, another container, kernel memory, or an unrelated
+device.
 
-A reusable memory-safe `no_std` protocol crate now parses the exact Ethernet/ARP
-boundary and maintains one generation-local neighbor. The measured service
-learns the first peer mapping, refreshes the same mapping, and rejects a
-conflicting MAC without mutating accepted state. Expiry, replacement, multiple
-neighbors, and ARP request generation remain future work.
+Domain identities are generation tagged. When a service exits or faults, stale
+capabilities, replies, interrupt routes, DMA mappings, and device ownership can
+be rejected before its memory is reused. A replacement is a new generation,
+not a continuation of the failed security context.
 
-Protocol bootstrap ABI v3 dispatches a separately delivered IPv4 frame after
-ARP learning. The isolated service validates the fixed IPv4 header, length,
-checksum, fragmentation boundary, protocol, and configured endpoints, then
-rejects a corrupted header without kernel protocol parsing. IPv4
-options/reassembly, UDP, TCP, routing, and sockets remain future work.
+## Userspace personalities
 
-Protocol bootstrap ABI v4 validates the delivered ICMPv4 echo-request type,
-code, checksum, identifier, sequence, and empty proof payload. A corrupted ICMP
-checksum is rejected in ring 3. The service remains read-only, so echo-reply
-construction is deferred to the next additive ABI.
+A userspace personality is the complete operating-system contract presented to
+a domain. It includes more than an executable format:
 
-Protocol bootstrap ABI v5 adds a distinct write-only egress capability and
-expected egress sequence without weakening the ingress handle. The memory-safe
-protocol crate constructs the exact echo reply and recomputes its IPv4 and ICMP
-checksums. A separate read-only ring-3 egress consumer receives it after the
-protocol service retires, while publication, ingress access, device access,
-future sequence use, and replay remain denied. Network bootstrap ABI v2 then
-gives a fresh measured network generation egress `READ` and separate NIC
-authority. It consumes a second reply into confined DMA, transmits it through
-virtio-net, and completes through kernel-owned MSI-X; the kernel validates the
-exact descriptor and reply before ordered teardown. Container-facing
-networking remains future work. See
-[Native Network Protocol Egress Transmit v0](specs/services/network-egress-transmit-v0.md).
+- syscall numbers and behavior;
+- process, thread, signal, and credential semantics;
+- executable loading and dynamic linking;
+- virtual filesystem behavior and paths such as `/proc`, `/sys`, and `/dev`;
+- sockets, clocks, synchronization, terminals, and `ioctl` families; and
+- the domain's expected namespace and device model.
 
-Network bootstrap ABI v3 makes egress restart-safe through separate claim and
-acknowledgement operations. A claim copies but retains the queue head; the
-kernel denies acknowledgement until the same device generation completes and
-validates virtio TX. The QEMU proof faults that generation after claiming,
-performs full device and DMA teardown, releases the claim without removing the
-packet, and has a fresh generation transmit and acknowledge the same sequence.
-See [Reliable Protocol Egress v0](specs/services/network-reliable-egress-v0.md).
+Linux x86-64 is the only personality under implementation today. Linux ELF is
+therefore the practical workload format, and Rocky Linux 10 with systemd as
+container PID 1 is the product compatibility benchmark.
 
-Network bootstrap ABI v4 starts the measured network service while the egress
-FIFO is empty. Operation 28 blocks its read-only object-9 capability on the
-exact next sequence without polling. A separately isolated write-only producer
-then publishes the 42-byte ICMP reply, waking only that object/sequence waiter.
-The resumed service claims, transmits, and acknowledges the packet through
-virtio-net, and both domains plus their wait, interrupt, device, VT-d, DMA, and
-capability state retire cleanly. Object-8 waits and ingress timers remain
-independent. See
-[Native Network Service Bootstrap ABI v4](specs/abi/native-network-bootstrap-v4.md).
+The architecture is intended to make personality selection a property of a
+domain rather than of the whole host. A BSD personality is a plausible future
+addition because it can reuse the same kernel mechanisms, but it would still
+require an explicit BSD syscall and userspace ABI implementation. Loading an
+ELF file alone is not compatibility.
 
-Operation 29 adds the matching write-side boundary. A write-only producer that
-fills all four egress entries blocks without polling; a read-only object-9
-consumer frees one slot and wakes only that producer. Wakeup grants no
-reservation, so the producer retries and receives the exact fifth sequence.
-The proof drains all entries in FIFO order and retires both domains and their
-wait/capability state. Reliable acknowledgement also wakes an egress space
-waiter, while a claim alone does not. A hardware-coupled proof fills the FIFO,
-has the measured network service claim and transmit its head through confined
-DMA, and requires validated MSI-X completion plus acknowledgement before the
-blocked producer wakes and publishes the exact fifth sequence. The remaining
-replies retain FIFO order, and replay of the acknowledged head is stale. See
-[Native Network Egress Backpressure v0](specs/services/network-egress-backpressure-v0.md).
+Native Ginux services are separate from workload personalities. They use a
+small, versioned service ABI and bounded static PIE ELF images. Ginux is not
+trying to create a third general-purpose application ecosystem.
 
-Network bootstrap ABI v5 keeps one measured network-service generation alive
-for two consecutive reliable replies. It reuses TX descriptor zero, the DMA
-lease, active queue, VT-d hierarchy, and device authority while advancing the
-available/used indices and kernel-owned interrupt request from one to two.
-Each packet retains the queue head until its own validated hardware completion
-authorizes acknowledgement; premature acknowledgement, duplicate claim,
-interrupt replay, and post-ack claim replay are rejected. The final gate
-requires both sequences consumed in order and all resident device and domain
-state retired cleanly. See
-[Native Network Service Bootstrap ABI v5](specs/abi/native-network-bootstrap-v5.md).
+## Boot process
 
-Network bootstrap ABI v6 fills the entire four-entry egress FIFO and drains it
-through the same resident driver generation. Every validated network-device
-completion starts a fresh bounded service-call epoch, so the driver can exceed
-its original lifetime allowance without gaining calls from yield, denial,
-packet traffic, failure, or timeout. Queue indices and interrupt requests
-advance from one through four, and every packet retains independent
-claim/completion/acknowledgement ordering before complete teardown. See
-[Native Network Service Bootstrap ABI v6](specs/abi/native-network-bootstrap-v6.md).
+The target boot sequence is deliberately short:
 
-Network bootstrap ABI v7 makes that service genuinely resident. After four
-reliable transmissions it advances to sequence five and blocks indefinitely
-on the empty FIFO. The write-only producer waits for complete drain without
-remaining runnable during device interrupts, then exits only after the service
-has installed its next exact wait. The persistent control plane stops the
-blocked driver; the kernel cancels its wait, quiesces the still-active NIC, and
-retires interrupt, VT-d, DMA, capability, address-space, and domain state in
-order. See
-[Native Network Service Bootstrap ABI v7](specs/abi/native-network-bootstrap-v7.md).
+1. UEFI loads a single `GINUX.EFI` PE/COFF application.
+2. The boot path validates the embedded component catalog, measured payloads,
+   and independently authorized configuration.
+3. Firmware state and the final memory map are handed to the kernel, and boot
+   services are exited.
+4. The kernel establishes paging, interrupts, scheduling, capabilities,
+   required storage and network mechanisms, and IOMMU protection.
+5. Executable mappings and the maximum authority for the boot are sealed.
+6. The embedded controller starts in ring 3 with exactly its configured
+   capabilities.
+7. The controller delegates authority to native services and container
+   domains, then starts each selected userspace init process.
 
-The control plane can also request graceful drain of that exact resident
-generation. The driver preserves and transmits every accepted FIFO entry,
-waits for the producer to close, receives a distinct drained result at the
-empty next-sequence boundary, and exits normally. The kernel then validates
-the completed DMA state and performs the same ordered NIC, interrupt, VT-d,
-DMA, capability, address-space, and domain teardown. See
-[Resident Network Service Drain v0](specs/services/network-resident-drain-v0.md).
+The native host does not need a distribution root filesystem. Container
+images, writable data, logs, and persistent volumes are explicit objects rather
+than files hidden in a mutable host installation.
 
-The control-plane replacement proof then stops one resident generation and
-starts another with the same logical service identity. The replacement has a
-distinct domain generation and fresh DMA plus VT-d table leases, reinitializes
-the reset NIC, and resumes at the exact next egress sequence before undergoing
-the same clean stop. See
-[Resident Network Service Replacement v0](specs/services/network-resident-restart-v0.md).
+Production deployments are intended to separate trust for the EFI image,
+site configuration, and container images. Changing runtime policy may reduce
+authority immediately, but expanding the boot authority ceiling requires a new
+authenticated boot.
 
-Native scheduler contexts retain a lower-canonical per-thread FS base alongside
-registers and the address-space root. Yield, blocking, and timer preemption
-capture it; every initial entry and resume programs and reads back the selected
-value before ring 3. Native bootstrap payloads currently use zero, while the
-Linux TLS contexts use nonzero FS bases outside this scheduler path.
+## Security model
 
-M4 begins with a strict static x86-64 ELF64 parser profile. It scans up to nine
-program headers in any order, normalizes executable, optional read-only, and
-writable loads,
-and accepts validated optional `PT_PHDR`, `PT_GNU_RELRO`, non-executable
-`PT_GNU_STACK`, bounded `PT_INTERP`, `PT_TLS`, and one-, two-, three-, four-,
-five-, or six-entry
-relocation `PT_DYNAMIC` declarations. Three-relocation images may place the eager
-`R_X86_64_JUMP_SLOT` record in a separate one-entry `DT_JMPREL` table described
-by `DT_PLTRELSZ` and `DT_PLTREL`; the six-relocation runtime main uses two
-entries in that split table. The symbol profile validates a two- or three-entry
-symbol-table prefix, bounded string table, bounded SysV `DT_HASH` or
-one-bucket/one-word-bloom `DT_GNU_HASH`, and up to two global function symbols
-used by paired `R_X86_64_GLOB_DAT` and `R_X86_64_JUMP_SLOT` records. The parser admits an ordered list of at most two distinct
-`DT_NEEDED` names and rejects overflow or duplicates. A separate LLD-produced
-metadata fixture proves both names and the second DSO's `DT_SONAME`. Independent
-authority records bind both ordered names to their SHA-256 digests and canonical
-load biases, with pairwise overlap rejection. Both dependencies are mapped and
-self-relocated by the userspace interpreter. The main image's two undefined
-symbols are matched by complete name against one provider in each authenticated
-`ET_DYN` dependency.
-Images whose expanded
-program-header table covers the entry point are rejected. A bounded proof maps
-a resolved `ET_EXEC` main image, relocated `ET_DYN` interpreter, and two
-relocated dependencies into separate W^X regions, builds the dynamic startup
-stack, and enters the interpreter first.
-The linker-produced main also carries an authenticated read-only `PT_TLS` view
-of its writable load: eight initialized bytes, sixteen total bytes, and
-eight-byte alignment. The parser caps both TLS size and alignment at 64 bytes,
-requires matching file and virtual displacement inside the writable load, and
-rejects malformed or duplicate declarations. Planning preserves all three
-templates and applies the main and dependency biases. The interpreted execution
-proof allocates a separate owned RW/NX page and constructs a deterministic
-three-module static layout: the auxiliary DSO occupies `TP-48..TP-32`, the
-primary DSO occupies `TP-32..TP-16`, the main occupies `TP-16..TP`, and all
-initialized `.tdata` regions retain zeroed `.tbss` tails. A minimal 16-byte TCB
-contains its own address. FS is activated before the interpreter,
-and the main preinitializer refuses to advance unless its TLS template, zero
-tail, and self pointer are correct. Both DSOs' direct initializers also refuse
-to advance unless their initialized and zero-filled regions are correct.
-The main accesses name the hidden TLS symbols
-through `R_X86_64_TPOFF32`; LLD resolves both offsets without adding a dynamic
-relocation class, proving the toolchain layout matches the loader. Teardown
-scrubs and releases the TLS frame and restores the supervisor's prior FS base.
-The kernel admits only the live static-block-plus-TCB extent to syscall copy
-validation; the interpreter compares the initialized `TLS_OK!` value directly
-through FS-relative storage before invoking the preinitializer, while one-byte
-underflow and overflow ranges are rejected internally.
-Each DSO names its hidden TLS template through one toolchain-emitted
-`R_X86_64_GOTTPOFF` object reference. LLD converts that reference into a
-bounded `R_X86_64_TPOFF64` GOT relocation and marks the object `DF_STATIC_TLS`.
-The userspace interpreter validates both exact relocation shapes and installs
-`-32` for the primary DSO and `-48` for the auxiliary DSO; each initializer
-loads its value from its GOT before using it as an FS-relative offset. Malformed
-types, symbol indexes, addends, alignments, and targets are rejected. TLS
-modules beyond the bounded graph, dynamic TLS, and per-thread allocation
-remain unimplemented.
-A reusable bounded planner computes each aligned block, signed thread-pointer
-offset, live extent, and TCB fit from the authenticated templates. It rejects
-zero or non-power-of-two alignments, undersized declarations, misaligned thread
-pointers, arithmetic underflow, and page overflow; the execution path consumes
-that plan rather than maintaining separate layout arithmetic.
-The same reusable materializer revalidates the plan before mutation, clears the
-whole owned page, copies every `.tdata` template, preserves zero-filled tails
-and padding, and writes the self-referential TCB. A substituted plan is rejected
-without changing the destination page.
-The interpreted address space also allocates a second independently owned
-RW/NX TLS page from that same authenticated plan. Its identical static blocks
-have a distinct self-referential TCB and thread pointer. The active syscall-copy
-contract admits only the initial thread's live TLS extent and rejects the
-sibling extent even while both mappings exist. Teardown verifies the sibling
-page is scrubbed before releasing both frame leases and restoring the allocator
-count. The bounded `clone(2)` profile consumes this preallocated sibling; it
-does not yet allocate arbitrary threads, and code in one process continues to
-share that process's address space.
-FS base and the syscall-copy TLS extent are represented together as a checked
-execution context. Before ring-3 entry, the kernel installs the sibling context,
-reads back its FS base, validates its self pointer, proves copy admission moved
-from the initial extent to the sibling extent, and then restores and revalidates
-the initial context. Bootstrap is single-core with interrupts disabled during
-this transition; scheduler-driven Linux TLS switching remains future work.
-A two-slot Linux thread table now binds monotonically assigned TIDs and
-generation-tagged internal handles to those checked TLS contexts. The initial
-thread runs as TID 1; the boot proof reserves TID 2 for the sibling context,
-switches to it and back, rejects a third live reservation, retires it, reuses
-the slot as TID 3 with a new generation, and rejects the stale handle. The
-ring-3 `gettid`, `set_tid_address`, and robust-list lookup paths resolve the
-current table entry rather than embedding TID 1. Process exit retires the
-initial entry and teardown requires the complete table to be empty before
-resetting the process-local TID sequence.
-The sibling slot also owns a separate, zeroed, RW/NX page between two unmapped
-guard pages. Its exact bounds follow the slot across TID 2 retirement and TID 3
-reuse. The current-thread syscall-copy contract rejects that whole page. Thread
-retirement scrubs the page while running on the kernel stack, and teardown
-verifies it remains zero before releasing its frame. This establishes
-bounded stack ownership and cleanup, not memory isolation within the shared
-process address space.
-An internal clone constructor now accepts exactly the bounded shared-VM,
-shared-files, shared-signal-handler, thread-group, SysV-semaphore, TLS,
-parent-TID, child-set-TID, and child-clear-TID flag set. It requires the reserved stack top,
-the sibling TLS pointer, aligned TID words inside the parent's writable stack,
-and a safe return RIP/RFLAGS pair. It records a child context that resumes after
-the eventual syscall with `rax = 0`, while the parent result is the child's TID.
-Malformed flags and stack bounds fail without changing the slot, and retirement
-clears the saved context before generation reuse. An internal publication proof
-then exercises the current-thread copy boundary: denial rolls the entire child
-execution state back to empty, while success writes the child TID to distinct
-parent- and child-TID words only after the complete context exists. The proof restores the
-initial stack word and retires the unpublished child. The ring-3 path exposes
-the same transaction as syscall 56 for one fixed sibling context.
-The Linux `SYSCALL` entry now captures and restores `rbx`, `rbp`, and
-`r12`-`r15` alongside all six syscall argument registers. Existing argument
-indices remain unchanged for dispatch. This makes the complete preserved user
-register set available on the kernel stack when `sched_yield` or blocking
-`FUTEX_WAIT` switches between the bounded parent and child.
-The assembly layout is now represented by one `repr(C)` syscall-frame type
-rather than an untyped word slice. Clone construction copies all twelve saved
-registers into generation-bound per-thread storage alongside RIP, RSP, RFLAGS,
-RAX, and FS base. A checked selector reconstructs the complete return context
-only for the matching live handle; retired handles and newly reused slots have
-no selectable context. The live yield, futex-wait, and child-exit paths use that
-selection to redirect `SYSRETQ`.
-A checked installer now validates the selected child first, switches the
-generation-tagged running state and FS/copy context, and then fills an exact
-return frame. Because all fallible work precedes the frame writes, a stale
-handle leaves every output word and the running parent unchanged. The boot
-proof installs the child, observes that copy admission moved to its TLS, and
-restores the parent with the reverse admission decision. The live thread paths
-use the same installer for the assembly-owned return frame.
-The real ring-3 `sched_yield` path now round-trips through that typed live
-frame. With interrupts disabled, the handler validates and reinstalls the
-current TLS context, writes all twelve registers plus RIP/RSP/RFLAGS into the
-assembly-owned return state, reads the result back, and resumes successfully
-through `SYSRETQ`.
-The interpreted runtime now calls bounded x86-64 `clone(2)` with exactly
-`CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID`.
-The call accepts only the authenticated sibling TLS pointer, guarded stack top,
-and distinct aligned parent- and child-TID words in the main writable mapping.
-Both words receive the monotonically allocated child TID before either thread
-returns to ring 3; the parent receives that same value, while the child resumes
-after the syscall with `rax = 0`. Each child immediately requires its live
-`gettid()` result to match the published child-TID word and requires `FS:[0]`
-to contain its own sibling TLS/TCB pointer. Signal masks are also thread-owned:
-each clone snapshots the parent's current mask, context switches save and
-restore the active thread's mask with its scheduler slot, and retirement clears
-that state. Each measured child proves it inherited blocked `SIGUSR1`, unblocks
-it independently, and leaves the parent's blocked mask unchanged. The parent first yields to the
-child; the child yields back, and the resumed parent yields to the same child
-again. While that child is ready, a second live `clone` attempt returns
-`EAGAIN` without replacing it. All three cooperative switches return zero in their resumed contexts.
-The child then blocks in `FUTEX_WAIT` on the parent-TID word and restores the parent. An
-explicit `FUTEX_WAKE` makes the child ready. The parent then waits on the
-child-TID word, selecting the child again; its first wait resumes with zero.
-The child calls `exit(42)`, clears only its child-TID word, wakes the matching
-parent, leaves the parent-TID word intact, retires itself, and restores the
-parent's registers, FS base, and copy ownership. Both resumed waits return
-zero. The complete handshake then runs a second time through the reused slot;
-the kernel requires the guarded stack to be fully scrubbed first and the new
-child TID to exceed the first. Before the first successful creation, a live
-syscall attempt proves that malformed flags return `EINVAL`, retires its
-provisional slot, and permits the valid clone to follow. After both children
-retire and the main RELRO page is sealed, a parent-TID write into that page
-returns `EFAULT`; final teardown proves the failed transaction leaked no slot.
-Occupied capacity returns `EAGAIN` without mutating the live slot. This remains a fixed
-two-slot, two-sequential-child proof without arbitrary allocation, more than
-one live child, asynchronous preemption, multiple waiters, requeue
-operations, or a general scheduler.
-A separate four-slot process-lifecycle table now establishes the ownership
-model required before process-style creation is exposed. Internal identities
-bind slot, generation, and monotonic PID; every child has a live recorded
-parent. Creation reserves an invisible `Preparing` record, and only a validated
-distinct generation-checked resource bundle can publish it as running; each
-bundle contains four through six page-table leases and one through 41
-private-page mapping records. Every record binds its virtual address, frame
-lease, and W^X permissions, and publication requires an exact match with every
-user leaf in the complete hierarchy while rejecting overlap in any frame.
-Publication also requires a saved userspace context whose RIP resolves inside
-an executable recorded page, whose RSP resolves to the top of a writable page,
-and whose flags and FS base are safe. Exit first moves the complete bundle to a non-runnable `Exiting` state, and zombie
-publication is denied until one prevalidated operation scrubs and releases
-every lease. Only the live parent can reap it. The QEMU proof uses three real
-six-frame address spaces, rejects stale leases, partial aliases, substituted
-address or permission metadata, and invalid execution contexts, aborts one reservation, creates
-and reaps two children through one reused slot, retires PID 1, and restores the
-allocator count. The live PID 1 `fork` and `wait4` path now uses this table;
-descriptor, credential, signal, mount, and namespace inheritance remain
-bounded to the existing process-global proof state rather than independently
-modeled per process.
-A separate eager-copy primitive validates generation-bound ownership and
-pairwise separation before copying two complete private pages. Its proof
-rejects stale and aliased destinations without partial writes, demonstrates
-parent/child independence, scrubs both copies, and restores the allocator's
-live-frame count. A companion transaction walks every user leaf in a bounded
-four-to-six-frame hierarchy, rejects incomplete inventories, copies and
-rewires the page tables, and replaces every parent leaf with its corresponding
-private child frame while preserving W^X. The QEMU proof validates two
-independent roots and reclaims all twelve temporary frames. The process proof
-now uses that operation to copy PID 1's two private pages, construct and
-revalidate the child's mapping inventory, and atomically publish the cloned
-bundle with a parent-derived execution context whose fork return value is zero;
-child mutation leaves the parent unchanged. PID 1 and that child are then
-admitted to the real native scheduler, selected under their exact roots, and
-yielded in both directions before their generation-tagged bindings are retired.
-Each root inherits the supervisor-only identity and higher-half kernel entries;
-the selected child CR3 is loaded, verified through the direct map, and restored
-in kernel mode. A bounded child then enters ring 3 under that CR3, requires its
-fork return in `RAX` to be zero, writes through its recorded FS base without
-changing the parent page, and returns through the user gate with FS and CR3
-restored. The entry stub installs all fifteen general registers, and the user
-gate captures and compares the complete frame before resuming ring 3. The child
-then issues `exit(42)`; the gate captures that status, returns to the kernel,
-and the same status drives resource teardown, zombie publication, and the
-parent's wait result. The live Linux exit paths now take an exact address-space
-snapshot before teardown. It combines the active image, primary stack, heap,
-primary and sibling TLS, sibling stack, and bounded `mmap` registries into at
-most 41 generation-checked mapping records, then requires a complete page-table
-walk to find exactly those user leaves with the recorded W^X permissions. A
-missing mapping, altered permission, stale root generation, or nonempty
-detached hierarchy frame is rejected. The kernel also converts the live syscall frame into the process
-model's complete 15-register context and admits it with the snapshot as PID 1.
-This includes Linux's architectural `RCX` and `R11` syscall clobbers and permits
-a lower-canonical FS base without requiring that it currently be mapped. The
-record is installed in non-stack kernel storage before userspace starts and
-refreshed from the exact live snapshot and return context at every PID 1
-syscall boundary. Terminal cleanup requires at least two successful refreshes,
-one parentless running record, and no child, scheduler binding, or retiring
-bundle. After each terminal ring-3 return, while the retained PID 1 resources
-are still live, the kernel reserves a child, allocates and eagerly copies every
-private page, clones the complete page-table hierarchy, derives a zero-return
-child context, and atomically publishes the result. It compares every copied
-page byte, requires complete parent/child frame separation, then tears the
-child down, reaps status 42, and proves the allocator count and PID 1 record
-were restored. One live child also has a bounded private trampoline installed
-at its saved RIP, is selected through the native process scheduler, enters ring
-3 under its cloned CR3 with the complete fork context and FS base, and drives
-zombie publication with its captured `exit(42)`. The parent code remains
-unchanged. The minimal system workload now consumes the same machinery through
-Linux syscall 57 (`fork`) and syscall 61 (`wait4`). The child resumes its real
-post-fork code with `RAX = 0`, observes PID 2 and parent PID 1, and exits 42.
-PID 1 resumes with the child PID, verifies invalid waits do not consume the
-zombie, receives status `42 << 8`, and proves a repeated reap returns
-`-ECHILD`. The profile therefore records `process.fork-wait` ready while
-retaining explicit limits on concurrency and inherited process state. The
-exact contract and limits are recorded in
-[Bounded Linux Process Lifecycle v0](specs/kernel/linux-process-v0.md).
-Each thread slot also owns its clear-child-TID pointer and robust-list head.
-The lifecycle proof assigns different sentinel registrations to TIDs 1 and 2,
-switches between them, and proves neither becomes visible through the other.
-Retiring TID 2 clears both values before its slot is reused, and the replacement
-starts empty. The real TID 1 syscall registrations are resolved through that
-slot; exit zeroes the exact registered child-TID word, records and clears the
-exact robust-list head, then retires the thread. Post-exit verification requires
-both per-thread fields to be zero in every slot.
-A compact userspace interpreter assembled from its own source derives its load
-bias, reads each admitted `DT_RELA` record, applies its own load-biased relative
-relocation plus the main image's relative and symbol-based relocations. The
-interpreter independently requires the exact primary and split relocation
-sizes, 24-byte `RELA` entries, counted-relative totals, and `DT_RELA` PLT kind
-for the main and both dependencies before applying those records. The
-symbol relocations resolve to the authenticated dependencies, and the interpreter
-also applies both dependencies' own relative and self-symbol relocations. Each
-DSO and the main expose one authenticated `DT_INIT` function and one eight-byte
-`DT_INIT_ARRAY`. The main additionally exposes one eight-byte
-`DT_PREINIT_ARRAY`. The interpreter independently scans the main's dynamic
-table for the exact relocation size and entry size, two-entry relative count,
-and complete preinit tag pair. It binds that address to the first relative
-relocation target, then relocates and calls the preinitializer
-before loading either dependency, calls each dependency's direct init function
-and constructor in order, resolves the main, and then calls the main's direct
-init function and constructor before transferring control to its entry.
-Before applying any init-array relative relocation, the interpreter also
-requires the runtime `DT_INIT_ARRAY` address to equal that relocation target
-for both dependencies and the main.
-Each exported function refuses to succeed before its dependency constructor
-runs; each constructor requires its image's direct init phase, and the main
-constructor calls both exports before recording initialization,
-and the main entry refuses to continue without that record. All three
-constructors receive the original `argc`, `argv`, and `envp` context and require
-the bounded `/init` and `GINUX=1` vectors before recording initialization. The main workload calls through the
-resolved jump slots; the loader validates all six dependency relocations and
-both dependency calls return checked values before the full
-ring-3 probe completes, while the kernel verifies the interpreter's relocated
-target. The kernel then restores its root and scrubs every owned frame.
-The build rejects unresolved ELF relocation records in all three raw embedded
-text payloads before extracting their bytes.
-The executable QEMU path now goes beyond the synthetic metadata fixtures: LLD
-produces an `ET_DYN` interpreter, PIE main, `libginux.so`, and
-`libginux-aux.so`, including
-program headers, dynamic tables, GOT/PLT, SysV/GNU hashes, `DT_NEEDED`, and
-`DT_SONAME`. The kernel authenticates all four linker outputs, applies fixed
-load biases, accepts the dependencies' intentionally unmapped ELF headers, and
-executes the complete probe through the linker-generated jump slot.
-The authenticated interpreter occupies a bounded two-page RX extent plus one
-RW/NX page; its metadata/startup core remains on the first executable page and
-its runtime-file discovery path begins on the second. Before relocating itself,
-the linked interpreter validates its mapped ELF
-header and bounded program-header table and derives its sole `PT_DYNAMIC`
-address and entry count; it no longer embeds its linker layout. After applying
-that relocation, the interpreter bounds and scans its initial stack,
-requires `AT_PHDR`, `AT_PHNUM`, `AT_BASE`, and `AT_ENTRY`, and verifies that
-`AT_BASE` identifies its actual load page. It derives the main load bias from
-`AT_PHDR`, the authenticated file's `e_phoff`, and matching `e_phnum`. It then
-invokes the Linux syscall gate from its own RX range and opens `/init`. After inspecting it through a temporary
-read-only window, the interpreter reopens it, bounds its 56-byte program-header
-table to nine entries in the two-page window, and derives page-aligned mmap
-requests from each readable `PT_LOAD`. It installs the authenticated header,
-four RX, and two RW/NX pages through exact `MAP_FIXED_NOREPLACE` contracts. It
-then captures the main image's two ordered `DT_NEEDED` strings, constructs each
-`/lib64/<needed-name>` on its bounded stack, inspects those derived dependency
-paths, walks both files' `PT_LOAD` entries the same way, and installs
-RX pages at `0x618000..0x61a000`, an R/NX page at `0x61a000`, and an RW/NX page
-at `0x61b000` for the primary DSO. The auxiliary DSO receives RX at `0x638000`
-and RW/NX at `0x63b000`. The kernel admits a
-page-aligned dependency bias only within `0x610000..0x620000`, binds the first
-valid request, and requires every later dependency page to preserve the
-authenticated relative layout at that bias. A bounded eight-entry contract
-table is derived from the dependency's authenticated page plan; the current
-fixture consumes four entries and exercises every admitted permission class.
-Kernel execution state now provides two isolated dependency slots, each with
-its own base window, selected bias, eight-entry contract table, mapping mask,
-generation leases, and cleanup validation. The running interpreter populates
-both slots, executes the main's one-entry preinit array, applies all three
-admitted relocations in each DSO, executes each
-dependency's `DT_INIT` function and one-entry init array, resolves the main, and
-executes its `DT_INIT` function and one-entry init array before transferring to
-the main entry.
-Wrong offsets, duplicate
-placement, a mixed bias, and W+X are rejected before it applies
-dependency and main relocations. Both dynamic-table addresses and entry counts
-come from bounded `PT_DYNAMIC` headers, and final transfer uses `AT_ENTRY`
-rather than an embedded main entry address. The kernel installs only the interpreter for
-this stage; it authenticates and plans the main and both dependencies and reserves
-only the address-space infrastructure and interpreter frames initially. Main
-and dependency payload frames are allocated only when their authenticated mmap
-requests arrive. Each successful authenticated mapping atomically joins the
-process's bounded active-image record alongside the initially installed
-interpreter pages. Each entry binds its address, exact frame generation, and
-W^X permissions. Teardown requires that record to contain the complete
-interpreter, main, and two-DSO page set with no duplicates or trailing state.
-All three userspace-loaded images' content and leaves are installed by userspace,
-and every executable-page lease is scrubbed and released after the process
-root is deactivated.
-Linker-private metadata remains mapped but outside the probe's bounded
-syscall-copy data extent.
-Interpreter and dependency selection bind the exact `PT_INTERP` path or
-`DT_NEEDED` name and SHA-256 digest before parsing or mapping. The dependency's
-own `DT_SONAME` must equal both the requested name and the authority record. A
-production authority source and general dynamic linking remain unimplemented.
-The admitted linker tag subset also validates `DT_PLTGOT`, zero `DT_DEBUG`, one
-counted relative relocation, and `DF_1_PIE`. Malformed dynamic tables,
-duplicate tags, unsupported relocations, and relocation targets outside writable memory
-are rejected before mapping.
-The static planner also rejects any image carrying dynamic relocation metadata,
-so unresolved code cannot bypass interpreter-first startup.
-The execution-oriented main plan keeps its six-header table in a distinct
-read-only load so its `0x400100` entry remains intact.
-The profile is validated during boot,
-plans and installs up to two RX/RW pages per segment with independently
-zero-filled BSS, including ELF and program headers in the first load page. The
-runtime proof owns every mapped frame, preserves per-page W^X permissions, and
-rejects larger plans. The planner materializes a conventional third read-only
-load and non-page-base segments. The mapper owns its frame and a separate leaf
-table, activates the root, and executes the toolchain-linked image through the
-full syscall workload before tearing every frame down. The synthetic two-load
-proof also activates the collision-checked page-table root and
-executes a non-page-base verification entry at ring 3. This
-entry receives a distinct RW/NX stack containing `argc`, `argv[0]`, `envp[0]`,
-and bounded Linux `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_PAGESZ`, `AT_CLKTCK`,
-`AT_PLATFORM`, conservative `AT_HWCAP`/`AT_HWCAP2`, static-loader,
-credential, `AT_SECURE`, `AT_EXECFN`, and `AT_ENTRY` metadata. It validates its
-argument, environment, executable-name, secure-mode, and entry metadata from
-ring 3 before terminating through the architectural x86-64 `SYSCALL` instruction
-after checking that an unsupported call returns `-ENOSYS`, performing bounded
-console `write` copy-in and `uname` copy-out operations, and validating a
-`getpid()` result returned through `SYSRETQ`. Console writes accept 1 through
-256 validated bytes on descriptor 1 and preserve exact byte content. Bounded
-`writev` atomically validates and assembles up to four vectors under the same
-aggregate limit before emitting any bytes. Bounded `poll` atomically reports
-immediate console and device readiness across four descriptors. With one to
-four descriptors and a runnable peer, it also blocks in the scheduler for a
-signed millisecond timeout or indefinitely, wakes after relevant eventfd,
-pipe, close, or timerfd state changes, and returns zero after an APIC-driven
-timeout. A zero-descriptor `poll` or `ppoll` ignores the table pointer and uses
-the same timeout path as a sleep; the measured graph proves positive timeouts
-for both forms. This is a fixed two-thread proof, not a general wait-queue
-facility; blocking without a runnable peer returns `ENOSYS`.
-A caught signal unblocked by the ordinary thread mask can interrupt `poll` with
-`EINTR` without changing the output table.
-`ppoll` uses the same scheduler-backed descriptor path with a checked
-nanosecond timespec or an infinite null timeout. Its optional eight-byte signal
-mask is installed only for the blocked interval, with `SIGKILL` and `SIGSTOP`
-removed, and the calling thread's prior mask is restored on readiness, timeout,
-rollback, or signal interruption. A sibling may target the initial thread with
-`tgkill` while it is blocked with a caught standard signal unblocked by the
-temporary mask. The kernel transactionally saves the sender, cancels the wait,
-restores the waiter's prior mask, switches to that thread's handler, and returns
-`EINTR` through `rt_sigreturn` without modifying the poll output. The measured
-two-thread graph proves that handoff, an APIC-driven timeout, and restoration of
-the original per-thread mask. Cross-thread delivery to other states, queuing a
-signal blocked by the temporary mask, nested delivery, and syscall restart
-remain outside this bounded profile. A single bounded epoll
-instance can register one console or device descriptor, report level-triggered
-readiness, and preserve packed 64-bit user data. With a runnable peer,
-`epoll_wait` blocks for a signed
-millisecond timeout or indefinitely, wakes after relevant descriptor or
-registration changes, and returns zero after an APIC-driven timeout. The
-registration, readiness, and data word remain live while blocked, and the
-output event is revalidated before completion. This remains a fixed two-thread,
-one-registration proof; blocking without a runnable peer returns `ENOSYS`. A
-caught signal unblocked by the ordinary thread mask can interrupt `epoll_wait`
-with `EINTR` without changing its output event.
-`epoll_pwait` and `epoll_pwait2` use the same scheduler path after validating
-their temporary signal mask, and the latter converts a null or checked
-nanosecond timespec. The mask is installed only while blocked and restored on
-readiness, timeout, rollback, or targeted signal interruption. The measured
-graph drives separate `tgkill` handoffs through `poll`, `epoll_wait`, `ppoll`,
-and `epoll_pwait`, verifies `EINTR` with unchanged output, and then proves an
-`epoll_pwait` APIC timeout and mask restoration. Blocked signals, nested
-delivery, and syscall restart remain unsupported. A bounded eventfd
-counter provides a signalable source for that epoll path, including
-nonblocking saturation and semaphore reads. With a runnable peer, a blocking
-read on an empty eventfd now sleeps in its scheduler slot until a write makes
-the counter readable; descriptor closure wakes it with `EBADF`, and its
-eight-byte output is revalidated on completion. A caught standard signal that
-is unblocked by the waiting thread's ordinary mask may interrupt that read:
-the same transactional sender/handler handoff returns `EINTR` without changing
-the output or counter. The measured graph then blocks the same read again and
-completes it through a write, proving the descriptor remains live. Blocked
-signals, unsupported dispositions, nested delivery, and syscall restart retain
-their explicit `ENOSYS` boundary. A write that would saturate a blocking
-eventfd now stores its already-copied increment in the scheduler wait. A read
-that creates enough capacity wakes and atomically commits that saved value;
-signal interruption returns `EINTR` without changing the counter, and close
-wakes it with `EBADF`. The measured graph mutates the userspace input while the
-retry sleeps and still observes the original saved increment. Blocking without
-a runnable peer retains `ENOSYS`.
-A bounded monotonic timerfd adds one-shot and periodic clock-driven readiness
-with relative or absolute arming. An unexpired or disarmed blocking read sleeps
-in its scheduler slot while a peer is runnable. Arming and disarming refresh the
-stored deadline; an APIC tick completes an expired read with its accumulated
-count and preempts directly back to the reader. Descriptor closure wakes it with
-`EBADF`. A caught standard signal can interrupt the wait with `EINTR` without
-changing its output or consuming/disarming the timer; retrying can still finish
-at the original deadline. Blocked signals, nested delivery, and syscall restart
-remain unsupported. One bounded pipe pair provides a 256-byte FIFO
-with atomic scalar or vectored I/O, poll/epoll readiness, EOF, broken-peer
-behavior, FIFO metadata, and byte-count introspection. An empty blocking scalar
-or vectored read sleeps in its scheduler slot while a peer is runnable, then
-revalidates and copies available bytes after a write or returns EOF after the
-writer closes. A blocked `readv` retains a kernel-owned snapshot of up to four
-iovecs and revalidates every snapshotted output range at completion; changing
-the userspace iovec table while asleep cannot redirect the copy. An admitted
-caught signal may interrupt either wait with `EINTR` without
-changing the output or FIFO; retrying the same read can then complete normally.
-The measured graph proves both wake paths, the scalar interruption/retry path,
-and readv snapshot isolation. A saturated blocking scalar or vectored write
-also sleeps while a peer is runnable. It revalidates and atomically copies its
-input only after enough capacity becomes available, returns `EINTR` without
-changing the FIFO when interrupted, and wakes with `EPIPE` if the reader
-closes. A blocked `writev` retains a kernel-owned snapshot of up to four
-iovecs, so later userspace table mutations cannot redirect its input. The
-measured graph proves both write forms across interruption, capacity wake, and
-reader-close wake, including writev snapshot isolation. Broken scalar and
-vectored writes generate `SIGPIPE`: caught delivery resumes the write with
-`EPIPE`, ignored delivery preserves `EPIPE`, and the default disposition
-terminates the bounded Linux process. A bounded console ioctl reports a fixed 80-by-24 geometry, and `close` irreversibly
-retires either initial console descriptor. Bounded `dup` reuses the lowest closed slot and preserves whether
-the console endpoint is input or output; `dup2` provides exact-slot replacement.
-`fcntl(F_GETFD/F_GETFL)` exposes the bounded descriptor and endpoint flags. It also
-configures and queries an FS-relative
-TLS base through bounded `arch_prctl(ARCH_SET_FS)` and restores the supervisor's
-prior FS base afterward. Pointer-bearing calls are constrained to the RW
-segment's declared ELF memory extent, allocated heap bytes below the current
-break, the mapped user stack, or the active bounded mappings. They
-cannot cross the stack's guard-page boundaries. Invalid ranges and write
-arguments return Linux `-EFAULT`, `-EBADF`, or `-EINVAL`. Copy-in may also read
-the declared main or interpreter RX ELF extent, while copy-out rejects both.
-A bounded area walker admits a buffer only when adjacent declared areas cover
-every byte with the requested permission. The pipe proof copies two bytes
-across the exact linked-main RX-to-RW boundary; gaps, RELRO, guard pages, and
-address overflow still fail closed.
-The ring-3 workload verifies each error and continues into valid calls.
-A real ring-3 page fault now enters a bounded `SIGSEGV` handler registered with
-`rt_sigaction` and `SA_RESTORER`. With `SA_ONSTACK`, the kernel selects the
-registered writable alternate stack, marks an ordinary registration
-`SS_ONSTACK`, and admits syscall
-entry from that range only for the active signal frame. It builds the 440-byte
-x86-64 Linux `rt_sigframe` base layout with the restorer, `ucontext`, and
-128-byte `siginfo_t` at their UAPI offsets, preserves the normal-stack red zone,
-and retains the complete interrupted register state. Handler arguments always
-identify the frame's information and context records. `SA_SIGINFO` populates
-page-fault `SEGV_MAPERR` address/trap state and software-generation identity;
-the frame advertises no floating-point state yet. The handler observes
-`SS_ONSTACK`, proves
-the alternate stack cannot be replaced while active, and proves a premature
-`rt_sigreturn` is rejected without consuming that state, maps the missing page,
-and returns through the restorer. A dedicated `IRETQ` syscall epilogue restores
-all general registers—including `rcx` and `r11`—plus RIP, RSP, RFLAGS, and the
-prior mask before retrying the faulting load. This covers synchronous page-fault
-delivery plus `kill`, `tkill`, and `tgkill` generation of explicitly caught
-standard signals 1 through 31. Ignored signals are discarded; unsupported
-default dispositions and real-time generation fail explicitly instead of
-claiming Linux behavior. The thread-directed paths reject zero or out-of-range
-identities before distinguishing absent thread groups or threads. Blocked
-standard signals coalesce independently in a pending set. `rt_sigpending`
-reports the blocked subset, and `rt_sigprocmask` delivers the lowest-numbered
-newly unblocked signal while retaining each signal's first source code. The
-measured runtime proves `SIGUSR1` wins over an earlier-queued `SIGUSR2`, and
-that a duplicate does not replace `SI_USER` with `SI_TKILL`. When both become
-unblocked together, the first successful `rt_sigreturn` installs the second
-frame before any original userspace instruction executes; a user-edited return
-register survives through that chain. Pending selection is deferred while a
-frame is active because nested delivery remains outside this profile.
-`rt_sigreturn` copies
-the complete frame back, requires the published selectors, context flags,
-alternate-stack record, null FP-state pointer, and reserved words to remain
-valid, then restores user-edited integer registers, Linux-restorable RFLAGS
-bits, and `uc_sigmask` with `SIGKILL` and `SIGSTOP` removed. A malformed frame
-fails without consuming the active context. Floating-point/XSAVE state,
-user-edited alternate-stack restoration, other asynchronous sources, nested
-delivery, and syscall restart remain future work. `SS_AUTODISARM` is supported:
-delivery records the configured stack in `ucontext`, makes the handler-visible
-configuration disabled, retains syscall access through the active kernel frame,
-and restores the exact configuration on `rt_sigreturn`.
-`SA_NODEFER` suppresses the automatic delivered-signal mask bit while retaining
-the explicit action mask, and `SA_RESETHAND` atomically restores the default
-disposition after committing a delivery. The measured handler observes that
-mask and verifies the one-shot action is already cleared after return.
-Bounded `rt_sigtimedwait` synchronously consumes the lowest-numbered matching
-pending standard signal. It supports an immediate zero-time poll, optional
-128-byte `siginfo_t` output, and immediate consumption when a signal is already
-pending even if the supplied timeout is nonzero or null. A null-timeout wait
-with no pending match can also suspend one of the two bounded threads while its
-peer is runnable. A matching generated standard signal writes the optional
-information record, installs the signal number as the suspended syscall's
-return value, and makes that thread runnable without invoking its disposition.
-A caught, unblocked standard signal outside the requested set may instead
-interrupt a sibling's wait through `tgkill`. The kernel transactionally saves
-the sender, cancels the typed wait, switches to the waiter's handler, and
-returns `EINTR` through `rt_sigreturn` without consuming a requested signal or
-modifying the optional information record. The measured two-thread graph proves
-that handoff with `SIGUSR2`, then proves that a later matching `SIGUSR1` still
-completes the normal synchronous-wait path.
-A positive timeout stores a checked monotonic deadline in that same wait record;
-the periodic local-APIC tick makes the waiter runnable with `EAGAIN` after the
-deadline, independently of Linux syscall entry, saves the interrupted peer's
-complete integer context, and dispatches the waiter immediately. The measured workload proves both timeout
-and signal handoffs from a futex-blocked child to its signal-waiting parent and
-requires all typed wait state to be reclaimed at exit. Empty zero-time polls
-also return `EAGAIN`. Nonmatching signals that are blocked by the target's
-current mask, unsupported dispositions, nested delivery, syscall restart, and
-waits without another runnable thread remain outside the profile and return
-`ENOSYS`. Input, timeout, and output failures leave pending and thread state
-unchanged.
-The bounded process reports UID, effective UID, GID, and effective GID zero as
-container-local identity only; these values grant no native kernel capability.
-Real/effective/saved UID and GID triples are also zero and are copied only
-after all three output pointers pass writable-VMA validation.
-Its initial single thread reports PID/TID/process-group/session ID 1 and parent
-PID 0, matching an initial process namespace. A bounded
-`set_tid_address` registration returns TID 1 and clears the registered word as
-part of exit.
-Bounded `set_robust_list` and `get_robust_list` calls retain and report one
-24-byte thread robust-list head, reject foreign process IDs and invalid ranges,
-and discard the registration during exit. A bounded matching futex wait may
-block either of the two threads only while its peer is ready. Explicit wake
-restores the blocked child; child exit clears its registered word and restores
-the blocked parent. An optional relative timeout uses the same typed monotonic
-deadline state as signal waits: zero returns `ETIMEDOUT` immediately, while a
-positive duration wakes at the next Linux syscall or scheduling boundary after
-expiry. The same periodic local-APIC tick can instead mark the timed waiter ready
-and dispatch it directly from interrupt context. Mismatches return `EAGAIN`, and a matching wait without another runnable
-thread returns `ENOSYS`. General futex queues and robust futex recovery are not
-implemented.
-The measured minimal-system PID 1 additionally exercises the public private
-operation encodings before readiness. `FUTEX_WAIT_PRIVATE` must return
-`EAGAIN` for a mismatched aligned word without changing it, and
-`FUTEX_WAKE_PRIVATE` must return zero when no waiter matches. It then emits
-`FUTEX_READY`. Combined with the dedicated two-thread runtime above, this closes
-the bounded `futex.private` profile row without claiming general Linux futex
-compatibility.
-The bounded M5 system image keeps PID 1 and its console descriptor live after
-the readiness line. PID 1 blocks in `rt_sigtimedwait` for `SIGTERM`; the native
-control path verifies the saved generation-bound process and thread state,
-wakes it with kernel-origin signal information, and resumes the same context.
-PID 1 validates the event, emits `SUPERVISOR_SHUTDOWN` through the retained
-console, restores its signal mask, closes the descriptor, and exits. This is a
-deterministic persistent-supervisor proof, not yet an interactive console or a
-general service-restart policy. Static exec now clears the replaced image's FS
-base before entering an image without TLS, so the saved supervisor context
-cannot retain a stale thread pointer.
-Bounded `mprotect` can activate a complete `PROT_NONE` scratch range as fresh
-zeroed read-only/NX or RW/NX pages, or irreversibly seal the page named by the
-parsed `PT_GNU_RELRO` range or any complete RW scratch range as read-only/NX.
-Changing a subrange rebuilds the bounded registry around it so the other pages
-retain independent protection. The page-table permissions and syscall copy
-direction change together: reads continue after sealing, writes fail, and
-executable permissions are rejected. Read-only pages cannot regain write
-permission, and active pages cannot transition back to `PROT_NONE` yet.
-An exact idempotent protection request succeeds only after revalidating every
-selected lease and page-table leaf.
-One separately owned, zero-filled RW/NX page backs a bounded `brk` heap. The
-ring-3 workload grows and shrinks the break, writes through the mapping, and
-confirms that an out-of-range request leaves the current break unchanged.
-A four-page fixed `mmap` registry can install page-aligned private areas of one
-through four pages in its reserved virtual window. Physical frames are allocated
-only when a mapping is admitted. Every nonzero scratch length is rounded up to
-a page consistently across mapping, protection, residency, discard, and unmap;
-a rounded request requiring more than four pages is rejected. Anonymous areas
-may be read-only/NX, RW/NX, or virtual-only `PROT_NONE` reservations. Reservations own no
-physical frame, keep their page-table leaves absent, deny syscall copies, and
-remain occupied for placement purposes until activation or unmap. RW/NX areas are
-removed from the hardware page table by exact `munmap`, scrubbed, and proven
-zero on reuse. Bounded `MADV_DONTNEED` also zeros an anonymous area in place
-without widening a sealed read-only area, while `mincore` reports mapped pages
-resident and `PROT_NONE` reservations nonresident. Any contiguous part of the window can
-instead expose a private read-only/NX copy of an immutable runtime ELF file.
-File offsets must
-be page aligned, partial final pages are zero-filled, syscall copy-out cannot
-modify the mapping, and unmap scrubs every payload frame. The runtime proof
-keeps independent areas live simultaneously, queries and removes them without
-disturbing their neighbors, and preserves access and immutable-file attributes
-across splits. A four-page proof seals the middle pair, punches two holes,
-reuses the lowest hole, rejects a two-page request when free pages are
-fragmented, and finally unmaps the complete sparse window. `mprotect`,
-`madvise`, `mincore`, and `munmap` walk adjacent records, so range behavior no
-longer depends on their original allocation boundaries. Anonymous
-`MAP_FIXED_NOREPLACE` can select an exact free subrange inside the window;
-overlap returns `EEXIST` without changing either the existing mappings or frame
-ownership. A reservation also counts as overlap. Anonymous `MAP_FIXED` can
-atomically fill holes, reservations, or replace a selected
-subrange after all old and new frame leases and page-table leaves pass one
-preflight. Replacement publishes fresh zeroed read-only/NX or RW/NX pages before scrubbing and
-retiring the displaced generation leases. A `PROT_NONE` fixed replacement
-instead clears the selected leaves, retires their leases, and leaves an
-occupied virtual-only reservation that can later be activated.
-Every occupied page selected by unmap validates generation ownership, removes
-the hardware leaf, scrubs the released frame, and returns its lease to the
-allocator; process exit requires the complete registry and all four lease
-slots to be empty.
-Placement outside the bounded window, fixed shared or file replacement
-mappings, writable mappings outside the exact authenticated main/dependency
-data pages, and arbitrary filesystem-backed
-mappings are not implemented.
-The root view starts with `/` as its working directory. Bounded `chdir` and
-`fchdir` can select an immutable indexed directory such as `/var/lib`, and
-`getcwd` returns that retained path. `AT_FDCWD` and relative `chdir` resolve
-beneath the current measured directory; empty, `.`, `..`, and empty path
-components are rejected. Paths and outputs remain fixed-size, and no mutable
-VFS is implied.
-Its first procfs-compatible identity is `/proc/self/exe`, whose bounded
-`readlink` result is `/init` before replacement and the selected canonical
-`/bin/signal-probe` or `/bin/exec-second` path after
-the bounded exec commit; rejected exec calls retain the old identity.
-An immutable runtime-file view exposes the exact authenticated `/init`,
-`/lib64/ld-ginux.so`, `/lib64/libginux.so`, and `/lib64/libginux-aux.so` bytes
-as read-only regular files. The linked main opens the auxiliary DSO, reads and
-validates its ELF magic, and closes its independent descriptor. The interpreter
-also derives, inspects, and executable-maps both DSO paths.
-Bounded `openat`, scalar and vectored reads, `pread64`, `lseek`, private
-read-only `mmap`, metadata, and access checks operate on those files. This is
-bounded immutable-root traversal, not a general VFS or general executable
-loading. The kernel
-authenticates and plans the fixed four-image graph; the interpreter installs
-the authenticated main and both dependency segments admitted by that exact plan.
-The separate static proofs resolve normalized absolute or current-directory-relative
-`execve` paths through the measured root, then admit any measured regular file
-that satisfies the bounded static ELF execution profile. The two
-independently linked fixtures, `bin/signal-probe` and `bin/exec-second`, prove
-selection is neither compiled-byte nor fixed-address identity: both use bounded
-two-page text segments, while the second has an independent header and data
-base. The profile
-allows one header page, up to five executable pages, up to two writable pages,
-and at most eight pages in total. The active mapping list is process runtime
-state and binds each virtual page to its generation-tagged physical-frame lease
-and W^X permissions. A successful transaction replaces it with the selected
-plan, while a failure retains the old list. The profile also allows up to eight
-63-byte `argv` strings, eight equivalent
-`envp` strings, and one live thread. Rejected path, pointer, count, string, and
-aggregate-stack cases leave the original image
-running; success installs exact W^X target frames, unmaps the old image, and
-retains the selected canonical measured-root identity.
-The same atomic transaction is exposed through a flags-zero `execveat` profile;
-each proof opens `/bin`, returns cwd to `/`, and resolves its selected basename relative
-to that measured-directory descriptor while rejecting bad descriptors,
-non-directory descriptors, and unsupported flags.
-`AT_EMPTY_PATH` also executes the selected authenticated image through an open regular
-file descriptor, rejects a directory descriptor, and retains the canonical
-measured-root executable identity.
-The proof also closes only `FD_CLOEXEC` descriptors, preserves an ordinary
-descriptor, resets caught signals while retaining an ignored disposition,
-disables the alternate signal stack, and derives the bounded process name from
-the selected measured node's basename. The interpreted `/init` proof accepts
-the same one-to-eight argument and zero-to-eight environment-entry kernel
-contract as static replacement. Its replacement run proves
-`argv = ["/init", "dynamic-exec", NULL]` and
-`envp = ["GINUX=1", "GINUX_MODE=exec", NULL]` reach the main and both DSO
-constructors, then installs the
-authenticated interpreter pages atomically, resets the main/DSO mapping
-contracts, rematerializes initial and sibling TLS pages from authenticated
-templates, restores the initial FS base, and executes the replacement main
-after both DSOs have been mapped and relocated. The internal measured node
-`linux/init` retains the canonical Linux-visible `/init` identity through
-`/proc/self/exe`. This remains one fixed graph,
-not a general dynamic-linker contract.
-Per-process `umask` state starts at `022`, returns its prior value, and masks
-updates to the nine permission bits.
-Bounded `fstat` identifies descriptors 0 and 1 as fixed character devices and
-copies the exact x86-64 stat layout only after validating the complete output.
-Read-only `getrlimit` and `prlimit64` queries expose the bounded stack and file
-descriptor ceilings; unsupported resources, foreign PIDs, mutations, and
-invalid output ranges fail without changing user memory.
-Bounded `sched_getaffinity` and `getcpu` report the current bootstrap topology
-as CPU 0 in NUMA node 0, with atomic validation of their output ranges.
-Bounded `clock_gettime` reports monotonic and raw-monotonic elapsed time from a
-private TSC epoch, using PIT calibration when CPUID has no frequency data;
-`clock_getres` reports its rounded single-tick resolution. The sole process and
-thread expose that same non-descheduled interval through CPU clocks and
-100-Hz `times` accounting; bounded `getrusage` returns it as user time in a
-fully initialized x86-64 resource-usage structure. Bounded `nanosleep` returns
-immediately for zero or stores a positive relative monotonic deadline while a
-peer is runnable. A periodic local-APIC interrupt marks the sleeper ready after
-expiry without requiring another syscall, preserves the interrupted peer's
-`RAX`, `RCX`, `R11`, remaining integer registers, RIP/RSP/RFLAGS, and FS base,
-then dispatches the sleeper immediately. A caught standard signal unblocked by
-the sleeper's ordinary mask may interrupt that wait with `EINTR`; a non-null
-remainder pointer receives the normalized unslept relative duration before the
-signal frame commits, while successful expiry leaves it untouched. The measured
-graph proves the interruption and a subsequent APIC-driven relative
-`clock_nanosleep` expiry. `clock_nanosleep` accepts `CLOCK_MONOTONIC` in
-relative or `TIMER_ABSTIME` mode; an elapsed absolute deadline returns
-immediately and ignores its remainder pointer. Realtime clocks remain
-unsupported. Blocked signals, nested delivery, and syscall restart remain
-unsupported. The three interval-timer classes can be
-queried and idempotently disarmed; arming remains unsupported until asynchronous
-signal delivery exists.
-The bounded ELF parser and page-image planner also validate checked,
-page-aligned load-bias plans for position-independent `ET_DYN` images. Dynamic
-execution planning binds an exact `PT_INTERP` path to a non-overlapping relocated
-interpreter image while preserving distinct initial-entry, `AT_ENTRY`, and
-`AT_BASE` values. The bounded synthetic interpreter-first execution path is
-verified, including rejection of substituted, mutated, and truncated interpreter
-bytes. The dependency is independently authenticated by exact name and digest,
-requires a matching internal `DT_SONAME`, is mapped W^X at a non-overlapping
-bias, and is rejected if it requests another dependency. Synthetic userspace
-relative relocations are executed for the interpreter, main image, and
-dependency. The dependency also receives its own
-eager `GLOB_DAT` and `JUMP_SLOT` self-bindings. The main image proves one
-cross-object symbol resolution through `R_X86_64_GLOB_DAT` and eager
-`R_X86_64_JUMP_SLOT`; the jump slot is called in ring 3 and returns a checked
-value from dependency code. The userspace interpreter verifies that the
-relocation's symbol index is the admitted SysV main-image or GNU dependency
-hash bucket result, follows each validated symbol-name offset into its
-`DT_STRTAB`, and
-requires the complete NUL-terminated names to match. Multiple dependencies,
-transitive graphs, search paths, alternate SONAME selection,
-symbol-version processing, interposition, multi-bucket lookup, lazy binding,
-and a real userspace linker remain outside the profile.
-This is not yet a general Linux
-process or syscall environment; see
-[Linux ELF64 Profile v0](specs/kernel/linux-elf-v0.md) and
-[Linux Syscall Entry v0](specs/kernel/linux-syscall-v0.md).
+Ginux aims to make authority visible, narrow, and revocable:
 
-## Quick start
+- Capabilities name objects and permitted operations; IDs, paths, PIDs, and
+  ancestry are not substitutes for authority.
+- The controller is highly trusted but still runs outside ring 0 and cannot
+  synthesize capabilities, rewrite kernel memory, or replace sealed code.
+- Native services use separate W^X address spaces with guarded stacks and
+  explicitly mapped bootstrap data.
+- SMEP, SMAP, UMIP, supervisor-only mappings, and non-executable data mappings
+  harden the CPU boundary on x86-64.
+- Device DMA is confined with the IOMMU. Bus mastering, interrupt routes, MMIO,
+  queues, and DMA pages are activated and revoked in a defined order.
+- A service fault triggers domain-specific cleanup. Device access is quiesced
+  before translation tables and memory are released.
+- Container root remains local to its personality domain. Linux privilege does
+  not imply native host privilege.
+- Boot manifests, executable identities, bounds, and reserved fields are
+  checked fail closed.
+
+This design reduces ambient authority; it does not make a universal claim of
+bug-free or formally verified security. Firmware, hardware, compilers, unsafe
+code, and unverified components remain part of the threat model.
+
+## Performance model
+
+Isolation is useful only if real workloads can afford it. Ginux separates
+control from data:
+
+- capability checks establish who may use a resource;
+- shared memory and mapped hardware queues avoid unnecessary copies;
+- batching reduces transitions and interrupt overhead;
+- IOMMU mappings allow direct device access without granting all of RAM;
+- NUMA placement, CPU affinity, pinned memory, PCIe topology, NVMe, RDMA, and
+  GPU paths can be optimized for AI and HPC workloads; and
+- benchmarks compare the same workload and hardware profile against Rocky
+  Linux rather than relying on architectural claims.
+
+The kernel-versus-service boundary is decided per subsystem. Boot-critical or
+latency-sensitive mechanisms may live in the kernel or authenticated boot-time
+modules. Components that benefit from independent restart and narrow authority
+may run as isolated services. Measurements, not a monolithic-versus-microkernel
+label, decide the final path.
+
+## Current state
+
+| Area | What works now | Next boundary |
+|---|---|---|
+| Boot | Direct x86-64 UEFI boot as one EFI application under Q35/OVMF | Production signing, recovery, and physical hardware profiles |
+| Controller | Persistent ring-3 command console with component, process, network, and container lifecycle control | Remote authenticated management and persistent configuration |
+| Domains | Capability tables, isolated address spaces, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | General concurrent workload domains and broader resource accounting |
+| Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
+| Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
+| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, and an unmodified Alpine musl/BusyBox shell with rootfs-backed commands | Complete Alpine checkpoint, then Rocky Linux 10 and systemd |
+| Other personalities | Domain and kernel mechanisms are designed for reuse | No BSD or other non-Linux personality is implemented yet |
+
+The Linux layer is intentionally tracked as a compatibility contract, not as a
+binary yes/no claim. Many interfaces are partial, and major surfaces including
+general sockets, cgroups, sysfs, and broad device `ioctl` compatibility remain.
+See the [Linux compatibility matrix](docs/LINUX-COMPATIBILITY.md) for the
+current ledger.
+
+The current validated development target is QEMU's x86-64 Q35 machine with
+OVMF, Intel IOMMU, and virtio devices. QEMU uses KVM on a suitable x86-64 Linux
+host and TCG otherwise, including on Apple Silicon Macs. Physical-server
+support is a later milestone.
+
+## Try it
 
 Requirements:
 
-- Rust 1.99.0 through `rustup`
-- Clang with the `x86_64-none-elf` assembly target
-- QEMU with x86-64 and OVMF support
-- GNU Make
+- Rust 1.99.0 through `rustup`;
+- Clang with the `x86_64-none-elf` target;
+- QEMU with x86-64 and OVMF support;
+- Docker for preparing the pinned Alpine OCI input; and
+- GNU Make.
 
-Check the local environment:
+Check the host, prepare the pinned Alpine image, build Ginux, and boot it:
 
 ```sh
 make doctor
-```
-
-Build the bootable EFI filesystem:
-
-```sh
-make build
-```
-
-`make build` deterministically regenerates the development manifest, measured
-control-plane bundle, measured initramfs, and Ed25519 signature from `boot/manifest-v0.conf` and
-`control-plane/bootstrap.hex`; that source declares its authenticated control,
-service, and restart entry labels inline. Run `make manifest` directly when
-working on those inputs. The kernel build assembles `kernel/linux-probe.S` as
-an x86-64 ELF object, extracts its `.text` section for the executable runtime
-proof, and also links a complete static ELF with the Rust toolchain's LLD for
-parser compatibility verification. The checked-in linker script fixes its
-read-only headers at `0x3ff000`, a five-page RX load with entry at `0x400100`,
-and RW data/BSS at `0x405000`, matching the ring-3 workload's bounded layout.
-This tests ordinary
-linker metadata on both macOS and Linux hosts. `make linux-probe` builds the
-static artifact at `build/linux-probe.elf` and the dynamic fixtures at
-`build/linux-dynamic/ld-ginux.so`,
-`build/linux-dynamic/linux-linked-main.elf`, and
-`build/linux-dynamic/libginux.so`. It also emits the bounded dependency-list
-fixtures `linux-linked-graph-main.elf`, `libginux-aux.so`,
-`linux-signal-probe.elf`, `linux-exec-second.elf`, and
-`linux-system-init.elf` for inspection
-and the deterministic proof root at `build/initramfs-v0.cpio` without assembling the EFI
-filesystem. Override the tools with `CLANG=/path/to/clang` or
-`LLD=/path/to/rust-lld`. Kernel and
-proof-workload ABI constants share the machine-readable
-`specs/abi/control-v4.rs` source, and the manifest builder expands its symbolic
-feature and descriptor words before signing. The checked-in key is an RFC test
-identity and must not be treated as a production trust root.
-
-`make system-image` builds the pinned minimal system-container candidate and
-signed development inputs from the profile, repository-built ELF artifacts,
-and deterministic archive recipe. See
-[Minimal System Container Profile v0](specs/container/minimal-system-v0.md).
-
-The interpreter and dependency proof payloads are assembled from
-`kernel/linux-interpreter.S` and `kernel/linux-dependency.S` under separate
-bounded text-size and unresolved-relocation checks.
-
-The result is placed at:
-
-```text
-build/esp/EFI/BOOT/BOOTX64.EFI
-```
-
-Boot it in headless QEMU:
-
-```sh
 make run
 ```
 
-Run the automated boot assertion:
+At the `ginux>` prompt:
 
-```sh
-make test
+```text
+help
+status
+container new alpine
+container set alpine image=alpine:3.24.2 init=/bin/sh
+container start alpine --attach
 ```
 
-The test succeeds only after the post-firmware kernel validates the UEFI memory map and emits `GINUX_KERNEL_OK` over the serial console.
+The final command enters the unmodified Alpine shell. `exit` returns to the
+Ginux controller; `shutdown` stops the host.
 
-Before committing a milestone, run the complete clean gate:
-
-```sh
-make gate
-```
-
-This formats the workspace, removes prior artifacts, runs lint checks, rebuilds
-the EFI image, executes the QEMU boot assertions, and checks the working diff
-for whitespace errors.
-
-Compile the public native bootstrap and lifecycle ABI as an independent
-freestanding C11 consumer with:
+Useful development gates:
 
 ```sh
-make abi-conformance
+make build          # build the unified EFI image
+make test           # run the core QEMU boot gate
+make test-c2        # verify configured container lifecycle
+make test-alpine    # verify OCI ingestion and the Alpine shell
+make check          # run architecture, ABI, format, lint, and unit checks
+make gate           # run the clean reproducible project gate
 ```
 
-`make help` lists all supported development targets.
+The EFI filesystem is written to
+`build/esp/EFI/BOOT/BOOTX64.EFI`. Run `make help` for all supported targets and
+environment overrides.
 
-## Virtualization profiles
+## Repository guide
 
-- **macOS on Apple Silicon:** QEMU x86-64 with TCG, the Q35 Intel IOMMU exposed, and virtio platform DMA required. UTM is optional for graphical inspection; the checked-in QEMU runner is authoritative.
-- **Linux on x86-64:** QEMU x86-64 with the same Q35 Intel IOMMU and virtio platform-DMA profile and KVM when `/dev/kvm` is available, falling back to TCG otherwise.
+- [`boot/efi`](boot/efi) builds the direct UEFI entry and unified image.
+- [`kernel`](kernel) contains the kernel, Linux personality work, executable
+  loaders, and QEMU hardware paths.
+- [`control-plane/runtime`](control-plane/runtime) is the embedded ring-3
+  controller.
+- [`services`](services) contains isolated native service runtimes.
+- [`crates`](crates) contains shared `no_std` contracts and state machines.
+- [`specs`](specs) records versioned boot, kernel, ABI, container, and service
+  contracts.
+- [`tests`](tests) contains ABI, configuration, and end-to-end QEMU gates.
+- [`tools`](tools) contains image preparation, manifest, architecture, and QEMU
+  tooling.
 
-Override discovery when necessary:
+## Technical references
 
-```sh
-QEMU_ACCEL=tcg QEMU_CPU=qemu64,+smep,+smap,+umip OVMF_CODE=/path/to/OVMF_CODE.fd OVMF_VARS=/path/to/OVMF_VARS.fd make run
-```
+- [Architecture](ARCHITECTURE.md) — full system direction and design choices.
+- [Verification roadmap](docs/ROADMAP.md) — staged product checkpoints.
+- [Linux compatibility matrix](docs/LINUX-COMPATIBILITY.md) — current ABI
+  coverage and omissions.
+- [Native domains and authority](docs/decisions/0001-native-domains-and-authority.md)
+  — the isolation and delegation model.
+- [Unified image and driver boundary](docs/decisions/0002-unified-image-and-driver-boundary.md)
+  — what belongs in the kernel, boot-time modules, and isolated services.
+- [C3 Alpine verification](docs/checkpoints/C3.md) — the current interactive
+  userspace checkpoint.
 
-The default virtual CPU is `qemu64,+smep,+smap,+umip`, matching the kernel's
-fail-closed supervisor execution/access and user-mode instruction protection
-requirements. `QEMU_CPU` may select a different model only if it still
-advertises SMEP, SMAP, and UMIP.
+## License
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, [ADR 0001](docs/decisions/0001-native-domains-and-authority.md) for the native domain and authority model, [Boot Handoff Contract v4](specs/boot/handoff-v4.md) for the firmware-to-kernel boundary, [Native Service Lifecycle ABI v0](specs/abi/native-service-lifecycle-v0.md) for clean service completion, [Initramfs Archive Profile v0](specs/kernel/initramfs-v0.md) for the proof root format, and [Paging v0](specs/kernel/paging-v0.md) for the transitional kernel address space.
+Ginux is licensed under the [Apache License, Version 2.0](LICENSE). See
+[`NOTICE`](NOTICE) for attribution information.
