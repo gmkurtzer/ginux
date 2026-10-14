@@ -3,6 +3,8 @@
 #[cfg(test)]
 extern crate std;
 
+use heapless::Vec;
+use serde::Deserialize;
 #[cfg(feature = "sha256")]
 use sha2::{Digest, Sha256};
 
@@ -12,6 +14,169 @@ const TAR_MAX_ENTRIES: usize = 4096;
 const TAR_NAME_SIZE: usize = 100;
 const TAR_PREFIX_SIZE: usize = 155;
 pub const REFERENCE_CAPACITY: usize = 128;
+pub const OCI_LAYER_LIMIT: usize = 16;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BearerChallenge<'a> {
+    pub realm: &'a str,
+    pub service: &'a str,
+    pub scope: &'a str,
+}
+
+impl<'a> BearerChallenge<'a> {
+    pub fn parse(header: &'a str) -> Option<Self> {
+        let fields = header.strip_prefix("Bearer ")?;
+        Some(Self {
+            realm: challenge_field(fields, "realm")?,
+            service: challenge_field(fields, "service")?,
+            scope: challenge_field(fields, "scope")?,
+        })
+    }
+}
+
+fn challenge_field<'a>(fields: &'a str, name: &str) -> Option<&'a str> {
+    fields.split(',').find_map(|field| {
+        let field = field.trim();
+        let (key, value) = field.split_once('=')?;
+        (key == name)
+            .then(|| value.strip_prefix('"')?.strip_suffix('"'))
+            .flatten()
+    })
+}
+
+#[derive(Deserialize)]
+struct TokenResponse<'a> {
+    #[serde(borrow)]
+    token: Option<&'a str>,
+    #[serde(borrow)]
+    access_token: Option<&'a str>,
+}
+
+pub fn parse_bearer_token(body: &[u8]) -> Option<&str> {
+    let (response, used): (TokenResponse<'_>, usize) = serde_json_core::from_slice(body).ok()?;
+    (body[used..].iter().all(u8::is_ascii_whitespace))
+        .then(|| response.token.or(response.access_token))
+        .flatten()
+        .filter(|token| !token.is_empty())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RegistryDescriptor<'a> {
+    pub media_type: &'a str,
+    pub digest: &'a str,
+    pub size: usize,
+}
+
+#[derive(Deserialize)]
+struct JsonPlatform<'a> {
+    #[serde(borrow)]
+    architecture: &'a str,
+    #[serde(borrow)]
+    os: &'a str,
+    #[serde(default, borrow)]
+    variant: &'a str,
+}
+
+#[derive(Deserialize)]
+struct JsonDescriptor<'a> {
+    #[serde(rename = "mediaType", borrow)]
+    media_type: &'a str,
+    #[serde(borrow)]
+    digest: &'a str,
+    size: usize,
+    #[serde(default, borrow)]
+    platform: Option<JsonPlatform<'a>>,
+}
+
+#[derive(Deserialize)]
+struct JsonIndex<'a> {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u8,
+    #[serde(borrow)]
+    manifests: Vec<JsonDescriptor<'a>, OCI_LAYER_LIMIT>,
+}
+
+#[derive(Deserialize)]
+struct JsonManifest<'a> {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u8,
+    #[serde(borrow)]
+    config: JsonDescriptor<'a>,
+    #[serde(borrow)]
+    layers: Vec<JsonDescriptor<'a>, OCI_LAYER_LIMIT>,
+}
+
+pub fn select_linux_amd64_manifest(body: &[u8]) -> Option<RegistryDescriptor<'_>> {
+    let (index, used): (JsonIndex<'_>, usize) = serde_json_core::from_slice(body).ok()?;
+    if index.schema_version != 2 || body[used..].iter().any(|byte| !byte.is_ascii_whitespace()) {
+        return None;
+    }
+    index.manifests.iter().find_map(|descriptor| {
+        descriptor.platform.as_ref().and_then(|platform| {
+            (platform.os == "linux"
+                && platform.architecture == "amd64"
+                && platform.variant.is_empty()
+                && valid_registry_digest(descriptor.digest)
+                && descriptor.size != 0)
+                .then_some(RegistryDescriptor {
+                    media_type: descriptor.media_type,
+                    digest: descriptor.digest,
+                    size: descriptor.size,
+                })
+        })
+    })
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct RegistryManifest<'a> {
+    pub config: RegistryDescriptor<'a>,
+    pub layers: Vec<RegistryDescriptor<'a>, OCI_LAYER_LIMIT>,
+}
+
+pub fn parse_registry_manifest(body: &[u8]) -> Option<RegistryManifest<'_>> {
+    let (manifest, used): (JsonManifest<'_>, usize) = serde_json_core::from_slice(body).ok()?;
+    if manifest.schema_version != 2
+        || body[used..].iter().any(|byte| !byte.is_ascii_whitespace())
+        || !valid_json_descriptor(&manifest.config)
+        || manifest.layers.is_empty()
+        || manifest
+            .layers
+            .iter()
+            .any(|layer| !valid_json_descriptor(layer))
+    {
+        return None;
+    }
+    let mut layers = Vec::new();
+    for layer in &manifest.layers {
+        layers
+            .push(RegistryDescriptor {
+                media_type: layer.media_type,
+                digest: layer.digest,
+                size: layer.size,
+            })
+            .ok()?;
+    }
+    Some(RegistryManifest {
+        config: RegistryDescriptor {
+            media_type: manifest.config.media_type,
+            digest: manifest.config.digest,
+            size: manifest.config.size,
+        },
+        layers,
+    })
+}
+
+fn valid_json_descriptor(descriptor: &JsonDescriptor<'_>) -> bool {
+    !descriptor.media_type.is_empty()
+        && valid_registry_digest(descriptor.digest)
+        && descriptor.size != 0
+}
+
+pub fn valid_registry_digest(digest: &str) -> bool {
+    digest.len() == 71
+        && digest.starts_with("sha256:")
+        && digest.as_bytes()[7..].iter().all(u8::is_ascii_hexdigit)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReferenceError {
@@ -495,6 +660,56 @@ mod tests {
         ] {
             assert!(ImageReference::parse(invalid).is_err(), "{invalid:?}");
         }
+    }
+
+    #[test]
+    fn parses_registry_authentication_contract() {
+        let challenge = BearerChallenge::parse(
+            "Bearer realm=\"https://auth.docker.io/token\",service=\"registry.docker.io\",scope=\"repository:library/alpine:pull\"",
+        )
+        .unwrap();
+        assert_eq!(challenge.realm, "https://auth.docker.io/token");
+        assert_eq!(challenge.service, "registry.docker.io");
+        assert_eq!(challenge.scope, "repository:library/alpine:pull");
+        assert_eq!(
+            parse_bearer_token(br#"{"token":"signed-token"}"#),
+            Some("signed-token")
+        );
+        assert_eq!(
+            parse_bearer_token(b"{\"access_token\":\"alternate-token\"}\n"),
+            Some("alternate-token")
+        );
+        assert!(BearerChallenge::parse("Basic realm=\"registry\"").is_none());
+        assert!(parse_bearer_token(br#"{"token":""}"#).is_none());
+    }
+
+    #[test]
+    fn selects_linux_amd64_index_and_parses_manifest() {
+        let digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let index = format!(
+            r#"{{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"{digest}","size":611,"platform":{{"architecture":"arm64","os":"linux"}}}},{{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"{digest}","size":612,"platform":{{"architecture":"amd64","os":"linux"}}}}]}}"#
+        );
+        let selected = select_linux_amd64_manifest(index.as_bytes()).unwrap();
+        assert_eq!(selected.digest, digest);
+        assert_eq!(selected.size, 612);
+
+        let manifest = format!(
+            r#"{{"schemaVersion":2,"config":{{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"{digest}","size":581}},"layers":[{{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","digest":"{digest}","size":3651200}}]}}"#
+        );
+        let parsed = parse_registry_manifest(manifest.as_bytes()).unwrap();
+        assert_eq!(parsed.config.size, 581);
+        assert_eq!(parsed.layers.len(), 1);
+        assert_eq!(parsed.layers[0].size, 3_651_200);
+    }
+
+    #[test]
+    fn registry_parsers_reject_wrong_platform_and_bad_digests() {
+        let digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let index = format!(
+            r#"{{"schemaVersion":2,"manifests":[{{"mediaType":"manifest","digest":"{digest}","size":1,"platform":{{"architecture":"amd64","os":"windows"}}}}]}}"#
+        );
+        assert!(select_linux_amd64_manifest(index.as_bytes()).is_none());
+        assert!(!valid_registry_digest("sha256:abcd"));
     }
 
     fn archive(path: &[u8], data: &[u8], kind: u8, link: &[u8]) -> Vec<u8> {
