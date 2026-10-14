@@ -25,11 +25,11 @@ use ginux_native_abi::{
     NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_NETWORK_APPLY_VERSION,
     NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION,
     NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_PING,
-    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_SNAPSHOT_SIZE,
-    NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
-    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
-    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_DEVICE_SET_LINK,
+    NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
+    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
+    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
@@ -49,48 +49,70 @@ const COMMAND_CONTAINER_RESTART: u16 = 11;
 const COMMAND_CONTAINER_FAIL: u16 = 12;
 const COMMAND_CONTAINER_LIST: u16 = 13;
 const COMMAND_NETWORK_STATUS: u16 = 14;
-const COMMAND_NETWORK_SET_STATIC: u16 = 15;
+const COMMAND_NETWORK_SET: u16 = 15;
 const COMMAND_NETWORK_DOWN: u16 = 16;
 const COMMAND_PING: u16 = 17;
-const COMMAND_NETWORK_SET_DHCP: u16 = 18;
-
-const NETWORK_SET_COMMANDS: &[Command<'static>] = &[
-    Command::leaf(
-        b"static",
-        b"network set static ADDRESS/PREFIX GATEWAY",
-        b"Configure a static control-domain address",
-        COMMAND_NETWORK_SET_STATIC,
-        Arity::exact(2),
-    ),
-    Command::leaf(
-        b"dhcp",
-        b"network set dhcp",
-        b"Configure the control domain using DHCP",
-        COMMAND_NETWORK_SET_DHCP,
-        Arity::exact(0),
-    ),
-];
+const COMMAND_NETWORK_LIST: u16 = 19;
+const COMMAND_NETWORK_START: u16 = 20;
+const COMMAND_NETWORK_STOP: u16 = 21;
+const COMMAND_NETWORK_RESTART: u16 = 22;
 
 const NETWORK_COMMANDS: &[Command<'static>] = &[
     Command::leaf(
-        b"status",
-        b"network status",
-        b"Show control-domain network configuration",
-        COMMAND_NETWORK_STATUS,
+        b"list",
+        b"network list",
+        b"List network devices and their state",
+        COMMAND_NETWORK_LIST,
         Arity::exact(0),
     ),
-    Command::group(
+    Command::leaf(
+        b"status",
+        b"network status DEVICE",
+        b"Show a network device configuration",
+        COMMAND_NETWORK_STATUS,
+        Arity::exact(1),
+    ),
+    Command::leaf(
         b"set",
-        b"network set COMMAND",
-        b"Configure control-domain networking",
-        NETWORK_SET_COMMANDS,
+        b"network set DEVICE {dhcp|static ADDRESS/PREFIX GATEWAY}",
+        b"Configure a network device",
+        COMMAND_NETWORK_SET,
+        Arity::range(2, 4),
+    ),
+    Command::leaf(
+        b"start",
+        b"network start DEVICE",
+        b"Administratively start a network device",
+        COMMAND_NETWORK_START,
+        Arity::exact(1),
+    ),
+    Command::leaf(
+        b"stop",
+        b"network stop DEVICE",
+        b"Administratively stop a network device",
+        COMMAND_NETWORK_STOP,
+        Arity::exact(1),
+    ),
+    Command::leaf(
+        b"restart",
+        b"network restart DEVICE",
+        b"Restart a network device without losing its configuration",
+        COMMAND_NETWORK_RESTART,
+        Arity::exact(1),
+    ),
+    Command::leaf(
+        b"ping",
+        b"network ping DEVICE ADDRESS",
+        b"Send one ICMP echo through a network device",
+        COMMAND_PING,
+        Arity::exact(2),
     ),
     Command::leaf(
         b"down",
-        b"network down",
-        b"Disable control-domain networking",
+        b"network down DEVICE",
+        b"Alias for network stop",
         COMMAND_NETWORK_DOWN,
-        Arity::exact(0),
+        Arity::exact(1),
     ),
 ];
 
@@ -198,15 +220,8 @@ const ROOT_COMMANDS: &[Command<'static>] = &[
     Command::group(
         b"network",
         b"network COMMAND",
-        b"Manage control-domain networking",
+        b"Manage network devices",
         NETWORK_COMMANDS,
-    ),
-    Command::leaf(
-        b"ping",
-        b"ping ADDRESS",
-        b"Send one ICMP echo from the control domain",
-        COMMAND_PING,
-        Arity::exact(1),
     ),
     Command::leaf(
         b"shutdown",
@@ -350,12 +365,16 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
                 handle_container_command(console, host, invocation.id(), invocation.arguments())
             }
             COMMAND_CONTAINER_LIST => show_container_list(console, host),
-            COMMAND_NETWORK_STATUS => show_network_status(console, network),
-            COMMAND_NETWORK_SET_STATIC => {
-                set_static_network(console, network, invocation.arguments())
+            COMMAND_NETWORK_LIST => show_network_list(console, network),
+            COMMAND_NETWORK_STATUS => show_network_status(console, network, invocation.arguments()),
+            COMMAND_NETWORK_SET => set_network(console, network, invocation.arguments()),
+            COMMAND_NETWORK_START => {
+                set_network_link(console, network, invocation.arguments(), true)
             }
-            COMMAND_NETWORK_SET_DHCP => set_dhcp_network(console, network),
-            COMMAND_NETWORK_DOWN => set_network_down(console, network),
+            COMMAND_NETWORK_STOP | COMMAND_NETWORK_DOWN => {
+                set_network_link(console, network, invocation.arguments(), false)
+            }
+            COMMAND_NETWORK_RESTART => restart_network(console, network, invocation.arguments()),
             COMMAND_PING => ping(console, network, invocation.arguments()),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
         }
@@ -363,7 +382,11 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
 }
 
 fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
-    let address_text = arguments.first().unwrap_or_default();
+    if !is_eth0(arguments.first()) {
+        write(console, b"network: device not found\r\n");
+        return;
+    }
+    let address_text = arguments.get(1).unwrap_or_default();
     let Some(address) = parse_ipv4(address_text) else {
         write(console, b"ping: invalid address\r\n");
         return;
@@ -400,14 +423,60 @@ fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
     }
 }
 
-fn show_network_status(console: u64, network: u64) {
+fn show_network_list(console: u64, network: u64) {
     let Some(snapshot) = network_snapshot(network) else {
         write(console, b"network: status failed\r\n");
         return;
     };
-    write(console, b"DOMAIN LINK ADDRESS GATEWAY GENERATION\r\n");
-    write(console, b"control ");
+    write(
+        console,
+        b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY\r\n",
+    );
+    write(console, b"eth0 control yes ");
     write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
+    write(
+        console,
+        if snapshot[3] == 0 {
+            b"unconfigured "
+        } else {
+            b"configured "
+        },
+    );
+    if snapshot[3] == 0 {
+        write(console, b"- -");
+    } else {
+        write_ipv4(console, snapshot[3] as u32);
+        write(console, b"/");
+        write_decimal(console, snapshot[3] >> 32);
+        write(console, b" ");
+        write_ipv4(console, snapshot[4] as u32);
+    }
+    write(console, b"\r\n");
+}
+
+fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
+    if !is_eth0(arguments.first()) {
+        write(console, b"network: device not found\r\n");
+        return;
+    }
+    let Some(snapshot) = network_snapshot(network) else {
+        write(console, b"network: status failed\r\n");
+        return;
+    };
+    write(
+        console,
+        b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY GENERATION\r\n",
+    );
+    write(console, b"eth0 control yes ");
+    write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
+    write(
+        console,
+        if snapshot[3] == 0 {
+            b"unconfigured "
+        } else {
+            b"configured "
+        },
+    );
     if snapshot[3] == 0 {
         write(console, b"- - ");
     } else {
@@ -422,12 +491,29 @@ fn show_network_status(console: u64, network: u64) {
     write(console, b"\r\n");
 }
 
-fn set_static_network(console: u64, network: u64, arguments: Arguments<'_>) {
-    let Some((address, prefix)) = arguments.first().and_then(parse_ipv4_prefix) else {
+fn set_network(console: u64, network: u64, arguments: Arguments<'_>) {
+    if !is_eth0(arguments.first()) {
+        write(console, b"network: device not found\r\n");
+        return;
+    }
+    match arguments.get(1) {
+        Some(b"dhcp") if arguments.len() == 2 => set_dhcp_network(console, network),
+        Some(b"static") if arguments.len() == 4 => {
+            set_static_network(console, network, arguments.get(2), arguments.get(3))
+        }
+        _ => write(
+            console,
+            b"network: usage: network set DEVICE {dhcp|static ADDRESS/PREFIX GATEWAY}\r\n",
+        ),
+    }
+}
+
+fn set_static_network(console: u64, network: u64, address: Option<&[u8]>, gateway: Option<&[u8]>) {
+    let Some((address, prefix)) = address.and_then(parse_ipv4_prefix) else {
         write(console, b"network: invalid address or prefix\r\n");
         return;
     };
-    let Some(gateway) = arguments.get(1).and_then(parse_ipv4) else {
+    let Some(gateway) = gateway.and_then(parse_ipv4) else {
         write(console, b"network: invalid gateway\r\n");
         return;
     };
@@ -455,11 +541,11 @@ fn set_static_network(console: u64, network: u64, arguments: Arguments<'_>) {
         write(console, b"network: configuration rejected\r\n");
         return;
     }
-    write(console, b"control: static network configured\r\n");
+    write(console, b"eth0: static network configured\r\n");
 }
 
 fn set_dhcp_network(console: u64, network: u64) {
-    write(console, b"control: requesting DHCP lease\r\n");
+    write(console, b"eth0: requesting DHCP lease\r\n");
     if call(
         NATIVE_NETWORK_DEVICE_OPERATION,
         network,
@@ -480,7 +566,7 @@ fn set_dhcp_network(console: u64, network: u64) {
         write(console, b"network: DHCP status failed\r\n");
         return;
     };
-    write(console, b"control: DHCP configured ");
+    write(console, b"eth0: DHCP configured ");
     write_ipv4(console, snapshot[3] as u32);
     write(console, b"/");
     write_decimal(console, snapshot[3] >> 32);
@@ -489,23 +575,57 @@ fn set_dhcp_network(console: u64, network: u64) {
     write(console, b"\r\n");
 }
 
-fn set_network_down(console: u64, network: u64) {
-    let Some(snapshot) = network_snapshot(network) else {
-        write(console, b"network: status failed\r\n");
+fn set_network_link(console: u64, network: u64, arguments: Arguments<'_>, start: bool) {
+    if !is_eth0(arguments.first()) {
+        write(console, b"network: device not found\r\n");
         return;
-    };
-    let request = [NATIVE_NETWORK_APPLY_VERSION, snapshot[1], 0, 0, 0, 0, 0, 0];
+    }
     if call(
         NATIVE_NETWORK_DEVICE_OPERATION,
         network,
-        NATIVE_NETWORK_DEVICE_APPLY,
-        request.as_ptr() as u64,
+        NATIVE_NETWORK_DEVICE_SET_LINK,
+        u64::from(start),
     ) == NATIVE_CALL_FAILED
     {
-        write(console, b"network: configuration rejected\r\n");
+        write(console, b"network: state change rejected\r\n");
         return;
     }
-    write(console, b"control: network disabled\r\n");
+    write(
+        console,
+        if start {
+            b"eth0: started\r\n"
+        } else {
+            b"eth0: stopped\r\n"
+        },
+    );
+}
+
+fn restart_network(console: u64, network: u64, arguments: Arguments<'_>) {
+    if !is_eth0(arguments.first()) {
+        write(console, b"network: device not found\r\n");
+        return;
+    }
+    if call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_SET_LINK,
+        0,
+    ) == NATIVE_CALL_FAILED
+        || call(
+            NATIVE_NETWORK_DEVICE_OPERATION,
+            network,
+            NATIVE_NETWORK_DEVICE_SET_LINK,
+            1,
+        ) == NATIVE_CALL_FAILED
+    {
+        write(console, b"network: restart rejected\r\n");
+        return;
+    }
+    write(console, b"eth0: restarted\r\n");
+}
+
+fn is_eth0(device: Option<&[u8]>) -> bool {
+    device == Some(b"eth0")
 }
 
 fn network_snapshot(network: u64) -> Option<[u64; 7]> {
