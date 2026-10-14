@@ -6,9 +6,9 @@ const MAX_FILE_SIZE: usize = 64 * 1024;
 const MAX_IMAGE_SIZE: u64 = 64 * 1024;
 const MAX_PROGRAM_HEADERS: usize = 8;
 const MAX_LOAD_SEGMENTS: usize = 3;
-const MAX_RELOCATIONS: usize = 96;
+const MAX_RELOCATIONS: usize = 128;
 const MAX_SERVICE_RELOCATIONS: usize = 8;
-const MAX_CONTROLLER_RELOCATIONS: usize = 96;
+const MAX_CONTROLLER_RELOCATIONS: usize = 128;
 const PAGE_SIZE: u64 = 4096;
 
 const ET_DYN: u16 = 3;

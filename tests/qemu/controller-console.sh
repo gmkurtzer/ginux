@@ -43,7 +43,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         done
     }
     for command in \
-        '' '   ' help 'container help' 'container set --help' 'network help' 'network set --help' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
+        '' '   ' help 'container help' 'container set --help' 'network help' 'network set --help' 'test linux' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
         'network list' 'network status eth0' 'network status lo' 'network status eth9' 'network ping lo 127.0.0.1' 'network set lo dns 10.0.2.3' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network set eth0 dns 10.0.2.3' 'network status eth0' 'network ping eth0 10.0.2.15' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
         'container status default' 'container new demo' 'container new demo' 'container list' \
         'container start' 'container set demo cpu=1 cpu=1' 'container set demo image=alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395 init=/bin/sh' 'container start demo' 'container list' \
@@ -101,6 +101,34 @@ for expected in \
     'Manage runtime containers' \
     'network COMMAND' \
     'Manage network devices' \
+    'test ENVIRONMENT' \
+    'Test a userspace compatibility environment' \
+    'Linux userspace interface tests (bounded profile):' \
+    'PASS syscall-entry' \
+    'PASS elf64-loader' \
+    'PASS initial-stack-and-auxv' \
+    'PASS dynamic-loader' \
+    'PASS tls' \
+    'PASS process-and-thread' \
+    'PASS signals' \
+    'PASS memory-management' \
+    'PASS descriptors-and-events' \
+    'PASS vfs-and-path-lookup' \
+    'PASS procfs' \
+    'PASS devfs-and-terminal' \
+    'PASS tmpfs' \
+    'PASS credentials-and-user-namespaces' \
+    'PASS clocks-and-timers' \
+    'PASS ioctl-profile' \
+    'FAIL sysfs' \
+    'FAIL mount-and-namespace-api' \
+    'FAIL socket-api' \
+    'FAIL cgroups' \
+    'FAIL seccomp-audit-and-lsm' \
+    'FAIL vdso-and-vvar' \
+    'FAIL linux-module-userspace-api' \
+    'Summary: 16 passed, 7 failed, 23 total' \
+    'PASS covers the current bounded Linux profile; FAIL is unsupported or unverified.' \
     'network list' \
     'List network devices and their state' \
     'network status DEVICE' \

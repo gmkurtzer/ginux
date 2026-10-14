@@ -2233,6 +2233,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux single-task CPU time validated\r\n");
     serial_write("ginux: Linux bounded resource usage validated\r\n");
     serial_write("ginux: Linux disabled interval timers validated\r\n");
+    if !arch::x86_64::cpu::publish_linux_abi_test_results() {
+        kernel_fail("\r\nginux: Linux ABI test results published twice\r\n");
+    }
     if !ipc::verify_channel_invariants() {
         kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
     }

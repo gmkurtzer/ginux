@@ -173,6 +173,8 @@ pub const NATIVE_CONTAINER_STATE_STOPPED: u64 = 2;
 pub const NATIVE_CONTAINER_STATE_FAILED: u64 = 3;
 pub const NATIVE_CONTAINER_STATE_CREATED: u64 = 4;
 pub const NATIVE_CONTAINER_STATE_CONFIGURED: u64 = 5;
+pub const NATIVE_LINUX_ABI_TEST_OPERATION: u64 = 34;
+pub const NATIVE_LINUX_ABI_TEST_COUNT: u32 = 23;
 pub const NATIVE_ROOT_OPERATION: u64 = 17;
 pub const NATIVE_ROOT_READ_DIRECTORY: u64 = 3;
 pub const NATIVE_ROOT_DIRECTORY_REQUEST_SIZE: u32 = 48;
@@ -1871,6 +1873,8 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_CONTROL_REQUIRED_FEATURES UINT16_C(1041)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_DESCRIPTOR_OPERATION UINT64_C(10)"));
         assert!(header.contains("GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF UINT16_C(2048)"));
+        assert!(header.contains("GINUX_NATIVE_LINUX_ABI_TEST_OPERATION UINT64_C(34)"));
+        assert!(header.contains("GINUX_NATIVE_LINUX_ABI_TEST_COUNT UINT32_C(23)"));
         assert!(header.contains("sizeof(struct ginux_native_control_descriptor_v4) == 16"));
     }
 

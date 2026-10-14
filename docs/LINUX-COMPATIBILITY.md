@@ -467,3 +467,10 @@ The practical compatibility gate remains workload-driven:
 4. Add focused kernel tests and a real OCI userspace regression.
 5. Change status only after those tests prove the documented boundary.
 
+The controller exposes the current grouped result ledger through `test linux`;
+see [Linux Userspace Interface Test v0](../specs/kernel/linux-abi-test-v0.md).
+The command name is intentionally environment-specific so future compatibility
+profiles, such as BSD, can have independent tests and contracts. A PASS reports
+that the current bounded Ginux profile was verified during boot; it does not
+upgrade that interface to Complete Linux compatibility. A FAIL means the
+interface is unsupported or was not verified.

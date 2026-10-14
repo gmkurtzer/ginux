@@ -152,6 +152,10 @@ _Static_assert(GINUX_NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT == UINT16_C(2),
                "container init host process kind");
 _Static_assert(GINUX_NATIVE_CONTAINER_CONTROL_OPERATION == UINT64_C(33),
                "container control operation");
+_Static_assert(GINUX_NATIVE_LINUX_ABI_TEST_OPERATION == UINT64_C(34),
+               "Linux ABI test operation");
+_Static_assert(GINUX_NATIVE_LINUX_ABI_TEST_COUNT == UINT32_C(23),
+               "Linux ABI test count");
 _Static_assert(GINUX_NATIVE_CONTAINER_HOST_SHUTDOWN == UINT64_C(4),
                "container host shutdown command");
 _Static_assert(GINUX_NATIVE_CONTAINER_STATE_FAILED == UINT64_C(3),

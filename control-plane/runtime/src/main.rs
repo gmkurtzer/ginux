@@ -23,14 +23,15 @@ use ginux_native_abi::{
     NATIVE_HOST_INSPECT_STATE_READY, NATIVE_HOST_INSPECT_STATE_STOPPING,
     NATIVE_HOST_INSPECT_VERSION, NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT,
     NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS,
-    NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP,
-    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP,
-    NATIVE_NETWORK_DEVICE_QUERY_DNS, NATIVE_NETWORK_DEVICE_QUERY_PING,
-    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_DEVICE_SET_DNS,
-    NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
-    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
-    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_LINUX_ABI_TEST_COUNT, NATIVE_LINUX_ABI_TEST_OPERATION, NATIVE_NETWORK_APPLY_VERSION,
+    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION,
+    NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_DNS,
+    NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
+    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_SNAPSHOT_SIZE,
+    NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
+    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
+    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
@@ -66,6 +67,41 @@ const COMMAND_NETWORK_LIST: u16 = 19;
 const COMMAND_NETWORK_START: u16 = 20;
 const COMMAND_NETWORK_STOP: u16 = 21;
 const COMMAND_NETWORK_RESTART: u16 = 22;
+const COMMAND_TEST_LINUX: u16 = 23;
+
+const LINUX_ABI_TESTS: &[&[u8]] = &[
+    b"syscall-entry",
+    b"elf64-loader",
+    b"initial-stack-and-auxv",
+    b"dynamic-loader",
+    b"tls",
+    b"process-and-thread",
+    b"signals",
+    b"memory-management",
+    b"descriptors-and-events",
+    b"vfs-and-path-lookup",
+    b"procfs",
+    b"devfs-and-terminal",
+    b"tmpfs",
+    b"credentials-and-user-namespaces",
+    b"clocks-and-timers",
+    b"ioctl-profile",
+    b"sysfs",
+    b"mount-and-namespace-api",
+    b"socket-api",
+    b"cgroups",
+    b"seccomp-audit-and-lsm",
+    b"vdso-and-vvar",
+    b"linux-module-userspace-api",
+];
+
+const TEST_COMMANDS: &[Command<'static>] = &[Command::leaf(
+    b"linux",
+    b"test linux",
+    b"Test Linux userspace interfaces",
+    COMMAND_TEST_LINUX,
+    Arity::exact(0),
+)];
 
 const NETWORK_COMMANDS: &[Command<'static>] = &[
     Command::leaf(
@@ -233,6 +269,12 @@ const ROOT_COMMANDS: &[Command<'static>] = &[
         b"Manage network devices",
         NETWORK_COMMANDS,
     ),
+    Command::group(
+        b"test",
+        b"test ENVIRONMENT",
+        b"Test a userspace compatibility environment",
+        TEST_COMMANDS,
+    ),
     Command::leaf(
         b"shutdown",
         b"shutdown",
@@ -390,9 +432,55 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
             }
             COMMAND_NETWORK_RESTART => restart_network(console, network, invocation.arguments()),
             COMMAND_PING => ping(console, network, invocation.arguments()),
+            COMMAND_TEST_LINUX => test_linux_userspace(console, host),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
         }
     }
+}
+
+fn test_linux_userspace(console: u64, host: u64) {
+    let results = call(NATIVE_LINUX_ABI_TEST_OPERATION, host, 0, 0);
+    let results = if results == NATIVE_CALL_FAILED {
+        0
+    } else {
+        results
+    };
+    let mut passed = 0_u64;
+    let mut output = ConsoleHelpWriter::new(console);
+    output.write(b"Linux userspace interface tests (bounded profile):\r\n");
+    for (index, name) in LINUX_ABI_TESTS.iter().enumerate() {
+        let pass = results & (1 << index) != 0;
+        output.write(if pass { b"PASS " } else { b"FAIL " });
+        output.write(name);
+        output.write(b"\r\n");
+        passed += u64::from(pass);
+    }
+    let total = LINUX_ABI_TESTS.len() as u64;
+    output.write(b"Summary: ");
+    write_help_decimal(&mut output, passed);
+    output.write(b" passed, ");
+    write_help_decimal(&mut output, total - passed);
+    output.write(b" failed, ");
+    write_help_decimal(&mut output, total);
+    output.write(b" total\r\n");
+    output.write(
+        b"PASS covers the current bounded Linux profile; FAIL is unsupported or unverified.\r\n",
+    );
+    output.finish();
+}
+
+fn write_help_decimal(output: &mut impl HelpWriter, mut value: u64) {
+    let mut bytes = [0_u8; 20];
+    let mut start = bytes.len();
+    loop {
+        start -= 1;
+        bytes[start] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    output.write(&bytes[start..]);
 }
 
 fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
@@ -1408,3 +1496,4 @@ fn exit(status: u8) -> ! {
 }
 
 const _: () = assert!(NATIVE_CALL_FAILED == u64::MAX - 2);
+const _: () = assert!(LINUX_ABI_TESTS.len() == NATIVE_LINUX_ABI_TEST_COUNT as usize);

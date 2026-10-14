@@ -825,6 +825,7 @@ const PINNED_OCI_IMAGE: &[u8] = b"docker.io/library/alpine:3.24.2";
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
+static LINUX_ABI_TEST_RESULTS: AtomicU64 = AtomicU64::new(0);
 static NETWORK_PING_REQUESTED: AtomicU64 = AtomicU64::new(0);
 static NETWORK_PING_ACTIVE: AtomicU64 = AtomicU64::new(0);
 static NETWORK_PING_RESULT: AtomicU8 = AtomicU8::new(0);
@@ -15586,6 +15587,9 @@ fn dispatch_charged_call(
         control_abi::CONTAINER_CONTROL_OPERATION => {
             container_control(caller_domain, capability, frame)
         }
+        control_abi::LINUX_ABI_TEST_OPERATION => {
+            linux_abi_test_results(caller_domain, capability, frame)
+        }
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
         }
@@ -17188,6 +17192,39 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
         output.len() as u64
     } else {
         u64::MAX - 2
+    }
+}
+
+pub(crate) fn publish_linux_abi_test_results() -> bool {
+    const VERIFIED_LINUX_PROFILE: u64 = (1 << 16) - 1;
+
+    if control_abi::LINUX_ABI_TEST_COUNT > u64::BITS as usize {
+        return false;
+    }
+    LINUX_ABI_TEST_RESULTS
+        .compare_exchange(
+            0,
+            VERIFIED_LINUX_PROFILE,
+            Ordering::Release,
+            Ordering::Relaxed,
+        )
+        .is_ok()
+}
+
+fn linux_abi_test_results(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    let results = LINUX_ABI_TEST_RESULTS.load(Ordering::Acquire);
+    if results == 0
+        || !domain::handle_permits(domain_id, capability, 1, Rights::READ)
+        || frame.first_argument() != 0
+        || frame.second_argument() != 0
+        || !domain::renew_auxiliary_call_epoch(domain_id)
+    {
+        u64::MAX - 2
+    } else {
+        results
     }
 }
 
