@@ -27,11 +27,13 @@ fi
 
 echo "Booting x86-64 Ginux with QEMU/$accelerator using CPU $cpu_model"
 
+memory="${GINUX_MEMORY:-1G}"
+
 exec "$qemu" \
     -machine "q35,accel=$accelerator" \
     -cpu "$cpu_model" \
     -smp 1 \
-    -m 256M \
+    -m "$memory" \
     -display none \
     -monitor none \
     -serial stdio \

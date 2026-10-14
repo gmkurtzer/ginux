@@ -500,7 +500,10 @@ fully staged before committing any byte and overflow returns `-ENOSPC`.
 scrubs all backing bytes, and makes later lookup return `-ENOENT`; an open file
 is rejected with `-EBUSY`. Final process teardown performs the same scrub if
 the file remains. The in-kernel contract also creates a replacement generation
-and rejects the retired handle. `readv`, `writev`, file mapping, truncation,
+and rejects the retired handle. The backing RAM store separately proves
+multiple named objects, hidden staging, atomic publish, aggregate quota
+enforcement, abort, and scrubbing; those objects are not exposed in this Linux
+view. `readv`, `writev`, file mapping, truncation,
 rename, subdirectories, relative creation/unlink, additional files, and
 unlink-while-open Linux semantics remain outside this profile. This is a
 bounded volatile filesystem contract, not general tmpfs.

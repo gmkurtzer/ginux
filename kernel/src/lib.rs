@@ -1627,10 +1627,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: generation-safe Linux user namespace installed\r\n");
     serial_write("ginux: container root mapped outside native authority\r\n");
     serial_write("ginux: Linux privilege policy sealed fail-closed\r\n");
-    if !linux_tmpfs::verify_contract() || !linux_tmpfs::install() {
-        kernel_fail("ginux: bounded Linux tmpfs invalid\r\n");
+    if !linux_tmpfs::verify_contract()
+        || !linux_tmpfs::install()
+        || !linux_tmpfs::verify_live_object_contract()
+    {
+        kernel_fail("ginux: transactional RAM store invalid\r\n");
     }
-    serial_write("ginux: generation-safe Linux tmpfs mounted at /tmp\r\n");
+    serial_write("ginux: quota-bound transactional RAM store installed\r\n");
+    serial_write("ginux: generation-safe Linux tmpfs view mounted at /tmp\r\n");
     let Some(system_profile_node) =
         initramfs::published_regular_file_node(b"etc/ginux-system-profile")
     else {
@@ -1880,7 +1884,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: bounded Linux private futex lifecycle validated\r\n");
     serial_write("ginux: bounded Linux devfs profile validated\r\n");
     serial_write("ginux: lifecycle-aware bounded procfs validated\r\n");
-    serial_write("ginux: generation-safe bounded tmpfs lifecycle validated\r\n");
+    serial_write("ginux: transactional multi-object tmpfs lifecycle validated\r\n");
     serial_write("ginux: minimal system init exited cleanly\r\n");
     if !linux_elf::verify_mapped_interpreted_plan(boot_info.image_base as u64, boot_info.image_size)
     {

@@ -373,9 +373,11 @@ selectors: `proc`, `sys`, `tmp`, and the otherwise unlisted `var` node open
 without per-directory kernel identities; `dev`
 retains its synthetic device entries. The measured `proc` node is populated by
 the bounded synthetic PID 1 directory plus status, root-mount, and user-namespace records;
-it is not yet a general procfs. The measured `tmp` node anchors a separate
-generation-safe bounded tmpfs whose one admitted `ginux-ready` file is created,
-enumerated, used, unlinked, and scrubbed at runtime; it is not a general tmpfs. A
+it is not yet a general procfs. The measured `tmp` node exposes one admitted
+`ginux-ready` file from a generation-safe, quota-bound RAM store. The backing
+store contract supports multiple named objects, hidden staging, atomic publish,
+quota rejection, abort, unlink, and byte scrubbing; the Linux syscall profile
+currently exposes only the fixture file and is not yet a general tmpfs. A
 bounded index-driven contract resolves any direct measured regular child below
 an open measured directory; `motd` proves the syscall layer needs no
 per-filename case. Normalized multi-component paths are bounded and `lib` is
