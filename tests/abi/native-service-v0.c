@@ -68,6 +68,10 @@ _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_RX_REUSE == UINT32_C(32),
                "network RX reuse feature bit");
 _Static_assert(GINUX_NATIVE_NETWORK_FEATURE_DHCP == UINT32_C(131072),
                "network DHCP feature bit");
+_Static_assert(GINUX_NATIVE_NETWORK_DEVICE_SET_DNS == UINT64_C(17),
+               "network DNS setter operation");
+_Static_assert(GINUX_NATIVE_NETWORK_DEVICE_QUERY_DNS == UINT64_C(18),
+               "network DNS query operation");
 _Static_assert(sizeof(struct ginux_native_network_boot_v1) == 88,
                "network bootstrap v1 size");
 _Static_assert(offsetof(struct ginux_native_network_boot_v1,

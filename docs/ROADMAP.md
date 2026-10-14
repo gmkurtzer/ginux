@@ -54,6 +54,8 @@ Deliverables:
   resolve the x86-64 manifest, verify every digest, and store the image locally.
 - Each container has explicit static or DHCP network configuration independent
   from the control domain.
+- Each virtual NIC has one globally unique `gnetN` name that remains unchanged
+  inside its assigned domain, and each domain has explicit DNS resolver state.
 - Rocky's `/sbin/init` executes as container PID 1.
 - Start-and-attach and later console attachment show systemd output; `Ctrl-]`
   returns to the controller without stopping the container, and boot logs can

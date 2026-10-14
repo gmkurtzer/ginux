@@ -16,12 +16,13 @@ use ginux_native_abi::{
     NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
     NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD,
     NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE,
-    NATIVE_NETWORK_DEVICE_QUERY_GENERATION, NATIVE_NETWORK_WAIT_CANCELLED,
-    NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED,
-    NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_DRAINED, NATIVE_PACKET_EGRESS_ACK_OPERATION,
-    NATIVE_PACKET_EGRESS_CLAIM_OPERATION, NATIVE_PACKET_EGRESS_WAIT_OPERATION,
-    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
+    NATIVE_NETWORK_DEVICE_QUERY_GENERATION, NATIVE_NETWORK_DEVICE_SET_DNS,
+    NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION,
+    NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_DRAINED,
+    NATIVE_PACKET_EGRESS_ACK_OPERATION, NATIVE_PACKET_EGRESS_CLAIM_OPERATION,
+    NATIVE_PACKET_EGRESS_WAIT_OPERATION, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION,
+    NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
@@ -402,16 +403,25 @@ unsafe fn dhcp(info: &NativeNetworkBootV0) -> Option<u8> {
         0,
         0,
     ];
+    if network_device_call(
+        info.device_capability,
+        NATIVE_NETWORK_DEVICE_APPLY,
+        request.as_ptr() as u64,
+    ) == NATIVE_NETWORK_WAIT_FAILED
+    {
+        return Some(17);
+    }
     Some(
-        if network_device_call(
-            info.device_capability,
-            NATIVE_NETWORK_DEVICE_APPLY,
-            request.as_ptr() as u64,
-        ) != NATIVE_NETWORK_WAIT_FAILED
+        if lease.dns != 0
+            && network_device_call(
+                info.device_capability,
+                NATIVE_NETWORK_DEVICE_SET_DNS,
+                u64::from(lease.dns),
+            ) == NATIVE_NETWORK_WAIT_FAILED
         {
-            NATIVE_SERVICE_EXIT_COMPLETED
+            18
         } else {
-            17
+            NATIVE_SERVICE_EXIT_COMPLETED
         },
     )
 }
@@ -421,6 +431,7 @@ struct DhcpLease {
     address: u32,
     router: u32,
     server: u32,
+    dns: u32,
     prefix: u8,
 }
 
@@ -580,6 +591,7 @@ unsafe fn parse_dhcp_reply(
     let mut mask = 0;
     let mut router = 0;
     let mut server = 0;
+    let mut dns = 0;
     while cursor < end {
         let kind = read_u8(cursor);
         cursor += 1;
@@ -602,6 +614,7 @@ unsafe fn parse_dhcp_reply(
             (1, 4) => mask = read_be_u32(cursor),
             (3, value) if value >= 4 => router = read_be_u32(cursor),
             (54, 4) => server = read_be_u32(cursor),
+            (6, value) if value >= 4 => dns = read_be_u32(cursor),
             _ => {}
         }
         cursor += length;
@@ -616,6 +629,7 @@ unsafe fn parse_dhcp_reply(
             address,
             router,
             server,
+            dns,
             prefix,
         })
 }

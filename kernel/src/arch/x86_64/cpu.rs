@@ -15612,6 +15612,27 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrap
         {
             u64::from(NETWORK_DHCP_RESULT.swap(0, Ordering::AcqRel))
         }
+        control_abi::NETWORK_DEVICE_SET_DNS
+            if domain::handle_permits(
+                caller_domain,
+                capability,
+                control_abi::NETWORK_DEVICE_OBJECT,
+                Rights::WRITE,
+            ) =>
+        {
+            network_result(network::set_dns(argument))
+        }
+        control_abi::NETWORK_DEVICE_QUERY_DNS
+            if argument == 0
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            network::dns()
+        }
         _ => u64::MAX - 2,
     }
 }

@@ -107,6 +107,8 @@ Administrative observation, lifecycle control, memory debugging, and authority d
 - Domain lifecycle, resource accounting, and enforcement primitives.
 - Container-local PID, mount, user, IPC, cgroup, time, hostname, device, and network object views with stronger isolation than current Linux namespaces.
 - Per-container loopback, interfaces, IP addresses, routes, sockets, and network-policy enforcement.
+- Globally unique virtual interfaces use `gnetN` names. The same name is exposed to the control plane and inside the assigned domain; interfaces are never implicitly renamed at a domain boundary. Device listings show the plain domain name without a type prefix.
+- Control-domain and per-domain network state includes DNS resolver configuration. DHCP imports DNS configuration when supplied and otherwise preserves an explicit resolver, while static configuration may set it directly.
 - Boot-critical storage, filesystem, networking, GPU/primary-device support in the kernel or authenticated kernel modules.
 - Boot handoff and integrity of the immutable kernel, module set, controller, and active authority envelope.
 

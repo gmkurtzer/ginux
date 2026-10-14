@@ -44,7 +44,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     }
     for command in \
         help 'container help' 'container set --help' 'network help' 'network set --help' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
-        'network list' 'network status eth0' 'network status eth9' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network status eth0' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
+        'network list' 'network status eth0' 'network status eth9' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network set eth0 dns 10.0.2.3' 'network status eth0' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
         'container status default' 'container new demo' 'container new demo' 'container list' \
         'container start' 'container set demo cpu=1 cpu=1' 'container list' \
         'container set demo init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo autostart=false' 'container set demo cpu 1' 'container list' status \
@@ -103,26 +103,27 @@ for expected in \
     'network list' \
     'List network devices and their state' \
     'network status DEVICE' \
-    'network set DEVICE {dhcp|static ADDRESS/PREFIX GATEWAY}' \
+    'network set DEVICE {dhcp|dns ADDRESS|static ADDRESS/PREFIX GATEWAY}' \
     'network start DEVICE' \
     'network stop DEVICE' \
     'network restart DEVICE' \
-    'DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY' \
+    'DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS' \
     'eth0 control yes' \
     'network: device not found' \
     'network: invalid address or prefix' \
     'eth0: static network configured' \
-    'eth0 control yes up configured 10.0.2.15/24 10.0.2.2' \
+    'eth0: DNS configured' \
+    'eth0 control yes up configured 10.0.2.15/24 10.0.2.2 10.0.2.3' \
     'network ping DEVICE ADDRESS' \
     'Send one ICMP echo through a network device' \
     'PING 10.0.2.2' \
     '64 bytes from 10.0.2.2: icmp_seq=1 ttl=64' \
     'eth0: stopped' \
-    'eth0 control yes down configured 10.0.2.15/24 10.0.2.2' \
+    'eth0 control yes down configured 10.0.2.15/24 10.0.2.2 10.0.2.3' \
     'eth0: started' \
     'eth0: restarted' \
     'eth0: requesting DHCP lease' \
-    'eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2' \
+    'eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3' \
     'container list' \
     'List all containers' \
     'container new NAME' \

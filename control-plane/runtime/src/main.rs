@@ -24,12 +24,13 @@ use ginux_native_abi::{
     NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT, NATIVE_HOST_PROCESS_KIND_CONTROLLER,
     NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_NETWORK_APPLY_VERSION,
     NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION,
-    NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_PING,
-    NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT, NATIVE_NETWORK_DEVICE_SET_LINK,
-    NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
-    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
-    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
-    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_DNS,
+    NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
+    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_SNAPSHOT_SIZE,
+    NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
+    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
+    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
+    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
@@ -74,7 +75,7 @@ const NETWORK_COMMANDS: &[Command<'static>] = &[
     ),
     Command::leaf(
         b"set",
-        b"network set DEVICE {dhcp|static ADDRESS/PREFIX GATEWAY}",
+        b"network set DEVICE {dhcp|dns ADDRESS|static ADDRESS/PREFIX GATEWAY}",
         b"Configure a network device",
         COMMAND_NETWORK_SET,
         Arity::range(2, 4),
@@ -430,42 +431,7 @@ fn show_network_list(console: u64, network: u64) {
     };
     write(
         console,
-        b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY\r\n",
-    );
-    write(console, b"eth0 control yes ");
-    write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
-    write(
-        console,
-        if snapshot[3] == 0 {
-            b"unconfigured "
-        } else {
-            b"configured "
-        },
-    );
-    if snapshot[3] == 0 {
-        write(console, b"- -");
-    } else {
-        write_ipv4(console, snapshot[3] as u32);
-        write(console, b"/");
-        write_decimal(console, snapshot[3] >> 32);
-        write(console, b" ");
-        write_ipv4(console, snapshot[4] as u32);
-    }
-    write(console, b"\r\n");
-}
-
-fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
-    if !is_eth0(arguments.first()) {
-        write(console, b"network: device not found\r\n");
-        return;
-    }
-    let Some(snapshot) = network_snapshot(network) else {
-        write(console, b"network: status failed\r\n");
-        return;
-    };
-    write(
-        console,
-        b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY GENERATION\r\n",
+        b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS\r\n",
     );
     write(console, b"eth0 control yes ");
     write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
@@ -487,6 +453,45 @@ fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
         write_ipv4(console, snapshot[4] as u32);
         write(console, b" ");
     }
+    write_network_dns(console, network);
+    write(console, b"\r\n");
+}
+
+fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
+    if !is_eth0(arguments.first()) {
+        write(console, b"network: device not found\r\n");
+        return;
+    }
+    let Some(snapshot) = network_snapshot(network) else {
+        write(console, b"network: status failed\r\n");
+        return;
+    };
+    write(
+        console,
+        b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS GENERATION\r\n",
+    );
+    write(console, b"eth0 control yes ");
+    write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
+    write(
+        console,
+        if snapshot[3] == 0 {
+            b"unconfigured "
+        } else {
+            b"configured "
+        },
+    );
+    if snapshot[3] == 0 {
+        write(console, b"- - ");
+    } else {
+        write_ipv4(console, snapshot[3] as u32);
+        write(console, b"/");
+        write_decimal(console, snapshot[3] >> 32);
+        write(console, b" ");
+        write_ipv4(console, snapshot[4] as u32);
+        write(console, b" ");
+    }
+    write_network_dns(console, network);
+    write(console, b" ");
     write_decimal(console, snapshot[1]);
     write(console, b"\r\n");
 }
@@ -498,12 +503,15 @@ fn set_network(console: u64, network: u64, arguments: Arguments<'_>) {
     }
     match arguments.get(1) {
         Some(b"dhcp") if arguments.len() == 2 => set_dhcp_network(console, network),
+        Some(b"dns") if arguments.len() == 3 => {
+            set_network_dns(console, network, arguments.get(2))
+        }
         Some(b"static") if arguments.len() == 4 => {
             set_static_network(console, network, arguments.get(2), arguments.get(3))
         }
         _ => write(
             console,
-            b"network: usage: network set DEVICE {dhcp|static ADDRESS/PREFIX GATEWAY}\r\n",
+            b"network: usage: network set DEVICE {dhcp|dns ADDRESS|static ADDRESS/PREFIX GATEWAY}\r\n",
         ),
     }
 }
@@ -572,7 +580,51 @@ fn set_dhcp_network(console: u64, network: u64) {
     write_decimal(console, snapshot[3] >> 32);
     write(console, b" via ");
     write_ipv4(console, snapshot[4] as u32);
+    write(console, b" DNS ");
+    write_network_dns(console, network);
     write(console, b"\r\n");
+}
+
+fn set_network_dns(console: u64, network: u64, address: Option<&[u8]>) {
+    let address = match address {
+        Some(b"none") => 0,
+        Some(address) => {
+            let Some(address) = parse_ipv4(address) else {
+                write(console, b"network: invalid DNS address\r\n");
+                return;
+            };
+            address
+        }
+        None => {
+            write(console, b"network: missing DNS address\r\n");
+            return;
+        }
+    };
+    if call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_SET_DNS,
+        u64::from(address),
+    ) == NATIVE_CALL_FAILED
+    {
+        write(console, b"network: DNS configuration rejected\r\n");
+        return;
+    }
+    write(console, b"eth0: DNS configured\r\n");
+}
+
+fn write_network_dns(console: u64, network: u64) {
+    let dns = call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_QUERY_DNS,
+        0,
+    );
+    if dns == NATIVE_CALL_FAILED || dns == 0 {
+        write(console, b"-");
+    } else {
+        write_ipv4(console, dns as u32);
+    }
 }
 
 fn set_network_link(console: u64, network: u64, arguments: Arguments<'_>, start: bool) {

@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 static LINK_UP: AtomicBool = AtomicBool::new(false);
 static IPV4_CONFIGURATION: AtomicU64 = AtomicU64::new(0);
 static IPV4_GATEWAY: AtomicU64 = AtomicU64::new(0);
+static IPV4_DNS: AtomicU64 = AtomicU64::new(0);
 static CONFIGURATION_GENERATION: AtomicU64 = AtomicU64::new(0);
 static ROUTE_DESTINATION: AtomicU64 = AtomicU64::new(0);
 static ROUTE_GATEWAY: AtomicU64 = AtomicU64::new(0);
@@ -77,6 +78,20 @@ pub(crate) fn set_gateway(gateway: u64) -> bool {
 
 pub(crate) fn ipv4_gateway() -> u64 {
     IPV4_GATEWAY.load(Ordering::Acquire)
+}
+
+pub(crate) fn set_dns(address: u64) -> bool {
+    if address >> 32 != 0 {
+        return false;
+    }
+    if IPV4_DNS.swap(address, Ordering::AcqRel) != address {
+        record_change();
+    }
+    true
+}
+
+pub(crate) fn dns() -> u64 {
+    IPV4_DNS.load(Ordering::Acquire)
 }
 
 pub(crate) fn generation() -> u64 {
