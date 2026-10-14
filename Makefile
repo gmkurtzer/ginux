@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image alpine-image alpine-image-check build-alpine run-alpine rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image alpine-image alpine-image-check build-alpine run-alpine test-alpine rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -29,6 +29,7 @@ help:
 	@echo "  make alpine-image-check Verify the prepared Alpine image without downloading"
 	@echo "  make build-alpine Build Ginux with the verified Alpine rootfs sealed in"
 	@echo "  make run-alpine Build and boot the Alpine-enabled image in QEMU"
+	@echo "  make test-alpine Verify the Alpine OCI boot ingestion path in QEMU"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
@@ -126,6 +127,9 @@ build-alpine: alpine-image-check manifest
 
 run-alpine: build-alpine
 	@tools/qemu/run.sh
+
+test-alpine: build-alpine
+	@tests/qemu/alpine-image.sh
 
 run: build
 	@tools/qemu/run.sh

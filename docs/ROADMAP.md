@@ -42,15 +42,15 @@ Gate: absent-at-boot, explicit creation/configuration, readiness, stop, restart,
 injected failure, cleanup, and predefined-profile rejection tests. Human
 verification exercises configuration and lifecycle commands.
 
-## C3: Rocky systemd early boot
+## C3: Alpine shell container
 
-**Implementation status:** In progress; the x86-64 systemd image recipe is
-pinned and verified, and the transactional page-backed tmpfs foundation is
-complete. Scaling it to the pinned image is next.
+**Implementation status:** In progress. The explicit image contract, pinned
+Alpine OCI input, verified rootfs reader, and Alpine-enabled boot profile are
+complete. General-purpose Linux ELF mapping is next.
 
 Deliverables:
 
-- A reproducible, digest-pinned Rocky Linux 10 x86-64 container image recipe.
+- A reproducible, architecture-specific, digest-pinned Alpine x86-64 image.
 - Operator-configurable control-domain networking can reach an OCI registry
   and resolve the x86-64 manifest. `container start NAME` automatically pulls
   a missing configured image, verifies every digest while streaming it into a
@@ -62,18 +62,22 @@ Deliverables:
   from the control domain.
 - Each virtual NIC has one globally unique `gnetN` name that remains unchanged
   inside its assigned domain, and each domain has explicit DNS resolver state.
-- Rocky's `/sbin/init` executes as container PID 1.
-- Start-and-attach and later console attachment show systemd output; `Ctrl-]`
-  returns to the controller without stopping the container, and boot logs can
-  be inspected after detach.
-- Early systemd reaches a named target or stops at a precisely documented compatibility boundary with machine-readable missing-interface results.
+- Alpine's `/bin/sh` executes as container PID 1 with an attached console.
+- `Ctrl-]` returns to the controller without stopping the container, and boot
+  logs can be inspected after detach.
+- The image loader accepts normal four-segment PIE executables and scales past
+  the deliberately tiny C2 proof-image limits without weakening W^X.
 
-Gate: deterministic console transcript and compatibility matrix. Human verification observes Rocky/systemd boot rather than a custom host userspace.
+Gate: deterministic Alpine shell transcript, detach/reattach, and negative
+digest/path tests. Human verification interacts with the unmodified Alpine
+BusyBox shell rather than a custom host userspace.
 
-## C4: Operational Rocky
+## C4: Rocky systemd early boot
 
 Deliverables:
 
+- Rocky's `/sbin/init` executes as container PID 1 after configurable pre-init
+  policy applies the required service enablement and masking changes.
 - Required process, mount, user, IPC, cgroup, time, hostname, device, and network object views are container-local.
 - Required `/proc`, `/sys`, `/dev`, credentials, clocks, signals, futexes, dynamic linking, and console behavior work.
 - Root inside Rocky has no implicit host authority.
