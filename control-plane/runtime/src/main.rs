@@ -916,7 +916,7 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: Ar
             {
                 write_name_state(console, name, b"starting\r\n");
             } else {
-                write(console, b"container: start rejected\r\n");
+                write(console, b"container: start rejected (image not ready)\r\n");
             }
         }
         COMMAND_CONTAINER_STOP => {

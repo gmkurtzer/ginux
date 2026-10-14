@@ -796,6 +796,7 @@ static CONTAINER_INIT: [AtomicU8; control_abi::CONTAINER_MAX_INIT_SIZE] =
 static CONTAINER_IMAGE_SIZE: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_IMAGE: [AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE];
+static CONTAINER_IMAGE_READY: AtomicBool = AtomicBool::new(false);
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -16208,6 +16209,10 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 &CONTAINER_IMAGE,
                 &CONTAINER_IMAGE_SIZE,
             );
+            CONTAINER_IMAGE_READY.store(
+                container_request_image(&request) == b"embedded://minimal-system-v0",
+                Ordering::SeqCst,
+            );
             update_container_configuration(control_abi::CONTAINER_CONFIG_IMAGE)
         }
         control_abi::CONTAINER_STOP
@@ -16220,6 +16225,7 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         }
         control_abi::CONTAINER_RESTART
             if stored_container_name_matches(name)
+                && CONTAINER_IMAGE_READY.load(Ordering::SeqCst)
                 && CONTAINER_CONFIG_FLAGS.load(Ordering::SeqCst)
                     & control_abi::CONTAINER_CONFIG_COMPLETE
                     == control_abi::CONTAINER_CONFIG_COMPLETE
