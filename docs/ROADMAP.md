@@ -45,8 +45,10 @@ verification exercises configuration and lifecycle commands.
 ## C3: Alpine shell container
 
 **Implementation status:** In progress. The explicit image contract, pinned
-Alpine OCI input, verified rootfs reader, and Alpine-enabled boot profile are
-complete. General-purpose Linux ELF mapping is next.
+Alpine OCI input, verified rootfs reader, Alpine-enabled boot profile, scalable
+four-segment PIE mapping, musl dynamic-loader startup, and an interactive
+BusyBox `/bin/sh` smoke path are complete. Rootfs-backed file operations,
+detach/reattach, runtime registry pull, and container networking remain.
 
 Deliverables:
 

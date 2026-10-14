@@ -484,6 +484,7 @@ static PROCESS_CHILD_EXIT_STATUS: AtomicU8 = AtomicU8::new(0);
 static PROCESS_CHILD_EXPECTED_REGISTERS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
 static PROCESS_CHILD_EXPECTED_FS_BASE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static LINUX_RUNTIME_MODE: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_TERMINATION_SIGNAL: AtomicU32 = AtomicU32::new(0);
 static ELF_PROBE_EXEC_REPLACED: AtomicBool = AtomicBool::new(false);
@@ -797,6 +798,8 @@ static CONTAINER_IMAGE_SIZE: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_IMAGE: [AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE];
 static CONTAINER_IMAGE_READY: AtomicBool = AtomicBool::new(false);
+const ALPINE_SHELL_IMAGE: &[u8] =
+    b"alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395";
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -1685,6 +1688,7 @@ impl LinuxRelativeFileMapping {
 }
 
 pub(crate) struct LinuxElfExecution {
+    pub(crate) runtime: bool,
     pub(crate) entry: usize,
     pub(crate) page_table_frames: [memory::FrameLease; 6],
     pub(crate) page_table_frame_count: usize,
@@ -3696,6 +3700,9 @@ pub(crate) fn take_linux_exec_page_table_frames() -> [Option<memory::FrameLease>
 }
 
 pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfResult {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return LinuxElfResult::FAILED;
+    }
     let Some(heap_limit) = execution.heap.checked_add(execution.heap_size) else {
         return LinuxElfResult::FAILED;
     };
@@ -3835,6 +3842,23 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         || !mmap_contract_valid
         || execution.exec_expected && execution.initial_image_count == 0
     {
+        if execution.runtime {
+            serial_write("ginux: Alpine runtime contract rejection:");
+            for valid in [
+                page_table_contract_valid,
+                stale_page_table_lease_rejected,
+                stack_contract_valid,
+                heap_contract_valid,
+                initial_image_valid,
+                retired_image_state_clean,
+                heap_reclaim_state_clean,
+                mmap_contract_valid,
+            ] {
+                serial_write(" ");
+                serial_write_u64(u64::from(valid));
+            }
+            serial_write("\r\n");
+        }
         return LinuxElfResult::FAILED;
     }
     let initial_tls = LinuxTlsContext {
@@ -3910,6 +3934,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         || !tls_reclaim_state_clean
         || !sibling_stack_reclaim_state_clean
     {
+        if execution.runtime {
+            serial_write("ginux: Alpine TLS contract rejection\r\n");
+        }
         return LinuxElfResult::FAILED;
     }
     if ELF_PROBE_ACTIVE.swap(true, Ordering::SeqCst) {
@@ -3918,10 +3945,16 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let Some(clock_frequency) = timer::monotonic_frequency()
         .filter(|frequency| *frequency <= u64::MAX / NANOSECONDS_PER_SECOND)
     else {
+        if execution.runtime {
+            serial_write("ginux: Alpine clock setup failed\r\n");
+        }
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     };
     let Some(saved_msrs) = configure_linux_syscall() else {
+        if execution.runtime {
+            serial_write("ginux: Alpine syscall setup failed\r\n");
+        }
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     };
@@ -4127,6 +4160,9 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         })()
         .unwrap_or(false);
     if !linux_thread_lifecycle_valid {
+        if execution.runtime {
+            serial_write("ginux: Alpine initial thread rejection\r\n");
+        }
         let _ = restore_linux_syscall(saved_msrs);
         let _ = finish_linux_thread_table();
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
@@ -4495,25 +4531,77 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     };
     let linux_wait_timer_armed = execution.tls_size == 0 || timer::arm_linux_wait_timer();
     if !linux_wait_timer_armed {
+        if execution.runtime {
+            serial_write("ginux: Alpine wait timer setup failed\r\n");
+        }
         let _ = restore_linux_syscall(saved_msrs);
         let _ = finish_linux_thread_table();
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
     if !linux_mount::activate_initial() {
+        if execution.runtime {
+            serial_write("ginux: Alpine mount setup failed\r\n");
+        }
         let _ = restore_linux_syscall(saved_msrs);
         let _ = finish_linux_thread_table();
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
-    if !install_live_linux_process_registry(execution.entry, execution.stack, active_fs_base()) {
+    if !execution.runtime
+        && !install_live_linux_process_registry(execution.entry, execution.stack, active_fs_base())
+    {
         let _ = linux_mount::deactivate_initial();
         let _ = restore_linux_syscall(saved_msrs);
         let _ = finish_linux_thread_table();
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
+    LINUX_RUNTIME_MODE.store(execution.runtime, Ordering::SeqCst);
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
+    if execution.runtime {
+        let completed = ELF_PROBE_COMPLETED.swap(false, Ordering::SeqCst);
+        let descriptors_closed = linux_close_all_descriptors();
+        let registry_finished = true;
+        let mount_deactivated = linux_mount::deactivate_initial();
+        let msrs_restored = restore_linux_syscall(saved_msrs);
+        let threads_released = finish_linux_thread_table();
+        let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
+        LINUX_RUNTIME_MODE.store(false, Ordering::SeqCst);
+        if !(completed
+            && descriptors_closed
+            && registry_finished
+            && mount_deactivated
+            && msrs_restored
+            && threads_released
+            && inactive)
+        {
+            serial_write("ginux: Alpine runtime return:");
+            for valid in [
+                completed,
+                descriptors_closed,
+                registry_finished,
+                mount_deactivated,
+                msrs_restored,
+                threads_released,
+                inactive,
+            ] {
+                serial_write(" ");
+                serial_write_u64(u64::from(valid));
+            }
+            serial_write("\r\n");
+        }
+        return LinuxElfResult {
+            valid: completed
+                && descriptors_closed
+                && registry_finished
+                && mount_deactivated
+                && msrs_restored
+                && threads_released
+                && inactive,
+            ..LinuxElfResult::FAILED
+        };
+    }
     let live_fork_executed = execute_deferred_live_fork();
     let live_process_registry_finished =
         live_fork_executed && linux_process::finish_live_process_registry();
@@ -5964,6 +6052,7 @@ extern "sysv64" fn linux_syscall_handler(
     }
     if current_linux_process_pid() == 1
         && current_linux_tid() == Some(1)
+        && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         && !refresh_live_linux_process_registry(syscall_return)
     {
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
@@ -6056,6 +6145,13 @@ extern "sysv64" fn linux_syscall_handler(
             let relro = ELF_PROBE_RELRO.load(Ordering::SeqCst);
             let relro_size = ELF_PROBE_RELRO_SIZE.load(Ordering::SeqCst);
             let relro_active_index = linux_active_image_writable_index(first_argument);
+            if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+                && count == LINUX_PROT_READ
+                && buffer.is_multiple_of(PAGE_SIZE as u64)
+                && address_space::protect_current_linux_range_read_only(first_argument, buffer)
+            {
+                return 0;
+            }
             if count == LINUX_PROT_READ
                 && first_argument == relro
                 && buffer == PAGE_SIZE as u64
@@ -6416,10 +6512,17 @@ extern "sysv64" fn linux_syscall_handler(
         },
         LINUX_ARCH_PRCTL_SYSCALL
             if first_argument == LINUX_ARCH_SET_FS
-                && buffer == ELF_PROBE_DATA.load(Ordering::SeqCst) =>
+                && (buffer == ELF_PROBE_DATA.load(Ordering::SeqCst)
+                    || LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+                        && address_space::current_linux_range_mapped(
+                            buffer,
+                            size_of::<u64>(),
+                            true,
+                        )) =>
         {
-            // SAFETY: the bounded proof accepts only its declared canonical
-            // user-data base and restores the supervisor FS base afterward.
+            // SAFETY: proof fixtures accept only their declared data base;
+            // runtime images accept a mapped writable user TLS location. The
+            // supervisor FS base is restored before returning to the kernel.
             unsafe { write_msr(FS_BASE_MSR, buffer) };
             0
         }
@@ -6590,6 +6693,15 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
         LINUX_STATX_SYSCALL => linux_statx(first_argument, buffer, count, register(0), register(2)),
         LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
+        LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
+            if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+                && first_argument <= u64::from(u8::MAX) =>
+        {
+            retire_all_linux_threads();
+            ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
+            ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+            LINUX_RETURN_TO_KERNEL
+        }
         LINUX_EXIT_SYSCALL
             if first_argument <= u64::from(u8::MAX) && current_linux_process_pid() != 1 =>
         {
@@ -9695,7 +9807,14 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
         }
         count
     } else if u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_INPUT {
-        0
+        if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) || count == 0 {
+            return 0;
+        }
+        let byte = crate::serial_read_byte_blocking();
+        if !copy_to_linux_user(address, &[byte]) {
+            return LINUX_EFAULT;
+        }
+        1
     } else {
         LINUX_EBADF
     }
@@ -11556,7 +11675,13 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
         return 0;
     };
     match u16::from(linux_console_descriptor(descriptor)) {
-        LINUX_DESCRIPTOR_INPUT => return LINUX_POLLHUP,
+        LINUX_DESCRIPTOR_INPUT => {
+            return if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+                requested & LINUX_POLLIN
+            } else {
+                LINUX_POLLHUP
+            };
+        }
         LINUX_DESCRIPTOR_OUTPUT => return requested & LINUX_POLLOUT,
         _ => {}
     }
@@ -12780,6 +12905,9 @@ fn extend_linux_user_area(next: &mut u64, base: u64, size: u64, address: u64) {
 }
 
 fn linux_user_range_covered(address: u64, length: usize, writable: bool) -> bool {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return address_space::current_linux_range_mapped(address, length, writable);
+    }
     let Some(target) = address.checked_add(length as u64) else {
         return false;
     };
@@ -16210,7 +16338,9 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 &CONTAINER_IMAGE_SIZE,
             );
             CONTAINER_IMAGE_READY.store(
-                container_request_image(&request) == b"embedded://minimal-system-v0",
+                container_request_image(&request) == b"embedded://minimal-system-v0"
+                    || container_request_image(&request) == ALPINE_SHELL_IMAGE
+                        && crate::oci_image::alpine_shell_plan().is_some(),
                 Ordering::SeqCst,
             );
             update_container_configuration(control_abi::CONTAINER_CONFIG_IMAGE)
@@ -16331,6 +16461,20 @@ fn stored_container_name_matches(name: &[u8]) -> bool {
             .iter()
             .zip(name)
             .all(|(stored, supplied)| stored.load(Ordering::SeqCst) == *supplied)
+}
+
+pub(crate) fn configured_container_uses_alpine() -> bool {
+    let size = usize::from(CONTAINER_IMAGE_SIZE.load(Ordering::SeqCst));
+    size == ALPINE_SHELL_IMAGE.len()
+        && CONTAINER_IMAGE[..size]
+            .iter()
+            .zip(ALPINE_SHELL_IMAGE)
+            .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected)
+        && CONTAINER_INIT_SIZE.load(Ordering::SeqCst) as usize == b"/bin/sh".len()
+        && CONTAINER_INIT[..b"/bin/sh".len()]
+            .iter()
+            .zip(b"/bin/sh")
+            .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected)
 }
 
 fn store_container_name(name: &[u8]) {

@@ -143,6 +143,260 @@ pub(crate) fn run_installed_interactive_controller() -> bool {
     valid && current_root() == linux_root
 }
 
+pub(crate) fn run_alpine_shell() -> bool {
+    const HIERARCHY_FRAMES: usize = 6;
+    const OWNED_FRAME_COUNT: usize = HIERARCHY_FRAMES + 2;
+    const RUNTIME_FRAME_CAPACITY: usize = 440;
+    const HEAP_ADDRESS: u64 = 0x80_0000;
+    const STACK_ADDRESS: u64 = 0x81_0000;
+    const MMAP_ADDRESS: u64 = 0x82_0000;
+
+    let Some(plan) = crate::oci_image::alpine_shell_plan() else {
+        crate::serial_write_bytes(b"ginux: Alpine shell plan unavailable\r\n");
+        return false;
+    };
+    let startup = crate::linux_elf::relocatable_startup(&plan);
+    let Some(frames) = memory::allocate_frames::<OWNED_FRAME_COUNT>(memory::FrameOwner::KERNEL)
+    else {
+        crate::serial_write_bytes(b"ginux: Alpine shell hierarchy allocation failed\r\n");
+        return false;
+    };
+    let Some(runtime_frames) = memory::allocate_runtime_extent::<RUNTIME_FRAME_CAPACITY>() else {
+        crate::serial_write_bytes(b"ginux: Alpine shell image allocation failed\r\n");
+        let _ = memory::release_frames(memory::FrameOwner::KERNEL, frames);
+        return false;
+    };
+    let kernel_root = current_root();
+    let mut stage = 0_u8;
+    let valid = (|| -> Option<bool> {
+        let [root, pdpt, directory, main_table, interpreter_table, runtime_table] = [
+            frames[0], frames[1], frames[2], frames[3], frames[4], frames[5],
+        ];
+        unsafe {
+            for frame in [
+                root,
+                pdpt,
+                directory,
+                main_table,
+                interpreter_table,
+                runtime_table,
+            ] {
+                zero_frame(frame.address())?;
+            }
+            let root_entries = mapped_frame::<u64>(root.address())?;
+            let kernel_entries = mapped_frame::<u64>(kernel_root)?;
+            root_entries.add(256).write(kernel_entries.add(256).read());
+            root_entries.write(pdpt.address() | PRESENT | WRITABLE | USER);
+            let pdpt_entries = mapped_frame::<u64>(pdpt.address())?;
+            let kernel_pdpt = mapped_frame::<u64>(kernel_entries.read() & ADDRESS_MASK)?;
+            core::ptr::copy_nonoverlapping(kernel_pdpt, pdpt_entries, ENTRY_COUNT);
+            let kernel_directory = mapped_frame::<u64>(kernel_pdpt.read() & ADDRESS_MASK)?;
+            let directory_entries = mapped_frame::<u64>(directory.address())?;
+            core::ptr::copy_nonoverlapping(kernel_directory, directory_entries, ENTRY_COUNT);
+            pdpt_entries.write(directory.address() | PRESENT | WRITABLE | USER);
+            directory_entries
+                .add(2)
+                .write(main_table.address() | PRESENT | WRITABLE | USER);
+            directory_entries
+                .add(3)
+                .write(interpreter_table.address() | PRESENT | WRITABLE | USER);
+            directory_entries
+                .add(4)
+                .write(runtime_table.address() | PRESENT | WRITABLE | USER);
+        }
+        stage = 1;
+
+        let mut next_frame = 0;
+        let mut executable = |image: &crate::linux_elf::RelocatableLoadPlan<'_>| -> Option<()> {
+            for segment in image.segments[..image.segment_count].iter().flatten() {
+                for page in 0..segment.page_count {
+                    let frame = *runtime_frames.get(next_frame)?;
+                    let output = unsafe {
+                        &mut *(mapped_frame::<u8>(frame.address())? as *mut [u8; PAGE_SIZE])
+                    };
+                    if !crate::linux_elf::materialize_page(*segment, page, output) {
+                        return None;
+                    }
+                    let address = segment
+                        .virtual_page
+                        .checked_add((page * PAGE_SIZE) as u64)?;
+                    let directory_index = ((address >> 21) & 0x1ff) as usize;
+                    if !matches!(directory_index, 2 | 3)
+                        || !map_linux_leaf_in_root(
+                            root.address(),
+                            address,
+                            frame.address(),
+                            segment.writable,
+                            segment.executable,
+                        )
+                    {
+                        return None;
+                    }
+                    next_frame += 1;
+                }
+            }
+            Some(())
+        };
+        executable(&plan.main)?;
+        stage = 2;
+        executable(&plan.interpreter)?;
+        stage = 3;
+
+        let heap_frame = frames[HIERARCHY_FRAMES];
+        let stack_frame = frames[HIERARCHY_FRAMES + 1];
+        if !map_linux_leaf_in_root(
+            root.address(),
+            HEAP_ADDRESS,
+            heap_frame.address(),
+            true,
+            false,
+        ) || !map_linux_leaf_in_root(
+            root.address(),
+            STACK_ADDRESS,
+            stack_frame.address(),
+            true,
+            false,
+        ) {
+            return None;
+        }
+        stage = 4;
+
+        let stack =
+            unsafe { &mut *(mapped_frame::<u8>(stack_frame.address())? as *mut [u8; PAGE_SIZE]) };
+        let argument = b"/bin/sh\0";
+        let environment = b"PATH=/bin:/usr/bin:/sbin:/usr/sbin\0";
+        let argument_offset = PAGE_SIZE - argument.len();
+        let environment_offset = argument_offset.checked_sub(environment.len())?;
+        let platform_offset = environment_offset.checked_sub(LINUX_PLATFORM.len())?;
+        let words = 5 + crate::linux_elf::AUXILIARY_VECTOR_WORDS;
+        let stack_offset = (platform_offset.checked_sub(words * size_of::<u64>())?) & !15;
+        let argument_address = STACK_ADDRESS + argument_offset as u64;
+        let environment_address = STACK_ADDRESS + environment_offset as u64;
+        let platform_address = STACK_ADDRESS + platform_offset as u64;
+        stack[argument_offset..].copy_from_slice(argument);
+        stack[environment_offset..argument_offset].copy_from_slice(environment);
+        stack[platform_offset..platform_offset + LINUX_PLATFORM.len()]
+            .copy_from_slice(&LINUX_PLATFORM);
+        let stack_words = unsafe { stack.as_mut_ptr().add(stack_offset).cast::<u64>() };
+        for (index, value) in [1_u64, argument_address, 0, environment_address, 0]
+            .into_iter()
+            .enumerate()
+        {
+            unsafe { stack_words.add(index).write(value) };
+        }
+        for (index, value) in
+            crate::linux_elf::auxiliary_vector(startup, argument_address, platform_address)
+                .into_iter()
+                .enumerate()
+        {
+            unsafe { stack_words.add(5 + index).write(value) };
+        }
+        stage = 5;
+
+        let main_code = plan.main.segments[..plan.main.segment_count]
+            .iter()
+            .flatten()
+            .find(|segment| segment.executable)?;
+        let main_data = plan.main.segments[..plan.main.segment_count]
+            .iter()
+            .flatten()
+            .find(|segment| segment.writable)?;
+        let loader_code = plan.interpreter.segments[..plan.interpreter.segment_count]
+            .iter()
+            .flatten()
+            .find(|segment| segment.executable)?;
+        stage = 6;
+
+        unsafe { activate(root.address()) };
+        let result = cpu::verify_linux_elf_entry(&cpu::LinuxElfExecution {
+            runtime: true,
+            entry: startup.initial_entry as usize,
+            page_table_frames: [
+                root,
+                pdpt,
+                directory,
+                main_table,
+                interpreter_table,
+                runtime_table,
+            ],
+            page_table_frame_count: 6,
+            stack: STACK_ADDRESS as usize + stack_offset,
+            stack_frame,
+            heap_frame,
+            tls_frames: [memory::FrameLease::EMPTY; 2],
+            initial_fs_base: 0,
+            tls: 0,
+            tls_size: 0,
+            sibling_fs_base: 0,
+            sibling_tls: 0,
+            sibling_stack: 0,
+            sibling_stack_frame: memory::FrameLease::EMPTY,
+            code: main_code.virtual_address as usize,
+            code_size: main_code.memory_size,
+            loader_code: loader_code.virtual_address as usize,
+            loader_code_size: loader_code.memory_size,
+            data: main_data.virtual_page as usize,
+            data_size: main_data.memory_size,
+            relro: 0,
+            relro_size: 0,
+            heap: HEAP_ADDRESS as usize,
+            heap_size: PAGE_SIZE,
+            mmap: MMAP_ADDRESS as usize,
+            main_mappings: [cpu::LinuxFileMapping::EMPTY; 8],
+            dependency_base_min: [0; 2],
+            dependency_base_end: [0; 2],
+            dependency_mappings: [[cpu::LinuxRelativeFileMapping::EMPTY; 8]; 2],
+            exec_expected: false,
+            system_init: false,
+            initial_image_count: 0,
+            initial_image_mappings: [cpu::LinuxActiveImageMapping::EMPTY;
+                cpu::LINUX_ACTIVE_IMAGE_MAPPING_LIMIT],
+        });
+        unsafe { activate(kernel_root) };
+        stage = 7;
+        Some(result.valid && current_root() == kernel_root)
+    })()
+    .unwrap_or(false);
+    if current_root() != kernel_root {
+        unsafe { activate(kernel_root) };
+    }
+    let runtime_scrubbed = memory::scrub_runtime_extent(runtime_frames);
+    if !valid {
+        crate::serial_write_bytes(b"ginux: Alpine shell setup failed at stage ");
+        crate::serial_write_u64(u64::from(stage));
+        crate::serial_write_bytes(b"\r\n");
+    }
+    valid && runtime_scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, frames)
+}
+
+fn map_linux_leaf_in_root(
+    root: u64,
+    address: u64,
+    frame: u64,
+    writable: bool,
+    executable: bool,
+) -> bool {
+    if writable && executable {
+        return false;
+    }
+    let Some(leaf) = linux_leaf_in_root(root, address) else {
+        return false;
+    };
+    unsafe {
+        if leaf.read() != 0 {
+            return false;
+        }
+        leaf.write(
+            frame
+                | PRESENT
+                | USER
+                | if writable { WRITABLE } else { 0 }
+                | if executable { 0 } else { NO_EXECUTE },
+        );
+    }
+    true
+}
+
 pub(crate) fn verify_linux_elf_mapping(
     plan: &crate::linux_elf::LoadPlan<'_>,
     protected_start: u64,
@@ -735,6 +989,7 @@ pub(crate) fn verify_linux_elf_mapping(
             });
             let execution_result = if exec_rollback_valid && observed {
                 cpu::verify_linux_elf_entry(&cpu::LinuxElfExecution {
+                    runtime: false,
                     entry: startup.initial_entry as usize,
                     page_table_frames: [
                         frames[0],
@@ -1789,6 +2044,7 @@ pub(crate) fn verify_interpreted_elf_mapping(
             }
             let execution_result = if observed {
                 cpu::verify_linux_elf_entry(&cpu::LinuxElfExecution {
+                    runtime: false,
                     entry: startup.initial_entry as usize,
                     page_table_frames: [
                         frames[0], frames[1], frames[2], frames[3], frames[4], frames[5],
@@ -2716,6 +2972,50 @@ pub(crate) fn map_current_linux_file_page(
         return false;
     }
     map_current_linux_page_with_permissions(address, frame, writable, executable)
+}
+
+pub(crate) fn protect_current_linux_range_read_only(address: u64, length: u64) -> bool {
+    if !address.is_multiple_of(PAGE_SIZE as u64)
+        || length == 0
+        || !length.is_multiple_of(PAGE_SIZE as u64)
+        || address.checked_add(length).is_none_or(|end| end > 1 << 47)
+    {
+        return false;
+    }
+    let Ok(pages) = usize::try_from(length / PAGE_SIZE as u64) else {
+        return false;
+    };
+    if !(1..=16).contains(&pages) {
+        return false;
+    }
+    let mut leaves = [core::ptr::null_mut(); 16];
+    let mut values = [0_u64; 16];
+    for index in 0..pages {
+        let page = address + (index * PAGE_SIZE) as u64;
+        let Some(leaf) = current_linux_leaf(page) else {
+            return false;
+        };
+        let value = unsafe { leaf.read() };
+        if value & (PRESENT | USER | WRITABLE | NO_EXECUTE)
+            != PRESENT | USER | WRITABLE | NO_EXECUTE
+            || !memory::frame_addresses_owned_by(
+                memory::FrameOwner::KERNEL,
+                &[value & ADDRESS_MASK],
+            )
+        {
+            return false;
+        }
+        leaves[index] = leaf;
+        values[index] = value;
+    }
+    for index in 0..pages {
+        let page = address + (index * PAGE_SIZE) as u64;
+        unsafe {
+            leaves[index].write(values[index] & !WRITABLE);
+            asm!("invlpg [{}]", in(reg) page, options(nostack, preserves_flags));
+        }
+    }
+    true
 }
 
 fn current_linux_tls_frames<'main, 'interpreter, 'dependency>(
@@ -3836,6 +4136,34 @@ pub(crate) fn current_linux_page_absent(address: u64) -> bool {
     address < 1 << 47
         && address.is_multiple_of(PAGE_SIZE as u64)
         && current_linux_leaf(address).is_some_and(|entry| unsafe { entry.read() == 0 })
+}
+
+pub(crate) fn current_linux_range_mapped(address: u64, length: usize, writable: bool) -> bool {
+    let Some(end) = address.checked_add(length as u64) else {
+        return false;
+    };
+    if length == 0 || address >= 1 << 47 || end > 1 << 47 {
+        return false;
+    }
+    let first = address & !(PAGE_SIZE as u64 - 1);
+    let last = (end - 1) & !(PAGE_SIZE as u64 - 1);
+    let mut page = first;
+    loop {
+        let valid = current_linux_leaf(page).is_some_and(|entry| {
+            let value = unsafe { entry.read() };
+            value & (PRESENT | USER) == PRESENT | USER && (!writable || value & WRITABLE != 0)
+        });
+        if !valid {
+            return false;
+        }
+        if page == last {
+            return true;
+        }
+        let Some(next) = page.checked_add(PAGE_SIZE as u64) else {
+            return false;
+        };
+        page = next;
+    }
 }
 
 pub(crate) fn current_root_address() -> u64 {

@@ -3,7 +3,7 @@ use crate::{
     EFI_BOOT_SERVICES_DATA, EFI_CONVENTIONAL_MEMORY,
 };
 use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
@@ -13,6 +13,8 @@ const MAX_LIVE_FRAMES: usize = 128;
 const DOMAIN_FRAME_LIMIT: usize = 16;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
+static RUNTIME_EXTENT_START: AtomicU64 = AtomicU64::new(0);
+static RUNTIME_EXTENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static mut GLOBAL_ALLOCATOR: MaybeUninit<FrameAllocator> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy)]
@@ -149,15 +151,33 @@ impl FrameAllocator {
     }
 
     pub(crate) fn reserve<const N: usize>(&mut self, owner: FrameOwner) -> Option<[FrameLease; N]> {
-        if N == 0 {
+        if N == 0
+            || self.live_count.checked_add(N)? > MAX_LIVE_FRAMES
+            || (!owner.is_kernel()
+                && self.owner_live_count(owner).checked_add(N)? > DOMAIN_FRAME_LIMIT)
+            || self.allocated_frames.checked_add(N as u64).is_none()
+        {
             return None;
         }
-        let mut staged = *self;
+        let recycled = N.min(self.recycled_count);
+        if self.recycled[self.recycled_count - recycled..self.recycled_count]
+            .iter()
+            .any(|frame| frame.generation == u32::MAX)
+        {
+            return None;
+        }
+        let available_ranges = self.ranges[self.active_range..self.range_count]
+            .iter()
+            .try_fold(0_u64, |total, range| {
+                total.checked_add(range.end.saturating_sub(range.next) / PAGE_SIZE)
+            })?;
+        if available_ranges < (N - recycled) as u64 {
+            return None;
+        }
         let mut frames = [EMPTY_LEASE; N];
         for frame in &mut frames {
-            *frame = staged.allocate_one(owner)?;
+            *frame = self.allocate_one(owner)?;
         }
-        *self = staged;
         Some(frames)
     }
 
@@ -186,22 +206,26 @@ impl FrameAllocator {
             })
             .flatten();
         if let Some(recycled_start) = recycled_start {
-            let mut staged = *self;
+            if self.recycled[recycled_start..recycled_start + N]
+                .iter()
+                .any(|frame| frame.generation == u32::MAX)
+            {
+                return None;
+            }
             let mut frames = [EMPTY_LEASE; N];
             for (index, frame) in frames.iter_mut().enumerate() {
-                let prior = staged.recycled[recycled_start + index];
+                let prior = self.recycled[recycled_start + index];
                 *frame = FrameLease {
                     address: prior.address,
                     generation: prior.generation.checked_add(1)?,
                 };
-                staged.record_live(*frame, owner)?;
+                self.record_live(*frame, owner)?;
             }
-            staged
-                .recycled
-                .copy_within(recycled_start + N..staged.recycled_count, recycled_start);
-            staged.recycled_count -= N;
-            staged.recycled[staged.recycled_count..self.recycled_count].fill(EMPTY_LEASE);
-            *self = staged;
+            self.recycled
+                .copy_within(recycled_start + N..self.recycled_count, recycled_start);
+            let prior_count = self.recycled_count;
+            self.recycled_count -= N;
+            self.recycled[self.recycled_count..prior_count].fill(EMPTY_LEASE);
             return Some(frames);
         }
         let size = (N as u64).checked_mul(PAGE_SIZE)?;
@@ -211,18 +235,16 @@ impl FrameAllocator {
                 .checked_sub(self.ranges[*index].next)
                 .is_some_and(|available| available >= size)
         })?;
-        let mut staged = *self;
-        let start = staged.ranges[range_index].next;
-        staged.ranges[range_index].next = start.checked_add(size)?;
+        let start = self.ranges[range_index].next;
+        self.ranges[range_index].next = start.checked_add(size)?;
         let mut frames = [EMPTY_LEASE; N];
         for (index, frame) in frames.iter_mut().enumerate() {
             *frame = FrameLease {
                 address: start.checked_add((index as u64).checked_mul(PAGE_SIZE)?)?,
                 generation: 1,
             };
-            staged.record_live(*frame, owner)?;
+            self.record_live(*frame, owner)?;
         }
-        *self = staged;
         Some(frames)
     }
 
@@ -296,24 +318,22 @@ impl FrameAllocator {
         if !self.can_release(owner, frames) {
             return false;
         }
-        let mut staged = *self;
         for frame in frames.iter().copied() {
-            let Some(index) = staged.live_frames[..staged.live_count]
+            let Some(index) = self.live_frames[..self.live_count]
                 .iter()
                 .position(|live| *live == frame)
             else {
                 return false;
             };
-            staged.live_count -= 1;
-            staged.live_frames[index] = staged.live_frames[staged.live_count];
-            staged.live_owners[index] = staged.live_owners[staged.live_count];
-            staged.live_frames[staged.live_count] = EMPTY_LEASE;
-            staged.live_owners[staged.live_count] = FrameOwner::KERNEL;
-            staged.recycled[staged.recycled_count] = frame;
-            staged.recycled_count += 1;
+            self.live_count -= 1;
+            self.live_frames[index] = self.live_frames[self.live_count];
+            self.live_owners[index] = self.live_owners[self.live_count];
+            self.live_frames[self.live_count] = EMPTY_LEASE;
+            self.live_owners[self.live_count] = FrameOwner::KERNEL;
+            self.recycled[self.recycled_count] = frame;
+            self.recycled_count += 1;
         }
-        staged.allocated_frames -= frames.len() as u64;
-        *self = staged;
+        self.allocated_frames -= frames.len() as u64;
         true
     }
 
@@ -493,6 +513,68 @@ pub(crate) fn allocate_contiguous_frames<const N: usize>(
     }
 }
 
+pub(crate) fn allocate_runtime_extent<const N: usize>() -> Option<[FrameLease; N]> {
+    if !INITIALIZED.load(Ordering::Acquire) || N == 0 {
+        return None;
+    }
+    let existing = RUNTIME_EXTENT_START.load(Ordering::Acquire);
+    let count = RUNTIME_EXTENT_COUNT.load(Ordering::Acquire);
+    let start = if existing != 0 {
+        (count == N).then_some(existing)?
+    } else {
+        let size = (N as u64).checked_mul(PAGE_SIZE)?;
+        let start = unsafe {
+            let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+            let index = ((*allocator).active_range..(*allocator).range_count).find(|index| {
+                (*allocator).ranges[*index]
+                    .end
+                    .checked_sub((*allocator).ranges[*index].next)
+                    .is_some_and(|available| available >= size)
+            })?;
+            let start = (*allocator).ranges[index].next;
+            (*allocator).ranges[index].next = start.checked_add(size)?;
+            start
+        };
+        RUNTIME_EXTENT_COUNT.store(N, Ordering::Release);
+        RUNTIME_EXTENT_START.store(start, Ordering::Release);
+        start
+    };
+    let frames = core::array::from_fn(|index| FrameLease {
+        address: start + index as u64 * PAGE_SIZE,
+        generation: 1,
+    });
+    for frame in &frames {
+        let address = frame.direct_map_address()?;
+        unsafe { core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE as usize) };
+    }
+    Some(frames)
+}
+
+pub(crate) fn scrub_runtime_extent<const N: usize>(frames: [FrameLease; N]) -> bool {
+    if !runtime_extent_owns(&frames) {
+        return false;
+    }
+    frames.iter().all(|frame| {
+        frame.direct_map_address().is_some_and(|address| {
+            unsafe { core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE as usize) };
+            true
+        })
+    })
+}
+
+fn runtime_extent_owns(frames: &[FrameLease]) -> bool {
+    let start = RUNTIME_EXTENT_START.load(Ordering::Acquire);
+    let count = RUNTIME_EXTENT_COUNT.load(Ordering::Acquire);
+    let end = start.saturating_add(count as u64 * PAGE_SIZE);
+    start != 0
+        && frames.iter().all(|frame| {
+            frame.generation == 1
+                && frame.address >= start
+                && frame.address < end
+                && frame.address.is_multiple_of(PAGE_SIZE)
+        })
+}
+
 pub(crate) fn release_frames<const N: usize>(owner: FrameOwner, frames: [FrameLease; N]) -> bool {
     if !INITIALIZED.load(Ordering::Acquire) {
         return false;
@@ -559,7 +641,7 @@ pub(crate) fn frames_owned_by(owner: FrameOwner, frames: &[FrameLease]) -> bool 
     }
     unsafe {
         let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
-        (*allocator).owns(owner, frames)
+        (*allocator).owns(owner, frames) || owner.is_kernel() && runtime_extent_owns(frames)
     }
 }
 
@@ -580,6 +662,16 @@ pub(crate) fn frame_addresses_owned_by(owner: FrameOwner, addresses: &[u64]) -> 
     unsafe {
         let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
         (*allocator).owns_addresses(owner, addresses)
+            || owner.is_kernel()
+                && !addresses.is_empty()
+                && addresses.iter().all(|address| {
+                    let start = RUNTIME_EXTENT_START.load(Ordering::Acquire);
+                    let count = RUNTIME_EXTENT_COUNT.load(Ordering::Acquire);
+                    start != 0
+                        && *address >= start
+                        && *address < start.saturating_add(count as u64 * PAGE_SIZE)
+                        && address.is_multiple_of(PAGE_SIZE)
+                })
     }
 }
 

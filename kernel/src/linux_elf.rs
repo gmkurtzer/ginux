@@ -1554,6 +1554,16 @@ pub(crate) fn interpreted_startup(plan: &InterpretedLoadPlan<'_, '_>) -> Process
     }
 }
 
+pub(crate) fn relocatable_startup(plan: &RelocatableProcessPlan<'_, '_>) -> ProcessStartup {
+    ProcessStartup {
+        initial_entry: plan.initial_entry,
+        program_headers: plan.main.program_headers,
+        program_header_count: plan.main.program_header_count,
+        interpreter_base: plan.interpreter.load_bias,
+        main_entry: plan.main.entry,
+    }
+}
+
 pub(crate) fn auxiliary_vector(
     startup: ProcessStartup,
     executable_name: u64,

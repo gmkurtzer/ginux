@@ -3629,7 +3629,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         loop {
             serial_write("ginux: starting configured runtime container\r\n");
-            if !linux_elf::verify_mapped_system_init_plan(
+            if arch::x86_64::cpu::configured_container_uses_alpine() {
+                serial_write("ginux: entering Alpine /bin/sh through musl\r\n");
+                if !address_space::run_alpine_shell() {
+                    kernel_fail("ginux: Alpine shell execution failed\r\n");
+                }
+                serial_write("ginux: Alpine /bin/sh exited cleanly\r\n");
+            } else if !linux_elf::verify_mapped_system_init_plan(
                 boot_info.image_base as u64,
                 boot_info.image_size,
             ) {
@@ -3872,7 +3878,7 @@ fn serial_write_usize(value: usize) {
     serial_write_u64(value as u64);
 }
 
-fn serial_write_u64(mut value: u64) {
+pub(crate) fn serial_write_u64(mut value: u64) {
     let mut digits = [0_u8; 20];
     let mut cursor = digits.len();
 

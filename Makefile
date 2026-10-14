@@ -29,7 +29,7 @@ help:
 	@echo "  make alpine-image-check Verify the prepared Alpine image without downloading"
 	@echo "  make build-alpine Build Ginux with the verified Alpine rootfs sealed in"
 	@echo "  make run-alpine Compatibility alias for 'make run'"
-	@echo "  make test-alpine Verify the Alpine OCI boot ingestion path in QEMU"
+	@echo "  make test-alpine Verify Alpine OCI ingestion and the real musl shell in QEMU"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
@@ -129,6 +129,7 @@ run-alpine: run
 
 test-alpine: build-alpine
 	@tests/qemu/alpine-image.sh
+	@tests/qemu/alpine-shell.sh
 
 run: build-alpine
 	@tools/qemu/run.sh

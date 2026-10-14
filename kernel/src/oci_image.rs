@@ -107,3 +107,16 @@ pub(crate) fn file(path: &[u8]) -> Option<Entry<'static>> {
     let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, size) };
     Rootfs::parse(bytes)?.find(path)
 }
+
+pub(crate) fn alpine_shell_plan(
+) -> Option<crate::linux_elf::RelocatableProcessPlan<'static, 'static>> {
+    let shell = file(b"bin/busybox")?;
+    let interpreter = file(b"lib/ld-musl-x86_64.so.1")?;
+    crate::linux_elf::plan_relocatable_process(
+        shell.data,
+        0x40_0000,
+        b"/lib/ld-musl-x86_64.so.1",
+        interpreter.data,
+        0x60_0000,
+    )
+}
