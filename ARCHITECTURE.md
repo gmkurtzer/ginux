@@ -109,6 +109,7 @@ Administrative observation, lifecycle control, memory debugging, and authority d
 - Per-container loopback, interfaces, IP addresses, routes, sockets, and network-policy enforcement.
 - Globally unique virtual interfaces use `gnetN` names. The same name is exposed to the control plane and inside the assigned domain; interfaces are never implicitly renamed at a domain boundary. Device listings show the plain domain name without a type prefix.
 - Control-domain and per-domain network state includes DNS resolver configuration. DHCP imports DNS configuration when supplied and otherwise preserves an explicit resolver, while static configuration may set it directly.
+- Every domain receives an always-up, immutable `lo` interface with `127.0.0.1/8`; operators do not create or configure loopback. The control domain attempts DHCP on its primary physical interface at boot and remains manageable for manual configuration if no lease is available.
 - Boot-critical storage, filesystem, networking, GPU/primary-device support in the kernel or authenticated kernel modules.
 - Boot handoff and integrity of the immutable kernel, module set, controller, and active authority envelope.
 

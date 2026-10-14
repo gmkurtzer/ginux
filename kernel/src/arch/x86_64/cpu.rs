@@ -15535,6 +15535,21 @@ fn network_device_call(caller_domain: u64, capability: u64, frame: *mut UserTrap
         }
         control_abi::NETWORK_DEVICE_PING
             if argument != 0
+                && argument >> 32 == 0
+                && network::link_is_up()
+                && network::ipv4_configuration() as u32 == argument as u32
+                && domain::handle_permits(
+                    caller_domain,
+                    capability,
+                    control_abi::NETWORK_DEVICE_OBJECT,
+                    Rights::READ,
+                ) =>
+        {
+            NETWORK_PING_RESULT.store(1, Ordering::Release);
+            0
+        }
+        control_abi::NETWORK_DEVICE_PING
+            if argument != 0
                 && network::link_is_up()
                 && network::ipv4_configuration() != 0
                 && network::ipv4_gateway() == argument

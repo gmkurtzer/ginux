@@ -295,6 +295,10 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
 
     write(console, b"\r\nGinux controller v0 (ring 3)\r\n");
     write(console, b"Type 'help' for commands.\r\n");
+    if network_snapshot(network).is_some_and(|snapshot| snapshot[3] == 0) {
+        write(console, b"eth0: automatic DHCP configuration\r\n");
+        set_dhcp_network(console, network);
+    }
     loop {
         write(console, b"ginux> ");
         let length = call(
@@ -383,7 +387,8 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
 }
 
 fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
-    if !is_eth0(arguments.first()) {
+    let device = arguments.first();
+    if !is_eth0(device) && !is_loopback(device) {
         write(console, b"network: device not found\r\n");
         return;
     }
@@ -395,6 +400,16 @@ fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
     write(console, b"PING ");
     write(console, address_text);
     write(console, b"\r\n");
+    if is_loopback(device) {
+        if address.to_be_bytes()[0] == 127 {
+            write(console, b"64 bytes from ");
+            write_ipv4(console, address);
+            write(console, b": icmp_seq=1 ttl=64\r\n");
+        } else {
+            write(console, b"ping: target is not a loopback address\r\n");
+        }
+        return;
+    }
     if call(
         NATIVE_NETWORK_DEVICE_OPERATION,
         network,
@@ -404,7 +419,7 @@ fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
     {
         write(
             console,
-            b"ping: network unavailable or target is not the configured gateway\r\n",
+            b"ping: network unavailable or target is not local or the configured gateway\r\n",
         );
         return;
     }
@@ -433,31 +448,19 @@ fn show_network_list(console: u64, network: u64) {
         console,
         b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS\r\n",
     );
-    write(console, b"eth0 control yes ");
-    write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
-    write(
-        console,
-        if snapshot[3] == 0 {
-            b"unconfigured "
-        } else {
-            b"configured "
-        },
-    );
-    if snapshot[3] == 0 {
-        write(console, b"- - ");
-    } else {
-        write_ipv4(console, snapshot[3] as u32);
-        write(console, b"/");
-        write_decimal(console, snapshot[3] >> 32);
-        write(console, b" ");
-        write_ipv4(console, snapshot[4] as u32);
-        write(console, b" ");
-    }
-    write_network_dns(console, network);
-    write(console, b"\r\n");
+    write_eth0_status(console, network, snapshot, false);
+    write_loopback_status(console, false);
 }
 
 fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
+    if is_loopback(arguments.first()) {
+        write(
+            console,
+            b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS GENERATION\r\n",
+        );
+        write_loopback_status(console, true);
+        return;
+    }
     if !is_eth0(arguments.first()) {
         write(console, b"network: device not found\r\n");
         return;
@@ -470,6 +473,10 @@ fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
         console,
         b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS GENERATION\r\n",
     );
+    write_eth0_status(console, network, snapshot, true);
+}
+
+fn write_eth0_status(console: u64, network: u64, snapshot: [u64; 7], generation: bool) {
     write(console, b"eth0 control yes ");
     write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
     write(
@@ -491,12 +498,26 @@ fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
         write(console, b" ");
     }
     write_network_dns(console, network);
-    write(console, b" ");
-    write_decimal(console, snapshot[1]);
+    if generation {
+        write(console, b" ");
+        write_decimal(console, snapshot[1]);
+    }
+    write(console, b"\r\n");
+}
+
+fn write_loopback_status(console: u64, generation: bool) {
+    write(console, b"lo control yes up configured 127.0.0.1/8 - -");
+    if generation {
+        write(console, b" 0");
+    }
     write(console, b"\r\n");
 }
 
 fn set_network(console: u64, network: u64, arguments: Arguments<'_>) {
+    if is_loopback(arguments.first()) {
+        write(console, b"network: loopback is automatic and immutable\r\n");
+        return;
+    }
     if !is_eth0(arguments.first()) {
         write(console, b"network: device not found\r\n");
         return;
@@ -628,6 +649,10 @@ fn write_network_dns(console: u64, network: u64) {
 }
 
 fn set_network_link(console: u64, network: u64, arguments: Arguments<'_>, start: bool) {
+    if is_loopback(arguments.first()) {
+        write(console, b"network: loopback is automatic and immutable\r\n");
+        return;
+    }
     if !is_eth0(arguments.first()) {
         write(console, b"network: device not found\r\n");
         return;
@@ -653,6 +678,10 @@ fn set_network_link(console: u64, network: u64, arguments: Arguments<'_>, start:
 }
 
 fn restart_network(console: u64, network: u64, arguments: Arguments<'_>) {
+    if is_loopback(arguments.first()) {
+        write(console, b"network: loopback is automatic and immutable\r\n");
+        return;
+    }
     if !is_eth0(arguments.first()) {
         write(console, b"network: device not found\r\n");
         return;
@@ -678,6 +707,10 @@ fn restart_network(console: u64, network: u64, arguments: Arguments<'_>) {
 
 fn is_eth0(device: Option<&[u8]>) -> bool {
     device == Some(b"eth0")
+}
+
+fn is_loopback(device: Option<&[u8]>) -> bool {
+    device == Some(b"lo")
 }
 
 fn network_snapshot(network: u64) -> Option<[u64; 7]> {

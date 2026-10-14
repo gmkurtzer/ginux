@@ -3554,6 +3554,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !arch::x86_64::cpu::enable_container_management() {
         kernel_fail("\r\nginux: container management activation failed\r\n");
     }
+    if !network::initialize_runtime() {
+        kernel_fail("\r\nginux: runtime network initialization failed\r\n");
+    }
     'managed: loop {
         serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
         if !address_space::run_installed_interactive_controller() {

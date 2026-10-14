@@ -2186,7 +2186,7 @@ fn address_space_root_is_owned(domain_raw: u64, root: u64) -> bool {
         return false;
     };
     (frames.base().len() == crate::address_space::USER_ADDRESS_SPACE_FRAMES
-        || (8..=crate::address_space::NATIVE_SERVICE_FRAME_COUNT).contains(&frames.base().len()))
+        || (8..=crate::address_space::NATIVE_CONTROLLER_FRAME_COUNT).contains(&frames.base().len()))
         && crate::memory::frame_addresses_owned_by(owner, frames.base())
         && frames
             .dma()

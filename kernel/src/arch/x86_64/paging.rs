@@ -85,10 +85,12 @@ pub(crate) fn verify_user_context_layout_invariants() -> bool {
 }
 
 pub(crate) struct ValidatedUserRootFrames {
-    base: [u64; 14],
+    base: [u64; 15],
     base_count: usize,
     dma: Option<u64>,
     native_executable_pages: u8,
+    native_image_pages: u8,
+    native_stack_page: u8,
 }
 
 impl ValidatedUserRootFrames {
@@ -104,12 +106,12 @@ impl ValidatedUserRootFrames {
         if self.base_count == 7 {
             return user_context_matches_layout(instruction, stack);
         }
-        let stack_start = USER_REGION_BASE + 8 * PAGE_SIZE as u64;
-        let stack_end = USER_REGION_BASE + 10 * PAGE_SIZE as u64;
+        let stack_start = USER_REGION_BASE + u64::from(self.native_stack_page) * PAGE_SIZE as u64;
+        let stack_end = stack_start + 2 * PAGE_SIZE as u64;
         let executable_page = instruction
             .checked_sub(USER_REGION_BASE)
             .map(|offset| offset / PAGE_SIZE as u64)
-            .filter(|page| *page < 7)
+            .filter(|page| *page < u64::from(self.native_image_pages))
             .is_some_and(|page| self.native_executable_pages & (1 << page) != 0);
         executable_page && stack_start < stack && stack <= stack_end
     }
@@ -222,13 +224,15 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             .all(|(index, frame)| !legacy_frames[index + 1..].contains(frame))
         && (dma == 0 || !legacy_frames.contains(&dma_address));
     if legacy_valid {
-        let mut base = [0_u64; 14];
+        let mut base = [0_u64; 15];
         base[..legacy_frames.len()].copy_from_slice(&legacy_frames);
         return Some(ValidatedUserRootFrames {
             base,
             base_count: legacy_frames.len(),
             dma: (dma != 0).then_some(dma_address),
             native_executable_pages: 0,
+            native_image_pages: 0,
+            native_stack_page: 0,
         });
     }
 
@@ -242,12 +246,16 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let flags_match = |entry: u64, expected: u64| {
         entry & !(ACCESSED | DIRTY) == expected && (entry & DIRTY == 0 || expected & WRITABLE != 0)
     };
-    let image_pages = (0..7)
+    let controller_layout = native_entries[7] & PRESENT != 0;
+    let image_capacity = if controller_layout { 8 } else { 7 };
+    let stack_page = if controller_layout { 9 } else { 8 };
+    let boot_info_page = if controller_layout { 12 } else { 11 };
+    let image_pages = (0..image_capacity)
         .take_while(|index| native_entries[*index] & PRESENT != 0)
         .count();
     let mut native_executable_pages = 0_u8;
     let image_valid = image_pages != 0
-        && (image_pages..7).all(|index| native_entries[index] == 0)
+        && (image_pages..image_capacity).all(|index| native_entries[index] == 0)
         && (0..image_pages).all(|index| {
             let entry = native_entries[index];
             let address = entry & ADDRESS_MASK as u64;
@@ -261,7 +269,11 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             valid
         })
         && native_executable_pages != 0;
-    let native_dma = native_entries[12];
+    let native_dma = if controller_layout {
+        0
+    } else {
+        native_entries[12]
+    };
     let native_dma_address = native_dma & ADDRESS_MASK as u64;
     let dma_valid = native_dma == 0
         || (flags_match(native_dma, native_dma_address | stack_flags)
@@ -280,15 +292,15 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             && native_entries[14] & ADDRESS_MASK as u64 >= INITIAL_IDENTITY_LIMIT as u64
             && native_entries[13] & ADDRESS_MASK as u64 != native_entries[14] & ADDRESS_MASK as u64
     };
-    let mut native_frames = [0_u64; 14];
+    let mut native_frames = [0_u64; 15];
     native_frames[..4].copy_from_slice(&[root, pdpt_address, directory_address, table_address]);
     for index in 0..image_pages {
         native_frames[4 + index] = native_entries[index] & ADDRESS_MASK as u64;
     }
     let stack_index = 4 + image_pages;
-    native_frames[stack_index] = native_entries[8] & ADDRESS_MASK as u64;
-    native_frames[stack_index + 1] = native_entries[9] & ADDRESS_MASK as u64;
-    native_frames[stack_index + 2] = native_entries[11] & ADDRESS_MASK as u64;
+    native_frames[stack_index] = native_entries[stack_page] & ADDRESS_MASK as u64;
+    native_frames[stack_index + 1] = native_entries[stack_page + 1] & ADDRESS_MASK as u64;
+    native_frames[stack_index + 2] = native_entries[boot_info_page] & ADDRESS_MASK as u64;
     let native_frame_count = stack_index + 3;
     let native_frames_valid = native_frames[..native_frame_count]
         .iter()
@@ -298,17 +310,21 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
             .enumerate()
             .all(|(index, frame)| !native_frames[index + 1..native_frame_count].contains(frame));
     (image_valid
-        && native_entries[7] == 0
-        && flags_match(native_entries[8], native_frames[stack_index] | stack_flags)
+        && native_entries[stack_page - 1] == 0
         && flags_match(
-            native_entries[9],
+            native_entries[stack_page],
+            native_frames[stack_index] | stack_flags,
+        )
+        && flags_match(
+            native_entries[stack_page + 1],
             native_frames[stack_index + 1] | stack_flags,
         )
-        && native_entries[10] == 0
+        && native_entries[stack_page + 2] == 0
         && flags_match(
-            native_entries[11],
+            native_entries[boot_info_page],
             native_frames[stack_index + 2] | read_only_nx,
         )
+        && (!controller_layout || (native_entries[13] == 0 && native_entries[14] == 0))
         && dma_valid
         && mmio_valid
         && (15..ENTRY_COUNT).all(|index| unsafe { table.add(index).read() == 0 })
@@ -319,6 +335,8 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
         base_count: native_frame_count,
         dma: (native_dma != 0).then_some(native_dma_address),
         native_executable_pages,
+        native_image_pages: image_pages as u8,
+        native_stack_page: stack_page as u8,
     })
 }
 

@@ -2377,6 +2377,9 @@ struct RegisteredAuxiliaryAddressSpace {
 enum AuxiliaryAddressSpace {
     Wx(WxAddressSpace),
     Native(NativeServiceAddressSpace),
+    Controller(
+        NativeServiceAddressSpace<NATIVE_CONTROLLER_IMAGE_PAGES, NATIVE_CONTROLLER_FRAME_COUNT>,
+    ),
 }
 
 #[derive(Clone, Copy)]
@@ -4177,33 +4180,43 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 7;
 pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
+const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 8;
+pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize = 4 + NATIVE_CONTROLLER_IMAGE_PAGES + 3;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;
 const NATIVE_BOOT_INFO_PAGE: usize = NATIVE_STACK_PAGE + 3;
-const NATIVE_FIRST_STACK_FRAME: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES;
-const NATIVE_SECOND_STACK_FRAME: usize = NATIVE_FIRST_STACK_FRAME + 1;
-const NATIVE_BOOT_INFO_FRAME: usize = NATIVE_SECOND_STACK_FRAME + 1;
 
-struct NativeServiceAddressSpace {
+struct NativeServiceAddressSpace<
+    const IMAGE_CAPACITY: usize = NATIVE_SERVICE_IMAGE_PAGES,
+    const FRAME_COUNT: usize = NATIVE_SERVICE_FRAME_COUNT,
+> {
     kernel_root: u64,
     root: u64,
-    frames: [memory::FrameLease; NATIVE_SERVICE_FRAME_COUNT],
+    frames: [memory::FrameLease; FRAME_COUNT],
     entry: u64,
     image_pages: usize,
     owner: memory::FrameOwner,
     dma_frame: Option<memory::FrameLease>,
 }
 
-impl NativeServiceAddressSpace {
+impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize>
+    NativeServiceAddressSpace<IMAGE_CAPACITY, FRAME_COUNT>
+{
+    const STACK_PAGE: usize = IMAGE_CAPACITY + 1;
+    const BOOT_INFO_PAGE: usize = Self::STACK_PAGE + 3;
+    const FIRST_STACK_FRAME: usize = 4 + IMAGE_CAPACITY;
+    const SECOND_STACK_FRAME: usize = Self::FIRST_STACK_FRAME + 1;
+    const BOOT_INFO_FRAME: usize = Self::SECOND_STACK_FRAME + 1;
+
     fn new(
         kernel_root: u64,
         owner: memory::FrameOwner,
         image: &crate::native_elf::NativeImage<'_>,
     ) -> Option<Self> {
         let image_pages = image.page_count()?;
-        if !(1..=NATIVE_SERVICE_IMAGE_PAGES).contains(&image_pages) {
+        if FRAME_COUNT != 4 + IMAGE_CAPACITY + 3 || !(1..=IMAGE_CAPACITY).contains(&image_pages) {
             return None;
         }
-        let frames = memory::allocate_frames::<NATIVE_SERVICE_FRAME_COUNT>(owner)?;
+        let frames = memory::allocate_frames::<FRAME_COUNT>(owner)?;
         let addresses = frames.map(memory::FrameLease::address);
         if addresses
             .iter()
@@ -4241,16 +4254,16 @@ impl NativeServiceAddressSpace {
                     table.add(page).write(frame | flags);
                 }
                 table
-                    .add(NATIVE_BOOT_INFO_PAGE)
-                    .write(addresses[NATIVE_BOOT_INFO_FRAME] | PRESENT | USER | NO_EXECUTE);
-                table.add(NATIVE_STACK_PAGE - 1).write(0);
-                table.add(NATIVE_STACK_PAGE).write(
-                    addresses[NATIVE_FIRST_STACK_FRAME] | PRESENT | WRITABLE | USER | NO_EXECUTE,
+                    .add(Self::BOOT_INFO_PAGE)
+                    .write(addresses[Self::BOOT_INFO_FRAME] | PRESENT | USER | NO_EXECUTE);
+                table.add(Self::STACK_PAGE - 1).write(0);
+                table.add(Self::STACK_PAGE).write(
+                    addresses[Self::FIRST_STACK_FRAME] | PRESENT | WRITABLE | USER | NO_EXECUTE,
                 );
-                table.add(NATIVE_STACK_PAGE + 1).write(
-                    addresses[NATIVE_SECOND_STACK_FRAME] | PRESENT | WRITABLE | USER | NO_EXECUTE,
+                table.add(Self::STACK_PAGE + 1).write(
+                    addresses[Self::SECOND_STACK_FRAME] | PRESENT | WRITABLE | USER | NO_EXECUTE,
                 );
-                table.add(NATIVE_STACK_PAGE + 2).write(0);
+                table.add(Self::STACK_PAGE + 2).write(0);
 
                 for relocation in image.relocations[..image.relocation_count].iter().flatten() {
                     let page = usize::try_from(relocation.target / PAGE_SIZE as u64).ok()?;
@@ -4305,8 +4318,8 @@ impl NativeServiceAddressSpace {
                 || root.add(256).read() != kernel.add(256).read()
                 || root.read() & USER != 0
                 || root.add(256).read() & USER != 0
-                || table.add(NATIVE_STACK_PAGE - 1).read() != 0
-                || table.add(NATIVE_STACK_PAGE + 2).read() != 0
+                || table.add(Self::STACK_PAGE - 1).read() != 0
+                || table.add(Self::STACK_PAGE + 2).read() != 0
             {
                 return false;
             }
@@ -4320,21 +4333,19 @@ impl NativeServiceAddressSpace {
                     return false;
                 }
             }
-            if (self.image_pages..NATIVE_SERVICE_IMAGE_PAGES)
-                .any(|page| table.add(page).read() != 0)
-            {
+            if (self.image_pages..IMAGE_CAPACITY).any(|page| table.add(page).read() != 0) {
                 return false;
             }
-            table.add(NATIVE_BOOT_INFO_PAGE).read()
-                == self.frames[NATIVE_BOOT_INFO_FRAME].address() | PRESENT | USER | NO_EXECUTE
-                && table.add(NATIVE_STACK_PAGE).read()
-                    == self.frames[NATIVE_FIRST_STACK_FRAME].address()
+            table.add(Self::BOOT_INFO_PAGE).read()
+                == self.frames[Self::BOOT_INFO_FRAME].address() | PRESENT | USER | NO_EXECUTE
+                && table.add(Self::STACK_PAGE).read()
+                    == self.frames[Self::FIRST_STACK_FRAME].address()
                         | PRESENT
                         | WRITABLE
                         | USER
                         | NO_EXECUTE
-                && table.add(NATIVE_STACK_PAGE + 1).read()
-                    == self.frames[NATIVE_SECOND_STACK_FRAME].address()
+                && table.add(Self::STACK_PAGE + 1).read()
+                    == self.frames[Self::SECOND_STACK_FRAME].address()
                         | PRESENT
                         | WRITABLE
                         | USER
@@ -4437,7 +4448,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeServiceBootV0>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4456,7 +4467,7 @@ impl NativeServiceAddressSpace {
 
     fn write_network_boot_info_raw(&self, info: ginux_native_abi::NativeNetworkBootV0) -> bool {
         let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV0>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4471,7 +4482,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV1>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4486,7 +4497,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV2>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4501,7 +4512,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV3>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4516,7 +4527,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV4>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4531,7 +4542,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV5>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4546,7 +4557,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV6>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4561,7 +4572,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV7>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4576,7 +4587,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeProtocolBootV0>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4591,7 +4602,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeProtocolBootV1>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4606,7 +4617,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeProtocolBootV2>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4621,7 +4632,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeProtocolBootV3>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4636,7 +4647,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeProtocolBootV4>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4651,7 +4662,7 @@ impl NativeServiceAddressSpace {
             return false;
         }
         let Some(page) = mapped_frame::<ginux_native_abi::NativeProtocolBootV5>(
-            self.frames[NATIVE_BOOT_INFO_FRAME].address(),
+            self.frames[Self::BOOT_INFO_FRAME].address(),
         ) else {
             return false;
         };
@@ -4673,6 +4684,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.root,
             Self::Native(space) => space.root,
+            Self::Controller(space) => space.root,
         }
     }
 
@@ -4680,6 +4692,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.kernel_root,
             Self::Native(space) => space.kernel_root,
+            Self::Controller(space) => space.kernel_root,
         }
     }
 
@@ -4691,6 +4704,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.dma_frame,
             Self::Native(space) => space.dma_frame,
+            Self::Controller(space) => space.dma_frame,
         }
     }
 
@@ -4698,6 +4712,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.device_page_mapping_is_exact(7, physical, true),
             Self::Native(space) => space.device_page_mapping_is_exact(14, physical),
+            Self::Controller(_) => false,
         }
     }
 
@@ -4714,6 +4729,7 @@ impl AuxiliaryAddressSpace {
                 NATIVE_VOLUME_COMPLETION.store(if recovered { 2 } else { 1 }, Ordering::Release);
                 true
             },
+            Self::Controller(_) => false,
         }
     }
 
@@ -4735,6 +4751,10 @@ impl AuxiliaryAddressSpace {
                             && memory::frame_leases_releasable(space.owner, &[frame])
                     })
             }
+            Self::Controller(space) => {
+                memory::frames_owned_by(space.owner, &space.frames)
+                    && memory::frame_leases_releasable(space.owner, &space.frames)
+            }
         }
     }
 
@@ -4742,6 +4762,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.release(),
             Self::Native(space) => space.release(),
+            Self::Controller(space) => space.release(),
         }
     }
 }
@@ -4750,9 +4771,10 @@ pub(crate) fn verify_native_service_materialization(
     image: &crate::native_elf::NativeImage<'_>,
 ) -> bool {
     let kernel_root = current_root();
-    let Some(space) =
-        NativeServiceAddressSpace::new(kernel_root, memory::FrameOwner::KERNEL, image)
-    else {
+    let Some(space) = NativeServiceAddressSpace::<
+        NATIVE_SERVICE_IMAGE_PAGES,
+        NATIVE_SERVICE_FRAME_COUNT,
+    >::new(kernel_root, memory::FrameOwner::KERNEL, image) else {
         return false;
     };
     if !space.layout_is_valid(image) || !space.relocations_are_valid(image) {
@@ -4828,7 +4850,10 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         crate::serial_write("ginux: controller capability setup failed\r\n");
         return false;
     };
-    let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+    let Some(space) = NativeServiceAddressSpace::<
+        NATIVE_CONTROLLER_IMAGE_PAGES,
+        NATIVE_CONTROLLER_FRAME_COUNT,
+    >::new(kernel_root, owner, image) else {
         crate::serial_write("ginux: controller address-space creation failed\r\n");
         return false;
     };
@@ -4859,12 +4884,12 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         let _ = space.release();
         return false;
     };
-    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS + (NATIVE_CONTROLLER_IMAGE_PAGES + 3) * PAGE_SIZE;
     if domain::publish_controller_process(controller).is_none() {
         crate::serial_write("ginux: controller process publication failed\r\n");
         return false;
     }
-    if !register_address_space(controller, AuxiliaryAddressSpace::Native(space)) {
+    if !register_address_space(controller, AuxiliaryAddressSpace::Controller(space)) {
         crate::serial_write("ginux: controller address-space registration failed\r\n");
         return false;
     }

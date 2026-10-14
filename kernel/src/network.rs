@@ -94,6 +94,21 @@ pub(crate) fn dns() -> u64 {
     IPV4_DNS.load(Ordering::Acquire)
 }
 
+pub(crate) fn initialize_runtime() -> bool {
+    let cleared = apply(
+        generation(),
+        Configuration {
+            link: 0,
+            ipv4: 0,
+            gateway: 0,
+            route_destination: 0,
+            route_gateway: 0,
+        },
+    )
+    .is_ok();
+    cleared && set_dns(0)
+}
+
 pub(crate) fn generation() -> u64 {
     CONFIGURATION_GENERATION.load(Ordering::Acquire)
 }
