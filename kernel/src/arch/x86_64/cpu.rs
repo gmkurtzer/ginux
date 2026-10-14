@@ -17331,15 +17331,15 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             if configurable_container(state, name)
                 && valid_container_image(container_request_image(&request)) =>
         {
-            store_container_value(
-                container_request_image(&request),
-                &CONTAINER_IMAGE,
-                &CONTAINER_IMAGE_SIZE,
-            );
+            let mut canonical = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
+            let canonical_size =
+                canonical_container_image(container_request_image(&request), &mut canonical)
+                    .unwrap_or(0);
+            let canonical = &canonical[..canonical_size];
+            store_container_value(canonical, &CONTAINER_IMAGE, &CONTAINER_IMAGE_SIZE);
             CONTAINER_IMAGE_READY.store(
-                container_request_image(&request) == b"embedded://minimal-system-v0"
-                    || container_request_image(&request) == PINNED_OCI_IMAGE
-                        && crate::oci_image::is_installed(),
+                canonical == b"embedded://minimal-system-v0"
+                    || canonical == PINNED_OCI_IMAGE && crate::oci_image::is_installed(),
                 Ordering::SeqCst,
             );
             update_container_configuration(control_abi::CONTAINER_CONFIG_IMAGE)
@@ -17448,9 +17448,19 @@ fn valid_container_init(init: &[u8]) -> bool {
 }
 
 fn valid_container_image(image: &[u8]) -> bool {
-    !image.is_empty()
-        && image.len() <= control_abi::CONTAINER_MAX_IMAGE_SIZE
-        && image.iter().all(u8::is_ascii_graphic)
+    let mut canonical = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
+    canonical_container_image(image, &mut canonical).is_some()
+}
+
+fn canonical_container_image(image: &[u8], output: &mut [u8]) -> Option<usize> {
+    if image == b"embedded://minimal-system-v0" {
+        output.get_mut(..image.len())?.copy_from_slice(image);
+        return Some(image.len());
+    }
+    ginux_oci::ImageReference::parse(image)
+        .ok()?
+        .write_canonical(output)
+        .ok()
 }
 
 fn stored_container_name_matches(name: &[u8]) -> bool {

@@ -1142,7 +1142,7 @@ fn prepare_setting(
             ))
         }
         (b"image", value) if value.iter().all(|byte| byte.is_ascii_graphic()) => {
-            let value = normalize_image_reference(value);
+            let value = normalize_pinned_alpine_reference(value);
             if value.len() > request.image.len() {
                 return None;
             }
@@ -1154,7 +1154,7 @@ fn prepare_setting(
     }
 }
 
-fn normalize_image_reference(value: &[u8]) -> &[u8] {
+fn normalize_pinned_alpine_reference(value: &[u8]) -> &[u8] {
     if value == ALPINE_IMAGE_DEFAULT
         || value == ALPINE_IMAGE_LATEST
         || value == ALPINE_IMAGE_SHORT

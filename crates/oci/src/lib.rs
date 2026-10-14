@@ -3,6 +3,7 @@
 #[cfg(test)]
 extern crate std;
 
+#[cfg(feature = "sha256")]
 use sha2::{Digest, Sha256};
 
 const TAR_BLOCK_SIZE: usize = 512;
@@ -10,6 +11,165 @@ const TAR_HEADER_SIZE: usize = 512;
 const TAR_MAX_ENTRIES: usize = 4096;
 const TAR_NAME_SIZE: usize = 100;
 const TAR_PREFIX_SIZE: usize = 155;
+pub const REFERENCE_CAPACITY: usize = 128;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReferenceError {
+    Empty,
+    TooLong,
+    InvalidRegistry,
+    InvalidRepository,
+    InvalidTag,
+    InvalidDigest,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageReference<'a> {
+    pub registry: &'a [u8],
+    pub repository: &'a [u8],
+    pub selector: &'a [u8],
+    pub digest: bool,
+}
+
+impl<'a> ImageReference<'a> {
+    pub fn parse(reference: &'a [u8]) -> Result<Self, ReferenceError> {
+        if reference.is_empty() {
+            return Err(ReferenceError::Empty);
+        }
+        if reference.len() > REFERENCE_CAPACITY || !reference.iter().all(u8::is_ascii_graphic) {
+            return Err(ReferenceError::TooLong);
+        }
+        let (name, selector, digest) = if let Some(index) =
+            reference.iter().position(|byte| *byte == b'@')
+        {
+            if reference[index + 1..].contains(&b'@') {
+                return Err(ReferenceError::InvalidDigest);
+            }
+            (&reference[..index], &reference[index + 1..], true)
+        } else {
+            let slash = reference.iter().rposition(|byte| *byte == b'/');
+            let colon = reference.iter().rposition(|byte| *byte == b':');
+            if let Some(index) = colon.filter(|index| slash.is_none_or(|slash| *index > slash)) {
+                (&reference[..index], &reference[index + 1..], false)
+            } else {
+                (reference, b"latest" as &[u8], false)
+            }
+        };
+        if name.is_empty() {
+            return Err(ReferenceError::InvalidRepository);
+        }
+        if digest {
+            if selector.len() != 71
+                || !selector.starts_with(b"sha256:")
+                || !selector[7..].iter().all(u8::is_ascii_hexdigit)
+            {
+                return Err(ReferenceError::InvalidDigest);
+            }
+        } else if selector.is_empty()
+            || selector.len() > REFERENCE_CAPACITY
+            || !selector
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
+        {
+            return Err(ReferenceError::InvalidTag);
+        }
+
+        let first_end = name.iter().position(|byte| *byte == b'/');
+        let explicit_registry = first_end.is_some_and(|end| {
+            let first = &name[..end];
+            first == b"localhost" || first.contains(&b'.') || first.contains(&b':')
+        });
+        let (registry, repository) = if explicit_registry {
+            let end = first_end.unwrap_or(0);
+            (&name[..end], &name[end + 1..])
+        } else {
+            (b"docker.io" as &[u8], name)
+        };
+        if !valid_registry(registry) {
+            return Err(ReferenceError::InvalidRegistry);
+        }
+        if !valid_repository(repository) {
+            return Err(ReferenceError::InvalidRepository);
+        }
+        Ok(Self {
+            registry,
+            repository,
+            selector,
+            digest,
+        })
+    }
+
+    pub fn write_canonical(self, output: &mut [u8]) -> Result<usize, ReferenceError> {
+        let official = self.registry == b"docker.io" && !self.repository.contains(&b'/');
+        let length = self.registry.len()
+            + 1
+            + usize::from(official) * b"library/".len()
+            + self.repository.len()
+            + 1
+            + self.selector.len();
+        let output = output.get_mut(..length).ok_or(ReferenceError::TooLong)?;
+        let mut used = copy_part(output, 0, self.registry);
+        output[used] = b'/';
+        used += 1;
+        if official {
+            used = copy_part(output, used, b"library/");
+        }
+        used = copy_part(output, used, self.repository);
+        output[used] = if self.digest { b'@' } else { b':' };
+        used += 1;
+        used = copy_part(output, used, self.selector);
+        Ok(used)
+    }
+
+    pub fn write_manifest_path(self, output: &mut [u8]) -> Result<usize, ReferenceError> {
+        let official = self.registry == b"docker.io" && !self.repository.contains(&b'/');
+        let prefix = b"/v2/";
+        let suffix = b"/manifests/";
+        let length = prefix.len()
+            + usize::from(official) * b"library/".len()
+            + self.repository.len()
+            + suffix.len()
+            + self.selector.len();
+        let output = output.get_mut(..length).ok_or(ReferenceError::TooLong)?;
+        let mut used = copy_part(output, 0, prefix);
+        if official {
+            used = copy_part(output, used, b"library/");
+        }
+        used = copy_part(output, used, self.repository);
+        used = copy_part(output, used, suffix);
+        used = copy_part(output, used, self.selector);
+        Ok(used)
+    }
+}
+
+fn copy_part(output: &mut [u8], offset: usize, input: &[u8]) -> usize {
+    output[offset..offset + input.len()].copy_from_slice(input);
+    offset + input.len()
+}
+
+fn valid_registry(registry: &[u8]) -> bool {
+    !registry.is_empty()
+        && registry.iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b':')
+        })
+        && !registry.starts_with(b".")
+        && !registry.ends_with(b".")
+}
+
+fn valid_repository(repository: &[u8]) -> bool {
+    !repository.is_empty()
+        && repository.len() <= REFERENCE_CAPACITY
+        && repository.split(|byte| *byte == b'/').all(|component| {
+            !component.is_empty()
+                && component.iter().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'.' | b'_' | b'-')
+                })
+                && !component.starts_with(b".")
+                && !component.ends_with(b".")
+        })
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EntryKind {
@@ -150,6 +310,7 @@ impl<'a> Rootfs<'a> {
     }
 }
 
+#[cfg(feature = "sha256")]
 pub fn verify_sha256(bytes: &[u8], expected: &[u8; 32]) -> bool {
     let actual: [u8; 32] = Sha256::digest(bytes).into();
     actual == *expected
@@ -294,6 +455,47 @@ mod tests {
     use std::format;
     use std::vec;
     use std::vec::Vec;
+
+    #[test]
+    fn canonicalizes_docker_hub_and_explicit_registry_references() {
+        let mut output = [0_u8; REFERENCE_CAPACITY];
+        let alpine = ImageReference::parse(b"alpine").unwrap();
+        let length = alpine.write_canonical(&mut output).unwrap();
+        assert_eq!(&output[..length], b"docker.io/library/alpine:latest");
+        let length = alpine.write_manifest_path(&mut output).unwrap();
+        assert_eq!(&output[..length], b"/v2/library/alpine/manifests/latest");
+
+        let rocky = ImageReference::parse(b"rockylinux/rockylinux:10").unwrap();
+        let length = rocky.write_canonical(&mut output).unwrap();
+        assert_eq!(&output[..length], b"docker.io/rockylinux/rockylinux:10");
+        let length = rocky.write_manifest_path(&mut output).unwrap();
+        assert_eq!(&output[..length], b"/v2/rockylinux/rockylinux/manifests/10");
+
+        let private = ImageReference::parse(b"registry.example:5000/team/image:v1").unwrap();
+        let length = private.write_canonical(&mut output).unwrap();
+        assert_eq!(&output[..length], b"registry.example:5000/team/image:v1");
+    }
+
+    #[test]
+    fn accepts_sha256_selectors_and_rejects_ambiguous_references() {
+        let digest = b"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let mut reference = Vec::from(&b"alpine@"[..]);
+        reference.extend_from_slice(digest);
+        let parsed = ImageReference::parse(&reference).unwrap();
+        assert!(parsed.digest);
+        assert_eq!(parsed.selector, digest);
+
+        for invalid in [
+            b"" as &[u8],
+            b"UPPER/image:tag",
+            b"docker.io//image:tag",
+            b"image:",
+            b"image@sha256:abcd",
+            b"image@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg",
+        ] {
+            assert!(ImageReference::parse(invalid).is_err(), "{invalid:?}");
+        }
+    }
 
     fn archive(path: &[u8], data: &[u8], kind: u8, link: &[u8]) -> Vec<u8> {
         let mut output = vec![0_u8; TAR_BLOCK_SIZE];

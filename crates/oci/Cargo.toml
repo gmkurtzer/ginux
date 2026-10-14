@@ -5,5 +5,9 @@ edition = "2021"
 license.workspace = true
 publish = false
 
+[features]
+default = ["sha256"]
+sha256 = ["dep:sha2"]
+
 [dependencies]
-sha2 = { version = "=0.11.0", default-features = false }
+sha2 = { version = "=0.11.0", default-features = false, optional = true }
