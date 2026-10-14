@@ -1,0 +1,469 @@
+# Linux x86-64 Userspace Compatibility Matrix
+
+This document is the compatibility ledger for running unmodified Linux x86-64
+userspace on Ginux. It records the target contract, the current implementation,
+and the remaining work. It is an index, not a substitute for the detailed
+behavioral specifications and tests.
+
+## Contract and authorities
+
+There is no single document that defines the complete Linux userspace ABI.
+Ginux uses this authority order:
+
+1. The pinned [Linux v6.12 x86-64 syscall table](https://github.com/torvalds/linux/blob/v6.12/arch/x86/entry/syscalls/syscall_64.tbl)
+   defines native x86-64 syscall names and numbers.
+2. Linux [UAPI headers](https://github.com/torvalds/linux/tree/v6.12/include/uapi)
+   define userspace-visible constants, flags, structures, ioctl encodings, and
+   filesystem interfaces.
+3. The [Linux man-pages project](https://www.kernel.org/doc/man-pages/)
+   defines expected syscall behavior, errors, and observable semantics.
+4. The [x86-64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI)
+   and System V generic ABI define ELF, relocation, process-entry, calling,
+   register, stack, and TLS conventions.
+5. Linux's documented [stable ABI](https://www.kernel.org/doc/html/latest/admin-guide/abi-stable.html),
+   procfs/sysfs documentation, and behavior verified by Linux selftests define
+   the remaining observable kernel/userspace interfaces.
+
+The baseline is native 64-bit x86-64 Linux v6.12. The x32 and i386 compatibility
+ABIs are out of scope. Moving the baseline requires an explicit review of the
+new syscall table and UAPI changes.
+
+## Status rules
+
+| Status | Meaning |
+|---|---|
+| Complete | Matches the pinned Linux contract and has positive, negative, and edge-case conformance tests. |
+| Partial | Dispatched and useful, but intentionally bounded or not yet proven equivalent to Linux. |
+| Policy-denied | Recognized as a privileged operation and rejected by the container authority policy. This is not full syscall support. |
+| Missing | Returns `-ENOSYS` through the default dispatcher. |
+
+No syscall is currently classified as Complete. Detailed bounded behavior for
+implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscall-v0.md).
+The matrix must be updated in the same commit whenever syscall dispatch or its
+documented behavior changes.
+
+Current totals: **112 Partial**, **28 Policy-denied**, **235 Missing**.
+
+## Non-syscall ABI surfaces
+
+| Surface | Status | Current boundary |
+|---|---|---|
+| x86-64 `SYSCALL` entry and return | Partial | Native register convention and `-errno` returns; bounded context validation. |
+| ELF64 loading | Partial | `ET_EXEC` and `ET_DYN`, bounded program-header and relocation profiles; see [Linux ELF64 Profile v0](../specs/kernel/linux-elf-v0.md). |
+| Initial stack and auxiliary vector | Partial | Bounded argv/envp and selected `AT_*` entries; no vDSO. |
+| Dynamic loader and shared objects | Partial | musl/Alpine bootstrap path works for the admitted relocation and dependency profile. |
+| TLS | Partial | Bounded static TLS and `arch_prctl` FS-base support. |
+| Process and thread model | Partial | Bounded fork/exec/clone/wait lifecycle; not general Linux scheduling or process semantics. |
+| Signals | Partial | Selected standard signal, mask, alternate-stack, delivery, and return behavior; no complete restart/nesting semantics. |
+| VFS and path lookup | Partial | OCI root, directories, symlinks, cwd, tmpfs, devfs, and procfs subsets; not a general Linux VFS. |
+| `/proc` | Partial | Generated process views needed by current probes; most Linux procfs files are absent. |
+| `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
+| `/sys` | Missing | No Linux-compatible sysfs contract. |
+| Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |
+| Mount and namespace APIs | Policy-denied | Container roots are kernel-created; general mount, chroot, pivot, unshare, and setns are unavailable. |
+| Socket API | Missing | Native Ginux networking exists, but Linux socket syscalls are not implemented. |
+| cgroups | Missing | No Linux cgroup filesystem or ABI. |
+| seccomp, audit, LSM ABI | Missing | No Linux-compatible userspace interfaces. |
+| vDSO/vvar | Missing | Time calls currently cross the syscall boundary. |
+| Linux module userspace ABI | Policy-denied | Module management is owned by the trusted control plane. |
+| ioctl families | Partial | Only explicitly admitted console, pipe, and device requests; ioctl is a family of ABIs, not one completed interface. |
+
+## Syscall index
+
+The table includes every native `common` or `64` entry in Linux v6.12's
+x86-64 syscall table. Number gaps reserved by Linux are not syscalls and are
+therefore omitted.
+
+| Number | Syscall | Status |
+|---:|---|---|
+| 0 | read | Partial |
+| 1 | write | Partial |
+| 2 | open | Partial |
+| 3 | close | Partial |
+| 4 | stat | Partial |
+| 5 | fstat | Partial |
+| 6 | lstat | Partial |
+| 7 | poll | Partial |
+| 8 | lseek | Partial |
+| 9 | mmap | Partial |
+| 10 | mprotect | Partial |
+| 11 | munmap | Partial |
+| 12 | brk | Partial |
+| 13 | rt_sigaction | Partial |
+| 14 | rt_sigprocmask | Partial |
+| 15 | rt_sigreturn | Partial |
+| 16 | ioctl | Partial |
+| 17 | pread64 | Partial |
+| 18 | pwrite64 | Missing |
+| 19 | readv | Partial |
+| 20 | writev | Partial |
+| 21 | access | Missing |
+| 22 | pipe | Partial |
+| 23 | select | Missing |
+| 24 | sched_yield | Partial |
+| 25 | mremap | Missing |
+| 26 | msync | Missing |
+| 27 | mincore | Partial |
+| 28 | madvise | Partial |
+| 29 | shmget | Missing |
+| 30 | shmat | Missing |
+| 31 | shmctl | Missing |
+| 32 | dup | Partial |
+| 33 | dup2 | Partial |
+| 34 | pause | Missing |
+| 35 | nanosleep | Partial |
+| 36 | getitimer | Partial |
+| 37 | alarm | Missing |
+| 38 | setitimer | Partial |
+| 39 | getpid | Partial |
+| 40 | sendfile | Missing |
+| 41 | socket | Missing |
+| 42 | connect | Missing |
+| 43 | accept | Missing |
+| 44 | sendto | Missing |
+| 45 | recvfrom | Missing |
+| 46 | sendmsg | Missing |
+| 47 | recvmsg | Missing |
+| 48 | shutdown | Missing |
+| 49 | bind | Missing |
+| 50 | listen | Missing |
+| 51 | getsockname | Missing |
+| 52 | getpeername | Missing |
+| 53 | socketpair | Missing |
+| 54 | setsockopt | Missing |
+| 55 | getsockopt | Missing |
+| 56 | clone | Partial |
+| 57 | fork | Partial |
+| 58 | vfork | Partial |
+| 59 | execve | Partial |
+| 60 | exit | Partial |
+| 61 | wait4 | Partial |
+| 62 | kill | Partial |
+| 63 | uname | Partial |
+| 64 | semget | Missing |
+| 65 | semop | Missing |
+| 66 | semctl | Missing |
+| 67 | shmdt | Missing |
+| 68 | msgget | Missing |
+| 69 | msgsnd | Missing |
+| 70 | msgrcv | Missing |
+| 71 | msgctl | Missing |
+| 72 | fcntl | Partial |
+| 73 | flock | Missing |
+| 74 | fsync | Missing |
+| 75 | fdatasync | Missing |
+| 76 | truncate | Missing |
+| 77 | ftruncate | Missing |
+| 78 | getdents | Missing |
+| 79 | getcwd | Partial |
+| 80 | chdir | Partial |
+| 81 | fchdir | Partial |
+| 82 | rename | Missing |
+| 83 | mkdir | Missing |
+| 84 | rmdir | Missing |
+| 85 | creat | Missing |
+| 86 | link | Missing |
+| 87 | unlink | Missing |
+| 88 | symlink | Missing |
+| 89 | readlink | Partial |
+| 90 | chmod | Missing |
+| 91 | fchmod | Missing |
+| 92 | chown | Missing |
+| 93 | fchown | Missing |
+| 94 | lchown | Missing |
+| 95 | umask | Partial |
+| 96 | gettimeofday | Missing |
+| 97 | getrlimit | Partial |
+| 98 | getrusage | Partial |
+| 99 | sysinfo | Missing |
+| 100 | times | Partial |
+| 101 | ptrace | Missing |
+| 102 | getuid | Partial |
+| 103 | syslog | Missing |
+| 104 | getgid | Partial |
+| 105 | setuid | Policy-denied |
+| 106 | setgid | Policy-denied |
+| 107 | geteuid | Partial |
+| 108 | getegid | Partial |
+| 109 | setpgid | Missing |
+| 110 | getppid | Partial |
+| 111 | getpgrp | Partial |
+| 112 | setsid | Missing |
+| 113 | setreuid | Policy-denied |
+| 114 | setregid | Policy-denied |
+| 115 | getgroups | Partial |
+| 116 | setgroups | Partial |
+| 117 | setresuid | Policy-denied |
+| 118 | getresuid | Partial |
+| 119 | setresgid | Policy-denied |
+| 120 | getresgid | Partial |
+| 121 | getpgid | Partial |
+| 122 | setfsuid | Policy-denied |
+| 123 | setfsgid | Policy-denied |
+| 124 | getsid | Partial |
+| 125 | capget | Partial |
+| 126 | capset | Partial |
+| 127 | rt_sigpending | Partial |
+| 128 | rt_sigtimedwait | Partial |
+| 129 | rt_sigqueueinfo | Missing |
+| 130 | rt_sigsuspend | Missing |
+| 131 | sigaltstack | Partial |
+| 132 | utime | Missing |
+| 133 | mknod | Missing |
+| 134 | uselib | Missing |
+| 135 | personality | Partial |
+| 136 | ustat | Missing |
+| 137 | statfs | Missing |
+| 138 | fstatfs | Missing |
+| 139 | sysfs | Missing |
+| 140 | getpriority | Partial |
+| 141 | setpriority | Partial |
+| 142 | sched_setparam | Partial |
+| 143 | sched_getparam | Partial |
+| 144 | sched_setscheduler | Partial |
+| 145 | sched_getscheduler | Partial |
+| 146 | sched_get_priority_max | Partial |
+| 147 | sched_get_priority_min | Partial |
+| 148 | sched_rr_get_interval | Missing |
+| 149 | mlock | Missing |
+| 150 | munlock | Missing |
+| 151 | mlockall | Missing |
+| 152 | munlockall | Missing |
+| 153 | vhangup | Missing |
+| 154 | modify_ldt | Missing |
+| 155 | pivot_root | Policy-denied |
+| 156 | _sysctl | Missing |
+| 157 | prctl | Partial |
+| 158 | arch_prctl | Partial |
+| 159 | adjtimex | Missing |
+| 160 | setrlimit | Missing |
+| 161 | chroot | Policy-denied |
+| 162 | sync | Missing |
+| 163 | acct | Missing |
+| 164 | settimeofday | Missing |
+| 165 | mount | Policy-denied |
+| 166 | umount2 | Policy-denied |
+| 167 | swapon | Policy-denied |
+| 168 | swapoff | Policy-denied |
+| 169 | reboot | Policy-denied |
+| 170 | sethostname | Policy-denied |
+| 171 | setdomainname | Policy-denied |
+| 172 | iopl | Policy-denied |
+| 173 | ioperm | Policy-denied |
+| 174 | create_module | Missing |
+| 175 | init_module | Policy-denied |
+| 176 | delete_module | Policy-denied |
+| 177 | get_kernel_syms | Missing |
+| 178 | query_module | Missing |
+| 179 | quotactl | Missing |
+| 180 | nfsservctl | Missing |
+| 181 | getpmsg | Missing |
+| 182 | putpmsg | Missing |
+| 183 | afs_syscall | Missing |
+| 184 | tuxcall | Missing |
+| 185 | security | Missing |
+| 186 | gettid | Partial |
+| 187 | readahead | Missing |
+| 188 | setxattr | Missing |
+| 189 | lsetxattr | Missing |
+| 190 | fsetxattr | Missing |
+| 191 | getxattr | Missing |
+| 192 | lgetxattr | Missing |
+| 193 | fgetxattr | Missing |
+| 194 | listxattr | Missing |
+| 195 | llistxattr | Missing |
+| 196 | flistxattr | Missing |
+| 197 | removexattr | Missing |
+| 198 | lremovexattr | Missing |
+| 199 | fremovexattr | Missing |
+| 200 | tkill | Partial |
+| 201 | time | Missing |
+| 202 | futex | Partial |
+| 203 | sched_setaffinity | Partial |
+| 204 | sched_getaffinity | Partial |
+| 205 | set_thread_area | Missing |
+| 206 | io_setup | Missing |
+| 207 | io_destroy | Missing |
+| 208 | io_getevents | Missing |
+| 209 | io_submit | Missing |
+| 210 | io_cancel | Missing |
+| 211 | get_thread_area | Missing |
+| 212 | lookup_dcookie | Missing |
+| 213 | epoll_create | Missing |
+| 214 | epoll_ctl_old | Missing |
+| 215 | epoll_wait_old | Missing |
+| 216 | remap_file_pages | Missing |
+| 217 | getdents64 | Partial |
+| 218 | set_tid_address | Partial |
+| 219 | restart_syscall | Missing |
+| 220 | semtimedop | Missing |
+| 221 | fadvise64 | Missing |
+| 222 | timer_create | Missing |
+| 223 | timer_settime | Missing |
+| 224 | timer_gettime | Missing |
+| 225 | timer_getoverrun | Missing |
+| 226 | timer_delete | Missing |
+| 227 | clock_settime | Missing |
+| 228 | clock_gettime | Partial |
+| 229 | clock_getres | Partial |
+| 230 | clock_nanosleep | Partial |
+| 231 | exit_group | Partial |
+| 232 | epoll_wait | Partial |
+| 233 | epoll_ctl | Partial |
+| 234 | tgkill | Partial |
+| 235 | utimes | Missing |
+| 236 | vserver | Missing |
+| 237 | mbind | Missing |
+| 238 | set_mempolicy | Missing |
+| 239 | get_mempolicy | Missing |
+| 240 | mq_open | Missing |
+| 241 | mq_unlink | Missing |
+| 242 | mq_timedsend | Missing |
+| 243 | mq_timedreceive | Missing |
+| 244 | mq_notify | Missing |
+| 245 | mq_getsetattr | Missing |
+| 246 | kexec_load | Policy-denied |
+| 247 | waitid | Missing |
+| 248 | add_key | Missing |
+| 249 | request_key | Missing |
+| 250 | keyctl | Missing |
+| 251 | ioprio_set | Missing |
+| 252 | ioprio_get | Missing |
+| 253 | inotify_init | Missing |
+| 254 | inotify_add_watch | Missing |
+| 255 | inotify_rm_watch | Missing |
+| 256 | migrate_pages | Missing |
+| 257 | openat | Partial |
+| 258 | mkdirat | Missing |
+| 259 | mknodat | Missing |
+| 260 | fchownat | Missing |
+| 261 | futimesat | Missing |
+| 262 | newfstatat | Partial |
+| 263 | unlinkat | Partial |
+| 264 | renameat | Missing |
+| 265 | linkat | Missing |
+| 266 | symlinkat | Missing |
+| 267 | readlinkat | Partial |
+| 268 | fchmodat | Missing |
+| 269 | faccessat | Partial |
+| 270 | pselect6 | Missing |
+| 271 | ppoll | Partial |
+| 272 | unshare | Policy-denied |
+| 273 | set_robust_list | Partial |
+| 274 | get_robust_list | Partial |
+| 275 | splice | Missing |
+| 276 | tee | Missing |
+| 277 | sync_file_range | Missing |
+| 278 | vmsplice | Missing |
+| 279 | move_pages | Missing |
+| 280 | utimensat | Missing |
+| 281 | epoll_pwait | Partial |
+| 282 | signalfd | Missing |
+| 283 | timerfd_create | Partial |
+| 284 | eventfd | Partial |
+| 285 | fallocate | Missing |
+| 286 | timerfd_settime | Partial |
+| 287 | timerfd_gettime | Partial |
+| 288 | accept4 | Missing |
+| 289 | signalfd4 | Missing |
+| 290 | eventfd2 | Partial |
+| 291 | epoll_create1 | Partial |
+| 292 | dup3 | Partial |
+| 293 | pipe2 | Partial |
+| 294 | inotify_init1 | Missing |
+| 295 | preadv | Missing |
+| 296 | pwritev | Missing |
+| 297 | rt_tgsigqueueinfo | Missing |
+| 298 | perf_event_open | Policy-denied |
+| 299 | recvmmsg | Missing |
+| 300 | fanotify_init | Missing |
+| 301 | fanotify_mark | Missing |
+| 302 | prlimit64 | Partial |
+| 303 | name_to_handle_at | Missing |
+| 304 | open_by_handle_at | Missing |
+| 305 | clock_adjtime | Missing |
+| 306 | syncfs | Missing |
+| 307 | sendmmsg | Missing |
+| 308 | setns | Policy-denied |
+| 309 | getcpu | Partial |
+| 310 | process_vm_readv | Missing |
+| 311 | process_vm_writev | Missing |
+| 312 | kcmp | Missing |
+| 313 | finit_module | Policy-denied |
+| 314 | sched_setattr | Missing |
+| 315 | sched_getattr | Missing |
+| 316 | renameat2 | Missing |
+| 317 | seccomp | Missing |
+| 318 | getrandom | Missing |
+| 319 | memfd_create | Missing |
+| 320 | kexec_file_load | Policy-denied |
+| 321 | bpf | Policy-denied |
+| 322 | execveat | Partial |
+| 323 | userfaultfd | Missing |
+| 324 | membarrier | Missing |
+| 325 | mlock2 | Missing |
+| 326 | copy_file_range | Missing |
+| 327 | preadv2 | Missing |
+| 328 | pwritev2 | Missing |
+| 329 | pkey_mprotect | Missing |
+| 330 | pkey_alloc | Missing |
+| 331 | pkey_free | Missing |
+| 332 | statx | Partial |
+| 333 | io_pgetevents | Missing |
+| 334 | rseq | Missing |
+| 335 | uretprobe | Missing |
+| 424 | pidfd_send_signal | Missing |
+| 425 | io_uring_setup | Missing |
+| 426 | io_uring_enter | Missing |
+| 427 | io_uring_register | Missing |
+| 428 | open_tree | Missing |
+| 429 | move_mount | Missing |
+| 430 | fsopen | Missing |
+| 431 | fsconfig | Missing |
+| 432 | fsmount | Missing |
+| 433 | fspick | Missing |
+| 434 | pidfd_open | Missing |
+| 435 | clone3 | Missing |
+| 436 | close_range | Missing |
+| 437 | openat2 | Missing |
+| 438 | pidfd_getfd | Missing |
+| 439 | faccessat2 | Partial |
+| 440 | process_madvise | Missing |
+| 441 | epoll_pwait2 | Partial |
+| 442 | mount_setattr | Missing |
+| 443 | quotactl_fd | Missing |
+| 444 | landlock_create_ruleset | Missing |
+| 445 | landlock_add_rule | Missing |
+| 446 | landlock_restrict_self | Missing |
+| 447 | memfd_secret | Missing |
+| 448 | process_mrelease | Missing |
+| 449 | futex_waitv | Missing |
+| 450 | set_mempolicy_home_node | Missing |
+| 451 | cachestat | Missing |
+| 452 | fchmodat2 | Missing |
+| 453 | map_shadow_stack | Missing |
+| 454 | futex_wake | Missing |
+| 455 | futex_wait | Missing |
+| 456 | futex_requeue | Missing |
+| 457 | statmount | Missing |
+| 458 | listmount | Missing |
+| 459 | lsm_get_self_attr | Missing |
+| 460 | lsm_set_self_attr | Missing |
+| 461 | lsm_list_modules | Missing |
+| 462 | mseal | Missing |
+
+## Completion requirements
+
+A syscall may move from Partial to Complete only when its supported flags,
+structures, success behavior, Linux error precedence, blocking/interruption
+behavior, concurrency, and filesystem or descriptor side effects are covered by
+tests. libc startup success alone is not conformance.
+
+The practical compatibility gate remains workload-driven:
+
+1. Trace the next target workload on Linux.
+2. Add every observed syscall and non-syscall ABI dependency to this ledger.
+3. Implement the behavior against the pinned sources.
+4. Add focused kernel tests and a real OCI userspace regression.
+5. Change status only after those tests prove the documented boundary.
+
