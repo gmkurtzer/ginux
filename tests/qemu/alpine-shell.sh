@@ -34,7 +34,10 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'ginux> '
     printf '%s\n' \
         'container new alpine' \
-        'container set alpine image=alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395 init=/bin/sh' \
+        'container set alpine image=alpine:latest init=/bin/sh' \
+        'container list'
+    wait_for 'docker.io/library/alpine:3.24.2'
+    printf '%s\n' \
         'container start alpine'
     wait_for 'ginux: entering Alpine /bin/sh through musl'
     printf '%s\n' 'echo MUSL_OK'
@@ -53,6 +56,11 @@ for _ in {1..90}; do
     if ! kill -0 "$qemu_pid" 2>/dev/null; then
         break
     fi
+    sleep 1
+done
+
+for _ in {1..10}; do
+    ! kill -0 "$qemu_pid" 2>/dev/null && break
     sleep 1
 done
 

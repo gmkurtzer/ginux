@@ -798,8 +798,7 @@ static CONTAINER_IMAGE_SIZE: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_IMAGE: [AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE];
 static CONTAINER_IMAGE_READY: AtomicBool = AtomicBool::new(false);
-const ALPINE_SHELL_IMAGE: &[u8] =
-    b"alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395";
+const ALPINE_SHELL_IMAGE: &[u8] = b"docker.io/library/alpine:3.24.2";
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);

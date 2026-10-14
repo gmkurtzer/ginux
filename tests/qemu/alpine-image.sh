@@ -37,6 +37,11 @@ for _ in {1..210}; do
     sleep 1
 done
 
+for _ in {1..10}; do
+    ! kill -0 "$qemu_pid" 2>/dev/null && break
+    sleep 1
+done
+
 if kill -0 "$qemu_pid" 2>/dev/null; then
     cat "$output_file"
     echo "Alpine image test failed: QEMU did not shut down." >&2
