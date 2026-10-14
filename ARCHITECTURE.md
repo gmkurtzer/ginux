@@ -161,6 +161,8 @@ The native host does not require a traditional distribution root filesystem. It 
 
 The acceptance goal is a repository-pinned Rocky Linux 10 x86-64 userspace reaching a systemd-managed console. Required behavior includes x86-64 ELF loading, dynamic linking, signals, futexes, clocks, process lifecycle, mounts, sockets, cgroups v2, console devices, and the `/proc`, `/sys`, `/dev`, credential, and isolation behavior systemd and Rocky exercise. Every system container receives independent PID, mount, user, IPC, cgroup, time, hostname, device, and network views; UID 0 remains local to the container. Unsupported interfaces must fail predictably rather than silently provide weaker semantics. Smaller images remain useful for incremental tests but do not replace the Rocky acceptance gate.
 
+Linux ABI compatibility is libc-neutral. Ginux never selects a musl, glibc, or other libc mode: it resolves the configured init inside the container root, reads the executable's ELF `PT_INTERP`, and admits that declared interpreter from the same immutable root under the normal ELF and resource policy.
+
 ## 5. ABI and binary component contracts
 
 ### 5.1 Three distinct interfaces

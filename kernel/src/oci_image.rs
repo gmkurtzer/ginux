@@ -12,7 +12,7 @@ pub(crate) struct Child {
     pub(crate) name: &'static [u8],
 }
 
-const ALPINE_ROOTFS_SHA256: [u8; 32] = [
+const PINNED_ROOTFS_SHA256: [u8; 32] = [
     0x74, 0xd9, 0x7c, 0x42, 0x8c, 0x51, 0xa8, 0x28, 0xf9, 0x05, 0x1a, 0x7a, 0x40, 0xa5, 0x3f, 0xf1,
     0xfc, 0x99, 0xe5, 0x4f, 0xc3, 0x03, 0x23, 0xce, 0x36, 0x76, 0x07, 0x01, 0xb0, 0xb7, 0xf7, 0x11,
 ];
@@ -21,91 +21,40 @@ static INSTALLED: AtomicBool = AtomicBool::new(false);
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SIZE: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) fn install_alpine_rootfs(bytes: &'static [u8]) -> bool {
-    if INSTALLED.load(Ordering::Acquire) || !ginux_oci::verify_sha256(bytes, &ALPINE_ROOTFS_SHA256)
+pub(crate) fn is_installed() -> bool {
+    INSTALLED.load(Ordering::Acquire)
+}
+
+pub(crate) fn install_pinned_rootfs(bytes: &'static [u8]) -> bool {
+    if INSTALLED.load(Ordering::Acquire) || !ginux_oci::verify_sha256(bytes, &PINNED_ROOTFS_SHA256)
     {
         return false;
     }
     let Some(rootfs) = Rootfs::parse(bytes) else {
         return false;
     };
-    let shell = rootfs.find(b"bin/busybox");
-    let interpreter = rootfs.find(b"lib/ld-musl-x86_64.so.1");
-    let pie_plan = shell.zip(interpreter).and_then(|(shell, interpreter)| {
-        crate::linux_elf::plan_relocatable_process(
-            shell.data,
-            0x40_0000,
-            b"/lib/ld-musl-x86_64.so.1",
-            interpreter.data,
-            0x60_0000,
-        )
+    let valid = process_plan_in(&rootfs, b"/bin/sh").is_some_and(|plan| {
+        plan.main.segment_count == 4
+            && plan.interpreter.segment_count == 4
+            && plan.main.program_header_count == 12
+            && plan.interpreter.program_header_count == 11
+            && plan.main.program_headers == 0x40_0040
+            && plan.interpreter.program_headers == 0x60_0040
+            && plan.main.load_bias == 0x40_0000
+            && plan.interpreter.load_bias == 0x60_0000
+            && plan.initial_entry == plan.interpreter.entry
+            && plan.main.segments[..plan.main.segment_count]
+                .iter()
+                .flatten()
+                .all(|segment| segment.page_count != 0)
     });
-    let invalid_pie_plans_rejected = shell.zip(interpreter).is_some_and(|(shell, interpreter)| {
-        crate::linux_elf::plan_relocatable_process(
-            shell.data,
-            0,
-            b"/lib/ld-musl-x86_64.so.1",
-            interpreter.data,
-            0x60_0000,
-        )
-        .is_none()
-            && crate::linux_elf::plan_relocatable_process(
-                shell.data,
-                0x40_0000,
-                b"/wrong-interpreter",
-                interpreter.data,
-                0x60_0000,
-            )
-            .is_none()
-            && crate::linux_elf::plan_relocatable_process(
-                shell.data,
-                0x40_0000,
-                b"/lib/ld-musl-x86_64.so.1",
-                interpreter.data,
-                0x40_0000,
-            )
-            .is_none()
-    });
-    let valid = rootfs
-        .find(b"bin/sh")
-        .is_some_and(|entry| entry.kind == EntryKind::Symlink && entry.link == b"/bin/busybox")
-        && shell.is_some_and(|entry| {
-            entry.kind == EntryKind::File
-                && entry.mode & 0o111 != 0
-                && entry.data.starts_with(b"\x7fELF")
-        })
-        && interpreter.is_some_and(|entry| {
-            entry.kind == EntryKind::File
-                && entry.mode & 0o111 != 0
-                && entry.data.starts_with(b"\x7fELF")
-        })
-        && invalid_pie_plans_rejected
-        && pie_plan.is_some_and(|plan| {
-            plan.main.segment_count == 4
-                && plan.interpreter.segment_count == 4
-                && plan.main.program_header_count == 12
-                && plan.interpreter.program_header_count == 11
-                && plan.main.program_headers == 0x40_0040
-                && plan.interpreter.program_headers == 0x60_0040
-                && plan.main.load_bias == 0x40_0000
-                && plan.interpreter.load_bias == 0x60_0000
-                && plan.initial_entry == plan.interpreter.entry
-                && plan.main.segments[..plan.main.segment_count]
-                    .iter()
-                    .flatten()
-                    .all(|segment| segment.page_count != 0)
-        });
     if !valid {
         return false;
     }
     ADDRESS.store(bytes.as_ptr() as usize, Ordering::Relaxed);
     SIZE.store(bytes.len(), Ordering::Relaxed);
     INSTALLED.store(true, Ordering::Release);
-    file(b"bin/busybox").is_some()
-}
-
-pub(crate) fn file(path: &[u8]) -> Option<Entry<'static>> {
-    rootfs()?.find(path)
+    process_plan(b"/bin/sh").is_some()
 }
 
 fn rootfs() -> Option<Rootfs<'static>> {
@@ -124,20 +73,25 @@ fn rootfs() -> Option<Rootfs<'static>> {
 }
 
 pub(crate) fn lookup(path: &[u8]) -> Option<(u16, Entry<'static>)> {
+    let rootfs = rootfs()?;
+    let (index, entry) = lookup_in(&rootfs, path)?;
+    let handle = u16::try_from(index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
+    Some((handle, entry))
+}
+
+fn lookup_in<'a>(rootfs: &Rootfs<'a>, path: &[u8]) -> Option<(usize, Entry<'a>)> {
     let path = path.strip_prefix(b"/").unwrap_or(path);
     let path = path.strip_suffix(b"/").unwrap_or(path);
     if path.is_empty() {
         return None;
     }
-    let rootfs = rootfs()?;
     let mut current = [0_u8; PATH_CAPACITY];
     current.get_mut(..path.len())?.copy_from_slice(path);
     let mut length = path.len();
     for _ in 0..8 {
         let (index, entry) = rootfs.find_index(&current[..length])?;
         if entry.kind != EntryKind::Symlink {
-            let handle = u16::try_from(index.checked_add(ENTRY_HANDLE_BASE)?).ok()?;
-            return Some((handle, entry));
+            return Some((index, entry));
         }
         let mut source = [0_u8; PATH_CAPACITY];
         source[..length].copy_from_slice(&current[..length]);
@@ -204,14 +158,29 @@ fn resolve_link(path: &[u8], link: &[u8], output: &mut [u8]) -> Option<usize> {
     (length != 0).then_some(length)
 }
 
-pub(crate) fn alpine_shell_plan(
+pub(crate) fn process_plan(
+    init: &[u8],
 ) -> Option<crate::linux_elf::RelocatableProcessPlan<'static, 'static>> {
-    let shell = file(b"bin/busybox")?;
-    let interpreter = file(b"lib/ld-musl-x86_64.so.1")?;
+    process_plan_in(&rootfs()?, init)
+}
+
+fn process_plan_in<'a>(
+    rootfs: &Rootfs<'a>,
+    init: &[u8],
+) -> Option<crate::linux_elf::RelocatableProcessPlan<'a, 'a>> {
+    let (_, executable) = lookup_in(rootfs, init)?;
+    if executable.kind != EntryKind::File || executable.mode & 0o111 == 0 {
+        return None;
+    }
+    let interpreter_path = crate::linux_elf::relocatable_interpreter(executable.data)?;
+    let (_, interpreter) = lookup_in(rootfs, interpreter_path)?;
+    if interpreter.kind != EntryKind::File || interpreter.mode & 0o111 == 0 {
+        return None;
+    }
     crate::linux_elf::plan_relocatable_process(
-        shell.data,
+        executable.data,
         0x40_0000,
-        b"/lib/ld-musl-x86_64.so.1",
+        interpreter_path,
         interpreter.data,
         0x60_0000,
     )

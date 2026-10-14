@@ -1033,6 +1033,10 @@ pub(crate) fn plan_relocatable_process<'main, 'interpreter>(
     })
 }
 
+pub(crate) fn relocatable_interpreter(bytes: &[u8]) -> Option<&[u8]> {
+    parse_relocatable(bytes)?.interpreter
+}
+
 fn parse_relocatable(bytes: &[u8]) -> Option<RelocatableImage<'_>> {
     if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * MIN_LOAD_SEGMENT_COUNT
         || bytes.get(0..4)? != b"\x7fELF"

@@ -13,15 +13,15 @@ use generated_boot::{
 use ginux_kernel::{kernel_entry, BootInfo, ResetSystem, BOOT_INFO_MAGIC, BOOT_INFO_VERSION};
 
 #[cfg(feature = "alpine-fixture")]
-static ALPINE_ROOTFS: &[u8] = include_bytes!(env!("GINUX_ALPINE_ROOTFS"));
+static OCI_ROOTFS: &[u8] = include_bytes!(env!("GINUX_OCI_ROOTFS"));
 
 #[cfg(feature = "alpine-fixture")]
-fn alpine_rootfs() -> (*const u8, usize) {
-    (ALPINE_ROOTFS.as_ptr(), ALPINE_ROOTFS.len())
+fn oci_rootfs() -> (*const u8, usize) {
+    (OCI_ROOTFS.as_ptr(), OCI_ROOTFS.len())
 }
 
 #[cfg(not(feature = "alpine-fixture"))]
-fn alpine_rootfs() -> (*const u8, usize) {
+fn oci_rootfs() -> (*const u8, usize) {
     (core::ptr::null(), 0)
 }
 
@@ -284,7 +284,7 @@ unsafe fn exit_boot_services(
 
         let status = ((*boot_services).exit_boot_services)(image, map_key);
         if status == EFI_SUCCESS {
-            let (alpine_rootfs, alpine_rootfs_size) = alpine_rootfs();
+            let (oci_rootfs, oci_rootfs_size) = oci_rootfs();
             return BootInfo {
                 magic: BOOT_INFO_MAGIC,
                 version: BOOT_INFO_VERSION,
@@ -304,8 +304,8 @@ unsafe fn exit_boot_services(
                 controller_runtime_size: CONTROLLER_RUNTIME.len(),
                 root_image: ROOT_IMAGE.as_ptr(),
                 root_image_size: ROOT_IMAGE.len(),
-                alpine_rootfs,
-                alpine_rootfs_size,
+                oci_rootfs,
+                oci_rootfs_size,
                 reset_system: (*runtime_services).reset_system,
                 image_base,
                 image_size,

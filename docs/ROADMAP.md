@@ -46,7 +46,7 @@ verification exercises configuration and lifecycle commands.
 
 **Implementation status:** In progress. The explicit image contract, pinned
 Alpine OCI input, verified rootfs reader, Alpine-enabled boot profile, scalable
-four-segment PIE mapping, musl dynamic-loader startup, and an interactive
+four-segment PIE mapping, ELF-declared dynamic-loader startup, and an interactive
 BusyBox `/bin/sh` smoke path are complete. Rootfs-backed file operations,
 detach/reattach, runtime registry pull, and container networking remain.
 

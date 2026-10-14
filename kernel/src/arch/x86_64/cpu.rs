@@ -816,7 +816,7 @@ static CONTAINER_IMAGE_SIZE: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_IMAGE: [AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE];
 static CONTAINER_IMAGE_READY: AtomicBool = AtomicBool::new(false);
-const ALPINE_SHELL_IMAGE: &[u8] = b"docker.io/library/alpine:3.24.2";
+const PINNED_OCI_IMAGE: &[u8] = b"docker.io/library/alpine:3.24.2";
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -16795,8 +16795,8 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             );
             CONTAINER_IMAGE_READY.store(
                 container_request_image(&request) == b"embedded://minimal-system-v0"
-                    || container_request_image(&request) == ALPINE_SHELL_IMAGE
-                        && crate::oci_image::alpine_shell_plan().is_some(),
+                    || container_request_image(&request) == PINNED_OCI_IMAGE
+                        && crate::oci_image::is_installed(),
                 Ordering::SeqCst,
             );
             update_container_configuration(control_abi::CONTAINER_CONFIG_IMAGE)
@@ -16919,18 +16919,23 @@ fn stored_container_name_matches(name: &[u8]) -> bool {
             .all(|(stored, supplied)| stored.load(Ordering::SeqCst) == *supplied)
 }
 
-pub(crate) fn configured_container_uses_alpine() -> bool {
+pub(crate) fn configured_container_uses_installed_oci_image() -> bool {
     let size = usize::from(CONTAINER_IMAGE_SIZE.load(Ordering::SeqCst));
-    size == ALPINE_SHELL_IMAGE.len()
+    size == PINNED_OCI_IMAGE.len()
         && CONTAINER_IMAGE[..size]
             .iter()
-            .zip(ALPINE_SHELL_IMAGE)
+            .zip(PINNED_OCI_IMAGE)
             .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected)
-        && CONTAINER_INIT_SIZE.load(Ordering::SeqCst) as usize == b"/bin/sh".len()
-        && CONTAINER_INIT[..b"/bin/sh".len()]
-            .iter()
-            .zip(b"/bin/sh")
-            .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected)
+        && crate::oci_image::is_installed()
+}
+
+pub(crate) fn configured_container_init(output: &mut [u8]) -> Option<usize> {
+    let size = usize::from(CONTAINER_INIT_SIZE.load(Ordering::SeqCst));
+    let output = output.get_mut(..size)?;
+    for (destination, source) in output.iter_mut().zip(&CONTAINER_INIT[..size]) {
+        *destination = source.load(Ordering::SeqCst);
+    }
+    Some(size)
 }
 
 fn store_container_name(name: &[u8]) {

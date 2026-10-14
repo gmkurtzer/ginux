@@ -143,7 +143,7 @@ pub(crate) fn run_installed_interactive_controller() -> bool {
     valid && current_root() == linux_root
 }
 
-pub(crate) fn run_alpine_shell() -> bool {
+pub(crate) fn run_oci_process(init: &[u8]) -> bool {
     const HIERARCHY_FRAMES: usize = 6;
     const OWNED_FRAME_COUNT: usize = HIERARCHY_FRAMES + 2;
     const RUNTIME_FRAME_CAPACITY: usize = 440;
@@ -151,18 +151,18 @@ pub(crate) fn run_alpine_shell() -> bool {
     const STACK_ADDRESS: u64 = 0x88_0000;
     const MMAP_ADDRESS: u64 = 0x90_0000;
 
-    let Some(plan) = crate::oci_image::alpine_shell_plan() else {
-        crate::serial_write_bytes(b"ginux: Alpine shell plan unavailable\r\n");
+    let Some(plan) = crate::oci_image::process_plan(init) else {
+        crate::serial_write_bytes(b"ginux: OCI init load plan unavailable\r\n");
         return false;
     };
     let startup = crate::linux_elf::relocatable_startup(&plan);
     let Some(frames) = memory::allocate_frames::<OWNED_FRAME_COUNT>(memory::FrameOwner::KERNEL)
     else {
-        crate::serial_write_bytes(b"ginux: Alpine shell hierarchy allocation failed\r\n");
+        crate::serial_write_bytes(b"ginux: OCI init hierarchy allocation failed\r\n");
         return false;
     };
     let Some(runtime_frames) = memory::allocate_runtime_extent::<RUNTIME_FRAME_CAPACITY>() else {
-        crate::serial_write_bytes(b"ginux: Alpine shell image allocation failed\r\n");
+        crate::serial_write_bytes(b"ginux: OCI init image allocation failed\r\n");
         let _ = memory::release_frames(memory::FrameOwner::KERNEL, frames);
         return false;
     };
@@ -283,9 +283,9 @@ pub(crate) fn run_alpine_shell() -> bool {
 
         let stack =
             unsafe { &mut *(mapped_frame::<u8>(stack_frame.address())? as *mut [u8; PAGE_SIZE]) };
-        let argument = b"/bin/sh\0";
+        let argument_length = init.len().checked_add(1)?;
         let environment = b"PATH=/bin:/usr/bin:/sbin:/usr/sbin\0";
-        let argument_offset = PAGE_SIZE - argument.len();
+        let argument_offset = PAGE_SIZE.checked_sub(argument_length)?;
         let environment_offset = argument_offset.checked_sub(environment.len())?;
         let platform_offset = environment_offset.checked_sub(LINUX_PLATFORM.len())?;
         let words = 5 + crate::linux_elf::AUXILIARY_VECTOR_WORDS;
@@ -293,7 +293,8 @@ pub(crate) fn run_alpine_shell() -> bool {
         let argument_address = STACK_ADDRESS + argument_offset as u64;
         let environment_address = STACK_ADDRESS + environment_offset as u64;
         let platform_address = STACK_ADDRESS + platform_offset as u64;
-        stack[argument_offset..].copy_from_slice(argument);
+        stack[argument_offset..argument_offset + init.len()].copy_from_slice(init);
+        stack[argument_offset + init.len()] = 0;
         stack[environment_offset..argument_offset].copy_from_slice(environment);
         stack[platform_offset..platform_offset + LINUX_PLATFORM.len()]
             .copy_from_slice(&LINUX_PLATFORM);
@@ -382,7 +383,7 @@ pub(crate) fn run_alpine_shell() -> bool {
     }
     let runtime_scrubbed = memory::scrub_runtime_extent(runtime_frames);
     if !valid {
-        crate::serial_write_bytes(b"ginux: Alpine shell setup failed at stage ");
+        crate::serial_write_bytes(b"ginux: OCI init setup failed at stage ");
         crate::serial_write_u64(u64::from(stage));
         crate::serial_write_bytes(b"\r\n");
     }

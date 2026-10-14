@@ -98,8 +98,8 @@ pub struct BootInfo {
     pub controller_runtime_size: usize,
     pub root_image: *const u8,
     pub root_image_size: usize,
-    pub alpine_rootfs: *const u8,
-    pub alpine_rootfs_size: usize,
+    pub oci_rootfs: *const u8,
+    pub oci_rootfs_size: usize,
     pub reset_system: ResetSystem,
     pub image_base: *const u8,
     pub image_size: usize,
@@ -245,23 +245,23 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: modified root-image measurement accepted\r\n");
     }
     serial_write("ginux: root-image measurement rejection verified\r\n");
-    if boot_info.alpine_rootfs_size == 0 {
-        if !boot_info.alpine_rootfs.is_null() {
-            kernel_fail("ginux: invalid empty Alpine rootfs handoff\r\n");
+    if boot_info.oci_rootfs_size == 0 {
+        if !boot_info.oci_rootfs.is_null() {
+            kernel_fail("ginux: invalid empty OCI rootfs handoff\r\n");
         }
         serial_write("ginux: no boot-local OCI image configured\r\n");
     } else {
-        if boot_info.alpine_rootfs.is_null() {
-            kernel_fail("ginux: missing Alpine rootfs bytes\r\n");
+        if boot_info.oci_rootfs.is_null() {
+            kernel_fail("ginux: missing OCI rootfs bytes\r\n");
         }
-        let alpine_rootfs =
-            core::slice::from_raw_parts(boot_info.alpine_rootfs, boot_info.alpine_rootfs_size);
-        if !oci_image::install_alpine_rootfs(alpine_rootfs) {
+        let oci_rootfs =
+            core::slice::from_raw_parts(boot_info.oci_rootfs, boot_info.oci_rootfs_size);
+        if !oci_image::install_pinned_rootfs(oci_rootfs) {
             kernel_fail("ginux: pinned Alpine OCI rootfs invalid\r\n");
         }
         serial_write("ginux: pinned Alpine OCI rootfs accepted\r\n");
-        serial_write("ginux: Alpine /bin/sh and musl runtime discovered\r\n");
-        serial_write("ginux: Alpine relocatable PIE load plan accepted\r\n");
+        serial_write("ginux: OCI init and declared ELF interpreter discovered\r\n");
+        serial_write("ginux: OCI relocatable PIE load plan accepted\r\n");
     }
 
     let Some(virtio_block) = arch::x86_64::pci::discover_virtio_block() else {
@@ -3636,12 +3636,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         }
         loop {
             serial_write("ginux: starting configured runtime container\r\n");
-            if arch::x86_64::cpu::configured_container_uses_alpine() {
-                serial_write("ginux: entering Alpine /bin/sh through musl\r\n");
-                if !address_space::run_alpine_shell() {
-                    kernel_fail("ginux: Alpine shell execution failed\r\n");
+            if arch::x86_64::cpu::configured_container_uses_installed_oci_image() {
+                let mut init = [0_u8; control_abi::CONTAINER_MAX_INIT_SIZE];
+                let Some(init_size) = arch::x86_64::cpu::configured_container_init(&mut init)
+                else {
+                    kernel_fail("ginux: configured OCI init unavailable\r\n");
+                };
+                serial_write("ginux: entering configured OCI init\r\n");
+                if !address_space::run_oci_process(&init[..init_size]) {
+                    kernel_fail("ginux: OCI init execution failed\r\n");
                 }
-                serial_write("ginux: Alpine /bin/sh exited cleanly\r\n");
+                serial_write("ginux: OCI init exited cleanly\r\n");
             } else if !linux_elf::verify_mapped_system_init_plan(
                 boot_info.image_base as u64,
                 boot_info.image_size,

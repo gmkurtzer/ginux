@@ -52,8 +52,8 @@ qemu_pid=""
 
 for expected in \
     'ginux: pinned Alpine OCI rootfs accepted' \
-    'ginux: Alpine /bin/sh and musl runtime discovered' \
-    'ginux: Alpine relocatable PIE load plan accepted' \
+    'ginux: OCI init and declared ELF interpreter discovered' \
+    'ginux: OCI relocatable PIE load plan accepted' \
     'Ginux controller v0 (ring 3)' \
     'ginux: controller requested clean shutdown' \
     'GINUX_KERNEL_OK'; do

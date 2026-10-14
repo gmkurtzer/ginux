@@ -53,20 +53,20 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'docker.io/library/alpine:3.24.2'
     printf '%s\n' \
         'container start alpine --attach'
-    wait_for 'ginux: entering Alpine /bin/sh through musl'
+    wait_for 'ginux: entering configured OCI init'
     printf '%s\n' \
-        "printf 'MUSL_RUNTIME_OK\\n'" \
+        "printf 'LIBC_RUNTIME_OK\\n'" \
         "while IFS= read -r line; do echo \"\$line\"; done < /etc/os-release" \
         'echo /*' \
         'echo /etc/os-*' \
         'pwd' \
         "printf 'OCI_FILESYSTEM_OK\\n'"
-    wait_for_line 'MUSL_RUNTIME_OK'
+    wait_for_line 'LIBC_RUNTIME_OK'
     wait_for_line 'NAME="Alpine Linux"'
     wait_for_line '/'
     wait_for_line 'OCI_FILESYSTEM_OK'
     printf '%s\n' 'exit 0'
-    wait_for 'ginux: Alpine /bin/sh exited cleanly'
+    wait_for 'ginux: OCI init exited cleanly'
     wait_for 'ginux> '
     printf '%s\n' 'shutdown'
 } | GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
@@ -96,11 +96,11 @@ wait "$qemu_pid" || true
 qemu_pid=""
 
 for expected in \
-    'ginux: entering Alpine /bin/sh through musl' \
-    'MUSL_RUNTIME_OK' \
+    'ginux: entering configured OCI init' \
+    'LIBC_RUNTIME_OK' \
     'NAME="Alpine Linux"' \
     'OCI_FILESYSTEM_OK' \
-    'ginux: Alpine /bin/sh exited cleanly' \
+    'ginux: OCI init exited cleanly' \
     'GINUX_KERNEL_OK'; do
     if ! grep -Fq "$expected" "$output_file"; then
         tail -n 120 "$output_file"
@@ -116,4 +116,4 @@ if ! grep -Eq '(^|[[:space:]])/bin([[:space:]]|$)' "$output_file" \
     exit 1
 fi
 
-echo "Alpine musl shell and OCI filesystem test passed."
+echo "Alpine OCI shell and filesystem test passed."

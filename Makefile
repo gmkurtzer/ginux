@@ -29,7 +29,7 @@ help:
 	@echo "  make alpine-image-check Verify the prepared Alpine image without downloading"
 	@echo "  make build-alpine Build Ginux with the verified Alpine rootfs sealed in"
 	@echo "  make run-alpine Compatibility alias for 'make run'"
-	@echo "  make test-alpine Verify Alpine OCI ingestion and the real musl shell in QEMU"
+	@echo "  make test-alpine Verify Alpine OCI ingestion and its real shell in QEMU"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
@@ -120,7 +120,7 @@ build: manifest
 
 build-alpine: alpine-image manifest
 	@echo "Building Alpine-enabled Ginux for $(TARGET) ($(PROFILE))"
-	@GINUX_ALPINE_ROOTFS="$(abspath build/alpine-3.24-shell-v0/rootfs.tar)" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG) --features alpine-fixture
+	@GINUX_OCI_ROOTFS="$(abspath build/alpine-3.24-shell-v0/rootfs.tar)" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG) --features alpine-fixture
 	@mkdir -p "$(dir $(EFI_DESTINATION))"
 	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
 	@echo "Built $(EFI_DESTINATION) with pinned Alpine 3.24.2 x86-64 rootfs"
