@@ -45,13 +45,18 @@ verification exercises configuration and lifecycle commands.
 ## C3: Rocky systemd early boot
 
 **Implementation status:** In progress; the x86-64 systemd image recipe is
-pinned and verified, and the storage-backed image path is next.
+pinned and verified, and the boot-local tmpfs image path is next.
 
 Deliverables:
 
 - A reproducible, digest-pinned Rocky Linux 10 x86-64 container image recipe.
-- Operator-configurable control-domain networking can reach an OCI registry,
-  resolve the x86-64 manifest, verify every digest, and store the image locally.
+- Operator-configurable control-domain networking can reach an OCI registry
+  and resolve the x86-64 manifest. `container start NAME` automatically pulls
+  a missing configured image, verifies every digest while streaming it into a
+  bounded RAM-backed store, and atomically publishes the immutable object.
+- Container configuration, cached image objects, writable overlays, and
+  temporary data are boot-local and disappear on host reboot. The C3 QEMU
+  profile has an explicit memory budget and fails cleanly on quota exhaustion.
 - Each container has explicit static or DHCP network configuration independent
   from the control domain.
 - Each virtual NIC has one globally unique `gnetN` name that remains unchanged
@@ -80,6 +85,10 @@ Deliverables:
 
 - Rocky receives its own loopback, interface, IP address, routes, sockets, and network policy.
 - A persistent volume survives host and container restart.
+- The controller can initialize a selected local volume, copy and verify
+  boot-local state into it, stage it for activation, and reboot into the
+  persistent configuration without allowing mutable storage to replace the
+  authenticated kernel or embedded controller.
 - SSH runs inside Rocky; it is not a native-host service.
 
 Gate: login over SSH, network-isolation tests, storage crash/recovery tests, and reboot persistence. Human verification performs the login and persistence check.
