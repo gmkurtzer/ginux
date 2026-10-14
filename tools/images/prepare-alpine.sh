@@ -87,9 +87,18 @@ write_metadata() {
 
 case "${1:-}" in
     fetch)
+        require_tool tar
+        if [[ -s "$oci_archive" && -s "$rootfs" && -s "$metadata" ]]; then
+            verify_archive
+            verify_rootfs
+            grep -Fqx $'manifest\t'"$ALPINE_IMAGE_DIGEST" "$metadata" || fail "metadata manifest mismatch"
+            grep -Fqx $'platform\t'"$ALPINE_IMAGE_PLATFORM" "$metadata" || fail "metadata platform mismatch"
+            grep -Fqx $'init\t'"$ALPINE_IMAGE_INIT" "$metadata" || fail "metadata init mismatch"
+            echo "Using verified cached Alpine OCI image at $oci_archive"
+            exit 0
+        fi
         require_tool docker
         require_tool gzip
-        require_tool tar
         mkdir -p "$output_directory"
         docker pull --platform "$ALPINE_IMAGE_PLATFORM" "$reference"
         identity=$(docker image inspect "$reference" --format '{{index .RepoDigests 0}}')
