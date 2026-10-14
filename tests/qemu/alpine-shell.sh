@@ -29,6 +29,20 @@ wait_for() {
     return 1
 }
 
+wait_for_line() {
+    local marker=$1
+    for _ in {1..60}; do
+        grep -Eq "^${marker}\\r?$" "$output_file" && return 0
+        if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
+            break
+        fi
+        sleep 1
+    done
+    tail -n 120 "$output_file" >&2
+    echo "Alpine shell test failed while waiting for line '$marker'." >&2
+    return 1
+}
+
 dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
 {
     wait_for 'ginux> '
@@ -38,10 +52,10 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'container list'
     wait_for 'docker.io/library/alpine:3.24.2'
     printf '%s\n' \
-        'container start alpine'
+        'container start alpine --attach'
     wait_for 'ginux: entering Alpine /bin/sh through musl'
-    printf '%s\n' 'echo MUSL_OK'
-    wait_for 'MUSL_OK'
+    printf '%s\n' "printf 'MUSL_RUNTIME_OK\\n'"
+    wait_for_line 'MUSL_RUNTIME_OK'
     printf '%s\n' 'exit 0'
     wait_for 'ginux: Alpine /bin/sh exited cleanly'
     wait_for 'ginux> '
@@ -74,7 +88,7 @@ qemu_pid=""
 
 for expected in \
     'ginux: entering Alpine /bin/sh through musl' \
-    'MUSL_OK' \
+    'MUSL_RUNTIME_OK' \
     'ginux: Alpine /bin/sh exited cleanly' \
     'GINUX_KERNEL_OK'; do
     if ! grep -Fq "$expected" "$output_file"; then

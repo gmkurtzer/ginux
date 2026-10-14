@@ -28,6 +28,9 @@ const CALL_BUDGET_EXHAUSTED: u64 = u64::MAX - 3;
 const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
 pub(crate) const LINUX_MMAP_SLOT_COUNT: usize = 4;
+const LINUX_RUNTIME_MMAP_SLOT_COUNT: usize = 32;
+pub(crate) const LINUX_RUNTIME_STACK_PAGES: usize = 8;
+pub(crate) const LINUX_RUNTIME_HEAP_PAGES: usize = 16;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
 const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE + PAGE_SIZE;
 const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
@@ -682,20 +685,20 @@ static ELF_PROBE_RELRO_SIZE: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
 static ELF_PROBE_MMAP: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_MMAP_FRAMES: [AtomicU64; LINUX_MMAP_SLOT_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_MMAP_SLOT_COUNT];
-static ELF_PROBE_MMAP_GENERATIONS: [AtomicU32; LINUX_MMAP_SLOT_COUNT] =
-    [const { AtomicU32::new(0) }; LINUX_MMAP_SLOT_COUNT];
+static ELF_PROBE_MMAP_FRAMES: [AtomicU64; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { AtomicU64::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+static ELF_PROBE_MMAP_GENERATIONS: [AtomicU32; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { AtomicU32::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
 static ELF_PROBE_PAGE_TABLE_FRAMES: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
 static ELF_PROBE_PAGE_TABLE_GENERATIONS: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
 static ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
 static ELF_PROBE_RECLAIM_PAGE_TABLE_GENERATIONS: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
-static ELF_PROBE_MMAP_PAGES: [AtomicU8; LINUX_MMAP_SLOT_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_MMAP_SLOT_COUNT];
-static ELF_PROBE_MMAP_PROTECTION: [AtomicU8; LINUX_MMAP_SLOT_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_MMAP_SLOT_COUNT];
-static ELF_PROBE_MMAP_FILE: [AtomicU8; LINUX_MMAP_SLOT_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_MMAP_SLOT_COUNT];
+static ELF_PROBE_MMAP_PAGES: [AtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { AtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+static ELF_PROBE_MMAP_PROTECTION: [AtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { AtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+static ELF_PROBE_MMAP_FILE: [AtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { AtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
 static ELF_PROBE_MAIN_ADDRESSES: [AtomicU64; LINUX_MAIN_MAPPING_COUNT] =
     [const { AtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
 static ELF_PROBE_MAIN_FRAMES: [AtomicU64; LINUX_MAIN_MAPPING_COUNT] =
@@ -2892,7 +2895,7 @@ fn reserve_linux_thread(
     if !context.is_valid()
         || stack_base == 0
         || !stack_base.is_multiple_of(PAGE_SIZE)
-        || stack_size != PAGE_SIZE
+        || stack_size != PAGE_SIZE && stack_size != LINUX_RUNTIME_STACK_PAGES * PAGE_SIZE
         || stack_base
             .checked_add(stack_size)
             .is_none_or(|end| end > 1 << 47)
@@ -3705,7 +3708,15 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let Some(heap_limit) = execution.heap.checked_add(execution.heap_size) else {
         return LinuxElfResult::FAILED;
     };
-    let stack_base = execution.stack & !(PAGE_SIZE - 1);
+    let stack_page = execution.stack & !(PAGE_SIZE - 1);
+    let stack_size = if execution.runtime {
+        LINUX_RUNTIME_STACK_PAGES * PAGE_SIZE
+    } else {
+        PAGE_SIZE
+    };
+    let Some(stack_base) = stack_page.checked_sub(stack_size - PAGE_SIZE) else {
+        return LinuxElfResult::FAILED;
+    };
     let page_table_contract_valid = (5..=execution.page_table_frames.len())
         .contains(&execution.page_table_frame_count)
         && execution.page_table_frames[execution.page_table_frame_count..]
@@ -3771,17 +3782,22 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         });
     let stack_contract_valid = execution.stack != 0
         && stack_base != 0
-        && execution.stack < stack_base + PAGE_SIZE
+        && execution.stack < stack_base + stack_size
         && memory::frames_owned_by(memory::FrameOwner::KERNEL, &[execution.stack_frame])
         && address_space::current_linux_mapping_matches(
-            stack_base as u64,
+            stack_page as u64,
             execution.stack_frame,
             true,
             false,
         );
     let heap_contract_valid = execution.heap != 0
         && execution.heap.is_multiple_of(PAGE_SIZE)
-        && execution.heap_size == PAGE_SIZE
+        && execution.heap_size
+            == if execution.runtime {
+                LINUX_RUNTIME_HEAP_PAGES * PAGE_SIZE
+            } else {
+                PAGE_SIZE
+            }
         && execution.heap_frame != execution.stack_frame
         && address_space::current_linux_mapping_matches(
             execution.heap as u64,
@@ -3960,7 +3976,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let linux_thread_lifecycle_valid = finish_linux_thread_table()
         && (|| -> Option<bool> {
             let initial_stack = execution.stack & !(PAGE_SIZE - 1);
-            let initial_thread = reserve_linux_thread(initial_tls, initial_stack, PAGE_SIZE)?;
+            let initial_thread = reserve_linux_thread(initial_tls, stack_base, stack_size)?;
             if initial_thread.tid != 1 || !switch_linux_thread(initial_thread) {
                 return Some(false);
             }
@@ -4287,7 +4303,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     for generation in &ELF_PROBE_MMAP_GENERATIONS {
         generation.store(0, Ordering::SeqCst);
     }
-    for index in 0..LINUX_MMAP_SLOT_COUNT {
+    for index in 0..LINUX_RUNTIME_MMAP_SLOT_COUNT {
         ELF_PROBE_MMAP_PAGES[index].store(0, Ordering::SeqCst);
         ELF_PROBE_MMAP_PROTECTION[index].store(0, Ordering::SeqCst);
         ELF_PROBE_MMAP_FILE[index].store(0, Ordering::SeqCst);
@@ -4988,11 +5004,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     }
     let clock_state_valid = ELF_PROBE_CLOCK_EPOCH.swap(0, Ordering::SeqCst) != 0
         && ELF_PROBE_CLOCK_FREQUENCY.swap(0, Ordering::SeqCst) == clock_frequency;
-    let mmap_inactive = (0..LINUX_MMAP_SLOT_COUNT)
+    let mmap_inactive = (0..LINUX_RUNTIME_MMAP_SLOT_COUNT)
         .all(|index| ELF_PROBE_MMAP_PAGES[index].swap(0, Ordering::SeqCst) == 0);
-    let mmap_protection_cleared = (0..LINUX_MMAP_SLOT_COUNT)
+    let mmap_protection_cleared = (0..LINUX_RUNTIME_MMAP_SLOT_COUNT)
         .all(|index| ELF_PROBE_MMAP_PROTECTION[index].swap(0, Ordering::SeqCst) == 0);
-    let mmap_file_released = (0..LINUX_MMAP_SLOT_COUNT)
+    let mmap_file_released = (0..LINUX_RUNTIME_MMAP_SLOT_COUNT)
         .all(|index| ELF_PROBE_MMAP_FILE[index].swap(0, Ordering::SeqCst) == 0);
     let mmap_address_valid = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64;
     let mmap_frames_valid = ELF_PROBE_MMAP_FRAMES
@@ -6046,6 +6062,14 @@ extern "sysv64" fn linux_syscall_handler(
             && !(loader_start..loader_end).contains(&user_rip))
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
+        if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+            serial_write("ginux: Alpine invalid syscall context:");
+            for value in [number, user_stack, user_rip, user_rflags] {
+                serial_write(" ");
+                serial_write_u64(value);
+            }
+            serial_write("\r\n");
+        }
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;
     }
@@ -6256,9 +6280,16 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_BRK_SYSCALL => {
             let current = ELF_PROBE_BRK.load(Ordering::SeqCst);
             let limit = ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst);
+            let base = limit.saturating_sub(
+                (if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+                    LINUX_RUNTIME_HEAP_PAGES
+                } else {
+                    1
+                } * PAGE_SIZE) as u64,
+            );
             if first_argument == 0 {
                 current
-            } else if (limit - PAGE_SIZE as u64..=limit).contains(&first_argument) {
+            } else if (base..=limit).contains(&first_argument) {
                 ELF_PROBE_BRK.store(first_argument, Ordering::SeqCst);
                 first_argument
             } else {
@@ -7457,27 +7488,29 @@ fn linux_mmap_clear_slot_lease(slot: usize) {
     ELF_PROBE_MMAP_GENERATIONS[slot].store(0, Ordering::SeqCst);
 }
 
-fn linux_allocate_mmap_leases(pages: usize) -> Option<[memory::FrameLease; LINUX_MMAP_SLOT_COUNT]> {
-    let mut leases = [memory::FrameLease::EMPTY; LINUX_MMAP_SLOT_COUNT];
-    match pages {
-        1 => {
-            leases[..1].copy_from_slice(&memory::allocate_frames::<1>(memory::FrameOwner::KERNEL)?)
-        }
-        2 => {
-            leases[..2].copy_from_slice(&memory::allocate_frames::<2>(memory::FrameOwner::KERNEL)?)
-        }
-        3 => {
-            leases[..3].copy_from_slice(&memory::allocate_frames::<3>(memory::FrameOwner::KERNEL)?)
-        }
-        4 => leases.copy_from_slice(&memory::allocate_frames::<4>(memory::FrameOwner::KERNEL)?),
-        _ => return None,
+fn linux_allocate_mmap_leases(
+    pages: usize,
+) -> Option<[memory::FrameLease; LINUX_RUNTIME_MMAP_SLOT_COUNT]> {
+    if !(1..=LINUX_RUNTIME_MMAP_SLOT_COUNT).contains(&pages) {
+        return None;
+    }
+    let mut leases = [memory::FrameLease::EMPTY; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+    for index in 0..pages {
+        let Some([lease]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+            if index != 0 {
+                let _ =
+                    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &leases[..index]);
+            }
+            return None;
+        };
+        leases[index] = lease;
     }
     Some(leases)
 }
 
 fn linux_mmap_unmap_and_release_slots(start_slot: usize, pages: usize) -> bool {
     let base = ELF_PROBE_MMAP.load(Ordering::SeqCst);
-    let mut leases = [None; LINUX_MMAP_SLOT_COUNT];
+    let mut leases = [None; LINUX_RUNTIME_MMAP_SLOT_COUNT];
     for slot in start_slot..start_slot + pages {
         let Some(area) = linux_mmap_slot_area_index(slot) else {
             continue;
@@ -7530,18 +7563,18 @@ fn linux_mmap_slot_occupied(slot: usize) -> bool {
 }
 
 fn linux_mmap_slot_area_index(slot: usize) -> Option<usize> {
-    if slot >= LINUX_MMAP_SLOT_COUNT {
+    if slot >= LINUX_RUNTIME_MMAP_SLOT_COUNT {
         return None;
     }
-    (0..LINUX_MMAP_SLOT_COUNT).find(|start| {
+    (0..LINUX_RUNTIME_MMAP_SLOT_COUNT).find(|start| {
         let pages = usize::from(ELF_PROBE_MMAP_PAGES[*start].load(Ordering::SeqCst));
         pages != 0
-            && pages <= LINUX_MMAP_SLOT_COUNT - *start
+            && pages <= LINUX_RUNTIME_MMAP_SLOT_COUNT - *start
             && (*start..*start + pages).contains(&slot)
     })
 }
 
-fn linux_mmap_slot_attributes() -> [Option<(u8, u8)>; LINUX_MMAP_SLOT_COUNT] {
+fn linux_mmap_slot_attributes() -> [Option<(u8, u8)>; LINUX_RUNTIME_MMAP_SLOT_COUNT] {
     core::array::from_fn(|slot| {
         let area = linux_mmap_slot_area_index(slot)?;
         Some((
@@ -7551,20 +7584,20 @@ fn linux_mmap_slot_attributes() -> [Option<(u8, u8)>; LINUX_MMAP_SLOT_COUNT] {
     })
 }
 
-fn linux_mmap_rebuild_areas(slots: [Option<(u8, u8)>; LINUX_MMAP_SLOT_COUNT]) {
-    for index in 0..LINUX_MMAP_SLOT_COUNT {
+fn linux_mmap_rebuild_areas(slots: [Option<(u8, u8)>; LINUX_RUNTIME_MMAP_SLOT_COUNT]) {
+    for index in 0..LINUX_RUNTIME_MMAP_SLOT_COUNT {
         ELF_PROBE_MMAP_PAGES[index].store(0, Ordering::SeqCst);
         ELF_PROBE_MMAP_PROTECTION[index].store(0, Ordering::SeqCst);
         ELF_PROBE_MMAP_FILE[index].store(0, Ordering::SeqCst);
     }
     let mut start = 0;
-    while start < LINUX_MMAP_SLOT_COUNT {
+    while start < LINUX_RUNTIME_MMAP_SLOT_COUNT {
         let Some((protection, file)) = slots[start] else {
             start += 1;
             continue;
         };
         let mut end = start + 1;
-        while end < LINUX_MMAP_SLOT_COUNT && slots[end] == Some((protection, file)) {
+        while end < LINUX_RUNTIME_MMAP_SLOT_COUNT && slots[end] == Some((protection, file)) {
             end += 1;
         }
         ELF_PROBE_MMAP_PAGES[start].store((end - start) as u8, Ordering::SeqCst);
@@ -7581,11 +7614,17 @@ fn linux_mmap_range_slots(address: u64, length: u64) -> Option<(usize, usize)> {
     }
     let start = usize::try_from((address - base) / PAGE_SIZE as u64).ok()?;
     let pages = usize::try_from(length.div_ceil(PAGE_SIZE as u64)).ok()?;
-    (start < LINUX_MMAP_SLOT_COUNT
-        && start
-            .checked_add(pages)
-            .is_some_and(|end| end <= LINUX_MMAP_SLOT_COUNT))
-    .then_some((start, pages))
+    let limit = linux_mmap_slot_limit();
+    (start < limit && start.checked_add(pages).is_some_and(|end| end <= limit))
+        .then_some((start, pages))
+}
+
+fn linux_mmap_slot_limit() -> usize {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        LINUX_RUNTIME_MMAP_SLOT_COUNT
+    } else {
+        LINUX_MMAP_SLOT_COUNT
+    }
 }
 
 fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
@@ -7682,7 +7721,7 @@ fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
             .iter()
             .all(|slot| slot == &Some(((LINUX_PROT_READ | LINUX_PROT_WRITE) as u8, 0)))
     {
-        let mut frames = [0_u64; LINUX_MMAP_SLOT_COUNT];
+        let mut frames = [0_u64; LINUX_RUNTIME_MMAP_SLOT_COUNT];
         for (offset, frame) in frames.iter_mut().enumerate().take(pages) {
             *frame = linux_mmap_slot_frame(start_slot + offset);
         }
@@ -7704,7 +7743,8 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
     let Ok(pages) = u8::try_from(length.div_ceil(PAGE_SIZE as u64)) else {
         return LINUX_EINVAL;
     };
-    if usize::from(pages) > LINUX_MMAP_SLOT_COUNT {
+    let slot_limit = linux_mmap_slot_limit();
+    if usize::from(pages) > slot_limit {
         return LINUX_EINVAL;
     }
     let anonymous_flags = LINUX_MAP_PRIVATE | LINUX_MAP_ANONYMOUS;
@@ -7727,7 +7767,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
         }
         start
     } else {
-        let Some(start) = (0..=LINUX_MMAP_SLOT_COUNT - usize::from(pages)).find(|start| {
+        let Some(start) = (0..=slot_limit - usize::from(pages)).find(|start| {
             (*start..*start + usize::from(pages)).all(|slot| !linux_mmap_slot_occupied(slot))
         }) else {
             return LINUX_ENOMEM;
@@ -7801,9 +7841,9 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
     if protection == 0 {
         if replace_anonymous {
             let mut slots = linux_mmap_slot_attributes();
-            let mut old_leases = [None; LINUX_MMAP_SLOT_COUNT];
-            let mut old_writable = [false; LINUX_MMAP_SLOT_COUNT];
-            let mut released = [memory::FrameLease::EMPTY; LINUX_MMAP_SLOT_COUNT];
+            let mut old_leases = [None; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+            let mut old_writable = [false; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+            let mut released = [memory::FrameLease::EMPTY; LINUX_RUNTIME_MMAP_SLOT_COUNT];
             let mut released_count = 0;
             for offset in 0..usize::from(pages) {
                 let slot = start_slot + offset;
@@ -7880,9 +7920,9 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
     }
     if replace_anonymous {
         let mut slots = linux_mmap_slot_attributes();
-        let mut old_leases = [None; LINUX_MMAP_SLOT_COUNT];
-        let mut old_writable = [false; LINUX_MMAP_SLOT_COUNT];
-        let mut released = [memory::FrameLease::EMPTY; LINUX_MMAP_SLOT_COUNT];
+        let mut old_leases = [None; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+        let mut old_writable = [false; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+        let mut released = [memory::FrameLease::EMPTY; LINUX_RUNTIME_MMAP_SLOT_COUNT];
         let mut released_count = 0;
         for offset in 0..usize::from(pages) {
             let slot = start_slot + offset;
@@ -8204,7 +8244,7 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
     let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {
         return LINUX_EINVAL;
     };
-    let areas: [Option<usize>; LINUX_MMAP_SLOT_COUNT] = core::array::from_fn(|offset| {
+    let areas: [Option<usize>; LINUX_RUNTIME_MMAP_SLOT_COUNT] = core::array::from_fn(|offset| {
         (offset < range_pages)
             .then(|| linux_mmap_slot_area_index(start_slot + offset))
             .flatten()
@@ -8234,7 +8274,7 @@ fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {
     let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {
         return LINUX_EINVAL;
     };
-    let mut residency = [0_u8; LINUX_MMAP_SLOT_COUNT];
+    let mut residency = [0_u8; LINUX_RUNTIME_MMAP_SLOT_COUNT];
     for (offset, resident) in residency.iter_mut().enumerate().take(range_pages) {
         let slot = start_slot + offset;
         let Some(area) = linux_mmap_slot_area_index(slot) else {
@@ -8897,7 +8937,7 @@ fn linux_execve_at(
     {
         return LINUX_ENOEXEC;
     }
-    if (0..LINUX_MMAP_SLOT_COUNT).any(|index| {
+    if (0..LINUX_RUNTIME_MMAP_SLOT_COUNT).any(|index| {
         ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst) != 0
             || ELF_PROBE_MMAP_PROTECTION[index].load(Ordering::SeqCst) != 0
             || ELF_PROBE_MMAP_FILE[index].load(Ordering::SeqCst) != 0
@@ -9764,6 +9804,16 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
     if let Some(result) = linux_pipe_read(descriptor, address, count) {
         return result;
     }
+    if u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_INPUT {
+        if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) || count == 0 {
+            return 0;
+        }
+        let byte = crate::serial_read_byte_blocking();
+        if !copy_to_linux_user(address, &[byte]) {
+            return LINUX_EFAULT;
+        }
+        return 1;
+    }
     let device = linux_device_descriptor(descriptor);
     if linux_tmp_file(device) {
         return linux_tmp_read(descriptor, device, address, count);
@@ -9805,15 +9855,6 @@ fn linux_descriptor_read(descriptor: u64, address: u64, count: u64) -> u64 {
             return LINUX_EFAULT;
         }
         count
-    } else if u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_INPUT {
-        if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) || count == 0 {
-            return 0;
-        }
-        let byte = crate::serial_read_byte_blocking();
-        if !copy_to_linux_user(address, &[byte]) {
-            return LINUX_EFAULT;
-        }
-        1
     } else {
         LINUX_EBADF
     }
@@ -11745,6 +11786,9 @@ fn linux_descriptor_poll_events(descriptor: i32, requested: u16) -> u16 {
 }
 
 fn linux_descriptor_write(descriptor: u64, address: u64, count: u64) -> u64 {
+    if descriptor == 2 && LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return linux_bounded_console_write(address, count);
+    }
     if let Some(result) = linux_eventfd_write(descriptor, address, count) {
         return result;
     }
@@ -11824,6 +11868,16 @@ fn linux_descriptor_readv(descriptor: u64, vectors: u64, count: u64) -> u64 {
         ranges[index] = (address, length);
         total = next_total;
     }
+    if u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_INPUT {
+        if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+            return 0;
+        }
+        let byte = crate::serial_read_byte_blocking();
+        if !copy_to_linux_user(ranges[0].0, &[byte]) {
+            return LINUX_EFAULT;
+        }
+        return 1;
+    }
     if let Some(file) = linux_regular_file(device) {
         let offset = linux_descriptor_offset(descriptor).load(Ordering::SeqCst);
         let Ok(start) = usize::try_from(offset) else {
@@ -11888,7 +11942,8 @@ fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
     }
     let access = device & 3;
     let writable_device = device != 0 && (access == LINUX_DESCRIPTOR_OUTPUT || access == 3);
-    let serial = u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_OUTPUT
+    let serial = descriptor == 2 && LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        || u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_OUTPUT
         || writable_device && device & LINUX_DEVICE_CONSOLE != 0;
     let discard = writable_device && device & LINUX_DEVICE_CONSOLE == 0;
     if !serial && !discard {
@@ -12958,7 +13013,7 @@ fn linux_user_range_covered(address: u64, length: usize, writable: bool) -> bool
         }
         extend_linux_user_area(&mut next, tls_base, tls_size, current);
         extend_linux_user_area(&mut next, stack_base, PAGE_SIZE as u64, current);
-        for index in 0..LINUX_MMAP_SLOT_COUNT {
+        for index in 0..LINUX_RUNTIME_MMAP_SLOT_COUNT {
             let pages = ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst);
             let protection = u64::from(ELF_PROBE_MMAP_PROTECTION[index].load(Ordering::SeqCst));
             let required = if writable {

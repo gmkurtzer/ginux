@@ -169,7 +169,6 @@ for expected in \
     '1 0 R controller' \
     '100 0 R demo:init' \
     'demo: stopped' \
-    'demo: starting' \
     'demo: failed (contained)' \
     'ginux: starting configured runtime container' \
     'Error: unknown command' \

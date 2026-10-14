@@ -157,10 +157,10 @@ const CONTAINER_COMMANDS: &[Command<'static>] = &[
     ),
     Command::leaf(
         b"start",
-        b"container start NAME",
-        b"Start a configured container",
+        b"container start NAME [--attach]",
+        b"Start a configured container and attach its console",
         COMMAND_CONTAINER_START,
-        Arity::exact(1),
+        Arity::range(1, 2),
     ),
     Command::leaf(
         b"stop",
@@ -895,6 +895,14 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: Ar
         write(console, b"container: invalid name\r\n");
         return;
     }
+    if command == COMMAND_CONTAINER_START
+        && arguments
+            .get(1)
+            .is_some_and(|argument| argument != b"--attach")
+    {
+        write(console, b"container: invalid option\r\n");
+        return;
+    }
     let mut request = request_for_name(name);
     match command {
         COMMAND_CONTAINER_NEW => {
@@ -923,7 +931,7 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: Ar
             if container_call(host, NATIVE_CONTAINER_RESTART, &mut request)
                 == NATIVE_CONTAINER_STATE_STOPPED
             {
-                write_name_state(console, name, b"starting\r\n");
+                write_name_state(console, name, b"stopped\r\n");
             } else {
                 write(console, b"container: start rejected (image not ready)\r\n");
             }

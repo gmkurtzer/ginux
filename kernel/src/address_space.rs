@@ -148,8 +148,8 @@ pub(crate) fn run_alpine_shell() -> bool {
     const OWNED_FRAME_COUNT: usize = HIERARCHY_FRAMES + 2;
     const RUNTIME_FRAME_CAPACITY: usize = 440;
     const HEAP_ADDRESS: u64 = 0x80_0000;
-    const STACK_ADDRESS: u64 = 0x81_0000;
-    const MMAP_ADDRESS: u64 = 0x82_0000;
+    const STACK_ADDRESS: u64 = 0x88_0000;
+    const MMAP_ADDRESS: u64 = 0x90_0000;
 
     let Some(plan) = crate::oci_image::alpine_shell_plan() else {
         crate::serial_write_bytes(b"ginux: Alpine shell plan unavailable\r\n");
@@ -259,6 +259,26 @@ pub(crate) fn run_alpine_shell() -> bool {
         ) {
             return None;
         }
+        for page in 1..cpu::LINUX_RUNTIME_HEAP_PAGES {
+            let frame = *runtime_frames.get(next_frame)?;
+            let address = HEAP_ADDRESS.checked_add((page * PAGE_SIZE) as u64)?;
+            if unsafe { zero_frame(frame.address()) }.is_none()
+                || !map_linux_leaf_in_root(root.address(), address, frame.address(), true, false)
+            {
+                return None;
+            }
+            next_frame += 1;
+        }
+        for page in 1..cpu::LINUX_RUNTIME_STACK_PAGES {
+            let frame = *runtime_frames.get(next_frame)?;
+            let address = STACK_ADDRESS.checked_sub((page * PAGE_SIZE) as u64)?;
+            if unsafe { zero_frame(frame.address()) }.is_none()
+                || !map_linux_leaf_in_root(root.address(), address, frame.address(), true, false)
+            {
+                return None;
+            }
+            next_frame += 1;
+        }
         stage = 4;
 
         let stack =
@@ -340,7 +360,7 @@ pub(crate) fn run_alpine_shell() -> bool {
             relro: 0,
             relro_size: 0,
             heap: HEAP_ADDRESS as usize,
-            heap_size: PAGE_SIZE,
+            heap_size: cpu::LINUX_RUNTIME_HEAP_PAGES * PAGE_SIZE,
             mmap: MMAP_ADDRESS as usize,
             main_mappings: [cpu::LinuxFileMapping::EMPTY; 8],
             dependency_base_min: [0; 2],
