@@ -3563,11 +3563,18 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     'managed: loop {
         serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
-        if !address_space::run_installed_interactive_controller() {
-            kernel_fail("ginux: runtime container controller failed\r\n");
-        }
-        if arch::x86_64::cpu::take_container_host_shutdown_request() {
+        let controller_completed = address_space::run_installed_interactive_controller();
+        let shutdown_requested = arch::x86_64::cpu::take_container_host_shutdown_request();
+        if shutdown_requested {
+            if !controller_completed {
+                serial_write(
+                    "ginux: authorized shutdown retained after controller teardown failure\r\n",
+                );
+            }
             break;
+        }
+        if !controller_completed {
+            kernel_fail("ginux: runtime container controller failed\r\n");
         }
         if arch::x86_64::cpu::take_network_dhcp_request() {
             let success = address_space::configure_native_network_dhcp(

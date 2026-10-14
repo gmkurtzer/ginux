@@ -2295,8 +2295,15 @@ fn resume_linux_system_supervisor() -> bool {
     }
     CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
     crate::serial_write("ginux: configured runtime container reached ready state\r\n");
-    if !address_space::run_installed_interactive_controller() {
+    let controller_completed = address_space::run_installed_interactive_controller();
+    let shutdown_requested = CONTAINER_HOST_SHUTDOWN_REQUESTED.load(Ordering::SeqCst);
+    if !controller_completed && !shutdown_requested {
         return false;
+    }
+    if !controller_completed {
+        crate::serial_write(
+            "ginux: authorized shutdown retained after controller teardown failure\r\n",
+        );
     }
     if LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT.load(Ordering::SeqCst) == 0
         && !shutdown_linux_system_supervisor(false)
