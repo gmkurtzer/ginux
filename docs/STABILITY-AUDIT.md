@@ -98,10 +98,10 @@ The domain-first control-plane iteration was verified on 2026-10-15:
   clean init exit, and restart.
 - `make test-multi-domain`: pass, including concurrent Alpine and Rocky domain
   lifecycle and independent attach/stop behavior.
-- `make test`: fail after the synthetic Linux PID-1 suite in the verification
-  build, with a pre-existing interpreted-loader teardown page fault. This gate
-  does not exercise the interactive controller path, but it must be repaired
-  before the complete repository gate is green.
+- `make test`: pass. The apparent interpreted-loader fault was a deliberate
+  probe failure caused by an obsolete all-or-nothing `getdents64` expectation;
+  the probe now verifies Linux-compatible whole-record partial reads and a
+  genuinely undersized first-record buffer.
 
 ## Stabilization progress
 
