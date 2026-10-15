@@ -20,14 +20,14 @@ until every invariant has an automated end-to-end test.
    heap, mmap state, TLS, descriptors, CWD, signals, threads, process table,
    mount namespace, tmpfs, and console continuation cannot be selected through
    a host-wide singleton.
-2. **A running container owns its memory until it exits.** OCI runtimes cannot
+2. **A running domain owns its memory until it exits.** OCI runtimes cannot
    share the reusable bootstrap runtime extent.
 3. **Detach is a scheduler operation.** It must save a resumable process context
    and return to the resident controller. It must not recursively invoke a new
    controller on the blocked container's kernel stack.
 4. **The controller is resident.** Starting, attaching, stopping, or faulting a
    container must not restart the controller or change controller PID 1.
-5. **Container failure is contained.** A failed syscall, process, driver, pull,
+5. **Domain failure is contained.** A failed syscall, process, driver, pull,
    or init changes only the owning domain's lifecycle state. It must not panic
    the kernel or stop another container.
 6. **Process state is process-owned.** Fork/exec must preserve the parent and
@@ -74,9 +74,9 @@ the real controller console:
 The test is not satisfied by lifecycle-state simulation. Both init processes
 must retain independent address spaces and resumable execution contexts.
 
-## Verification baseline
+## Verification record
 
-At the start of this audit (historical baseline):
+The historical baseline at the start of this audit was:
 
 - `make check`: pass.
 - `make test-c1`: pass.
@@ -90,11 +90,24 @@ At the start of this audit (historical baseline):
 These results show that the existing green gates do not cover the failing
 runtime topology.
 
+The domain-first control-plane iteration was verified on 2026-10-15:
+
+- `make check`: pass.
+- `make test-c1`: pass.
+- `make test-alpine`: pass, including live registry ingestion, attach/detach,
+  clean init exit, and restart.
+- `make test-multi-domain`: pass, including concurrent Alpine and Rocky domain
+  lifecycle and independent attach/stop behavior.
+- `make test`: fail after the synthetic Linux PID-1 suite in the verification
+  build, with a pre-existing interpreted-loader teardown page fault. This gate
+  does not exercise the interactive controller path, but it must be repaired
+  before the complete repository gate is green.
+
 ## Stabilization progress
 
-- OCI runtime extents are now allocated per container slot. Starting another
+- OCI runtime extents are now allocated per domain slot. Starting another
   domain can no longer reuse the first domain's runtime pages.
-- Mutable Linux/ELF ABI state is now banked by the executing container domain,
+- Mutable Linux/ELF ABI state is now banked by the executing domain,
   with a separate host/proof instance. Controller handoff temporarily selects
   the host bank.
 - `make check`, the normal `make test` boot, and `make test-c2` pass with these

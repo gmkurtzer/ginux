@@ -129,14 +129,14 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for "[detached from domain; use 'domain attach NAME' to return]"
     wait_for_count 'ginux> ' 2
     printf '%s\n' 'domain list'
-    wait_for_line 'alpine          running     linux'
+    wait_for 'alpine          running     linux'
     printf '%s\n' 'domain attach alpine'
     wait_for_count $'\033[2J\033[H' 1
     printf '%s\n' 'exit 0'
     wait_for_count 'ginux: OCI init exited cleanly' 1
     wait_for_count 'ginux> ' 3
     printf '%s\n' 'domain list'
-    wait_for_line 'alpine          stopped     linux'
+    wait_for 'alpine          stopped     linux'
     wait_for_count 'ginux> ' 4
     printf '%s\n' 'domain start alpine --attach'
     wait_for_count 'ginux: entering configured OCI init' 2
