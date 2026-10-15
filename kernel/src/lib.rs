@@ -3688,7 +3688,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             if downloaded {
                 serial_write("ginux: OCI unpacking image filesystem\r\n");
             }
-            let success = downloaded && image_store::install_latest_layer();
+            let success = arch::x86_64::cpu::configured_container_slot()
+                .is_some_and(|slot| downloaded && image_store::install_latest_layer(slot));
             arch::x86_64::cpu::complete_container_pull(success);
             serial_write(if success {
                 "ginux: OCI image ready\r\n"

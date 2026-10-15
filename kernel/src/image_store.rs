@@ -17,7 +17,8 @@ pub(crate) const CACHE_QUOTA: usize = OBJECT_SIZE_LIMIT;
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static mut STORE: MaybeUninit<ImageStore<RamBackend, OBJECT_LIMIT>> = MaybeUninit::uninit();
 static mut LAST_PUBLISHED: Digest = Digest([0; 32]);
-static mut ROOTFS_FRAMES: [FrameLease; ROOTFS_PAGE_LIMIT] = [FrameLease::EMPTY; ROOTFS_PAGE_LIMIT];
+static mut ROOTFS_FRAMES: [[FrameLease; ROOTFS_PAGE_LIMIT]; crate::control_abi::CONTAINER_LIMIT] =
+    [const { [FrameLease::EMPTY; ROOTFS_PAGE_LIMIT] }; crate::control_abi::CONTAINER_LIMIT];
 
 #[derive(Clone, Copy)]
 struct RamObject {
@@ -205,7 +206,10 @@ fn with_store<T>(
     Some(operation(store))
 }
 
-pub(crate) fn install_latest_layer() -> bool {
+pub(crate) fn install_latest_layer(slot: usize) -> bool {
+    if slot >= crate::control_abi::CONTAINER_LIMIT || crate::oci_image::is_installed(slot) {
+        return false;
+    }
     let digest = unsafe { core::ptr::addr_of!(LAST_PUBLISHED).read() };
     if digest == Digest([0; 32]) {
         return false;
@@ -260,16 +264,36 @@ pub(crate) fn install_latest_layer() -> bool {
             return false;
         }
         let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, written) };
-        if !crate::oci_image::install_runtime_rootfs(bytes) {
+        if !crate::oci_image::install_runtime_rootfs(slot, bytes) {
             let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &frames);
             return false;
         }
         unsafe {
-            core::ptr::addr_of_mut!(ROOTFS_FRAMES).write(frames);
+            core::ptr::addr_of_mut!(ROOTFS_FRAMES[slot]).write(frames);
         }
         true
     })
     .unwrap_or(false)
+}
+
+pub(crate) fn uninstall_rootfs(slot: usize) -> bool {
+    if slot >= crate::control_abi::CONTAINER_LIMIT
+        || !crate::oci_image::uninstall_runtime_rootfs(slot)
+    {
+        return false;
+    }
+    let frames = unsafe { core::ptr::addr_of!(ROOTFS_FRAMES[slot]).read() };
+    if frames[0] == FrameLease::EMPTY {
+        return true;
+    }
+    let released = memory::scrub_and_release_frames(FrameOwner::KERNEL, &frames);
+    if released {
+        unsafe {
+            core::ptr::addr_of_mut!(ROOTFS_FRAMES[slot])
+                .write([FrameLease::EMPTY; ROOTFS_PAGE_LIMIT]);
+        }
+    }
+    released
 }
 
 fn gzip_header_length(backend: &RamBackend, object: u8, length: usize) -> Option<usize> {

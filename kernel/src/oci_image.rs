@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use ginux_oci::{Entry, EntryKind, Rootfs};
 
 pub(crate) const ROOT_HANDLE: u16 = 1;
@@ -12,16 +12,17 @@ pub(crate) struct Child {
     pub(crate) name: &'static [u8],
 }
 
-static INSTALLED: AtomicBool = AtomicBool::new(false);
-static ADDRESS: AtomicUsize = AtomicUsize::new(0);
-static SIZE: AtomicUsize = AtomicUsize::new(0);
+static ADDRESSES: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::CONTAINER_LIMIT];
+static SIZES: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::CONTAINER_LIMIT];
 
-pub(crate) fn is_installed() -> bool {
-    INSTALLED.load(Ordering::Acquire)
+pub(crate) fn is_installed(slot: usize) -> bool {
+    slot < crate::control_abi::CONTAINER_LIMIT && SIZES[slot].load(Ordering::Acquire) != 0
 }
 
-pub(crate) fn install_runtime_rootfs(bytes: &'static [u8]) -> bool {
-    if INSTALLED.load(Ordering::Acquire) {
+pub(crate) fn install_runtime_rootfs(slot: usize, bytes: &'static [u8]) -> bool {
+    if slot >= crate::control_abi::CONTAINER_LIMIT || is_installed(slot) {
         return false;
     }
     let Some(rootfs) = Rootfs::parse(bytes) else {
@@ -30,18 +31,29 @@ pub(crate) fn install_runtime_rootfs(bytes: &'static [u8]) -> bool {
     if process_plan_in(&rootfs, b"/bin/sh").is_none() {
         return false;
     }
-    ADDRESS.store(bytes.as_ptr() as usize, Ordering::Relaxed);
-    SIZE.store(bytes.len(), Ordering::Relaxed);
-    INSTALLED.store(true, Ordering::Release);
+    ADDRESSES[slot].store(bytes.as_ptr() as usize, Ordering::Relaxed);
+    SIZES[slot].store(bytes.len(), Ordering::Release);
+    true
+}
+
+pub(crate) fn uninstall_runtime_rootfs(slot: usize) -> bool {
+    let Some(size) = SIZES.get(slot) else {
+        return false;
+    };
+    if size.swap(0, Ordering::AcqRel) == 0 {
+        return true;
+    }
+    ADDRESSES[slot].store(0, Ordering::Release);
     true
 }
 
 fn rootfs() -> Option<Rootfs<'static>> {
-    if !INSTALLED.load(Ordering::Acquire) {
-        return None;
-    }
-    let address = ADDRESS.load(Ordering::Relaxed);
-    let size = SIZE.load(Ordering::Relaxed);
+    rootfs_for(crate::arch::x86_64::cpu::current_container_slot()?)
+}
+
+fn rootfs_for(slot: usize) -> Option<Rootfs<'static>> {
+    let size = SIZES.get(slot)?.load(Ordering::Acquire);
+    let address = ADDRESSES.get(slot)?.load(Ordering::Relaxed);
     if address == 0 || size == 0 {
         return None;
     }

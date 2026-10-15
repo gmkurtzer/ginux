@@ -834,7 +834,6 @@ static CONTAINER_IMAGES: [[AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
         control_abi::CONTAINER_LIMIT];
 static CONTAINER_SELECTED_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
 static CONTAINER_ACTIVE_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
-static CONTAINER_INSTALLED_IMAGE_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -17646,8 +17645,8 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 &CONTAINER_IMAGES[slot],
                 &CONTAINER_IMAGE_SIZES[slot],
             );
-            if installed_container_image_slot() == Some(slot) {
-                CONTAINER_INSTALLED_IMAGE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
+            if crate::oci_image::is_installed(slot) && !crate::image_store::uninstall_rootfs(slot) {
+                return u64::MAX - 2;
             }
             update_container_configuration(slot, control_abi::CONTAINER_CONFIG_IMAGE)
         }
@@ -17679,7 +17678,7 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             let slot = requested_slot.unwrap_or(0);
             CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::SeqCst);
             reset_container_console(operation == control_abi::CONTAINER_START_ATTACHED);
-            if container_image_is_embedded(slot) || installed_container_image_slot() == Some(slot) {
+            if container_image_is_embedded(slot) || crate::oci_image::is_installed(slot) {
                 CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
             } else {
                 CONTAINER_PULL_REQUESTED.store(true, Ordering::SeqCst);
@@ -17835,11 +17834,6 @@ fn active_container_slot() -> Option<usize> {
     (slot < control_abi::CONTAINER_LIMIT).then_some(slot)
 }
 
-fn installed_container_image_slot() -> Option<usize> {
-    let slot = usize::from(CONTAINER_INSTALLED_IMAGE_SLOT.load(Ordering::SeqCst));
-    (slot < control_abi::CONTAINER_LIMIT).then_some(slot)
-}
-
 fn selected_or_active_container_slot() -> Option<usize> {
     selected_container_slot().or_else(active_container_slot)
 }
@@ -17867,9 +17861,15 @@ pub(crate) fn configured_container_uses_installed_oci_image() -> bool {
     let Some(slot) = selected_container_slot() else {
         return false;
     };
-    !container_image_is_embedded(slot)
-        && installed_container_image_slot() == Some(slot)
-        && crate::oci_image::is_installed()
+    !container_image_is_embedded(slot) && crate::oci_image::is_installed(slot)
+}
+
+pub(crate) fn configured_container_slot() -> Option<usize> {
+    selected_container_slot()
+}
+
+pub(crate) fn current_container_slot() -> Option<usize> {
+    active_container_slot()
 }
 
 pub(crate) fn configured_container_init(output: &mut [u8]) -> Option<usize> {
@@ -17901,7 +17901,6 @@ pub(crate) fn complete_container_pull(success: bool) {
         return;
     };
     if success {
-        CONTAINER_INSTALLED_IMAGE_SLOT.store(slot as u8, Ordering::Release);
         CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
     } else {
         CONTAINER_CONTROL_STATES[slot]
