@@ -50,15 +50,15 @@ Current totals: **116 Partial**, **28 Policy-denied**, **231 Missing**.
 |---|---|---|
 | x86-64 `SYSCALL` entry and return | Partial | Native register convention and `-errno` returns; bounded context validation. |
 | ELF64 loading | Partial | `ET_EXEC` and `ET_DYN`, bounded program-header and relocation profiles; see [Linux ELF64 Profile v0](../specs/kernel/linux-elf-v0.md). |
-| Initial stack and auxiliary vector | Partial | Bounded argv/envp and selected `AT_*` entries; no vDSO. |
-| Dynamic loader and shared objects | Partial | musl/Alpine bootstrap path works for the admitted relocation and dependency profile. |
+| Initial stack and auxiliary vector | Partial | Bounded argv/envp, selected `AT_*` entries, and kernel-provided `AT_RANDOM`; no vDSO. |
+| Dynamic loader and shared objects | Partial | Unmodified Alpine/musl and Rocky 10/glibc shells load. Rocky's dynamic coreutils `cat` and `ls` execute from the OCI root. Broader dependency, relocation, locale, and NSS coverage remains incomplete. |
 | TLS | Partial | Bounded static TLS and `arch_prctl` FS-base support. |
-| Process and thread model | Partial | Bounded fork/exec/clone/wait lifecycle; not general Linux scheduling or process semantics. |
+| Process and thread model | Partial | Repeated fork/exec/exit/wait works for Alpine and Rocky shells. Fork preserves parent memory and descriptor state; exec privately replaces shared image pages. Copy-on-write, larger process tables, and general Linux scheduling semantics remain incomplete. |
 | Signals | Partial | Selected standard signal, mask, alternate-stack, delivery, and return behavior; no complete restart/nesting semantics. |
 | VFS and path lookup | Partial | OCI root, directories, symlinks, cwd, tmpfs, devfs, and procfs subsets; not a general Linux VFS. |
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
-| Runtime `mmap` | Partial | Anonymous and file mappings support current Alpine workloads. The backend-independent, page-growing metadata layer is implemented and tested; adapting it to managed kernel frames and migrating mmap away from the current 32-page path remain required for Rocky systemd. |
+| Runtime `mmap` | Partial | Page-table-backed anonymous and OCI file mappings, fixed placement, protection changes, unmap, `madvise`, and `mincore` support Alpine and the validated Rocky glibc/coreutils path. Process snapshot metadata is still bounded and demand paging, COW, shared mappings, and full Linux semantics remain incomplete. |
 | `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
 | `/sys` | Missing | No Linux-compatible sysfs contract. |
 | Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |

@@ -545,12 +545,6 @@ impl<'a> Rootfs<'a> {
             let mut full_path = [0_u8; TAR_PREFIX_SIZE + 1 + TAR_NAME_SIZE];
             let length = copy_entry_path(entry, &mut full_path)?;
             let path = &full_path[..length];
-            if self
-                .find_index(path)
-                .is_none_or(|(visible, _)| visible != index)
-            {
-                continue;
-            }
             let remainder = if parent.is_empty() {
                 path
             } else {
@@ -563,6 +557,12 @@ impl<'a> Rootfs<'a> {
                 remainder
             };
             if remainder.is_empty() || remainder.contains(&b'/') {
+                continue;
+            }
+            if self
+                .find_index(path)
+                .is_none_or(|(visible, _)| visible != index)
+            {
                 continue;
             }
             let name = entry.path.rsplit(|byte| *byte == b'/').next()?;

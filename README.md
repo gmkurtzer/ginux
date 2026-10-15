@@ -257,7 +257,7 @@ simulation is not sufficient.
 | Domains | Default-Linux domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
-| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, an automatically mounted per-domain procfs, and an unmodified Alpine musl/BusyBox shell with rootfs-backed commands | Complete Alpine checkpoint, then Rocky Linux 10 and systemd |
+| Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, an automatically mounted per-domain procfs, an unmodified Alpine musl/BusyBox shell, and a Rocky 10 glibc shell that can fork/exec dynamic coreutils | Expand the general Linux ABI, then boot Rocky Linux 10 with systemd |
 | Other personalities | Domain and kernel mechanisms are designed for reuse | No BSD or other non-Linux personality is implemented yet |
 
 The Linux layer is intentionally tracked as a compatibility contract, not as a
@@ -307,15 +307,13 @@ personality domain. `shutdown` stops the host.
 
 OCI layers are downloaded and verified in manifest order, then assembled with
 replacement, whiteout, and opaque-directory semantics before publication.
-Full controlling-terminal and session semantics are still incomplete. The
-Rocky `10-ubi-init` image now reaches its dynamic linker, but systemd remains
-blocked by the fixed-size runtime mmap bookkeeping; replacing that bookkeeping
-with domain-memory-backed dynamic metadata is the next compatibility step. The
-`ginux-runtime-memory` foundation now provides backend-independent mapping
-metadata that grows by allocating pages, rolls back failed growth atomically,
-and releases the complete chain. The kernel frame backend and mmap migration
-remain in progress; the existing 32-page runtime path has not been relabeled as
-unbounded.
+Full controlling-terminal and session semantics are still incomplete. Rocky
+Linux 10 now starts an unmodified glibc `/bin/sh`; shell builtins, file status,
+dynamic `cat`, and root-directory `ls` pass the QEMU lifecycle gate. This is a
+meaningful ABI checkpoint, not a claim of general Linux or systemd
+compatibility. Process metadata remains bounded, fork is eager rather than
+copy-on-write, and major surfaces such as sockets, cgroups, sysfs, broad
+`ioctl` families, and systemd's remaining contracts still need implementation.
 
 Useful development gates:
 
@@ -324,8 +322,9 @@ make build          # build the unified EFI image
 make test           # run the core QEMU boot gate
 make test-c2        # verify configured domain lifecycle
 make test-alpine    # verify runtime OCI download and the Alpine shell
+make test-rocky-shell # verify Rocky glibc shell, fork/exec, cat, and ls
 make test-multi-domain # verify concurrent Alpine domains and Rocky ingestion
-make probe-rocky-systemd # probe Rocky systemd's documented mmap boundary
+make probe-rocky-systemd # probe the remaining Rocky systemd boundary
 make check          # run architecture, ABI, format, lint, and unit checks
 make gate           # run the clean reproducible project gate
 ```

@@ -65,8 +65,9 @@ domain to boot like a normal machine while remaining inside a native Ginux
 domain boundary.
 
 - Diagnostic gate: `make probe-rocky-systemd`
-- Current status: not accepted. The probe reaches the Rocky dynamic linker;
-  systemd is currently blocked by fixed-size runtime `mmap` bookkeeping.
+- Current status: not accepted. The Rocky 10 glibc shell and dynamic coreutils
+  now pass `make test-rocky-shell`; systemd and the broader general-purpose
+  Linux contract remain incomplete.
 - Acceptance requires: dynamic mapping metadata, the required Linux syscall
   and pseudo-filesystem surface, working domain networking, interactive access,
   clean stop/restart, and no special Rocky code path in the kernel.

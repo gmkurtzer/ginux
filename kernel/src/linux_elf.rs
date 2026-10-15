@@ -819,7 +819,7 @@ pub(crate) struct ProcessStartup {
     pub(crate) main_entry: u64,
 }
 
-pub(crate) const AUXILIARY_VECTOR_WORDS: usize = 36;
+pub(crate) const AUXILIARY_VECTOR_WORDS: usize = 38;
 
 pub(crate) fn parse(bytes: &[u8]) -> Option<Image<'_>> {
     if bytes.len() < ELF_HEADER_SIZE + PROGRAM_HEADER_SIZE * MIN_LOAD_SEGMENT_COUNT
@@ -1572,6 +1572,7 @@ pub(crate) fn auxiliary_vector(
     startup: ProcessStartup,
     executable_name: u64,
     platform: u64,
+    random: u64,
 ) -> [u64; AUXILIARY_VECTOR_WORDS] {
     [
         3,
@@ -1608,6 +1609,8 @@ pub(crate) fn auxiliary_vector(
         0,
         26,
         0,
+        25,
+        random,
         0,
         0,
     ]
@@ -3334,7 +3337,7 @@ pub(crate) fn verify_interpreted_plan() -> bool {
     };
     let combined = &combined_plan.process;
     let startup = interpreted_startup(combined);
-    let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000);
+    let auxiliary = auxiliary_vector(startup, 0x70_1000, 0x70_2000, 0x70_3000);
     if combined_plan.dependency.entry != 0x61_0100 {
         crate::serial_write_bytes(b"\r\nginux: dependency entry plan mismatch");
     }
@@ -3361,7 +3364,8 @@ pub(crate) fn verify_interpreted_plan() -> bool {
         && auxiliary[23] == 0x70_1000
         && auxiliary[25] == 0x40_0100
         && auxiliary[29] == 0x70_2000
-        && auxiliary[34..] == [0, 0];
+        && auxiliary[35] == 0x70_3000
+        && auxiliary[36..] == [0, 0];
     let main_valid = combined.initial_entry == 0x60_0100
         && combined.main_entry == 0x40_0100
         && combined.interpreter_base == 0x60_0000

@@ -29,6 +29,7 @@ const DOUBLE_FAULT_IST: u8 = 1;
 const PAGE_SIZE: usize = 4096;
 pub(crate) const LINUX_MMAP_SLOT_COUNT: usize = 4;
 const LINUX_RUNTIME_MMAP_SLOT_COUNT: usize = 32;
+const LINUX_RUNTIME_DYNAMIC_MMAP_BASE: u64 = 1 << 39;
 pub(crate) const LINUX_RUNTIME_STACK_PAGES: usize = 8;
 pub(crate) const LINUX_RUNTIME_HEAP_PAGES: usize = 16;
 const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
@@ -113,6 +114,7 @@ const LINUX_CLONE_SETTLS: u64 = 0x0008_0000;
 const LINUX_CLONE_PARENT_SETTID: u64 = 0x0010_0000;
 const LINUX_CLONE_CHILD_CLEARTID: u64 = 0x0020_0000;
 const LINUX_CLONE_CHILD_SETTID: u64 = 0x0100_0000;
+const LINUX_SIGCHLD: u64 = 17;
 const LINUX_BOUNDED_THREAD_CLONE_FLAGS: u64 = LINUX_CLONE_VM
     | LINUX_CLONE_FS
     | LINUX_CLONE_FILES
@@ -233,6 +235,7 @@ const LINUX_CAPABILITY_DATA_SIZE: usize = 24;
 const LINUX_RETURN_TO_KERNEL: u64 = (-4096_i64) as u64;
 const LINUX_RETURN_FROM_SIGNAL: u64 = (-4095_i64) as u64;
 const LINUX_EPERM: u64 = u64::MAX;
+const LINUX_EIO: u64 = u64::MAX - 4;
 const LINUX_EINTR: u64 = u64::MAX - 3;
 const LINUX_E2BIG: u64 = u64::MAX - 6;
 const LINUX_ENOEXEC: u64 = u64::MAX - 7;
@@ -261,12 +264,17 @@ const LINUX_ENOSYS: u64 = u64::MAX - 37;
 const LINUX_ETIMEDOUT: u64 = u64::MAX - 109;
 const LINUX_RLIMIT_STACK: u64 = 3;
 const LINUX_RLIMIT_NOFILE: u64 = 7;
+const LINUX_WNOHANG: u64 = 1;
+const LINUX_WUNTRACED: u64 = 2;
+const LINUX_WCONTINUED: u64 = 8;
+const LINUX_RUSAGE_SIZE: usize = 144;
 const LINUX_PROT_READ: u64 = 1;
 const LINUX_PROT_WRITE: u64 = 2;
 const LINUX_PROT_EXEC: u64 = 4;
 const LINUX_MAP_PRIVATE: u64 = 2;
 const LINUX_MAP_FIXED: u64 = 0x10;
 const LINUX_MAP_ANONYMOUS: u64 = 0x20;
+const LINUX_MAP_DENYWRITE: u64 = 0x800;
 const LINUX_MAP_FIXED_NOREPLACE: u64 = 0x10_0000;
 const LINUX_MAIN_MAPPING_COUNT: usize = 8;
 const LINUX_DEPENDENCY_MAPPING_COUNT: usize = 8;
@@ -308,7 +316,9 @@ const LINUX_PIPE_READV_WAIT_FLAG: u64 = 1 << 63;
 const LINUX_PIPE_WRITEV_WAIT_FLAG: u64 = 1 << 63;
 const LINUX_AT_FDCWD: u32 = (-100_i32) as u32;
 const LINUX_AT_SYMLINK_NOFOLLOW: u64 = 0x100;
+const LINUX_AT_NO_AUTOMOUNT: u64 = 0x800;
 const LINUX_AT_EMPTY_PATH: u64 = 0x1000;
+const LINUX_AT_STATX_SYNC_TYPE: u64 = 0x6000;
 const LINUX_TCGETS: u64 = 0x5401;
 const LINUX_TIOCGWINSZ: u64 = 0x5413;
 const LINUX_FIONREAD: u64 = 0x541b;
@@ -387,12 +397,8 @@ const LINUX_PROC_PID2_ZOMBIE_STAT: &[u8] = b"2 (init) Z 1 1 1 0 -1 4194560 0 0 0
 const LINUX_PROC_PID2_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 440;
-pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
-    + 1 // primary stack
-    + 1 // heap
-    + 2 // primary and sibling TLS
-    + 1 // sibling stack
-    + LINUX_MMAP_SLOT_COUNT;
+pub(crate) const LINUX_PROCESS_HIERARCHY_LIMIT: usize = 16;
+pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = 1408;
 const LINUX_EXEC_VECTOR_LIMIT: usize = 8;
 const LINUX_EXEC_STRING_LIMIT: usize = 64;
 const LINUX_EXEC_STACK_SIZE: usize = 512;
@@ -693,6 +699,35 @@ banked_atomic_integer!(BankedAtomicU8, AtomicU8, u8);
 banked_atomic_integer!(BankedAtomicU16, AtomicU16, u16);
 banked_atomic_integer!(BankedAtomicU32, AtomicU32, u32);
 banked_atomic_integer!(BankedAtomicU64, AtomicU64, u64);
+
+pub(crate) fn linux_startup_random() -> Option<[u8; 16]> {
+    if core::arch::x86_64::__cpuid(1).ecx & (1 << 30) == 0 {
+        return None;
+    }
+    let mut output = [0_u8; 16];
+    for chunk in output.as_chunks_mut::<8>().0 {
+        let mut generated = None;
+        for _ in 0..16 {
+            let mut value: u64;
+            let mut ready: u8;
+            unsafe {
+                asm!(
+                    "rdrand {value}",
+                    "setc {ready}",
+                    value = out(reg) value,
+                    ready = out(reg_byte) ready,
+                    options(nostack, preserves_flags)
+                );
+            }
+            if ready != 0 {
+                generated = Some(value);
+                break;
+            }
+        }
+        chunk.copy_from_slice(&generated?.to_ne_bytes());
+    }
+    Some(output)
+}
 static CONTROL_DISCOVERY_OVERRIDE_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static CONTROL_DISCOVERY_OVERRIDE_WORD: AtomicU64 = AtomicU64::new(0);
 static CONTROL_DESCRIPTOR_OVERRIDE_DOMAIN: AtomicU64 = AtomicU64::new(0);
@@ -716,6 +751,7 @@ static LINUX_LIVE_RETURN_VALIDATED: BankedAtomicBool = BankedAtomicBool::new(fal
 static LINUX_CHILD_EXIT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_PARENT_RESUMED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_FORK_REQUESTED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_FORK_CHILD_TID_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_PROCESS_CHILD_EXITED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_PROCESS_CHILD_STATUS: BankedAtomicU8 = BankedAtomicU8::new(0);
 static LINUX_CURRENT_PROCESS_PID: BankedAtomicU32 = BankedAtomicU32::new(1);
@@ -907,6 +943,7 @@ static ELF_PROBE_RELRO_SIZE: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_BRK: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_BRK_LIMIT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_MMAP: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_MMAP_NEXT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_MMAP_FRAMES: [BankedAtomicU64; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
     [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
 static ELF_PROBE_MMAP_GENERATIONS: [BankedAtomicU32; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
@@ -1885,7 +1922,11 @@ pub(crate) fn resume_live_linux_process(
     // A terminating or deferred Linux syscall returns through the saved kernel
     // stack installed by this entry stub.
     unsafe { ginux_process_user_enter(entry, stack, general.as_ptr(), rflags) };
-    let preserved = active_fs_base() == fs_base;
+    let returned_fs = active_fs_base();
+    let preserved = returned_fs == fs_base
+        || LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+            && LINUX_PROCESS_CHILD_EXITED.load(Ordering::SeqCst)
+            && returned_fs < 1 << 47;
     unsafe { write_msr(FS_BASE_MSR, saved_fs) };
     preserved && active_fs_base() == saved_fs
 }
@@ -2169,7 +2210,7 @@ impl LinuxActiveImageMapping {
 
 #[derive(Clone, Copy)]
 pub(crate) struct LinuxProcessAddressSpaceSnapshot {
-    hierarchy: [memory::FrameLease; 6],
+    hierarchy: [memory::FrameLease; LINUX_PROCESS_HIERARCHY_LIMIT],
     hierarchy_count: usize,
     mappings: [LinuxActiveImageMapping; LINUX_PROCESS_MAPPING_LIMIT],
     mapping_count: usize,
@@ -2377,10 +2418,41 @@ pub(crate) fn live_linux_process_address_space_snapshot() -> Option<LinuxProcess
     if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst) || current_linux_thread_handle().is_none() {
         return None;
     }
-    let mut hierarchy = [memory::FrameLease::EMPTY; 6];
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        let root_address = address_space::current_root_address();
+        let root =
+            memory::live_frame_lease(memory::FrameOwner::KERNEL, root_address).or_else(|| {
+                memory::FrameLease::from_parts(root_address, 1)
+                    .filter(|frame| memory::frame_lease_is_runtime(*frame))
+            })?;
+        let mut hierarchy = [memory::FrameLease::EMPTY; LINUX_PROCESS_HIERARCHY_LIMIT];
+        hierarchy[0] = root;
+        let mut hierarchy_count = 1;
+        let mut mappings = [LinuxActiveImageMapping::EMPTY; LINUX_PROCESS_MAPPING_LIMIT];
+        let mut mapping_count = 0;
+        LINUX_PROCESS_SNAPSHOT_STAGE.store(8, Ordering::SeqCst);
+        if !address_space::complete_current_linux_process_snapshot(
+            &mut hierarchy,
+            &mut hierarchy_count,
+            &mut mappings,
+            &mut mapping_count,
+        ) {
+            return None;
+        }
+        let snapshot = LinuxProcessAddressSpaceSnapshot {
+            hierarchy,
+            hierarchy_count,
+            mappings,
+            mapping_count,
+        };
+        let valid = snapshot.is_valid();
+        LINUX_PROCESS_SNAPSHOT_STAGE.store(if valid { 9 } else { 8 }, Ordering::SeqCst);
+        return valid.then_some(snapshot);
+    }
+    let mut hierarchy = [memory::FrameLease::EMPTY; LINUX_PROCESS_HIERARCHY_LIMIT];
     let mut hierarchy_count = 0;
     let mut hierarchy_ended = false;
-    for index in 0..hierarchy.len() {
+    for index in 0..ELF_PROBE_PAGE_TABLE_FRAMES.len() {
         let address = ELF_PROBE_PAGE_TABLE_FRAMES[index].load(Ordering::SeqCst);
         let generation = ELF_PROBE_PAGE_TABLE_GENERATIONS[index].load(Ordering::SeqCst);
         match memory::FrameLease::from_parts(address, generation) {
@@ -2444,25 +2516,41 @@ pub(crate) fn live_linux_process_address_space_snapshot() -> Option<LinuxProcess
             executable: false,
         },
     ) {
+        if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+            serial_write("ginux: snapshot rejected stack address/frame/current/count ");
+            serial_write_u64(stack_address as u64);
+            serial_write(" ");
+            serial_write_u64(stack_frame.address());
+            serial_write(" ");
+            serial_write_u64(
+                address_space::current_linux_mapping_frame_address(stack_address as u64)
+                    .unwrap_or(0),
+            );
+            serial_write(" ");
+            serial_write_u64(mapping_count as u64);
+            serial_write("\r\n");
+        }
         return None;
     }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
         for page in 1..LINUX_RUNTIME_STACK_PAGES {
             let address = stack_address.checked_sub(page * PAGE_SIZE)?;
             let frame_address = address_space::current_linux_mapping_frame_address(address as u64)?;
-            let frame = memory::FrameLease::from_parts(frame_address, 1)?;
-            if !memory::frame_lease_is_runtime(frame)
-                || !append_linux_process_snapshot_mapping(
-                    &mut mappings,
-                    &mut mapping_count,
-                    LinuxActiveImageMapping {
-                        address,
-                        frame,
-                        writable: true,
-                        executable: false,
-                    },
-                )
-            {
+            let frame = memory::live_frame_lease(memory::FrameOwner::KERNEL, frame_address)
+                .or_else(|| {
+                    memory::FrameLease::from_parts(frame_address, 1)
+                        .filter(|frame| memory::frame_lease_is_runtime(*frame))
+                })?;
+            if !append_linux_process_snapshot_mapping(
+                &mut mappings,
+                &mut mapping_count,
+                LinuxActiveImageMapping {
+                    address,
+                    frame,
+                    writable: true,
+                    executable: false,
+                },
+            ) {
                 return None;
             }
         }
@@ -2497,19 +2585,21 @@ pub(crate) fn live_linux_process_address_space_snapshot() -> Option<LinuxProcess
         for page in 1..LINUX_RUNTIME_HEAP_PAGES {
             let address = heap_address.checked_add(page * PAGE_SIZE)?;
             let frame_address = address_space::current_linux_mapping_frame_address(address as u64)?;
-            let frame = memory::FrameLease::from_parts(frame_address, 1)?;
-            if !memory::frame_lease_is_runtime(frame)
-                || !append_linux_process_snapshot_mapping(
-                    &mut mappings,
-                    &mut mapping_count,
-                    LinuxActiveImageMapping {
-                        address,
-                        frame,
-                        writable: true,
-                        executable: false,
-                    },
-                )
-            {
+            let frame = memory::live_frame_lease(memory::FrameOwner::KERNEL, frame_address)
+                .or_else(|| {
+                    memory::FrameLease::from_parts(frame_address, 1)
+                        .filter(|frame| memory::frame_lease_is_runtime(*frame))
+                })?;
+            if !append_linux_process_snapshot_mapping(
+                &mut mappings,
+                &mut mapping_count,
+                LinuxActiveImageMapping {
+                    address,
+                    frame,
+                    writable: true,
+                    executable: false,
+                },
+            ) {
                 return None;
             }
         }
@@ -2604,6 +2694,22 @@ pub(crate) fn live_linux_process_address_space_snapshot() -> Option<LinuxProcess
         }
     }
     LINUX_PROCESS_SNAPSHOT_STAGE.store(8, Ordering::SeqCst);
+
+    if !address_space::complete_current_linux_process_snapshot(
+        &mut hierarchy,
+        &mut hierarchy_count,
+        &mut mappings,
+        &mut mapping_count,
+    ) {
+        if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+            serial_write("ginux: runtime snapshot hierarchy/mappings before rejection: ");
+            serial_write_u64(hierarchy_count as u64);
+            serial_write(" ");
+            serial_write_u64(mapping_count as u64);
+            serial_write("\r\n");
+        }
+        return None;
+    }
 
     let snapshot = LinuxProcessAddressSpaceSnapshot {
         hierarchy,
@@ -2778,7 +2884,9 @@ fn execute_deferred_live_fork() -> bool {
             || linux_process::verify_live_fork_clone_transaction();
     }
     let parent_mmap_state = capture_linux_mmap_runtime_state();
+    let parent_descriptor_state = capture_linux_descriptor_runtime_state();
     let Some(child) = linux_process::begin_live_fork() else {
+        LINUX_FORK_CHILD_TID_ADDRESS.store(0, Ordering::SeqCst);
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
             serial_write("ginux: runtime fork preparation failed at stage ");
             serial_write_u64(u64::from(linux_process::live_fork_execution_stage()));
@@ -2799,8 +2907,12 @@ fn execute_deferred_live_fork() -> bool {
     LINUX_PROCESS_CHILD_EXITED.store(false, Ordering::SeqCst);
     LINUX_PROCESS_CHILD_STATUS.store(0, Ordering::SeqCst);
     LINUX_CURRENT_PROCESS_PID.store(child.pid, Ordering::SeqCst);
-    let child_resumed = (!LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-        || sync_live_linux_process_address_space(child.pid))
+    let child_tid_address = LINUX_FORK_CHILD_TID_ADDRESS.swap(0, Ordering::SeqCst);
+    let child_tid_ready = child_tid_address == 0
+        || linux_process::write_live_process_u32(child.pid, child_tid_address, child.pid);
+    let child_resumed = child_tid_ready
+        && (!LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+            || sync_live_linux_process_address_space(child.pid))
         && address_space::resume_live_linux_process(
             child.root,
             child.rip,
@@ -2812,6 +2924,7 @@ fn execute_deferred_live_fork() -> bool {
     let child_exited = LINUX_PROCESS_CHILD_EXITED.swap(false, Ordering::SeqCst);
     let child_status = LINUX_PROCESS_CHILD_STATUS.swap(0, Ordering::SeqCst);
     restore_linux_mmap_runtime_state(parent_mmap_state);
+    restore_linux_descriptor_runtime_state(parent_descriptor_state);
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && !(child_resumed && child_exited) {
         serial_write("ginux: runtime child return resumed/exited/status ");
         serial_write_u64(u64::from(child_resumed));
@@ -4954,6 +5067,14 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         ELF_PROBE_TLS_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
     }
     ELF_PROBE_MMAP.store(execution.mmap as u64, Ordering::SeqCst);
+    ELF_PROBE_MMAP_NEXT.store(
+        if execution.runtime {
+            LINUX_RUNTIME_DYNAMIC_MMAP_BASE
+        } else {
+            execution.mmap as u64
+        },
+        Ordering::SeqCst,
+    );
     for frame in &ELF_PROBE_MMAP_FRAMES {
         frame.store(0, Ordering::SeqCst);
     }
@@ -5681,6 +5802,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let mmap_file_released = (0..LINUX_RUNTIME_MMAP_SLOT_COUNT)
         .all(|index| ELF_PROBE_MMAP_FILE[index].swap(0, Ordering::SeqCst) == 0);
     let mmap_address_valid = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == execution.mmap as u64;
+    let mmap_next_valid = if execution.runtime {
+        ELF_PROBE_MMAP_NEXT.swap(0, Ordering::SeqCst) >= execution.mmap as u64
+    } else {
+        ELF_PROBE_MMAP_NEXT.swap(0, Ordering::SeqCst) == execution.mmap as u64
+    };
     let mmap_frames_valid = ELF_PROBE_MMAP_FRAMES
         .iter()
         .all(|frame| frame.swap(0, Ordering::SeqCst) == 0)
@@ -5691,6 +5817,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         && mmap_protection_cleared
         && mmap_file_released
         && mmap_address_valid
+        && mmap_next_valid
         && mmap_frames_valid;
     let expected_main_mappings = execution
         .main_mappings
@@ -6735,11 +6862,12 @@ extern "sysv64" fn linux_syscall_handler(
     if !ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
         || !linux_user_stack_pointer_valid(user_stack)
         || (!(code_start..code_end).contains(&user_rip)
-            && !(loader_start..loader_end).contains(&user_rip))
+            && !(loader_start..loader_end).contains(&user_rip)
+            && !address_space::current_linux_address_executable(user_rip))
         || user_rflags & ((3 << 12) | (1 << 17)) != 0
     {
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
-            serial_write("ginux: Alpine invalid syscall context:");
+            serial_write("ginux: Linux runtime invalid syscall context:");
             for value in [number, user_stack, user_rip, user_rflags] {
                 serial_write(" ");
                 serial_write_u64(value);
@@ -6840,14 +6968,24 @@ extern "sysv64" fn linux_syscall_handler(
                 LINUX_EBADF
             }
         }
-        LINUX_MMAP_SYSCALL => linux_mmap(
-            first_argument,
-            buffer,
-            count,
-            register(0),
-            register(2),
-            register(1),
-        ),
+        LINUX_MMAP_SYSCALL => {
+            let arguments = [
+                first_argument,
+                buffer,
+                count,
+                register(0),
+                register(2),
+                register(1),
+            ];
+            linux_mmap(
+                arguments[0],
+                arguments[1],
+                arguments[2],
+                arguments[3],
+                arguments[4],
+                arguments[5],
+            )
+        }
         LINUX_MUNMAP_SYSCALL => linux_munmap(first_argument, buffer),
         LINUX_MPROTECT_SYSCALL => {
             if !first_argument.is_multiple_of(PAGE_SIZE as u64) || buffer == 0 {
@@ -7015,19 +7153,32 @@ extern "sysv64" fn linux_syscall_handler(
             count,
             register(0),
         ),
+        LINUX_CLONE_SYSCALL
+            if (saved_registers.rdi == LINUX_SIGCHLD
+                || saved_registers.rdi
+                    == LINUX_SIGCHLD | LINUX_CLONE_CHILD_SETTID | LINUX_CLONE_CHILD_CLEARTID)
+                && saved_registers.rsi == 0
+                && saved_registers.rdx == 0
+                && saved_registers.r8 == 0 =>
+        {
+            let child_tid = if saved_registers.rdi & LINUX_CLONE_CHILD_SETTID != 0 {
+                saved_registers.r10
+            } else {
+                0
+            };
+            if child_tid != 0 && !linux_writable_user_range_contains(child_tid, size_of::<u32>()) {
+                LINUX_EFAULT
+            } else {
+                let result = linux_request_process_fork(runtime_mode, syscall_return);
+                if result == LINUX_RETURN_TO_KERNEL {
+                    LINUX_FORK_CHILD_TID_ADDRESS.store(child_tid, Ordering::SeqCst);
+                }
+                result
+            }
+        }
         LINUX_CLONE_SYSCALL => linux_clone_thread(saved_registers, user_rip, user_rflags),
         LINUX_FORK_SYSCALL | LINUX_VFORK_SYSCALL => {
-            if current_linux_process_pid() != 1
-                || current_linux_tid() != Some(1)
-                || (runtime_mode && !refresh_live_linux_process_registry(syscall_return))
-                || LINUX_FORK_REQUESTED
-                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_err()
-            {
-                LINUX_EAGAIN
-            } else {
-                LINUX_RETURN_TO_KERNEL
-            }
+            linux_request_process_fork(runtime_mode, syscall_return)
         }
         LINUX_EXECVE_SYSCALL => linux_execve(first_argument, buffer, count),
         LINUX_KILL_SYSCALL => linux_kill(
@@ -7441,6 +7592,27 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument <= u64::from(u8::MAX) && current_linux_process_pid() != 1 =>
         {
+            if runtime_mode {
+                let Some(snapshot) = live_linux_process_address_space_snapshot() else {
+                    serial_write("ginux: child exit snapshot rejected at stage ");
+                    serial_write_u64(u64::from(
+                        LINUX_PROCESS_SNAPSHOT_STAGE.load(Ordering::SeqCst),
+                    ));
+                    serial_write("\r\n");
+                    return LINUX_ESRCH;
+                };
+                if !linux_process::refresh_live_process_address_space(
+                    current_linux_process_pid(),
+                    &snapshot,
+                ) {
+                    serial_write("ginux: child exit address-space refresh rejected ");
+                    serial_write_u64(snapshot.hierarchy().len() as u64);
+                    serial_write(" ");
+                    serial_write_u64(snapshot.mappings().len() as u64);
+                    serial_write("\r\n");
+                    return LINUX_ESRCH;
+                }
+            }
             LINUX_PROCESS_CHILD_STATUS.store(first_argument as u8, Ordering::SeqCst);
             LINUX_PROCESS_CHILD_EXITED.store(true, Ordering::SeqCst);
             LINUX_RETURN_TO_KERNEL
@@ -7701,6 +7873,20 @@ fn linux_deny_privileged_operation(number: u64) -> u64 {
     }
 }
 
+fn linux_request_process_fork(runtime_mode: bool, caller: LinuxUserContext) -> u64 {
+    if current_linux_process_pid() != 1
+        || current_linux_tid() != Some(1)
+        || (runtime_mode && !refresh_live_linux_process_registry(caller))
+        || LINUX_FORK_REQUESTED
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+    {
+        LINUX_EAGAIN
+    } else {
+        LINUX_RETURN_TO_KERNEL
+    }
+}
+
 fn linux_clone_thread(registers: LinuxSyscallFrame, user_rip: u64, user_rflags: u64) -> u64 {
     if current_linux_tid() != Some(1) {
         return LINUX_EAGAIN;
@@ -7854,14 +8040,17 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
     if current_linux_process_pid() != 1 || current_linux_tid() != Some(1) {
         return LINUX_ECHILD;
     }
-    if options != 0 || rusage != 0 {
+    if options & !(LINUX_WNOHANG | LINUX_WUNTRACED | LINUX_WCONTINUED) != 0 {
         return LINUX_EINVAL;
     }
     if status_address != 0 && !linux_writable_user_range_contains(status_address, size_of::<u32>())
     {
         return LINUX_EFAULT;
     }
-    let waited = if pid == u64::MAX {
+    if rusage != 0 && !linux_writable_user_range_contains(rusage, LINUX_RUSAGE_SIZE) {
+        return LINUX_EFAULT;
+    }
+    let waited = if pid as u32 == u32::MAX {
         linux_process::wait_live_child_any(1)
     } else {
         u32::try_from(pid)
@@ -7869,10 +8058,17 @@ fn linux_wait4(pid: u64, status_address: u64, options: u64, rusage: u64) -> u64 
             .and_then(|pid| linux_process::wait_live_child(1, pid))
     };
     let Some((waited, status)) = waited else {
-        return LINUX_ECHILD;
+        return if options & LINUX_WNOHANG != 0 {
+            0
+        } else {
+            LINUX_ECHILD
+        };
     };
     let encoded = u32::from(status) << 8;
     if status_address != 0 && !copy_to_linux_user(status_address, &encoded.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    if rusage != 0 && !copy_to_linux_user(rusage, &[0_u8; LINUX_RUSAGE_SIZE]) {
         return LINUX_EFAULT;
     }
     LINUX_PROCESS_WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -8120,6 +8316,7 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
         && inactive;
     if !valid {
         serial_write("ginux: OCI runtime cleanup failed\r\n");
+        write_linux_runtime_syscall_trace();
     }
     LinuxElfResult {
         valid,
@@ -8635,6 +8832,14 @@ fn linux_mmap_unmap_and_release_slots(start_slot: usize, pages: usize) -> bool {
 }
 
 fn release_linux_runtime_mmaps(expected_base: u64) -> bool {
+    let dynamic_released = !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        || address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
+    let next_expected = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        LINUX_RUNTIME_DYNAMIC_MMAP_BASE
+    } else {
+        expected_base
+    };
+    let next_valid = ELF_PROBE_MMAP_NEXT.swap(0, Ordering::SeqCst) >= next_expected;
     let address_valid = ELF_PROBE_MMAP.load(Ordering::SeqCst) == expected_base;
     let mut areas_released = true;
     for (start_slot, pages) in ELF_PROBE_MMAP_PAGES.iter().enumerate() {
@@ -8655,7 +8860,12 @@ fn release_linux_runtime_mmaps(expected_base: u64) -> bool {
             && ELF_PROBE_MMAP_GENERATIONS[slot].load(Ordering::SeqCst) == 0;
     }
     let address_cleared = ELF_PROBE_MMAP.swap(0, Ordering::SeqCst) == expected_base;
-    address_valid && address_cleared && areas_released && leases_released
+    address_valid
+        && address_cleared
+        && areas_released
+        && leases_released
+        && dynamic_released
+        && next_valid
 }
 
 fn linux_mmap_slot_occupied(slot: usize) -> bool {
@@ -8692,6 +8902,51 @@ struct LinuxMmapRuntimeState {
     file: [u8; LINUX_RUNTIME_MMAP_SLOT_COUNT],
     frames: [u64; LINUX_RUNTIME_MMAP_SLOT_COUNT],
     generations: [u32; LINUX_RUNTIME_MMAP_SLOT_COUNT],
+}
+
+#[derive(Clone, Copy)]
+struct LinuxDescriptorRuntimeState {
+    console: u8,
+    close_on_exec: u16,
+    devices: [u16; LINUX_DEVICE_DESCRIPTOR_COUNT],
+    oci: [u16; LINUX_DEVICE_DESCRIPTOR_COUNT],
+    tmp_generations: [u32; LINUX_DEVICE_DESCRIPTOR_COUNT],
+    offsets: [u64; LINUX_DEVICE_DESCRIPTOR_COUNT],
+    stdio_oci: [u16; 2],
+}
+
+fn capture_linux_descriptor_runtime_state() -> LinuxDescriptorRuntimeState {
+    LinuxDescriptorRuntimeState {
+        console: ELF_PROBE_CONSOLE_DESCRIPTORS.load(Ordering::SeqCst),
+        close_on_exec: ELF_PROBE_CONSOLE_CLOEXEC.load(Ordering::SeqCst),
+        devices: core::array::from_fn(|index| {
+            ELF_PROBE_DEVICE_DESCRIPTORS[index].load(Ordering::SeqCst)
+        }),
+        oci: core::array::from_fn(|index| ELF_PROBE_OCI_DESCRIPTORS[index].load(Ordering::SeqCst)),
+        tmp_generations: core::array::from_fn(|index| {
+            ELF_PROBE_TMP_FILE_GENERATIONS[index].load(Ordering::SeqCst)
+        }),
+        offsets: core::array::from_fn(|index| {
+            ELF_PROBE_DESCRIPTOR_OFFSETS[index].load(Ordering::SeqCst)
+        }),
+        stdio_oci: core::array::from_fn(|index| {
+            ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].load(Ordering::SeqCst)
+        }),
+    }
+}
+
+fn restore_linux_descriptor_runtime_state(state: LinuxDescriptorRuntimeState) {
+    ELF_PROBE_CONSOLE_DESCRIPTORS.store(state.console, Ordering::SeqCst);
+    ELF_PROBE_CONSOLE_CLOEXEC.store(state.close_on_exec, Ordering::SeqCst);
+    for index in 0..LINUX_DEVICE_DESCRIPTOR_COUNT {
+        ELF_PROBE_DEVICE_DESCRIPTORS[index].store(state.devices[index], Ordering::SeqCst);
+        ELF_PROBE_OCI_DESCRIPTORS[index].store(state.oci[index], Ordering::SeqCst);
+        ELF_PROBE_TMP_FILE_GENERATIONS[index].store(state.tmp_generations[index], Ordering::SeqCst);
+        ELF_PROBE_DESCRIPTOR_OFFSETS[index].store(state.offsets[index], Ordering::SeqCst);
+    }
+    for (index, descriptor) in state.stdio_oci.into_iter().enumerate() {
+        ELF_PROBE_STDIO_OCI_DESCRIPTORS[index].store(descriptor, Ordering::SeqCst);
+    }
 }
 
 fn capture_linux_mmap_runtime_state() -> LinuxMmapRuntimeState {
@@ -8787,7 +9042,331 @@ fn linux_mmap_slot_limit() -> usize {
     }
 }
 
+fn linux_runtime_mmap_end() -> Option<u64> {
+    LINUX_RUNTIME_DYNAMIC_MMAP_BASE.checked_add(1 << 39)
+}
+
+fn linux_runtime_mapping_range(address: u64, length: u64) -> Option<(u64, usize)> {
+    let end = linux_runtime_mmap_end()?;
+    if length == 0
+        || !address.is_multiple_of(PAGE_SIZE as u64)
+        || address < LINUX_RUNTIME_DYNAMIC_MMAP_BASE
+    {
+        return None;
+    }
+    let pages = usize::try_from(length.div_ceil(PAGE_SIZE as u64)).ok()?;
+    let mapped_end = address.checked_add((pages as u64).checked_mul(PAGE_SIZE as u64)?)?;
+    (pages != 0 && mapped_end <= end).then_some((mapped_end, pages))
+}
+
+fn linux_runtime_range_available(address: u64, pages: usize) -> bool {
+    (0..pages).all(|page| {
+        !address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).occupied
+    })
+}
+
+fn linux_runtime_select_mapping(address: u64, pages: usize, fixed: bool) -> Option<u64> {
+    let base = LINUX_RUNTIME_DYNAMIC_MMAP_BASE;
+    let end = linux_runtime_mmap_end()?;
+    let size = (pages as u64).checked_mul(PAGE_SIZE as u64)?;
+    if fixed {
+        return (address >= base
+            && address.is_multiple_of(PAGE_SIZE as u64)
+            && address
+                .checked_add(size)
+                .is_some_and(|mapped_end| mapped_end <= end))
+        .then_some(address);
+    }
+    if address >= base
+        && address.is_multiple_of(PAGE_SIZE as u64)
+        && address
+            .checked_add(size)
+            .is_some_and(|mapped_end| mapped_end <= end)
+        && linux_runtime_range_available(address, pages)
+    {
+        return Some(address);
+    }
+    let mut candidate = ELF_PROBE_MMAP_NEXT.load(Ordering::SeqCst).max(base);
+    while candidate
+        .checked_add(size)
+        .is_some_and(|mapped_end| mapped_end <= end)
+    {
+        if linux_runtime_range_available(candidate, pages) {
+            ELF_PROBE_MMAP_NEXT.store(candidate + size, Ordering::SeqCst);
+            return Some(candidate);
+        }
+        candidate = candidate.checked_add(PAGE_SIZE as u64)?;
+    }
+    None
+}
+
+fn release_linux_runtime_page(page: address_space::LinuxRuntimePage) -> bool {
+    page.frame.is_none_or(|frame| {
+        memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, core::slice::from_ref(&frame))
+    })
+}
+
+fn rollback_linux_runtime_mapping(address: u64, pages: usize) -> bool {
+    (0..pages).all(|page| {
+        let page =
+            address_space::remove_current_linux_runtime_page(address + (page * PAGE_SIZE) as u64);
+        release_linux_runtime_page(page)
+    })
+}
+
+fn linux_runtime_mmap(
+    address: u64,
+    length: u64,
+    protection: u64,
+    flags: u64,
+    fd: u64,
+    offset: u64,
+) -> u64 {
+    if length == 0
+        || ![
+            0,
+            LINUX_PROT_READ,
+            LINUX_PROT_READ | LINUX_PROT_WRITE,
+            LINUX_PROT_READ | LINUX_PROT_EXEC,
+        ]
+        .contains(&protection)
+    {
+        return LINUX_EINVAL;
+    }
+    let Ok(pages) = usize::try_from(length.div_ceil(PAGE_SIZE as u64)) else {
+        return LINUX_ENOMEM;
+    };
+    let anonymous = flags & LINUX_MAP_ANONYMOUS != 0;
+    let fixed = flags & LINUX_MAP_FIXED != 0;
+    let no_replace = flags & LINUX_MAP_FIXED_NOREPLACE != 0;
+    let ignored = flags & LINUX_MAP_DENYWRITE;
+    let normalized = flags & !ignored;
+    let valid_flags = if anonymous {
+        LINUX_MAP_PRIVATE
+            | LINUX_MAP_ANONYMOUS
+            | if fixed { LINUX_MAP_FIXED } else { 0 }
+            | if no_replace {
+                LINUX_MAP_FIXED_NOREPLACE
+            } else {
+                0
+            }
+    } else {
+        LINUX_MAP_PRIVATE
+            | if fixed { LINUX_MAP_FIXED } else { 0 }
+            | if no_replace {
+                LINUX_MAP_FIXED_NOREPLACE
+            } else {
+                0
+            }
+    };
+    let anonymous_fd = fd == u64::MAX || fd == u64::from(u32::MAX);
+    if normalized != valid_flags
+        || fixed && no_replace
+        || anonymous && (!anonymous_fd || offset != 0)
+    {
+        return LINUX_EINVAL;
+    }
+    let Some(mapping) = linux_runtime_select_mapping(address, pages, fixed || no_replace) else {
+        return LINUX_ENOMEM;
+    };
+    if no_replace && !linux_runtime_range_available(mapping, pages) {
+        return LINUX_EEXIST;
+    }
+    let file = if anonymous {
+        None
+    } else {
+        let state = linux_device_descriptor(fd);
+        let Some(file) = linux_oci_entry(fd)
+            .map(|entry| entry.data)
+            .or_else(|| linux_regular_file(state))
+        else {
+            return if linux_descriptor_open(fd) {
+                LINUX_ENODEV
+            } else {
+                LINUX_EBADF
+            };
+        };
+        if linux_proc_file(state)
+            || state & 3 != LINUX_DESCRIPTOR_INPUT
+            || !offset.is_multiple_of(PAGE_SIZE as u64)
+        {
+            return LINUX_EACCES;
+        }
+        let Ok(start) = usize::try_from(offset) else {
+            return LINUX_EINVAL;
+        };
+        if start >= file.len() {
+            if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+                serial_write("ginux: file mmap rejected offset/file-length: ");
+                serial_write_u64(start as u64);
+                serial_write(" ");
+                serial_write_u64(file.len() as u64);
+                serial_write("\r\n");
+            }
+            return LINUX_EINVAL;
+        }
+        Some((file, start))
+    };
+    let replace = fixed;
+    for (installed, page) in (0..pages).enumerate() {
+        let page_address = mapping + (page * PAGE_SIZE) as u64;
+        let old_frame = if protection == 0 {
+            address_space::reserve_current_linux_runtime_page(page_address, replace)
+        } else {
+            let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+                let _ = rollback_linux_runtime_mapping(mapping, installed);
+                return LINUX_ENOMEM;
+            };
+            let bytes = file.map_or(&[][..], |(file, start)| {
+                let page_start = start + page * PAGE_SIZE;
+                file.get(page_start..file.len().min(page_start + PAGE_SIZE))
+                    .unwrap_or(&[])
+            });
+            if !address_space::prepare_linux_frame(frame.address(), bytes) {
+                let _ = memory::scrub_and_release_frames(
+                    memory::FrameOwner::KERNEL,
+                    core::slice::from_ref(&frame),
+                );
+                let _ = rollback_linux_runtime_mapping(mapping, installed);
+                return LINUX_ENOMEM;
+            }
+            match address_space::install_current_linux_runtime_page(
+                page_address,
+                frame,
+                protection as u8,
+                file.is_some(),
+                replace,
+            ) {
+                Some(old) => Some(old),
+                None => {
+                    let _ = memory::scrub_and_release_frames(
+                        memory::FrameOwner::KERNEL,
+                        core::slice::from_ref(&frame),
+                    );
+                    let _ = rollback_linux_runtime_mapping(mapping, installed);
+                    return if no_replace {
+                        LINUX_EEXIST
+                    } else {
+                        LINUX_ENOMEM
+                    };
+                }
+            }
+        };
+        let Some(old_frame) = old_frame else {
+            let _ = rollback_linux_runtime_mapping(mapping, installed);
+            return if no_replace {
+                LINUX_EEXIST
+            } else {
+                LINUX_ENOMEM
+            };
+        };
+        if old_frame.is_some_and(|frame| {
+            !memory::scrub_and_release_frames(
+                memory::FrameOwner::KERNEL,
+                core::slice::from_ref(&frame),
+            )
+        }) {
+            let _ = rollback_linux_runtime_mapping(mapping, installed + 1);
+            return LINUX_ENOMEM;
+        }
+    }
+    mapping
+}
+
+fn linux_runtime_munmap(address: u64, length: u64) -> u64 {
+    let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
+        return LINUX_EINVAL;
+    };
+    for page in 0..pages {
+        if !release_linux_runtime_page(address_space::remove_current_linux_runtime_page(
+            address + (page * PAGE_SIZE) as u64,
+        )) {
+            return LINUX_EINVAL;
+        }
+    }
+    0
+}
+
+fn linux_runtime_mprotect(address: u64, length: u64, protection: u64) -> u64 {
+    if ![
+        0,
+        LINUX_PROT_READ,
+        LINUX_PROT_READ | LINUX_PROT_WRITE,
+        LINUX_PROT_READ | LINUX_PROT_EXEC,
+    ]
+    .contains(&protection)
+    {
+        return LINUX_EINVAL;
+    }
+    let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
+        return LINUX_EINVAL;
+    };
+    if (0..pages).any(|page| {
+        !address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64).occupied
+    }) {
+        return LINUX_ENOMEM;
+    }
+    if (0..pages).all(|page| {
+        address_space::protect_current_linux_runtime_page(
+            address + (page * PAGE_SIZE) as u64,
+            protection as u8,
+        )
+    }) {
+        0
+    } else {
+        LINUX_EINVAL
+    }
+}
+
+fn linux_runtime_madvise(address: u64, length: u64, advice: u64) -> u64 {
+    let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
+        return LINUX_EINVAL;
+    };
+    if advice != LINUX_MADV_DONTNEED {
+        return LINUX_EINVAL;
+    }
+    for page in 0..pages {
+        let page_address = address + (page * PAGE_SIZE) as u64;
+        let state = address_space::current_linux_runtime_page(page_address);
+        if !state.occupied || state.file || state.protection == 0 {
+            return LINUX_EINVAL;
+        }
+        let Some(frame) = state.frame else {
+            return LINUX_EINVAL;
+        };
+        if !address_space::zero_current_linux_page(page_address, frame.address()) {
+            return LINUX_EINVAL;
+        }
+    }
+    0
+}
+
+fn linux_runtime_mincore(address: u64, length: u64, vector: u64) -> u64 {
+    let Some((_, pages)) = linux_runtime_mapping_range(address, length) else {
+        return LINUX_EINVAL;
+    };
+    let bytes = length.div_ceil(PAGE_SIZE as u64) as usize;
+    for page in 0..pages {
+        let state = address_space::current_linux_runtime_page(address + (page * PAGE_SIZE) as u64);
+        if !state.occupied {
+            return LINUX_ENOMEM;
+        }
+        let resident = u8::from(state.frame.is_some() && state.protection != 0);
+        if !copy_to_linux_user(vector + page as u64, &[resident]) {
+            return LINUX_EFAULT;
+        }
+    }
+    if bytes == pages {
+        0
+    } else {
+        LINUX_EINVAL
+    }
+}
+
 fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
+        return linux_runtime_mprotect(address, length, protection);
+    }
     if protection != 0
         && protection != LINUX_PROT_READ
         && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
@@ -8897,6 +9476,9 @@ fn linux_mprotect_mmap(address: u64, length: u64, protection: u64) -> u64 {
 }
 
 fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, offset: u64) -> u64 {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        return linux_runtime_mmap(address, length, protection, flags, fd, offset);
+    }
     if length == 0 {
         return LINUX_EINVAL;
     }
@@ -8960,7 +9542,7 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
             if protection != 0
                 && protection != LINUX_PROT_READ
                 && protection != (LINUX_PROT_READ | LINUX_PROT_WRITE)
-                || fd != u64::MAX
+                || fd != u64::MAX && fd != u64::from(u32::MAX)
                 || offset != 0
             {
                 return LINUX_EINVAL;
@@ -8971,7 +9553,10 @@ fn linux_mmap(address: u64, length: u64, protection: u64, flags: u64, fd: u64, o
                 return LINUX_EINVAL;
             }
             let state = linux_device_descriptor(fd);
-            let Some(file) = linux_regular_file(state) else {
+            let Some(file) = linux_oci_entry(fd)
+                .map(|entry| entry.data)
+                .or_else(|| linux_regular_file(state))
+            else {
                 return if linux_descriptor_open(fd) {
                     LINUX_ENODEV
                 } else {
@@ -9386,6 +9971,9 @@ fn linux_mmap_fixed_file(
 }
 
 fn linux_munmap(address: u64, length: u64) -> u64 {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
+        return linux_runtime_munmap(address, length);
+    }
     let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {
         return LINUX_EINVAL;
     };
@@ -9401,6 +9989,9 @@ fn linux_munmap(address: u64, length: u64) -> u64 {
 }
 
 fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
+        return linux_runtime_madvise(address, length, advice);
+    }
     let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {
         return LINUX_EINVAL;
     };
@@ -9431,6 +10022,9 @@ fn linux_madvise(address: u64, length: u64, advice: u64) -> u64 {
 }
 
 fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {
+    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && address >= LINUX_RUNTIME_DYNAMIC_MMAP_BASE {
+        return linux_runtime_mincore(address, length, vector);
+    }
     let Some((start_slot, range_pages)) = linux_mmap_range_slots(address, length) else {
         return LINUX_EINVAL;
     };
@@ -10182,11 +10776,23 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
         return LINUX_E2BIG;
     };
     output.copy_from_slice(LINUX_PLATFORM);
+    let Some(random) = linux_startup_random() else {
+        return LINUX_EIO;
+    };
+    let random_offset = platform_end;
+    let Some(random_end) = random_offset.checked_add(random.len()) else {
+        return LINUX_E2BIG;
+    };
+    let Some(output) = stack_image.get_mut(random_offset..random_end) else {
+        return LINUX_E2BIG;
+    };
+    output.copy_from_slice(&random);
     let auxiliary_word = environment_word + environment_count + 1;
     for (index, value) in crate::linux_elf::auxiliary_vector(
         startup,
         argument_zero_address,
         new_stack + platform_offset as u64,
+        new_stack + random_offset as u64,
     )
     .into_iter()
     .enumerate()
@@ -10195,6 +10801,24 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
             .copy_from_slice(&value.to_ne_bytes());
     }
 
+    let replacement_count = [&plan.main, &plan.interpreter]
+        .into_iter()
+        .flat_map(|image| image.segments[..image.segment_count].iter().flatten())
+        .try_fold(0_usize, |count, segment| {
+            count.checked_add(segment.page_count)
+        });
+    let Some(replacement_count) =
+        replacement_count.filter(|count| (1..=LINUX_ACTIVE_IMAGE_MAPPING_LIMIT).contains(count))
+    else {
+        return LINUX_ENOEXEC;
+    };
+    let Some(replacements) = memory::allocate_frame_prefix::<LINUX_ACTIVE_IMAGE_MAPPING_LIMIT>(
+        memory::FrameOwner::KERNEL,
+        replacement_count,
+    ) else {
+        return LINUX_ENOMEM;
+    };
+    let mut replacement_index = 0;
     let pid = current_linux_process_pid();
     for image in [&plan.main, &plan.interpreter] {
         for segment in image.segments[..image.segment_count].iter().flatten() {
@@ -10209,18 +10833,46 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
                 let Some(mapping) = linux_process::live_process_mapping(pid, address) else {
                     return LINUX_ENOEXEC;
                 };
-                if !address_space::set_current_linux_mapping_permissions(
+                let replacement = replacements[replacement_index];
+                replacement_index += 1;
+                if !address_space::materialize_linux_exec_frame(replacement, *segment, page) {
+                    let _ = memory::scrub_and_release_frames(
+                        memory::FrameOwner::KERNEL,
+                        &[replacement],
+                    );
+                    return LINUX_ENOEXEC;
+                }
+                let protection = if segment.executable {
+                    LINUX_PROT_READ | LINUX_PROT_EXEC
+                } else if segment.writable {
+                    LINUX_PROT_READ | LINUX_PROT_WRITE
+                } else {
+                    LINUX_PROT_READ
+                } as u8;
+                if !address_space::current_linux_mapping_matches(
                     address as u64,
                     mapping.frame,
-                    segment.writable,
-                    segment.executable,
-                ) || !linux_process::set_live_process_mapping_permissions(
-                    pid,
-                    address,
-                    segment.writable,
-                    segment.executable,
-                ) || segment.writable
-                    && !address_space::materialize_linux_exec_frame(mapping.frame, *segment, page)
+                    mapping.writable,
+                    mapping.executable,
+                ) {
+                    return LINUX_ENOEXEC;
+                }
+                let replaced = address_space::install_current_linux_runtime_page(
+                    address as u64,
+                    replacement,
+                    protection,
+                    true,
+                    true,
+                );
+                if replaced.is_none()
+                    || !linux_process::replace_live_process_mapping(
+                        pid,
+                        address,
+                        mapping.frame,
+                        replacement,
+                        segment.writable,
+                        segment.executable,
+                    )
                 {
                     return LINUX_ENOEXEC;
                 }
@@ -10232,13 +10884,28 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
                             == address as u64
                     })
                 {
+                    ELF_PROBE_ACTIVE_IMAGE_FRAMES[index]
+                        .store(replacement.address(), Ordering::SeqCst);
+                    ELF_PROBE_ACTIVE_IMAGE_GENERATIONS[index]
+                        .store(replacement.generation(), Ordering::SeqCst);
                     ELF_PROBE_ACTIVE_IMAGE_FLAGS[index].store(
                         u8::from(segment.writable) | (u8::from(segment.executable) << 1),
                         Ordering::SeqCst,
                     );
                 }
+                if memory::frame_leases_releasable(memory::FrameOwner::KERNEL, &[mapping.frame])
+                    && !memory::scrub_and_release_frames(
+                        memory::FrameOwner::KERNEL,
+                        &[mapping.frame],
+                    )
+                {
+                    return LINUX_ENOMEM;
+                }
             }
         }
+    }
+    if replacement_index != replacement_count {
+        return LINUX_ENOEXEC;
     }
     let heap_base =
         ELF_PROBE_BRK_LIMIT.load(Ordering::SeqCst) as usize - LINUX_RUNTIME_HEAP_PAGES * PAGE_SIZE;
@@ -10314,6 +10981,10 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     }
     let _ = set_current_linux_clear_child_tid(0);
     let _ = set_current_linux_robust_list(0);
+    if !address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE) {
+        return LINUX_ENOMEM;
+    }
+    ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
     if !install_linux_tls_context(LinuxTlsContext {
         thread_pointer: 0,
         extent: 0,
@@ -10534,10 +11205,22 @@ fn linux_execve_at(
         return LINUX_E2BIG;
     };
     output.copy_from_slice(LINUX_PLATFORM);
+    let Some(random) = linux_startup_random() else {
+        return LINUX_EIO;
+    };
+    let random_offset = platform_end;
+    let Some(random_end) = random_offset.checked_add(random.len()) else {
+        return LINUX_E2BIG;
+    };
+    let Some(output) = stack_image.get_mut(random_offset..random_end) else {
+        return LINUX_E2BIG;
+    };
+    output.copy_from_slice(&random);
     let mut auxiliary = crate::linux_elf::auxiliary_vector(
         startup,
         argument_zero_address,
         new_stack + platform_offset as u64,
+        new_stack + random_offset as u64,
     );
     if interpreted {
         auxiliary[33] = 1;
@@ -11129,6 +11812,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
                 | LINUX_O_DIRECTORY
                 | LINUX_O_CREAT
                 | LINUX_O_EXCL
+                | LINUX_O_NONBLOCK
                 | LINUX_O_LARGEFILE)
             != 0
         || flags & LINUX_O_EXCL != 0 && flags & LINUX_O_CREAT == 0
@@ -11393,7 +12077,14 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
 }
 
 fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_address: u64) -> u64 {
-    if flags != 0 || mask & u64::from(LINUX_STATX_RESERVED) != 0 {
+    if flags
+        & !(LINUX_AT_SYMLINK_NOFOLLOW
+            | LINUX_AT_NO_AUTOMOUNT
+            | LINUX_AT_EMPTY_PATH
+            | LINUX_AT_STATX_SYNC_TYPE)
+        != 0
+        || mask & u64::from(LINUX_STATX_RESERVED) != 0
+    {
         return LINUX_EINVAL;
     }
     let mut path = [0_u8; 256];
@@ -11431,7 +12122,12 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         };
     }
     {
-        if let Some((handle, entry)) = linux_oci_path_at(directory, path) {
+        let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
+            linux_oci_metadata_path_at(directory, path)
+        } else {
+            linux_oci_path_at(directory, path)
+        };
+        if let Some((handle, entry)) = oci {
             let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_oci_mode);
             let size = entry.map_or(0, |entry| entry.data.len() as u64);
             let mut stat = [0_u8; 256];
@@ -13699,14 +14395,22 @@ fn linux_bounded_console_write(address: u64, count: u64) -> u64 {
     let Ok(length) = usize::try_from(count) else {
         return LINUX_EINVAL;
     };
-    if !(1..=LINUX_WRITE_LIMIT).contains(&length) {
-        return LINUX_EINVAL;
+    if length == 0 {
+        return 0;
     }
-    let mut bytes = [0_u8; LINUX_WRITE_LIMIT];
-    if !copy_from_linux_user(address, &mut bytes[..length]) {
+    if !linux_readable_user_range_contains(address, length) {
         return LINUX_EFAULT;
     }
-    container_console_write(&bytes[..length]);
+    let mut bytes = [0_u8; LINUX_WRITE_LIMIT];
+    let mut written = 0_usize;
+    while written < length {
+        let chunk = (length - written).min(bytes.len());
+        if !copy_from_linux_user(address + written as u64, &mut bytes[..chunk]) {
+            return LINUX_EFAULT;
+        }
+        container_console_write(&bytes[..chunk]);
+        written += chunk;
+    }
     count
 }
 
@@ -19642,6 +20346,7 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         serial_write(" ");
         serial_write_u64(fault_metadata.instruction);
         serial_write("\r\n");
+        write_linux_runtime_syscall_trace();
         if deliver_linux_sigsegv(frame, fault_metadata) {
             return 0;
         }

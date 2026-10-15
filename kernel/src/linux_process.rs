@@ -1,4 +1,5 @@
 use core::{
+    cell::UnsafeCell,
     mem::{size_of, MaybeUninit},
     sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering},
 };
@@ -6,9 +7,9 @@ use core::{
 use crate::{address_space, arch::x86_64::cpu, control_abi, linux_user, memory, scheduler};
 
 const PROCESS_LIMIT: usize = 4;
-const PROCESS_HIERARCHY_LIMIT: usize = 6;
+const PROCESS_HIERARCHY_LIMIT: usize = cpu::LINUX_PROCESS_HIERARCHY_LIMIT;
 const PROCESS_PRIVATE_PAGE_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
-const PROCESS_PRIVATE_COPY_LIMIT: usize = 64;
+const PROCESS_PRIVATE_COPY_LIMIT: usize = cpu::LINUX_PROCESS_MAPPING_LIMIT;
 const PROCESS_LEASE_LIMIT: usize = PROCESS_HIERARCHY_LIMIT + PROCESS_PRIVATE_PAGE_LIMIT;
 const PAGE_SIZE: usize = 4096;
 const FORK_PRIVATE_PAGE_LIMIT: usize = 2;
@@ -31,6 +32,21 @@ static LIVE_FORK_EXECUTION_STAGE: AtomicU32 = AtomicU32::new(0);
 static LIVE_FORK_CHILD_DIAGNOSTIC: AtomicU32 = AtomicU32::new(0);
 static mut LIVE_PROCESS_TABLES: [ProcessTable; PROCESS_INSTANCE_LIMIT] =
     [const { ProcessTable::new() }; PROCESS_INSTANCE_LIMIT];
+
+struct LiveForkScratch {
+    child_mappings: [cpu::LinuxActiveImageMapping; PROCESS_PRIVATE_PAGE_LIMIT],
+    parent_pages: [memory::FrameLease; PROCESS_PRIVATE_PAGE_LIMIT],
+}
+
+struct LiveForkScratchCell(UnsafeCell<LiveForkScratch>);
+
+unsafe impl Sync for LiveForkScratchCell {}
+
+static LIVE_FORK_SCRATCH: LiveForkScratchCell =
+    LiveForkScratchCell(UnsafeCell::new(LiveForkScratch {
+        child_mappings: [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
+        parent_pages: [memory::FrameLease::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT],
+    }));
 static mut TEST_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
 
 fn mapping_requires_fork_copy(mapping: &cpu::LinuxActiveImageMapping) -> bool {
@@ -518,7 +534,7 @@ impl ProcessTable {
             let _ = self.abort_fork(handle);
             return false;
         };
-        let Some(parent_space) = parent.address_space else {
+        let Some(parent_space) = parent.address_space.as_ref() else {
             let _ = self.abort_fork(handle);
             return false;
         };
@@ -541,8 +557,11 @@ impl ProcessTable {
             return false;
         }
 
-        let mut child_mappings = [cpu::LinuxActiveImageMapping::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT];
-        let mut parent_pages = [memory::FrameLease::EMPTY; PROCESS_PRIVATE_PAGE_LIMIT];
+        let scratch = unsafe { &mut *LIVE_FORK_SCRATCH.0.get() };
+        let child_mappings = &mut scratch.child_mappings;
+        let parent_pages = &mut scratch.parent_pages;
+        child_mappings.fill(cpu::LinuxActiveImageMapping::EMPTY);
+        parent_pages.fill(memory::FrameLease::EMPTY);
         let mut private_index = 0;
         for (child, parent) in child_mappings.iter_mut().zip(parent_space.mappings()) {
             let frame = if mapping_requires_fork_copy(parent) {
@@ -601,35 +620,16 @@ impl ProcessTable {
         hierarchy: &[memory::FrameLease],
         pages: &[memory::FrameLease],
     ) -> bool {
-        if !(4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
-            || pages.is_empty()
-            || pages.len() > PROCESS_PRIVATE_PAGE_LIMIT
-            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
-            || !memory::frames_owned_by(memory::FrameOwner::KERNEL, pages)
-            || hierarchy
-                .iter()
-                .enumerate()
-                .any(|(index, frame)| hierarchy[..index].contains(frame) || pages.contains(frame))
-            || pages
-                .iter()
-                .enumerate()
-                .any(|(index, frame)| pages[..index].contains(frame))
-        {
-            return false;
-        }
-        let overlaps = |space: ProcessAddressSpace| {
-            let (leases, count) = space.leases();
-            leases[..count].iter().any(|lease| {
-                hierarchy
-                    .iter()
-                    .chain(pages)
-                    .any(|candidate| candidate.address() == lease.address())
-            })
-        };
-        !self.processes.iter().flatten().any(|process| {
-            process.address_space.is_some_and(overlaps)
-                || process.retiring_address_space.is_some_and(overlaps)
-        })
+        // Both slices come directly from the frame allocator in one fork
+        // transaction. Their live kernel leases establish uniqueness against
+        // every already-published process; only cross-batch overlap remains
+        // to be checked here.
+        (4..=PROCESS_HIERARCHY_LIMIT).contains(&hierarchy.len())
+            && !pages.is_empty()
+            && pages.len() <= PROCESS_PRIVATE_PAGE_LIMIT
+            && memory::frames_owned_by(memory::FrameOwner::KERNEL, hierarchy)
+            && memory::frames_owned_by(memory::FrameOwner::KERNEL, pages)
+            && hierarchy.iter().all(|frame| !pages.contains(frame))
     }
 
     fn abort_fork(&mut self, handle: ProcessHandle) -> bool {
@@ -1270,6 +1270,30 @@ pub(crate) fn refresh_live_process_registry(
     refreshed
 }
 
+pub(crate) fn refresh_live_process_address_space(
+    pid: u32,
+    snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
+) -> bool {
+    let Some(replacement) = ProcessAddressSpace::new(snapshot.hierarchy(), snapshot.mappings())
+    else {
+        return false;
+    };
+    let Some(table) = live_process_table_mut() else {
+        return false;
+    };
+    let Some(handle) = table.handle_by_pid(pid) else {
+        return false;
+    };
+    let Some(process) = table.process_mut(handle) else {
+        return false;
+    };
+    if process.state != ProcessState::Running || process.address_space.is_none() {
+        return false;
+    }
+    process.address_space = Some(replacement);
+    true
+}
+
 pub(crate) fn finish_live_process_registry() -> bool {
     finish_live_process_registry_with_refresh_floor(2)
 }
@@ -1394,13 +1418,17 @@ pub(crate) fn live_process_mapping(
         .find(|mapping| mapping.address == address)
 }
 
-pub(crate) fn set_live_process_mapping_permissions(
+pub(crate) fn replace_live_process_mapping(
     pid: u32,
     address: usize,
+    expected: memory::FrameLease,
+    replacement: memory::FrameLease,
     writable: bool,
     executable: bool,
 ) -> bool {
-    if writable && executable {
+    if writable && executable
+        || !memory::frames_owned_by(memory::FrameOwner::KERNEL, &[replacement])
+    {
         return false;
     }
     let Some(table) = live_process_table_mut() else {
@@ -1417,10 +1445,11 @@ pub(crate) fn set_live_process_mapping_permissions(
     };
     let Some(mapping) = space.mappings[..usize::from(space.mapping_count)]
         .iter_mut()
-        .find(|mapping| mapping.address == address)
+        .find(|mapping| mapping.address == address && mapping.frame == expected)
     else {
         return false;
     };
+    mapping.frame = replacement;
     mapping.writable = writable;
     mapping.executable = executable;
     true
@@ -1435,6 +1464,30 @@ pub(crate) fn live_process_hierarchy_frame(pid: u32, index: usize) -> Option<mem
         .hierarchy()
         .get(index)
         .copied()
+}
+
+pub(crate) fn write_live_process_u32(pid: u32, address: u64, value: u32) -> bool {
+    let Ok(address) = usize::try_from(address) else {
+        return false;
+    };
+    let page = address & !(PAGE_SIZE - 1);
+    let offset = address & (PAGE_SIZE - 1);
+    if offset + size_of::<u32>() > PAGE_SIZE {
+        return false;
+    }
+    let Some(mapping) = live_process_mapping(pid, page).filter(|mapping| mapping.writable) else {
+        return false;
+    };
+    let Some(frame) = mapping.frame.direct_map_address() else {
+        return false;
+    };
+    unsafe {
+        (frame as *mut u8)
+            .add(offset)
+            .cast::<u32>()
+            .write_unaligned(value)
+    };
+    true
 }
 
 pub(crate) fn dispatch_live_init_with_return(value: u64) -> Option<LiveProcessDispatch> {
@@ -1452,23 +1505,26 @@ pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
     let table = live_process_table_mut()?;
     let parent_handle = table.init?;
     let parent = table.process(parent_handle)?;
-    let parent_space = parent.address_space?;
+    let parent_space = parent.address_space.as_ref()?;
     if parent.state != ProcessState::Running || !parent_space.is_valid() {
         return None;
     }
+    let hierarchy_count = parent_space.hierarchy().len();
+    let private_count = parent_space
+        .mappings()
+        .iter()
+        .filter(|mapping| mapping_requires_fork_copy(mapping))
+        .count();
     LIVE_FORK_EXECUTION_STAGE.store(11, Ordering::Release);
     let child_handle = table.prepare_fork(parent_handle)?;
+    LIVE_FORK_EXECUTION_STAGE.store(111, Ordering::Release);
     let Some(child_hierarchy) =
         memory::allocate_frames::<PROCESS_HIERARCHY_LIMIT>(memory::FrameOwner::KERNEL)
     else {
         let _ = table.abort_fork(child_handle);
         return None;
     };
-    let private_count = parent_space
-        .mappings()
-        .iter()
-        .filter(|mapping| mapping_requires_fork_copy(mapping))
-        .count();
+    LIVE_FORK_EXECUTION_STAGE.store(112, Ordering::Release);
     if private_count == 0 || private_count > PROCESS_PRIVATE_COPY_LIMIT {
         let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &child_hierarchy);
         let _ = table.abort_fork(child_handle);
@@ -1482,7 +1538,7 @@ pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
         let _ = table.abort_fork(child_handle);
         return None;
     };
-    let hierarchy_count = parent_space.hierarchy().len();
+    LIVE_FORK_EXECUTION_STAGE.store(113, Ordering::Release);
     let published = table.commit_cloned_fork(
         child_handle,
         &child_hierarchy[..hierarchy_count],
@@ -1508,7 +1564,14 @@ pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
-    let Some(parent_scheduler_context) = parent_context.scheduler_context(&parent_space) else {
+    let Some(parent_space) = table
+        .process(parent_handle)
+        .and_then(|process| process.address_space.as_ref())
+    else {
+        let _ = discard_live_fork(table, parent_handle, child_handle);
+        return None;
+    };
+    let Some(parent_scheduler_context) = parent_context.scheduler_context(parent_space) else {
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
@@ -1516,11 +1579,12 @@ pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
-    let (Some(child_space), Some(child_context)) = (child.address_space, child.context) else {
+    let (Some(child_space), Some(child_context)) = (child.address_space.as_ref(), child.context)
+    else {
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };
-    let Some(child_scheduler_context) = child_context.scheduler_context(&child_space) else {
+    let Some(child_scheduler_context) = child_context.scheduler_context(child_space) else {
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     };

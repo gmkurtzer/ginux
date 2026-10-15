@@ -778,6 +778,26 @@ pub(crate) fn frame_leases_releasable(owner: FrameOwner, frames: &[FrameLease]) 
     }
 }
 
+pub(crate) fn live_frame_lease(owner: FrameOwner, address: u64) -> Option<FrameLease> {
+    if !INITIALIZED.load(Ordering::Acquire) || !address.is_multiple_of(PAGE_SIZE) {
+        return None;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        (&(*allocator).live_frames)[..(*allocator).live_count]
+            .iter()
+            .copied()
+            .zip(
+                (&(*allocator).live_owners)[..(*allocator).live_count]
+                    .iter()
+                    .copied(),
+            )
+            .find_map(|(frame, live_owner)| {
+                (frame.address == address && live_owner == owner).then_some(frame)
+            })
+    }
+}
+
 pub(crate) fn scrub_and_release_frames(owner: FrameOwner, frames: &[FrameLease]) -> bool {
     if !INITIALIZED.load(Ordering::Acquire) || frames.is_empty() {
         return false;
