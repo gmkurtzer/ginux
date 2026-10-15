@@ -18,6 +18,12 @@ memory-mib=128
 autostart=false
 ```
 
+`cpu` accepts any nonzero 16-bit count and `memory-mib` accepts any nonzero
+64-bit MiB value. These are per-domain policy values, not admission-time
+reservations, and neither has an arbitrary host-wide product ceiling. Runtime
+allocation remains constrained by addressability and resources actually
+available on the machine.
+
 No image is implied. `container new NAME` therefore creates an incomplete
 record until an explicit OCI image reference is configured:
 

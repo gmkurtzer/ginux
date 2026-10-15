@@ -1,13 +1,16 @@
 # Boot-local image store v0
 
-The C3 OCI cache is volatile, quota-bound, and content addressed. It exposes no
-partially downloaded object to a container.
+The C3 OCI cache is volatile, available-memory-backed, and content addressed.
+It has no configured byte ceiling and exposes no partially downloaded object
+to a container.
 
 An ingestion client reserves the complete declared object length before the
-first byte is accepted. Bytes are appended in order while SHA-256 is computed.
+first byte is accepted. The reservation succeeds while backing memory is
+available; resource exhaustion is not an image-size policy. Bytes are appended
+in order while SHA-256 is computed.
 Publication succeeds only when the declared length and digest both match. A
 failed transfer, digest mismatch, or explicit abort destroys and scrubs its
-staging storage before returning quota.
+staging storage before returning its backing memory.
 
 Published objects are immutable and addressed by their SHA-256 digest. Staging
 handles include a monotonically increasing generation so an aborted handle

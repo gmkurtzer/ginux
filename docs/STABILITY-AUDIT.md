@@ -53,7 +53,7 @@ until every invariant has an automated end-to-end test.
 | S1 | Start failures are misreported | all rejected starts say `image not ready` | Return and display typed lifecycle errors |
 | S1 | Live OCI gate is nondeterministic | registry DNS failure prevented two full Alpine test runs | Deterministic registry fixture plus optional public-registry test |
 | S1 | No two-container QEMU gate exists | current Alpine script tests one container sequentially | Add the acceptance sequence below to the required gate |
-| S2 | Resource settings are not fully effective | current admission path assumes one CPU and 128 MiB | Enforce configured values through domain policy and report them |
+| S2 | Resource enforcement is incomplete | configured CPU and arbitrary nonzero 64-bit MiB values are retained and reported, but allocations are not yet charged to domains | Enforce the configured values through domain allocation accounting |
 | S2 | Roadmap/checkpoint claims are ahead of verification | C3 text describes behavior absent from the QEMU gate | Derive status from passing gates, not implementation intent |
 
 ## Required end-to-end acceptance sequence

@@ -105,6 +105,11 @@ I/O subsystems must consult their corresponding domain policy as their
 contention queues are introduced. Only an ancestor domain may change a
 descendant's policy, so a workload cannot promote itself.
 
+Container resource settings do not have arbitrary host-wide ceilings.
+`memory-mib` accepts any nonzero 64-bit MiB value, and OCI staging/rootfs
+allocation has no configured byte cap. Values are bounded only by their ABI
+representation, addressability, and resources actually available at runtime.
+
 Each configured container is backed by exactly one Ginux domain. The domain is
 the outer, non-bypassable security boundary and owns the container's CPU and
 memory budget, process tree, IPC objects, filesystem root and mount view,

@@ -126,7 +126,7 @@ struct Domain {
     role: Role,
     container_slot: Option<u16>,
     cpu_limit: u16,
-    memory_limit_mib: u32,
+    memory_limit_mib: u64,
     resource_policy: DomainResourcePolicy,
     container_network: Option<ContainerNetworkMode>,
     state: State,
@@ -371,6 +371,13 @@ impl Manager {
             .filter(|domain| domain.id == id)
     }
 
+    fn domain_mut(&mut self, id: DomainId) -> Option<&mut Domain> {
+        self.domains
+            .get_mut(usize::from(id.slot))?
+            .as_mut()
+            .filter(|domain| domain.id == id)
+    }
+
     fn next_domain_id(&self) -> Option<(usize, DomainId)> {
         self.domains.iter().enumerate().find_map(|(slot, domain)| {
             if domain.is_some() {
@@ -574,7 +581,7 @@ impl Manager {
         parent: DomainId,
         container_slot: usize,
         cpu_limit: u16,
-        memory_limit_mib: u32,
+        memory_limit_mib: u64,
     ) -> Option<DomainId> {
         let parent_role = self.domain(parent)?.role;
         if container_slot >= CONTAINER_DOMAIN_CAPACITY
@@ -622,6 +629,28 @@ impl Manager {
             delegated_roots: [None; MAX_BOOT_GRANTS],
         });
         Some(id)
+    }
+
+    fn configure_container_domain_limits(
+        &mut self,
+        id: DomainId,
+        cpu_limit: u16,
+        memory_limit_mib: u64,
+    ) -> bool {
+        if cpu_limit == 0 || memory_limit_mib == 0 {
+            return false;
+        }
+        let Some(domain) = self.domain_mut(id) else {
+            return false;
+        };
+        if domain.role != Role::Container || domain.state != State::Ready {
+            return false;
+        }
+        domain.cpu_limit = cpu_limit;
+        domain.memory_limit_mib = memory_limit_mib;
+        domain.thread_limit = cpu_limit;
+        domain.operation_limit = cpu_limit;
+        true
     }
 
     fn create_initial_service(&mut self) -> Option<DomainId> {
@@ -1425,7 +1454,7 @@ pub(crate) fn create_container_domain(
     parent_raw: u64,
     container_slot: usize,
     cpu_limit: u16,
-    memory_limit_mib: u32,
+    memory_limit_mib: u64,
 ) -> Option<u64> {
     let parent = decode_id(parent_raw)?;
     let manager = global_manager_mut()?;
@@ -1451,9 +1480,26 @@ pub(crate) fn container_domain_for_slot(container_slot: usize) -> Option<u64> {
         .map(|domain| encode_id(domain.id))
 }
 
-pub(crate) fn container_domain_limits(domain_raw: u64) -> Option<(u16, u32)> {
+pub(crate) fn container_domain_limits(domain_raw: u64) -> Option<(u16, u64)> {
     let domain = global_manager()?.domain(decode_id(domain_raw)?)?;
     (domain.role == Role::Container).then_some((domain.cpu_limit, domain.memory_limit_mib))
+}
+
+pub(crate) fn configure_container_domain_limits(
+    domain_raw: u64,
+    cpu_limit: u16,
+    memory_limit_mib: u64,
+) -> bool {
+    if cpu_limit == 0 || memory_limit_mib == 0 {
+        return false;
+    }
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let Some(manager) = global_manager_mut() else {
+        return false;
+    };
+    manager.configure_container_domain_limits(id, cpu_limit, memory_limit_mib)
 }
 
 pub(crate) fn resource_policy(domain_raw: u64) -> Option<DomainResourcePolicy> {
@@ -1733,6 +1779,9 @@ pub(crate) fn verify_container_domain_invariants() -> bool {
         || !manager.set_descendant_resource_policy(control, second, io_favored)
         || manager.set_descendant_resource_policy(first, second, scavenger)
         || manager.set_descendant_resource_policy(first, first, scavenger)
+        || !manager.configure_container_domain_limits(second, 4096, 1_u64 << 40)
+        || manager.configure_container_domain_limits(second, 0, 1)
+        || manager.configure_container_domain_limits(second, 1, 0)
     {
         return false;
     }
@@ -1754,8 +1803,8 @@ pub(crate) fn verify_container_domain_invariants() -> bool {
         && second_domain.is_some_and(|domain| {
             domain.role == Role::Container
                 && domain.container_slot == Some(1)
-                && domain.cpu_limit == 2
-                && domain.memory_limit_mib == 512
+                && domain.cpu_limit == 4096
+                && domain.memory_limit_mib == (1_u64 << 40)
                 && domain.resource_policy == io_favored
         })
         && manager

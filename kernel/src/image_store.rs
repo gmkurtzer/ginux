@@ -9,10 +9,7 @@ use crate::memory::{self, FrameLease, FrameOwner};
 
 const PAGE_SIZE: usize = 4096;
 const OBJECT_LIMIT: usize = 4;
-const OBJECT_PAGE_LIMIT: usize = 32_768;
-const ROOTFS_PAGE_LIMIT: usize = 131_072;
-pub(crate) const OBJECT_SIZE_LIMIT: usize = OBJECT_PAGE_LIMIT * PAGE_SIZE;
-pub(crate) const CACHE_QUOTA: usize = OBJECT_SIZE_LIMIT;
+pub(crate) const CACHE_QUOTA: usize = usize::MAX;
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static mut STORE: MaybeUninit<ImageStore<RamBackend, OBJECT_LIMIT>> = MaybeUninit::uninit();
@@ -56,7 +53,7 @@ impl ObjectBackend for RamBackend {
 
     fn create(&mut self, expected_length: usize) -> Option<Self::Object> {
         let page_count = expected_length.div_ceil(PAGE_SIZE);
-        if page_count == 0 || page_count > OBJECT_PAGE_LIMIT {
+        if page_count == 0 {
             return None;
         }
         let slot = self.objects.iter().position(|object| !object.live)?;
@@ -238,10 +235,7 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
             return false;
         }
         let expected_length = u32::from_le_bytes(trailer) as usize;
-        if expected_length == 0 || expected_length > ROOTFS_PAGE_LIMIT * PAGE_SIZE {
-            crate::serial_write_bytes(b"ginux: OCI rootfs expanded size exceeds limit: ");
-            crate::serial_write_u64(expected_length as u64);
-            crate::serial_write_bytes(b" bytes\r\n");
+        if expected_length == 0 {
             return false;
         }
         let page_count = expected_length.div_ceil(PAGE_SIZE);

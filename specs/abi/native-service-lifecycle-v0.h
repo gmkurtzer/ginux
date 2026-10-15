@@ -76,7 +76,7 @@
 #define GINUX_NATIVE_CONTAINER_SET_AUTOSTART UINT64_C(9)
 #define GINUX_NATIVE_CONTAINER_SET_IMAGE UINT64_C(10)
 #define GINUX_NATIVE_CONTAINER_REQUEST_SIZE UINT32_C(208)
-#define GINUX_NATIVE_CONTAINER_REQUEST_VERSION UINT16_C(1)
+#define GINUX_NATIVE_CONTAINER_REQUEST_VERSION UINT16_C(2)
 #define GINUX_NATIVE_CONTAINER_MAX_NAME_SIZE UINT16_C(16)
 #define GINUX_NATIVE_CONTAINER_MAX_INIT_SIZE UINT16_C(32)
 #define GINUX_NATIVE_CONTAINER_MAX_IMAGE_SIZE UINT16_C(128)
@@ -92,7 +92,7 @@
 #define GINUX_NATIVE_CONTAINER_STATE_CREATED UINT64_C(4)
 #define GINUX_NATIVE_CONTAINER_STATE_CONFIGURED UINT64_C(5)
 
-struct ginux_native_container_request_v1 {
+struct ginux_native_container_request_v2 {
     uint32_t size;
     uint16_t version;
     uint16_t name_size;
@@ -102,13 +102,13 @@ struct ginux_native_container_request_v1 {
     uint16_t config_flags;
     uint8_t init[GINUX_NATIVE_CONTAINER_MAX_INIT_SIZE];
     uint16_t image_size;
-    uint16_t reserved16;
+    uint16_t cpu_count;
     uint8_t image[GINUX_NATIVE_CONTAINER_MAX_IMAGE_SIZE];
-    uint64_t reserved64;
+    uint64_t memory_mib;
 };
 
-_Static_assert(sizeof(struct ginux_native_container_request_v1) == 208,
-               "ginux native container request v1 size");
+_Static_assert(sizeof(struct ginux_native_container_request_v2) == 208,
+               "ginux native container request v2 size");
 #define GINUX_NATIVE_CONTROL_DISCOVERY(version, features) \
     (((uint64_t)(version) << 16) | (uint64_t)(features))
 #define GINUX_NATIVE_CONTROL_ABI_IS_COMPATIBLE(discovery)                         \

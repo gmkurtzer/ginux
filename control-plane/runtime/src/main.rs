@@ -6,7 +6,7 @@ use ginux_command::{
     complete, parse, write_error, write_help, Arguments, Arity, Command, HelpWriter, ParseOutcome,
 };
 use ginux_native_abi::{
-    native_control_abi_is_compatible, NativeContainerRequestV1, NativeControlDescriptorV4,
+    native_control_abi_is_compatible, NativeContainerRequestV2, NativeControlDescriptorV4,
     NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
     NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION,
     NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_ATTACH,
@@ -1004,14 +1004,14 @@ fn show_container_list(console: u64, host: u64) {
     }
 }
 
-fn next_container(host: u64, cursor: u64) -> Option<(u64, NativeContainerRequestV1)> {
-    let mut request = NativeContainerRequestV1::zeroed();
+fn next_container(host: u64, cursor: u64) -> Option<(u64, NativeContainerRequestV2)> {
+    let mut request = NativeContainerRequestV2::zeroed();
     request.value = cursor;
     let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
     (state != 0 && state != NATIVE_CALL_FAILED).then_some((state, request))
 }
 
-fn append_container_configuration(row: &mut OutputLine, request: &NativeContainerRequestV1) {
+fn append_container_configuration(row: &mut OutputLine, request: &NativeContainerRequestV2) {
     let configured = |flag| request.config_flags & flag != 0;
     if configured(NATIVE_CONTAINER_CONFIG_INIT) {
         let init = request
@@ -1022,22 +1022,16 @@ fn append_container_configuration(row: &mut OutputLine, request: &NativeContaine
     } else {
         row.padded(b"-", 22);
     }
-    row.padded(
-        if configured(NATIVE_CONTAINER_CONFIG_CPU) {
-            b"1"
-        } else {
-            b"-"
-        },
-        5,
-    );
-    row.padded(
-        if configured(NATIVE_CONTAINER_CONFIG_MEMORY) {
-            b"128"
-        } else {
-            b"-"
-        },
-        9,
-    );
+    if configured(NATIVE_CONTAINER_CONFIG_CPU) {
+        row.decimal_padded(u64::from(request.cpu_count), 5);
+    } else {
+        row.padded(b"-", 5);
+    }
+    if configured(NATIVE_CONTAINER_CONFIG_MEMORY) {
+        row.decimal_padded(request.memory_mib, 9);
+    } else {
+        row.padded(b"-", 9);
+    }
     row.padded(
         if configured(NATIVE_CONTAINER_CONFIG_AUTOSTART) {
             b"true"
@@ -1220,7 +1214,7 @@ fn split_setting(setting: &[u8]) -> Option<(&[u8], &[u8])> {
 }
 
 fn prepare_setting(
-    request: &mut NativeContainerRequestV1,
+    request: &mut NativeContainerRequestV2,
     field: &[u8],
     value: &[u8],
 ) -> Option<(u16, u64)> {
@@ -1234,12 +1228,18 @@ fn prepare_setting(
             request.init[..value.len()].copy_from_slice(value);
             Some((NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_SET_INIT))
         }
-        (b"cpu", b"1") => {
-            request.value = 1;
+        (b"cpu", value) => {
+            request.cpu_count = u16::try_from(parse_decimal(value)?).ok()?;
+            if request.cpu_count == 0 {
+                return None;
+            }
             Some((NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_SET_CPU))
         }
-        (b"memory-mib", b"128") => {
-            request.value = 128;
+        (b"memory-mib", value) => {
+            request.memory_mib = parse_decimal(value)?;
+            if request.memory_mib == 0 {
+                return None;
+            }
             Some((
                 NATIVE_CONTAINER_CONFIG_MEMORY,
                 NATIVE_CONTAINER_SET_MEMORY_MIB,
@@ -1302,14 +1302,14 @@ impl HelpWriter for ConsoleHelpWriter {
     }
 }
 
-fn request_for_name(name: &[u8]) -> NativeContainerRequestV1 {
-    let mut request = NativeContainerRequestV1::zeroed();
+fn request_for_name(name: &[u8]) -> NativeContainerRequestV2 {
+    let mut request = NativeContainerRequestV2::zeroed();
     request.name_size = name.len() as u16;
     request.name[..name.len()].copy_from_slice(name);
     request
 }
 
-fn request_name(request: &NativeContainerRequestV1) -> &[u8] {
+fn request_name(request: &NativeContainerRequestV2) -> &[u8] {
     request
         .name
         .get(..usize::from(request.name_size))
@@ -1324,12 +1324,12 @@ fn valid_container_name(name: &[u8]) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
-fn container_call(host: u64, operation: u64, request: &mut NativeContainerRequestV1) -> u64 {
+fn container_call(host: u64, operation: u64, request: &mut NativeContainerRequestV2) -> u64 {
     call(
         NATIVE_CONTAINER_CONTROL_OPERATION,
         host,
         operation,
-        (request as *mut NativeContainerRequestV1) as u64,
+        (request as *mut NativeContainerRequestV2) as u64,
     )
 }
 
@@ -1470,7 +1470,7 @@ fn show_processes(console: u64, host: u64) {
     }
 }
 
-fn container_for_pid(host: u64, pid: u64) -> Option<NativeContainerRequestV1> {
+fn container_for_pid(host: u64, pid: u64) -> Option<NativeContainerRequestV2> {
     let slot = pid.checked_sub(100)?;
     if slot >= NATIVE_CONTAINER_LIMIT as u64 {
         return None;

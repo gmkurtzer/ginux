@@ -160,7 +160,7 @@ pub const NATIVE_CONTAINER_SET_IMAGE: u64 = 10;
 pub const NATIVE_CONTAINER_START_ATTACHED: u64 = 11;
 pub const NATIVE_CONTAINER_ATTACH: u64 = 12;
 pub const NATIVE_CONTAINER_REQUEST_SIZE: u32 = 208;
-pub const NATIVE_CONTAINER_REQUEST_VERSION: u16 = 1;
+pub const NATIVE_CONTAINER_REQUEST_VERSION: u16 = 2;
 pub const NATIVE_CONTAINER_MAX_NAME_SIZE: usize = 16;
 pub const NATIVE_CONTAINER_MAX_INIT_SIZE: usize = 32;
 pub const NATIVE_CONTAINER_MAX_IMAGE_SIZE: usize = 128;
@@ -348,7 +348,7 @@ pub struct NativeHostInspectRecordV0 {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct NativeContainerRequestV1 {
+pub struct NativeContainerRequestV2 {
     pub size: u32,
     pub version: u16,
     pub name_size: u16,
@@ -358,12 +358,12 @@ pub struct NativeContainerRequestV1 {
     pub config_flags: u16,
     pub init: [u8; NATIVE_CONTAINER_MAX_INIT_SIZE],
     pub image_size: u16,
-    pub reserved16: u16,
+    pub cpu_count: u16,
     pub image: [u8; NATIVE_CONTAINER_MAX_IMAGE_SIZE],
-    pub reserved64: u64,
+    pub memory_mib: u64,
 }
 
-impl NativeContainerRequestV1 {
+impl NativeContainerRequestV2 {
     pub const fn zeroed() -> Self {
         Self {
             size: NATIVE_CONTAINER_REQUEST_SIZE,
@@ -375,9 +375,9 @@ impl NativeContainerRequestV1 {
             config_flags: 0,
             init: [0; NATIVE_CONTAINER_MAX_INIT_SIZE],
             image_size: 0,
-            reserved16: 0,
+            cpu_count: 0,
             image: [0; NATIVE_CONTAINER_MAX_IMAGE_SIZE],
-            reserved64: 0,
+            memory_mib: 0,
         }
     }
 }
@@ -401,7 +401,7 @@ impl NativeHostInspectRecordV0 {
 const _: () = assert!(core::mem::size_of::<NativeRootDirectoryRequestV4>() == 48);
 const _: () = assert!(core::mem::size_of::<NativeHostInspectRequestV0>() == 32);
 const _: () = assert!(core::mem::size_of::<NativeHostInspectRecordV0>() == 40);
-const _: () = assert!(core::mem::size_of::<NativeContainerRequestV1>() == 208);
+const _: () = assert!(core::mem::size_of::<NativeContainerRequestV2>() == 208);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2070,6 +2070,16 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF UINT16_C(2048)"));
         assert!(header.contains("GINUX_NATIVE_LINUX_ABI_TEST_OPERATION UINT64_C(34)"));
         assert!(header.contains("GINUX_NATIVE_LINUX_ABI_TEST_COUNT UINT32_C(23)"));
+        assert!(header.contains("GINUX_NATIVE_CONTAINER_REQUEST_VERSION UINT16_C(2)"));
+        assert!(header.contains("struct ginux_native_container_request_v2"));
+        assert_eq!(
+            core::mem::offset_of!(NativeContainerRequestV2, cpu_count),
+            70
+        );
+        assert_eq!(
+            core::mem::offset_of!(NativeContainerRequestV2, memory_mib),
+            200
+        );
         assert!(header.contains("sizeof(struct ginux_native_control_descriptor_v4) == 16"));
     }
 

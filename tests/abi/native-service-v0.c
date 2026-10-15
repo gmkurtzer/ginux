@@ -166,16 +166,20 @@ _Static_assert(GINUX_NATIVE_CONSOLE_MAX_LINE_BYTES == UINT32_C(256),
                "console line bound");
 _Static_assert(GINUX_NATIVE_CONTAINER_CONFIG_COMPLETE == UINT16_C(23),
                "complete container configuration flags");
-_Static_assert(sizeof(struct ginux_native_container_request_v1) == 208,
+_Static_assert(sizeof(struct ginux_native_container_request_v2) == 208,
                "container request size");
-_Static_assert(offsetof(struct ginux_native_container_request_v1, name) == 8,
+_Static_assert(offsetof(struct ginux_native_container_request_v2, name) == 8,
                "container request name offset");
-_Static_assert(offsetof(struct ginux_native_container_request_v1, value) == 24,
+_Static_assert(offsetof(struct ginux_native_container_request_v2, value) == 24,
                "container request value offset");
-_Static_assert(offsetof(struct ginux_native_container_request_v1, init) == 36,
+_Static_assert(offsetof(struct ginux_native_container_request_v2, init) == 36,
                "container request init offset");
-_Static_assert(offsetof(struct ginux_native_container_request_v1, image) == 72,
+_Static_assert(offsetof(struct ginux_native_container_request_v2, image) == 72,
                "container request image offset");
+_Static_assert(offsetof(struct ginux_native_container_request_v2, cpu_count) == 70,
+               "container request CPU count offset");
+_Static_assert(offsetof(struct ginux_native_container_request_v2, memory_mib) == 200,
+               "container request memory offset");
 _Static_assert(GINUX_NATIVE_PACKET_CONSUME_OPERATION == UINT64_C(22),
                "native packet consume operation");
 _Static_assert(GINUX_NATIVE_PACKET_WAIT_OPERATION == UINT64_C(23),

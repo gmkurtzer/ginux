@@ -989,6 +989,10 @@ static CONTAINER_DOMAIN_IDS: [AtomicU64; control_abi::CONTAINER_LIMIT] =
     [const { AtomicU64::new(0) }; control_abi::CONTAINER_LIMIT];
 static CONTAINER_CONFIG_FLAGS: [AtomicU16; control_abi::CONTAINER_LIMIT] =
     [const { AtomicU16::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_CPU_COUNTS: [AtomicU16; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU16::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_MEMORY_MIB: [AtomicU64; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU64::new(0) }; control_abi::CONTAINER_LIMIT];
 static CONTAINER_NAME_SIZES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
 static CONTAINER_NAMES: [[AtomicU8; control_abi::CONTAINER_MAX_NAME_SIZE];
@@ -2981,7 +2985,7 @@ pub(crate) fn begin_configured_container() {
                 .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
             return;
         };
-        if domain::container_domain_limits(container_domain) != Some((1, 128)) {
+        if domain::container_domain_limits(container_domain).is_none() {
             CONTAINER_CONTROL_STATES[slot]
                 .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
             return;
@@ -16529,10 +16533,12 @@ fn image_store_call(caller_domain: u64, capability: u64, frame: *const UserTrapF
                 && buffer_address == 0
                 && buffer_size == 0
                 && expected_length != 0
-                && expected_length <= image_store::OBJECT_SIZE_LIMIT as u64
                 && digest != [0; 32] =>
         {
-            image_store::stage(digest, expected_length as usize)
+            let Ok(expected_length) = usize::try_from(expected_length) else {
+                return failed;
+            };
+            image_store::stage(digest, expected_length)
                 .map(ginux_image_store::StagingHandle::into_raw)
                 .unwrap_or(failed)
         }
@@ -18275,6 +18281,8 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 return u64::MAX - 2;
             };
             CONTAINER_DOMAIN_IDS[slot].store(container_domain, Ordering::SeqCst);
+            CONTAINER_CPU_COUNTS[slot].store(1, Ordering::SeqCst);
+            CONTAINER_MEMORY_MIB[slot].store(128, Ordering::SeqCst);
             store_container_name(slot, name);
             store_container_value(
                 b"/sbin/init",
@@ -18304,20 +18312,36 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             update_container_configuration(slot, control_abi::CONTAINER_CONFIG_INIT)
         }
         control_abi::CONTAINER_SET_CPU
-            if configurable_container(requested_slot) && read_u64_at(&request, 24) == 1 =>
+            if configurable_container(requested_slot) && read_u16_at(&request, 70) != 0 =>
         {
-            update_container_configuration(
-                requested_slot.unwrap_or(0),
-                control_abi::CONTAINER_CONFIG_CPU,
-            )
+            let slot = requested_slot.unwrap_or(0);
+            let cpu_count = read_u16_at(&request, 70);
+            let memory_mib = CONTAINER_MEMORY_MIB[slot].load(Ordering::Acquire);
+            if !domain::configure_container_domain_limits(
+                CONTAINER_DOMAIN_IDS[slot].load(Ordering::Acquire),
+                cpu_count,
+                memory_mib,
+            ) {
+                return u64::MAX - 2;
+            }
+            CONTAINER_CPU_COUNTS[slot].store(cpu_count, Ordering::Release);
+            update_container_configuration(slot, control_abi::CONTAINER_CONFIG_CPU)
         }
         control_abi::CONTAINER_SET_MEMORY_MIB
-            if configurable_container(requested_slot) && read_u64_at(&request, 24) == 128 =>
+            if configurable_container(requested_slot) && read_u64_at(&request, 200) != 0 =>
         {
-            update_container_configuration(
-                requested_slot.unwrap_or(0),
-                control_abi::CONTAINER_CONFIG_MEMORY,
-            )
+            let slot = requested_slot.unwrap_or(0);
+            let memory_mib = read_u64_at(&request, 200);
+            let cpu_count = CONTAINER_CPU_COUNTS[slot].load(Ordering::Acquire);
+            if !domain::configure_container_domain_limits(
+                CONTAINER_DOMAIN_IDS[slot].load(Ordering::Acquire),
+                cpu_count,
+                memory_mib,
+            ) {
+                return u64::MAX - 2;
+            }
+            CONTAINER_MEMORY_MIB[slot].store(memory_mib, Ordering::Release);
+            update_container_configuration(slot, control_abi::CONTAINER_CONFIG_MEMORY)
         }
         control_abi::CONTAINER_SET_AUTOSTART
             if configurable_container(requested_slot) && read_u64_at(&request, 24) <= 1 =>
@@ -18446,8 +18470,6 @@ fn read_container_request(address: u64) -> Option<[u8; control_abi::CONTAINER_RE
         || usize::from(read_u16_at(&request, 6)) > control_abi::CONTAINER_MAX_NAME_SIZE
         || usize::from(read_u16_at(&request, 32)) > control_abi::CONTAINER_MAX_INIT_SIZE
         || usize::from(read_u16_at(&request, 68)) > control_abi::CONTAINER_MAX_IMAGE_SIZE
-        || read_u16_at(&request, 70) != 0
-        || read_u64_at(&request, 200) != 0
     {
         return None;
     }
@@ -18709,12 +18731,22 @@ fn write_container_request(
     }
     let image_size = usize::from(CONTAINER_IMAGE_SIZES[slot].load(Ordering::SeqCst));
     request[68..70].copy_from_slice(&(image_size as u16).to_le_bytes());
+    request[70..72].copy_from_slice(
+        &CONTAINER_CPU_COUNTS[slot]
+            .load(Ordering::Acquire)
+            .to_le_bytes(),
+    );
     for (output, stored) in request[72..72 + image_size]
         .iter_mut()
         .zip(&CONTAINER_IMAGES[slot][..image_size])
     {
         *output = stored.load(Ordering::SeqCst);
     }
+    request[200..208].copy_from_slice(
+        &CONTAINER_MEMORY_MIB[slot]
+            .load(Ordering::Acquire)
+            .to_le_bytes(),
+    );
 }
 
 fn read_u16_at(bytes: &[u8], offset: usize) -> u16 {

@@ -59,11 +59,11 @@ Deliverables:
   manifest and image configuration are digest-verified before layer ingestion.
 - Operator-configurable control-domain networking can reach an OCI registry
   and resolve the native-platform manifest. `container start NAME` automatically pulls
-  a missing configured image, verifies every digest while streaming it into a
-  bounded RAM-backed store, and atomically publishes the immutable object.
+  a missing configured image, verifies every digest while streaming it into an
+  available-memory-backed store, and atomically publishes the immutable object.
 - Container configuration, cached image objects, writable overlays, and
-  temporary data are boot-local and disappear on host reboot. The C3 QEMU
-  profile has an explicit memory budget and fails cleanly on quota exhaustion.
+  temporary data are boot-local and disappear on host reboot. Image storage has
+  no configured byte ceiling and fails cleanly if backing resources are exhausted.
 - Each container has explicit static or DHCP network configuration independent
   from the control domain.
 - Each virtual NIC has one globally unique `gnetN` name that remains unchanged
