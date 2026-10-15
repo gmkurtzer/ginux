@@ -52,6 +52,39 @@ pub(crate) enum ContainerNetworkMode {
     Isolated,
 }
 
+/// Relative service given to a domain when a resource is contended.
+///
+/// Hard limits remain separate: this class decides which eligible domain is
+/// served first, while the limit decides whether it is eligible at all.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum ResourceServiceClass {
+    Scavenger,
+    BestEffort,
+    Standard,
+    LatencyCritical,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct DomainResourcePolicy {
+    pub(crate) cpu: ResourceServiceClass,
+    pub(crate) memory: ResourceServiceClass,
+    pub(crate) storage_io: ResourceServiceClass,
+    pub(crate) network_io: ResourceServiceClass,
+}
+
+impl DomainResourcePolicy {
+    const STANDARD: Self = Self::uniform(ResourceServiceClass::Standard);
+
+    pub(crate) const fn uniform(class: ResourceServiceClass) -> Self {
+        Self {
+            cpu: class,
+            memory: class,
+            storage_io: class,
+            network_io: class,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ServiceFailurePolicy {
     RestartManaged,
@@ -94,6 +127,7 @@ struct Domain {
     container_slot: Option<u16>,
     cpu_limit: u16,
     memory_limit_mib: u32,
+    resource_policy: DomainResourcePolicy,
     container_network: Option<ContainerNetworkMode>,
     state: State,
     capabilities: CapabilityTable,
@@ -310,6 +344,7 @@ impl Manager {
             container_slot: None,
             cpu_limit: 1,
             memory_limit_mib: 0,
+            resource_policy: DomainResourcePolicy::STANDARD,
             container_network: None,
             state: State::Ready,
             capabilities,
@@ -512,6 +547,7 @@ impl Manager {
             container_slot: None,
             cpu_limit: 1,
             memory_limit_mib: 0,
+            resource_policy: DomainResourcePolicy::STANDARD,
             container_network: None,
             state: State::Ready,
             capabilities,
@@ -570,6 +606,7 @@ impl Manager {
             container_slot: Some(u16::try_from(container_slot).ok()?),
             cpu_limit,
             memory_limit_mib,
+            resource_policy: DomainResourcePolicy::STANDARD,
             container_network: Some(ContainerNetworkMode::HostShared),
             state: State::Ready,
             capabilities,
@@ -659,6 +696,27 @@ impl Manager {
             current = parent;
         }
         false
+    }
+
+    fn set_descendant_resource_policy(
+        &mut self,
+        supervisor: DomainId,
+        target: DomainId,
+        policy: DomainResourcePolicy,
+    ) -> bool {
+        if !self.is_descendant(supervisor, target) {
+            return false;
+        }
+        let Some(domain) = self
+            .domains
+            .get_mut(usize::from(target.slot))
+            .and_then(Option::as_mut)
+            .filter(|domain| domain.id == target && domain.state == State::Ready)
+        else {
+            return false;
+        };
+        domain.resource_policy = policy;
+        true
     }
 
     fn begin_operation(&mut self, id: DomainId) -> bool {
@@ -1398,6 +1456,20 @@ pub(crate) fn container_domain_limits(domain_raw: u64) -> Option<(u16, u32)> {
     (domain.role == Role::Container).then_some((domain.cpu_limit, domain.memory_limit_mib))
 }
 
+pub(crate) fn resource_policy(domain_raw: u64) -> Option<DomainResourcePolicy> {
+    Some(
+        global_manager()?
+            .domain(decode_id(domain_raw)?)?
+            .resource_policy,
+    )
+}
+
+pub(crate) fn cpu_service_class(domain_raw: u64) -> ResourceServiceClass {
+    resource_policy(domain_raw)
+        .map(|policy| policy.cpu)
+        .unwrap_or(ResourceServiceClass::Standard)
+}
+
 pub(crate) fn container_slot_for_domain(domain_raw: u64) -> Option<usize> {
     let domain = global_manager()?.domain(decode_id(domain_raw)?)?;
     (domain.role == Role::Container)
@@ -1650,6 +1722,20 @@ pub(crate) fn verify_container_domain_invariants() -> bool {
     let Some(second) = manager.create_container_domain(control, 1, 2, 512) else {
         return false;
     };
+    let scavenger = DomainResourcePolicy::uniform(ResourceServiceClass::Scavenger);
+    let io_favored = DomainResourcePolicy {
+        cpu: ResourceServiceClass::BestEffort,
+        memory: ResourceServiceClass::Standard,
+        storage_io: ResourceServiceClass::LatencyCritical,
+        network_io: ResourceServiceClass::LatencyCritical,
+    };
+    if !manager.set_descendant_resource_policy(control, first, scavenger)
+        || !manager.set_descendant_resource_policy(control, second, io_favored)
+        || manager.set_descendant_resource_policy(first, second, scavenger)
+        || manager.set_descendant_resource_policy(first, first, scavenger)
+    {
+        return false;
+    }
     let first_domain = manager.domain(first);
     let second_domain = manager.domain(second);
     first != second
@@ -1660,6 +1746,7 @@ pub(crate) fn verify_container_domain_invariants() -> bool {
                 && domain.container_slot == Some(0)
                 && domain.cpu_limit == 1
                 && domain.memory_limit_mib == 128
+                && domain.resource_policy == scavenger
                 && domain.container_network == Some(ContainerNetworkMode::HostShared)
                 && domain.capabilities.is_empty()
                 && domain.capabilities.boot_authority_is_sealed()
@@ -1669,6 +1756,7 @@ pub(crate) fn verify_container_domain_invariants() -> bool {
                 && domain.container_slot == Some(1)
                 && domain.cpu_limit == 2
                 && domain.memory_limit_mib == 512
+                && domain.resource_policy == io_favored
         })
         && manager
             .create_container_domain(control, 0, 1, 128)

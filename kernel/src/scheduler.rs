@@ -672,12 +672,21 @@ impl Scheduler {
                 context: self.thread(id)?.context,
             });
         }
+        let service_class = self
+            .threads
+            .iter()
+            .flatten()
+            .filter(|thread| thread.state == State::Ready)
+            .map(|thread| domain::cpu_service_class(thread.domain))
+            .max()?;
         for offset in 0..MAX_THREADS {
             let slot = (self.next_slot + offset) % MAX_THREADS;
             let Some(mut thread) = self.threads[slot] else {
                 continue;
             };
-            if thread.state == State::Ready {
+            if thread.state == State::Ready
+                && domain::cpu_service_class(thread.domain) == service_class
+            {
                 thread.state = State::Running;
                 self.threads[slot] = Some(thread);
                 self.current = Some(thread.id);

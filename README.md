@@ -93,6 +93,18 @@ capabilities, replies, interrupt routes, DMA mappings, and device ownership can
 be rejected before its memory is reused. A replacement is a new generation,
 not a continuation of the failed security context.
 
+A domain is also the kernel's resource-policy principal. Hard limits and
+service policy are deliberately separate: CPU and memory limits define what a
+domain may never exceed, while per-resource service classes define how the
+kernel arbitrates contention. CPU, memory pressure, storage I/O, and network
+I/O each have an independent class. This permits, for example, latency-critical
+CPU service with ordinary storage service, or a scavenger domain that runs only
+from capacity left by higher classes. The CPU scheduler already selects the
+highest ready domain class and remains round-robin within a class; memory and
+I/O subsystems must consult their corresponding domain policy as their
+contention queues are introduced. Only an ancestor domain may change a
+descendant's policy, so a workload cannot promote itself.
+
 Each configured container is backed by exactly one Ginux domain. The domain is
 the outer, non-bypassable security boundary and owns the container's CPU and
 memory budget, process tree, IPC objects, filesystem root and mount view,
