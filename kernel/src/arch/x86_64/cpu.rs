@@ -2402,14 +2402,16 @@ fn execute_deferred_live_fork() -> bool {
     LINUX_PROCESS_CHILD_EXITED.store(false, Ordering::SeqCst);
     LINUX_PROCESS_CHILD_STATUS.store(0, Ordering::SeqCst);
     LINUX_CURRENT_PROCESS_PID.store(child.pid, Ordering::SeqCst);
-    let child_resumed = address_space::resume_live_linux_process(
-        child.root,
-        child.rip,
-        child.rsp,
-        child.fs_base,
-        child.general,
-        child.rflags,
-    );
+    let child_resumed = (!LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        || sync_live_linux_process_address_space(child.pid))
+        && address_space::resume_live_linux_process(
+            child.root,
+            child.rip,
+            child.rsp,
+            child.fs_base,
+            child.general,
+            child.rflags,
+        );
     let child_exited = LINUX_PROCESS_CHILD_EXITED.swap(false, Ordering::SeqCst);
     let child_status = LINUX_PROCESS_CHILD_STATUS.swap(0, Ordering::SeqCst);
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && !(child_resumed && child_exited) {
@@ -2437,14 +2439,16 @@ fn execute_deferred_live_fork() -> bool {
     }
     LINUX_CURRENT_PROCESS_PID.store(1, Ordering::SeqCst);
     LIVE_FORK_PUBLIC_DIAGNOSTIC.store(0x20, Ordering::SeqCst);
-    let parent_resumed = address_space::resume_live_linux_process(
-        parent.root,
-        parent.rip,
-        parent.rsp,
-        parent.fs_base,
-        parent.general,
-        parent.rflags,
-    );
+    let parent_resumed = (!LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        || sync_live_linux_process_address_space(1))
+        && address_space::resume_live_linux_process(
+            parent.root,
+            parent.rip,
+            parent.rsp,
+            parent.fs_base,
+            parent.general,
+            parent.rflags,
+        );
     let parent_resumed = if parent_resumed
         && !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
         && ELF_PROBE_SYSTEM_INIT.load(Ordering::SeqCst)
@@ -6311,13 +6315,9 @@ extern "sysv64" fn linux_syscall_handler(
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LINUX_RETURN_TO_KERNEL;
     }
-    if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
-        && !sync_live_linux_process_address_space(current_linux_process_pid())
-    {
-        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
-        return LINUX_RETURN_TO_KERNEL;
-    }
-    if current_linux_process_pid() == 1
+    let runtime_mode = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
+    if !runtime_mode
+        && current_linux_process_pid() == 1
         && current_linux_tid() == Some(1)
         && !refresh_live_linux_process_registry(syscall_return)
     {
@@ -6580,6 +6580,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_FORK_SYSCALL | LINUX_VFORK_SYSCALL => {
             if current_linux_process_pid() != 1
                 || current_linux_tid() != Some(1)
+                || (runtime_mode && !refresh_live_linux_process_registry(syscall_return))
                 || LINUX_FORK_REQUESTED
                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                     .is_err()
