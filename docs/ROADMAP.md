@@ -46,9 +46,11 @@ verification exercises configuration and lifecycle commands.
 
 **Implementation status:** In progress. Explicit image configuration, runtime
 registry resolution and download, verified rootfs ingestion, scalable
-four-segment PIE mapping, ELF-declared dynamic-loader startup, an interactive
-BusyBox `/bin/sh`, and detach/reattach with retained console redraw are complete.
-Multi-layer filesystem merging and container networking remain.
+four-segment PIE mapping, ELF-declared dynamic-loader startup, and an
+interactive BusyBox `/bin/sh` work for a single runtime. C3 remains open:
+detach/reattach must use schedulable domain contexts, and Alpine and Rocky must
+run concurrently without shared Linux ABI state. Multi-layer filesystem
+merging and container networking also remain.
 
 Deliverables:
 
@@ -72,9 +74,10 @@ Deliverables:
 - The image loader accepts normal four-segment PIE executables and scales past
   the deliberately tiny C2 proof-image limits without weakening W^X.
 
-Gate: deterministic Alpine shell transcript, detach/reattach, and negative
-digest/path tests. Human verification interacts with the unmodified Alpine
-BusyBox shell rather than a custom host userspace.
+Gate: deterministic Alpine and Rocky shell transcripts, concurrent detached
+runtimes, independent attach/detach/stop/restart, and negative digest/path
+tests. Human verification interacts with both unmodified shells rather than a
+custom host userspace. See `docs/STABILITY-AUDIT.md` for the complete sequence.
 
 ## C4: Rocky systemd early boot
 
@@ -106,7 +109,10 @@ Gate: login over SSH, network-isolation tests, storage crash/recovery tests, and
 
 Deliverables:
 
-- Two Rocky system containers boot concurrently with independent init, process IDs, mounts, hostnames, credentials, cgroups, clocks, devices, IP addresses, routes, and persistent state.
+- Scale the concurrency already required by C3 to multiple Rocky system
+  containers with independent init, process IDs, mounts, hostnames,
+  credentials, cgroups, clocks, devices, IP addresses, routes, and persistent
+  state.
 - Failure or root compromise in one does not grant observation or control of the other or the host.
 
 Gate: automated cross-container negative tests and injected failure/restart. Human verification compares both consoles and network identities.
