@@ -3,7 +3,9 @@ use crate::manifest::Manifest;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-const MAX_DOMAINS: usize = 8;
+const NATIVE_DOMAIN_CAPACITY: usize = 8;
+const CONTAINER_DOMAIN_CAPACITY: usize = crate::control_abi::CONTAINER_LIMIT;
+const MAX_DOMAINS: usize = NATIVE_DOMAIN_CAPACITY + CONTAINER_DOMAIN_CAPACITY;
 pub(crate) const HOST_DOMAIN_CURSOR_END: u64 = MAX_DOMAINS as u64;
 const MAX_BOOT_GRANTS: usize = 10;
 const CONTROL_CALL_BUDGET: u16 = 79;
@@ -12,7 +14,7 @@ const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
 const BOOTSTRAP_OPERATION_LIMIT: u16 = 1;
 const SERVICE_RESTART_BUDGET: u16 = 1;
 const EVENT_CAPACITY: usize = 4;
-pub(crate) const MAX_AUXILIARY_SERVICES: usize = MAX_DOMAINS - 2;
+pub(crate) const MAX_AUXILIARY_SERVICES: usize = NATIVE_DOMAIN_CAPACITY - 2;
 const MAX_SERVICE_IDENTITIES: usize = 1 + MAX_AUXILIARY_SERVICES;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -35,6 +37,7 @@ enum Role {
     ControlPlane,
     SupervisedService,
     AuxiliaryService,
+    Container,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -82,6 +85,9 @@ struct Domain {
     host_pid: Option<u32>,
     process_kind: u16,
     role: Role,
+    container_slot: Option<u16>,
+    cpu_limit: u16,
+    memory_limit_mib: u32,
     state: State,
     capabilities: CapabilityTable,
     boot_roots: [Option<Handle>; MAX_BOOT_GRANTS],
@@ -294,6 +300,9 @@ impl Manager {
             host_pid: None,
             process_kind: 0,
             role: Role::ControlPlane,
+            container_slot: None,
+            cpu_limit: 1,
+            memory_limit_mib: 0,
             state: State::Ready,
             capabilities,
             boot_roots,
@@ -492,6 +501,9 @@ impl Manager {
             host_pid: None,
             process_kind: 0,
             role,
+            container_slot: None,
+            cpu_limit: 1,
+            memory_limit_mib: 0,
             state: State::Ready,
             capabilities,
             boot_roots,
@@ -508,6 +520,58 @@ impl Manager {
             address_space_root: None,
             parent: Some(control_id),
             delegated_roots,
+        });
+        Some(id)
+    }
+
+    fn create_container_domain(
+        &mut self,
+        parent: DomainId,
+        container_slot: usize,
+        cpu_limit: u16,
+        memory_limit_mib: u32,
+    ) -> Option<DomainId> {
+        if container_slot >= CONTAINER_DOMAIN_CAPACITY
+            || cpu_limit == 0
+            || memory_limit_mib == 0
+            || self.domain(parent).is_none()
+            || self.domains.iter().flatten().any(|domain| {
+                domain.role == Role::Container
+                    && domain.container_slot == u16::try_from(container_slot).ok()
+            })
+        {
+            return None;
+        }
+        let (slot, id) = self.next_domain_id()?;
+        let mut capabilities = CapabilityTable::new();
+        capabilities.seal_boot_authority();
+        self.generations[slot] = id.generation;
+        self.domains[slot] = Some(Domain {
+            id,
+            service: None,
+            failure_policy: None,
+            terminal_fault: None,
+            terminal_exit_status: None,
+            drain_requested: false,
+            readiness_published: false,
+            host_pid: None,
+            process_kind: crate::control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+            role: Role::Container,
+            container_slot: Some(u16::try_from(container_slot).ok()?),
+            cpu_limit,
+            memory_limit_mib,
+            state: State::Ready,
+            capabilities,
+            boot_roots: [None; MAX_BOOT_GRANTS],
+            boot_root_count: 0,
+            remaining_calls: 0,
+            active_threads: 0,
+            thread_limit: cpu_limit,
+            active_operations: 0,
+            operation_limit: cpu_limit,
+            address_space_root: None,
+            parent: Some(parent),
+            delegated_roots: [None; MAX_BOOT_GRANTS],
         });
         Some(id)
     }
@@ -1286,6 +1350,41 @@ pub(crate) fn service_boot_handle() -> Option<u64> {
 
 pub(crate) fn control_plane_id() -> Option<u64> {
     Some(encode_id(global_manager()?.control_plane_id?))
+}
+
+pub(crate) fn create_container_domain(
+    parent_raw: u64,
+    container_slot: usize,
+    cpu_limit: u16,
+    memory_limit_mib: u32,
+) -> Option<u64> {
+    let parent = decode_id(parent_raw)?;
+    let manager = global_manager_mut()?;
+    let id =
+        manager.create_container_domain(parent, container_slot, cpu_limit, memory_limit_mib)?;
+    let domain = manager.domain(id)?;
+    (domain.role == Role::Container
+        && domain.container_slot == u16::try_from(container_slot).ok()
+        && domain.cpu_limit == cpu_limit
+        && domain.memory_limit_mib == memory_limit_mib
+        && domain.parent == Some(parent)
+        && domain.capabilities.boot_authority_is_sealed())
+    .then_some(encode_id(id))
+}
+
+pub(crate) fn container_domain_for_slot(container_slot: usize) -> Option<u64> {
+    let expected = u16::try_from(container_slot).ok()?;
+    global_manager()?
+        .domains
+        .iter()
+        .flatten()
+        .find(|domain| domain.role == Role::Container && domain.container_slot == Some(expected))
+        .map(|domain| encode_id(domain.id))
+}
+
+pub(crate) fn container_domain_limits(domain_raw: u64) -> Option<(u16, u32)> {
+    let domain = global_manager()?.domain(decode_id(domain_raw)?)?;
+    (domain.role == Role::Container).then_some((domain.cpu_limit, domain.memory_limit_mib))
 }
 
 pub(crate) fn primary_service_identity() -> Option<u64> {

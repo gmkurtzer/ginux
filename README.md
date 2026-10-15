@@ -93,6 +93,21 @@ capabilities, replies, interrupt routes, DMA mappings, and device ownership can
 be rejected before its memory is reused. A replacement is a new generation,
 not a continuation of the failed security context.
 
+Each configured container is backed by exactly one Ginux domain. The domain is
+the outer, non-bypassable security boundary and owns the container's CPU and
+memory budget, process tree, IPC objects, filesystem root and mount view,
+network view, and devices. A container without an explicit network attachment
+uses the control domain's host network; this shares connectivity, not the
+authority to reconfigure the host interface.
+
+A Linux personality domain starts with its own root Linux PID, mount, user,
+IPC, UTS, and network namespace views. Linux namespace operations such as
+`clone`, `unshare`, and `setns` may create and join descendants of those roots,
+but can never cross the enclosing Ginux domain. This makes nested containers a
+supported compatibility case: systemd or a container manager inside a Linux
+domain may create further Linux namespaces, while every resulting process and
+object remains owned and limited by the same outer Ginux domain.
+
 ## Userspace personalities
 
 A userspace personality is the complete operating-system contract presented to

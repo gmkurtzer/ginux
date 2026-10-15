@@ -812,6 +812,8 @@ static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: AtomicU32 = AtomicU32::new(0);
 const CONTAINER_SLOT_NONE: u8 = u8::MAX;
 static CONTAINER_CONTROL_STATES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_DOMAIN_IDS: [AtomicU64; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU64::new(0) }; control_abi::CONTAINER_LIMIT];
 static CONTAINER_CONFIG_FLAGS: [AtomicU16; control_abi::CONTAINER_LIMIT] =
     [const { AtomicU16::new(0) }; control_abi::CONTAINER_LIMIT];
 static CONTAINER_NAME_SIZES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
@@ -2660,6 +2662,16 @@ pub(crate) fn fail_configured_container() {
 
 pub(crate) fn begin_configured_container() {
     if let Some(slot) = selected_container_slot() {
+        let Some(container_domain) = container_domain_id(slot) else {
+            CONTAINER_CONTROL_STATES[slot]
+                .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+            return;
+        };
+        if domain::container_domain_limits(container_domain) != Some((1, 128)) {
+            CONTAINER_CONTROL_STATES[slot]
+                .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+            return;
+        }
         CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
         CONTAINER_CONTROL_STATES[slot]
             .store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
@@ -17581,6 +17593,11 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             let Some(slot) = free_container_slot() else {
                 return u64::MAX - 2;
             };
+            let Some(container_domain) = domain::create_container_domain(domain_id, slot, 1, 128)
+            else {
+                return u64::MAX - 2;
+            };
+            CONTAINER_DOMAIN_IDS[slot].store(container_domain, Ordering::SeqCst);
             store_container_name(slot, name);
             store_container_value(
                 b"/sbin/init",
@@ -17870,6 +17887,14 @@ pub(crate) fn configured_container_slot() -> Option<usize> {
 
 pub(crate) fn current_container_slot() -> Option<usize> {
     active_container_slot()
+}
+
+pub(crate) fn container_domain_id(slot: usize) -> Option<u64> {
+    let domain = CONTAINER_DOMAIN_IDS.get(slot)?.load(Ordering::Acquire);
+    (domain != 0
+        && domain::container_domain_for_slot(slot) == Some(domain)
+        && domain::container_domain_limits(domain).is_some())
+    .then_some(domain)
 }
 
 pub(crate) fn configured_container_init(output: &mut [u8]) -> Option<usize> {
