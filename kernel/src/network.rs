@@ -11,6 +11,8 @@ static VIRTUAL_NETWORK_NAMES: [[AtomicU8; NETWORK_NAME_SIZE]; VIRTUAL_NETWORK_CA
     [const { [const { AtomicU8::new(0) }; NETWORK_NAME_SIZE] }; VIRTUAL_NETWORK_CAPACITY];
 static VIRTUAL_NETWORK_UPLINKS: [AtomicU8; VIRTUAL_NETWORK_CAPACITY] =
     [const { AtomicU8::new(0) }; VIRTUAL_NETWORK_CAPACITY];
+static VIRTUAL_NETWORK_LINKS: [AtomicBool; VIRTUAL_NETWORK_CAPACITY] =
+    [const { AtomicBool::new(false) }; VIRTUAL_NETWORK_CAPACITY];
 // Zero is unused. The upper byte is domain slot + 1 and the lower byte is
 // network slot + 1. Attachments are resource-bounded kernel objects, not a
 // singleton field on a domain.
@@ -44,7 +46,16 @@ pub(crate) fn create_virtual(name: &[u8], uplink: &[u8]) -> bool {
         byte.store(name.get(index).copied().unwrap_or(0), Ordering::Relaxed);
     }
     VIRTUAL_NETWORK_UPLINKS[slot].store((uplink_index + 1) as u8, Ordering::Relaxed);
+    VIRTUAL_NETWORK_LINKS[slot].store(true, Ordering::Relaxed);
     VIRTUAL_NETWORK_NAME_SIZES[slot].store(name.len() as u8, Ordering::Release);
+    true
+}
+
+pub(crate) fn set_virtual_link(name: &[u8], up: bool) -> bool {
+    let Some(slot) = network_index(name).and_then(|index| index.checked_sub(1)) else {
+        return false;
+    };
+    VIRTUAL_NETWORK_LINKS[slot].store(up, Ordering::Release);
     true
 }
 
@@ -66,7 +77,18 @@ pub(crate) fn inventory(cursor: usize) -> Option<InventoryRecord> {
             *output = stored.load(Ordering::Acquire);
         }
         let uplink = usize::from(VIRTUAL_NETWORK_UPLINKS[slot].load(Ordering::Acquire));
-        (slot + 1, name, name_size, 2, uplink.checked_sub(1))
+        let state = if VIRTUAL_NETWORK_LINKS[slot].load(Ordering::Acquire) {
+            ginux_native_abi::NATIVE_NETWORK_FLAG_UP
+        } else {
+            0
+        };
+        (
+            slot + 1,
+            name,
+            name_size,
+            ginux_native_abi::NATIVE_NETWORK_KIND_VIRTUAL | state,
+            uplink.checked_sub(1),
+        )
     };
     let mut uplink = [0_u8; NETWORK_NAME_SIZE];
     let uplink_size = uplink_index

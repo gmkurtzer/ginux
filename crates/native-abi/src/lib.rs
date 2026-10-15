@@ -210,8 +210,11 @@ pub const NATIVE_NETWORK_INVENTORY_QUERY: u16 = 1;
 pub const NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL: u16 = 2;
 pub const NATIVE_NETWORK_INVENTORY_ATTACH: u16 = 3;
 pub const NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT: u16 = 4;
+pub const NATIVE_NETWORK_INVENTORY_SET_LINK: u16 = 5;
 pub const NATIVE_NETWORK_KIND_PHYSICAL: u16 = 1;
 pub const NATIVE_NETWORK_KIND_VIRTUAL: u16 = 2;
+pub const NATIVE_NETWORK_KIND_MASK: u16 = 0x00ff;
+pub const NATIVE_NETWORK_FLAG_UP: u16 = 0x0100;
 pub const NATIVE_NETWORK_MAX_NAME_SIZE: usize = 16;
 pub const NATIVE_NETWORK_CURSOR_END: u64 = u64::MAX;
 
@@ -2174,6 +2177,8 @@ mod tests {
             216
         );
         assert!(header.contains("GINUX_NATIVE_NETWORK_INVENTORY_OPERATION UINT64_C(38)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_INVENTORY_SET_LINK UINT16_C(5)"));
+        assert!(header.contains("GINUX_NATIVE_NETWORK_FLAG_UP UINT16_C(0x0100)"));
         assert!(header.contains("struct ginux_native_network_inventory_request_v0"));
         assert!(header.contains("sizeof(struct ginux_native_control_descriptor_v4) == 16"));
     }

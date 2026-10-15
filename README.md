@@ -121,7 +121,9 @@ connectivity, not authority to reconfigure the host interface.
 Physical network devices are discovered by the kernel. Operators may create
 named virtual devices with `network new`, chain them to physical or virtual
 uplinks, and attach multiple devices by repeating `network=DEVICE` in a
-`domain set` command. Attachments are independent kernel objects, not a
+`domain set` command. Virtual-device administrative state uses the same
+`network start`, `network stop`, `network restart`, and `network status`
+commands as physical devices. Attachments are independent kernel objects, not a
 singleton namespace field, and names remain unchanged across the domain
 boundary. The inventory/attachment control path is implemented; isolated
 per-domain packet queues, address configuration, DHCP, DNS, routes, and Linux

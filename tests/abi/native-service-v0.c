@@ -184,6 +184,10 @@ _Static_assert(offsetof(struct ginux_native_domain_request_v3, personality) == 2
                "domain request personality offset");
 _Static_assert(GINUX_NATIVE_NETWORK_INVENTORY_OPERATION == UINT64_C(38),
                "network inventory operation");
+_Static_assert(GINUX_NATIVE_NETWORK_INVENTORY_SET_LINK == UINT16_C(5),
+               "network inventory link operation");
+_Static_assert(GINUX_NATIVE_NETWORK_FLAG_UP == UINT16_C(0x0100),
+               "network inventory link state flag");
 _Static_assert(sizeof(struct ginux_native_network_inventory_request_v0) == 72,
                "network inventory request size");
 _Static_assert(GINUX_NATIVE_PACKET_CONSUME_OPERATION == UINT64_C(22),

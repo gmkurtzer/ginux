@@ -30,14 +30,15 @@ use ginux_native_abi::{
     NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING,
     NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_DNS,
     NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
-    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_INVENTORY_ATTACH,
-    NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL, NATIVE_NETWORK_INVENTORY_OPERATION,
-    NATIVE_NETWORK_INVENTORY_QUERY, NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT,
-    NATIVE_NETWORK_KIND_VIRTUAL, NATIVE_NETWORK_MAX_NAME_SIZE, NATIVE_NETWORK_SNAPSHOT_SIZE,
-    NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
-    NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
-    NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_FLAG_UP,
+    NATIVE_NETWORK_INVENTORY_ATTACH, NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL,
+    NATIVE_NETWORK_INVENTORY_OPERATION, NATIVE_NETWORK_INVENTORY_QUERY,
+    NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT, NATIVE_NETWORK_INVENTORY_SET_LINK,
+    NATIVE_NETWORK_KIND_MASK, NATIVE_NETWORK_KIND_VIRTUAL, NATIVE_NETWORK_MAX_NAME_SIZE,
+    NATIVE_NETWORK_SNAPSHOT_SIZE, NATIVE_NETWORK_SNAPSHOT_VERSION,
+    NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE, NATIVE_ROOT_DIRECTORY_REQUEST_SIZE,
+    NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE, NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
@@ -426,15 +427,19 @@ extern "C" fn ginux_controller_main() -> ! {
             }
             COMMAND_NETWORK_LIST => show_network_list(console, host, network),
             COMMAND_NETWORK_NEW => create_virtual_network(console, host, invocation.arguments()),
-            COMMAND_NETWORK_STATUS => show_network_status(console, network, invocation.arguments()),
+            COMMAND_NETWORK_STATUS => {
+                show_network_status(console, host, network, invocation.arguments())
+            }
             COMMAND_NETWORK_SET => set_network(console, network, invocation.arguments()),
             COMMAND_NETWORK_START => {
-                set_network_link(console, network, invocation.arguments(), true)
+                set_network_link(console, host, network, invocation.arguments(), true)
             }
             COMMAND_NETWORK_STOP | COMMAND_NETWORK_DOWN => {
-                set_network_link(console, network, invocation.arguments(), false)
+                set_network_link(console, host, network, invocation.arguments(), false)
             }
-            COMMAND_NETWORK_RESTART => restart_network(console, network, invocation.arguments()),
+            COMMAND_NETWORK_RESTART => {
+                restart_network(console, host, network, invocation.arguments())
+            }
             COMMAND_PING => ping(console, network, invocation.arguments()),
             COMMAND_TEST_LINUX => test_linux_userspace(console, host),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
@@ -598,12 +603,19 @@ fn show_network_list(console: u64, host: u64, network: u64) {
             return;
         };
         let name = network_request_name(&request);
-        if request.kind == NATIVE_NETWORK_KIND_VIRTUAL {
+        if request.kind & NATIVE_NETWORK_KIND_MASK == NATIVE_NETWORK_KIND_VIRTUAL {
             let mut row = OutputLine::new();
             row.padded(name, 8);
             append_network_domains(&mut row, host, name, false);
             row.padded(b"yes", 11);
-            row.padded(b"up", 7);
+            row.padded(
+                if request.kind & NATIVE_NETWORK_FLAG_UP != 0 {
+                    b"up"
+                } else {
+                    b"down"
+                },
+                7,
+            );
             row.padded(b"virtual", 15);
             row.padded(b"-", 17);
             row.padded(network_request_uplink(&request), 17);
@@ -690,7 +702,7 @@ fn create_virtual_network(console: u64, host: u64, arguments: Arguments<'_>) {
     write(console, b"\r\n");
 }
 
-fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
+fn show_network_status(console: u64, host: u64, network: u64, arguments: Arguments<'_>) {
     if is_loopback(arguments.first()) {
         write(
             console,
@@ -699,7 +711,34 @@ fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
         write_loopback_status(console, true);
         return;
     }
-    if !is_eth0(arguments.first()) {
+    let device = arguments.first().unwrap_or_default();
+    if !is_eth0(Some(device)) {
+        if let Some(request) = query_network_by_name(host, device) {
+            write(
+                console,
+                b"DEVICE  DOMAIN   CONNECTED  STATE  CONFIGURATION  ADDRESS          GATEWAY          DNS             GENERATION\r\n",
+            );
+            let mut row = OutputLine::new();
+            row.padded(device, 8);
+            append_network_domains(&mut row, host, device, false);
+            row.padded(b"yes", 11);
+            row.padded(
+                if request.kind & NATIVE_NETWORK_FLAG_UP != 0 {
+                    b"up"
+                } else {
+                    b"down"
+                },
+                7,
+            );
+            row.padded(b"virtual", 15);
+            row.padded(b"-", 17);
+            row.padded(network_request_uplink(&request), 17);
+            row.padded(b"-", 16);
+            row.push(b"-");
+            row.push(b"\r\n");
+            row.write(console);
+            return;
+        }
         write(console, b"network: device not found\r\n");
         return;
     }
@@ -928,12 +967,25 @@ fn write_network_dns(console: u64, network: u64) {
     }
 }
 
-fn set_network_link(console: u64, network: u64, arguments: Arguments<'_>, start: bool) {
+fn set_network_link(console: u64, host: u64, network: u64, arguments: Arguments<'_>, start: bool) {
     if is_loopback(arguments.first()) {
         write(console, b"network: loopback is automatic and immutable\r\n");
         return;
     }
-    if !is_eth0(arguments.first()) {
+    let device = arguments.first().unwrap_or_default();
+    if !is_eth0(Some(device)) {
+        if set_virtual_network_link(host, device, start) {
+            write(console, device);
+            write(
+                console,
+                if start {
+                    b": started\r\n"
+                } else {
+                    b": stopped\r\n"
+                },
+            );
+            return;
+        }
         write(console, b"network: device not found\r\n");
         return;
     }
@@ -957,12 +1009,20 @@ fn set_network_link(console: u64, network: u64, arguments: Arguments<'_>, start:
     );
 }
 
-fn restart_network(console: u64, network: u64, arguments: Arguments<'_>) {
+fn restart_network(console: u64, host: u64, network: u64, arguments: Arguments<'_>) {
     if is_loopback(arguments.first()) {
         write(console, b"network: loopback is automatic and immutable\r\n");
         return;
     }
-    if !is_eth0(arguments.first()) {
+    let device = arguments.first().unwrap_or_default();
+    if !is_eth0(Some(device)) {
+        if set_virtual_network_link(host, device, false)
+            && set_virtual_network_link(host, device, true)
+        {
+            write(console, device);
+            write(console, b": restarted\r\n");
+            return;
+        }
         write(console, b"network: device not found\r\n");
         return;
     }
@@ -1519,6 +1579,32 @@ fn query_network_inventory(host: u64, cursor: u64) -> Option<NativeNetworkInvent
     let mut request = NativeNetworkInventoryRequestV0::zeroed(NATIVE_NETWORK_INVENTORY_QUERY);
     request.cursor = cursor;
     (network_inventory_call(host, &mut request) == 1).then_some(request)
+}
+
+fn query_network_by_name(host: u64, name: &[u8]) -> Option<NativeNetworkInventoryRequestV0> {
+    let mut cursor = 0;
+    loop {
+        let request = query_network_inventory(host, cursor)?;
+        if network_request_name(&request) == name {
+            return Some(request);
+        }
+        if request.cursor == u64::MAX {
+            return None;
+        }
+        cursor = request.cursor;
+    }
+}
+
+fn set_virtual_network_link(host: u64, name: &[u8], up: bool) -> bool {
+    if query_network_by_name(host, name).is_none_or(|request| {
+        request.kind & NATIVE_NETWORK_KIND_MASK != NATIVE_NETWORK_KIND_VIRTUAL
+    }) {
+        return false;
+    }
+    let mut request = NativeNetworkInventoryRequestV0::zeroed(NATIVE_NETWORK_INVENTORY_SET_LINK);
+    request.cursor = u64::from(up);
+    set_network_request_name(&mut request, name);
+    network_inventory_call(host, &mut request) == 1
 }
 
 fn network_exists(host: u64, name: &[u8]) -> bool {

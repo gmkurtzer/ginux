@@ -18740,6 +18740,12 @@ fn network_inventory_call(domain_id: u64, capability: u64, frame: *const UserTra
             }
             1
         }
+        ginux_native_abi::NATIVE_NETWORK_INVENTORY_SET_LINK
+            if read_u64_at(&request, 8) <= 1
+                && network::set_virtual_link(name, read_u64_at(&request, 8) == 1) =>
+        {
+            1
+        }
         ginux_native_abi::NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT => {
             let Some(slot) = container_slot_by_name(domain_name) else {
                 return u64::MAX - 2;

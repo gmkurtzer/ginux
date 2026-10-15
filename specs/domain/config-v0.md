@@ -45,6 +45,8 @@ created explicitly and may use a physical or virtual uplink:
 ```text
 network new gnet0 type=virtual
 network new gnet1 type=virtual uplink=gnet0
+network stop gnet1
+network start gnet1
 ```
 
 A domain may attach any number of existing network devices by repeating the
@@ -58,7 +60,9 @@ domain set alpine network=gnet0 network=gnet1
 Attachments are independent kernel objects rather than a singleton domain
 attribute. Their implementation is resource-bounded by available kernel
 memory; the interface does not impose a one-device product limit. Device names
-remain identical in the control domain and attached personality domain.
+remain identical in the control domain and attached personality domain. New
+virtual devices start administratively up, and their state can change without
+altering their uplink or domain attachments.
 
 The v0 control path inventories physical and virtual devices and records
 multi-device attachment policy. Per-domain packet queues, addresses, routes,
