@@ -848,10 +848,13 @@ static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_PULL_REQUESTED: AtomicBool = AtomicBool::new(false);
 const CONTAINER_CONSOLE_CAPACITY: usize = 4096;
 const CONTAINER_CONSOLE_DETACH: u8 = 0x1d;
-static CONTAINER_CONSOLE_ATTACHED: AtomicBool = AtomicBool::new(false);
-static CONTAINER_CONSOLE_CURSOR: AtomicU64 = AtomicU64::new(0);
-static CONTAINER_CONSOLE_BYTES: [AtomicU8; CONTAINER_CONSOLE_CAPACITY] =
-    [const { AtomicU8::new(0) }; CONTAINER_CONSOLE_CAPACITY];
+static CONTAINER_CONSOLE_ATTACHED: [AtomicBool; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicBool::new(false) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_CONSOLE_CURSOR: [AtomicU64; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU64::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_CONSOLE_BYTES: [[AtomicU8; CONTAINER_CONSOLE_CAPACITY];
+    control_abi::CONTAINER_LIMIT] = [const { [const { AtomicU8::new(0) }; CONTAINER_CONSOLE_CAPACITY] };
+    control_abi::CONTAINER_LIMIT];
 static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -12787,7 +12790,8 @@ fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
 
 fn container_console_read_byte() -> Option<u8> {
     loop {
-        if !CONTAINER_CONSOLE_ATTACHED.load(Ordering::Acquire) {
+        let slot = active_container_slot()?;
+        if !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
             if !yield_container_console_to_controller() {
                 return None;
             }
@@ -12797,7 +12801,7 @@ fn container_console_read_byte() -> Option<u8> {
         if byte != CONTAINER_CONSOLE_DETACH {
             return Some(byte);
         }
-        CONTAINER_CONSOLE_ATTACHED.store(false, Ordering::Release);
+        CONTAINER_CONSOLE_ATTACHED[slot].store(false, Ordering::Release);
         crate::serial_write_bytes(
             b"\r\n[detached from container; use 'container attach NAME' to return]\r\n",
         );
@@ -12820,30 +12824,34 @@ fn container_console_write(bytes: &[u8]) {
         crate::serial_write_bytes(bytes);
         return;
     }
-    let start = CONTAINER_CONSOLE_CURSOR.load(Ordering::Relaxed);
+    let Some(slot) = active_container_slot() else {
+        crate::serial_write_bytes(bytes);
+        return;
+    };
+    let start = CONTAINER_CONSOLE_CURSOR[slot].load(Ordering::Relaxed);
     for (offset, byte) in bytes.iter().copied().enumerate() {
         let index = start.wrapping_add(offset as u64) as usize % CONTAINER_CONSOLE_CAPACITY;
-        CONTAINER_CONSOLE_BYTES[index].store(byte, Ordering::Relaxed);
+        CONTAINER_CONSOLE_BYTES[slot][index].store(byte, Ordering::Relaxed);
     }
-    CONTAINER_CONSOLE_CURSOR.store(start.wrapping_add(bytes.len() as u64), Ordering::Release);
-    if CONTAINER_CONSOLE_ATTACHED.load(Ordering::Acquire) {
+    CONTAINER_CONSOLE_CURSOR[slot].store(start.wrapping_add(bytes.len() as u64), Ordering::Release);
+    if CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
         crate::serial_write_bytes(bytes);
     }
 }
 
-fn reset_container_console(attached: bool) {
-    CONTAINER_CONSOLE_CURSOR.store(0, Ordering::Release);
-    CONTAINER_CONSOLE_ATTACHED.store(attached, Ordering::Release);
+fn reset_container_console(slot: usize, attached: bool) {
+    CONTAINER_CONSOLE_CURSOR[slot].store(0, Ordering::Release);
+    CONTAINER_CONSOLE_ATTACHED[slot].store(attached, Ordering::Release);
 }
 
-fn redraw_container_console() {
+fn redraw_container_console(slot: usize) {
     crate::serial_write_bytes(b"\x1b[2J\x1b[H");
-    let cursor = CONTAINER_CONSOLE_CURSOR.load(Ordering::Acquire);
+    let cursor = CONTAINER_CONSOLE_CURSOR[slot].load(Ordering::Acquire);
     let count = cursor.min(CONTAINER_CONSOLE_CAPACITY as u64);
     let start = cursor.wrapping_sub(count);
     for offset in 0..count {
         let index = start.wrapping_add(offset) as usize % CONTAINER_CONSOLE_CAPACITY;
-        crate::serial_write_bytes(&[CONTAINER_CONSOLE_BYTES[index].load(Ordering::Relaxed)]);
+        crate::serial_write_bytes(&[CONTAINER_CONSOLE_BYTES[slot][index].load(Ordering::Relaxed)]);
     }
 }
 
@@ -17701,7 +17709,7 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         {
             let slot = requested_slot.unwrap_or(0);
             CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::SeqCst);
-            reset_container_console(operation == control_abi::CONTAINER_START_ATTACHED);
+            reset_container_console(slot, operation == control_abi::CONTAINER_START_ATTACHED);
             if container_image_is_embedded(slot) || crate::oci_image::is_installed(slot) {
                 CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
             } else {
@@ -17714,9 +17722,10 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 && active_container_slot() == requested_slot
                 && container_state(requested_slot.unwrap_or(0))
                     == control_abi::CONTAINER_STATE_RUNNING
-                && !CONTAINER_CONSOLE_ATTACHED.swap(true, Ordering::AcqRel) =>
+                && !CONTAINER_CONSOLE_ATTACHED[requested_slot.unwrap_or(0)]
+                    .swap(true, Ordering::AcqRel) =>
         {
-            redraw_container_console();
+            redraw_container_console(requested_slot.unwrap_or(0));
             control_abi::CONTAINER_STATE_RUNNING
         }
         control_abi::CONTAINER_INJECT_FAILURE
