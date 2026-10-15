@@ -11241,7 +11241,8 @@ fn verify_native_volume_service_run(
     let root = space.root;
     let entry = usize::try_from(space.entry).ok()?;
     let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
-    let expected_timeouts = timer::device_wait_timeout_count().checked_add(match mode {
+    let initial_timeouts = timer::device_wait_timeout_count();
+    let expected_timeouts = initial_timeouts.checked_add(match mode {
         NativeVolumeMode::Normal => 1,
         NativeVolumeMode::IncompatibleAbi
         | NativeVolumeMode::IncompatibleDescriptor
@@ -11395,44 +11396,59 @@ fn verify_native_volume_service_run(
         crate::control_abi::LIFECYCLE_AUXILIARY_EXITED
     };
     let expected_status = exit_status?;
-    let valid = outcome.is_some()
-        && timer::device_wait_timeout_count() == expected_timeouts
-        && current_root() == kernel_root
-        && scheduler::current_domain().is_none()
-        && registered_auxiliary_address_space_count() == 0
-        && memory::owner_live_frame_count(owner) == Some(0)
-        && unsafe { frame_is_zero(dma_physical) }
-        && iommu_profile.is_inactive()
-        && iommu_evidence.is_retired()
-        && domain::domain_is_retired(auxiliary)
-        && !domain::handle_permits(
+    let observed_timeouts = timer::device_wait_timeout_count();
+    let timeout_count_valid = match mode {
+        NativeVolumeMode::Normal => observed_timeouts >= initial_timeouts,
+        NativeVolumeMode::IncompatibleAbi
+        | NativeVolumeMode::IncompatibleDescriptor
+        | NativeVolumeMode::Fault
+        | NativeVolumeMode::CancelNotified => observed_timeouts == expected_timeouts,
+    };
+    let lifecycle_event_valid = event
+        == Some((u64::from(expected_status) << 56) | (auxiliary << 8) | u64::from(expected_kind));
+    let lifecycle_audit_valid = domain::last_lifecycle_event_audit()
+        .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary);
+    let lifecycle_fault_valid = domain::last_lifecycle_event_has_fault()
+        == Some(matches!(
+            mode,
+            NativeVolumeMode::IncompatibleAbi
+                | NativeVolumeMode::IncompatibleDescriptor
+                | NativeVolumeMode::Fault
+        ));
+    let unsafe_quiesce_valid = match mode {
+        NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::IncompatibleDescriptor => {
+            unsafe_device_quiesce_was_active(auxiliary) == Some(false)
+        }
+        NativeVolumeMode::Fault => unsafe_device_quiesce_was_active(auxiliary) == Some(true),
+        NativeVolumeMode::Normal | NativeVolumeMode::CancelNotified => true,
+    };
+    let lifecycle_identity_valid = domain::last_lifecycle_service_identity() == Some(identity);
+    let lifecycle_queue_empty = domain::take_lifecycle_event().is_none();
+    let checks = [
+        outcome.is_some(),
+        timeout_count_valid,
+        current_root() == kernel_root,
+        scheduler::current_domain().is_none(),
+        registered_auxiliary_address_space_count() == 0,
+        memory::owner_live_frame_count(owner) == Some(0),
+        unsafe { frame_is_zero(dma_physical) },
+        iommu_profile.is_inactive(),
+        iommu_evidence.is_retired(),
+        domain::domain_is_retired(auxiliary),
+        !domain::handle_permits(
             auxiliary,
             handle,
             crate::control_abi::BLOCK_DEVICE_OBJECT,
             crate::capability::Rights::WRITE,
-        )
-        && event
-            == Some(
-                (u64::from(expected_status) << 56) | (auxiliary << 8) | u64::from(expected_kind),
-            )
-        && domain::last_lifecycle_event_audit()
-            .is_some_and(|(kind, audited, _)| kind == expected_kind && audited == auxiliary)
-        && domain::last_lifecycle_event_has_fault()
-            == Some(matches!(
-                mode,
-                NativeVolumeMode::IncompatibleAbi
-                    | NativeVolumeMode::IncompatibleDescriptor
-                    | NativeVolumeMode::Fault
-            ))
-        && match mode {
-            NativeVolumeMode::IncompatibleAbi | NativeVolumeMode::IncompatibleDescriptor => {
-                unsafe_device_quiesce_was_active(auxiliary) == Some(false)
-            }
-            NativeVolumeMode::Fault => unsafe_device_quiesce_was_active(auxiliary) == Some(true),
-            NativeVolumeMode::Normal | NativeVolumeMode::CancelNotified => true,
-        }
-        && domain::last_lifecycle_service_identity() == Some(identity)
-        && domain::take_lifecycle_event().is_none();
+        ),
+        lifecycle_event_valid,
+        lifecycle_audit_valid,
+        lifecycle_fault_valid,
+        unsafe_quiesce_valid,
+        lifecycle_identity_valid,
+        lifecycle_queue_empty,
+    ];
+    let valid = checks.iter().all(|check| *check);
     if !valid {
         crate::serial_write_bytes(
             b"\r\nginux: native volume event/completion/status/roots/frames: ",
@@ -11443,6 +11459,14 @@ fn verify_native_volume_service_run(
             exit_status.map_or(u64::MAX, u64::from),
             registered_auxiliary_address_space_count() as u64,
             memory::owner_live_frame_count(owner).unwrap_or(usize::MAX) as u64,
+            checks
+                .iter()
+                .enumerate()
+                .fold(0_u64, |mask, (index, check)| {
+                    mask | (u64::from(*check) << index)
+                }),
+            initial_timeouts,
+            observed_timeouts,
         ] {
             crate::serial_write_u64(value);
             crate::serial_write_bytes(b" ");
