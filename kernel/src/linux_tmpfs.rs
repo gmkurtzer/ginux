@@ -15,8 +15,8 @@ const OBJECT_CAPACITY: usize = OBJECT_PAGE_LIMIT * PAGE_SIZE;
 const TOTAL_CAPACITY: usize = TOTAL_PAGE_LIMIT * PAGE_SIZE;
 const FILE_NAME: &[u8] = b"ginux-ready";
 const FIRST_FILE_INODE: u64 = 18;
-const HOST_INSTANCE: usize = control_abi::CONTAINER_LIMIT;
-const INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
+const HOST_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
+const INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static mut LIVE_TMPFS: [Tmpfs; INSTANCE_LIMIT] = [const { Tmpfs::new() }; INSTANCE_LIMIT];

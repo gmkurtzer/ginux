@@ -70,7 +70,7 @@ This is a **logical** architecture, not a requirement that every operation trave
 
 ### Native domains
 
-A **domain** is the native unit of isolation, ownership, accounting, and failure containment. A domain owns processes/address spaces, a capability table, memory and CPU budgets, IPC endpoints, device grants, network endpoints, filesystem views, and failure policy. Linux system containers are domains with Linux-compatible behavior. The controller is a statically linked Linux-ABI process; optional isolated services may retain their narrower native service ABI.
+A **domain** is the native unit of isolation, ownership, accounting, scheduling, device assignment, and failure containment. A domain owns processes/address spaces, a capability table, memory and CPU budgets, IPC endpoints, device grants, network endpoints, filesystem views, and failure policy. A Linux system container is a domain configured with `personality=linux` and a system image; OCI populates its filesystem but does not create its isolation boundary. The controller is a statically linked Linux-ABI process; optional isolated services may retain their narrower native service ABI.
 
 The kernel maintains one global host PID namespace spanning native userspace
 processes and Linux-compatible processes in every container. The controller's
@@ -83,9 +83,9 @@ The kernel creates exactly one initial userspace authority: the native control-p
 
 ### Embedded Linux-ABI controller
 
-The controller is packaged inside `GINUX.EFI` but executes in ring 3 as a statically linked Linux-ABI userspace process and the only initial holder of boot-authorized host capabilities. It uses ordinary Linux `read`, `write`, and `exit` syscalls. Ginux-specific management is exposed through a versioned device/ioctl UAPI rather than a private syscall convention. Its authenticated local configuration declares which containers start automatically, their image and resource grants, and the init path (normally `/sbin/init`). It:
+The controller is packaged inside `GINUX.EFI` but executes in ring 3 as a statically linked Linux-ABI userspace process and the only initial holder of boot-authorized host capabilities. It uses ordinary Linux `read`, `write`, and `exit` syscalls. Ginux-specific domain and device management is exposed through a versioned device/ioctl UAPI rather than a private syscall convention. Its authenticated local configuration declares which domains start automatically, their personality, system image, resource grants, network attachments, and init path (normally `/sbin/init`). It:
 
-- Starts, stops, inspects, and restarts native services and containers.
+- Starts, stops, inspects, and restarts native services and workload domains.
 - Creates domain process trees and assigns CPU, memory, storage, network, and device resources.
 - Delegates and revokes capabilities within the immutable boot authority envelope.
 - Provides the native administrative API and a command-tree CLI with generated
@@ -106,8 +106,9 @@ Administrative observation, lifecycle control, memory debugging, and authority d
 - IOMMU, DMA, MMIO, interrupt routing, and device-access authorization.
 - Domain lifecycle, resource accounting, and enforcement primitives.
 - Container-local PID, mount, user, IPC, cgroup, time, hostname, device, and network object views with stronger isolation than current Linux namespaces.
-- Per-container loopback, interfaces, IP addresses, routes, sockets, and network-policy enforcement.
-- Globally unique virtual interfaces use `gnetN` names. The same name is exposed to the control plane and inside the assigned domain; interfaces are never implicitly renamed at a domain boundary. Device listings show the plain domain name without a type prefix.
+- Per-domain loopback, interfaces, IP addresses, routes, sockets, and network-policy enforcement.
+- Physical interfaces are discovered kernel objects. The controller may create any number of resource-backed virtual interfaces, connect each to a physical or virtual uplink, and attach any number of existing interfaces to a domain. A domain with no explicit attachment shares the control domain's host network.
+- Virtual interfaces conventionally use `gnetN` names. The same name is exposed to the control plane and inside every assigned domain; interfaces are never implicitly renamed at a domain boundary. Attachments are separate kernel objects rather than a singleton field on the domain.
 - Control-domain and per-domain network state includes DNS resolver configuration. DHCP imports DNS configuration when supplied and otherwise preserves an explicit resolver, while static configuration may set it directly.
 - Every domain receives an always-up, immutable `lo` interface with `127.0.0.1/8`; operators do not create or configure loopback. The control domain attempts DHCP on its primary physical interface at boot and remains manageable for manual configuration if no lease is available.
 - Boot-critical storage, filesystem, networking, GPU/primary-device support in the kernel or authenticated kernel modules.
@@ -133,7 +134,7 @@ The native host does not require a traditional distribution root filesystem. It 
 
 - The native boot path does not require a separate initramfs. Boot-required code and controller payloads are sections of the authenticated EFI image. CPIO remains acceptable only as a Linux-container test or image format.
 - The first minimal system container should use a verified read-only root image plus explicitly writable temporary paths. Later distribution images add explicitly authorized persistent paths.
-- C3 container configuration and OCI image storage are deliberately boot-local. The controller keeps configuration in memory and stores verified, content-addressed image objects in a bounded RAM-backed tmpfs. `container start NAME` automatically pulls a configured image when its digest is absent, streams it through bounded staging while verifying every digest, and atomically publishes only the complete immutable object. Failed or partial pulls are discarded, and all configuration, cached images, writable overlays, and temporary data disappear on host reboot.
+- C3 domain configuration and OCI image storage are deliberately boot-local. The controller keeps configuration in memory and stores verified, content-addressed image objects in RAM-backed tmpfs. `domain start NAME` automatically pulls a configured Linux domain image when its digest is absent, streams it through staging while verifying every digest, and atomically publishes only the complete immutable object. Failed or partial pulls are discarded, and all configuration, cached images, writable overlays, and temporary data disappear on host reboot.
 - The current single-file tmpfs proof is not the C3 image store. C3 must extend it into a quota-enforced multi-object store, avoid unnecessary whole-image copies, and give the QEMU profile an explicit memory budget large enough for the pinned Rocky image and kernel. Exhaustion must fail the initiating operation without destabilizing the host or other domains.
 - Persistence is a later controller-managed transition. The controller will be able to select and initialize a local volume, copy and verify boot-local state into it, stage that volume as the pending persistent-state source, and request a reboot. The next boot authenticates the selection and validates the volume before activation; an incomplete or invalid activation fails closed to the existing boot path. A mutable data volume must never silently replace the authenticated kernel, embedded controller, or sealed boot authority envelope.
 - Boot storage is exposed by a kernel driver or authenticated kernel module through a stable block-device contract, beginning with `virtio-blk` and later selected NVMe hardware.
@@ -220,7 +221,7 @@ Build one UEFI PE/COFF executable with a minimal Rust/assembly EFI entry path an
 3. The kernel initializes memory, scheduling, interrupts, IPC, boot storage/filesystems, networking, and required IOMMU/device support from built-in code and authenticated modules.
 4. Kernel/module executable integrity, immutable data, and the boot authority envelope are sealed.
 5. The kernel creates the initial controller domain, maps the embedded controller payload, and transfers execution to it in ring 3 with exactly the capabilities authorized by configuration.
-6. The controller starts optional native services and opens configured container images through kernel storage/filesystem interfaces.
+6. The controller starts optional native services and opens configured Linux-domain images through kernel storage/filesystem interfaces.
 7. For each autostart entry, the controller creates an isolated system-container domain with its own kernel-object and network views.
 8. The controller executes the configured init path, normally `/sbin/init`, as PID 1 in each container.
 9. The local administrative API and console report component, container, health, and readiness state.
@@ -244,7 +245,7 @@ edit config at runtime
 - Boot code accepts only trusted, complete, consistent manifests and passes a compact typed immutable configuration and initial capability graph to the kernel.
 - Support atomic A/B boot artifacts, health checks, recovery and rollback; security policy determines whether older signed states may be restored.
 - Active kernel configuration, trust roots, approved host code, security-policy floor, device ceiling, and maximum authority cannot be modified until reboot.
-- Runtime operations such as container lifecycle, resource allocation, IP addresses, routes, mounts, and device grants remain dynamic when authorized within the fixed envelope. Runtime policy may reduce authority but cannot expand the boot ceiling.
+- Runtime operations such as domain lifecycle, resource allocation, IP addresses, routes, mounts, and device grants remain dynamic when authorized within the fixed envelope. Runtime policy may reduce authority but cannot expand the boot ceiling.
 
 ### 7.4 Trust choices
 
@@ -303,7 +304,7 @@ Work proceeds through hard verification checkpoints. Complete the implementation
 |---|---|---|
 | C0: Architecture alignment | This document, ADRs, and roadmap consistently describe the unified image, embedded ring-3 controller, kernel/module device boundary, Rocky benchmark, and future `.ko` path | Review documentation and signed commit |
 | C1: Interactive unified boot | One `GINUX.EFI` boots on the Mac QEMU profile and presents controller diagnostics, including measured-root `ls` and live-domain `ps` | User boots and interacts; no container yet |
-| C2: Runtime container lifecycle | No container exists implicitly; the resident host-PID-1 controller creates and configures one named, boot-local minimal fixture, then starts, observes, stops, and restarts it without relaunching itself (**implemented; awaiting human verification**) | User verifies creation, configuration, lifecycle, and failure recovery |
+| C2: Runtime domain lifecycle | No workload domain exists implicitly; the resident host-PID-1 controller creates and configures one named Linux-personality domain backed by a boot-local minimal fixture, then starts, observes, stops, and restarts it without relaunching itself (**implemented; awaiting human verification**) | User verifies creation, personality/image configuration, lifecycle, and failure recovery |
 | C3: Alpine shell container | Control networking automatically pulls a missing digest-pinned Alpine x86-64 OCI image into a verified boot-local tmpfs cache; explicit static/DHCP container networking is configured; `/bin/sh` executes with an attachable console and retained boot log | User interacts with the unmodified Alpine BusyBox shell, detaches back to the controller with `Ctrl-]`, reattaches, and verifies that reboot clears the C3 cache |
 | C4: Operational Rocky | Required mounts, devices, processes, credentials, cgroups, clocks, and console behavior work normally | User interacts with a functioning Rocky system |
 | C5: Networked persistent Rocky | Rocky owns an IP, routes, loopback, sockets, and persistent volume; the controller can provision local storage and stage verified persistent state for activation on reboot; SSH works inside the container | User logs in over SSH and verifies controlled activation and reboot persistence |

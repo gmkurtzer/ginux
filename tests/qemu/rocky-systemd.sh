@@ -51,9 +51,9 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
 {
     wait_for 'ginux> '
     printf '%s\n' \
-        'container new rocky' \
-        'container set rocky image=rockylinux/rockylinux:10-ubi-init init=/sbin/init' \
-        'container start rocky --attach'
+        'domain new rocky' \
+        'domain set rocky personality=linux image=rockylinux/rockylinux:10-ubi-init init=/sbin/init' \
+        'domain start rocky --attach'
     wait_for 'ginux: OCI image ready' 240
     wait_for 'ginux: entering configured OCI init' 30
     sleep 15
@@ -64,8 +64,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
             fail 'systemd failed before the documented mmap boundary'
         fi
         printf '\035'
-        wait_for "[detached from container; use 'container attach NAME' to return]" 30
-        printf '%s\n' 'container status rocky'
+        wait_for "[detached from domain; use 'domain attach NAME' to return]" 30
+        printf '%s\n' 'domain status rocky'
         wait_for 'rocky: running' 30
         printf '%s\n' 'shutdown'
     fi

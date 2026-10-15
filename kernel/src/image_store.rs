@@ -16,10 +16,10 @@ static mut STORE: MaybeUninit<ImageStore<RamBackend, OBJECT_LIMIT>> = MaybeUnini
 static mut PUBLISHED_LAYERS: [Digest; ginux_oci::OCI_LAYER_LIMIT] =
     [Digest([0; 32]); ginux_oci::OCI_LAYER_LIMIT];
 static PUBLISHED_LAYER_COUNT: AtomicUsize = AtomicUsize::new(0);
-static ROOTFS_FRAME_STARTS: [AtomicU64; crate::control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU64::new(0) }; crate::control_abi::CONTAINER_LIMIT];
-static ROOTFS_FRAME_COUNTS: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::CONTAINER_LIMIT];
+static ROOTFS_FRAME_STARTS: [AtomicU64; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU64::new(0) }; crate::control_abi::DOMAIN_LIMIT];
+static ROOTFS_FRAME_COUNTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 
 #[derive(Clone, Copy)]
 struct RamObject {
@@ -251,7 +251,7 @@ pub(crate) fn discard_published_layers() -> bool {
 }
 
 pub(crate) fn install_published_layers(slot: usize) -> bool {
-    if slot >= crate::control_abi::CONTAINER_LIMIT || crate::oci_image::is_installed(slot) {
+    if slot >= crate::control_abi::DOMAIN_LIMIT || crate::oci_image::is_installed(slot) {
         return false;
     }
     let layer_count = PUBLISHED_LAYER_COUNT.load(Ordering::Acquire);
@@ -426,8 +426,7 @@ pub(crate) fn install_published_layers(slot: usize) -> bool {
 }
 
 pub(crate) fn uninstall_rootfs(slot: usize) -> bool {
-    if slot >= crate::control_abi::CONTAINER_LIMIT
-        || !crate::oci_image::uninstall_runtime_rootfs(slot)
+    if slot >= crate::control_abi::DOMAIN_LIMIT || !crate::oci_image::uninstall_runtime_rootfs(slot)
     {
         return false;
     }

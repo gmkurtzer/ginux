@@ -10,7 +10,7 @@ use crate::{
     oci_image,
 };
 
-const NAMESPACE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 4;
+const NAMESPACE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 4;
 const EMPTY_SLOT: u8 = u8::MAX;
 pub(crate) const ROOT_READ_ONLY: u32 = 1 << 0;
 pub(crate) const ROOT_NOSUID: u32 = 1 << 1;
@@ -122,9 +122,7 @@ impl NamespaceRoot {
     fn is_valid(self) -> bool {
         match self {
             Self::Embedded(root) => root.generation != 0,
-            Self::Oci { container_slot } => {
-                usize::from(container_slot) < control_abi::CONTAINER_LIMIT
-            }
+            Self::Oci { container_slot } => usize::from(container_slot) < control_abi::DOMAIN_LIMIT,
         }
     }
 

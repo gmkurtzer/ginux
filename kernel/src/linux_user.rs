@@ -5,8 +5,8 @@ const NAMESPACE_LIMIT: usize = 4;
 const ROOT_INSIDE_ID: u32 = 0;
 const ROOT_OUTSIDE_ID: u32 = 100_000;
 const ROOT_ID_COUNT: u32 = 1;
-const HOST_INSTANCE: usize = control_abi::CONTAINER_LIMIT;
-const INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
+const HOST_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
+const INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 
 pub(crate) const UID_MAP: &[u8] = b"0 100000 1\n";
 pub(crate) const GID_MAP: &[u8] = b"0 100000 1\n";

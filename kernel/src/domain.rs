@@ -4,7 +4,7 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const NATIVE_DOMAIN_CAPACITY: usize = 8;
-const CONTAINER_DOMAIN_CAPACITY: usize = crate::control_abi::CONTAINER_LIMIT;
+const CONTAINER_DOMAIN_CAPACITY: usize = crate::control_abi::DOMAIN_LIMIT;
 const MAX_DOMAINS: usize = NATIVE_DOMAIN_CAPACITY + CONTAINER_DOMAIN_CAPACITY;
 pub(crate) const HOST_DOMAIN_CURSOR_END: u64 = MAX_DOMAINS as u64;
 const MAX_BOOT_GRANTS: usize = 10;
@@ -608,7 +608,7 @@ impl Manager {
             drain_requested: false,
             readiness_published: false,
             host_pid: None,
-            process_kind: crate::control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+            process_kind: crate::control_abi::HOST_PROCESS_KIND_DOMAIN_INIT,
             role: Role::Container,
             container_slot: Some(u16::try_from(container_slot).ok()?),
             cpu_limit,
@@ -1529,6 +1529,24 @@ pub(crate) fn container_network_mode(domain_raw: u64) -> Option<ContainerNetwork
     (domain.role == Role::Container)
         .then_some(domain.container_network)
         .flatten()
+}
+
+pub(crate) fn configure_container_network_mode(
+    domain_raw: u64,
+    mode: ContainerNetworkMode,
+) -> bool {
+    let Some(id) = decode_id(domain_raw) else {
+        return false;
+    };
+    let manager = unsafe { &mut *core::ptr::addr_of_mut!(GLOBAL_MANAGER).cast::<Manager>() };
+    let Some(domain) = manager.domain_mut(id) else {
+        return false;
+    };
+    if domain.role != Role::Container || domain.state != State::Ready {
+        return false;
+    }
+    domain.container_network = Some(mode);
+    true
 }
 
 pub(crate) fn primary_service_identity() -> Option<u64> {

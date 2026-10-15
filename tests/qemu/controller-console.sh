@@ -56,15 +56,15 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         done
     }
     for command in \
-        '' '   ' $'sta\t' $'statuz\177s' $'statuz\bs' $'container a\t' help 'container help' 'container set --help' 'network help' 'network set --help' 'test linux' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
-        'network list' 'network status eth0' 'network status lo' 'network status eth9' 'network ping lo 127.0.0.1' 'network set lo dns 10.0.2.3' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network set eth0 dns 10.0.2.3' 'network status eth0' 'network ping eth0 10.0.2.15' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
-        'container status default' 'container new demo' 'container new demo' 'container new rocky' 'container set rocky image=rockylinux/rockylinux:10 init=/bin/sh' 'container list' \
-        'container start' 'container set demo cpu=1 cpu=1' 'container set demo image=alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395 init=/bin/sh' 'container list' 'container set demo image=rockylinux/rockylinux:10' 'container list' \
-        'container set demo image=embedded://minimal-system-v0 init=/sbin/init cpu=1 memory-mib=1048576 autostart=true' 'container set demo autostart=false' 'container set demo cpu 1' 'container list' status \
-        'container start demo' 'container list' 'container status demo' 'ls /proc' 'ls /proc/100' ps \
-        'container stop demo' 'container status demo' \
-        'container start demo' 'container status demo' 'container fail demo' \
-        'container status demo' 'container start demo' 'container status demo' unknown; do
+        '' '   ' $'sta\t' $'statuz\177s' $'statuz\bs' $'domain a\t' help 'domain help' 'domain set --help' 'network help' 'network set --help' 'test linux' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'domain list' \
+        'network list' 'network new gnet0 type=virtual' 'network new gnet1 type=virtual uplink=gnet0' 'network list' 'network status eth0' 'network status lo' 'network status eth9' 'network ping lo 127.0.0.1' 'network set lo dns 10.0.2.3' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network set eth0 dns 10.0.2.3' 'network status eth0' 'network ping eth0 10.0.2.15' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
+        'domain status default' 'domain new demo' 'domain new demo' 'domain new rocky' 'domain set rocky personality=linux image=rockylinux/rockylinux:10 init=/bin/sh' 'domain list' \
+        'domain start' 'domain set demo cpu=1 cpu=1' 'domain set demo personality=linux image=alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395 init=/bin/sh' 'domain list' 'domain set demo personality=linux image=rockylinux/rockylinux:10' 'domain list' \
+        'domain set demo personality=linux image=embedded://minimal-system-v0 init=/sbin/init cpu=1 memory-mib=1048576 autostart=true network=gnet0 network=gnet1' 'domain set demo autostart=false' 'domain set demo cpu 1' 'domain list' 'network list' status \
+        'domain start demo' 'domain list' 'domain status demo' 'ls /proc' 'ls /proc/100' ps \
+        'domain stop demo' 'domain status demo' \
+        'domain start demo' 'domain status demo' 'domain fail demo' \
+        'domain status demo' 'domain start demo' 'domain status demo' unknown; do
         send_command "$command"
     done
     printf 'shutdown\n'
@@ -111,8 +111,8 @@ for expected in \
     'List the embedded measured root or /proc' \
     'ps' \
     'Show live host processes' \
-    'container COMMAND' \
-    'Manage runtime containers' \
+    'domain COMMAND' \
+    'Manage runtime domains' \
     'network COMMAND' \
     'Manage network devices' \
     'test ENVIRONMENT' \
@@ -145,6 +145,9 @@ for expected in \
     'PASS covers the current bounded Linux profile; FAIL is unsupported or unverified.' \
     'network list' \
     'List network devices and their state' \
+    'network new NAME type=virtual [uplink=DEVICE]' \
+    'gnet0: virtual network created; uplink eth0' \
+    'gnet1: virtual network created; uplink gnet0' \
     'network status DEVICE' \
     'network set DEVICE {dhcp|dns ADDRESS|static ADDRESS/PREFIX GATEWAY}' \
     'network start DEVICE' \
@@ -171,28 +174,31 @@ for expected in \
     'eth0: restarted' \
     'eth0: requesting DHCP lease' \
     'eth0: DHCP configured 10.0.2.15/24 via 10.0.2.2 DNS 10.0.2.3' \
-    'container list' \
-    'List all containers' \
-    'container new NAME' \
-    'container set NAME FIELD=VALUE...' \
-    'Set one or more container fields' \
+    'domain list' \
+    'List all domains' \
+    'domain new NAME' \
+    'domain set NAME FIELD=VALUE...' \
+    'Set one or more domain fields' \
     'controller: running (ring 3)' \
-    'containers: 0 configured' \
-    'container: not found' \
-    'NAME            STATE       INIT                  CPU  MEM-MIB  AUTO   IMAGE' \
-    'demo: created (image required)' \
-    'container: create rejected' \
-    'rocky: created (image required)' \
-    'rocky           configured  /bin/sh               1    128      false  docker.io/rockylinux/rockylinux:10' \
-    'demo            configured  /sbin/init            1    1048576  false  embedded://minimal-system-v0' \
+    'domains: 0 configured' \
+    'domain: not found' \
+    'NAME            STATE       PERSONALITY  INIT                  CPU  MEM-MIB  AUTO   NETWORKS          IMAGE' \
+    'demo: created (personality and image required)' \
+    'domain: create rejected' \
+    'rocky: created (personality and image required)' \
+    'rocky           configured  linux' \
+    'docker.io/rockylinux/rockylinux:10' \
+    'demo            configured  linux' \
+    'gnet0,gnet1' \
+    'embedded://minimal-system-v0' \
     'Error: missing arguments' \
     'Usage:' \
-    'container: duplicate setting' \
-    'demo            configured  /bin/sh               1    128      false  docker.io/rockylinux/rockylinux:10' \
+    'domain: duplicate setting' \
+    'demo            configured  linux' \
     'demo: settings accepted; configured' \
     'demo: setting accepted; configured' \
-    'demo            running     /sbin/init            1    1048576  false  embedded://minimal-system-v0' \
-    'containers: 2 configured' \
+    'demo            running     linux' \
+    'domains: 2 configured' \
     'demo: running' \
     'integrity: sealed' \
     'GINUX.EFI component catalog v0:' \
@@ -213,7 +219,7 @@ for expected in \
     '100    0      R      demo:init' \
     'demo: stopped' \
     'demo: failed (contained)' \
-    'ginux: starting configured runtime container' \
+    'ginux: starting configured runtime domain' \
     'Error: unknown command' \
     'Shutting down Ginux.' \
     'ginux: controller requested clean shutdown' \

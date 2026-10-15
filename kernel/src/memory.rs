@@ -13,10 +13,10 @@ const MAX_LIVE_FRAMES: usize = 262_144;
 const DOMAIN_FRAME_LIMIT: usize = 192;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
-static RUNTIME_EXTENT_STARTS: [AtomicU64; crate::control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU64::new(0) }; crate::control_abi::CONTAINER_LIMIT];
-static RUNTIME_EXTENT_COUNTS: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::CONTAINER_LIMIT];
+static RUNTIME_EXTENT_STARTS: [AtomicU64; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU64::new(0) }; crate::control_abi::DOMAIN_LIMIT];
+static RUNTIME_EXTENT_COUNTS: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 static mut GLOBAL_ALLOCATOR: MaybeUninit<FrameAllocator> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy)]

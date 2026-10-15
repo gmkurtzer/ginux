@@ -6,31 +6,34 @@ use ginux_command::{
     complete, parse, write_error, write_help, Arguments, Arity, Command, HelpWriter, ParseOutcome,
 };
 use ginux_native_abi::{
-    native_control_abi_is_compatible, GinuxControlIoctlV0, NativeContainerRequestV2,
-    NativeControlDescriptorV4, NativeHostInspectRecordV0, NativeHostInspectRequestV0,
-    NativeRootDirectoryRequestV4, GINUX_CONTROL_IOCTL, NATIVE_CALL_FAILED,
-    NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION, NATIVE_CONTAINER_ATTACH,
-    NATIVE_CONTAINER_CONFIG_AUTOSTART, NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_CONFIG_IMAGE,
-    NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_CONFIG_MEMORY,
-    NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE, NATIVE_CONTAINER_CURSOR_END,
-    NATIVE_CONTAINER_HOST_SHUTDOWN, NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_LIMIT,
-    NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY, NATIVE_CONTAINER_RESTART,
-    NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU, NATIVE_CONTAINER_SET_IMAGE,
-    NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_START_ATTACHED,
-    NATIVE_CONTAINER_STATE_CONFIGURED, NATIVE_CONTAINER_STATE_CREATED,
-    NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING, NATIVE_CONTAINER_STATE_STOPPED,
-    NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    native_control_abi_is_compatible, GinuxControlIoctlV0, NativeControlDescriptorV4,
+    NativeDomainRequestV3, NativeHostInspectRecordV0, NativeHostInspectRequestV0,
+    NativeNetworkInventoryRequestV0, NativeRootDirectoryRequestV4, GINUX_CONTROL_IOCTL,
+    NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION,
+    NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
     NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES,
-    NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
+    NATIVE_DOMAIN_ATTACH, NATIVE_DOMAIN_CONFIG_AUTOSTART, NATIVE_DOMAIN_CONFIG_CPU,
+    NATIVE_DOMAIN_CONFIG_IMAGE, NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_CONFIG_MEMORY,
+    NATIVE_DOMAIN_CONFIG_PERSONALITY, NATIVE_DOMAIN_CONTROL_OPERATION, NATIVE_DOMAIN_CREATE,
+    NATIVE_DOMAIN_CURSOR_END, NATIVE_DOMAIN_HOST_SHUTDOWN, NATIVE_DOMAIN_INJECT_FAILURE,
+    NATIVE_DOMAIN_LIMIT, NATIVE_DOMAIN_MAX_NAME_SIZE, NATIVE_DOMAIN_QUERY, NATIVE_DOMAIN_RESTART,
+    NATIVE_DOMAIN_SET_AUTOSTART, NATIVE_DOMAIN_SET_CPU, NATIVE_DOMAIN_SET_IMAGE,
+    NATIVE_DOMAIN_SET_INIT, NATIVE_DOMAIN_SET_MEMORY_MIB, NATIVE_DOMAIN_SET_PERSONALITY,
+    NATIVE_DOMAIN_START_ATTACHED, NATIVE_DOMAIN_STATE_CONFIGURED, NATIVE_DOMAIN_STATE_CREATED,
+    NATIVE_DOMAIN_STATE_FAILED, NATIVE_DOMAIN_STATE_RUNNING, NATIVE_DOMAIN_STATE_STOPPED,
+    NATIVE_DOMAIN_STOP, NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
     NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
     NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
-    NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT, NATIVE_HOST_PROCESS_KIND_CONTROLLER,
+    NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT,
     NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_LINUX_ABI_TEST_COUNT,
     NATIVE_LINUX_ABI_TEST_OPERATION, NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_APPLY,
     NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING,
     NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_DNS,
     NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
-    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_SNAPSHOT_SIZE,
+    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_INVENTORY_ATTACH,
+    NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL, NATIVE_NETWORK_INVENTORY_OPERATION,
+    NATIVE_NETWORK_INVENTORY_QUERY, NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT,
+    NATIVE_NETWORK_KIND_VIRTUAL, NATIVE_NETWORK_MAX_NAME_SIZE, NATIVE_NETWORK_SNAPSHOT_SIZE,
     NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
     NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
     NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
@@ -53,14 +56,14 @@ const COMMAND_COMPONENTS: u16 = 2;
 const COMMAND_LS: u16 = 3;
 const COMMAND_PS: u16 = 4;
 const COMMAND_SHUTDOWN: u16 = 5;
-const COMMAND_CONTAINER_NEW: u16 = 6;
-const COMMAND_CONTAINER_SET: u16 = 7;
-const COMMAND_CONTAINER_STATUS: u16 = 8;
-const COMMAND_CONTAINER_START: u16 = 9;
-const COMMAND_CONTAINER_STOP: u16 = 10;
-const COMMAND_CONTAINER_RESTART: u16 = 11;
-const COMMAND_CONTAINER_FAIL: u16 = 12;
-const COMMAND_CONTAINER_LIST: u16 = 13;
+const COMMAND_DOMAIN_NEW: u16 = 6;
+const COMMAND_DOMAIN_SET: u16 = 7;
+const COMMAND_DOMAIN_STATUS: u16 = 8;
+const COMMAND_DOMAIN_START: u16 = 9;
+const COMMAND_DOMAIN_STOP: u16 = 10;
+const COMMAND_DOMAIN_RESTART: u16 = 11;
+const COMMAND_DOMAIN_FAIL: u16 = 12;
+const COMMAND_DOMAIN_LIST: u16 = 13;
 const COMMAND_NETWORK_STATUS: u16 = 14;
 const COMMAND_NETWORK_SET: u16 = 15;
 const COMMAND_NETWORK_DOWN: u16 = 16;
@@ -70,7 +73,8 @@ const COMMAND_NETWORK_START: u16 = 20;
 const COMMAND_NETWORK_STOP: u16 = 21;
 const COMMAND_NETWORK_RESTART: u16 = 22;
 const COMMAND_TEST_LINUX: u16 = 23;
-const COMMAND_CONTAINER_ATTACH: u16 = 24;
+const COMMAND_DOMAIN_ATTACH: u16 = 24;
+const COMMAND_NETWORK_NEW: u16 = 25;
 
 const LINUX_ABI_TESTS: &[&[u8]] = &[
     b"syscall-entry",
@@ -107,6 +111,13 @@ const TEST_COMMANDS: &[Command<'static>] = &[Command::leaf(
 )];
 
 const NETWORK_COMMANDS: &[Command<'static>] = &[
+    Command::leaf(
+        b"new",
+        b"network new NAME type=virtual [uplink=DEVICE]",
+        b"Create a virtual network device",
+        COMMAND_NETWORK_NEW,
+        Arity::range(2, 3),
+    ),
     Command::leaf(
         b"list",
         b"network list",
@@ -165,68 +176,68 @@ const NETWORK_COMMANDS: &[Command<'static>] = &[
     ),
 ];
 
-const CONTAINER_COMMANDS: &[Command<'static>] = &[
+const DOMAIN_COMMANDS: &[Command<'static>] = &[
     Command::leaf(
         b"list",
-        b"container list",
-        b"List all containers",
-        COMMAND_CONTAINER_LIST,
+        b"domain list",
+        b"List all domains",
+        COMMAND_DOMAIN_LIST,
         Arity::exact(0),
     ),
     Command::leaf(
         b"new",
-        b"container new NAME",
-        b"Create a container configuration",
-        COMMAND_CONTAINER_NEW,
+        b"domain new NAME",
+        b"Create a domain configuration",
+        COMMAND_DOMAIN_NEW,
         Arity::exact(1),
     ),
     Command::leaf(
         b"set",
-        b"container set NAME FIELD=VALUE...",
-        b"Set one or more container fields",
-        COMMAND_CONTAINER_SET,
+        b"domain set NAME FIELD=VALUE...",
+        b"Set one or more domain fields",
+        COMMAND_DOMAIN_SET,
         Arity::at_least(2),
     ),
     Command::leaf(
         b"status",
-        b"container status NAME",
-        b"Show container state",
-        COMMAND_CONTAINER_STATUS,
+        b"domain status NAME",
+        b"Show domain state",
+        COMMAND_DOMAIN_STATUS,
         Arity::exact(1),
     ),
     Command::leaf(
         b"start",
-        b"container start NAME [--attach]",
-        b"Start a configured container, optionally attached",
-        COMMAND_CONTAINER_START,
+        b"domain start NAME [--attach]",
+        b"Start a configured domain, optionally attached",
+        COMMAND_DOMAIN_START,
         Arity::range(1, 2),
     ),
     Command::leaf(
         b"attach",
-        b"container attach NAME",
-        b"Attach to a running container; Ctrl-] detaches",
-        COMMAND_CONTAINER_ATTACH,
+        b"domain attach NAME",
+        b"Attach to a running domain; Ctrl-] detaches",
+        COMMAND_DOMAIN_ATTACH,
         Arity::exact(1),
     ),
     Command::leaf(
         b"stop",
-        b"container stop NAME",
-        b"Stop a running container",
-        COMMAND_CONTAINER_STOP,
+        b"domain stop NAME",
+        b"Stop a running domain",
+        COMMAND_DOMAIN_STOP,
         Arity::exact(1),
     ),
     Command::leaf(
         b"restart",
-        b"container restart NAME",
-        b"Restart a configured container",
-        COMMAND_CONTAINER_RESTART,
+        b"domain restart NAME",
+        b"Restart a configured domain",
+        COMMAND_DOMAIN_RESTART,
         Arity::exact(1),
     ),
     Command::leaf(
         b"fail",
-        b"container fail NAME",
-        b"Inject a contained container failure",
-        COMMAND_CONTAINER_FAIL,
+        b"domain fail NAME",
+        b"Inject a contained domain failure",
+        COMMAND_DOMAIN_FAIL,
         Arity::exact(1),
     ),
 ];
@@ -268,10 +279,10 @@ const ROOT_COMMANDS: &[Command<'static>] = &[
         Arity::exact(0),
     ),
     Command::group(
-        b"container",
-        b"container COMMAND",
-        b"Manage runtime containers",
-        CONTAINER_COMMANDS,
+        b"domain",
+        b"domain COMMAND",
+        b"Manage runtime domains",
+        DOMAIN_COMMANDS,
     ),
     Command::group(
         b"network",
@@ -372,7 +383,7 @@ extern "C" fn ginux_controller_main() -> ! {
         match invocation.id() {
             COMMAND_STATUS => {
                 write(console, b"controller: running (ring 3)\r\n");
-                write_container_summary(console, host);
+                write_domain_summary(console, host);
                 write(console, b"integrity: sealed\r\n");
             }
             COMMAND_COMPONENTS => {
@@ -385,9 +396,9 @@ extern "C" fn ginux_controller_main() -> ! {
             COMMAND_SHUTDOWN => {
                 write(console, b"Shutting down Ginux.\r\n");
                 if call(
-                    NATIVE_CONTAINER_CONTROL_OPERATION,
+                    NATIVE_DOMAIN_CONTROL_OPERATION,
                     host,
-                    NATIVE_CONTAINER_HOST_SHUTDOWN,
+                    NATIVE_DOMAIN_HOST_SHUTDOWN,
                     0,
                 ) == NATIVE_CALL_FAILED
                 {
@@ -406,14 +417,15 @@ extern "C" fn ginux_controller_main() -> ! {
                     list_directory(console, root, path);
                 }
             }
-            COMMAND_CONTAINER_NEW..=COMMAND_CONTAINER_FAIL => {
-                handle_container_command(console, host, invocation.id(), invocation.arguments())
+            COMMAND_DOMAIN_NEW..=COMMAND_DOMAIN_FAIL => {
+                handle_domain_command(console, host, invocation.id(), invocation.arguments())
             }
-            COMMAND_CONTAINER_LIST => show_container_list(console, host),
-            COMMAND_CONTAINER_ATTACH => {
-                handle_container_command(console, host, invocation.id(), invocation.arguments())
+            COMMAND_DOMAIN_LIST => show_domain_list(console, host),
+            COMMAND_DOMAIN_ATTACH => {
+                handle_domain_command(console, host, invocation.id(), invocation.arguments())
             }
-            COMMAND_NETWORK_LIST => show_network_list(console, network),
+            COMMAND_NETWORK_LIST => show_network_list(console, host, network),
+            COMMAND_NETWORK_NEW => create_virtual_network(console, host, invocation.arguments()),
             COMMAND_NETWORK_STATUS => show_network_status(console, network, invocation.arguments()),
             COMMAND_NETWORK_SET => set_network(console, network, invocation.arguments()),
             COMMAND_NETWORK_START => {
@@ -569,7 +581,7 @@ fn ping(console: u64, network: u64, arguments: Arguments<'_>) {
     }
 }
 
-fn show_network_list(console: u64, network: u64) {
+fn show_network_list(console: u64, host: u64, network: u64) {
     let Some(snapshot) = network_snapshot(network) else {
         write(console, b"network: status failed\r\n");
         return;
@@ -578,8 +590,104 @@ fn show_network_list(console: u64, network: u64) {
         console,
         b"DEVICE  DOMAIN   CONNECTED  STATE  CONFIGURATION  ADDRESS          GATEWAY          DNS\r\n",
     );
-    write_eth0_status(console, network, snapshot, false);
+    write_eth0_status(console, Some(host), network, snapshot, false);
     write_loopback_status(console, false);
+    let mut cursor = 0;
+    loop {
+        let Some(request) = query_network_inventory(host, cursor) else {
+            return;
+        };
+        let name = network_request_name(&request);
+        if request.kind == NATIVE_NETWORK_KIND_VIRTUAL {
+            let mut row = OutputLine::new();
+            row.padded(name, 8);
+            append_network_domains(&mut row, host, name, false);
+            row.padded(b"yes", 11);
+            row.padded(b"up", 7);
+            row.padded(b"virtual", 15);
+            row.padded(b"-", 17);
+            row.padded(network_request_uplink(&request), 17);
+            row.push(b"-");
+            row.push(b"\r\n");
+            row.write(console);
+        }
+        if request.cursor == u64::MAX {
+            return;
+        }
+        cursor = request.cursor;
+    }
+}
+
+fn append_network_domains(row: &mut OutputLine, host: u64, network: &[u8], control: bool) {
+    let mut domain_cursor = 0;
+    let mut length = if control {
+        row.push(b"control");
+        7
+    } else {
+        0
+    };
+    while let Some((_, domain)) = next_domain(host, domain_cursor) {
+        let domain_name = request_name(&domain);
+        let mut attachment_cursor = 0;
+        while let Some(attachment) = query_domain_network(host, domain_name, attachment_cursor) {
+            if network_request_name(&attachment) == network {
+                if length != 0 {
+                    row.push(b",");
+                    length += 1;
+                }
+                row.push(domain_name);
+                length += domain_name.len();
+                break;
+            }
+            if attachment.cursor == u64::MAX {
+                break;
+            }
+            attachment_cursor = attachment.cursor;
+        }
+        if domain.value == NATIVE_DOMAIN_CURSOR_END {
+            break;
+        }
+        domain_cursor = domain.value;
+    }
+    if length == 0 {
+        row.push(b"-");
+        length = 1;
+    }
+    row.spaces(9_usize.saturating_sub(length).max(1));
+}
+
+fn create_virtual_network(console: u64, host: u64, arguments: Arguments<'_>) {
+    let name = arguments.first().unwrap_or_default();
+    if !valid_network_object_name(name) || arguments.get(1) != Some(b"type=virtual") {
+        write(
+            console,
+            b"network: usage: network new NAME type=virtual [uplink=DEVICE]\r\n",
+        );
+        return;
+    }
+    let uplink = match arguments.get(2) {
+        None => b"eth0" as &[u8],
+        Some(setting) => match setting.strip_prefix(b"uplink=") {
+            Some(value) if valid_network_object_name(value) => value,
+            _ => {
+                write(console, b"network: invalid uplink\r\n");
+                return;
+            }
+        },
+    };
+    let mut request =
+        NativeNetworkInventoryRequestV0::zeroed(NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL);
+    set_network_request_name(&mut request, name);
+    request.uplink_size = uplink.len() as u16;
+    request.uplink[..uplink.len()].copy_from_slice(uplink);
+    if network_inventory_call(host, &mut request) != 1 {
+        write(console, b"network: create rejected\r\n");
+        return;
+    }
+    write(console, name);
+    write(console, b": virtual network created; uplink ");
+    write(console, uplink);
+    write(console, b"\r\n");
 }
 
 fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
@@ -603,13 +711,23 @@ fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
         console,
         b"DEVICE  DOMAIN   CONNECTED  STATE  CONFIGURATION  ADDRESS          GATEWAY          DNS             GENERATION\r\n",
     );
-    write_eth0_status(console, network, snapshot, true);
+    write_eth0_status(console, None, network, snapshot, true);
 }
 
-fn write_eth0_status(console: u64, network: u64, snapshot: [u64; 7], generation: bool) {
+fn write_eth0_status(
+    console: u64,
+    host: Option<u64>,
+    network: u64,
+    snapshot: [u64; 7],
+    generation: bool,
+) {
     let mut row = OutputLine::new();
     row.padded(b"eth0", 8);
-    row.padded(b"control", 9);
+    if let Some(host) = host {
+        append_network_domains(&mut row, host, b"eth0", true);
+    } else {
+        row.padded(b"control", 9);
+    }
     row.padded(b"yes", 11);
     row.padded(if snapshot[2] == 1 { b"up" } else { b"down" }, 7);
     row.padded(
@@ -938,85 +1056,94 @@ fn append_decimal(output: &mut [u8], mut value: u64) -> usize {
     count
 }
 
-fn write_container_summary(console: u64, host: u64) {
+fn write_domain_summary(console: u64, host: u64) {
     let mut count = 0;
     let mut cursor = 0;
-    while let Some((_, request)) = next_container(host, cursor) {
+    while let Some((_, request)) = next_domain(host, cursor) {
         count += 1;
-        if request.value == NATIVE_CONTAINER_CURSOR_END {
+        if request.value == NATIVE_DOMAIN_CURSOR_END {
             break;
         }
         cursor = request.value;
     }
     if count == 0 {
-        write(console, b"containers: 0 configured\r\n");
+        write(console, b"domains: 0 configured\r\n");
         return;
     }
-    write(console, b"containers: ");
+    write(console, b"domains: ");
     write_decimal(console, count);
     write(console, b" configured\r\n");
 }
 
-fn write_container_state(console: u64, state: u64) {
+fn write_domain_state(console: u64, state: u64) {
     write(
         console,
-        if state == NATIVE_CONTAINER_STATE_CREATED {
+        if state == NATIVE_DOMAIN_STATE_CREATED {
             b"created (incomplete)"
         } else {
-            container_state_name(state)
+            domain_state_name(state)
         },
     );
     write(console, b"\r\n");
 }
 
-fn container_state_name(state: u64) -> &'static [u8] {
+fn domain_state_name(state: u64) -> &'static [u8] {
     match state {
-        NATIVE_CONTAINER_STATE_RUNNING => b"running",
-        NATIVE_CONTAINER_STATE_STOPPED => b"stopped",
-        NATIVE_CONTAINER_STATE_FAILED => b"failed",
-        NATIVE_CONTAINER_STATE_CREATED => b"created",
-        NATIVE_CONTAINER_STATE_CONFIGURED => b"configured",
+        NATIVE_DOMAIN_STATE_RUNNING => b"running",
+        NATIVE_DOMAIN_STATE_STOPPED => b"stopped",
+        NATIVE_DOMAIN_STATE_FAILED => b"failed",
+        NATIVE_DOMAIN_STATE_CREATED => b"created",
+        NATIVE_DOMAIN_STATE_CONFIGURED => b"configured",
         _ => b"unknown",
     }
 }
 
-fn show_container_list(console: u64, host: u64) {
+fn show_domain_list(console: u64, host: u64) {
     write(
         console,
-        b"NAME            STATE       INIT                  CPU  MEM-MIB  AUTO   IMAGE\r\n",
+        b"NAME            STATE       PERSONALITY  INIT                  CPU  MEM-MIB  AUTO   NETWORKS          IMAGE\r\n",
     );
     let mut cursor = 0;
     loop {
-        let Some((state, request)) = next_container(host, cursor) else {
+        let Some((state, request)) = next_domain(host, cursor) else {
             return;
         };
         let mut row = OutputLine::new();
         row.padded(request_name(&request), 16);
-        row.padded(container_state_name(state), 12);
-        append_container_configuration(&mut row, &request);
+        row.padded(domain_state_name(state), 12);
+        append_domain_configuration(&mut row, host, &request);
         row.push(b"\r\n");
         row.write(console);
-        if request.value == NATIVE_CONTAINER_CURSOR_END {
+        if request.value == NATIVE_DOMAIN_CURSOR_END {
             return;
         }
         if request.value <= cursor {
-            write(console, b"container: list cursor failed\r\n");
+            write(console, b"domain: list cursor failed\r\n");
             return;
         }
         cursor = request.value;
     }
 }
 
-fn next_container(host: u64, cursor: u64) -> Option<(u64, NativeContainerRequestV2)> {
-    let mut request = NativeContainerRequestV2::zeroed();
+fn next_domain(host: u64, cursor: u64) -> Option<(u64, NativeDomainRequestV3)> {
+    let mut request = NativeDomainRequestV3::zeroed();
     request.value = cursor;
-    let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
+    let state = domain_call(host, NATIVE_DOMAIN_QUERY, &mut request);
     (state != 0 && state != NATIVE_CALL_FAILED).then_some((state, request))
 }
 
-fn append_container_configuration(row: &mut OutputLine, request: &NativeContainerRequestV2) {
+fn append_domain_configuration(row: &mut OutputLine, host: u64, request: &NativeDomainRequestV3) {
     let configured = |flag| request.config_flags & flag != 0;
-    if configured(NATIVE_CONTAINER_CONFIG_INIT) {
+    if configured(NATIVE_DOMAIN_CONFIG_PERSONALITY) {
+        let personality = request
+            .personality
+            .get(..usize::from(request.personality_size))
+            .unwrap_or_default();
+        row.padded(personality, 13);
+    } else {
+        row.padded(b"-", 13);
+    }
+    if configured(NATIVE_DOMAIN_CONFIG_INIT) {
         let init = request
             .init
             .get(..usize::from(request.init_size))
@@ -1025,25 +1152,26 @@ fn append_container_configuration(row: &mut OutputLine, request: &NativeContaine
     } else {
         row.padded(b"-", 22);
     }
-    if configured(NATIVE_CONTAINER_CONFIG_CPU) {
+    if configured(NATIVE_DOMAIN_CONFIG_CPU) {
         row.decimal_padded(u64::from(request.cpu_count), 5);
     } else {
         row.padded(b"-", 5);
     }
-    if configured(NATIVE_CONTAINER_CONFIG_MEMORY) {
+    if configured(NATIVE_DOMAIN_CONFIG_MEMORY) {
         row.decimal_padded(request.memory_mib, 9);
     } else {
         row.padded(b"-", 9);
     }
     row.padded(
-        if configured(NATIVE_CONTAINER_CONFIG_AUTOSTART) {
+        if configured(NATIVE_DOMAIN_CONFIG_AUTOSTART) {
             b"true"
         } else {
             b"false"
         },
         7,
     );
-    if configured(NATIVE_CONTAINER_CONFIG_IMAGE) {
+    append_domain_networks(row, host, request_name(request));
+    if configured(NATIVE_DOMAIN_CONFIG_IMAGE) {
         row.push(
             request
                 .image
@@ -1055,106 +1183,132 @@ fn append_container_configuration(row: &mut OutputLine, request: &NativeContaine
     }
 }
 
-fn handle_container_command(console: u64, host: u64, command: u16, arguments: Arguments<'_>) {
+fn append_domain_networks(row: &mut OutputLine, host: u64, domain: &[u8]) {
+    let mut cursor = 0;
+    let mut found = false;
+    let mut length = 0;
+    while let Some(request) = query_domain_network(host, domain, cursor) {
+        if found {
+            row.push(b",");
+            length += 1;
+        }
+        let name = network_request_name(&request);
+        row.push(name);
+        length += name.len();
+        found = true;
+        if request.cursor == u64::MAX {
+            break;
+        }
+        cursor = request.cursor;
+    }
+    if !found {
+        row.push(b"host(shared)");
+        length = 12;
+    }
+    row.spaces(18_usize.saturating_sub(length).max(1));
+}
+
+fn handle_domain_command(console: u64, host: u64, command: u16, arguments: Arguments<'_>) {
     let name = arguments.first().unwrap_or_default();
-    if !valid_container_name(name) {
-        write(console, b"container: invalid name\r\n");
+    if !valid_domain_name(name) {
+        write(console, b"domain: invalid name\r\n");
         return;
     }
-    if command == COMMAND_CONTAINER_START
+    if command == COMMAND_DOMAIN_START
         && arguments
             .get(1)
             .is_some_and(|argument| argument != b"--attach")
     {
-        write(console, b"container: invalid option\r\n");
+        write(console, b"domain: invalid option\r\n");
         return;
     }
     let mut request = request_for_name(name);
     match command {
-        COMMAND_CONTAINER_NEW => {
-            if container_call(host, NATIVE_CONTAINER_CREATE, &mut request)
-                == NATIVE_CONTAINER_STATE_CREATED
+        COMMAND_DOMAIN_NEW => {
+            if domain_call(host, NATIVE_DOMAIN_CREATE, &mut request) == NATIVE_DOMAIN_STATE_CREATED
             {
-                write_name_state(console, name, b"created (image required)\r\n");
+                write_name_state(
+                    console,
+                    name,
+                    b"created (personality and image required)\r\n",
+                );
             } else {
-                write(console, b"container: create rejected\r\n");
+                write(console, b"domain: create rejected\r\n");
             }
         }
-        COMMAND_CONTAINER_SET => {
-            set_container_configuration(console, host, name, arguments);
+        COMMAND_DOMAIN_SET => {
+            set_domain_configuration(console, host, name, arguments);
         }
-        COMMAND_CONTAINER_STATUS => {
-            let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
+        COMMAND_DOMAIN_STATUS => {
+            let state = domain_call(host, NATIVE_DOMAIN_QUERY, &mut request);
             if state == NATIVE_CALL_FAILED {
-                write(console, b"container: not found\r\n");
+                write(console, b"domain: not found\r\n");
             } else {
                 write(console, name);
                 write(console, b": ");
-                write_container_state(console, state);
+                write_domain_state(console, state);
             }
         }
-        COMMAND_CONTAINER_START | COMMAND_CONTAINER_RESTART => {
+        COMMAND_DOMAIN_START | COMMAND_DOMAIN_RESTART => {
             let operation =
-                if command == COMMAND_CONTAINER_START && arguments.get(1) == Some(b"--attach") {
-                    NATIVE_CONTAINER_START_ATTACHED
+                if command == COMMAND_DOMAIN_START && arguments.get(1) == Some(b"--attach") {
+                    NATIVE_DOMAIN_START_ATTACHED
                 } else {
-                    NATIVE_CONTAINER_RESTART
+                    NATIVE_DOMAIN_RESTART
                 };
-            if container_call(host, operation, &mut request) == NATIVE_CALL_FAILED {
-                write(console, b"container: start rejected (image not ready)\r\n");
+            if domain_call(host, operation, &mut request) == NATIVE_CALL_FAILED {
+                write(console, b"domain: start rejected (image not ready)\r\n");
                 return;
             }
-            let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
-            if state == NATIVE_CONTAINER_STATE_RUNNING {
+            let state = domain_call(host, NATIVE_DOMAIN_QUERY, &mut request);
+            if state == NATIVE_DOMAIN_STATE_RUNNING {
                 write_name_state(console, name, b"running (detached)\r\n");
-            } else if state == NATIVE_CONTAINER_STATE_STOPPED {
+            } else if state == NATIVE_DOMAIN_STATE_STOPPED {
                 write_name_state(console, name, b"stopped\r\n");
-            } else if state == NATIVE_CONTAINER_STATE_FAILED {
+            } else if state == NATIVE_DOMAIN_STATE_FAILED {
                 write_name_state(console, name, b"failed\r\n");
             } else {
-                write(console, b"container: start failed\r\n");
+                write(console, b"domain: start failed\r\n");
             }
         }
-        COMMAND_CONTAINER_ATTACH => {
-            if container_call(host, NATIVE_CONTAINER_ATTACH, &mut request) == NATIVE_CALL_FAILED {
+        COMMAND_DOMAIN_ATTACH => {
+            if domain_call(host, NATIVE_DOMAIN_ATTACH, &mut request) == NATIVE_CALL_FAILED {
                 write(
                     console,
-                    b"container: attach rejected (container is not running)\r\n",
+                    b"domain: attach rejected (domain is not running)\r\n",
                 );
                 return;
             }
-            let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
-            if state == NATIVE_CONTAINER_STATE_RUNNING {
+            let state = domain_call(host, NATIVE_DOMAIN_QUERY, &mut request);
+            if state == NATIVE_DOMAIN_STATE_RUNNING {
                 write_name_state(console, name, b"running (detached)\r\n");
-            } else if state == NATIVE_CONTAINER_STATE_STOPPED {
+            } else if state == NATIVE_DOMAIN_STATE_STOPPED {
                 write_name_state(console, name, b"stopped\r\n");
-            } else if state == NATIVE_CONTAINER_STATE_FAILED {
+            } else if state == NATIVE_DOMAIN_STATE_FAILED {
                 write_name_state(console, name, b"failed\r\n");
             }
         }
-        COMMAND_CONTAINER_STOP => {
-            if container_call(host, NATIVE_CONTAINER_STOP, &mut request)
-                == NATIVE_CONTAINER_STATE_STOPPED
-            {
+        COMMAND_DOMAIN_STOP => {
+            if domain_call(host, NATIVE_DOMAIN_STOP, &mut request) == NATIVE_DOMAIN_STATE_STOPPED {
                 write_name_state(console, name, b"stopped\r\n");
             } else {
-                write(console, b"container: stop rejected\r\n");
+                write(console, b"domain: stop rejected\r\n");
             }
         }
-        COMMAND_CONTAINER_FAIL => {
-            if container_call(host, NATIVE_CONTAINER_INJECT_FAILURE, &mut request)
-                == NATIVE_CONTAINER_STATE_FAILED
+        COMMAND_DOMAIN_FAIL => {
+            if domain_call(host, NATIVE_DOMAIN_INJECT_FAILURE, &mut request)
+                == NATIVE_DOMAIN_STATE_FAILED
             {
                 write_name_state(console, name, b"failed (contained)\r\n");
             } else {
-                write(console, b"container: failure injection rejected\r\n");
+                write(console, b"domain: failure injection rejected\r\n");
             }
         }
         _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
     }
 }
 
-fn set_container_configuration(console: u64, host: u64, name: &[u8], arguments: Arguments<'_>) {
+fn set_domain_configuration(console: u64, host: u64, name: &[u8], arguments: Arguments<'_>) {
     let legacy = arguments.len() == 3 && !arguments.get(1).unwrap_or_default().contains(&b'=');
     let setting_count = if legacy { 1 } else { arguments.len() - 1 };
     let mut configured = 0_u16;
@@ -1164,16 +1318,23 @@ fn set_container_configuration(console: u64, host: u64, name: &[u8], arguments: 
         } else if let Some(pair) = split_setting(setting) {
             pair
         } else {
-            write(console, b"container: invalid setting\r\n");
+            write(console, b"domain: invalid setting\r\n");
             return;
         };
         let mut request = request_for_name(name);
+        if field == b"network" {
+            if !valid_network_object_name(value) || !network_exists(host, value) {
+                write(console, b"domain: invalid network setting\r\n");
+                return;
+            }
+            continue;
+        }
         let Some((flag, _)) = prepare_setting(&mut request, field, value) else {
-            write(console, b"container: invalid setting\r\n");
+            write(console, b"domain: invalid setting\r\n");
             return;
         };
         if configured & flag != 0 {
-            write(console, b"container: duplicate setting\r\n");
+            write(console, b"domain: duplicate setting\r\n");
             return;
         }
         configured |= flag;
@@ -1187,13 +1348,21 @@ fn set_container_configuration(console: u64, host: u64, name: &[u8], arguments: 
             split_setting(setting).unwrap()
         };
         let mut request = request_for_name(name);
+        if field == b"network" {
+            if !attach_domain_network(host, name, value) {
+                write(console, b"domain: network attachment rejected\r\n");
+                return;
+            }
+            state = domain_call(host, NATIVE_DOMAIN_QUERY, &mut request);
+            continue;
+        }
         let (_, operation) = prepare_setting(&mut request, field, value).unwrap();
-        state = container_call(host, operation, &mut request);
+        state = domain_call(host, operation, &mut request);
         if !matches!(
             state,
-            NATIVE_CONTAINER_STATE_CREATED | NATIVE_CONTAINER_STATE_CONFIGURED
+            NATIVE_DOMAIN_STATE_CREATED | NATIVE_DOMAIN_STATE_CONFIGURED
         ) {
-            write(console, b"container: setting rejected\r\n");
+            write(console, b"domain: setting rejected\r\n");
             return;
         }
     }
@@ -1206,7 +1375,7 @@ fn set_container_configuration(console: u64, host: u64, name: &[u8], arguments: 
             b": settings accepted; "
         },
     );
-    write_container_state(console, state);
+    write_domain_state(console, state);
 }
 
 fn split_setting(setting: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -1217,7 +1386,7 @@ fn split_setting(setting: &[u8]) -> Option<(&[u8], &[u8])> {
 }
 
 fn prepare_setting(
-    request: &mut NativeContainerRequestV2,
+    request: &mut NativeDomainRequestV3,
     field: &[u8],
     value: &[u8],
 ) -> Option<(u16, u64)> {
@@ -1229,31 +1398,25 @@ fn prepare_setting(
         {
             request.init_size = value.len() as u16;
             request.init[..value.len()].copy_from_slice(value);
-            Some((NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_SET_INIT))
+            Some((NATIVE_DOMAIN_CONFIG_INIT, NATIVE_DOMAIN_SET_INIT))
         }
         (b"cpu", value) => {
             request.cpu_count = u16::try_from(parse_decimal(value)?).ok()?;
             if request.cpu_count == 0 {
                 return None;
             }
-            Some((NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_SET_CPU))
+            Some((NATIVE_DOMAIN_CONFIG_CPU, NATIVE_DOMAIN_SET_CPU))
         }
         (b"memory-mib", value) => {
             request.memory_mib = parse_decimal(value)?;
             if request.memory_mib == 0 {
                 return None;
             }
-            Some((
-                NATIVE_CONTAINER_CONFIG_MEMORY,
-                NATIVE_CONTAINER_SET_MEMORY_MIB,
-            ))
+            Some((NATIVE_DOMAIN_CONFIG_MEMORY, NATIVE_DOMAIN_SET_MEMORY_MIB))
         }
         (b"autostart", value @ (b"true" | b"false")) => {
             request.value = u64::from(value == b"true");
-            Some((
-                NATIVE_CONTAINER_CONFIG_AUTOSTART,
-                NATIVE_CONTAINER_SET_AUTOSTART,
-            ))
+            Some((NATIVE_DOMAIN_CONFIG_AUTOSTART, NATIVE_DOMAIN_SET_AUTOSTART))
         }
         (b"image", value) if value.iter().all(|byte| byte.is_ascii_graphic()) => {
             if value.len() > request.image.len() {
@@ -1261,7 +1424,15 @@ fn prepare_setting(
             }
             request.image_size = value.len() as u16;
             request.image[..value.len()].copy_from_slice(value);
-            Some((NATIVE_CONTAINER_CONFIG_IMAGE, NATIVE_CONTAINER_SET_IMAGE))
+            Some((NATIVE_DOMAIN_CONFIG_IMAGE, NATIVE_DOMAIN_SET_IMAGE))
+        }
+        (b"personality", b"linux") => {
+            request.personality_size = value.len() as u16;
+            request.personality[..value.len()].copy_from_slice(value);
+            Some((
+                NATIVE_DOMAIN_CONFIG_PERSONALITY,
+                NATIVE_DOMAIN_SET_PERSONALITY,
+            ))
         }
         _ => None,
     }
@@ -1305,35 +1476,112 @@ impl HelpWriter for ConsoleHelpWriter {
     }
 }
 
-fn request_for_name(name: &[u8]) -> NativeContainerRequestV2 {
-    let mut request = NativeContainerRequestV2::zeroed();
+fn request_for_name(name: &[u8]) -> NativeDomainRequestV3 {
+    let mut request = NativeDomainRequestV3::zeroed();
     request.name_size = name.len() as u16;
     request.name[..name.len()].copy_from_slice(name);
     request
 }
 
-fn request_name(request: &NativeContainerRequestV2) -> &[u8] {
+fn request_name(request: &NativeDomainRequestV3) -> &[u8] {
     request
         .name
         .get(..usize::from(request.name_size))
         .unwrap_or_default()
 }
 
-fn valid_container_name(name: &[u8]) -> bool {
+fn valid_domain_name(name: &[u8]) -> bool {
     !name.is_empty()
-        && name.len() <= NATIVE_CONTAINER_MAX_NAME_SIZE
+        && name.len() <= NATIVE_DOMAIN_MAX_NAME_SIZE
         && name
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
-fn container_call(host: u64, operation: u64, request: &mut NativeContainerRequestV2) -> u64 {
+fn domain_call(host: u64, operation: u64, request: &mut NativeDomainRequestV3) -> u64 {
     call(
-        NATIVE_CONTAINER_CONTROL_OPERATION,
+        NATIVE_DOMAIN_CONTROL_OPERATION,
         host,
         operation,
-        (request as *mut NativeContainerRequestV2) as u64,
+        (request as *mut NativeDomainRequestV3) as u64,
     )
+}
+
+fn attach_domain_network(host: u64, domain: &[u8], network: &[u8]) -> bool {
+    let mut request = NativeNetworkInventoryRequestV0::zeroed(NATIVE_NETWORK_INVENTORY_ATTACH);
+    set_network_request_name(&mut request, network);
+    request.domain_size = domain.len() as u16;
+    request.domain[..domain.len()].copy_from_slice(domain);
+    network_inventory_call(host, &mut request) == 1
+}
+
+fn query_network_inventory(host: u64, cursor: u64) -> Option<NativeNetworkInventoryRequestV0> {
+    let mut request = NativeNetworkInventoryRequestV0::zeroed(NATIVE_NETWORK_INVENTORY_QUERY);
+    request.cursor = cursor;
+    (network_inventory_call(host, &mut request) == 1).then_some(request)
+}
+
+fn network_exists(host: u64, name: &[u8]) -> bool {
+    let mut cursor = 0;
+    while let Some(request) = query_network_inventory(host, cursor) {
+        if network_request_name(&request) == name {
+            return true;
+        }
+        if request.cursor == u64::MAX {
+            break;
+        }
+        cursor = request.cursor;
+    }
+    false
+}
+
+fn query_domain_network(
+    host: u64,
+    domain: &[u8],
+    cursor: u64,
+) -> Option<NativeNetworkInventoryRequestV0> {
+    let mut request =
+        NativeNetworkInventoryRequestV0::zeroed(NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT);
+    request.cursor = cursor;
+    request.domain_size = domain.len() as u16;
+    request.domain[..domain.len()].copy_from_slice(domain);
+    (network_inventory_call(host, &mut request) == 1).then_some(request)
+}
+
+fn network_inventory_call(host: u64, request: &mut NativeNetworkInventoryRequestV0) -> u64 {
+    call(
+        NATIVE_NETWORK_INVENTORY_OPERATION,
+        host,
+        (request as *mut NativeNetworkInventoryRequestV0) as u64,
+        0,
+    )
+}
+
+fn set_network_request_name(request: &mut NativeNetworkInventoryRequestV0, name: &[u8]) {
+    request.name_size = name.len() as u16;
+    request.name[..name.len()].copy_from_slice(name);
+}
+
+fn network_request_name(request: &NativeNetworkInventoryRequestV0) -> &[u8] {
+    request
+        .name
+        .get(..usize::from(request.name_size))
+        .unwrap_or_default()
+}
+
+fn network_request_uplink(request: &NativeNetworkInventoryRequestV0) -> &[u8] {
+    request
+        .uplink
+        .get(..usize::from(request.uplink_size))
+        .unwrap_or_default()
+}
+
+fn valid_network_object_name(name: &[u8]) -> bool {
+    !name.is_empty()
+        && name.len() <= NATIVE_NETWORK_MAX_NAME_SIZE
+        && name
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn write_name_state(console: u64, name: &[u8], state: &[u8]) {
@@ -1443,8 +1691,8 @@ fn show_processes(console: u64, host: u64) {
             write(console, b"ps: inspection failed\r\n");
             return;
         };
-        let container = (record.kind == NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT)
-            .then(|| container_for_pid(host, record.pid))
+        let domain = (record.kind == NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT)
+            .then(|| domain_for_pid(host, record.pid))
             .flatten();
         let mut row = OutputLine::new();
         row.decimal_padded(record.pid, 7);
@@ -1459,12 +1707,12 @@ fn show_processes(console: u64, host: u64) {
         );
         row.push(match record.kind {
             NATIVE_HOST_PROCESS_KIND_CONTROLLER => b"controller",
-            NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT => {
-                container.as_ref().map(request_name).unwrap_or(b"unknown")
+            NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT => {
+                domain.as_ref().map(request_name).unwrap_or(b"unknown")
             }
             _ => b"unknown",
         });
-        if record.kind == NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT {
+        if record.kind == NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT {
             row.push(b":init");
         }
         row.push(b"\r\n");
@@ -1473,13 +1721,13 @@ fn show_processes(console: u64, host: u64) {
     }
 }
 
-fn container_for_pid(host: u64, pid: u64) -> Option<NativeContainerRequestV2> {
+fn domain_for_pid(host: u64, pid: u64) -> Option<NativeDomainRequestV3> {
     let slot = pid.checked_sub(100)?;
-    if slot >= NATIVE_CONTAINER_LIMIT as u64 {
+    if slot >= NATIVE_DOMAIN_LIMIT as u64 {
         return None;
     }
-    let (state, request) = next_container(host, slot)?;
-    (state == NATIVE_CONTAINER_STATE_RUNNING).then_some(request)
+    let (state, request) = next_domain(host, slot)?;
+    (state == NATIVE_DOMAIN_STATE_RUNNING).then_some(request)
 }
 
 fn list_proc_directory(console: u64, host: u64, path: &[u8]) {

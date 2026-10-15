@@ -146,44 +146,48 @@ pub const NATIVE_HOST_INSPECT_VERSION: u16 = 0;
 pub const NATIVE_HOST_PROC_ENUMERATE: u16 = 1;
 pub const NATIVE_HOST_PROC_STATUS: u16 = 2;
 pub const NATIVE_HOST_PROCESS_KIND_CONTROLLER: u16 = 1;
-pub const NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT: u16 = 2;
+pub const NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT: u16 = 2;
 pub const NATIVE_HOST_INSPECT_STATE_READY: u16 = 1;
 pub const NATIVE_HOST_INSPECT_STATE_STOPPING: u16 = 2;
-pub const NATIVE_CONTAINER_CONTROL_OPERATION: u64 = 33;
-pub const NATIVE_CONTAINER_QUERY: u64 = 0;
-pub const NATIVE_CONTAINER_STOP: u64 = 1;
-pub const NATIVE_CONTAINER_RESTART: u64 = 2;
-pub const NATIVE_CONTAINER_INJECT_FAILURE: u64 = 3;
-pub const NATIVE_CONTAINER_HOST_SHUTDOWN: u64 = 4;
-pub const NATIVE_CONTAINER_CREATE: u64 = 5;
-pub const NATIVE_CONTAINER_SET_INIT: u64 = 6;
-pub const NATIVE_CONTAINER_SET_CPU: u64 = 7;
-pub const NATIVE_CONTAINER_SET_MEMORY_MIB: u64 = 8;
-pub const NATIVE_CONTAINER_SET_AUTOSTART: u64 = 9;
-pub const NATIVE_CONTAINER_SET_IMAGE: u64 = 10;
-pub const NATIVE_CONTAINER_START_ATTACHED: u64 = 11;
-pub const NATIVE_CONTAINER_ATTACH: u64 = 12;
-pub const NATIVE_CONTAINER_REQUEST_SIZE: u32 = 208;
-pub const NATIVE_CONTAINER_REQUEST_VERSION: u16 = 2;
-pub const NATIVE_CONTAINER_MAX_NAME_SIZE: usize = 16;
-pub const NATIVE_CONTAINER_MAX_INIT_SIZE: usize = 32;
-pub const NATIVE_CONTAINER_MAX_IMAGE_SIZE: usize = 128;
-pub const NATIVE_CONTAINER_LIMIT: usize = 32;
-pub const NATIVE_CONTAINER_CURSOR_END: u64 = u64::MAX;
-pub const NATIVE_CONTAINER_CONFIG_INIT: u16 = 1 << 0;
-pub const NATIVE_CONTAINER_CONFIG_CPU: u16 = 1 << 1;
-pub const NATIVE_CONTAINER_CONFIG_MEMORY: u16 = 1 << 2;
-pub const NATIVE_CONTAINER_CONFIG_AUTOSTART: u16 = 1 << 3;
-pub const NATIVE_CONTAINER_CONFIG_IMAGE: u16 = 1 << 4;
-pub const NATIVE_CONTAINER_CONFIG_COMPLETE: u16 = NATIVE_CONTAINER_CONFIG_INIT
-    | NATIVE_CONTAINER_CONFIG_CPU
-    | NATIVE_CONTAINER_CONFIG_MEMORY
-    | NATIVE_CONTAINER_CONFIG_IMAGE;
-pub const NATIVE_CONTAINER_STATE_RUNNING: u64 = 1;
-pub const NATIVE_CONTAINER_STATE_STOPPED: u64 = 2;
-pub const NATIVE_CONTAINER_STATE_FAILED: u64 = 3;
-pub const NATIVE_CONTAINER_STATE_CREATED: u64 = 4;
-pub const NATIVE_CONTAINER_STATE_CONFIGURED: u64 = 5;
+pub const NATIVE_DOMAIN_CONTROL_OPERATION: u64 = 33;
+pub const NATIVE_DOMAIN_QUERY: u64 = 0;
+pub const NATIVE_DOMAIN_STOP: u64 = 1;
+pub const NATIVE_DOMAIN_RESTART: u64 = 2;
+pub const NATIVE_DOMAIN_INJECT_FAILURE: u64 = 3;
+pub const NATIVE_DOMAIN_HOST_SHUTDOWN: u64 = 4;
+pub const NATIVE_DOMAIN_CREATE: u64 = 5;
+pub const NATIVE_DOMAIN_SET_INIT: u64 = 6;
+pub const NATIVE_DOMAIN_SET_CPU: u64 = 7;
+pub const NATIVE_DOMAIN_SET_MEMORY_MIB: u64 = 8;
+pub const NATIVE_DOMAIN_SET_AUTOSTART: u64 = 9;
+pub const NATIVE_DOMAIN_SET_IMAGE: u64 = 10;
+pub const NATIVE_DOMAIN_START_ATTACHED: u64 = 11;
+pub const NATIVE_DOMAIN_ATTACH: u64 = 12;
+pub const NATIVE_DOMAIN_SET_PERSONALITY: u64 = 13;
+pub const NATIVE_DOMAIN_REQUEST_SIZE: u32 = 232;
+pub const NATIVE_DOMAIN_REQUEST_VERSION: u16 = 3;
+pub const NATIVE_DOMAIN_MAX_NAME_SIZE: usize = 16;
+pub const NATIVE_DOMAIN_MAX_INIT_SIZE: usize = 32;
+pub const NATIVE_DOMAIN_MAX_IMAGE_SIZE: usize = 128;
+pub const NATIVE_DOMAIN_MAX_PERSONALITY_SIZE: usize = 16;
+pub const NATIVE_DOMAIN_LIMIT: usize = 32;
+pub const NATIVE_DOMAIN_CURSOR_END: u64 = u64::MAX;
+pub const NATIVE_DOMAIN_CONFIG_INIT: u16 = 1 << 0;
+pub const NATIVE_DOMAIN_CONFIG_CPU: u16 = 1 << 1;
+pub const NATIVE_DOMAIN_CONFIG_MEMORY: u16 = 1 << 2;
+pub const NATIVE_DOMAIN_CONFIG_AUTOSTART: u16 = 1 << 3;
+pub const NATIVE_DOMAIN_CONFIG_IMAGE: u16 = 1 << 4;
+pub const NATIVE_DOMAIN_CONFIG_PERSONALITY: u16 = 1 << 5;
+pub const NATIVE_DOMAIN_CONFIG_COMPLETE: u16 = NATIVE_DOMAIN_CONFIG_INIT
+    | NATIVE_DOMAIN_CONFIG_CPU
+    | NATIVE_DOMAIN_CONFIG_MEMORY
+    | NATIVE_DOMAIN_CONFIG_IMAGE
+    | NATIVE_DOMAIN_CONFIG_PERSONALITY;
+pub const NATIVE_DOMAIN_STATE_RUNNING: u64 = 1;
+pub const NATIVE_DOMAIN_STATE_STOPPED: u64 = 2;
+pub const NATIVE_DOMAIN_STATE_FAILED: u64 = 3;
+pub const NATIVE_DOMAIN_STATE_CREATED: u64 = 4;
+pub const NATIVE_DOMAIN_STATE_CONFIGURED: u64 = 5;
 pub const NATIVE_LINUX_ABI_TEST_OPERATION: u64 = 34;
 pub const NATIVE_LINUX_ABI_TEST_COUNT: u32 = 23;
 pub const NATIVE_IMAGE_STORE_OPERATION: u64 = 35;
@@ -199,6 +203,53 @@ pub const NATIVE_IMAGE_STORE_RESULT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_PROGRESS_OPERATION: u64 = 36;
 pub const NATIVE_PROGRESS_MAX_SIZE: usize = 128;
 pub const NATIVE_CONSOLE_READ_BYTE_OPERATION: u64 = 37;
+pub const NATIVE_NETWORK_INVENTORY_OPERATION: u64 = 38;
+pub const NATIVE_NETWORK_INVENTORY_REQUEST_SIZE: u32 = 72;
+pub const NATIVE_NETWORK_INVENTORY_VERSION: u16 = 0;
+pub const NATIVE_NETWORK_INVENTORY_QUERY: u16 = 1;
+pub const NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL: u16 = 2;
+pub const NATIVE_NETWORK_INVENTORY_ATTACH: u16 = 3;
+pub const NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT: u16 = 4;
+pub const NATIVE_NETWORK_KIND_PHYSICAL: u16 = 1;
+pub const NATIVE_NETWORK_KIND_VIRTUAL: u16 = 2;
+pub const NATIVE_NETWORK_MAX_NAME_SIZE: usize = 16;
+pub const NATIVE_NETWORK_CURSOR_END: u64 = u64::MAX;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct NativeNetworkInventoryRequestV0 {
+    pub size: u32,
+    pub version: u16,
+    pub command: u16,
+    pub cursor: u64,
+    pub name_size: u16,
+    pub kind: u16,
+    pub uplink_size: u16,
+    pub domain_size: u16,
+    pub name: [u8; NATIVE_NETWORK_MAX_NAME_SIZE],
+    pub uplink: [u8; NATIVE_NETWORK_MAX_NAME_SIZE],
+    pub domain: [u8; NATIVE_DOMAIN_MAX_NAME_SIZE],
+}
+
+impl NativeNetworkInventoryRequestV0 {
+    pub const fn zeroed(command: u16) -> Self {
+        Self {
+            size: NATIVE_NETWORK_INVENTORY_REQUEST_SIZE,
+            version: NATIVE_NETWORK_INVENTORY_VERSION,
+            command,
+            cursor: 0,
+            name_size: 0,
+            kind: 0,
+            uplink_size: 0,
+            domain_size: 0,
+            name: [0; NATIVE_NETWORK_MAX_NAME_SIZE],
+            uplink: [0; NATIVE_NETWORK_MAX_NAME_SIZE],
+            domain: [0; NATIVE_DOMAIN_MAX_NAME_SIZE],
+        }
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeNetworkInventoryRequestV0>() == 72);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -383,36 +434,42 @@ pub struct NativeHostInspectRecordV0 {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct NativeContainerRequestV2 {
+pub struct NativeDomainRequestV3 {
     pub size: u32,
     pub version: u16,
     pub name_size: u16,
-    pub name: [u8; NATIVE_CONTAINER_MAX_NAME_SIZE],
+    pub name: [u8; NATIVE_DOMAIN_MAX_NAME_SIZE],
     pub value: u64,
     pub init_size: u16,
     pub config_flags: u16,
-    pub init: [u8; NATIVE_CONTAINER_MAX_INIT_SIZE],
+    pub init: [u8; NATIVE_DOMAIN_MAX_INIT_SIZE],
     pub image_size: u16,
     pub cpu_count: u16,
-    pub image: [u8; NATIVE_CONTAINER_MAX_IMAGE_SIZE],
+    pub image: [u8; NATIVE_DOMAIN_MAX_IMAGE_SIZE],
     pub memory_mib: u64,
+    pub personality_size: u16,
+    pub reserved: [u8; 6],
+    pub personality: [u8; NATIVE_DOMAIN_MAX_PERSONALITY_SIZE],
 }
 
-impl NativeContainerRequestV2 {
+impl NativeDomainRequestV3 {
     pub const fn zeroed() -> Self {
         Self {
-            size: NATIVE_CONTAINER_REQUEST_SIZE,
-            version: NATIVE_CONTAINER_REQUEST_VERSION,
+            size: NATIVE_DOMAIN_REQUEST_SIZE,
+            version: NATIVE_DOMAIN_REQUEST_VERSION,
             name_size: 0,
-            name: [0; NATIVE_CONTAINER_MAX_NAME_SIZE],
+            name: [0; NATIVE_DOMAIN_MAX_NAME_SIZE],
             value: 0,
             init_size: 0,
             config_flags: 0,
-            init: [0; NATIVE_CONTAINER_MAX_INIT_SIZE],
+            init: [0; NATIVE_DOMAIN_MAX_INIT_SIZE],
             image_size: 0,
             cpu_count: 0,
-            image: [0; NATIVE_CONTAINER_MAX_IMAGE_SIZE],
+            image: [0; NATIVE_DOMAIN_MAX_IMAGE_SIZE],
             memory_mib: 0,
+            personality_size: 0,
+            reserved: [0; 6],
+            personality: [0; NATIVE_DOMAIN_MAX_PERSONALITY_SIZE],
         }
     }
 }
@@ -436,7 +493,7 @@ impl NativeHostInspectRecordV0 {
 const _: () = assert!(core::mem::size_of::<NativeRootDirectoryRequestV4>() == 48);
 const _: () = assert!(core::mem::size_of::<NativeHostInspectRequestV0>() == 32);
 const _: () = assert!(core::mem::size_of::<NativeHostInspectRecordV0>() == 40);
-const _: () = assert!(core::mem::size_of::<NativeContainerRequestV2>() == 208);
+const _: () = assert!(core::mem::size_of::<NativeDomainRequestV3>() == 232);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2105,16 +2162,19 @@ mod tests {
         assert!(header.contains("GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF UINT16_C(2048)"));
         assert!(header.contains("GINUX_NATIVE_LINUX_ABI_TEST_OPERATION UINT64_C(34)"));
         assert!(header.contains("GINUX_NATIVE_LINUX_ABI_TEST_COUNT UINT32_C(23)"));
-        assert!(header.contains("GINUX_NATIVE_CONTAINER_REQUEST_VERSION UINT16_C(2)"));
-        assert!(header.contains("struct ginux_native_container_request_v2"));
+        assert!(header.contains("GINUX_NATIVE_DOMAIN_REQUEST_VERSION UINT16_C(3)"));
+        assert!(header.contains("struct ginux_native_domain_request_v3"));
+        assert_eq!(core::mem::offset_of!(NativeDomainRequestV3, cpu_count), 70);
         assert_eq!(
-            core::mem::offset_of!(NativeContainerRequestV2, cpu_count),
-            70
-        );
-        assert_eq!(
-            core::mem::offset_of!(NativeContainerRequestV2, memory_mib),
+            core::mem::offset_of!(NativeDomainRequestV3, memory_mib),
             200
         );
+        assert_eq!(
+            core::mem::offset_of!(NativeDomainRequestV3, personality),
+            216
+        );
+        assert!(header.contains("GINUX_NATIVE_NETWORK_INVENTORY_OPERATION UINT64_C(38)"));
+        assert!(header.contains("struct ginux_native_network_inventory_request_v0"));
         assert!(header.contains("sizeof(struct ginux_native_control_descriptor_v4) == 16"));
     }
 

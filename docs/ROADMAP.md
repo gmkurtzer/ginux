@@ -22,21 +22,21 @@ Deliverables:
   host `/proc` inspection, `ps`, and `shutdown`.
 - `make run` provides the intuitive Mac/QEMU path; documentation covers optional UTM and later KVM acceleration on x86-64 Linux.
 
-Gate: automated serial-console test exercises every command and clean shutdown. Human verification boots it and interacts with the console. No container starts yet.
+Gate: automated serial-console test exercises every command and clean shutdown. Human verification boots it and interacts with the console. No workload domain starts yet.
 
-## C2: Runtime container lifecycle
+## C2: Runtime domain lifecycle
 
 **Implementation status:** Complete; awaiting human verification.
 
 Deliverables:
 
-- No container name or entity exists implicitly at boot.
+- No workload domain name or entity exists implicitly at boot.
 - The controller explicitly creates a named runtime record and sets the pinned
   minimal fixture, `/sbin/init`, bounded CPU/memory grants, and autostart policy.
-- The controller starts, observes, stops, and restarts the container.
-- `container list` reports the complete runtime inventory and configuration.
+- The controller starts, observes, stops, and restarts the domain.
+- `domain list` reports the complete runtime inventory, personality, and configuration.
 - The controller remains resident as host PID 1 across every lifecycle transition.
-- A container or controller failure cannot panic the kernel and leaves no stale authority.
+- A workload-domain or controller failure cannot panic the kernel and leaves no stale authority.
 
 Gate: absent-at-boot, explicit creation/configuration, readiness, stop, restart,
 injected failure, cleanup, and predefined-profile rejection tests. Human
@@ -58,16 +58,18 @@ Deliverables:
   architecture, and variant without a build-embedded image. The selected
   manifest and image configuration are digest-verified before layer ingestion.
 - Operator-configurable control-domain networking can reach an OCI registry
-  and resolve the native-platform manifest. `container start NAME` automatically pulls
+  and resolve the native-platform manifest. `domain start NAME` automatically pulls
   a missing configured image, verifies every digest while streaming it into an
   available-memory-backed store, and atomically publishes the immutable object.
 - Container configuration, cached image objects, writable overlays, and
   temporary data are boot-local and disappear on host reboot. Image storage has
   no configured byte ceiling and fails cleanly if backing resources are exhausted.
-- Each container has explicit static or DHCP network configuration independent
-  from the control domain.
-- Each virtual NIC has one globally unique `gnetN` name that remains unchanged
-  inside its assigned domain, and each domain has explicit DNS resolver state.
+- Physical and virtual network devices are independently inventoried kernel
+  objects. A domain may attach multiple devices; omission selects host-network
+  sharing, and each attached device keeps one unchanged name across the domain
+  boundary.
+- Each attached interface has explicit static or DHCP configuration and DNS
+  resolver state independent from the control domain.
 - Alpine's `/bin/sh` executes as container PID 1 with an attached console.
 - `Ctrl-]` returns to the controller without stopping the container, and boot
   logs can be inspected after detach.

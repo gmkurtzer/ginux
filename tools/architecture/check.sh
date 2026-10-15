@@ -30,7 +30,7 @@ require_text "$architecture" 'executes in ring 3'
 require_text "$architecture" 'Rocky Linux 10 x86-64'
 require_text "$architecture" 'stable kABI'
 require_text "$architecture" 'must not preclude a future authenticated compatibility layer'
-require_text "$architecture" 'Per-container loopback, interfaces, IP addresses, routes, sockets'
+require_text "$architecture" 'Per-domain loopback, interfaces, IP addresses, routes, sockets'
 require_text "$decision" 'The controller is embedded as bytes but executes in ring 3 as a statically linked Linux-ABI process.'
 require_text "$controller" '"syscall"'
 

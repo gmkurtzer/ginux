@@ -369,35 +369,35 @@ mod tests {
 
     const START: Command<'static> = Command::leaf(
         b"start",
-        b"container start NAME",
-        b"Start one container",
+        b"domain start NAME",
+        b"Start one domain",
         3,
         Arity::exact(1),
     );
     const SET: Command<'static> = Command::leaf(
         b"set",
-        b"container set NAME FIELD=VALUE...",
-        b"Set container fields",
+        b"domain set NAME FIELD=VALUE...",
+        b"Set domain fields",
         4,
         Arity::at_least(2),
     );
-    const CONTAINER_CHILDREN: &[Command<'static>] = &[START, SET];
-    const CONTAINER: Command<'static> = Command::group(
-        b"container",
-        b"container COMMAND",
-        b"Manage containers",
-        CONTAINER_CHILDREN,
+    const DOMAIN_CHILDREN: &[Command<'static>] = &[START, SET];
+    const DOMAIN: Command<'static> = Command::group(
+        b"domain",
+        b"domain COMMAND",
+        b"Manage domains",
+        DOMAIN_CHILDREN,
     );
     const STATUS: Command<'static> =
         Command::leaf(b"status", b"status", b"Show status", 2, Arity::exact(0));
-    const ROOT_CHILDREN: &[Command<'static>] = &[STATUS, CONTAINER];
+    const ROOT_CHILDREN: &[Command<'static>] = &[STATUS, DOMAIN];
     const ROOT: Command<'static> =
         Command::group(b"ginux", b"ginux COMMAND", b"Ginux shell", ROOT_CHILDREN);
 
     #[test]
     fn parses_nested_commands_and_normalizes_whitespace() {
         let ParseOutcome::Invoke(invocation) =
-            parse(&ROOT, b"  container\tset  demo cpu  1 ").unwrap()
+            parse(&ROOT, b"  domain\tset  demo cpu  1 ").unwrap()
         else {
             panic!("expected invocation");
         };
@@ -407,10 +407,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_multiple_container_settings() {
+    fn parses_multiple_domain_settings() {
         let ParseOutcome::Invoke(invocation) = parse(
             &ROOT,
-            b"container set demo image=registry.example/alpine@sha256:abc init=/bin/sh cpu=1 memory-mib=128 autostart=true",
+            b"domain set demo image=registry.example/alpine@sha256:abc init=/bin/sh cpu=1 memory-mib=128 autostart=true",
         )
         .unwrap() else {
             panic!("expected invocation");
@@ -426,7 +426,7 @@ mod tests {
         assert!(invocation.arguments().eq(expected.iter().copied()));
 
         let ParseOutcome::Invoke(invocation) =
-            parse(&ROOT, b"container set demo a=1 b=2 c=3 d=4 e=5 f=6 g=7 h=8").unwrap()
+            parse(&ROOT, b"domain set demo a=1 b=2 c=3 d=4 e=5 f=6 g=7 h=8").unwrap()
         else {
             panic!("expected variadic invocation");
         };
@@ -440,15 +440,14 @@ mod tests {
             Ok(ParseOutcome::Help(&ROOT))
         ));
         assert!(matches!(
-            parse(&ROOT, b"container help"),
-            Ok(ParseOutcome::Help(&CONTAINER))
+            parse(&ROOT, b"domain help"),
+            Ok(ParseOutcome::Help(&DOMAIN))
         ));
         assert!(matches!(
-            parse(&ROOT, b"help container start"),
+            parse(&ROOT, b"help domain start"),
             Ok(ParseOutcome::Help(&START))
         ));
-        let ParseOutcome::Invoke(invocation) = parse(&ROOT, b"container start help").unwrap()
-        else {
+        let ParseOutcome::Invoke(invocation) = parse(&ROOT, b"domain start help").unwrap() else {
             panic!("expected invocation");
         };
         let expected: &[&[u8]] = &[b"help"];
@@ -457,10 +456,10 @@ mod tests {
 
     #[test]
     fn reports_scope_and_arity_errors() {
-        let unknown = parse(&ROOT, b"container launch demo").unwrap_err();
+        let unknown = parse(&ROOT, b"domain launch demo").unwrap_err();
         assert_eq!(unknown.kind(), ParseErrorKind::UnknownCommand);
-        assert_eq!(unknown.command(), &CONTAINER);
-        let missing = parse(&ROOT, b"container start").unwrap_err();
+        assert_eq!(unknown.command(), &DOMAIN);
+        let missing = parse(&ROOT, b"domain start").unwrap_err();
         assert_eq!(missing.kind(), ParseErrorKind::MissingArguments);
         assert_eq!(missing.command(), &START);
         let extra = parse(&ROOT, b"status now").unwrap_err();
@@ -479,21 +478,21 @@ mod tests {
     #[test]
     fn generates_help_from_the_command_tree() {
         let mut output = Buffer(Vec::new());
-        write_help(&CONTAINER, &mut output);
+        write_help(&DOMAIN, &mut output);
         let output = String::from_utf8(output.0).unwrap();
-        assert!(output.contains("Usage:\r\n  container COMMAND"));
-        assert!(output.contains("container start NAME"));
-        assert!(output.contains("Start one container"));
+        assert!(output.contains("Usage:\r\n  domain COMMAND"));
+        assert!(output.contains("domain start NAME"));
+        assert!(output.contains("Start one domain"));
     }
 
     #[test]
     fn completes_root_and_nested_command_names() {
         let mut output = [0_u8; 32];
-        let length = complete(&ROOT, b"cont", &mut output);
-        assert_eq!(&output[..length], b"ainer ");
-        let length = complete(&ROOT, b"container sta", &mut output);
+        let length = complete(&ROOT, b"dom", &mut output);
+        assert_eq!(&output[..length], b"ain ");
+        let length = complete(&ROOT, b"domain sta", &mut output);
         assert_eq!(&output[..length], b"rt ");
-        assert_eq!(complete(&ROOT, b"container start ", &mut output), 0);
+        assert_eq!(complete(&ROOT, b"domain start ", &mut output), 0);
         assert_eq!(complete(&ROOT, b"missing", &mut output), 0);
     }
 }

@@ -1,25 +1,19 @@
 # Runtime stability audit
 
-Status: active stabilization work. This document records observed behavior, the
-kernel invariant behind it, and the acceptance test required before the item is
-closed.
+Status: original S0 runtime-isolation findings closed; broader C3 compatibility
+and deterministic registry coverage remain active.
 
 ## Executive finding
 
-Ginux has a real domain model, per-container configuration, rootfs storage,
-tmpfs instances, and process-table instances. The executable Linux runtime is
-not yet a per-domain object. It still uses a single active container selector,
-a single reusable OCI memory extent, singleton ELF/Linux ABI state, and a
-recursive controller handoff while a detached shell waits for input.
-
-Those implementation choices are the common cause of the recent regressions.
-Removing only the active-container check would let the second container erase
-or inherit the first container's runtime state. It is therefore not an
-acceptable fix.
+Ginux now models the executable Linux runtime as a domain-owned object. Runtime
+extents, mutable ELF/Linux ABI state, root/mount/process views, retained CPU
+state, and console continuations are selected by domain. Detach schedules the
+resident PID-1 controller instead of recursively relaunching it. The concurrent
+Alpine/Rocky QEMU gate is the release check for these invariants.
 
 ## Severity-zero invariants
 
-These are release-blocking. A checkpoint must not claim multi-container support
+These are release-blocking. A checkpoint must not claim multi-domain support
 until every invariant has an automated end-to-end test.
 
 1. **A Linux runtime belongs to one domain.** Its page tables, image mappings,
@@ -40,39 +34,39 @@ until every invariant has an automated end-to-end test.
    isolate child mmap, brk, descriptors, CWD, credentials, signals, TLS, and
    image metadata. Restoring only mmap metadata is not sufficient.
 
-## Confirmed defects
+## Original defects and closure
 
 | Severity | Defect | Evidence | Required closure |
 | --- | --- | --- | --- |
-| S0 | Only one container can execute | `CONTAINER_ACTIVE_SLOT` rejects a second start | Replace with per-domain runtime records and scheduler bindings |
-| S0 | OCI memory is singleton | `allocate_runtime_extent::<440>()` returns the same extent | Domain-owned allocations retained until process teardown |
-| S0 | Detach is recursive | console input calls `run_installed_interactive_controller()` | Save context, block the domain, schedule the controller |
-| S0 | Linux ABI state is singleton | ELF, mmap, descriptor, signal, thread, CWD, and TLS atomics are host-wide | Move state into domain/process runtime records |
-| S0 | Fork/exec can leak child state | the parent mmap regression was one instance of global state replacement | Process-state isolation test covering every mutable ABI subsystem |
-| S1 | Host process inspection models one fake init | host inspection synthesizes PID 100 for one active slot | Enumerate domain/process registries with stable identities |
+| S0 | Only one domain can execute | A second start was rejected | Closed: retained per-domain runtime records and scheduler bindings |
+| S0 | OCI memory is singleton | A reusable extent was shared | Closed: domain-owned allocations survive suspension until teardown |
+| S0 | Detach is recursive | Console detach relaunched the controller | Closed: save context, block the domain, schedule resident PID 1 |
+| S0 | Linux ABI state is singleton | ELF, mmap, descriptor, signal, thread, CWD, and TLS state was host-wide | Closed: mutable state is domain-banked and process-owned where implemented |
+| S0 | Fork/exec can leak child state | Parent mmap state was replaced | Closed for the current bounded ABI profile; compatibility expansion remains test-driven |
+| S1 | Host process inspection models one fake init | Host inspection synthesized one PID | Closed: enumerate running domain init records with stable host PIDs |
 | S1 | Start failures are misreported | all rejected starts say `image not ready` | Return and display typed lifecycle errors |
 | S1 | Live OCI gate is nondeterministic | registry DNS failure prevented two full Alpine test runs | Deterministic registry fixture plus optional public-registry test |
-| S1 | No two-container QEMU gate exists | current Alpine script tests one container sequentially | Add the acceptance sequence below to the required gate |
+| S1 | No two-domain QEMU gate exists | The Alpine script tested one domain sequentially | Closed: `make test-multi-domain` runs the sequence below |
 | S2 | Resource enforcement is incomplete | configured CPU and arbitrary nonzero 64-bit MiB values are retained and reported, but allocations are not yet charged to domains | Enforce the configured values through domain allocation accounting |
 | S2 | Roadmap/checkpoint claims are ahead of verification | C3 text describes behavior absent from the QEMU gate | Derive status from passing gates, not implementation intent |
 
 ## Required end-to-end acceptance sequence
 
-The multi-container test must boot a clean image and perform this sequence over
+The multi-domain test must boot a clean image and perform this sequence over
 the real controller console:
 
-1. Create Alpine and Rocky containers with explicit image references and
+1. Create Alpine and Rocky Linux personality domains with explicit image references and
    `/bin/sh` init.
 2. Start Alpine detached; verify pull, digest, architecture selection, unpack,
    domain creation, and `running` state.
 3. Start Rocky detached while Alpine remains running; verify the same stages.
-4. Verify `container list`, host `/proc`, and `ps` report both domain init
+4. Verify `domain list`, host `/proc`, and `ps` report both domain init
    processes with distinct stable identities.
 5. Attach Alpine, run filesystem/process ABI probes, detach, and confirm Rocky
    remains running.
 6. Attach Rocky, run the same probes, detach, and confirm Alpine remains
    running.
-7. Stop and restart each container independently.
+7. Stop and restart each domain independently.
 8. Exit one init and inject a fault into the other; verify correct per-domain
    state and a responsive PID-1 controller.
 9. Shut down cleanly with no kernel panic and no leaked domain-owned frames.
@@ -82,7 +76,7 @@ must retain independent address spaces and resumable execution contexts.
 
 ## Verification baseline
 
-At the start of this audit:
+At the start of this audit (historical baseline):
 
 - `make check`: pass.
 - `make test-c1`: pass.
@@ -112,7 +106,7 @@ runtime topology.
   and IOMMU retirement all validate. Repeated test runs now reach the
   controller instead of panicking on host timing.
 
-The S0 scheduler item remains open. `CONTAINER_ACTIVE_SLOT` and recursive
-console handoff are intentionally still enforcing one executable Linux runtime;
-lifting that guard before resumable domain contexts exist would misreport
-concurrency and risk corrupting process state.
+The S0 scheduler item is closed by retained per-domain contexts and resident
+controller scheduling. The selected/active slot variables now identify the
+domain currently executing on the serialized POC CPU; they are not ownership
+of the other suspended domains' runtime state.

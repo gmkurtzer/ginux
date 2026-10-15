@@ -18,8 +18,8 @@ const USER: u64 = 1 << 2;
 const NO_EXECUTE: u64 = 1 << 63;
 const TEST_USER_ADDRESS: usize = 1usize << 39;
 const PROCESS_RAX_INDEX: usize = 0;
-const HOST_PROCESS_INSTANCE: usize = control_abi::CONTAINER_LIMIT;
-const PROCESS_INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
+const HOST_PROCESS_INSTANCE: usize = control_abi::DOMAIN_LIMIT;
+const PROCESS_INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 const PROCESS_INSTANCE_NONE: u8 = u8::MAX;
 static LIVE_PROCESS_TABLE_INITIALIZED: [AtomicBool; PROCESS_INSTANCE_LIMIT] =
     [const { AtomicBool::new(false) }; PROCESS_INSTANCE_LIMIT];

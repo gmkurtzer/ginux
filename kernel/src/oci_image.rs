@@ -18,17 +18,17 @@ pub(crate) struct LaunchArguments<'a> {
     pub(crate) execfn: usize,
 }
 
-static ADDRESSES: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::CONTAINER_LIMIT];
-static SIZES: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
-    [const { AtomicUsize::new(0) }; crate::control_abi::CONTAINER_LIMIT];
+static ADDRESSES: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
+static SIZES: [AtomicUsize; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::DOMAIN_LIMIT];
 
 pub(crate) fn is_installed(slot: usize) -> bool {
-    slot < crate::control_abi::CONTAINER_LIMIT && SIZES[slot].load(Ordering::Acquire) != 0
+    slot < crate::control_abi::DOMAIN_LIMIT && SIZES[slot].load(Ordering::Acquire) != 0
 }
 
 pub(crate) fn install_runtime_rootfs(slot: usize, bytes: &'static [u8]) -> bool {
-    if slot >= crate::control_abi::CONTAINER_LIMIT || is_installed(slot) {
+    if slot >= crate::control_abi::DOMAIN_LIMIT || is_installed(slot) {
         return false;
     }
     let Some(rootfs) = Rootfs::parse(bytes) else {

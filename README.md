@@ -105,17 +105,27 @@ I/O subsystems must consult their corresponding domain policy as their
 contention queues are introduced. Only an ancestor domain may change a
 descendant's policy, so a workload cannot promote itself.
 
-Container resource settings do not have arbitrary host-wide ceilings.
+Domain resource settings do not have arbitrary host-wide ceilings.
 `memory-mib` accepts any nonzero 64-bit MiB value, and OCI staging/rootfs
 allocation has no configured byte cap. Values are bounded only by their ABI
 representation, addressability, and resources actually available at runtime.
 
-Each configured container is backed by exactly one Ginux domain. The domain is
-the outer, non-bypassable security boundary and owns the container's CPU and
-memory budget, process tree, IPC objects, filesystem root and mount view,
-network view, and devices. A container without an explicit network attachment
-uses the control domain's host network; this shares connectivity, not the
-authority to reconfigure the host interface.
+Each configured workload is a Ginux domain. The domain is the outer,
+non-bypassable security boundary and owns its CPU and memory budget, process
+tree, IPC objects, filesystem root and mount view, network view, and devices.
+`personality=linux` selects the Linux userspace contract; `image=...` selects
+how that domain's system root is populated. A domain without an explicit
+network attachment uses the control domain's host network; this shares
+connectivity, not authority to reconfigure the host interface.
+
+Physical network devices are discovered by the kernel. Operators may create
+named virtual devices with `network new`, chain them to physical or virtual
+uplinks, and attach multiple devices by repeating `network=DEVICE` in a
+`domain set` command. Attachments are independent kernel objects, not a
+singleton namespace field, and names remain unchanged across the domain
+boundary. The inventory/attachment control path is implemented; isolated
+per-domain packet queues, address configuration, DHCP, DNS, routes, and Linux
+interface enumeration remain active C3 dataplane work.
 
 The filesystem root is an abstract domain-owned kernel object. OCI is an image
 ingestion and population format, not an isolation mechanism: an embedded
@@ -231,7 +241,7 @@ label, decide the final path.
 
 ## Current state
 
-The active runtime stabilization findings and required multi-container QEMU
+The active runtime stabilization findings and required multi-domain QEMU
 acceptance sequence are tracked in
 [docs/STABILITY-AUDIT.md](docs/STABILITY-AUDIT.md). Runtime behavior is treated
 as complete only when its real lifecycle gate passes; configuration-state
@@ -240,8 +250,8 @@ simulation is not sufficient.
 | Area | What works now | Next boundary |
 |---|---|---|
 | Boot | Direct x86-64 UEFI boot as one EFI application under Q35/OVMF | Production signing, recovery, and physical hardware profiles |
-| Controller | Persistent ring-3 command console with command-name completion, aligned status tables, and component, process, network, and container lifecycle control | Dynamic argument completion, remote authenticated management, and persistent configuration |
-| Domains | Concurrent container domains with isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
+| Controller | Persistent ring-3 command console with command-name completion, aligned status tables, and component, process, network, and domain lifecycle control | Dynamic argument completion, remote authenticated management, and persistent configuration |
+| Domains | Explicitly selected Linux-personality domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
 | Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, an automatically mounted per-domain procfs, and an unmodified Alpine musl/BusyBox shell with rootfs-backed commands | Complete Alpine checkpoint, then Rocky Linux 10 and systemd |
@@ -279,17 +289,18 @@ At the `ginux>` prompt:
 ```text
 help
 status
-container new alpine
-container set alpine image=alpine:latest init=/bin/sh
-container start alpine --attach
+network new gnet0 type=virtual
+domain new alpine
+domain set alpine personality=linux image=alpine:latest init=/bin/sh network=gnet0
+domain start alpine --attach
 ```
 
 The final command resolves and downloads Alpine from Docker Hub, verifies and
 unpacks its layer, then enters the unmodified Alpine shell. Multiple domains
 can run concurrently; each keeps its own address space, root/mount view,
 process view, and suspended execution state. Press Control-] to detach, use
-`container attach NAME` to return, and use `exit` to stop the attached
-container. `shutdown` stops the host.
+`domain attach NAME` to return, and use `exit` to stop the attached Linux
+personality domain. `shutdown` stops the host.
 
 OCI layers are downloaded and verified in manifest order, then assembled with
 replacement, whiteout, and opaque-directory semantics before publication.
@@ -308,9 +319,9 @@ Useful development gates:
 ```sh
 make build          # build the unified EFI image
 make test           # run the core QEMU boot gate
-make test-c2        # verify configured container lifecycle
+make test-c2        # verify configured domain lifecycle
 make test-alpine    # verify runtime OCI download and the Alpine shell
-make test-multi-container # verify concurrent Alpine domains and Rocky ingestion
+make test-multi-domain # verify concurrent Alpine domains and Rocky ingestion
 make probe-rocky-systemd # probe Rocky systemd's documented mmap boundary
 make check          # run architecture, ABI, format, lint, and unit checks
 make gate           # run the clean reproducible project gate

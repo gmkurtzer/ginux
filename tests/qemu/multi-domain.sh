@@ -2,9 +2,9 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
-output_file=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-container.XXXXXX")
-volume_image=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-container-volume.XXXXXX")
-qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-container-pid.XXXXXX")
+output_file=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-domain.XXXXXX")
+volume_image=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-domain-volume.XXXXXX")
+qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-multi-domain-pid.XXXXXX")
 qemu_pid=""
 
 stop_qemu() {
@@ -38,7 +38,7 @@ wait_for() {
         sleep 1
     done
     tail -n 160 "$output_file" >&2
-    echo "Multi-container test failed while waiting for '$marker'." >&2
+    echo "Multi-domain test failed while waiting for '$marker'." >&2
     stop_qemu
     return 1
 }
@@ -57,7 +57,7 @@ wait_for_count() {
         sleep 1
     done
     tail -n 160 "$output_file" >&2
-    echo "Multi-container test failed while waiting for $expected occurrences of '$marker'." >&2
+    echo "Multi-domain test failed while waiting for $expected occurrences of '$marker'." >&2
     stop_qemu
     return 1
 }
@@ -66,29 +66,29 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
 {
     wait_for 'ginux> '
     printf '%s\n' \
-        'container new alpine' \
-        'container set alpine image=alpine:latest init=/bin/sh' \
-        'container start alpine'
+        'domain new alpine' \
+        'domain set alpine personality=linux image=alpine:latest init=/bin/sh' \
+        'domain start alpine'
     wait_for 'alpine: running (detached)'
     printf '%s\n' \
-        'container new alpine2' \
-        'container set alpine2 image=alpine:latest init=/bin/sh' \
-        'container start alpine2'
+        'domain new alpine2' \
+        'domain set alpine2 personality=linux image=alpine:latest init=/bin/sh' \
+        'domain start alpine2'
     wait_for 'alpine2: running (detached)'
     printf '%s\n' \
-        'container new rocky' \
-        'container set rocky image=rockylinux/rockylinux:10 init=/usr/bin/true' \
-        'container start rocky'
+        'domain new rocky' \
+        'domain set rocky personality=linux image=rockylinux/rockylinux:10 init=/usr/bin/true' \
+        'domain start rocky'
     wait_for_count 'ginux: OCI image ready' 3 240
     wait_for_count 'ginux: entering configured OCI init' 3 30
     wait_for 'rocky: stopped'
-    printf '%s\n' 'container list' 'ps'
-    wait_for 'alpine          running     /bin/sh               1    128      false  docker.io/library/alpine:latest'
-    wait_for 'alpine2         running     /bin/sh               1    128      false  docker.io/library/alpine:latest'
-    wait_for 'rocky           stopped     /usr/bin/true         1    128      false  docker.io/rockylinux/rockylinux:10'
+    printf '%s\n' 'domain list' 'ps'
+    wait_for 'alpine          running     linux'
+    wait_for 'alpine2         running     linux'
+    wait_for 'rocky           stopped     linux'
     wait_for '100    0      R      alpine:init'
     wait_for '101    0      R      alpine2:init'
-    printf '%s\n' 'container attach alpine'
+    printf '%s\n' 'domain attach alpine'
     wait_for $'\033[2J\033[H'
     printf '%s\n' \
         "printf 'ALPINE_DOMAIN_OK\\n'" \
@@ -96,22 +96,22 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'ALPINE_DOMAIN_OK'
     wait_for 'ALPINE_PROC_OK'
     printf '\035'
-    wait_for "[detached from container; use 'container attach NAME' to return]"
-    printf '%s\n' 'container attach alpine2'
+    wait_for "[detached from domain; use 'domain attach NAME' to return]"
+    printf '%s\n' 'domain attach alpine2'
     printf '%s\n' "printf 'ALPINE2_DOMAIN_OK\\n'"
     wait_for 'ALPINE2_DOMAIN_OK'
     printf '\035'
-    wait_for_count "[detached from container; use 'container attach NAME' to return]" 2 30
-    printf '%s\n' 'container attach alpine'
+    wait_for_count "[detached from domain; use 'domain attach NAME' to return]" 2 30
+    printf '%s\n' 'domain attach alpine'
     printf '%s\n' \
         "printf 'ALPINE_RESUME_OK\\n'" \
         'exit 0'
     wait_for 'ALPINE_RESUME_OK'
     wait_for 'alpine: stopped'
-    printf '%s\n' 'container stop alpine2'
+    printf '%s\n' 'domain stop alpine2'
     wait_for 'alpine2: stopped'
     printf '%s\n' \
-        'container list' \
+        'domain list' \
         'shutdown'
 } | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
     "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
@@ -134,7 +134,7 @@ done
 
 if kill -0 "$qemu_pid" 2>/dev/null; then
     tail -n 160 "$output_file"
-    echo "Multi-container test failed: QEMU did not shut down." >&2
+    echo "Multi-domain test failed: QEMU did not shut down." >&2
     exit 1
 fi
 wait "$qemu_pid" || true
@@ -148,14 +148,14 @@ for expected in \
     'GINUX_KERNEL_OK'; do
     if ! grep -Fq "$expected" "$output_file"; then
         tail -n 160 "$output_file"
-        echo "Multi-container test failed: missing '$expected'." >&2
+        echo "Multi-domain test failed: missing '$expected'." >&2
         exit 1
     fi
 done
 
 if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|live registry refresh snapshot failed' "$output_file"; then
     tail -n 160 "$output_file"
-    echo "Multi-container test failed: kernel or process-registry failure detected." >&2
+    echo "Multi-domain test failed: kernel or process-registry failure detected." >&2
     exit 1
 fi
 

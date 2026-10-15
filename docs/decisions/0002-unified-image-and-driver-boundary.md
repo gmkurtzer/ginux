@@ -5,7 +5,7 @@
 
 ## Context
 
-Ginux is not intended to host a small conventional Linux distribution beside its containers. The host needs only the kernel, boot-required hardware support, and a narrowly scoped controller for configuration, monitoring, maintenance, and container lifecycle. The design must also support normal systemd-based system containers, stable driver compatibility, runtime immutability, and failure containment.
+Ginux is not intended to host a small conventional Linux distribution beside its containers. The host needs only the kernel, boot-required hardware support, and a narrowly scoped controller for configuration, monitoring, maintenance, and domain lifecycle. The design must also support normal systemd-based system containers, stable driver compatibility, runtime immutability, and failure containment.
 
 The earlier architecture placed nearly all storage, networking, filesystem, and GPU support in userspace domains and rejected future binary Linux module compatibility. That no longer reflects the product direction.
 

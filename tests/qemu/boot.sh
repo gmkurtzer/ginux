@@ -1687,7 +1687,7 @@ if ! grep -q '^ginux: generation-safe Linux mount namespace installed' "$output_
 fi
 
 if ! grep -q '^ginux: generation-safe Linux user namespace installed' "$output_file" ||
-    ! grep -q '^ginux: container root mapped outside native authority' "$output_file" ||
+    ! grep -q '^ginux: Linux domain root mapped outside native authority' "$output_file" ||
     ! grep -q '^ginux: Linux fork inherited user namespace' "$output_file" ||
     ! grep -q '^USERNS_READY$' "$output_file"; then
     echo "Boot test failed: the bounded Linux user namespace was not observed." >&2

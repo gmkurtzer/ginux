@@ -535,8 +535,8 @@ static LINUX_CONTROLLER_HOST: AtomicU64 = AtomicU64::new(0);
 static LINUX_CONTROLLER_ROOT: AtomicU64 = AtomicU64::new(0);
 static LINUX_CONTROLLER_NETWORK: AtomicU64 = AtomicU64::new(0);
 
-const LINUX_RUNTIME_HOST_INSTANCE: u8 = control_abi::CONTAINER_LIMIT as u8;
-const LINUX_RUNTIME_INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
+const LINUX_RUNTIME_HOST_INSTANCE: u8 = control_abi::DOMAIN_LIMIT as u8;
+const LINUX_RUNTIME_INSTANCE_LIMIT: usize = control_abi::DOMAIN_LIMIT + 1;
 static LINUX_EXECUTION_INSTANCE: AtomicU8 = AtomicU8::new(LINUX_RUNTIME_HOST_INSTANCE);
 
 fn linux_execution_instance() -> usize {
@@ -1029,34 +1029,38 @@ static LINUX_SIGNAL_WAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0
 static LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 const CONTAINER_SLOT_NONE: u8 = u8::MAX;
-static CONTAINER_CONTROL_STATES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_DOMAIN_IDS: [AtomicU64; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU64::new(0) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_CONFIG_FLAGS: [AtomicU16; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU16::new(0) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_CPU_COUNTS: [AtomicU16; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU16::new(0) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_MEMORY_MIB: [AtomicU64; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU64::new(0) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_NAME_SIZES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_NAMES: [[AtomicU8; control_abi::CONTAINER_MAX_NAME_SIZE];
-    control_abi::CONTAINER_LIMIT] =
-    [const { [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_NAME_SIZE] };
-        control_abi::CONTAINER_LIMIT];
-static CONTAINER_INIT_SIZES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_INITS: [[AtomicU8; control_abi::CONTAINER_MAX_INIT_SIZE];
-    control_abi::CONTAINER_LIMIT] =
-    [const { [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_INIT_SIZE] };
-        control_abi::CONTAINER_LIMIT];
-static CONTAINER_IMAGE_SIZES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_IMAGES: [[AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
-    control_abi::CONTAINER_LIMIT] =
-    [const { [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE] };
-        control_abi::CONTAINER_LIMIT];
+static CONTAINER_CONTROL_STATES: [AtomicU8; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_DOMAIN_IDS: [AtomicU64; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU64::new(0) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_CONFIG_FLAGS: [AtomicU16; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU16::new(0) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_CPU_COUNTS: [AtomicU16; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU16::new(0) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_MEMORY_MIB: [AtomicU64; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU64::new(0) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_NAME_SIZES: [AtomicU8; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_NAMES: [[AtomicU8; control_abi::DOMAIN_MAX_NAME_SIZE]; control_abi::DOMAIN_LIMIT] =
+    [const { [const { AtomicU8::new(0) }; control_abi::DOMAIN_MAX_NAME_SIZE] };
+        control_abi::DOMAIN_LIMIT];
+static CONTAINER_INIT_SIZES: [AtomicU8; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_INITS: [[AtomicU8; control_abi::DOMAIN_MAX_INIT_SIZE]; control_abi::DOMAIN_LIMIT] =
+    [const { [const { AtomicU8::new(0) }; control_abi::DOMAIN_MAX_INIT_SIZE] };
+        control_abi::DOMAIN_LIMIT];
+static CONTAINER_IMAGE_SIZES: [AtomicU8; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_IMAGES: [[AtomicU8; control_abi::DOMAIN_MAX_IMAGE_SIZE];
+    control_abi::DOMAIN_LIMIT] =
+    [const { [const { AtomicU8::new(0) }; control_abi::DOMAIN_MAX_IMAGE_SIZE] };
+        control_abi::DOMAIN_LIMIT];
+static DOMAIN_PERSONALITY_SIZES: [AtomicU8; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::DOMAIN_LIMIT];
+static DOMAIN_PERSONALITIES: [[AtomicU8; control_abi::DOMAIN_MAX_PERSONALITY_SIZE];
+    control_abi::DOMAIN_LIMIT] =
+    [const { [const { AtomicU8::new(0) }; control_abi::DOMAIN_MAX_PERSONALITY_SIZE] };
+        control_abi::DOMAIN_LIMIT];
 static CONTAINER_SELECTED_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
 static CONTAINER_ACTIVE_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -1081,10 +1085,10 @@ static LINUX_RUNTIME_SUSPEND_REGISTERS: [BankedAtomicU64; LINUX_SYSCALL_FRAME_RE
     [const { BankedAtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS];
 const CONTAINER_CONSOLE_CAPACITY: usize = 4096;
 const CONTAINER_CONSOLE_DETACH: u8 = 0x1d;
-static CONTAINER_CONSOLE_ATTACHED: [AtomicBool; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicBool::new(false) }; control_abi::CONTAINER_LIMIT];
-static CONTAINER_STOP_REQUESTED: [AtomicBool; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicBool::new(false) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_CONSOLE_ATTACHED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
+static CONTAINER_STOP_REQUESTED: [AtomicBool; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 
 const EXTENDED_STATE_SIZE: usize = 1024;
 
@@ -1092,16 +1096,16 @@ const EXTENDED_STATE_SIZE: usize = 1024;
 #[repr(C, align(64))]
 struct ExtendedState([u8; EXTENDED_STATE_SIZE]);
 
-static mut CONTAINER_EXTENDED_STATES: [ExtendedState; control_abi::CONTAINER_LIMIT] =
-    [ExtendedState([0; EXTENDED_STATE_SIZE]); control_abi::CONTAINER_LIMIT];
-static CONTAINER_EXTENDED_STATE_VALID: [AtomicBool; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicBool::new(false) }; control_abi::CONTAINER_LIMIT];
+static mut CONTAINER_EXTENDED_STATES: [ExtendedState; control_abi::DOMAIN_LIMIT] =
+    [ExtendedState([0; EXTENDED_STATE_SIZE]); control_abi::DOMAIN_LIMIT];
+static CONTAINER_EXTENDED_STATE_VALID: [AtomicBool; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicBool::new(false) }; control_abi::DOMAIN_LIMIT];
 static EXTENDED_USER_STATE_ENABLED: AtomicBool = AtomicBool::new(false);
-static CONTAINER_CONSOLE_CURSOR: [AtomicU64; control_abi::CONTAINER_LIMIT] =
-    [const { AtomicU64::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_CONSOLE_CURSOR: [AtomicU64; control_abi::DOMAIN_LIMIT] =
+    [const { AtomicU64::new(0) }; control_abi::DOMAIN_LIMIT];
 static CONTAINER_CONSOLE_BYTES: [[AtomicU8; CONTAINER_CONSOLE_CAPACITY];
-    control_abi::CONTAINER_LIMIT] = [const { [const { AtomicU8::new(0) }; CONTAINER_CONSOLE_CAPACITY] };
-    control_abi::CONTAINER_LIMIT];
+    control_abi::DOMAIN_LIMIT] =
+    [const { [const { AtomicU8::new(0) }; CONTAINER_CONSOLE_CAPACITY] }; control_abi::DOMAIN_LIMIT];
 static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -2890,9 +2894,8 @@ fn resume_linux_system_supervisor() -> bool {
     };
     CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
     LINUX_EXECUTION_INSTANCE.store(slot as u8, Ordering::SeqCst);
-    CONTAINER_CONTROL_STATES[slot]
-        .store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
-    crate::serial_write("ginux: configured runtime container reached ready state\r\n");
+    CONTAINER_CONTROL_STATES[slot].store(control_abi::DOMAIN_STATE_RUNNING as u8, Ordering::SeqCst);
+    crate::serial_write("ginux: configured runtime domain reached ready state\r\n");
     let controller_completed = address_space::run_installed_interactive_controller();
     let shutdown_requested = CONTAINER_HOST_SHUTDOWN_REQUESTED.load(Ordering::SeqCst);
     if !controller_completed && !shutdown_requested {
@@ -3000,15 +3003,15 @@ fn shutdown_linux_system_supervisor(failed: bool) -> bool {
             return false;
         };
         if CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst)
-            != control_abi::CONTAINER_STATE_RUNNING as u8
+            != control_abi::DOMAIN_STATE_RUNNING as u8
         {
             return resumed;
         }
         CONTAINER_CONTROL_STATES[slot].store(
             if failed {
-                control_abi::CONTAINER_STATE_FAILED as u8
+                control_abi::DOMAIN_STATE_FAILED as u8
             } else {
-                control_abi::CONTAINER_STATE_STOPPED as u8
+                control_abi::DOMAIN_STATE_STOPPED as u8
             },
             Ordering::SeqCst,
         );
@@ -3029,7 +3032,7 @@ pub(crate) fn take_container_host_shutdown_request() -> bool {
 pub(crate) fn fail_configured_container() {
     if let Some(slot) = selected_or_active_container_slot() {
         CONTAINER_CONTROL_STATES[slot]
-            .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+            .store(control_abi::DOMAIN_STATE_FAILED as u8, Ordering::SeqCst);
     }
     CONTAINER_ACTIVE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
     CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
@@ -3040,35 +3043,33 @@ pub(crate) fn begin_configured_container() {
     if let Some(slot) = selected_container_slot() {
         let Some(container_domain) = container_domain_id(slot) else {
             CONTAINER_CONTROL_STATES[slot]
-                .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+                .store(control_abi::DOMAIN_STATE_FAILED as u8, Ordering::SeqCst);
             return;
         };
         if domain::container_domain_limits(container_domain).is_none() {
             CONTAINER_CONTROL_STATES[slot]
-                .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+                .store(control_abi::DOMAIN_STATE_FAILED as u8, Ordering::SeqCst);
             return;
         }
-        if domain::container_network_mode(container_domain)
-            != Some(domain::ContainerNetworkMode::HostShared)
-        {
+        if domain::container_network_mode(container_domain).is_none() {
             CONTAINER_CONTROL_STATES[slot]
-                .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+                .store(control_abi::DOMAIN_STATE_FAILED as u8, Ordering::SeqCst);
             return;
         }
         CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
         LINUX_EXECUTION_INSTANCE.store(slot as u8, Ordering::SeqCst);
         CONTAINER_CONTROL_STATES[slot]
-            .store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
+            .store(control_abi::DOMAIN_STATE_RUNNING as u8, Ordering::SeqCst);
     }
 }
 
 pub(crate) fn stop_configured_container() {
     if let Some(slot) = active_container_slot() {
         if CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst)
-            == control_abi::CONTAINER_STATE_RUNNING as u8
+            == control_abi::DOMAIN_STATE_RUNNING as u8
         {
             CONTAINER_CONTROL_STATES[slot]
-                .store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
+                .store(control_abi::DOMAIN_STATE_STOPPED as u8, Ordering::SeqCst);
         }
     }
     CONTAINER_ACTIVE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
@@ -13711,7 +13712,7 @@ fn container_console_read_byte() -> Option<u8> {
         CONTAINER_CONSOLE_ATTACHED[slot].store(false, Ordering::Release);
         LINUX_RUNTIME_SUSPEND_REQUESTED.store(true, Ordering::Release);
         crate::serial_write_bytes(
-            b"\r\n[detached from container; use 'container attach NAME' to return]\r\n",
+            b"\r\n[detached from domain; use 'domain attach NAME' to return]\r\n",
         );
         None
     } else {
@@ -16805,7 +16806,7 @@ fn dispatch_charged_call(
             console_read_byte(caller_domain, capability, frame)
         }
         control_abi::HOST_INSPECT_OPERATION => host_inspect(caller_domain, capability, frame),
-        control_abi::CONTAINER_CONTROL_OPERATION => {
+        control_abi::DOMAIN_CONTROL_OPERATION => {
             container_control(caller_domain, capability, frame)
         }
         control_abi::LINUX_ABI_TEST_OPERATION => {
@@ -16816,6 +16817,9 @@ fn dispatch_charged_call(
         }
         ginux_native_abi::NATIVE_PROGRESS_OPERATION => {
             native_progress_call(caller_domain, capability, frame)
+        }
+        ginux_native_abi::NATIVE_NETWORK_INVENTORY_OPERATION => {
+            network_inventory_call(caller_domain, capability, frame)
         }
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
@@ -18515,7 +18519,7 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
                 return u64::MAX - 2;
             };
             let container_cursor_base = domain::HOST_DOMAIN_CURSOR_END as usize + 1;
-            let container_cursor_end = container_cursor_base + control_abi::CONTAINER_LIMIT;
+            let container_cursor_end = container_cursor_base + control_abi::DOMAIN_LIMIT;
             if cursor == container_cursor_end {
                 return if domain::renew_auxiliary_call_epoch(domain_id) {
                     0
@@ -18533,7 +18537,7 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
                     domain::InspectionRecord {
                         pid: 100 + slot as u64,
                         parent_pid: 0,
-                        kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+                        kind: control_abi::HOST_PROCESS_KIND_DOMAIN_INIT,
                         state: control_abi::HOST_INSPECT_STATE_READY,
                         active_threads: 1,
                         next_cursor: (container_cursor_base + slot + 1) as u64,
@@ -18559,7 +18563,7 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
                 domain::InspectionRecord {
                     pid: 100 + slot as u64,
                     parent_pid: 0,
-                    kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+                    kind: control_abi::HOST_PROCESS_KIND_DOMAIN_INIT,
                     state: control_abi::HOST_INSPECT_STATE_READY,
                     active_threads: 1,
                     next_cursor: (container_cursor_base + slot + 1) as u64,
@@ -18571,14 +18575,14 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
                 .checked_sub(100)
                 .and_then(|slot| usize::try_from(slot).ok())
                 .filter(|slot| {
-                    *slot < control_abi::CONTAINER_LIMIT
-                        && container_state(*slot) == control_abi::CONTAINER_STATE_RUNNING
+                    *slot < control_abi::DOMAIN_LIMIT
+                        && container_state(*slot) == control_abi::DOMAIN_STATE_RUNNING
                 })
             {
                 domain::InspectionRecord {
                     pid: 100 + slot as u64,
                     parent_pid: 0,
-                    kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+                    kind: control_abi::HOST_PROCESS_KIND_DOMAIN_INIT,
                     state: control_abi::HOST_INSPECT_STATE_READY,
                     active_threads: 1,
                     next_cursor: 0,
@@ -18643,6 +18647,111 @@ fn linux_abi_test_results(domain_id: u64, capability: u64, frame: *const UserTra
     }
 }
 
+fn network_inventory_call(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(domain_id, capability, 1, Rights::MANAGE)
+        || frame.second_argument() != 0
+    {
+        return u64::MAX - 2;
+    }
+    let mut request = [0_u8; ginux_native_abi::NATIVE_NETWORK_INVENTORY_REQUEST_SIZE as usize];
+    if !address_space::copy_from_current_user(frame.first_argument(), &mut request)
+        || read_u32_at(&request, 0) != ginux_native_abi::NATIVE_NETWORK_INVENTORY_REQUEST_SIZE
+        || read_u16_at(&request, 4) != ginux_native_abi::NATIVE_NETWORK_INVENTORY_VERSION
+        || usize::from(read_u16_at(&request, 16)) > ginux_native_abi::NATIVE_NETWORK_MAX_NAME_SIZE
+        || usize::from(read_u16_at(&request, 20)) > ginux_native_abi::NATIVE_NETWORK_MAX_NAME_SIZE
+        || usize::from(read_u16_at(&request, 22)) > control_abi::DOMAIN_MAX_NAME_SIZE
+    {
+        return u64::MAX - 2;
+    }
+    let command = read_u16_at(&request, 6);
+    let name_size = usize::from(read_u16_at(&request, 16));
+    let uplink_size = usize::from(read_u16_at(&request, 20));
+    let domain_size = usize::from(read_u16_at(&request, 22));
+    let name = &request[24..24 + name_size];
+    let uplink = &request[40..40 + uplink_size];
+    let domain_name = &request[56..56 + domain_size];
+    let result = match command {
+        ginux_native_abi::NATIVE_NETWORK_INVENTORY_QUERY => {
+            let Ok(cursor) = usize::try_from(read_u64_at(&request, 8)) else {
+                return u64::MAX - 2;
+            };
+            let Some(record) = network::inventory(cursor) else {
+                return 0;
+            };
+            request.fill(0);
+            request[0..4].copy_from_slice(
+                &ginux_native_abi::NATIVE_NETWORK_INVENTORY_REQUEST_SIZE.to_le_bytes(),
+            );
+            request[4..6]
+                .copy_from_slice(&ginux_native_abi::NATIVE_NETWORK_INVENTORY_VERSION.to_le_bytes());
+            request[6..8].copy_from_slice(&command.to_le_bytes());
+            request[8..16].copy_from_slice(&record.next_cursor.to_le_bytes());
+            request[16..18].copy_from_slice(&(record.name_size as u16).to_le_bytes());
+            request[18..20].copy_from_slice(&record.kind.to_le_bytes());
+            request[20..22].copy_from_slice(&(record.uplink_size as u16).to_le_bytes());
+            request[24..24 + record.name_size].copy_from_slice(&record.name[..record.name_size]);
+            request[40..40 + record.uplink_size]
+                .copy_from_slice(&record.uplink[..record.uplink_size]);
+            1
+        }
+        ginux_native_abi::NATIVE_NETWORK_INVENTORY_CREATE_VIRTUAL
+            if network::create_virtual(name, uplink) =>
+        {
+            1
+        }
+        ginux_native_abi::NATIVE_NETWORK_INVENTORY_ATTACH => {
+            let Some(slot) = container_slot_by_name(domain_name) else {
+                return u64::MAX - 2;
+            };
+            if !network::attach(slot, name)
+                || !domain::configure_container_network_mode(
+                    CONTAINER_DOMAIN_IDS[slot].load(Ordering::Acquire),
+                    domain::ContainerNetworkMode::Isolated,
+                )
+            {
+                return u64::MAX - 2;
+            }
+            1
+        }
+        ginux_native_abi::NATIVE_NETWORK_INVENTORY_QUERY_ATTACHMENT => {
+            let Some(slot) = container_slot_by_name(domain_name) else {
+                return u64::MAX - 2;
+            };
+            let Ok(cursor) = usize::try_from(read_u64_at(&request, 8)) else {
+                return u64::MAX - 2;
+            };
+            let Some((next, attached_name, attached_name_size)) = network::attachment(slot, cursor)
+            else {
+                return 0;
+            };
+            request.fill(0);
+            request[0..4].copy_from_slice(
+                &ginux_native_abi::NATIVE_NETWORK_INVENTORY_REQUEST_SIZE.to_le_bytes(),
+            );
+            request[4..6]
+                .copy_from_slice(&ginux_native_abi::NATIVE_NETWORK_INVENTORY_VERSION.to_le_bytes());
+            request[6..8].copy_from_slice(&command.to_le_bytes());
+            request[8..16].copy_from_slice(&next.to_le_bytes());
+            request[16..18].copy_from_slice(&(attached_name_size as u16).to_le_bytes());
+            request[24..24 + attached_name_size]
+                .copy_from_slice(&attached_name[..attached_name_size]);
+            1
+        }
+        _ => return u64::MAX - 2,
+    };
+    if result != 0 && !address_space::copy_to_current_user(frame.first_argument(), &request) {
+        return u64::MAX - 2;
+    }
+    if domain::renew_auxiliary_call_epoch(domain_id) {
+        result
+    } else {
+        u64::MAX - 2
+    }
+}
+
 fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame) -> u64 {
     let Some(frame) = (unsafe { frame.as_mut() }) else {
         return u64::MAX - 2;
@@ -18651,7 +18760,7 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         return u64::MAX - 2;
     }
     let operation = frame.first_argument();
-    if operation == control_abi::CONTAINER_HOST_SHUTDOWN && frame.second_argument() == 0 {
+    if operation == control_abi::DOMAIN_HOST_SHUTDOWN && frame.second_argument() == 0 {
         CONTAINER_HOST_SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
         return active_container_slot()
             .map(|slot| u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst)))
@@ -18663,7 +18772,7 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
     let name = container_request_name(&request);
     let requested_slot = container_slot_by_name(name);
     let result = match operation {
-        control_abi::CONTAINER_QUERY if name.is_empty() => {
+        control_abi::DOMAIN_QUERY if name.is_empty() => {
             let Ok(cursor) = usize::try_from(read_u64_at(&request, 24)) else {
                 return u64::MAX - 2;
             };
@@ -18680,15 +18789,15 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             }
             u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
         }
-        control_abi::CONTAINER_QUERY if requested_slot.is_some() => {
+        control_abi::DOMAIN_QUERY if requested_slot.is_some() => {
             let slot = requested_slot.unwrap_or(0);
-            write_container_request(&mut request, slot, control_abi::CONTAINER_CURSOR_END);
+            write_container_request(&mut request, slot, control_abi::DOMAIN_CURSOR_END);
             if !address_space::copy_to_current_user(frame.second_argument(), &request) {
                 return u64::MAX - 2;
             }
             u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
         }
-        control_abi::CONTAINER_CREATE if requested_slot.is_none() && valid_container_name(name) => {
+        control_abi::DOMAIN_CREATE if requested_slot.is_none() && valid_container_name(name) => {
             let Some(slot) = free_container_slot() else {
                 return u64::MAX - 2;
             };
@@ -18706,16 +18815,16 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 &CONTAINER_INIT_SIZES[slot],
             );
             CONTAINER_CONFIG_FLAGS[slot].store(
-                control_abi::CONTAINER_CONFIG_INIT
-                    | control_abi::CONTAINER_CONFIG_CPU
-                    | control_abi::CONTAINER_CONFIG_MEMORY,
+                control_abi::DOMAIN_CONFIG_INIT
+                    | control_abi::DOMAIN_CONFIG_CPU
+                    | control_abi::DOMAIN_CONFIG_MEMORY,
                 Ordering::SeqCst,
             );
             CONTAINER_CONTROL_STATES[slot]
-                .store(control_abi::CONTAINER_STATE_CREATED as u8, Ordering::SeqCst);
-            control_abi::CONTAINER_STATE_CREATED
+                .store(control_abi::DOMAIN_STATE_CREATED as u8, Ordering::SeqCst);
+            control_abi::DOMAIN_STATE_CREATED
         }
-        control_abi::CONTAINER_SET_INIT
+        control_abi::DOMAIN_SET_INIT
             if configurable_container(requested_slot)
                 && valid_container_init(container_request_init(&request)) =>
         {
@@ -18725,9 +18834,9 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 &CONTAINER_INITS[slot],
                 &CONTAINER_INIT_SIZES[slot],
             );
-            update_container_configuration(slot, control_abi::CONTAINER_CONFIG_INIT)
+            update_container_configuration(slot, control_abi::DOMAIN_CONFIG_INIT)
         }
-        control_abi::CONTAINER_SET_CPU
+        control_abi::DOMAIN_SET_CPU
             if configurable_container(requested_slot) && read_u16_at(&request, 70) != 0 =>
         {
             let slot = requested_slot.unwrap_or(0);
@@ -18741,9 +18850,9 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 return u64::MAX - 2;
             }
             CONTAINER_CPU_COUNTS[slot].store(cpu_count, Ordering::Release);
-            update_container_configuration(slot, control_abi::CONTAINER_CONFIG_CPU)
+            update_container_configuration(slot, control_abi::DOMAIN_CONFIG_CPU)
         }
-        control_abi::CONTAINER_SET_MEMORY_MIB
+        control_abi::DOMAIN_SET_MEMORY_MIB
             if configurable_container(requested_slot) && read_u64_at(&request, 200) != 0 =>
         {
             let slot = requested_slot.unwrap_or(0);
@@ -18757,19 +18866,19 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 return u64::MAX - 2;
             }
             CONTAINER_MEMORY_MIB[slot].store(memory_mib, Ordering::Release);
-            update_container_configuration(slot, control_abi::CONTAINER_CONFIG_MEMORY)
+            update_container_configuration(slot, control_abi::DOMAIN_CONFIG_MEMORY)
         }
-        control_abi::CONTAINER_SET_AUTOSTART
+        control_abi::DOMAIN_SET_AUTOSTART
             if configurable_container(requested_slot) && read_u64_at(&request, 24) <= 1 =>
         {
             update_container_autostart(requested_slot.unwrap_or(0), read_u64_at(&request, 24) == 1)
         }
-        control_abi::CONTAINER_SET_IMAGE
+        control_abi::DOMAIN_SET_IMAGE
             if configurable_container(requested_slot)
                 && valid_container_image(container_request_image(&request)) =>
         {
             let slot = requested_slot.unwrap_or(0);
-            let mut canonical = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
+            let mut canonical = [0_u8; control_abi::DOMAIN_MAX_IMAGE_SIZE];
             let canonical_size =
                 canonical_container_image(container_request_image(&request), &mut canonical)
                     .unwrap_or(0);
@@ -18782,12 +18891,24 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             if crate::oci_image::is_installed(slot) && !crate::image_store::uninstall_rootfs(slot) {
                 return u64::MAX - 2;
             }
-            update_container_configuration(slot, control_abi::CONTAINER_CONFIG_IMAGE)
+            update_container_configuration(slot, control_abi::DOMAIN_CONFIG_IMAGE)
         }
-        control_abi::CONTAINER_STOP
+        control_abi::DOMAIN_SET_PERSONALITY
+            if configurable_container(requested_slot)
+                && valid_domain_personality(domain_request_personality(&request)) =>
+        {
+            let slot = requested_slot.unwrap_or(0);
+            store_container_value(
+                domain_request_personality(&request),
+                &DOMAIN_PERSONALITIES[slot],
+                &DOMAIN_PERSONALITY_SIZES[slot],
+            );
+            update_container_configuration(slot, control_abi::DOMAIN_CONFIG_PERSONALITY)
+        }
+        control_abi::DOMAIN_STOP
             if requested_slot.is_some()
                 && container_state(requested_slot.unwrap_or(0))
-                    == control_abi::CONTAINER_STATE_RUNNING
+                    == control_abi::DOMAIN_STATE_RUNNING
                 && (active_container_slot() == requested_slot
                     || address_space::oci_runtime_is_suspended(requested_slot.unwrap_or(0))) =>
         {
@@ -18798,38 +18919,38 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
             } else {
                 CONTAINER_CONTROL_STATES[slot]
-                    .store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
+                    .store(control_abi::DOMAIN_STATE_STOPPED as u8, Ordering::SeqCst);
             }
-            control_abi::CONTAINER_STATE_STOPPED
+            control_abi::DOMAIN_STATE_STOPPED
         }
-        control_abi::CONTAINER_RESTART | control_abi::CONTAINER_START_ATTACHED
+        control_abi::DOMAIN_RESTART | control_abi::DOMAIN_START_ATTACHED
             if requested_slot.is_some()
                 && active_container_slot().is_none_or(|slot| Some(slot) == requested_slot)
                 && CONTAINER_CONFIG_FLAGS[requested_slot.unwrap_or(0)].load(Ordering::SeqCst)
-                    & control_abi::CONTAINER_CONFIG_COMPLETE
-                    == control_abi::CONTAINER_CONFIG_COMPLETE
+                    & control_abi::DOMAIN_CONFIG_COMPLETE
+                    == control_abi::DOMAIN_CONFIG_COMPLETE
                 && matches!(
                     container_state(requested_slot.unwrap_or(0)),
-                    control_abi::CONTAINER_STATE_CONFIGURED
-                        | control_abi::CONTAINER_STATE_RUNNING
-                        | control_abi::CONTAINER_STATE_STOPPED
-                        | control_abi::CONTAINER_STATE_FAILED
+                    control_abi::DOMAIN_STATE_CONFIGURED
+                        | control_abi::DOMAIN_STATE_RUNNING
+                        | control_abi::DOMAIN_STATE_STOPPED
+                        | control_abi::DOMAIN_STATE_FAILED
                 ) =>
         {
             let slot = requested_slot.unwrap_or(0);
             CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::SeqCst);
-            reset_container_console(slot, operation == control_abi::CONTAINER_START_ATTACHED);
+            reset_container_console(slot, operation == control_abi::DOMAIN_START_ATTACHED);
             if container_image_is_embedded(slot) || crate::oci_image::is_installed(slot) {
                 CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
             } else {
                 CONTAINER_PULL_REQUESTED.store(true, Ordering::SeqCst);
             }
-            control_abi::CONTAINER_STATE_STOPPED
+            control_abi::DOMAIN_STATE_STOPPED
         }
-        control_abi::CONTAINER_ATTACH
+        control_abi::DOMAIN_ATTACH
             if requested_slot.is_some()
                 && container_state(requested_slot.unwrap_or(0))
-                    == control_abi::CONTAINER_STATE_RUNNING
+                    == control_abi::DOMAIN_STATE_RUNNING
                 && !CONTAINER_CONSOLE_ATTACHED[requested_slot.unwrap_or(0)]
                     .swap(true, Ordering::AcqRel) =>
         {
@@ -18837,17 +18958,17 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::Release);
             CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
             redraw_container_console(slot);
-            control_abi::CONTAINER_STATE_RUNNING
+            control_abi::DOMAIN_STATE_RUNNING
         }
-        control_abi::CONTAINER_INJECT_FAILURE
+        control_abi::DOMAIN_INJECT_FAILURE
             if requested_slot.is_some()
                 && active_container_slot() == requested_slot
                 && container_state(requested_slot.unwrap_or(0))
-                    == control_abi::CONTAINER_STATE_RUNNING =>
+                    == control_abi::DOMAIN_STATE_RUNNING =>
         {
             CONTAINER_CONTROL_STATES[requested_slot.unwrap_or(0)]
-                .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
-            control_abi::CONTAINER_STATE_FAILED
+                .store(control_abi::DOMAIN_STATE_FAILED as u8, Ordering::SeqCst);
+            control_abi::DOMAIN_STATE_FAILED
         }
         _ => u64::MAX - 2,
     };
@@ -18857,11 +18978,11 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         }
         if matches!(
             operation,
-            control_abi::CONTAINER_STOP
-                | control_abi::CONTAINER_RESTART
-                | control_abi::CONTAINER_START_ATTACHED
-                | control_abi::CONTAINER_ATTACH
-                | control_abi::CONTAINER_INJECT_FAILURE
+            control_abi::DOMAIN_STOP
+                | control_abi::DOMAIN_RESTART
+                | control_abi::DOMAIN_START_ATTACHED
+                | control_abi::DOMAIN_ATTACH
+                | control_abi::DOMAIN_INJECT_FAILURE
         ) {
             if !scheduler::suspend_container_lifecycle(
                 frame,
@@ -18878,38 +18999,49 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
     result
 }
 
-fn read_container_request(address: u64) -> Option<[u8; control_abi::CONTAINER_REQUEST_SIZE]> {
-    let mut request = [0_u8; control_abi::CONTAINER_REQUEST_SIZE];
+fn read_container_request(address: u64) -> Option<[u8; control_abi::DOMAIN_REQUEST_SIZE]> {
+    let mut request = [0_u8; control_abi::DOMAIN_REQUEST_SIZE];
     if !address_space::copy_from_current_user(address, &mut request)
-        || read_u32_at(&request, 0) != control_abi::CONTAINER_REQUEST_SIZE as u32
-        || read_u16_at(&request, 4) != control_abi::CONTAINER_REQUEST_VERSION
-        || usize::from(read_u16_at(&request, 6)) > control_abi::CONTAINER_MAX_NAME_SIZE
-        || usize::from(read_u16_at(&request, 32)) > control_abi::CONTAINER_MAX_INIT_SIZE
-        || usize::from(read_u16_at(&request, 68)) > control_abi::CONTAINER_MAX_IMAGE_SIZE
+        || read_u32_at(&request, 0) != control_abi::DOMAIN_REQUEST_SIZE as u32
+        || read_u16_at(&request, 4) != control_abi::DOMAIN_REQUEST_VERSION
+        || usize::from(read_u16_at(&request, 6)) > control_abi::DOMAIN_MAX_NAME_SIZE
+        || usize::from(read_u16_at(&request, 32)) > control_abi::DOMAIN_MAX_INIT_SIZE
+        || usize::from(read_u16_at(&request, 68)) > control_abi::DOMAIN_MAX_IMAGE_SIZE
+        || usize::from(read_u16_at(&request, 208)) > control_abi::DOMAIN_MAX_PERSONALITY_SIZE
+        || request[210..216].iter().any(|byte| *byte != 0)
     {
         return None;
     }
     Some(request)
 }
 
-fn container_request_name(request: &[u8; control_abi::CONTAINER_REQUEST_SIZE]) -> &[u8] {
+fn container_request_name(request: &[u8; control_abi::DOMAIN_REQUEST_SIZE]) -> &[u8] {
     let size = usize::from(read_u16_at(request, 6));
     request.get(8..8 + size).unwrap_or_default()
 }
 
-fn container_request_init(request: &[u8; control_abi::CONTAINER_REQUEST_SIZE]) -> &[u8] {
+fn container_request_init(request: &[u8; control_abi::DOMAIN_REQUEST_SIZE]) -> &[u8] {
     let size = usize::from(read_u16_at(request, 32));
     request.get(36..36 + size).unwrap_or_default()
 }
 
-fn container_request_image(request: &[u8; control_abi::CONTAINER_REQUEST_SIZE]) -> &[u8] {
+fn container_request_image(request: &[u8; control_abi::DOMAIN_REQUEST_SIZE]) -> &[u8] {
     let size = usize::from(read_u16_at(request, 68));
     request.get(72..72 + size).unwrap_or_default()
 }
 
+fn domain_request_personality(request: &[u8; control_abi::DOMAIN_REQUEST_SIZE]) -> &[u8] {
+    let size = usize::from(read_u16_at(request, 208));
+    request.get(216..216 + size).unwrap_or_default()
+}
+
+fn valid_domain_personality(personality: &[u8]) -> bool {
+    personality == b"linux"
+}
+
 fn valid_container_name(name: &[u8]) -> bool {
     !name.is_empty()
-        && name.len() <= control_abi::CONTAINER_MAX_NAME_SIZE
+        && name.len() <= control_abi::DOMAIN_MAX_NAME_SIZE
         && name
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
@@ -18917,13 +19049,13 @@ fn valid_container_name(name: &[u8]) -> bool {
 
 fn valid_container_init(init: &[u8]) -> bool {
     !init.is_empty()
-        && init.len() <= control_abi::CONTAINER_MAX_INIT_SIZE
+        && init.len() <= control_abi::DOMAIN_MAX_INIT_SIZE
         && init[0] == b'/'
         && init.iter().all(u8::is_ascii_graphic)
 }
 
 fn valid_container_image(image: &[u8]) -> bool {
-    let mut canonical = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
+    let mut canonical = [0_u8; control_abi::DOMAIN_MAX_IMAGE_SIZE];
     canonical_container_image(image, &mut canonical).is_some()
 }
 
@@ -18940,7 +19072,7 @@ fn canonical_container_image(image: &[u8], output: &mut [u8]) -> Option<usize> {
 
 fn container_slot_by_name(name: &[u8]) -> Option<usize> {
     (!name.is_empty()).then_some(())?;
-    (0..control_abi::CONTAINER_LIMIT).find(|slot| {
+    (0..control_abi::DOMAIN_LIMIT).find(|slot| {
         let size = usize::from(CONTAINER_NAME_SIZES[*slot].load(Ordering::SeqCst));
         size == name.len()
             && CONTAINER_NAMES[*slot][..size]
@@ -18951,34 +19083,34 @@ fn container_slot_by_name(name: &[u8]) -> Option<usize> {
 }
 
 fn free_container_slot() -> Option<usize> {
-    (0..control_abi::CONTAINER_LIMIT)
+    (0..control_abi::DOMAIN_LIMIT)
         .find(|slot| CONTAINER_CONTROL_STATES[*slot].load(Ordering::SeqCst) == 0)
 }
 
 fn next_container_slot(cursor: usize) -> Option<usize> {
-    (cursor..control_abi::CONTAINER_LIMIT)
+    (cursor..control_abi::DOMAIN_LIMIT)
         .find(|slot| CONTAINER_CONTROL_STATES[*slot].load(Ordering::SeqCst) != 0)
 }
 
 fn next_running_container_slot(cursor: usize) -> Option<usize> {
-    (cursor..control_abi::CONTAINER_LIMIT)
-        .find(|slot| container_state(*slot) == control_abi::CONTAINER_STATE_RUNNING)
+    (cursor..control_abi::DOMAIN_LIMIT)
+        .find(|slot| container_state(*slot) == control_abi::DOMAIN_STATE_RUNNING)
 }
 
 fn next_container_cursor(cursor: usize) -> u64 {
     next_container_slot(cursor)
         .map(|slot| slot as u64)
-        .unwrap_or(control_abi::CONTAINER_CURSOR_END)
+        .unwrap_or(control_abi::DOMAIN_CURSOR_END)
 }
 
 fn selected_container_slot() -> Option<usize> {
     let slot = usize::from(CONTAINER_SELECTED_SLOT.load(Ordering::SeqCst));
-    (slot < control_abi::CONTAINER_LIMIT).then_some(slot)
+    (slot < control_abi::DOMAIN_LIMIT).then_some(slot)
 }
 
 fn active_container_slot() -> Option<usize> {
     let slot = usize::from(CONTAINER_ACTIVE_SLOT.load(Ordering::SeqCst));
-    (slot < control_abi::CONTAINER_LIMIT).then_some(slot)
+    (slot < control_abi::DOMAIN_LIMIT).then_some(slot)
 }
 
 fn selected_or_active_container_slot() -> Option<usize> {
@@ -19007,7 +19139,7 @@ pub(crate) fn configured_container_uses_installed_oci_image() -> bool {
 }
 
 pub(crate) fn container_uses_installed_oci_image(slot: usize) -> bool {
-    slot < control_abi::CONTAINER_LIMIT
+    slot < control_abi::DOMAIN_LIMIT
         && !container_image_is_embedded(slot)
         && crate::oci_image::is_installed(slot)
 }
@@ -19060,7 +19192,7 @@ pub(crate) fn complete_container_pull(success: bool) {
         CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
     } else {
         CONTAINER_CONTROL_STATES[slot]
-            .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::Release);
+            .store(control_abi::DOMAIN_STATE_FAILED as u8, Ordering::Release);
         CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::Release);
     }
 }
@@ -19083,23 +19215,22 @@ fn configurable_container(slot: Option<usize>) -> bool {
     slot.is_some_and(|slot| {
         matches!(
             container_state(slot),
-            control_abi::CONTAINER_STATE_CREATED
-                | control_abi::CONTAINER_STATE_CONFIGURED
-                | control_abi::CONTAINER_STATE_STOPPED
-                | control_abi::CONTAINER_STATE_FAILED
+            control_abi::DOMAIN_STATE_CREATED
+                | control_abi::DOMAIN_STATE_CONFIGURED
+                | control_abi::DOMAIN_STATE_STOPPED
+                | control_abi::DOMAIN_STATE_FAILED
         )
     })
 }
 
 fn update_container_configuration(slot: usize, flag: u16) -> u64 {
     let flags = CONTAINER_CONFIG_FLAGS[slot].fetch_or(flag, Ordering::SeqCst) | flag;
-    let state = if flags & control_abi::CONTAINER_CONFIG_COMPLETE
-        == control_abi::CONTAINER_CONFIG_COMPLETE
-    {
-        control_abi::CONTAINER_STATE_CONFIGURED
-    } else {
-        control_abi::CONTAINER_STATE_CREATED
-    };
+    let state =
+        if flags & control_abi::DOMAIN_CONFIG_COMPLETE == control_abi::DOMAIN_CONFIG_COMPLETE {
+            control_abi::DOMAIN_STATE_CONFIGURED
+        } else {
+            control_abi::DOMAIN_STATE_CREATED
+        };
     CONTAINER_CONTROL_STATES[slot].store(state as u8, Ordering::SeqCst);
     state
 }
@@ -19107,21 +19238,21 @@ fn update_container_configuration(slot: usize, flag: u16) -> u64 {
 fn update_container_autostart(slot: usize, enabled: bool) -> u64 {
     if enabled {
         CONTAINER_CONFIG_FLAGS[slot]
-            .fetch_or(control_abi::CONTAINER_CONFIG_AUTOSTART, Ordering::SeqCst);
+            .fetch_or(control_abi::DOMAIN_CONFIG_AUTOSTART, Ordering::SeqCst);
     } else {
         CONTAINER_CONFIG_FLAGS[slot]
-            .fetch_and(!control_abi::CONTAINER_CONFIG_AUTOSTART, Ordering::SeqCst);
+            .fetch_and(!control_abi::DOMAIN_CONFIG_AUTOSTART, Ordering::SeqCst);
     }
     update_container_configuration(slot, 0)
 }
 
 fn write_container_request(
-    request: &mut [u8; control_abi::CONTAINER_REQUEST_SIZE],
+    request: &mut [u8; control_abi::DOMAIN_REQUEST_SIZE],
     slot: usize,
     next_cursor: u64,
 ) {
     request.fill(0);
-    request[0..4].copy_from_slice(&(control_abi::CONTAINER_REQUEST_SIZE as u32).to_le_bytes());
+    request[0..4].copy_from_slice(&(control_abi::DOMAIN_REQUEST_SIZE as u32).to_le_bytes());
     let size = usize::from(CONTAINER_NAME_SIZES[slot].load(Ordering::SeqCst));
     request[6..8].copy_from_slice(&(size as u16).to_le_bytes());
     for (output, stored) in request[8..8 + size]
@@ -19130,7 +19261,7 @@ fn write_container_request(
     {
         *output = stored.load(Ordering::SeqCst);
     }
-    request[4..6].copy_from_slice(&control_abi::CONTAINER_REQUEST_VERSION.to_le_bytes());
+    request[4..6].copy_from_slice(&control_abi::DOMAIN_REQUEST_VERSION.to_le_bytes());
     request[24..32].copy_from_slice(&next_cursor.to_le_bytes());
     let init_size = usize::from(CONTAINER_INIT_SIZES[slot].load(Ordering::SeqCst));
     request[32..34].copy_from_slice(&(init_size as u16).to_le_bytes());
@@ -19163,6 +19294,14 @@ fn write_container_request(
             .load(Ordering::Acquire)
             .to_le_bytes(),
     );
+    let personality_size = usize::from(DOMAIN_PERSONALITY_SIZES[slot].load(Ordering::SeqCst));
+    request[208..210].copy_from_slice(&(personality_size as u16).to_le_bytes());
+    for (output, stored) in request[216..216 + personality_size]
+        .iter_mut()
+        .zip(&DOMAIN_PERSONALITIES[slot][..personality_size])
+    {
+        *output = stored.load(Ordering::SeqCst);
+    }
 }
 
 fn read_u16_at(bytes: &[u8], offset: usize) -> u16 {

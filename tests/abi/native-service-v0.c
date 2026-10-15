@@ -148,38 +148,44 @@ _Static_assert(GINUX_NATIVE_CONTROL_FEATURE_PACKET_HANDOFF == UINT16_C(2048),
                "control packet handoff feature bit");
 _Static_assert(GINUX_NATIVE_HOST_INSPECT_OPERATION == UINT64_C(32),
                "host inspection operation");
-_Static_assert(GINUX_NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT == UINT16_C(2),
-               "container init host process kind");
-_Static_assert(GINUX_NATIVE_CONTAINER_CONTROL_OPERATION == UINT64_C(33),
-               "container control operation");
+_Static_assert(GINUX_NATIVE_HOST_PROCESS_KIND_DOMAIN_INIT == UINT16_C(2),
+               "domain init host process kind");
+_Static_assert(GINUX_NATIVE_DOMAIN_CONTROL_OPERATION == UINT64_C(33),
+               "domain control operation");
 _Static_assert(GINUX_NATIVE_LINUX_ABI_TEST_OPERATION == UINT64_C(34),
                "Linux ABI test operation");
 _Static_assert(GINUX_NATIVE_LINUX_ABI_TEST_COUNT == UINT32_C(23),
                "Linux ABI test count");
-_Static_assert(GINUX_NATIVE_CONTAINER_HOST_SHUTDOWN == UINT64_C(4),
-               "container host shutdown command");
-_Static_assert(GINUX_NATIVE_CONTAINER_STATE_FAILED == UINT64_C(3),
-               "failed container state");
-_Static_assert(GINUX_NATIVE_CONTAINER_CREATE == UINT64_C(5),
-               "container create command");
+_Static_assert(GINUX_NATIVE_DOMAIN_HOST_SHUTDOWN == UINT64_C(4),
+               "domain host shutdown command");
+_Static_assert(GINUX_NATIVE_DOMAIN_STATE_FAILED == UINT64_C(3),
+               "failed domain state");
+_Static_assert(GINUX_NATIVE_DOMAIN_CREATE == UINT64_C(5),
+               "domain create command");
 _Static_assert(GINUX_NATIVE_CONSOLE_MAX_LINE_BYTES == UINT32_C(256),
                "console line bound");
-_Static_assert(GINUX_NATIVE_CONTAINER_CONFIG_COMPLETE == UINT16_C(23),
-               "complete container configuration flags");
-_Static_assert(sizeof(struct ginux_native_container_request_v2) == 208,
-               "container request size");
-_Static_assert(offsetof(struct ginux_native_container_request_v2, name) == 8,
-               "container request name offset");
-_Static_assert(offsetof(struct ginux_native_container_request_v2, value) == 24,
-               "container request value offset");
-_Static_assert(offsetof(struct ginux_native_container_request_v2, init) == 36,
-               "container request init offset");
-_Static_assert(offsetof(struct ginux_native_container_request_v2, image) == 72,
-               "container request image offset");
-_Static_assert(offsetof(struct ginux_native_container_request_v2, cpu_count) == 70,
-               "container request CPU count offset");
-_Static_assert(offsetof(struct ginux_native_container_request_v2, memory_mib) == 200,
-               "container request memory offset");
+_Static_assert(GINUX_NATIVE_DOMAIN_CONFIG_COMPLETE == UINT16_C(55),
+               "complete domain configuration flags");
+_Static_assert(sizeof(struct ginux_native_domain_request_v3) == 232,
+               "domain request size");
+_Static_assert(offsetof(struct ginux_native_domain_request_v3, name) == 8,
+               "domain request name offset");
+_Static_assert(offsetof(struct ginux_native_domain_request_v3, value) == 24,
+               "domain request value offset");
+_Static_assert(offsetof(struct ginux_native_domain_request_v3, init) == 36,
+               "domain request init offset");
+_Static_assert(offsetof(struct ginux_native_domain_request_v3, image) == 72,
+               "domain request image offset");
+_Static_assert(offsetof(struct ginux_native_domain_request_v3, cpu_count) == 70,
+               "domain request CPU count offset");
+_Static_assert(offsetof(struct ginux_native_domain_request_v3, memory_mib) == 200,
+               "domain request memory offset");
+_Static_assert(offsetof(struct ginux_native_domain_request_v3, personality) == 216,
+               "domain request personality offset");
+_Static_assert(GINUX_NATIVE_NETWORK_INVENTORY_OPERATION == UINT64_C(38),
+               "network inventory operation");
+_Static_assert(sizeof(struct ginux_native_network_inventory_request_v0) == 72,
+               "network inventory request size");
 _Static_assert(GINUX_NATIVE_PACKET_CONSUME_OPERATION == UINT64_C(22),
                "native packet consume operation");
 _Static_assert(GINUX_NATIVE_PACKET_WAIT_OPERATION == UINT64_C(23),

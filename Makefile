@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-multi-container probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build build-verification run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-multi-domain probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build build-verification run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -26,7 +26,7 @@ help:
 	@echo "  make manifest Regenerate the signed development boot inputs"
 	@echo "  make system-image Build the pinned minimal system-container candidate"
 	@echo "  make test-alpine Download Alpine at runtime and verify its real shell in QEMU"
-	@echo "  make test-multi-container Run concurrent Alpine and Rocky domains in QEMU"
+	@echo "  make test-multi-domain Run concurrent Alpine and Rocky domains in QEMU"
 	@echo "  make probe-rocky-systemd Probe Rocky systemd and verify the documented next blocker"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
@@ -41,7 +41,7 @@ help:
 	@echo "  make run     Build Ginux and boot it in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
 	@echo "  make test-c1 Build and verify the interactive controller console"
-	@echo "  make test-c2 Verify configured container lifecycle management"
+	@echo "  make test-c2 Verify configured domain lifecycle management"
 	@echo "  make check   Run formatting and lint checks"
 	@echo "  make fmt     Format Rust sources"
 	@echo "  make gate    Run the clean reproducible build and QEMU test gate"
@@ -120,8 +120,8 @@ build-verification: manifest
 test-alpine: build
 	@tests/qemu/alpine-shell.sh
 
-test-multi-container: build
-	@tests/qemu/multi-container.sh
+test-multi-domain: build
+	@tests/qemu/multi-domain.sh
 
 probe-rocky-systemd: build
 	@tests/qemu/rocky-systemd.sh

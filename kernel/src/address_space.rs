@@ -106,14 +106,14 @@ static INTERACTIVE_CONTROLLER_IMAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
 const OCI_RUNTIME_FRAME_CAPACITY: usize = 440;
 const OCI_OWNED_FRAME_COUNT: usize = 8;
-static OCI_RUNTIME_ACTIVE: [AtomicBool; crate::control_abi::CONTAINER_LIMIT] =
-    [const { AtomicBool::new(false) }; crate::control_abi::CONTAINER_LIMIT];
+static OCI_RUNTIME_ACTIVE: [AtomicBool; crate::control_abi::DOMAIN_LIMIT] =
+    [const { AtomicBool::new(false) }; crate::control_abi::DOMAIN_LIMIT];
 static mut OCI_RUNTIME_OWNED_FRAMES: [[memory::FrameLease; OCI_OWNED_FRAME_COUNT];
-    crate::control_abi::CONTAINER_LIMIT] =
-    [[memory::FrameLease::EMPTY; OCI_OWNED_FRAME_COUNT]; crate::control_abi::CONTAINER_LIMIT];
+    crate::control_abi::DOMAIN_LIMIT] =
+    [[memory::FrameLease::EMPTY; OCI_OWNED_FRAME_COUNT]; crate::control_abi::DOMAIN_LIMIT];
 static mut OCI_RUNTIME_FRAMES: [[memory::FrameLease; OCI_RUNTIME_FRAME_CAPACITY];
-    crate::control_abi::CONTAINER_LIMIT] =
-    [[memory::FrameLease::EMPTY; OCI_RUNTIME_FRAME_CAPACITY]; crate::control_abi::CONTAINER_LIMIT];
+    crate::control_abi::DOMAIN_LIMIT] =
+    [[memory::FrameLease::EMPTY; OCI_RUNTIME_FRAME_CAPACITY]; crate::control_abi::DOMAIN_LIMIT];
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum OciProcessOutcome {
@@ -4697,7 +4697,7 @@ const NATIVE_NETWORK_IMAGE_PAGES: usize = 160;
 const NATIVE_NETWORK_STACK_PAGES: usize = 16;
 pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
     4 + NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1;
-pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 9;
+pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 16;
 pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize = 4 + NATIVE_CONTROLLER_IMAGE_PAGES + 3;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;
 const NATIVE_BOOT_INFO_PAGE: usize = NATIVE_STACK_PAGE + 3;

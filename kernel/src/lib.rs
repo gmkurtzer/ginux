@@ -959,9 +959,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: domain lifecycle ancestry verified\r\n");
     if !domain::verify_container_domain_invariants() {
-        kernel_fail("ginux: container domain boundary invariant failed\r\n");
+        kernel_fail("ginux: Linux domain boundary invariant failed\r\n");
     }
-    serial_write("ginux: container domain boundaries verified\r\n");
+    serial_write("ginux: Linux domain boundaries verified\r\n");
     if !domain::verify_generation_exhaustion_invariants() {
         kernel_fail("ginux: generation exhaustion invariant failed\r\n");
     }
@@ -1672,7 +1672,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: initial Linux user namespace invalid\r\n");
     }
     serial_write("ginux: generation-safe Linux user namespace installed\r\n");
-    serial_write("ginux: container root mapped outside native authority\r\n");
+    serial_write("ginux: Linux domain root mapped outside native authority\r\n");
     serial_write("ginux: Linux privilege policy sealed fail-closed\r\n");
     if !linux_tmpfs::verify_contract()
         || !linux_tmpfs::install()
@@ -3681,7 +3681,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("\r\nginux: bootstrap SHA-256 known answers verified");
     if !arch::x86_64::cpu::enable_container_management() {
-        kernel_fail("\r\nginux: container management activation failed\r\n");
+        kernel_fail("\r\nginux: domain management activation failed\r\n");
     }
     if !network::initialize_runtime() {
         kernel_fail("\r\nginux: runtime network initialization failed\r\n");
@@ -3752,7 +3752,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 arch::x86_64::cpu::complete_container_pull(false);
                 continue 'managed;
             }
-            let mut image = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
+            let mut image = [0_u8; control_abi::DOMAIN_MAX_IMAGE_SIZE];
             let image_size = arch::x86_64::cpu::configured_container_image(&mut image).unwrap_or(0);
             serial_write("ginux: pulling OCI image ");
             serial_write_bytes(&image[..image_size]);
@@ -3792,14 +3792,14 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             let resuming = arch::x86_64::cpu::configured_container_slot()
                 .is_some_and(address_space::oci_runtime_is_suspended);
             if !resuming {
-                serial_write("ginux: starting configured runtime container\r\n");
+                serial_write("ginux: starting configured runtime domain\r\n");
             }
             if arch::x86_64::cpu::configured_container_uses_installed_oci_image() {
-                let mut init = [0_u8; control_abi::CONTAINER_MAX_INIT_SIZE];
+                let mut init = [0_u8; control_abi::DOMAIN_MAX_INIT_SIZE];
                 let Some(init_size) = arch::x86_64::cpu::configured_container_init(&mut init)
                 else {
                     serial_write(
-                        "ginux: configured OCI init unavailable; container marked failed\r\n",
+                        "ginux: configured OCI init unavailable; domain marked failed\r\n",
                     );
                     arch::x86_64::cpu::fail_configured_container();
                     break;
@@ -3814,9 +3814,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                         break;
                     }
                     address_space::OciProcessOutcome::Failed => {
-                        serial_write(
-                            "ginux: OCI init execution failed; container marked failed\r\n",
-                        );
+                        serial_write("ginux: OCI init execution failed; domain marked failed\r\n");
                         arch::x86_64::cpu::fail_configured_container();
                         break;
                     }
@@ -3845,7 +3843,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 break 'managed;
             }
             if arch::x86_64::cpu::take_container_restart_request() {
-                serial_write("ginux: restarting configured runtime container\r\n");
+                serial_write("ginux: restarting configured runtime domain\r\n");
                 continue;
             }
             break;
