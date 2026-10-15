@@ -483,6 +483,160 @@ struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
+
+const LINUX_RUNTIME_HOST_INSTANCE: u8 = control_abi::CONTAINER_LIMIT as u8;
+const LINUX_RUNTIME_INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
+static LINUX_EXECUTION_INSTANCE: AtomicU8 = AtomicU8::new(LINUX_RUNTIME_HOST_INSTANCE);
+
+fn linux_execution_instance() -> usize {
+    let instance = usize::from(LINUX_EXECUTION_INSTANCE.load(Ordering::Relaxed));
+    if instance < LINUX_RUNTIME_INSTANCE_LIMIT {
+        instance
+    } else {
+        usize::from(LINUX_RUNTIME_HOST_INSTANCE)
+    }
+}
+
+macro_rules! banked_atomic_integer {
+    ($name:ident, $atomic:ty, $value:ty) => {
+        struct $name {
+            values: [$atomic; LINUX_RUNTIME_INSTANCE_LIMIT],
+            states: [AtomicU8; LINUX_RUNTIME_INSTANCE_LIMIT],
+            initial: $value,
+        }
+
+        #[allow(dead_code)]
+        impl $name {
+            const fn new(value: $value) -> Self {
+                Self {
+                    values: [const { <$atomic>::new(0) }; LINUX_RUNTIME_INSTANCE_LIMIT],
+                    states: [const { AtomicU8::new(0) }; LINUX_RUNTIME_INSTANCE_LIMIT],
+                    initial: value,
+                }
+            }
+
+            fn current(&self) -> &$atomic {
+                let instance = linux_execution_instance();
+                if self.states[instance]
+                    .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
+                    .is_ok()
+                {
+                    self.values[instance].store(self.initial, Ordering::Relaxed);
+                    self.states[instance].store(2, Ordering::Release);
+                } else {
+                    while self.states[instance].load(Ordering::Acquire) != 2 {
+                        core::hint::spin_loop();
+                    }
+                }
+                &self.values[instance]
+            }
+
+            fn load(&self, order: Ordering) -> $value {
+                self.current().load(order)
+            }
+
+            fn store(&self, value: $value, order: Ordering) {
+                self.current().store(value, order);
+            }
+
+            fn swap(&self, value: $value, order: Ordering) -> $value {
+                self.current().swap(value, order)
+            }
+
+            fn fetch_add(&self, value: $value, order: Ordering) -> $value {
+                self.current().fetch_add(value, order)
+            }
+
+            fn fetch_and(&self, value: $value, order: Ordering) -> $value {
+                self.current().fetch_and(value, order)
+            }
+
+            fn fetch_or(&self, value: $value, order: Ordering) -> $value {
+                self.current().fetch_or(value, order)
+            }
+
+            fn compare_exchange(
+                &self,
+                current: $value,
+                new: $value,
+                success: Ordering,
+                failure: Ordering,
+            ) -> Result<$value, $value> {
+                self.current()
+                    .compare_exchange(current, new, success, failure)
+            }
+        }
+    };
+}
+
+struct BankedAtomicBool {
+    values: [AtomicBool; LINUX_RUNTIME_INSTANCE_LIMIT],
+    states: [AtomicU8; LINUX_RUNTIME_INSTANCE_LIMIT],
+    initial: bool,
+}
+
+#[allow(dead_code)]
+impl BankedAtomicBool {
+    const fn new(value: bool) -> Self {
+        Self {
+            values: [const { AtomicBool::new(false) }; LINUX_RUNTIME_INSTANCE_LIMIT],
+            states: [const { AtomicU8::new(0) }; LINUX_RUNTIME_INSTANCE_LIMIT],
+            initial: value,
+        }
+    }
+
+    fn current(&self) -> &AtomicBool {
+        let instance = linux_execution_instance();
+        if self.states[instance]
+            .compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire)
+            .is_ok()
+        {
+            self.values[instance].store(self.initial, Ordering::Relaxed);
+            self.states[instance].store(2, Ordering::Release);
+        } else {
+            while self.states[instance].load(Ordering::Acquire) != 2 {
+                core::hint::spin_loop();
+            }
+        }
+        &self.values[instance]
+    }
+
+    fn load(&self, order: Ordering) -> bool {
+        self.current().load(order)
+    }
+
+    fn store(&self, value: bool, order: Ordering) {
+        self.current().store(value, order);
+    }
+
+    fn swap(&self, value: bool, order: Ordering) -> bool {
+        self.current().swap(value, order)
+    }
+
+    fn fetch_and(&self, value: bool, order: Ordering) -> bool {
+        self.current().fetch_and(value, order)
+    }
+
+    fn fetch_or(&self, value: bool, order: Ordering) -> bool {
+        self.current().fetch_or(value, order)
+    }
+
+    fn compare_exchange(
+        &self,
+        current: bool,
+        new: bool,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<bool, bool> {
+        self.current()
+            .compare_exchange(current, new, success, failure)
+    }
+}
+
+banked_atomic_integer!(BankedAtomicU8, AtomicU8, u8);
+banked_atomic_integer!(BankedAtomicU16, AtomicU16, u16);
+banked_atomic_integer!(BankedAtomicU32, AtomicU32, u32);
+banked_atomic_integer!(BankedAtomicU64, AtomicU64, u64);
 static CONTROL_DISCOVERY_OVERRIDE_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static CONTROL_DISCOVERY_OVERRIDE_WORD: AtomicU64 = AtomicU64::new(0);
 static CONTROL_DESCRIPTOR_OVERRIDE_DOMAIN: AtomicU64 = AtomicU64::new(0);
@@ -496,124 +650,125 @@ static PROCESS_CHILD_EXECUTION_DIAGNOSTIC: AtomicU8 = AtomicU8::new(0);
 static PROCESS_CHILD_EXIT_STATUS: AtomicU8 = AtomicU8::new(0);
 static PROCESS_CHILD_EXPECTED_REGISTERS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
 static PROCESS_CHILD_EXPECTED_FS_BASE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_ACTIVE: AtomicBool = AtomicBool::new(false);
-static LINUX_RUNTIME_MODE: AtomicBool = AtomicBool::new(false);
-static ELF_PROBE_COMPLETED: AtomicBool = AtomicBool::new(false);
-static ELF_PROBE_TERMINATION_SIGNAL: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_EXEC_REPLACED: AtomicBool = AtomicBool::new(false);
-static ELF_PROBE_EXEC_NODE: AtomicU8 = AtomicU8::new(0);
-static LINUX_LIVE_RETURN_VALIDATED: AtomicBool = AtomicBool::new(false);
-static LINUX_CHILD_EXIT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PARENT_RESUMED: AtomicBool = AtomicBool::new(false);
-static LINUX_FORK_REQUESTED: AtomicBool = AtomicBool::new(false);
-static LINUX_PROCESS_CHILD_EXITED: AtomicBool = AtomicBool::new(false);
-static LINUX_PROCESS_CHILD_STATUS: AtomicU8 = AtomicU8::new(0);
-static LINUX_CURRENT_PROCESS_PID: AtomicU32 = AtomicU32::new(1);
-static LINUX_PROCESS_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LIVE_FORK_PUBLIC_DIAGNOSTIC: AtomicU8 = AtomicU8::new(0);
-static LINUX_PROCESS_SNAPSHOT_VALIDATED: AtomicBool = AtomicBool::new(false);
-static LINUX_PROCESS_SNAPSHOT_STAGE: AtomicU8 = AtomicU8::new(0);
-static LINUX_CLONE_DISPATCH_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_FIRST_CHILD_TID: AtomicU32 = AtomicU32::new(0);
-static LINUX_CLONE_REUSE_VALIDATED: AtomicBool = AtomicBool::new(false);
-static LINUX_CHILD_GETTID_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_YIELD_SWITCH_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_CLONE_BUSY_REJECTION_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_CLONE_INVALID_REJECTION_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_CLONE_TID_FAULT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_FUTEX_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_FUTEX_EXPLICIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_FUTEX_EXIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_FUTEX_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_SLEEP_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_SLEEP_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_SLEEP_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_TIMER_WAIT_EXPIRY_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_TIMER_WAIT_PREEMPTION_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_POLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_POLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_POLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_POLL_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EPOLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EPOLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EPOLL_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EVENTFD_READ_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EVENTFD_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EVENTFD_READ_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EVENTFD_WRITE_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EVENTFD_WRITE_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EVENTFD_WRITE_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PIPE_READ_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PIPE_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PIPE_READ_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PIPE_WRITE_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PIPE_WRITE_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PIPE_WRITE_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_TIMERFD_READ_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_TIMERFD_READ_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_TIMERFD_READ_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PPOLL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PPOLL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_PPOLL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EPOLL_PWAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EPOLL_PWAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_EPOLL_PWAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_MASKED_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_SIGNAL_WAIT_INTERRUPT_COUNT: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_STACK: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_HEAP_FRAME: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_HEAP_GENERATION: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_RECLAIM_HEAP_FRAME: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_RECLAIM_HEAP_GENERATION: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_CODE_BASE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_LOADER_CODE_BASE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_LOADER_CODE_SIZE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_DATA: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_DATA_SIZE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_EXEC_ENTRY: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_EXEC_MAPPING_ADDRESSES: [AtomicU64; LINUX_EXEC_MAPPING_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
-static ELF_PROBE_EXEC_MAPPING_FRAMES: [AtomicU64; LINUX_EXEC_MAPPING_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
-static ELF_PROBE_EXEC_MAPPING_GENERATIONS: [AtomicU32; LINUX_EXEC_MAPPING_LIMIT] =
-    [const { AtomicU32::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
-static ELF_PROBE_EXEC_MAPPING_FLAGS: [AtomicU8; LINUX_EXEC_MAPPING_LIMIT] =
-    [const { AtomicU8::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
-static ELF_PROBE_ACTIVE_IMAGE_ADDRESSES: [AtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-static ELF_PROBE_ACTIVE_IMAGE_FRAMES: [AtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-static ELF_PROBE_ACTIVE_IMAGE_GENERATIONS: [AtomicU32; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
-    [const { AtomicU32::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-static ELF_PROBE_ACTIVE_IMAGE_FLAGS: [AtomicU8; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
-    [const { AtomicU8::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-static ELF_PROBE_ACTIVE_IMAGE_COUNT: AtomicU16 = AtomicU16::new(0);
-static ELF_PROBE_RETIRED_IMAGE_ADDRESSES: [AtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-static ELF_PROBE_RETIRED_IMAGE_FRAMES: [AtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-static ELF_PROBE_RETIRED_IMAGE_GENERATIONS: [AtomicU32; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
-    [const { AtomicU32::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-static ELF_PROBE_RETIRED_IMAGE_FLAGS: [AtomicU8; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
-    [const { AtomicU8::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
-static ELF_PROBE_RETIRED_IMAGE_COUNT: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_TLS: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_TLS_SIZE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_TLS_FRAMES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
-static ELF_PROBE_TLS_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
-static ELF_PROBE_RECLAIM_TLS_FRAMES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
-static ELF_PROBE_RECLAIM_TLS_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
-static ELF_PROBE_SIBLING_FS_BASE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_SIBLING_TLS: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_SIBLING_STACK: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_SIBLING_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_SIBLING_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_RECLAIM_SIBLING_STACK_FRAME: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_RECLAIM_SIBLING_STACK_GENERATION: AtomicU32 = AtomicU32::new(0);
+static ELF_PROBE_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_RUNTIME_MODE: BankedAtomicBool = BankedAtomicBool::new(false);
+static ELF_PROBE_COMPLETED: BankedAtomicBool = BankedAtomicBool::new(false);
+static ELF_PROBE_TERMINATION_SIGNAL: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_EXEC_REPLACED: BankedAtomicBool = BankedAtomicBool::new(false);
+static ELF_PROBE_EXEC_NODE: BankedAtomicU8 = BankedAtomicU8::new(0);
+static LINUX_LIVE_RETURN_VALIDATED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_CHILD_EXIT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PARENT_RESUMED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_FORK_REQUESTED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_PROCESS_CHILD_EXITED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_PROCESS_CHILD_STATUS: BankedAtomicU8 = BankedAtomicU8::new(0);
+static LINUX_CURRENT_PROCESS_PID: BankedAtomicU32 = BankedAtomicU32::new(1);
+static LINUX_PROCESS_WAIT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LIVE_FORK_PUBLIC_DIAGNOSTIC: BankedAtomicU8 = BankedAtomicU8::new(0);
+static LINUX_PROCESS_SNAPSHOT_VALIDATED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_PROCESS_SNAPSHOT_STAGE: BankedAtomicU8 = BankedAtomicU8::new(0);
+static LINUX_CLONE_DISPATCH_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_FIRST_CHILD_TID: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_CLONE_REUSE_VALIDATED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_CHILD_GETTID_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_YIELD_SWITCH_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_CLONE_BUSY_REJECTION_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_CLONE_INVALID_REJECTION_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_CLONE_TID_FAULT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_FUTEX_WAIT_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_FUTEX_EXPLICIT_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_FUTEX_EXIT_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_FUTEX_WAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_SLEEP_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_SLEEP_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_SLEEP_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_TIMER_WAIT_EXPIRY_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_TIMER_WAIT_PREEMPTION_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_POLL_WAIT_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_POLL_WAIT_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_POLL_WAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_POLL_WAIT_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EPOLL_WAIT_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EPOLL_WAIT_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EPOLL_WAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EPOLL_WAIT_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EVENTFD_READ_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EVENTFD_READ_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EVENTFD_READ_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EVENTFD_WRITE_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EVENTFD_WRITE_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EVENTFD_WRITE_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PIPE_READ_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PIPE_READ_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PIPE_READ_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PIPE_WRITE_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PIPE_WRITE_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PIPE_WRITE_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_TIMERFD_READ_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_TIMERFD_READ_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_TIMERFD_READ_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PPOLL_WAIT_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PPOLL_WAIT_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_PPOLL_WAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EPOLL_PWAIT_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EPOLL_PWAIT_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_EPOLL_PWAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_MASKED_WAIT_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_SIGNAL_WAIT_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_STACK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_STACK_FRAME: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_STACK_GENERATION: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_HEAP_FRAME: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_HEAP_GENERATION: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_RECLAIM_HEAP_FRAME: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_RECLAIM_HEAP_GENERATION: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_CODE_BASE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_CODE_SIZE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_LOADER_CODE_BASE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_LOADER_CODE_SIZE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_DATA: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_DATA_SIZE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_EXEC_ENTRY: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_EXEC_MAPPING_ADDRESSES: [BankedAtomicU64; LINUX_EXEC_MAPPING_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
+static ELF_PROBE_EXEC_MAPPING_FRAMES: [BankedAtomicU64; LINUX_EXEC_MAPPING_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
+static ELF_PROBE_EXEC_MAPPING_GENERATIONS: [BankedAtomicU32; LINUX_EXEC_MAPPING_LIMIT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
+static ELF_PROBE_EXEC_MAPPING_FLAGS: [BankedAtomicU8; LINUX_EXEC_MAPPING_LIMIT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_EXEC_MAPPING_LIMIT];
+static ELF_PROBE_ACTIVE_IMAGE_ADDRESSES: [BankedAtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_ACTIVE_IMAGE_FRAMES: [BankedAtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_ACTIVE_IMAGE_GENERATIONS: [BankedAtomicU32; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_ACTIVE_IMAGE_FLAGS: [BankedAtomicU8; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_ACTIVE_IMAGE_COUNT: BankedAtomicU16 = BankedAtomicU16::new(0);
+static ELF_PROBE_RETIRED_IMAGE_ADDRESSES: [BankedAtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_RETIRED_IMAGE_FRAMES: [BankedAtomicU64; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_RETIRED_IMAGE_GENERATIONS: [BankedAtomicU32; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_RETIRED_IMAGE_FLAGS: [BankedAtomicU8; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_ACTIVE_IMAGE_MAPPING_LIMIT];
+static ELF_PROBE_RETIRED_IMAGE_COUNT: BankedAtomicU8 = BankedAtomicU8::new(0);
+static ELF_PROBE_TLS: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_TLS_SIZE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_TLS_FRAMES: [BankedAtomicU64; 2] = [const { BankedAtomicU64::new(0) }; 2];
+static ELF_PROBE_TLS_GENERATIONS: [BankedAtomicU32; 2] = [const { BankedAtomicU32::new(0) }; 2];
+static ELF_PROBE_RECLAIM_TLS_FRAMES: [BankedAtomicU64; 2] = [const { BankedAtomicU64::new(0) }; 2];
+static ELF_PROBE_RECLAIM_TLS_GENERATIONS: [BankedAtomicU32; 2] =
+    [const { BankedAtomicU32::new(0) }; 2];
+static ELF_PROBE_SIBLING_FS_BASE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_SIBLING_TLS: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_SIBLING_STACK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_SIBLING_STACK_FRAME: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_SIBLING_STACK_GENERATION: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_RECLAIM_SIBLING_STACK_FRAME: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_RECLAIM_SIBLING_STACK_GENERATION: BankedAtomicU32 = BankedAtomicU32::new(0);
 const LINUX_THREAD_LIMIT: usize = 2;
 const LINUX_THREAD_FREE: u8 = 0;
 const LINUX_THREAD_READY: u8 = 1;
@@ -634,181 +789,188 @@ const LINUX_THREAD_WAIT_TIMERFD_READ: u8 = 10;
 const LINUX_THREAD_WAIT_PIPE_WRITE: u8 = 11;
 const LINUX_THREAD_WAIT_EVENTFD_WRITE: u8 = 12;
 const LINUX_SYSCALL_FRAME_REGISTERS: usize = 12;
-static LINUX_THREAD_STATES: [AtomicU8; LINUX_THREAD_LIMIT] =
-    [const { AtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_GENERATIONS: [AtomicU32; LINUX_THREAD_LIMIT] =
-    [const { AtomicU32::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_TIDS: [AtomicU32; LINUX_THREAD_LIMIT] =
-    [const { AtomicU32::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_POINTERS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_TLS_EXTENTS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_TLS_SIZES: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_STACK_BASES: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_STACK_SIZES: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_RIPS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_RSPS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_RFLAGS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_RAXS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_RCXS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_R11S: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_REGISTERS: [[AtomicU64; LINUX_SYSCALL_FRAME_REGISTERS]; LINUX_THREAD_LIMIT] =
-    [const { [const { AtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS] }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_CLEAR_CHILD_TIDS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_ROBUST_LISTS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_SIGNAL_MASKS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_WAIT_KINDS: [AtomicU8; LINUX_THREAD_LIMIT] =
-    [const { AtomicU8::new(LINUX_THREAD_WAIT_NONE) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_WAIT_KEYS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_WAIT_OUTPUTS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_WAIT_DEADLINES: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS: [AtomicU64; LINUX_THREAD_LIMIT] =
-    [const { AtomicU64::new(0) }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_POLL_DESCRIPTORS: [[AtomicU32; LINUX_POLLFD_LIMIT]; LINUX_THREAD_LIMIT] =
-    [const { [const { AtomicU32::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_POLL_EVENTS: [[AtomicU16; LINUX_POLLFD_LIMIT]; LINUX_THREAD_LIMIT] =
-    [const { [const { AtomicU16::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_IOV_ADDRESSES: [[AtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
-    [const { [const { AtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
-static LINUX_THREAD_IOV_LENGTHS: [[AtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
-    [const { [const { AtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
-static LINUX_CURRENT_THREAD_SLOT: AtomicU8 = AtomicU8::new(LINUX_THREAD_SLOT_NONE);
-static LINUX_NEXT_TID: AtomicU32 = AtomicU32::new(1);
-static ELF_PROBE_RELRO: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_RELRO_SIZE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_BRK: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_BRK_LIMIT: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_MMAP: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_MMAP_FRAMES: [AtomicU64; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
-static ELF_PROBE_MMAP_GENERATIONS: [AtomicU32; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
-    [const { AtomicU32::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
-static ELF_PROBE_PAGE_TABLE_FRAMES: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
-static ELF_PROBE_PAGE_TABLE_GENERATIONS: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
-static ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
-static ELF_PROBE_RECLAIM_PAGE_TABLE_GENERATIONS: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
-static ELF_PROBE_MMAP_PAGES: [AtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
-static ELF_PROBE_MMAP_PROTECTION: [AtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
-static ELF_PROBE_MMAP_FILE: [AtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
-static ELF_PROBE_MAIN_ADDRESSES: [AtomicU64; LINUX_MAIN_MAPPING_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
-static ELF_PROBE_MAIN_FRAMES: [AtomicU64; LINUX_MAIN_MAPPING_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
-static ELF_PROBE_MAIN_OFFSETS: [AtomicU64; LINUX_MAIN_MAPPING_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
-static ELF_PROBE_MAIN_FILE_SIZES: [AtomicU64; LINUX_MAIN_MAPPING_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
-static ELF_PROBE_MAIN_PROTECTIONS: [AtomicU8; LINUX_MAIN_MAPPING_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_MAIN_MAPPING_COUNT];
-static ELF_PROBE_MAIN_GENERATIONS: [AtomicU32; LINUX_MAIN_MAPPING_COUNT] =
-    [const { AtomicU32::new(0) }; LINUX_MAIN_MAPPING_COUNT];
-static ELF_PROBE_MAIN_MAPPINGS: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_DEPENDENCY_BASE_MIN: [AtomicU64; LINUX_DEPENDENCY_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_DEPENDENCY_COUNT];
-static ELF_PROBE_DEPENDENCY_BASE_END: [AtomicU64; LINUX_DEPENDENCY_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_DEPENDENCY_COUNT];
-static ELF_PROBE_DEPENDENCY_SELECTED_BASE: [AtomicU64; LINUX_DEPENDENCY_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_DEPENDENCY_COUNT];
-static ELF_PROBE_DEPENDENCY_RELATIVES: [AtomicU64; LINUX_DEPENDENCY_STATE_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
-static ELF_PROBE_DEPENDENCY_FRAMES: [AtomicU64; LINUX_DEPENDENCY_STATE_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
-static ELF_PROBE_DEPENDENCY_GENERATIONS: [AtomicU32; LINUX_DEPENDENCY_STATE_COUNT] =
-    [const { AtomicU32::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
-static ELF_PROBE_DEPENDENCY_OFFSETS: [AtomicU64; LINUX_DEPENDENCY_STATE_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
-static ELF_PROBE_DEPENDENCY_FILE_SIZES: [AtomicU64; LINUX_DEPENDENCY_STATE_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
-static ELF_PROBE_DEPENDENCY_PROTECTIONS: [AtomicU8; LINUX_DEPENDENCY_STATE_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
-static ELF_PROBE_DEPENDENCY_MAPPINGS: [AtomicU8; LINUX_DEPENDENCY_COUNT] =
-    [const { AtomicU8::new(0) }; LINUX_DEPENDENCY_COUNT];
-static ELF_PROBE_EXITED_CLEAR_CHILD_TID: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_EXITED_ROBUST_LIST: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_READ_ONLY_DATA_PAGE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_UMASK: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_CONSOLE_DESCRIPTORS: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_CONSOLE_CLOEXEC: AtomicU16 = AtomicU16::new(0);
-static ELF_PROBE_DEVICE_DESCRIPTORS: [AtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
-    [const { AtomicU16::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
-static ELF_PROBE_OCI_DESCRIPTORS: [AtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
-    [const { AtomicU16::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
-static ELF_PROBE_TMP_FILE_GENERATIONS: [AtomicU32; LINUX_DEVICE_DESCRIPTOR_COUNT] =
-    [const { AtomicU32::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
-static ELF_PROBE_STDIO_DEVICE_DESCRIPTORS: [AtomicU16; 2] = [const { AtomicU16::new(0) }; 2];
-static ELF_PROBE_STDIO_OCI_DESCRIPTORS: [AtomicU16; 2] = [const { AtomicU16::new(0) }; 2];
-static ELF_PROBE_STDIO_TMP_FILE_GENERATIONS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
-static ELF_PROBE_STDIO_OFFSETS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
-static ELF_PROBE_CWD: AtomicU16 = AtomicU16::new(LINUX_ROOT_DIRECTORY);
-static ELF_PROBE_OCI_CWD: AtomicU16 = AtomicU16::new(crate::oci_image::ROOT_HANDLE);
-static ELF_PROBE_EPOLL_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_EPOLL_TARGET: AtomicU64 = AtomicU64::new(u64::MAX);
-static ELF_PROBE_EPOLL_EVENTS: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_EPOLL_DATA: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_EVENTFD_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_EVENTFD_COUNTER: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_EVENTFD_FLAGS: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_TIMERFD_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_TIMERFD_FLAGS: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_TIMERFD_INTERVAL: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_TIMERFD_DEADLINE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_PIPE_READ_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_PIPE_WRITE_DESCRIPTOR: AtomicU8 = AtomicU8::new(0);
-static ELF_PROBE_PIPE_READ_FLAGS: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_PIPE_WRITE_FLAGS: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_PIPE_LENGTH: AtomicU32 = AtomicU32::new(0);
-static ELF_PROBE_PIPE_BUFFER: [AtomicU8; LINUX_PIPE_CAPACITY] =
-    [const { AtomicU8::new(0) }; LINUX_PIPE_CAPACITY];
-static ELF_PROBE_DESCRIPTOR_OFFSETS: [AtomicU64; LINUX_DEVICE_DESCRIPTOR_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
-static ELF_PROBE_CLOCK_EPOCH: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_CLOCK_FREQUENCY: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_PROCESS_NAME_LOW: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_PROCESS_NAME_HIGH: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_NO_NEW_PRIVS: AtomicBool = AtomicBool::new(false);
-static ELF_PROBE_SIGNAL_MASK: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_PENDING_SIGNALS: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_PENDING_SIGNAL_CODES: [AtomicU32; LINUX_SIGNAL_COUNT] =
-    [const { AtomicU32::new(0) }; LINUX_SIGNAL_COUNT];
-static ELF_PROBE_EXEC_IGNORED_SIGNALS: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_SIGNAL_HANDLERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
-static ELF_PROBE_SIGNAL_FLAGS: [AtomicU64; LINUX_SIGNAL_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
-static ELF_PROBE_SIGNAL_RESTORERS: [AtomicU64; LINUX_SIGNAL_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
-static ELF_PROBE_SIGNAL_ACTION_MASKS: [AtomicU64; LINUX_SIGNAL_COUNT] =
-    [const { AtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
-static ELF_PROBE_ALT_STACK_POINTER: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_ALT_STACK_SIZE: AtomicU64 = AtomicU64::new(0);
-static ELF_PROBE_ALT_STACK_FLAGS: AtomicU32 = AtomicU32::new(LINUX_SS_DISABLE);
-static LINUX_SIGNAL_ACTIVE: AtomicBool = AtomicBool::new(false);
-static LINUX_SIGNAL_DELIVERY_COUNT: AtomicU64 = AtomicU64::new(0);
-static LINUX_SIGNAL_RETURN_COUNT: AtomicU64 = AtomicU64::new(0);
-static LINUX_SIGNAL_WAIT_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_SIGNAL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_SIGNAL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
-static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: AtomicU32 = AtomicU32::new(0);
+static LINUX_THREAD_STATES: [BankedAtomicU8; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU8::new(LINUX_THREAD_FREE) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_GENERATIONS: [BankedAtomicU32; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_TIDS: [BankedAtomicU32; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_POINTERS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_TLS_EXTENTS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_TLS_SIZES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_STACK_BASES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_STACK_SIZES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RIPS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RSPS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RFLAGS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RAXS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_RCXS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_R11S: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_REGISTERS: [[BankedAtomicU64; LINUX_SYSCALL_FRAME_REGISTERS];
+    LINUX_THREAD_LIMIT] = [const { [const { BankedAtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS] };
+    LINUX_THREAD_LIMIT];
+static LINUX_THREAD_CLEAR_CHILD_TIDS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_ROBUST_LISTS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_SIGNAL_MASKS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_WAIT_KINDS: [BankedAtomicU8; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU8::new(LINUX_THREAD_WAIT_NONE) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_WAIT_KEYS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_WAIT_OUTPUTS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_WAIT_DEADLINES: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_WAIT_PRIOR_SIGNAL_MASKS: [BankedAtomicU64; LINUX_THREAD_LIMIT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_POLL_DESCRIPTORS: [[BankedAtomicU32; LINUX_POLLFD_LIMIT]; LINUX_THREAD_LIMIT] =
+    [const { [const { BankedAtomicU32::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_POLL_EVENTS: [[BankedAtomicU16; LINUX_POLLFD_LIMIT]; LINUX_THREAD_LIMIT] =
+    [const { [const { BankedAtomicU16::new(0) }; LINUX_POLLFD_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_IOV_ADDRESSES: [[BankedAtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
+    [const { [const { BankedAtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_THREAD_IOV_LENGTHS: [[BankedAtomicU64; LINUX_IOV_LIMIT]; LINUX_THREAD_LIMIT] =
+    [const { [const { BankedAtomicU64::new(0) }; LINUX_IOV_LIMIT] }; LINUX_THREAD_LIMIT];
+static LINUX_CURRENT_THREAD_SLOT: BankedAtomicU8 = BankedAtomicU8::new(LINUX_THREAD_SLOT_NONE);
+static LINUX_NEXT_TID: BankedAtomicU32 = BankedAtomicU32::new(1);
+static ELF_PROBE_RELRO: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_RELRO_SIZE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_BRK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_BRK_LIMIT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_MMAP: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_MMAP_FRAMES: [BankedAtomicU64; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+static ELF_PROBE_MMAP_GENERATIONS: [BankedAtomicU32; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+static ELF_PROBE_PAGE_TABLE_FRAMES: [BankedAtomicU64; 6] = [const { BankedAtomicU64::new(0) }; 6];
+static ELF_PROBE_PAGE_TABLE_GENERATIONS: [BankedAtomicU32; 6] =
+    [const { BankedAtomicU32::new(0) }; 6];
+static ELF_PROBE_RECLAIM_PAGE_TABLE_FRAMES: [BankedAtomicU64; 6] =
+    [const { BankedAtomicU64::new(0) }; 6];
+static ELF_PROBE_RECLAIM_PAGE_TABLE_GENERATIONS: [BankedAtomicU32; 6] =
+    [const { BankedAtomicU32::new(0) }; 6];
+static ELF_PROBE_MMAP_PAGES: [BankedAtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+static ELF_PROBE_MMAP_PROTECTION: [BankedAtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+static ELF_PROBE_MMAP_FILE: [BankedAtomicU8; LINUX_RUNTIME_MMAP_SLOT_COUNT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_RUNTIME_MMAP_SLOT_COUNT];
+static ELF_PROBE_MAIN_ADDRESSES: [BankedAtomicU64; LINUX_MAIN_MAPPING_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
+static ELF_PROBE_MAIN_FRAMES: [BankedAtomicU64; LINUX_MAIN_MAPPING_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
+static ELF_PROBE_MAIN_OFFSETS: [BankedAtomicU64; LINUX_MAIN_MAPPING_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
+static ELF_PROBE_MAIN_FILE_SIZES: [BankedAtomicU64; LINUX_MAIN_MAPPING_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_MAIN_MAPPING_COUNT];
+static ELF_PROBE_MAIN_PROTECTIONS: [BankedAtomicU8; LINUX_MAIN_MAPPING_COUNT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_MAIN_MAPPING_COUNT];
+static ELF_PROBE_MAIN_GENERATIONS: [BankedAtomicU32; LINUX_MAIN_MAPPING_COUNT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_MAIN_MAPPING_COUNT];
+static ELF_PROBE_MAIN_MAPPINGS: BankedAtomicU8 = BankedAtomicU8::new(0);
+static ELF_PROBE_DEPENDENCY_BASE_MIN: [BankedAtomicU64; LINUX_DEPENDENCY_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEPENDENCY_COUNT];
+static ELF_PROBE_DEPENDENCY_BASE_END: [BankedAtomicU64; LINUX_DEPENDENCY_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEPENDENCY_COUNT];
+static ELF_PROBE_DEPENDENCY_SELECTED_BASE: [BankedAtomicU64; LINUX_DEPENDENCY_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEPENDENCY_COUNT];
+static ELF_PROBE_DEPENDENCY_RELATIVES: [BankedAtomicU64; LINUX_DEPENDENCY_STATE_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
+static ELF_PROBE_DEPENDENCY_FRAMES: [BankedAtomicU64; LINUX_DEPENDENCY_STATE_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
+static ELF_PROBE_DEPENDENCY_GENERATIONS: [BankedAtomicU32; LINUX_DEPENDENCY_STATE_COUNT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
+static ELF_PROBE_DEPENDENCY_OFFSETS: [BankedAtomicU64; LINUX_DEPENDENCY_STATE_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
+static ELF_PROBE_DEPENDENCY_FILE_SIZES: [BankedAtomicU64; LINUX_DEPENDENCY_STATE_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
+static ELF_PROBE_DEPENDENCY_PROTECTIONS: [BankedAtomicU8; LINUX_DEPENDENCY_STATE_COUNT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_DEPENDENCY_STATE_COUNT];
+static ELF_PROBE_DEPENDENCY_MAPPINGS: [BankedAtomicU8; LINUX_DEPENDENCY_COUNT] =
+    [const { BankedAtomicU8::new(0) }; LINUX_DEPENDENCY_COUNT];
+static ELF_PROBE_EXITED_CLEAR_CHILD_TID: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_EXITED_ROBUST_LIST: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_READ_ONLY_DATA_PAGE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_UMASK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_CONSOLE_DESCRIPTORS: BankedAtomicU8 = BankedAtomicU8::new(0);
+static ELF_PROBE_CONSOLE_CLOEXEC: BankedAtomicU16 = BankedAtomicU16::new(0);
+static ELF_PROBE_DEVICE_DESCRIPTORS: [BankedAtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU16::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static ELF_PROBE_OCI_DESCRIPTORS: [BankedAtomicU16; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU16::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static ELF_PROBE_TMP_FILE_GENERATIONS: [BankedAtomicU32; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static ELF_PROBE_STDIO_DEVICE_DESCRIPTORS: [BankedAtomicU16; 2] =
+    [const { BankedAtomicU16::new(0) }; 2];
+static ELF_PROBE_STDIO_OCI_DESCRIPTORS: [BankedAtomicU16; 2] =
+    [const { BankedAtomicU16::new(0) }; 2];
+static ELF_PROBE_STDIO_TMP_FILE_GENERATIONS: [BankedAtomicU32; 2] =
+    [const { BankedAtomicU32::new(0) }; 2];
+static ELF_PROBE_STDIO_OFFSETS: [BankedAtomicU64; 2] = [const { BankedAtomicU64::new(0) }; 2];
+static ELF_PROBE_CWD: BankedAtomicU16 = BankedAtomicU16::new(LINUX_ROOT_DIRECTORY);
+static ELF_PROBE_OCI_CWD: BankedAtomicU16 = BankedAtomicU16::new(crate::oci_image::ROOT_HANDLE);
+static ELF_PROBE_EPOLL_DESCRIPTOR: BankedAtomicU8 = BankedAtomicU8::new(0);
+static ELF_PROBE_EPOLL_TARGET: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
+static ELF_PROBE_EPOLL_EVENTS: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_EPOLL_DATA: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_EVENTFD_DESCRIPTOR: BankedAtomicU8 = BankedAtomicU8::new(0);
+static ELF_PROBE_EVENTFD_COUNTER: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_EVENTFD_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_TIMERFD_DESCRIPTOR: BankedAtomicU8 = BankedAtomicU8::new(0);
+static ELF_PROBE_TIMERFD_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_TIMERFD_INTERVAL: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_TIMERFD_DEADLINE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_PIPE_READ_DESCRIPTOR: BankedAtomicU8 = BankedAtomicU8::new(0);
+static ELF_PROBE_PIPE_WRITE_DESCRIPTOR: BankedAtomicU8 = BankedAtomicU8::new(0);
+static ELF_PROBE_PIPE_READ_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_PIPE_WRITE_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_PIPE_LENGTH: BankedAtomicU32 = BankedAtomicU32::new(0);
+static ELF_PROBE_PIPE_BUFFER: [BankedAtomicU8; LINUX_PIPE_CAPACITY] =
+    [const { BankedAtomicU8::new(0) }; LINUX_PIPE_CAPACITY];
+static ELF_PROBE_DESCRIPTOR_OFFSETS: [BankedAtomicU64; LINUX_DEVICE_DESCRIPTOR_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_DEVICE_DESCRIPTOR_COUNT];
+static ELF_PROBE_CLOCK_EPOCH: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_CLOCK_FREQUENCY: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_PROCESS_NAME_LOW: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_PROCESS_NAME_HIGH: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_NO_NEW_PRIVS: BankedAtomicBool = BankedAtomicBool::new(false);
+static ELF_PROBE_SIGNAL_MASK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_PENDING_SIGNALS: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_PENDING_SIGNAL_CODES: [BankedAtomicU32; LINUX_SIGNAL_COUNT] =
+    [const { BankedAtomicU32::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_EXEC_IGNORED_SIGNALS: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_SIGNAL_HANDLERS: [BankedAtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_SIGNAL_FLAGS: [BankedAtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_SIGNAL_RESTORERS: [BankedAtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_SIGNAL_ACTION_MASKS: [BankedAtomicU64; LINUX_SIGNAL_COUNT] =
+    [const { BankedAtomicU64::new(0) }; LINUX_SIGNAL_COUNT];
+static ELF_PROBE_ALT_STACK_POINTER: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_ALT_STACK_SIZE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_ALT_STACK_FLAGS: BankedAtomicU32 = BankedAtomicU32::new(LINUX_SS_DISABLE);
+static LINUX_SIGNAL_ACTIVE: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_SIGNAL_DELIVERY_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_SIGNAL_RETURN_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_SIGNAL_WAIT_BLOCK_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_SIGNAL_WAIT_WAKE_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_SIGNAL_WAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
+static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 const CONTAINER_SLOT_NONE: u8 = u8::MAX;
 static CONTAINER_CONTROL_STATES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
@@ -2520,6 +2682,7 @@ fn resume_linux_system_supervisor() -> bool {
         return false;
     };
     CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
+    LINUX_EXECUTION_INSTANCE.store(slot as u8, Ordering::SeqCst);
     CONTAINER_CONTROL_STATES[slot]
         .store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
     crate::serial_write("ginux: configured runtime container reached ready state\r\n");
@@ -2663,6 +2826,7 @@ pub(crate) fn fail_configured_container() {
     }
     CONTAINER_ACTIVE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
     CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
+    LINUX_EXECUTION_INSTANCE.store(LINUX_RUNTIME_HOST_INSTANCE, Ordering::SeqCst);
 }
 
 pub(crate) fn begin_configured_container() {
@@ -2685,6 +2849,7 @@ pub(crate) fn begin_configured_container() {
             return;
         }
         CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
+        LINUX_EXECUTION_INSTANCE.store(slot as u8, Ordering::SeqCst);
         CONTAINER_CONTROL_STATES[slot]
             .store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
     }
@@ -2701,6 +2866,7 @@ pub(crate) fn stop_configured_container() {
     }
     CONTAINER_ACTIVE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
     CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
+    LINUX_EXECUTION_INSTANCE.store(LINUX_RUNTIME_HOST_INSTANCE, Ordering::SeqCst);
 }
 
 pub(crate) fn enable_container_management() -> bool {
@@ -12876,7 +13042,10 @@ fn container_console_read_byte() -> Option<u8> {
 fn yield_container_console_to_controller() -> bool {
     let linux_fs_base = active_fs_base();
     let linux_return_stack = unsafe { USER_RETURN_STACK };
+    let linux_instance =
+        LINUX_EXECUTION_INSTANCE.swap(LINUX_RUNTIME_HOST_INSTANCE, Ordering::SeqCst);
     let resumed = address_space::run_installed_interactive_controller();
+    LINUX_EXECUTION_INSTANCE.store(linux_instance, Ordering::SeqCst);
     unsafe { USER_RETURN_STACK = linux_return_stack };
     resumed && install_user_fs_base(linux_fs_base)
 }
@@ -13135,7 +13304,7 @@ fn linux_tmp_write(descriptor: u64, state: u16, address: u64, count: u64) -> u64
     count
 }
 
-fn linux_descriptor_offset(descriptor: u64) -> &'static AtomicU64 {
+fn linux_descriptor_offset(descriptor: u64) -> &'static BankedAtomicU64 {
     if descriptor < 2 {
         return &ELF_PROBE_STDIO_OFFSETS[descriptor as usize];
     }
@@ -13627,7 +13796,7 @@ fn linux_descriptor_fcntl(descriptor: u64, command: u64, argument: u64) -> u64 {
     }
 }
 
-fn linux_descriptor_set_nonblocking(flags: &AtomicU32, argument: u64) -> u64 {
+fn linux_descriptor_set_nonblocking(flags: &BankedAtomicU32, argument: u64) -> u64 {
     if argument & !(3 | LINUX_O_NONBLOCK) != 0 {
         return LINUX_EINVAL;
     }
