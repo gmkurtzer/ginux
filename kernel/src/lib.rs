@@ -2129,6 +2129,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: Linux PROT_NONE activation validated\r\n");
     serial_write("ginux: Linux mmap frames allocated on demand\r\n");
     serial_write("ginux: Linux mmap frame leases reclaimed\r\n");
+    if !arch::x86_64::cpu::verify_linux_mmap_process_restore() {
+        kernel_fail("ginux: Linux process mmap state restoration failed\r\n");
+    }
+    serial_write("ginux: Linux parent mmap state restored after child execution\r\n");
     serial_write("ginux: Linux anonymous mapping discard validated\r\n");
     serial_write("ginux: Linux anonymous mapping residency validated\r\n");
     serial_write("ginux: Linux heap copy bounds validated\r\n");

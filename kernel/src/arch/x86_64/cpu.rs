@@ -2399,6 +2399,7 @@ fn execute_deferred_live_fork() -> bool {
         return LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
             || linux_process::verify_live_fork_clone_transaction();
     }
+    let parent_mmap_state = capture_linux_mmap_runtime_state();
     let Some(child) = linux_process::begin_live_fork() else {
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
             serial_write("ginux: runtime fork preparation failed at stage ");
@@ -2432,6 +2433,7 @@ fn execute_deferred_live_fork() -> bool {
         );
     let child_exited = LINUX_PROCESS_CHILD_EXITED.swap(false, Ordering::SeqCst);
     let child_status = LINUX_PROCESS_CHILD_STATUS.swap(0, Ordering::SeqCst);
+    restore_linux_mmap_runtime_state(parent_mmap_state);
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && !(child_resumed && child_exited) {
         serial_write("ginux: runtime child return resumed/exited/status ");
         serial_write_u64(u64::from(child_resumed));
@@ -7942,6 +7944,66 @@ fn linux_mmap_slot_attributes() -> [Option<(u8, u8)>; LINUX_RUNTIME_MMAP_SLOT_CO
             ELF_PROBE_MMAP_FILE[area].load(Ordering::SeqCst),
         ))
     })
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct LinuxMmapRuntimeState {
+    base: u64,
+    pages: [u8; LINUX_RUNTIME_MMAP_SLOT_COUNT],
+    protection: [u8; LINUX_RUNTIME_MMAP_SLOT_COUNT],
+    file: [u8; LINUX_RUNTIME_MMAP_SLOT_COUNT],
+    frames: [u64; LINUX_RUNTIME_MMAP_SLOT_COUNT],
+    generations: [u32; LINUX_RUNTIME_MMAP_SLOT_COUNT],
+}
+
+fn capture_linux_mmap_runtime_state() -> LinuxMmapRuntimeState {
+    LinuxMmapRuntimeState {
+        base: ELF_PROBE_MMAP.load(Ordering::SeqCst),
+        pages: core::array::from_fn(|index| ELF_PROBE_MMAP_PAGES[index].load(Ordering::SeqCst)),
+        protection: core::array::from_fn(|index| {
+            ELF_PROBE_MMAP_PROTECTION[index].load(Ordering::SeqCst)
+        }),
+        file: core::array::from_fn(|index| ELF_PROBE_MMAP_FILE[index].load(Ordering::SeqCst)),
+        frames: core::array::from_fn(|index| ELF_PROBE_MMAP_FRAMES[index].load(Ordering::SeqCst)),
+        generations: core::array::from_fn(|index| {
+            ELF_PROBE_MMAP_GENERATIONS[index].load(Ordering::SeqCst)
+        }),
+    }
+}
+
+fn restore_linux_mmap_runtime_state(state: LinuxMmapRuntimeState) {
+    ELF_PROBE_MMAP.store(state.base, Ordering::SeqCst);
+    for index in 0..LINUX_RUNTIME_MMAP_SLOT_COUNT {
+        ELF_PROBE_MMAP_PAGES[index].store(state.pages[index], Ordering::SeqCst);
+        ELF_PROBE_MMAP_PROTECTION[index].store(state.protection[index], Ordering::SeqCst);
+        ELF_PROBE_MMAP_FILE[index].store(state.file[index], Ordering::SeqCst);
+        ELF_PROBE_MMAP_FRAMES[index].store(state.frames[index], Ordering::SeqCst);
+        ELF_PROBE_MMAP_GENERATIONS[index].store(state.generations[index], Ordering::SeqCst);
+    }
+}
+
+pub(crate) fn verify_linux_mmap_process_restore() -> bool {
+    let original = capture_linux_mmap_runtime_state();
+    let mut parent = original;
+    parent.base = 0x7f00_1000;
+    parent.pages[0] = 2;
+    parent.protection[0] = (LINUX_PROT_READ | LINUX_PROT_WRITE) as u8;
+    parent.frames[0] = 0x20_0000;
+    parent.generations[0] = 7;
+    parent.frames[1] = 0x21_0000;
+    parent.generations[1] = 8;
+    restore_linux_mmap_runtime_state(parent);
+
+    let mut child = parent;
+    child.pages[0] = 0;
+    child.protection[0] = 0;
+    child.frames[0] = 0x30_0000;
+    child.generations[0] = 11;
+    restore_linux_mmap_runtime_state(child);
+    restore_linux_mmap_runtime_state(parent);
+    let restored = capture_linux_mmap_runtime_state() == parent;
+    restore_linux_mmap_runtime_state(original);
+    restored && capture_linux_mmap_runtime_state() == original
 }
 
 fn linux_mmap_rebuild_areas(slots: [Option<(u8, u8)>; LINUX_RUNTIME_MMAP_SLOT_COUNT]) {

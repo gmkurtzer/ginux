@@ -85,6 +85,11 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'cd /' \
         '/bin/ls /etc' \
         '/bin/cat /etc/os-release' \
+        'ps aux' \
+        'ps' \
+        'ls /proc' \
+        'ls /' \
+        "printf 'FORK_STATE_RESTORE_OK\\n'" \
         "printf 'FORK_EXEC_OK\\n'" \
         "printf 'OCI_FILESYSTEM_OK\\n'"
     wait_for_line 'LIBC_RUNTIME_OK'
@@ -94,6 +99,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'ROOT_CWD_STATUS=0'
     wait_for_line 'RELATIVE_CWD_STATUS=0'
     wait_for_line '/etc'
+    wait_for_line 'FORK_STATE_RESTORE_OK'
     wait_for_line 'FORK_EXEC_OK'
     wait_for_line 'OCI_FILESYSTEM_OK'
     printf '\035'
@@ -160,6 +166,7 @@ for expected in \
     'NAME="Alpine Linux"' \
     'ROOT_CWD_STATUS=0' \
     'RELATIVE_CWD_STATUS=0' \
+    'FORK_STATE_RESTORE_OK' \
     '/etc' \
     'FORK_EXEC_OK' \
     'OCI_FILESYSTEM_OK' \
@@ -174,6 +181,12 @@ for expected in \
         exit 1
     fi
 done
+
+if grep -Fq 'live registry refresh snapshot failed' "$output_file"; then
+    tail -n 120 "$output_file"
+    echo "Alpine shell test failed: forked applet corrupted the parent process registry." >&2
+    exit 1
+fi
 
 if [[ $(grep -Fc 'ginux: entering configured OCI init' "$output_file") -ne 3 ]] \
     || [[ $(grep -Fc 'ginux: OCI init exited cleanly' "$output_file") -ne 2 ]]; then
