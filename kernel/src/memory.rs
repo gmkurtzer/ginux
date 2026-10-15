@@ -13,8 +13,10 @@ const MAX_LIVE_FRAMES: usize = 8192;
 const DOMAIN_FRAME_LIMIT: usize = 192;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
-static RUNTIME_EXTENT_START: AtomicU64 = AtomicU64::new(0);
-static RUNTIME_EXTENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+static RUNTIME_EXTENT_STARTS: [AtomicU64; crate::control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU64::new(0) }; crate::control_abi::CONTAINER_LIMIT];
+static RUNTIME_EXTENT_COUNTS: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::CONTAINER_LIMIT];
 static mut GLOBAL_ALLOCATOR: MaybeUninit<FrameAllocator> = MaybeUninit::uninit();
 
 #[derive(Clone, Copy)]
@@ -549,8 +551,9 @@ pub(crate) fn allocate_runtime_extent<const N: usize>() -> Option<[FrameLease; N
     if !INITIALIZED.load(Ordering::Acquire) || N == 0 {
         return None;
     }
-    let existing = RUNTIME_EXTENT_START.load(Ordering::Acquire);
-    let count = RUNTIME_EXTENT_COUNT.load(Ordering::Acquire);
+    let slot = crate::arch::x86_64::cpu::current_container_slot()?;
+    let existing = RUNTIME_EXTENT_STARTS[slot].load(Ordering::Acquire);
+    let count = RUNTIME_EXTENT_COUNTS[slot].load(Ordering::Acquire);
     let start = if existing != 0 {
         (count == N).then_some(existing)?
     } else {
@@ -567,8 +570,8 @@ pub(crate) fn allocate_runtime_extent<const N: usize>() -> Option<[FrameLease; N
             (*allocator).ranges[index].next = start.checked_add(size)?;
             start
         };
-        RUNTIME_EXTENT_COUNT.store(N, Ordering::Release);
-        RUNTIME_EXTENT_START.store(start, Ordering::Release);
+        RUNTIME_EXTENT_COUNTS[slot].store(N, Ordering::Release);
+        RUNTIME_EXTENT_STARTS[slot].store(start, Ordering::Release);
         start
     };
     let frames = core::array::from_fn(|index| FrameLease {
@@ -595,16 +598,22 @@ pub(crate) fn scrub_runtime_extent<const N: usize>(frames: [FrameLease; N]) -> b
 }
 
 fn runtime_extent_owns(frames: &[FrameLease]) -> bool {
-    let start = RUNTIME_EXTENT_START.load(Ordering::Acquire);
-    let count = RUNTIME_EXTENT_COUNT.load(Ordering::Acquire);
-    let end = start.saturating_add(count as u64 * PAGE_SIZE);
-    start != 0
-        && frames.iter().all(|frame| {
-            frame.generation == 1
-                && frame.address >= start
-                && frame.address < end
-                && frame.address.is_multiple_of(PAGE_SIZE)
-        })
+    !frames.is_empty()
+        && RUNTIME_EXTENT_STARTS
+            .iter()
+            .zip(&RUNTIME_EXTENT_COUNTS)
+            .any(|(start, count)| {
+                let start = start.load(Ordering::Acquire);
+                let count = count.load(Ordering::Acquire);
+                let end = start.saturating_add(count as u64 * PAGE_SIZE);
+                start != 0
+                    && frames.iter().all(|frame| {
+                        frame.generation == 1
+                            && frame.address >= start
+                            && frame.address < end
+                            && frame.address.is_multiple_of(PAGE_SIZE)
+                    })
+            })
 }
 
 pub(crate) fn frame_lease_is_runtime(frame: FrameLease) -> bool {
@@ -704,14 +713,19 @@ pub(crate) fn frame_addresses_owned_by(owner: FrameOwner, addresses: &[u64]) -> 
         (*allocator).owns_addresses(owner, addresses)
             || owner.is_kernel()
                 && !addresses.is_empty()
-                && addresses.iter().all(|address| {
-                    let start = RUNTIME_EXTENT_START.load(Ordering::Acquire);
-                    let count = RUNTIME_EXTENT_COUNT.load(Ordering::Acquire);
-                    start != 0
-                        && *address >= start
-                        && *address < start.saturating_add(count as u64 * PAGE_SIZE)
-                        && address.is_multiple_of(PAGE_SIZE)
-                })
+                && RUNTIME_EXTENT_STARTS
+                    .iter()
+                    .zip(&RUNTIME_EXTENT_COUNTS)
+                    .any(|(start, count)| {
+                        let start = start.load(Ordering::Acquire);
+                        let count = count.load(Ordering::Acquire);
+                        addresses.iter().all(|address| {
+                            start != 0
+                                && *address >= start
+                                && *address < start.saturating_add(count as u64 * PAGE_SIZE)
+                                && address.is_multiple_of(PAGE_SIZE)
+                        })
+                    })
     }
 }
 
