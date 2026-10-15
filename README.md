@@ -354,6 +354,8 @@ environment overrides.
 - [Verification roadmap](docs/ROADMAP.md) — staged product checkpoints.
 - [Linux compatibility matrix](docs/LINUX-COMPATIBILITY.md) — current ABI
   coverage and omissions.
+- [Runtime use cases](docs/USE-CASES.md) — observable acceptance scenarios,
+  current gates, and the next end-to-end tests.
 - [Native domains and authority](docs/decisions/0001-native-domains-and-authority.md)
   — the isolation and delegation model.
 - [Unified image and driver boundary](docs/decisions/0002-unified-image-and-driver-boundary.md)
