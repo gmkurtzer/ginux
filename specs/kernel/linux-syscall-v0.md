@@ -435,8 +435,9 @@ validates immutable mode `0555` and size 17 without a kernel filename case.
 The same profile opens `/etc` read-only with `O_DIRECTORY`. Its `getdents64`
 result is staged atomically and contains `.`, `..`, `hostname`, `os-release`,
 and `motd` regular files derived from the retained measured-root index. A second call returns EOF;
-`lseek(fd, 0, SEEK_SET)` rewinds the one-shot cursor. A buffer below the exact
-136-byte result returns `-EINVAL` without advancing that cursor. `fstat`,
+`lseek(fd, 0, SEEK_SET)` rewinds the cursor. A buffer below the first complete
+24-byte record returns `-EINVAL` without advancing that cursor; larger bounded
+buffers return every whole record that fits and retain the next cursor. `fstat`,
 `newfstatat`, and `statx` expose immutable directory mode `0555`; writable
 opens return `-EISDIR`, and `O_DIRECTORY` against `/etc/hostname` returns
 `-ENOTDIR`.

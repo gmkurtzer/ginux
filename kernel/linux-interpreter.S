@@ -842,7 +842,7 @@ ginux_linux_interpreter:
 
     mov edi, 2
     mov rsi, rsp
-    mov edx, 135
+    mov edx, 23
     mov eax, 217
     syscall
     cmp rax, -22
