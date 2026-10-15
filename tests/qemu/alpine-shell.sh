@@ -208,6 +208,12 @@ if grep -Fq 'live registry refresh snapshot failed' "$output_file"; then
     exit 1
 fi
 
+if grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC|ginux: unsupported Linux syscall' "$output_file"; then
+    tail -n 120 "$output_file"
+    echo "Alpine shell test failed: kernel panic or syscall debug noise detected." >&2
+    exit 1
+fi
+
 if [[ $(grep -Fc 'ginux: entering configured OCI init' "$output_file") -ne 3 ]] \
     || [[ $(grep -Fc 'ginux: OCI init exited cleanly' "$output_file") -ne 2 ]]; then
     tail -n 120 "$output_file"

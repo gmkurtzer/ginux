@@ -1021,7 +1021,6 @@ static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_PULL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static LINUX_RUNTIME_SUSPEND_REQUESTED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_SUSPENDED: BankedAtomicBool = BankedAtomicBool::new(false);
-static LINUX_RUNTIME_UNSUPPORTED_SYSCALLS: BankedAtomicU8 = BankedAtomicU8::new(0);
 static LINUX_RUNTIME_SUSPEND_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_SUSPEND_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_SUSPEND_RIP: BankedAtomicU64 = BankedAtomicU64::new(0);
@@ -7423,16 +7422,7 @@ extern "sysv64" fn linux_syscall_handler(
         number if linux_privileged_operation(number).is_some() => {
             linux_deny_privileged_operation(number)
         }
-        _ => {
-            if LINUX_RUNTIME_MODE.load(Ordering::Acquire)
-                && LINUX_RUNTIME_UNSUPPORTED_SYSCALLS.fetch_add(1, Ordering::AcqRel) < 8
-            {
-                serial_write("ginux: unsupported Linux syscall ");
-                serial_write_u64(number);
-                serial_write("\r\n");
-            }
-            LINUX_ENOSYS
-        }
+        _ => LINUX_ENOSYS,
     }
 }
 
