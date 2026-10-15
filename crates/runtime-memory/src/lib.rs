@@ -32,6 +32,7 @@ pub trait MetadataBackend {
     fn release_page(&mut self, page: Self::Page) -> bool;
     fn next_page(&self, page: Self::Page) -> Option<Self::Page>;
     fn set_next_page(&mut self, page: Self::Page, next: Self::Page) -> bool;
+    fn clear_next_page(&mut self, page: Self::Page, next: Self::Page) -> bool;
     fn read_slot(&self, page: Self::Page, slot: usize) -> Option<RuntimeMappingSlot>;
     fn write_slot(&mut self, page: Self::Page, slot: usize, value: RuntimeMappingSlot) -> bool;
 }
@@ -106,29 +107,75 @@ impl<B: MetadataBackend> RuntimeMappingMetadata<B> {
     }
 
     fn ensure_page(&mut self, target: usize) -> Option<B::Page> {
+        if target < self.page_count {
+            return self.page(target);
+        }
+        let original_root = self.root;
+        let original_count = self.page_count;
         if self.root.is_none() {
-            self.root = Some(self.backend.allocate_page()?);
+            let root = self.backend.allocate_page()?;
+            self.root = Some(root);
             self.page_count = 1;
         }
-        let mut page = self.root?;
-        for index in 0..=target {
-            if index == target {
-                return Some(page);
-            }
-            page = if let Some(next) = self.backend.next_page(page) {
-                next
-            } else {
-                let next_count = self.page_count.checked_add(1)?;
-                let allocated = self.backend.allocate_page()?;
-                if !self.backend.set_next_page(page, allocated) {
-                    let _ = self.backend.release_page(allocated);
-                    return None;
-                }
-                self.page_count = next_count;
-                allocated
+        while self.page_count <= target {
+            let Some(tail) = self.page(self.page_count - 1) else {
+                let _ = self.rollback_growth(original_root, original_count);
+                return None;
             };
+            let Some(next_count) = self.page_count.checked_add(1) else {
+                let _ = self.rollback_growth(original_root, original_count);
+                return None;
+            };
+            let Some(allocated) = self.backend.allocate_page() else {
+                let _ = self.rollback_growth(original_root, original_count);
+                return None;
+            };
+            if !self.backend.set_next_page(tail, allocated) {
+                let _ = self.backend.release_page(allocated);
+                let _ = self.rollback_growth(original_root, original_count);
+                return None;
+            }
+            self.page_count = next_count;
         }
-        None
+        self.page(target)
+    }
+
+    fn rollback_growth(&mut self, original_root: Option<B::Page>, original_count: usize) -> bool {
+        if original_count > self.page_count || original_root.is_some() != (original_count != 0) {
+            return false;
+        }
+        let mut current = if original_count == 0 {
+            self.root
+        } else {
+            let Some(tail) = self.page(original_count - 1) else {
+                return false;
+            };
+            let first = self.backend.next_page(tail);
+            if let Some(first) = first {
+                if !self.backend.clear_next_page(tail, first) {
+                    return false;
+                }
+            }
+            first
+        };
+        let mut released = original_count;
+        while let Some(page) = current {
+            if released >= self.page_count {
+                return false;
+            }
+            let next = self.backend.next_page(page);
+            if !self.backend.release_page(page) {
+                return false;
+            }
+            current = next;
+            released += 1;
+        }
+        if released != self.page_count {
+            return false;
+        }
+        self.root = original_root;
+        self.page_count = original_count;
+        true
     }
 }
 
@@ -198,6 +245,17 @@ mod tests {
                 return false;
             }
             page.next = Some(next);
+            true
+        }
+
+        fn clear_next_page(&mut self, page: Self::Page, next: Self::Page) -> bool {
+            let Some(page) = self.pages.get_mut(page).filter(|page| page.live) else {
+                return false;
+            };
+            if page.next != Some(next) {
+                return false;
+            }
+            page.next = None;
             true
         }
 
@@ -273,8 +331,37 @@ mod tests {
                 flags: 0,
             }
         ));
-        assert_eq!(metadata.allocated_pages(), 1);
-        assert_eq!(metadata.read(0), Some(RuntimeMappingSlot::EMPTY));
+        assert_eq!(metadata.allocated_pages(), 0);
         assert!(metadata.release());
+    }
+
+    #[test]
+    fn failed_multi_page_growth_restores_existing_chain() {
+        let backend = Backend {
+            pages: Vec::new(),
+            allocation_limit: Some(3),
+        };
+        let mut metadata = RuntimeMappingMetadata::new(backend);
+        let retained = RuntimeMappingSlot {
+            frame: 0x20_0000,
+            generation: 7,
+            protection: 3,
+            file: 0,
+            flags: 1,
+        };
+        assert!(metadata.write(0, retained));
+        assert!(!metadata.write(
+            SLOTS_PER_METADATA_PAGE * 4,
+            RuntimeMappingSlot {
+                frame: 0x30_0000,
+                ..RuntimeMappingSlot::EMPTY
+            }
+        ));
+        assert_eq!(metadata.allocated_pages(), 1);
+        assert_eq!(metadata.read(0), Some(retained));
+        assert_eq!(metadata.read(SLOTS_PER_METADATA_PAGE), None);
+        assert!(metadata.release());
+        let backend = metadata.into_backend();
+        assert_eq!(backend.pages.iter().filter(|page| page.live).count(), 0);
     }
 }
