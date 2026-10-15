@@ -45,8 +45,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     for command in \
         '' '   ' help 'container help' 'container set --help' 'network help' 'network set --help' 'test linux' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'container list' \
         'network list' 'network status eth0' 'network status lo' 'network status eth9' 'network ping lo 127.0.0.1' 'network set lo dns 10.0.2.3' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network set eth0 dns 10.0.2.3' 'network status eth0' 'network ping eth0 10.0.2.15' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
-        'container status default' 'container new demo' 'container new demo' 'container list' \
-        'container start' 'container set demo cpu=1 cpu=1' 'container set demo image=alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395 init=/bin/sh' 'container start demo' 'container list' 'container set demo image=rockylinux/rockylinux:10' 'container list' \
+        'container status default' 'container new demo' 'container new demo' 'container new rocky' 'container set rocky image=rockylinux/rockylinux:10 init=/bin/sh' 'container list' \
+        'container start' 'container set demo cpu=1 cpu=1' 'container set demo image=alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395 init=/bin/sh' 'container list' 'container set demo image=rockylinux/rockylinux:10' 'container list' \
         'container set demo image=embedded://minimal-system-v0 init=/sbin/init cpu=1 memory-mib=128 autostart=true' 'container set demo autostart=false' 'container set demo cpu 1' 'container list' status \
         'container start demo' 'container list' 'container status demo' 'ls /proc' 'ls /proc/100' ps \
         'container stop demo' 'container status demo' \
@@ -168,17 +168,17 @@ for expected in \
     'NAME STATE INIT CPU MEM-MIB AUTO IMAGE' \
     'demo: created (image required)' \
     'container: create rejected' \
+    'rocky: created (image required)' \
+    'rocky configured /bin/sh 1 128 false docker.io/rockylinux/rockylinux:10' \
     'demo configured /sbin/init 1 128 false embedded://minimal-system-v0' \
     'Error: missing arguments' \
     'Usage:' \
     'container: duplicate setting' \
-    'container: start rejected (image not ready)' \
     'demo configured /bin/sh 1 128 false docker.io/rockylinux/rockylinux:10' \
     'demo: settings accepted; configured' \
     'demo: setting accepted; configured' \
     'demo running /sbin/init 1 128 false embedded://minimal-system-v0' \
-    'containers: 1 runtime (demo)' \
-    'demo: configured' \
+    'containers: 2 configured' \
     'demo: running' \
     'integrity: sealed' \
     'GINUX.EFI component catalog v0:' \

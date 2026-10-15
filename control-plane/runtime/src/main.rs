@@ -12,7 +12,7 @@ use ginux_native_abi::{
     NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_ATTACH, NATIVE_CONTAINER_CONFIG_AUTOSTART,
     NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_CONFIG_IMAGE, NATIVE_CONTAINER_CONFIG_INIT,
     NATIVE_CONTAINER_CONFIG_MEMORY, NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE,
-    NATIVE_CONTAINER_HOST_SHUTDOWN, NATIVE_CONTAINER_INJECT_FAILURE,
+    NATIVE_CONTAINER_CURSOR_END, NATIVE_CONTAINER_HOST_SHUTDOWN, NATIVE_CONTAINER_INJECT_FAILURE,
     NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY, NATIVE_CONTAINER_RESTART,
     NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU, NATIVE_CONTAINER_SET_IMAGE,
     NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_START_ATTACHED,
@@ -871,18 +871,22 @@ fn append_decimal(output: &mut [u8], mut value: u64) -> usize {
 }
 
 fn write_container_summary(console: u64, host: u64) {
-    let mut request = NativeContainerRequestV1::zeroed();
-    let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
-    if state == 0 {
+    let mut count = 0;
+    let mut cursor = 0;
+    while let Some((_, request)) = next_container(host, cursor) {
+        count += 1;
+        if request.value == NATIVE_CONTAINER_CURSOR_END {
+            break;
+        }
+        cursor = request.value;
+    }
+    if count == 0 {
         write(console, b"containers: 0 configured\r\n");
         return;
     }
-    write(console, b"containers: 1 runtime (");
-    write(console, request_name(&request));
-    write(console, b")\r\n");
-    write(console, request_name(&request));
-    write(console, b": ");
-    write_container_state(console, state);
+    write(console, b"containers: ");
+    write_decimal(console, count);
+    write(console, b" configured\r\n");
 }
 
 fn write_container_state(console: u64, state: u64) {
@@ -910,20 +914,32 @@ fn container_state_name(state: u64) -> &'static [u8] {
 
 fn show_container_list(console: u64, host: u64) {
     write(console, b"NAME STATE INIT CPU MEM-MIB AUTO IMAGE\r\n");
+    let mut cursor = 0;
+    loop {
+        let Some((state, request)) = next_container(host, cursor) else {
+            return;
+        };
+        write(console, request_name(&request));
+        write(console, b" ");
+        write(console, container_state_name(state));
+        write(console, b" ");
+        write_container_configuration(console, &request);
+        if request.value == NATIVE_CONTAINER_CURSOR_END {
+            return;
+        }
+        if request.value <= cursor {
+            write(console, b"container: list cursor failed\r\n");
+            return;
+        }
+        cursor = request.value;
+    }
+}
+
+fn next_container(host: u64, cursor: u64) -> Option<(u64, NativeContainerRequestV1)> {
     let mut request = NativeContainerRequestV1::zeroed();
+    request.value = cursor;
     let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
-    if state == 0 {
-        return;
-    }
-    if state == NATIVE_CALL_FAILED {
-        write(console, b"container: list failed\r\n");
-        return;
-    }
-    write(console, request_name(&request));
-    write(console, b" ");
-    write(console, container_state_name(state));
-    write(console, b" ");
-    write_container_configuration(console, &request);
+    (state != 0 && state != NATIVE_CALL_FAILED).then_some((state, request))
 }
 
 fn write_container_configuration(console: u64, request: &NativeContainerRequestV1) {
@@ -1347,8 +1363,7 @@ fn list_directory(console: u64, root: u64, path: &[u8]) {
 }
 
 fn show_processes(console: u64, host: u64) {
-    let mut configuration = NativeContainerRequestV1::zeroed();
-    let _ = container_call(host, NATIVE_CONTAINER_QUERY, &mut configuration);
+    let configuration = running_container(host).unwrap_or_else(NativeContainerRequestV1::zeroed);
     write(console, b"PID PPID STATE NAME\r\n");
     let mut cursor = 0;
     loop {
@@ -1389,6 +1404,20 @@ fn show_processes(console: u64, host: u64) {
         }
         write(console, b"\r\n");
         cursor = directory_record.next_cursor;
+    }
+}
+
+fn running_container(host: u64) -> Option<NativeContainerRequestV1> {
+    let mut cursor = 0;
+    loop {
+        let (state, request) = next_container(host, cursor)?;
+        if state == NATIVE_CONTAINER_STATE_RUNNING {
+            return Some(request);
+        }
+        if request.value == NATIVE_CONTAINER_CURSOR_END {
+            return None;
+        }
+        cursor = request.value;
     }
 }
 

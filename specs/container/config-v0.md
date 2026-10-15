@@ -6,8 +6,8 @@
 covered by the signed root-image digest. It describes the available Linux ABI
 fixture, but it does not create a container or reserve a container name.
 
-The C2 controller creates one bounded runtime container explicitly. Creation
-applies usable defaults:
+The controller maintains a bounded registry of independently named runtime
+containers. Creation applies usable defaults:
 
 ```text
 container new NAME
@@ -32,10 +32,15 @@ remains accepted. `autostart` accepts `true` or `false`; it is policy rather
 than a prerequisite for manual start.
 
 No name is special. The name is chosen by the operator, and lifecycle commands
-must use that exact name. The current bounded implementation accepts one
-container, an absolute init path, one virtual CPU, and 128 MiB. The record
-lives only for the current boot; authenticated persistent configuration is a
-later contract.
+must use that exact name. The current registry holds up to 32 container records,
+each with an independent state, image, init path, and policy. The POC execution
+engine runs one container at a time while process/address-space isolation grows
+to concurrent execution. Records live only for the current boot; authenticated
+persistent configuration is a later contract.
+
+An empty-name query enumerates records. The request `value` is the starting
+slot cursor, and the returned `value` is the next occupied slot or
+`CONTAINER_CURSOR_END`. A named query continues to perform exact lookup.
 
 Container declarations embedded in the system profile are rejected so a build
 cannot silently recreate the former implicit `default` entity.

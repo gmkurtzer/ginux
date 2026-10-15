@@ -809,18 +809,32 @@ static LINUX_SIGNAL_WAIT_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SIGNAL_WAIT_TIMEOUT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SYSTEM_SUPERVISOR_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
 static LINUX_SYSTEM_SUPERVISOR_SHUTDOWN_COUNT: AtomicU32 = AtomicU32::new(0);
-static CONTAINER_CONTROL_STATE: AtomicU8 = AtomicU8::new(0);
-static CONTAINER_CONFIG_FLAGS: AtomicU16 = AtomicU16::new(0);
-static CONTAINER_NAME_SIZE: AtomicU8 = AtomicU8::new(0);
-static CONTAINER_NAME: [AtomicU8; control_abi::CONTAINER_MAX_NAME_SIZE] =
-    [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_NAME_SIZE];
-static CONTAINER_INIT_SIZE: AtomicU8 = AtomicU8::new(0);
-static CONTAINER_INIT: [AtomicU8; control_abi::CONTAINER_MAX_INIT_SIZE] =
-    [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_INIT_SIZE];
-static CONTAINER_IMAGE_SIZE: AtomicU8 = AtomicU8::new(0);
-static CONTAINER_IMAGE: [AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE] =
-    [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE];
-static CONTAINER_IMAGE_READY: AtomicBool = AtomicBool::new(false);
+const CONTAINER_SLOT_NONE: u8 = u8::MAX;
+static CONTAINER_CONTROL_STATES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_CONFIG_FLAGS: [AtomicU16; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU16::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_NAME_SIZES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_NAMES: [[AtomicU8; control_abi::CONTAINER_MAX_NAME_SIZE];
+    control_abi::CONTAINER_LIMIT] =
+    [const { [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_NAME_SIZE] };
+        control_abi::CONTAINER_LIMIT];
+static CONTAINER_INIT_SIZES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_INITS: [[AtomicU8; control_abi::CONTAINER_MAX_INIT_SIZE];
+    control_abi::CONTAINER_LIMIT] =
+    [const { [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_INIT_SIZE] };
+        control_abi::CONTAINER_LIMIT];
+static CONTAINER_IMAGE_SIZES: [AtomicU8; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU8::new(0) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_IMAGES: [[AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
+    control_abi::CONTAINER_LIMIT] =
+    [const { [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE] };
+        control_abi::CONTAINER_LIMIT];
+static CONTAINER_SELECTED_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
+static CONTAINER_ACTIVE_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
+static CONTAINER_INSTALLED_IMAGE_SLOT: AtomicU8 = AtomicU8::new(CONTAINER_SLOT_NONE);
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -2496,7 +2510,12 @@ fn resume_linux_system_supervisor() -> bool {
     if !CONTAINER_MANAGEMENT_ENABLED.load(Ordering::SeqCst) {
         return resume_linux_system_supervisor_legacy();
     }
-    CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
+    let Some(slot) = selected_container_slot() else {
+        return false;
+    };
+    CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
+    CONTAINER_CONTROL_STATES[slot]
+        .store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
     crate::serial_write("ginux: configured runtime container reached ready state\r\n");
     let controller_completed = address_space::run_installed_interactive_controller();
     let shutdown_requested = CONTAINER_HOST_SHUTDOWN_REQUESTED.load(Ordering::SeqCst);
@@ -2600,11 +2619,16 @@ fn shutdown_linux_system_supervisor(failed: bool) -> bool {
         process.general,
         process.rflags,
     );
-    if resumed
-        && CONTAINER_CONTROL_STATE.load(Ordering::SeqCst)
-            == control_abi::CONTAINER_STATE_RUNNING as u8
-    {
-        CONTAINER_CONTROL_STATE.store(
+    if resumed {
+        let Some(slot) = active_container_slot() else {
+            return false;
+        };
+        if CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst)
+            != control_abi::CONTAINER_STATE_RUNNING as u8
+        {
+            return resumed;
+        }
+        CONTAINER_CONTROL_STATES[slot].store(
             if failed {
                 control_abi::CONTAINER_STATE_FAILED as u8
             } else {
@@ -2612,6 +2636,8 @@ fn shutdown_linux_system_supervisor(failed: bool) -> bool {
             },
             Ordering::SeqCst,
         );
+        CONTAINER_ACTIVE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
+        CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
     }
     resumed
 }
@@ -2625,18 +2651,33 @@ pub(crate) fn take_container_host_shutdown_request() -> bool {
 }
 
 pub(crate) fn fail_configured_container() {
-    CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+    if let Some(slot) = selected_or_active_container_slot() {
+        CONTAINER_CONTROL_STATES[slot]
+            .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+    }
+    CONTAINER_ACTIVE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
+    CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
 }
 
 pub(crate) fn begin_configured_container() {
-    CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
+    if let Some(slot) = selected_container_slot() {
+        CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
+        CONTAINER_CONTROL_STATES[slot]
+            .store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
+    }
 }
 
 pub(crate) fn stop_configured_container() {
-    if CONTAINER_CONTROL_STATE.load(Ordering::SeqCst) == control_abi::CONTAINER_STATE_RUNNING as u8
-    {
-        CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
+    if let Some(slot) = active_container_slot() {
+        if CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst)
+            == control_abi::CONTAINER_STATE_RUNNING as u8
+        {
+            CONTAINER_CONTROL_STATES[slot]
+                .store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
+        }
     }
+    CONTAINER_ACTIVE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
+    CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
 }
 
 pub(crate) fn enable_container_management() -> bool {
@@ -17405,18 +17446,14 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
             };
             match record {
                 Some(record) => record,
-                None if CONTAINER_CONTROL_STATE.load(Ordering::SeqCst)
-                    == control_abi::CONTAINER_STATE_RUNNING as u8 =>
-                {
-                    domain::InspectionRecord {
-                        pid: 100,
-                        parent_pid: 0,
-                        kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
-                        state: control_abi::HOST_INSPECT_STATE_READY,
-                        active_threads: 1,
-                        next_cursor: domain::HOST_DOMAIN_CURSOR_END + 1,
-                    }
-                }
+                None if container_runtime_is_running() => domain::InspectionRecord {
+                    pid: 100,
+                    parent_pid: 0,
+                    kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+                    state: control_abi::HOST_INSPECT_STATE_READY,
+                    active_threads: 1,
+                    next_cursor: domain::HOST_DOMAIN_CURSOR_END + 1,
+                },
                 None => {
                     return if domain::renew_auxiliary_call_epoch(domain_id) {
                         0
@@ -17427,10 +17464,7 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
             }
         }
         control_abi::HOST_PROC_STATUS => {
-            if selector == 100
-                && CONTAINER_CONTROL_STATE.load(Ordering::SeqCst)
-                    == control_abi::CONTAINER_STATE_RUNNING as u8
-            {
+            if selector == 100 && container_runtime_is_running() {
                 domain::InspectionRecord {
                     pid: 100,
                     parent_pid: 0,
@@ -17506,105 +17540,146 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
     if !domain::handle_permits(domain_id, capability, 1, Rights::MANAGE) {
         return u64::MAX - 2;
     }
-    let state = u64::from(CONTAINER_CONTROL_STATE.load(Ordering::SeqCst));
     let operation = frame.first_argument();
     if operation == control_abi::CONTAINER_HOST_SHUTDOWN && frame.second_argument() == 0 {
         CONTAINER_HOST_SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
-        return state;
+        return active_container_slot()
+            .map(|slot| u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst)))
+            .unwrap_or(0);
     }
     let Some(mut request) = read_container_request(frame.second_argument()) else {
         return u64::MAX - 2;
     };
     let name = container_request_name(&request);
+    let requested_slot = container_slot_by_name(name);
     let result = match operation {
-        control_abi::CONTAINER_QUERY if state == 0 && name.is_empty() => 0,
-        control_abi::CONTAINER_QUERY
-            if state != 0 && (name.is_empty() || stored_container_name_matches(name)) =>
-        {
-            write_container_request(&mut request);
+        control_abi::CONTAINER_QUERY if name.is_empty() => {
+            let Ok(cursor) = usize::try_from(read_u64_at(&request, 24)) else {
+                return u64::MAX - 2;
+            };
+            let Some(slot) = next_container_slot(cursor) else {
+                return if domain::renew_auxiliary_call_epoch(domain_id) {
+                    0
+                } else {
+                    u64::MAX - 2
+                };
+            };
+            write_container_request(&mut request, slot, next_container_cursor(slot + 1));
             if !address_space::copy_to_current_user(frame.second_argument(), &request) {
                 return u64::MAX - 2;
             }
-            state
+            u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
         }
-        control_abi::CONTAINER_CREATE if state == 0 && valid_container_name(name) => {
-            store_container_name(name);
-            store_container_value(b"/sbin/init", &CONTAINER_INIT, &CONTAINER_INIT_SIZE);
-            CONTAINER_CONFIG_FLAGS.store(
+        control_abi::CONTAINER_QUERY if requested_slot.is_some() => {
+            let slot = requested_slot.unwrap_or(0);
+            write_container_request(&mut request, slot, control_abi::CONTAINER_CURSOR_END);
+            if !address_space::copy_to_current_user(frame.second_argument(), &request) {
+                return u64::MAX - 2;
+            }
+            u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
+        }
+        control_abi::CONTAINER_CREATE if requested_slot.is_none() && valid_container_name(name) => {
+            let Some(slot) = free_container_slot() else {
+                return u64::MAX - 2;
+            };
+            store_container_name(slot, name);
+            store_container_value(
+                b"/sbin/init",
+                &CONTAINER_INITS[slot],
+                &CONTAINER_INIT_SIZES[slot],
+            );
+            CONTAINER_CONFIG_FLAGS[slot].store(
                 control_abi::CONTAINER_CONFIG_INIT
                     | control_abi::CONTAINER_CONFIG_CPU
                     | control_abi::CONTAINER_CONFIG_MEMORY,
                 Ordering::SeqCst,
             );
-            CONTAINER_CONTROL_STATE
+            CONTAINER_CONTROL_STATES[slot]
                 .store(control_abi::CONTAINER_STATE_CREATED as u8, Ordering::SeqCst);
             control_abi::CONTAINER_STATE_CREATED
         }
         control_abi::CONTAINER_SET_INIT
-            if configurable_container(state, name)
+            if configurable_container(requested_slot)
                 && valid_container_init(container_request_init(&request)) =>
         {
+            let slot = requested_slot.unwrap_or(0);
             store_container_value(
                 container_request_init(&request),
-                &CONTAINER_INIT,
-                &CONTAINER_INIT_SIZE,
+                &CONTAINER_INITS[slot],
+                &CONTAINER_INIT_SIZES[slot],
             );
-            update_container_configuration(control_abi::CONTAINER_CONFIG_INIT)
+            update_container_configuration(slot, control_abi::CONTAINER_CONFIG_INIT)
         }
         control_abi::CONTAINER_SET_CPU
-            if configurable_container(state, name) && read_u64_at(&request, 24) == 1 =>
+            if configurable_container(requested_slot) && read_u64_at(&request, 24) == 1 =>
         {
-            update_container_configuration(control_abi::CONTAINER_CONFIG_CPU)
+            update_container_configuration(
+                requested_slot.unwrap_or(0),
+                control_abi::CONTAINER_CONFIG_CPU,
+            )
         }
         control_abi::CONTAINER_SET_MEMORY_MIB
-            if configurable_container(state, name) && read_u64_at(&request, 24) == 128 =>
+            if configurable_container(requested_slot) && read_u64_at(&request, 24) == 128 =>
         {
-            update_container_configuration(control_abi::CONTAINER_CONFIG_MEMORY)
+            update_container_configuration(
+                requested_slot.unwrap_or(0),
+                control_abi::CONTAINER_CONFIG_MEMORY,
+            )
         }
         control_abi::CONTAINER_SET_AUTOSTART
-            if configurable_container(state, name) && read_u64_at(&request, 24) <= 1 =>
+            if configurable_container(requested_slot) && read_u64_at(&request, 24) <= 1 =>
         {
-            update_container_autostart(read_u64_at(&request, 24) == 1)
+            update_container_autostart(requested_slot.unwrap_or(0), read_u64_at(&request, 24) == 1)
         }
         control_abi::CONTAINER_SET_IMAGE
-            if configurable_container(state, name)
+            if configurable_container(requested_slot)
                 && valid_container_image(container_request_image(&request)) =>
         {
+            let slot = requested_slot.unwrap_or(0);
             let mut canonical = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
             let canonical_size =
                 canonical_container_image(container_request_image(&request), &mut canonical)
                     .unwrap_or(0);
             let canonical = &canonical[..canonical_size];
-            store_container_value(canonical, &CONTAINER_IMAGE, &CONTAINER_IMAGE_SIZE);
-            CONTAINER_IMAGE_READY.store(
-                canonical == b"embedded://minimal-system-v0",
-                Ordering::SeqCst,
+            store_container_value(
+                canonical,
+                &CONTAINER_IMAGES[slot],
+                &CONTAINER_IMAGE_SIZES[slot],
             );
-            update_container_configuration(control_abi::CONTAINER_CONFIG_IMAGE)
+            if installed_container_image_slot() == Some(slot) {
+                CONTAINER_INSTALLED_IMAGE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::SeqCst);
+            }
+            update_container_configuration(slot, control_abi::CONTAINER_CONFIG_IMAGE)
         }
         control_abi::CONTAINER_STOP
-            if state == control_abi::CONTAINER_STATE_RUNNING
-                && stored_container_name_matches(name) =>
+            if requested_slot.is_some()
+                && active_container_slot() == requested_slot
+                && container_state(requested_slot.unwrap_or(0))
+                    == control_abi::CONTAINER_STATE_RUNNING =>
         {
-            CONTAINER_CONTROL_STATE
+            let slot = requested_slot.unwrap_or(0);
+            CONTAINER_CONTROL_STATES[slot]
                 .store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
             control_abi::CONTAINER_STATE_STOPPED
         }
         control_abi::CONTAINER_RESTART | control_abi::CONTAINER_START_ATTACHED
-            if stored_container_name_matches(name)
-                && CONTAINER_CONFIG_FLAGS.load(Ordering::SeqCst)
+            if requested_slot.is_some()
+                && active_container_slot().is_none_or(|slot| Some(slot) == requested_slot)
+                && CONTAINER_CONFIG_FLAGS[requested_slot.unwrap_or(0)].load(Ordering::SeqCst)
                     & control_abi::CONTAINER_CONFIG_COMPLETE
                     == control_abi::CONTAINER_CONFIG_COMPLETE
                 && matches!(
-                    state,
+                    container_state(requested_slot.unwrap_or(0)),
                     control_abi::CONTAINER_STATE_CONFIGURED
                         | control_abi::CONTAINER_STATE_RUNNING
                         | control_abi::CONTAINER_STATE_STOPPED
                         | control_abi::CONTAINER_STATE_FAILED
                 ) =>
         {
+            let slot = requested_slot.unwrap_or(0);
+            CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::SeqCst);
             reset_container_console(operation == control_abi::CONTAINER_START_ATTACHED);
-            if CONTAINER_IMAGE_READY.load(Ordering::SeqCst) {
+            if container_image_is_embedded(slot) || installed_container_image_slot() == Some(slot) {
                 CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
             } else {
                 CONTAINER_PULL_REQUESTED.store(true, Ordering::SeqCst);
@@ -17612,18 +17687,22 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             control_abi::CONTAINER_STATE_STOPPED
         }
         control_abi::CONTAINER_ATTACH
-            if state == control_abi::CONTAINER_STATE_RUNNING
-                && stored_container_name_matches(name)
+            if requested_slot.is_some()
+                && active_container_slot() == requested_slot
+                && container_state(requested_slot.unwrap_or(0))
+                    == control_abi::CONTAINER_STATE_RUNNING
                 && !CONTAINER_CONSOLE_ATTACHED.swap(true, Ordering::AcqRel) =>
         {
             redraw_container_console();
             control_abi::CONTAINER_STATE_RUNNING
         }
         control_abi::CONTAINER_INJECT_FAILURE
-            if state == control_abi::CONTAINER_STATE_RUNNING
-                && stored_container_name_matches(name) =>
+            if requested_slot.is_some()
+                && active_container_slot() == requested_slot
+                && container_state(requested_slot.unwrap_or(0))
+                    == control_abi::CONTAINER_STATE_RUNNING =>
         {
-            CONTAINER_CONTROL_STATE
+            CONTAINER_CONTROL_STATES[requested_slot.unwrap_or(0)]
                 .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
             control_abi::CONTAINER_STATE_FAILED
         }
@@ -17661,6 +17740,9 @@ fn read_container_request(address: u64) -> Option<[u8; control_abi::CONTAINER_RE
     if !address_space::copy_from_current_user(address, &mut request)
         || read_u32_at(&request, 0) != control_abi::CONTAINER_REQUEST_SIZE as u32
         || read_u16_at(&request, 4) != control_abi::CONTAINER_REQUEST_VERSION
+        || usize::from(read_u16_at(&request, 6)) > control_abi::CONTAINER_MAX_NAME_SIZE
+        || usize::from(read_u16_at(&request, 32)) > control_abi::CONTAINER_MAX_INIT_SIZE
+        || usize::from(read_u16_at(&request, 68)) > control_abi::CONTAINER_MAX_IMAGE_SIZE
         || read_u16_at(&request, 70) != 0
         || read_u64_at(&request, 200) != 0
     {
@@ -17715,40 +17797,96 @@ fn canonical_container_image(image: &[u8], output: &mut [u8]) -> Option<usize> {
         .ok()
 }
 
-fn stored_container_name_matches(name: &[u8]) -> bool {
-    let size = usize::from(CONTAINER_NAME_SIZE.load(Ordering::SeqCst));
-    size == name.len()
-        && CONTAINER_NAME[..size]
+fn container_slot_by_name(name: &[u8]) -> Option<usize> {
+    (!name.is_empty()).then_some(())?;
+    (0..control_abi::CONTAINER_LIMIT).find(|slot| {
+        let size = usize::from(CONTAINER_NAME_SIZES[*slot].load(Ordering::SeqCst));
+        size == name.len()
+            && CONTAINER_NAMES[*slot][..size]
+                .iter()
+                .zip(name)
+                .all(|(stored, supplied)| stored.load(Ordering::SeqCst) == *supplied)
+    })
+}
+
+fn free_container_slot() -> Option<usize> {
+    (0..control_abi::CONTAINER_LIMIT)
+        .find(|slot| CONTAINER_CONTROL_STATES[*slot].load(Ordering::SeqCst) == 0)
+}
+
+fn next_container_slot(cursor: usize) -> Option<usize> {
+    (cursor..control_abi::CONTAINER_LIMIT)
+        .find(|slot| CONTAINER_CONTROL_STATES[*slot].load(Ordering::SeqCst) != 0)
+}
+
+fn next_container_cursor(cursor: usize) -> u64 {
+    next_container_slot(cursor)
+        .map(|slot| slot as u64)
+        .unwrap_or(control_abi::CONTAINER_CURSOR_END)
+}
+
+fn selected_container_slot() -> Option<usize> {
+    let slot = usize::from(CONTAINER_SELECTED_SLOT.load(Ordering::SeqCst));
+    (slot < control_abi::CONTAINER_LIMIT).then_some(slot)
+}
+
+fn active_container_slot() -> Option<usize> {
+    let slot = usize::from(CONTAINER_ACTIVE_SLOT.load(Ordering::SeqCst));
+    (slot < control_abi::CONTAINER_LIMIT).then_some(slot)
+}
+
+fn installed_container_image_slot() -> Option<usize> {
+    let slot = usize::from(CONTAINER_INSTALLED_IMAGE_SLOT.load(Ordering::SeqCst));
+    (slot < control_abi::CONTAINER_LIMIT).then_some(slot)
+}
+
+fn selected_or_active_container_slot() -> Option<usize> {
+    selected_container_slot().or_else(active_container_slot)
+}
+
+fn container_state(slot: usize) -> u64 {
+    u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
+}
+
+fn container_runtime_is_running() -> bool {
+    active_container_slot()
+        .is_some_and(|slot| container_state(slot) == control_abi::CONTAINER_STATE_RUNNING)
+}
+
+fn container_image_is_embedded(slot: usize) -> bool {
+    let size = usize::from(CONTAINER_IMAGE_SIZES[slot].load(Ordering::SeqCst));
+    let embedded = b"embedded://minimal-system-v0";
+    size == embedded.len()
+        && CONTAINER_IMAGES[slot][..size]
             .iter()
-            .zip(name)
-            .all(|(stored, supplied)| stored.load(Ordering::SeqCst) == *supplied)
+            .zip(embedded)
+            .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected)
 }
 
 pub(crate) fn configured_container_uses_installed_oci_image() -> bool {
-    let size = usize::from(CONTAINER_IMAGE_SIZE.load(Ordering::SeqCst));
-    let embedded = b"embedded://minimal-system-v0";
-    size != 0
-        && !(size == embedded.len()
-            && CONTAINER_IMAGE[..size]
-                .iter()
-                .zip(embedded)
-                .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected))
+    let Some(slot) = selected_container_slot() else {
+        return false;
+    };
+    !container_image_is_embedded(slot)
+        && installed_container_image_slot() == Some(slot)
         && crate::oci_image::is_installed()
 }
 
 pub(crate) fn configured_container_init(output: &mut [u8]) -> Option<usize> {
-    let size = usize::from(CONTAINER_INIT_SIZE.load(Ordering::SeqCst));
+    let slot = selected_container_slot()?;
+    let size = usize::from(CONTAINER_INIT_SIZES[slot].load(Ordering::SeqCst));
     let output = output.get_mut(..size)?;
-    for (destination, source) in output.iter_mut().zip(&CONTAINER_INIT[..size]) {
+    for (destination, source) in output.iter_mut().zip(&CONTAINER_INITS[slot][..size]) {
         *destination = source.load(Ordering::SeqCst);
     }
     Some(size)
 }
 
 pub(crate) fn configured_container_image(output: &mut [u8]) -> Option<usize> {
-    let size = usize::from(CONTAINER_IMAGE_SIZE.load(Ordering::SeqCst));
+    let slot = selected_container_slot()?;
+    let size = usize::from(CONTAINER_IMAGE_SIZES[slot].load(Ordering::SeqCst));
     let output = output.get_mut(..size)?;
-    for (destination, source) in output.iter_mut().zip(&CONTAINER_IMAGE[..size]) {
+    for (destination, source) in output.iter_mut().zip(&CONTAINER_IMAGES[slot][..size]) {
         *destination = source.load(Ordering::SeqCst);
     }
     Some(size)
@@ -17759,19 +17897,24 @@ pub(crate) fn take_container_pull_request() -> bool {
 }
 
 pub(crate) fn complete_container_pull(success: bool) {
-    CONTAINER_IMAGE_READY.store(success, Ordering::Release);
+    let Some(slot) = selected_container_slot() else {
+        return;
+    };
     if success {
+        CONTAINER_INSTALLED_IMAGE_SLOT.store(slot as u8, Ordering::Release);
         CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
     } else {
-        CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::Release);
+        CONTAINER_CONTROL_STATES[slot]
+            .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::Release);
+        CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::Release);
     }
 }
 
-fn store_container_name(name: &[u8]) {
-    for (index, byte) in CONTAINER_NAME.iter().enumerate() {
+fn store_container_name(slot: usize, name: &[u8]) {
+    for (index, byte) in CONTAINER_NAMES[slot].iter().enumerate() {
         byte.store(name.get(index).copied().unwrap_or(0), Ordering::SeqCst);
     }
-    CONTAINER_NAME_SIZE.store(name.len() as u8, Ordering::SeqCst);
+    CONTAINER_NAME_SIZES[slot].store(name.len() as u8, Ordering::SeqCst);
 }
 
 fn store_container_value<const N: usize>(value: &[u8], output: &[AtomicU8; N], size: &AtomicU8) {
@@ -17781,18 +17924,20 @@ fn store_container_value<const N: usize>(value: &[u8], output: &[AtomicU8; N], s
     size.store(value.len() as u8, Ordering::SeqCst);
 }
 
-fn configurable_container(state: u64, name: &[u8]) -> bool {
-    matches!(
-        state,
-        control_abi::CONTAINER_STATE_CREATED
-            | control_abi::CONTAINER_STATE_CONFIGURED
-            | control_abi::CONTAINER_STATE_STOPPED
-            | control_abi::CONTAINER_STATE_FAILED
-    ) && stored_container_name_matches(name)
+fn configurable_container(slot: Option<usize>) -> bool {
+    slot.is_some_and(|slot| {
+        matches!(
+            container_state(slot),
+            control_abi::CONTAINER_STATE_CREATED
+                | control_abi::CONTAINER_STATE_CONFIGURED
+                | control_abi::CONTAINER_STATE_STOPPED
+                | control_abi::CONTAINER_STATE_FAILED
+        )
+    })
 }
 
-fn update_container_configuration(flag: u16) -> u64 {
-    let flags = CONTAINER_CONFIG_FLAGS.fetch_or(flag, Ordering::SeqCst) | flag;
+fn update_container_configuration(slot: usize, flag: u16) -> u64 {
+    let flags = CONTAINER_CONFIG_FLAGS[slot].fetch_or(flag, Ordering::SeqCst) | flag;
     let state = if flags & control_abi::CONTAINER_CONFIG_COMPLETE
         == control_abi::CONTAINER_CONFIG_COMPLETE
     {
@@ -17800,43 +17945,56 @@ fn update_container_configuration(flag: u16) -> u64 {
     } else {
         control_abi::CONTAINER_STATE_CREATED
     };
-    CONTAINER_CONTROL_STATE.store(state as u8, Ordering::SeqCst);
+    CONTAINER_CONTROL_STATES[slot].store(state as u8, Ordering::SeqCst);
     state
 }
 
-fn update_container_autostart(enabled: bool) -> u64 {
+fn update_container_autostart(slot: usize, enabled: bool) -> u64 {
     if enabled {
-        CONTAINER_CONFIG_FLAGS.fetch_or(control_abi::CONTAINER_CONFIG_AUTOSTART, Ordering::SeqCst);
+        CONTAINER_CONFIG_FLAGS[slot]
+            .fetch_or(control_abi::CONTAINER_CONFIG_AUTOSTART, Ordering::SeqCst);
     } else {
-        CONTAINER_CONFIG_FLAGS
+        CONTAINER_CONFIG_FLAGS[slot]
             .fetch_and(!control_abi::CONTAINER_CONFIG_AUTOSTART, Ordering::SeqCst);
     }
-    update_container_configuration(0)
+    update_container_configuration(slot, 0)
 }
 
-fn write_container_request(request: &mut [u8; control_abi::CONTAINER_REQUEST_SIZE]) {
+fn write_container_request(
+    request: &mut [u8; control_abi::CONTAINER_REQUEST_SIZE],
+    slot: usize,
+    next_cursor: u64,
+) {
     request.fill(0);
     request[0..4].copy_from_slice(&(control_abi::CONTAINER_REQUEST_SIZE as u32).to_le_bytes());
-    let size = usize::from(CONTAINER_NAME_SIZE.load(Ordering::SeqCst));
+    let size = usize::from(CONTAINER_NAME_SIZES[slot].load(Ordering::SeqCst));
     request[6..8].copy_from_slice(&(size as u16).to_le_bytes());
-    for (output, stored) in request[8..8 + size].iter_mut().zip(&CONTAINER_NAME[..size]) {
-        *output = stored.load(Ordering::SeqCst);
-    }
-    request[4..6].copy_from_slice(&control_abi::CONTAINER_REQUEST_VERSION.to_le_bytes());
-    let init_size = usize::from(CONTAINER_INIT_SIZE.load(Ordering::SeqCst));
-    request[32..34].copy_from_slice(&(init_size as u16).to_le_bytes());
-    request[34..36].copy_from_slice(&CONTAINER_CONFIG_FLAGS.load(Ordering::SeqCst).to_le_bytes());
-    for (output, stored) in request[36..36 + init_size]
+    for (output, stored) in request[8..8 + size]
         .iter_mut()
-        .zip(&CONTAINER_INIT[..init_size])
+        .zip(&CONTAINER_NAMES[slot][..size])
     {
         *output = stored.load(Ordering::SeqCst);
     }
-    let image_size = usize::from(CONTAINER_IMAGE_SIZE.load(Ordering::SeqCst));
+    request[4..6].copy_from_slice(&control_abi::CONTAINER_REQUEST_VERSION.to_le_bytes());
+    request[24..32].copy_from_slice(&next_cursor.to_le_bytes());
+    let init_size = usize::from(CONTAINER_INIT_SIZES[slot].load(Ordering::SeqCst));
+    request[32..34].copy_from_slice(&(init_size as u16).to_le_bytes());
+    request[34..36].copy_from_slice(
+        &CONTAINER_CONFIG_FLAGS[slot]
+            .load(Ordering::SeqCst)
+            .to_le_bytes(),
+    );
+    for (output, stored) in request[36..36 + init_size]
+        .iter_mut()
+        .zip(&CONTAINER_INITS[slot][..init_size])
+    {
+        *output = stored.load(Ordering::SeqCst);
+    }
+    let image_size = usize::from(CONTAINER_IMAGE_SIZES[slot].load(Ordering::SeqCst));
     request[68..70].copy_from_slice(&(image_size as u16).to_le_bytes());
     for (output, stored) in request[72..72 + image_size]
         .iter_mut()
-        .zip(&CONTAINER_IMAGE[..image_size])
+        .zip(&CONTAINER_IMAGES[slot][..image_size])
     {
         *output = stored.load(Ordering::SeqCst);
     }
