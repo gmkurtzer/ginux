@@ -36,16 +36,6 @@ use ginux_native_abi::{
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
-const ALPINE_IMAGE_CANONICAL: &[u8] = b"docker.io/library/alpine:3.24.2";
-const ALPINE_IMAGE_SHORT: &[u8] = b"alpine:3.24.2";
-const ALPINE_IMAGE_DEFAULT: &[u8] = b"alpine";
-const ALPINE_IMAGE_LATEST: &[u8] = b"alpine:latest";
-const ALPINE_IMAGE_CANONICAL_LATEST: &[u8] = b"docker.io/library/alpine:latest";
-const ALPINE_IMAGE_LEGACY_DIGEST: &[u8] =
-    b"alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395";
-const ALPINE_IMAGE_CANONICAL_DIGEST: &[u8] =
-    b"docker.io/library/alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395";
-
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
 const COMMAND_LS: u16 = 3;
@@ -1142,7 +1132,6 @@ fn prepare_setting(
             ))
         }
         (b"image", value) if value.iter().all(|byte| byte.is_ascii_graphic()) => {
-            let value = normalize_pinned_alpine_reference(value);
             if value.len() > request.image.len() {
                 return None;
             }
@@ -1151,20 +1140,6 @@ fn prepare_setting(
             Some((NATIVE_CONTAINER_CONFIG_IMAGE, NATIVE_CONTAINER_SET_IMAGE))
         }
         _ => None,
-    }
-}
-
-fn normalize_pinned_alpine_reference(value: &[u8]) -> &[u8] {
-    if value == ALPINE_IMAGE_DEFAULT
-        || value == ALPINE_IMAGE_LATEST
-        || value == ALPINE_IMAGE_SHORT
-        || value == ALPINE_IMAGE_CANONICAL_LATEST
-        || value == ALPINE_IMAGE_LEGACY_DIGEST
-        || value == ALPINE_IMAGE_CANONICAL_DIGEST
-    {
-        ALPINE_IMAGE_CANONICAL
-    } else {
-        value
     }
 }
 

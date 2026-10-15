@@ -25,6 +25,7 @@ pub const NATIVE_NETWORK_FEATURE_EGRESS_BATCH: u32 = 1 << 14;
 pub const NATIVE_NETWORK_FEATURE_EGRESS_RESIDENT: u32 = 1 << 15;
 pub const NATIVE_NETWORK_FEATURE_ICMP_PROBE: u32 = 1 << 16;
 pub const NATIVE_NETWORK_FEATURE_DHCP: u32 = 1 << 17;
+pub const NATIVE_NETWORK_FEATURE_OCI_REGISTRY: u32 = 1 << 18;
 pub const NATIVE_NETWORK_BOOT_V1_VERSION: u16 = 1;
 pub const NATIVE_NETWORK_BOOT_V1_SIZE: u16 = 88;
 pub const NATIVE_NETWORK_BOOT_V2_VERSION: u16 = 2;
@@ -39,6 +40,8 @@ pub const NATIVE_NETWORK_BOOT_V6_VERSION: u16 = 6;
 pub const NATIVE_NETWORK_BOOT_V6_SIZE: u16 = 96;
 pub const NATIVE_NETWORK_BOOT_V7_VERSION: u16 = 7;
 pub const NATIVE_NETWORK_BOOT_V7_SIZE: u16 = 96;
+pub const NATIVE_NETWORK_BOOT_V8_VERSION: u16 = 8;
+pub const NATIVE_NETWORK_BOOT_V8_SIZE: u16 = 240;
 pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
@@ -175,6 +178,79 @@ pub const NATIVE_CONTAINER_STATE_CREATED: u64 = 4;
 pub const NATIVE_CONTAINER_STATE_CONFIGURED: u64 = 5;
 pub const NATIVE_LINUX_ABI_TEST_OPERATION: u64 = 34;
 pub const NATIVE_LINUX_ABI_TEST_COUNT: u32 = 23;
+pub const NATIVE_IMAGE_STORE_OPERATION: u64 = 35;
+pub const NATIVE_IMAGE_STORE_OBJECT: u64 = 10;
+pub const NATIVE_IMAGE_STORE_REQUEST_VERSION: u16 = 0;
+pub const NATIVE_IMAGE_STORE_REQUEST_SIZE: u32 = 72;
+pub const NATIVE_IMAGE_STORE_STAGE: u16 = 1;
+pub const NATIVE_IMAGE_STORE_APPEND: u16 = 2;
+pub const NATIVE_IMAGE_STORE_PUBLISH: u16 = 3;
+pub const NATIVE_IMAGE_STORE_ABORT: u16 = 4;
+pub const NATIVE_IMAGE_STORE_CHUNK_LIMIT: u32 = 4096;
+pub const NATIVE_IMAGE_STORE_RESULT_FAILED: u64 = u64::MAX - 2;
+pub const NATIVE_PROGRESS_OPERATION: u64 = 36;
+pub const NATIVE_PROGRESS_MAX_SIZE: usize = 128;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeImageStoreRequestV0 {
+    pub size: u32,
+    pub version: u16,
+    pub command: u16,
+    pub handle: u64,
+    pub expected_length: u64,
+    pub buffer_address: u64,
+    pub buffer_size: u32,
+    pub reserved: u32,
+    pub digest: [u8; 32],
+}
+
+impl NativeImageStoreRequestV0 {
+    pub const fn stage(expected_length: u64, digest: [u8; 32]) -> Self {
+        Self {
+            size: NATIVE_IMAGE_STORE_REQUEST_SIZE,
+            version: NATIVE_IMAGE_STORE_REQUEST_VERSION,
+            command: NATIVE_IMAGE_STORE_STAGE,
+            handle: 0,
+            expected_length,
+            buffer_address: 0,
+            buffer_size: 0,
+            reserved: 0,
+            digest,
+        }
+    }
+
+    pub const fn append(handle: u64, buffer_address: u64, buffer_size: u32) -> Self {
+        Self {
+            size: NATIVE_IMAGE_STORE_REQUEST_SIZE,
+            version: NATIVE_IMAGE_STORE_REQUEST_VERSION,
+            command: NATIVE_IMAGE_STORE_APPEND,
+            handle,
+            expected_length: 0,
+            buffer_address,
+            buffer_size,
+            reserved: 0,
+            digest: [0; 32],
+        }
+    }
+
+    pub const fn finish(command: u16, handle: u64) -> Self {
+        Self {
+            size: NATIVE_IMAGE_STORE_REQUEST_SIZE,
+            version: NATIVE_IMAGE_STORE_REQUEST_VERSION,
+            command,
+            handle,
+            expected_length: 0,
+            buffer_address: 0,
+            buffer_size: 0,
+            reserved: 0,
+            digest: [0; 32],
+        }
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeImageStoreRequestV0>() == 72);
+const _: () = assert!(core::mem::align_of::<NativeImageStoreRequestV0>() == 8);
 pub const NATIVE_ROOT_OPERATION: u64 = 17;
 pub const NATIVE_ROOT_READ_DIRECTORY: u64 = 3;
 pub const NATIVE_ROOT_DIRECTORY_REQUEST_SIZE: u32 = 48;
@@ -619,6 +695,120 @@ impl NativeNetworkBootV1 {
 
 const _: () = assert!(core::mem::size_of::<NativeNetworkBootV1>() == 88);
 const _: () = assert!(core::mem::align_of::<NativeNetworkBootV1>() == 8);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeNetworkBootV8 {
+    pub magic: u64,
+    pub version: u16,
+    pub size: u16,
+    pub features: u32,
+    pub common_config_address: u64,
+    pub receive_notification_address: u64,
+    pub transmit_notification_address: u64,
+    pub dma_virtual_address: u64,
+    pub dma_device_address: u64,
+    pub device_capability: u64,
+    pub mac_address: u64,
+    pub image_store_capability: u64,
+    pub unix_time: u64,
+    pub ipv4: u32,
+    pub gateway: u32,
+    pub dns: u32,
+    pub reference_size: u16,
+    pub prefix: u8,
+    pub reserved: [u8; 5],
+    pub reference: [u8; 128],
+}
+
+impl NativeNetworkBootV8 {
+    pub fn registry_pull(
+        v0: NativeNetworkBootV0,
+        image_store_capability: u64,
+        unix_time: u64,
+        network: (u32, u8, u32, u32),
+        reference: &[u8],
+    ) -> Option<Self> {
+        let mut stored_reference = [0; 128];
+        stored_reference
+            .get_mut(..reference.len())?
+            .copy_from_slice(reference);
+        let (ipv4, prefix, gateway, dns) = network;
+        Some(Self {
+            magic: v0.magic,
+            version: NATIVE_NETWORK_BOOT_V8_VERSION,
+            size: NATIVE_NETWORK_BOOT_V8_SIZE,
+            features: v0.features | NATIVE_NETWORK_FEATURE_OCI_REGISTRY,
+            common_config_address: v0.common_config_address,
+            receive_notification_address: v0.receive_notification_address,
+            transmit_notification_address: v0.transmit_notification_address,
+            dma_virtual_address: v0.dma_virtual_address,
+            dma_device_address: v0.dma_device_address,
+            device_capability: v0.device_capability,
+            mac_address: v0.mac_address,
+            image_store_capability,
+            unix_time,
+            ipv4,
+            gateway,
+            dns,
+            reference_size: reference.len() as u16,
+            prefix,
+            reserved: [0; 5],
+            reference: stored_reference,
+        })
+    }
+
+    pub fn is_valid_registry_pull(&self) -> bool {
+        self.magic == NATIVE_NETWORK_BOOT_MAGIC
+            && self.version == NATIVE_NETWORK_BOOT_V8_VERSION
+            && self.size == NATIVE_NETWORK_BOOT_V8_SIZE
+            && self.features
+                == NATIVE_NETWORK_FEATURE_VIRTIO_NETWORK
+                    | NATIVE_NETWORK_FEATURE_EMPTY_QUEUES
+                    | NATIVE_NETWORK_FEATURE_OCI_REGISTRY
+            && self.common_config_address != 0
+            && self.receive_notification_address != 0
+            && self.transmit_notification_address != 0
+            && self.dma_virtual_address != 0
+            && self.dma_device_address != 0
+            && self.device_capability != 0
+            && self.image_store_capability != 0
+            && self.image_store_capability != self.device_capability
+            && self.mac_address != 0
+            && self.mac_address >> 48 == 0
+            && self.unix_time >= 1_577_836_800
+            && self.ipv4 != 0
+            && self.prefix <= 32
+            && self.gateway != 0
+            && self.dns != 0
+            && self.reference_size != 0
+            && usize::from(self.reference_size) <= self.reference.len()
+            && self.reference[..usize::from(self.reference_size)]
+                .iter()
+                .all(u8::is_ascii_graphic)
+            && self.reserved == [0; 5]
+    }
+
+    pub const fn v0_prefix(&self) -> NativeNetworkBootV0 {
+        NativeNetworkBootV0 {
+            magic: self.magic,
+            version: NATIVE_NETWORK_BOOT_VERSION,
+            size: NATIVE_NETWORK_BOOT_SIZE,
+            features: self.features & !NATIVE_NETWORK_FEATURE_OCI_REGISTRY,
+            common_config_address: self.common_config_address,
+            receive_notification_address: self.receive_notification_address,
+            transmit_notification_address: self.transmit_notification_address,
+            dma_virtual_address: self.dma_virtual_address,
+            dma_device_address: self.dma_device_address,
+            device_capability: self.device_capability,
+            mac_address: self.mac_address,
+            reserved: 0,
+        }
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<NativeNetworkBootV8>() == 240);
+const _: () = assert!(core::mem::align_of::<NativeNetworkBootV8>() == 8);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -28,6 +28,10 @@ fi
 echo "Booting x86-64 Ginux with QEMU/$accelerator using CPU $cpu_model"
 
 memory="${GINUX_MEMORY:-1G}"
+network_capture=()
+if [[ -n "${GINUX_PCAP:-}" ]]; then
+    network_capture=(-object "filter-dump,id=ginux-capture,netdev=ginux-net,file=$GINUX_PCAP")
+fi
 
 exec "$qemu" \
     -machine "q35,accel=$accelerator" \
@@ -42,6 +46,7 @@ exec "$qemu" \
     -device "intel-iommu,intremap=off" \
     -device "virtio-blk-pci,drive=ginux-volume,disable-legacy=on,iommu_platform=on,serial=ginux-volume" \
     -netdev "user,id=ginux-net,restrict=off" \
+    ${network_capture[@]+"${network_capture[@]}"} \
     -device "virtio-net-pci,netdev=ginux-net,disable-legacy=on,iommu_platform=on,mac=52:54:00:12:34:56,addr=0x3" \
     -drive "if=none,id=ginux-volume,format=raw,file=$volume_image" \
     -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code" \

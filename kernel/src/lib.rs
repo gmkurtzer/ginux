@@ -7,6 +7,7 @@ mod control_abi;
 mod crypto;
 mod domain;
 mod executable;
+mod image_store;
 mod initramfs;
 mod ipc;
 mod linux_elf;
@@ -44,7 +45,7 @@ const KERNEL_STACK_SIZE: usize = 512 * 1024;
 const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SIZE;
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
-pub const BOOT_INFO_VERSION: u32 = 6;
+pub const BOOT_INFO_VERSION: u32 = 7;
 
 #[repr(C, align(4096))]
 struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
@@ -100,6 +101,7 @@ pub struct BootInfo {
     pub root_image_size: usize,
     pub oci_rootfs: *const u8,
     pub oci_rootfs_size: usize,
+    pub unix_time: u64,
     pub reset_system: ResetSystem,
     pub image_base: *const u8,
     pub image_size: usize,
@@ -245,24 +247,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: modified root-image measurement accepted\r\n");
     }
     serial_write("ginux: root-image measurement rejection verified\r\n");
-    if boot_info.oci_rootfs_size == 0 {
-        if !boot_info.oci_rootfs.is_null() {
-            kernel_fail("ginux: invalid empty OCI rootfs handoff\r\n");
-        }
-        serial_write("ginux: no boot-local OCI image configured\r\n");
-    } else {
-        if boot_info.oci_rootfs.is_null() {
-            kernel_fail("ginux: missing OCI rootfs bytes\r\n");
-        }
-        let oci_rootfs =
-            core::slice::from_raw_parts(boot_info.oci_rootfs, boot_info.oci_rootfs_size);
-        if !oci_image::install_pinned_rootfs(oci_rootfs) {
-            kernel_fail("ginux: pinned Alpine OCI rootfs invalid\r\n");
-        }
-        serial_write("ginux: pinned Alpine OCI rootfs accepted\r\n");
-        serial_write("ginux: OCI init and declared ELF interpreter discovered\r\n");
-        serial_write("ginux: OCI relocatable PIE load plan accepted\r\n");
+    if boot_info.oci_rootfs_size != 0 || !boot_info.oci_rootfs.is_null() {
+        kernel_fail("ginux: boot-embedded OCI images are unsupported\r\n");
     }
+    serial_write("ginux: OCI images require runtime registry ingestion\r\n");
 
     let Some(virtio_block) = arch::x86_64::pci::discover_virtio_block() else {
         kernel_fail("ginux: modern virtio block device discovery failed\r\n");
@@ -1591,7 +1579,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     };
     if network_image.bytes.len() != network_service.len()
         || network_image.entry == 0
-        || network_image.segments.iter().flatten().count() != 3
+        || !(3..=4).contains(&network_image.segments.iter().flatten().count())
         || network_image.relocation_count == 0
         || network_image.relocations[..network_image.relocation_count]
             .iter()
@@ -1604,7 +1592,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("ginux: measured isolated network service discovered\r\n");
     serial_write("ginux: bounded native network PIE load plan accepted\r\n");
     serial_write("ginux: native network service relative relocations accepted\r\n");
-    if !address_space::verify_native_service_materialization(&network_image) {
+    if !address_space::verify_native_network_service_materialization(&network_image) {
         kernel_fail("ginux: native network service materialization failed\r\n");
     }
     serial_write("ginux: native network service segments materialized in owned frames\r\n");
@@ -1659,6 +1647,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         || !linux_tmpfs::verify_live_object_contract()
     {
         kernel_fail("ginux: transactional RAM store invalid\r\n");
+    }
+    if !image_store::install() {
+        kernel_fail("ginux: boot-local image store initialization failed\r\n");
     }
     serial_write("ginux: quota-bound page-backed RAM store installed\r\n");
     serial_write("ginux: generation-safe Linux tmpfs view mounted at /tmp\r\n");
@@ -3639,6 +3630,33 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 );
             arch::x86_64::cpu::complete_network_ping(success);
             continue 'managed;
+        }
+        if arch::x86_64::cpu::take_container_pull_request() {
+            let mut image = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
+            let image_size = arch::x86_64::cpu::configured_container_image(&mut image).unwrap_or(0);
+            serial_write("ginux: resolving OCI image ");
+            serial_write_bytes(&image[..image_size]);
+            serial_write("\r\n");
+            let downloaded = image_size != 0
+                && address_space::pull_native_oci_image(
+                    &network_image,
+                    virtio_network,
+                    virtio_network_initialization,
+                    virtio_network_iommu_profile,
+                    virtio_network_common_mmio,
+                    &image[..image_size],
+                    boot_info.unix_time,
+                );
+            let success = downloaded && image_store::install_latest_layer();
+            arch::x86_64::cpu::complete_container_pull(success);
+            serial_write(if success {
+                "ginux: OCI image downloaded, verified, unpacked, and published\r\n"
+            } else {
+                "ginux: OCI image pull failed; partial objects discarded\r\n"
+            });
+            if !success {
+                continue 'managed;
+            }
         }
         if !arch::x86_64::cpu::take_container_restart_request() {
             kernel_fail("ginux: controller exited without a lifecycle request\r\n");

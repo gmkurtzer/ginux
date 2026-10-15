@@ -16,6 +16,22 @@ pub struct StagingHandle {
     generation: u32,
 }
 
+impl StagingHandle {
+    pub const fn into_raw(self) -> u64 {
+        (self.generation as u64) << 16 | self.slot as u64
+    }
+
+    pub const fn from_raw(raw: u64) -> Option<Self> {
+        let slot = raw as u16;
+        let generation = (raw >> 16) as u32;
+        if raw >> 48 != 0 || generation == 0 {
+            None
+        } else {
+            Some(Self { slot, generation })
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StoreError {
     InvalidHandle,
@@ -197,6 +213,14 @@ impl<B: ObjectBackend, const OBJECTS: usize> ImageStore<B, OBJECTS> {
             .then_some(length)
     }
 
+    pub fn published_object(&self, digest: Digest) -> Option<(B::Object, usize)> {
+        self.entries
+            .iter()
+            .flatten()
+            .find(|entry| entry.published && entry.expected == digest)
+            .map(|entry| (entry.object, entry.expected_length))
+    }
+
     pub const fn quota(&self) -> usize {
         self.quota
     }
@@ -321,5 +345,14 @@ mod tests {
         assert_eq!(store.append(first, b"x"), Err(StoreError::InvalidHandle));
         store.append(second, b"12").unwrap();
         assert!(store.publish(second).is_ok());
+    }
+
+    #[test]
+    fn staging_handles_round_trip_without_ambient_authority() {
+        let mut store = ImageStore::<Backend, 1>::new(Backend::default(), 4);
+        let handle = store.stage(digest(b"1234"), 4).unwrap();
+        assert_eq!(StagingHandle::from_raw(handle.into_raw()), Some(handle));
+        assert!(StagingHandle::from_raw(0).is_none());
+        assert!(StagingHandle::from_raw(u64::MAX).is_none());
     }
 }

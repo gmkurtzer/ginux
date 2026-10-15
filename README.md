@@ -220,10 +220,9 @@ Requirements:
 - Rust 1.99.0 through `rustup`;
 - Clang with the `x86_64-none-elf` target;
 - QEMU with x86-64 and OVMF support;
-- Docker for preparing the pinned Alpine OCI input; and
 - GNU Make.
 
-Check the host, prepare the pinned Alpine image, build Ginux, and boot it:
+Check the host, build Ginux, and boot it:
 
 ```sh
 make doctor
@@ -236,12 +235,13 @@ At the `ginux>` prompt:
 help
 status
 container new alpine
-container set alpine image=alpine:3.24.2 init=/bin/sh
+container set alpine image=alpine:latest init=/bin/sh
 container start alpine --attach
 ```
 
-The final command enters the unmodified Alpine shell. `exit` returns to the
-Ginux controller; `shutdown` stops the host.
+The final command resolves and downloads Alpine from Docker Hub, verifies and
+unpacks its layer, then enters the unmodified Alpine shell. `exit` returns to
+the Ginux controller; `shutdown` stops the host.
 
 Useful development gates:
 
@@ -249,7 +249,7 @@ Useful development gates:
 make build          # build the unified EFI image
 make test           # run the core QEMU boot gate
 make test-c2        # verify configured container lifecycle
-make test-alpine    # verify OCI ingestion and the Alpine shell
+make test-alpine    # verify runtime OCI download and the Alpine shell
 make check          # run architecture, ABI, format, lint, and unit checks
 make gate           # run the clean reproducible project gate
 ```

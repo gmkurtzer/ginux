@@ -5,9 +5,6 @@ edition = "2021"
 license.workspace = true
 publish = false
 
-[features]
-alpine-fixture = []
-
 [[bin]]
 name = "ginux-boot"
 path = "src/main.rs"

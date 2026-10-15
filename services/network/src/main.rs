@@ -1,30 +1,79 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 use core::{
+    alloc::{GlobalAlloc, Layout},
     arch::{asm, global_asm},
     ptr::{read_volatile, write_volatile},
-    sync::atomic::{compiler_fence, Ordering},
+    sync::atomic::{compiler_fence, AtomicUsize, Ordering},
 };
 
 use ginux_native_abi::{
     native_control_abi_is_compatible, native_control_abi_supports_packet_handoff,
     NativeControlDescriptorV4, NativeNetworkBootV0, NativeNetworkBootV1, NativeNetworkBootV2,
     NativeNetworkBootV3, NativeNetworkBootV4, NativeNetworkBootV5, NativeNetworkBootV6,
-    NativeNetworkBootV7, NativePacketRequestV0, NATIVE_CONTROL_DESCRIPTOR_OPERATION,
-    NATIVE_CONTROL_DESCRIPTOR_SIZE, NATIVE_CONTROL_DISCOVERY_OPERATION,
-    NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES,
-    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD,
-    NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PROBE,
-    NATIVE_NETWORK_DEVICE_QUERY_GATEWAY, NATIVE_NETWORK_DEVICE_QUERY_GENERATION,
-    NATIVE_NETWORK_DEVICE_QUERY_IPV4, NATIVE_NETWORK_DEVICE_QUERY_PING_TARGET,
-    NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED,
-    NATIVE_NETWORK_WAIT_OPERATION, NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED,
-    NATIVE_PACKET_DRAINED, NATIVE_PACKET_EGRESS_ACK_OPERATION,
-    NATIVE_PACKET_EGRESS_CLAIM_OPERATION, NATIVE_PACKET_EGRESS_WAIT_OPERATION,
-    NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
+    NativeNetworkBootV7, NativeNetworkBootV8, NativePacketRequestV0,
+    NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
+    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_NETWORK_APPLY_VERSION,
+    NATIVE_NETWORK_DEVICE_ACTIVATE_EMPTY_QUEUES, NATIVE_NETWORK_DEVICE_APPLY,
+    NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD, NATIVE_NETWORK_DEVICE_OPERATION,
+    NATIVE_NETWORK_DEVICE_PROBE, NATIVE_NETWORK_DEVICE_QUERY_GATEWAY,
+    NATIVE_NETWORK_DEVICE_QUERY_GENERATION, NATIVE_NETWORK_DEVICE_QUERY_IPV4,
+    NATIVE_NETWORK_DEVICE_QUERY_PING_TARGET, NATIVE_NETWORK_DEVICE_SET_DNS,
+    NATIVE_NETWORK_WAIT_CANCELLED, NATIVE_NETWORK_WAIT_FAILED, NATIVE_NETWORK_WAIT_OPERATION,
+    NATIVE_NETWORK_WAIT_RX_POSTED, NATIVE_NETWORK_WAIT_TX_NOTIFIED, NATIVE_PACKET_DRAINED,
+    NATIVE_PACKET_EGRESS_ACK_OPERATION, NATIVE_PACKET_EGRESS_CLAIM_OPERATION,
+    NATIVE_PACKET_EGRESS_WAIT_OPERATION, NATIVE_PACKET_PUBLISH_OPERATION, NATIVE_PACKET_STALE,
+    NATIVE_SERVICE_EXIT_COMPLETED, NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_SERVICE_EXIT_RESTART_REQUIRED,
 };
+
+mod registry;
+
+const TLS_HEAP_SIZE: usize = 128 * 1024;
+
+struct RegistryAllocator;
+
+static TLS_HEAP_NEXT: AtomicUsize = AtomicUsize::new(0);
+static mut TLS_HEAP: [u8; TLS_HEAP_SIZE] = [0; TLS_HEAP_SIZE];
+
+unsafe impl GlobalAlloc for RegistryAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let mut current = TLS_HEAP_NEXT.load(Ordering::Relaxed);
+        loop {
+            let aligned = match current.checked_add(layout.align() - 1) {
+                Some(value) => value & !(layout.align() - 1),
+                None => return core::ptr::null_mut(),
+            };
+            let Some(next) = aligned.checked_add(layout.size()) else {
+                return core::ptr::null_mut();
+            };
+            if next > TLS_HEAP_SIZE {
+                return core::ptr::null_mut();
+            }
+            match TLS_HEAP_NEXT.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return core::ptr::addr_of_mut!(TLS_HEAP).cast::<u8>().add(aligned),
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    unsafe fn dealloc(&self, _pointer: *mut u8, _layout: Layout) {}
+}
+
+#[global_allocator]
+static REGISTRY_ALLOCATOR: RegistryAllocator = RegistryAllocator;
+
+fn reset_registry_allocator() {
+    TLS_HEAP_NEXT.store(0, Ordering::Release);
+}
 
 static SERVICE_IDENTITY: &[u8] = b"GINUX_NETWORK_SERVICE_V0";
 
@@ -278,6 +327,37 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
                         0,
                     )),
                 )
+            } else if info.version == 8 {
+                let Some(v8) = (unsafe {
+                    (info as *const NativeNetworkBootV0 as *const NativeNetworkBootV8).as_ref()
+                }) else {
+                    fail();
+                };
+                if !v8.is_valid_registry_pull() {
+                    fail();
+                }
+                registry::set_progress_capability(v8.image_store_capability);
+                registry::progress(b"pull service started");
+                let network = v8.v0_prefix();
+                if probe_network_device(network.device_capability)
+                    != NATIVE_NETWORK_DEVICE_DESCRIPTOR_WORD
+                {
+                    registry::progress(b"registry network capability rejected");
+                    fail();
+                }
+                if !unsafe { configure_empty_queues(&network) }
+                    || activate_empty_queues(network.device_capability) != 0
+                {
+                    registry::progress(b"registry network queue activation failed");
+                    fail();
+                }
+                registry::progress(b"registry network queues active");
+                let status = unsafe { registry_pull(v8) };
+                exit(if status {
+                    NATIVE_SERVICE_EXIT_COMPLETED
+                } else {
+                    NATIVE_SERVICE_EXIT_REJECTED
+                });
             } else {
                 fail();
             };
@@ -329,6 +409,10 @@ extern "C" fn ginux_network_service_main(info: *const NativeNetworkBootV0) -> ! 
         }
     }
     exit(NATIVE_SERVICE_EXIT_COMPLETED)
+}
+
+unsafe fn registry_pull(_info: &NativeNetworkBootV8) -> bool {
+    registry::pull(_info)
 }
 
 unsafe fn dhcp(info: &NativeNetworkBootV0) -> Option<u8> {

@@ -10,8 +10,8 @@ use super::{paging, timer};
 use crate::{
     address_space,
     capability::Rights,
-    control_abi, domain, initramfs, ipc, linux_mount, linux_process, linux_tmpfs, linux_user,
-    memory, network, scheduler,
+    control_abi, domain, image_store, initramfs, ipc, linux_mount, linux_process, linux_tmpfs,
+    linux_user, memory, network, scheduler,
     scheduler::{
         RuntimeAction, UserFaultContext, UserFaultFrame, UserInterruptFrame, UserTrapFrame,
     },
@@ -821,7 +821,6 @@ static CONTAINER_IMAGE_SIZE: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_IMAGE: [AtomicU8; control_abi::CONTAINER_MAX_IMAGE_SIZE] =
     [const { AtomicU8::new(0) }; control_abi::CONTAINER_MAX_IMAGE_SIZE];
 static CONTAINER_IMAGE_READY: AtomicBool = AtomicBool::new(false);
-const PINNED_OCI_IMAGE: &[u8] = b"docker.io/library/alpine:3.24.2";
 static CONTAINER_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_HOST_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_MANAGEMENT_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -831,6 +830,7 @@ static NETWORK_PING_ACTIVE: AtomicU64 = AtomicU64::new(0);
 static NETWORK_PING_RESULT: AtomicU8 = AtomicU8::new(0);
 static NETWORK_DHCP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
+static CONTAINER_PULL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static ELF_PROBE_SYSTEM_INIT: AtomicBool = AtomicBool::new(false);
 static SERVICE_STACK_SCRUBBED: AtomicBool = AtomicBool::new(false);
 static SERVICE_FRAMES_TRANSFERRED: AtomicBool = AtomicBool::new(false);
@@ -15622,6 +15622,12 @@ fn dispatch_charged_call(
         control_abi::LINUX_ABI_TEST_OPERATION => {
             linux_abi_test_results(caller_domain, capability, frame)
         }
+        ginux_native_abi::NATIVE_IMAGE_STORE_OPERATION => {
+            image_store_call(caller_domain, capability, frame)
+        }
+        ginux_native_abi::NATIVE_PROGRESS_OPERATION => {
+            native_progress_call(caller_domain, capability, frame)
+        }
         control_abi::PACKET_PUBLISH_OPERATION => {
             packet_publish_call(caller_domain, capability, frame)
         }
@@ -15661,6 +15667,133 @@ fn dispatch_charged_call(
             packet_egress_drain_wait_call(caller_domain, capability, frame)
         }
         _ => u64::MAX,
+    }
+}
+
+fn native_progress_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    if !domain::handle_permits(
+        caller_domain,
+        capability,
+        ginux_native_abi::NATIVE_IMAGE_STORE_OBJECT,
+        Rights::WRITE,
+    ) {
+        return u64::MAX - 2;
+    }
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    let Ok(size) = usize::try_from(frame.second_argument()) else {
+        return u64::MAX - 2;
+    };
+    if size == 0 || size > ginux_native_abi::NATIVE_PROGRESS_MAX_SIZE {
+        return u64::MAX - 2;
+    }
+    let mut bytes = [0; ginux_native_abi::NATIVE_PROGRESS_MAX_SIZE];
+    if !address_space::copy_from_current_user(frame.first_argument(), &mut bytes[..size])
+        || !bytes[..size]
+            .iter()
+            .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
+    {
+        return u64::MAX - 2;
+    }
+    serial_write("ginux: OCI ");
+    crate::serial_write_bytes(&bytes[..size]);
+    serial_write("\r\n");
+    if domain::renew_auxiliary_call_epoch(caller_domain) {
+        size as u64
+    } else {
+        u64::MAX - 2
+    }
+}
+
+fn image_store_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let failed = ginux_native_abi::NATIVE_IMAGE_STORE_RESULT_FAILED;
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return failed;
+    };
+    if !domain::handle_permits(
+        caller_domain,
+        capability,
+        ginux_native_abi::NATIVE_IMAGE_STORE_OBJECT,
+        Rights::WRITE,
+    ) {
+        return failed;
+    }
+    let mut request = [0_u8; ginux_native_abi::NATIVE_IMAGE_STORE_REQUEST_SIZE as usize];
+    if !address_space::copy_from_current_user(frame.first_argument(), &mut request)
+        || u32::from_le_bytes(request[0..4].try_into().unwrap())
+            != ginux_native_abi::NATIVE_IMAGE_STORE_REQUEST_SIZE
+        || u16::from_le_bytes(request[4..6].try_into().unwrap())
+            != ginux_native_abi::NATIVE_IMAGE_STORE_REQUEST_VERSION
+        || request[36..40] != [0; 4]
+    {
+        return failed;
+    }
+    let command = u16::from_le_bytes(request[6..8].try_into().unwrap());
+    let raw_handle = u64::from_le_bytes(request[8..16].try_into().unwrap());
+    let expected_length = u64::from_le_bytes(request[16..24].try_into().unwrap());
+    let buffer_address = u64::from_le_bytes(request[24..32].try_into().unwrap());
+    let buffer_size = u32::from_le_bytes(request[32..36].try_into().unwrap());
+    let digest: [u8; 32] = request[40..72].try_into().unwrap();
+    let result = match command {
+        ginux_native_abi::NATIVE_IMAGE_STORE_STAGE
+            if raw_handle == 0
+                && buffer_address == 0
+                && buffer_size == 0
+                && expected_length != 0
+                && expected_length <= image_store::OBJECT_SIZE_LIMIT as u64
+                && digest != [0; 32] =>
+        {
+            image_store::stage(digest, expected_length as usize)
+                .map(ginux_image_store::StagingHandle::into_raw)
+                .unwrap_or(failed)
+        }
+        ginux_native_abi::NATIVE_IMAGE_STORE_APPEND
+            if expected_length == 0
+                && digest == [0; 32]
+                && (1..=ginux_native_abi::NATIVE_IMAGE_STORE_CHUNK_LIMIT)
+                    .contains(&buffer_size) =>
+        {
+            let Some(handle) = ginux_image_store::StagingHandle::from_raw(raw_handle) else {
+                return failed;
+            };
+            let mut bytes = [0_u8; ginux_native_abi::NATIVE_IMAGE_STORE_CHUNK_LIMIT as usize];
+            let size = buffer_size as usize;
+            if !address_space::copy_from_current_user(buffer_address, &mut bytes[..size]) {
+                return failed;
+            }
+            image_store::append(handle, &bytes[..size])
+                .map(|written| written as u64)
+                .unwrap_or(failed)
+        }
+        ginux_native_abi::NATIVE_IMAGE_STORE_PUBLISH
+            if expected_length == 0
+                && buffer_address == 0
+                && buffer_size == 0
+                && digest == [0; 32] =>
+        {
+            let Some(handle) = ginux_image_store::StagingHandle::from_raw(raw_handle) else {
+                return failed;
+            };
+            image_store::publish(handle).map_or(failed, |_| 0)
+        }
+        ginux_native_abi::NATIVE_IMAGE_STORE_ABORT
+            if expected_length == 0
+                && buffer_address == 0
+                && buffer_size == 0
+                && digest == [0; 32] =>
+        {
+            let Some(handle) = ginux_image_store::StagingHandle::from_raw(raw_handle) else {
+                return failed;
+            };
+            image_store::abort(handle).map_or(failed, |()| 0)
+        }
+        _ => failed,
+    };
+    if result != failed && !domain::renew_auxiliary_call_epoch(caller_domain) {
+        failed
+    } else {
+        result
     }
 }
 
@@ -17338,8 +17471,7 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
             let canonical = &canonical[..canonical_size];
             store_container_value(canonical, &CONTAINER_IMAGE, &CONTAINER_IMAGE_SIZE);
             CONTAINER_IMAGE_READY.store(
-                canonical == b"embedded://minimal-system-v0"
-                    || canonical == PINNED_OCI_IMAGE && crate::oci_image::is_installed(),
+                canonical == b"embedded://minimal-system-v0",
                 Ordering::SeqCst,
             );
             update_container_configuration(control_abi::CONTAINER_CONFIG_IMAGE)
@@ -17354,7 +17486,6 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         }
         control_abi::CONTAINER_RESTART
             if stored_container_name_matches(name)
-                && CONTAINER_IMAGE_READY.load(Ordering::SeqCst)
                 && CONTAINER_CONFIG_FLAGS.load(Ordering::SeqCst)
                     & control_abi::CONTAINER_CONFIG_COMPLETE
                     == control_abi::CONTAINER_CONFIG_COMPLETE
@@ -17366,7 +17497,11 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                         | control_abi::CONTAINER_STATE_FAILED
                 ) =>
         {
-            CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
+            if CONTAINER_IMAGE_READY.load(Ordering::SeqCst) {
+                CONTAINER_RESTART_REQUESTED.store(true, Ordering::SeqCst);
+            } else {
+                CONTAINER_PULL_REQUESTED.store(true, Ordering::SeqCst);
+            }
             control_abi::CONTAINER_STATE_STOPPED
         }
         control_abi::CONTAINER_INJECT_FAILURE
@@ -17474,11 +17609,13 @@ fn stored_container_name_matches(name: &[u8]) -> bool {
 
 pub(crate) fn configured_container_uses_installed_oci_image() -> bool {
     let size = usize::from(CONTAINER_IMAGE_SIZE.load(Ordering::SeqCst));
-    size == PINNED_OCI_IMAGE.len()
-        && CONTAINER_IMAGE[..size]
-            .iter()
-            .zip(PINNED_OCI_IMAGE)
-            .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected)
+    let embedded = b"embedded://minimal-system-v0";
+    size != 0
+        && !(size == embedded.len()
+            && CONTAINER_IMAGE[..size]
+                .iter()
+                .zip(embedded)
+                .all(|(stored, expected)| stored.load(Ordering::SeqCst) == *expected))
         && crate::oci_image::is_installed()
 }
 
@@ -17489,6 +17626,28 @@ pub(crate) fn configured_container_init(output: &mut [u8]) -> Option<usize> {
         *destination = source.load(Ordering::SeqCst);
     }
     Some(size)
+}
+
+pub(crate) fn configured_container_image(output: &mut [u8]) -> Option<usize> {
+    let size = usize::from(CONTAINER_IMAGE_SIZE.load(Ordering::SeqCst));
+    let output = output.get_mut(..size)?;
+    for (destination, source) in output.iter_mut().zip(&CONTAINER_IMAGE[..size]) {
+        *destination = source.load(Ordering::SeqCst);
+    }
+    Some(size)
+}
+
+pub(crate) fn take_container_pull_request() -> bool {
+    CONTAINER_PULL_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
+pub(crate) fn complete_container_pull(success: bool) {
+    CONTAINER_IMAGE_READY.store(success, Ordering::Release);
+    if success {
+        CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
+    } else {
+        CONTAINER_CONTROL_STATE.store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::Release);
+    }
 }
 
 fn store_container_name(name: &[u8]) {
@@ -18081,7 +18240,7 @@ pub(crate) fn activate_user_root(root: u64) -> bool {
         return false;
     };
     if !frames.context_matches(instruction, stack)
-        || !memory::frame_addresses_owned_by(owner, frames.base())
+        || !frames.frames_owned_by(owner)
         || frames
             .dma()
             .is_some_and(|dma| !memory::frame_addresses_owned_by(owner, &[dma]))

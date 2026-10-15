@@ -8,9 +8,9 @@ use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 128;
-const MAX_RECYCLED_FRAMES: usize = 256;
-const MAX_LIVE_FRAMES: usize = 256;
-const DOMAIN_FRAME_LIMIT: usize = 16;
+const MAX_RECYCLED_FRAMES: usize = 8192;
+const MAX_LIVE_FRAMES: usize = 8192;
+const DOMAIN_FRAME_LIMIT: usize = 192;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 static RUNTIME_EXTENT_START: AtomicU64 = AtomicU64::new(0);
@@ -86,33 +86,27 @@ const EMPTY_LEASE: FrameLease = FrameLease {
 };
 
 #[derive(Clone, Copy)]
-pub(crate) struct FrameAllocator {
+pub(crate) struct FrameAllocator<
+    const LIVE_LIMIT: usize = MAX_LIVE_FRAMES,
+    const RECYCLED_LIMIT: usize = MAX_RECYCLED_FRAMES,
+    const OWNER_LIMIT: usize = DOMAIN_FRAME_LIMIT,
+> {
     ranges: [Range; MAX_RANGES],
     range_count: usize,
     active_range: usize,
     allocated_frames: u64,
     reclaimed_boot_service_frames: u64,
-    live_frames: [FrameLease; MAX_LIVE_FRAMES],
-    live_owners: [FrameOwner; MAX_LIVE_FRAMES],
+    live_frames: [FrameLease; LIVE_LIMIT],
+    live_owners: [FrameOwner; LIVE_LIMIT],
     live_count: usize,
-    recycled: [FrameLease; MAX_RECYCLED_FRAMES],
+    recycled: [FrameLease; RECYCLED_LIMIT],
     recycled_count: usize,
 }
 
-impl FrameAllocator {
-    pub(crate) fn from_uefi_map(boot_info: &BootInfo, ceiling: u64) -> Option<Self> {
-        let mut allocator = Self {
-            ranges: [EMPTY_RANGE; MAX_RANGES],
-            range_count: 0,
-            active_range: 0,
-            allocated_frames: 0,
-            reclaimed_boot_service_frames: 0,
-            live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
-            live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
-            live_count: 0,
-            recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
-            recycled_count: 0,
-        };
+impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: usize>
+    FrameAllocator<LIVE_LIMIT, RECYCLED_LIMIT, OWNER_LIMIT>
+{
+    fn populate_uefi_map(&mut self, boot_info: &BootInfo, ceiling: u64) -> Option<()> {
         let count = boot_info.memory_map_size / boot_info.memory_descriptor_size;
 
         for index in 0..count {
@@ -138,23 +132,22 @@ impl FrameAllocator {
             let start = start.div_ceil(PAGE_SIZE) * PAGE_SIZE;
             let end = end / PAGE_SIZE * PAGE_SIZE;
             if start < end {
-                allocator.insert_range(Range { next: start, end })?;
+                self.insert_range(Range { next: start, end })?;
                 if boot_service {
-                    allocator.reclaimed_boot_service_frames = allocator
+                    self.reclaimed_boot_service_frames = self
                         .reclaimed_boot_service_frames
                         .checked_add((end - start) / PAGE_SIZE)?;
                 }
             }
         }
-        allocator.sort_and_merge();
-        (allocator.range_count != 0).then_some(allocator)
+        self.sort_and_merge();
+        (self.range_count != 0).then_some(())
     }
 
     pub(crate) fn reserve<const N: usize>(&mut self, owner: FrameOwner) -> Option<[FrameLease; N]> {
         if N == 0
-            || self.live_count.checked_add(N)? > MAX_LIVE_FRAMES
-            || (!owner.is_kernel()
-                && self.owner_live_count(owner).checked_add(N)? > DOMAIN_FRAME_LIMIT)
+            || self.live_count.checked_add(N)? > LIVE_LIMIT
+            || (!owner.is_kernel() && self.owner_live_count(owner).checked_add(N)? > OWNER_LIMIT)
             || self.allocated_frames.checked_add(N as u64).is_none()
         {
             return None;
@@ -186,9 +179,8 @@ impl FrameAllocator {
         owner: FrameOwner,
     ) -> Option<[FrameLease; N]> {
         if N == 0
-            || self.live_count.checked_add(N)? > MAX_LIVE_FRAMES
-            || (!owner.is_kernel()
-                && self.owner_live_count(owner).checked_add(N)? > DOMAIN_FRAME_LIMIT)
+            || self.live_count.checked_add(N)? > LIVE_LIMIT
+            || (!owner.is_kernel() && self.owner_live_count(owner).checked_add(N)? > OWNER_LIMIT)
         {
             return None;
         }
@@ -249,8 +241,8 @@ impl FrameAllocator {
     }
 
     fn allocate_one(&mut self, owner: FrameOwner) -> Option<FrameLease> {
-        if self.live_count == MAX_LIVE_FRAMES
-            || (!owner.is_kernel() && self.owner_live_count(owner) >= DOMAIN_FRAME_LIMIT)
+        if self.live_count == LIVE_LIMIT
+            || (!owner.is_kernel() && self.owner_live_count(owner) >= OWNER_LIMIT)
         {
             return None;
         }
@@ -287,7 +279,7 @@ impl FrameAllocator {
             || self
                 .recycled_count
                 .checked_add(frames.len())
-                .is_none_or(|count| count > MAX_RECYCLED_FRAMES)
+                .is_none_or(|count| count > RECYCLED_LIMIT)
             || self.allocated_frames < frames.len() as u64
             || self.live_count < frames.len()
         {
@@ -346,7 +338,7 @@ impl FrameAllocator {
     }
 
     fn record_live(&mut self, frame: FrameLease, owner: FrameOwner) -> Option<()> {
-        if self.live_count == MAX_LIVE_FRAMES
+        if self.live_count == LIVE_LIMIT
             || self.live_frames[..self.live_count]
                 .iter()
                 .any(|live| live.address == frame.address)
@@ -375,7 +367,7 @@ impl FrameAllocator {
         if self
             .owner_live_count(to)
             .checked_add(count)
-            .is_none_or(|total| total > DOMAIN_FRAME_LIMIT)
+            .is_none_or(|total| total > OWNER_LIMIT)
         {
             return None;
         }
@@ -458,13 +450,19 @@ pub(crate) fn initialize(boot_info: &BootInfo, ceiling: u64) -> bool {
     if INITIALIZED.load(Ordering::Acquire) {
         return false;
     }
-    let Some(allocator) = FrameAllocator::from_uefi_map(boot_info, ceiling) else {
-        return false;
-    };
     // SAFETY: Bootstrap initialization is single-processor and interrupts do
-    // not access the allocator. Publication follows the complete write.
+    // not access the allocator. Constructing the large tracking tables in
+    // their final static location avoids consuming the bounded kernel stack.
     unsafe {
-        core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).write(MaybeUninit::new(allocator));
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        core::ptr::write_bytes(
+            allocator.cast::<u8>(),
+            0,
+            core::mem::size_of::<FrameAllocator>(),
+        );
+        if (*allocator).populate_uefi_map(boot_info, ceiling).is_none() {
+            return false;
+        }
     }
     INITIALIZED.store(true, Ordering::Release);
     true
@@ -738,16 +736,18 @@ pub(crate) fn reclaimed_boot_service_frame_count() -> Option<u64> {
 }
 
 pub(crate) fn verify_reservation_invariants() -> bool {
-    let mut allocator = FrameAllocator {
+    const TEST_FRAME_LIMIT: usize = 64;
+    type TestFrameAllocator = FrameAllocator<TEST_FRAME_LIMIT, TEST_FRAME_LIMIT, 16>;
+    let mut allocator = TestFrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
         range_count: 2,
         active_range: 0,
         allocated_frames: 0,
         reclaimed_boot_service_frames: 0,
-        live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
-        live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
+        live_frames: [EMPTY_LEASE; TEST_FRAME_LIMIT],
+        live_owners: [FrameOwner::KERNEL; TEST_FRAME_LIMIT],
         live_count: 0,
-        recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
+        recycled: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         recycled_count: 0,
     };
     allocator.ranges[0] = Range {
@@ -793,16 +793,16 @@ pub(crate) fn verify_reservation_invariants() -> bool {
         && allocator.owns(other_owner, &last)
         && allocator.owner_live_count(owner) == 0
         && allocator.owner_live_count(other_owner) == 3;
-    let mut budgeted = FrameAllocator {
+    let mut budgeted = TestFrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
         range_count: 1,
         active_range: 0,
         allocated_frames: 0,
         reclaimed_boot_service_frames: 0,
-        live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
-        live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
+        live_frames: [EMPTY_LEASE; TEST_FRAME_LIMIT],
+        live_owners: [FrameOwner::KERNEL; TEST_FRAME_LIMIT],
         live_count: 0,
-        recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
+        recycled: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         recycled_count: 0,
     };
     budgeted.ranges[0] = Range {
@@ -823,16 +823,16 @@ pub(crate) fn verify_reservation_invariants() -> bool {
     let bounded_transfer_completed = budgeted.transfer_owner(owner, third_owner) == Some(16)
         && budgeted.owner_live_count(owner) == 0
         && budgeted.owner_live_count(third_owner) == 16;
-    let mut contiguous = FrameAllocator {
+    let mut contiguous = TestFrameAllocator {
         ranges: [EMPTY_RANGE; MAX_RANGES],
         range_count: 2,
         active_range: 0,
         allocated_frames: 0,
         reclaimed_boot_service_frames: 0,
-        live_frames: [EMPTY_LEASE; MAX_LIVE_FRAMES],
-        live_owners: [FrameOwner::KERNEL; MAX_LIVE_FRAMES],
+        live_frames: [EMPTY_LEASE; TEST_FRAME_LIMIT],
+        live_owners: [FrameOwner::KERNEL; TEST_FRAME_LIMIT],
         live_count: 0,
-        recycled: [EMPTY_LEASE; MAX_RECYCLED_FRAMES],
+        recycled: [EMPTY_LEASE; TEST_FRAME_LIMIT],
         recycled_count: 0,
     };
     contiguous.ranges[0] = Range {

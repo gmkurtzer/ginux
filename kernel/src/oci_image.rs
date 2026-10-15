@@ -12,11 +12,6 @@ pub(crate) struct Child {
     pub(crate) name: &'static [u8],
 }
 
-const PINNED_ROOTFS_SHA256: [u8; 32] = [
-    0x74, 0xd9, 0x7c, 0x42, 0x8c, 0x51, 0xa8, 0x28, 0xf9, 0x05, 0x1a, 0x7a, 0x40, 0xa5, 0x3f, 0xf1,
-    0xfc, 0x99, 0xe5, 0x4f, 0xc3, 0x03, 0x23, 0xce, 0x36, 0x76, 0x07, 0x01, 0xb0, 0xb7, 0xf7, 0x11,
-];
-
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SIZE: AtomicUsize = AtomicUsize::new(0);
@@ -25,36 +20,20 @@ pub(crate) fn is_installed() -> bool {
     INSTALLED.load(Ordering::Acquire)
 }
 
-pub(crate) fn install_pinned_rootfs(bytes: &'static [u8]) -> bool {
-    if INSTALLED.load(Ordering::Acquire) || !ginux_oci::verify_sha256(bytes, &PINNED_ROOTFS_SHA256)
-    {
+pub(crate) fn install_runtime_rootfs(bytes: &'static [u8]) -> bool {
+    if INSTALLED.load(Ordering::Acquire) {
         return false;
     }
     let Some(rootfs) = Rootfs::parse(bytes) else {
         return false;
     };
-    let valid = process_plan_in(&rootfs, b"/bin/sh").is_some_and(|plan| {
-        plan.main.segment_count == 4
-            && plan.interpreter.segment_count == 4
-            && plan.main.program_header_count == 12
-            && plan.interpreter.program_header_count == 11
-            && plan.main.program_headers == 0x40_0040
-            && plan.interpreter.program_headers == 0x60_0040
-            && plan.main.load_bias == 0x40_0000
-            && plan.interpreter.load_bias == 0x60_0000
-            && plan.initial_entry == plan.interpreter.entry
-            && plan.main.segments[..plan.main.segment_count]
-                .iter()
-                .flatten()
-                .all(|segment| segment.page_count != 0)
-    });
-    if !valid {
+    if process_plan_in(&rootfs, b"/bin/sh").is_none() {
         return false;
     }
     ADDRESS.store(bytes.as_ptr() as usize, Ordering::Relaxed);
     SIZE.store(bytes.len(), Ordering::Relaxed);
     INSTALLED.store(true, Ordering::Release);
-    process_plan(b"/bin/sh").is_some()
+    true
 }
 
 fn rootfs() -> Option<Rootfs<'static>> {

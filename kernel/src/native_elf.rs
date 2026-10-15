@@ -2,12 +2,12 @@ const ELF_HEADER_SIZE: usize = 64;
 const PROGRAM_HEADER_SIZE: usize = 56;
 const DYNAMIC_ENTRY_SIZE: usize = 16;
 const RELA_ENTRY_SIZE: usize = 24;
-const MAX_FILE_SIZE: usize = 64 * 1024;
-const MAX_IMAGE_SIZE: u64 = 64 * 1024;
+const MAX_FILE_SIZE: usize = 512 * 1024;
+const MAX_IMAGE_SIZE: u64 = 1024 * 1024;
 const MAX_PROGRAM_HEADERS: usize = 8;
-const MAX_LOAD_SEGMENTS: usize = 3;
+const MAX_LOAD_SEGMENTS: usize = 4;
 const MAX_RELOCATIONS: usize = 128;
-const MAX_SERVICE_RELOCATIONS: usize = 8;
+const MAX_SERVICE_RELOCATIONS: usize = 32;
 const MAX_CONTROLLER_RELOCATIONS: usize = 128;
 const PAGE_SIZE: u64 = 4096;
 
@@ -40,7 +40,7 @@ const DF_BIND_NOW: u64 = 8;
 const DF_1_NOW_PIE: u64 = 0x0800_0001;
 const R_X86_64_RELATIVE: u64 = 8;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct LoadSegment {
     pub(crate) file_offset: u64,
     pub(crate) virtual_address: u64,
@@ -59,6 +59,7 @@ pub(crate) struct NativeImage<'a> {
     pub(crate) bytes: &'a [u8],
     pub(crate) entry: u64,
     pub(crate) segments: [Option<LoadSegment>; MAX_LOAD_SEGMENTS],
+    relro: LoadSegment,
     pub(crate) relocations: [Option<RelativeRelocation>; MAX_RELOCATIONS],
     pub(crate) relocation_count: usize,
 }
@@ -81,6 +82,21 @@ impl NativeImage<'_> {
         let address = (page as u64).saturating_mul(PAGE_SIZE);
         self.segments.iter().flatten().any(|segment| {
             segment.flags & PF_EXECUTE != 0
+                && address >= segment.virtual_address / PAGE_SIZE * PAGE_SIZE
+                && address
+                    < segment
+                        .virtual_address
+                        .saturating_add(segment.memory_size)
+                        .div_ceil(PAGE_SIZE)
+                        * PAGE_SIZE
+        })
+    }
+
+    pub(crate) fn page_is_writable(&self, page: usize) -> bool {
+        let address = (page as u64).saturating_mul(PAGE_SIZE);
+        self.segments.iter().flatten().any(|segment| {
+            segment.flags & PF_WRITE != 0
+                && *segment != self.relro
                 && address >= segment.virtual_address / PAGE_SIZE * PAGE_SIZE
                 && address
                     < segment
@@ -273,12 +289,11 @@ fn inspect_with_relocation_limit(
             _ => return None,
         }
     }
-    if segment_count != MAX_LOAD_SEGMENTS || !phdr_seen || !stack_seen {
+    if !(3..=MAX_LOAD_SEGMENTS).contains(&segment_count) || !phdr_seen || !stack_seen {
         return None;
     }
     let read_only = exactly_one_segment(&segments, PF_READ)?;
     let executable = exactly_one_segment(&segments, PF_READ | PF_EXECUTE)?;
-    let writable = exactly_one_segment(&segments, PF_READ | PF_WRITE)?;
     if read_only.virtual_address != 0
         || read_only.file_offset != 0
         || !contains_memory(executable, entry, 1)
@@ -286,6 +301,11 @@ fn inspect_with_relocation_limit(
         return None;
     }
     let dynamic = dynamic?;
+    let writable = segments.iter().flatten().find(|segment| {
+        segment.flags == PF_READ | PF_WRITE
+            && contains_memory(**segment, dynamic.virtual_address, dynamic.memory_size)
+    })?;
+    let writable = *writable;
     let relro = relro?;
     if !contains_memory(writable, dynamic.virtual_address, dynamic.memory_size)
         || relro.virtual_address != writable.virtual_address
@@ -296,21 +316,26 @@ fn inspect_with_relocation_limit(
         return None;
     }
     let (relocations, relocation_count) =
-        parse_dynamic(bytes, &segments, dynamic, writable, maximum_relocations)?;
-    Some(NativeImage {
+        parse_dynamic(bytes, &segments, dynamic, maximum_relocations)?;
+    let image = NativeImage {
         bytes,
         entry,
         segments,
+        relro,
         relocations,
         relocation_count,
-    })
+    };
+    let page_count = image.page_count()?;
+    if (0..page_count).any(|page| image.page_is_executable(page) && image.page_is_writable(page)) {
+        return None;
+    }
+    Some(image)
 }
 
 fn parse_dynamic(
     bytes: &[u8],
     segments: &[Option<LoadSegment>; MAX_LOAD_SEGMENTS],
     dynamic: LoadSegment,
-    writable: LoadSegment,
     maximum_relocations: usize,
 ) -> Option<([Option<RelativeRelocation>; MAX_RELOCATIONS], usize)> {
     let start = usize::try_from(dynamic.file_offset).ok()?;
@@ -364,7 +389,9 @@ fn parse_dynamic(
         if info != R_X86_64_RELATIVE
             || target % 8 != 0
             || addend < 0
-            || !contains_memory(writable, target, 8)
+            || !segments.iter().flatten().any(|segment| {
+                segment.flags == PF_READ | PF_WRITE && contains_memory(*segment, target, 8)
+            })
             || !segments
                 .iter()
                 .flatten()

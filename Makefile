@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image alpine-image alpine-image-check build-alpine run-alpine test-alpine rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -25,11 +25,7 @@ help:
 	@echo "  make doctor  Check the local development prerequisites"
 	@echo "  make manifest Regenerate the signed development boot inputs"
 	@echo "  make system-image Build the pinned minimal system-container candidate"
-	@echo "  make alpine-image Prepare and verify the pinned Alpine x86-64 OCI image"
-	@echo "  make alpine-image-check Verify the prepared Alpine image without downloading"
-	@echo "  make build-alpine Build Ginux with the verified Alpine rootfs sealed in"
-	@echo "  make run-alpine Compatibility alias for 'make run'"
-	@echo "  make test-alpine Verify Alpine OCI ingestion and its real shell in QEMU"
+	@echo "  make test-alpine Download Alpine at runtime and verify its real shell in QEMU"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
@@ -40,7 +36,7 @@ help:
 	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
 	@echo "  make architecture-check Check architecture and roadmap consistency"
 	@echo "  make build   Build the x86-64 UEFI image"
-	@echo "  make run     Prepare Alpine, build Ginux, and boot it in headless QEMU"
+	@echo "  make run     Build Ginux and boot it in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
 	@echo "  make test-c1 Build and verify the interactive controller console"
 	@echo "  make test-c2 Verify configured container lifecycle management"
@@ -59,12 +55,6 @@ manifest: linux-probe controller-runtime network-service protocol-service volume
 
 system-image: manifest
 	@echo "Built $(INITRAMFS) from $(SYSTEM_PROFILE)"
-
-alpine-image:
-	@tools/images/prepare-alpine.sh fetch
-
-alpine-image-check:
-	@tools/images/prepare-alpine.sh check
 
 rocky-image:
 	@tools/images/prepare-rocky.sh fetch
@@ -118,20 +108,10 @@ build: manifest
 	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
 	@echo "Built $(EFI_DESTINATION)"
 
-build-alpine: alpine-image manifest
-	@echo "Building Alpine-enabled Ginux for $(TARGET) ($(PROFILE))"
-	@GINUX_OCI_ROOTFS="$(abspath build/alpine-3.24-shell-v0/rootfs.tar)" cargo build --package ginux-boot --target $(TARGET) $(CARGO_PROFILE_FLAG) --features alpine-fixture
-	@mkdir -p "$(dir $(EFI_DESTINATION))"
-	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
-	@echo "Built $(EFI_DESTINATION) with pinned Alpine 3.24.2 x86-64 rootfs"
-
-run-alpine: run
-
-test-alpine: build-alpine
-	@tests/qemu/alpine-image.sh
+test-alpine: build
 	@tests/qemu/alpine-shell.sh
 
-run: build-alpine
+run: build
 	@tools/qemu/run.sh
 
 test: build

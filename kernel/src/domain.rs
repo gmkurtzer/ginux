@@ -3,9 +3,9 @@ use crate::manifest::Manifest;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-const MAX_DOMAINS: usize = 4;
+const MAX_DOMAINS: usize = 8;
 pub(crate) const HOST_DOMAIN_CURSOR_END: u64 = MAX_DOMAINS as u64;
-const MAX_BOOT_GRANTS: usize = 9;
+const MAX_BOOT_GRANTS: usize = 10;
 const CONTROL_CALL_BUDGET: u16 = 79;
 const SERVICE_CALL_BUDGET: u16 = 23;
 const BOOTSTRAP_THREAD_LIMIT: u16 = 1;
@@ -1593,8 +1593,7 @@ fn verify_generation_exhaustion_invariants_inner() -> Option<bool> {
     let mut domains = Manager::new();
     domains.generations[0] = u32::MAX;
     let displaced_control = domains.create_control_plane(&grants)?;
-    domains.generations[2] = u32::MAX;
-    domains.generations[3] = u32::MAX;
+    domains.generations[2..].fill(u32::MAX);
     if displaced_control.slot != 1
         || domains.create_service().is_some()
         || domains.primary_service_identity.is_some()
@@ -1624,13 +1623,15 @@ fn verify_generation_exhaustion_invariants_inner() -> Option<bool> {
         rights: Rights::WRITE,
     };
     auxiliary.service_generations[1] = u32::MAX;
+    auxiliary.service_generations[3..].fill(u32::MAX);
     let service = auxiliary.create_auxiliary_service_with_delegations(&[console_grant])?;
     let identity = auxiliary.domain(service)?.service?;
     Some(
         identity.slot == 2
             && identity.generation == 1
-            && auxiliary.auxiliary_service_ids == [None, Some(service)]
-            && auxiliary.service_generations == [0, u32::MAX, 1]
+            && auxiliary.auxiliary_service_ids == [None, Some(service), None, None, None, None]
+            && auxiliary.service_generations
+                == [0, u32::MAX, 1, u32::MAX, u32::MAX, u32::MAX, u32::MAX]
             && auxiliary
                 .create_auxiliary_service_with_delegations(&[console_grant])
                 .is_none()
@@ -1872,10 +1873,15 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
         || manager.domain(host_service)?.failure_policy != Some(ServiceFailurePolicy::StopOnly)
         || manager.domain(host_service)?.thread_limit != 0
         || manager.attach_thread(console_service)
-        || manager
-            .create_auxiliary_service_with_delegations(&[console_grant])
-            .is_some()
-        || manager.auxiliary_service_ids != [Some(console_service), Some(host_service)]
+        || manager.auxiliary_service_ids
+            != [
+                Some(console_service),
+                Some(host_service),
+                None,
+                None,
+                None,
+                None,
+            ]
         || !manager.is_descendant(control, console_service)
         || !manager.is_descendant(control, host_service)
         || !manager.permits(console_service, console_handle, 2, Rights::WRITE)
@@ -1909,7 +1915,15 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
         || replacement_identity.slot != console_identity.slot
         || replacement_identity.generation <= console_identity.generation
         || manager.domain(replacement)?.failure_policy != Some(ServiceFailurePolicy::StopOnly)
-        || manager.auxiliary_service_ids != [Some(replacement), Some(host_service)]
+        || manager.auxiliary_service_ids
+            != [
+                Some(replacement),
+                Some(host_service),
+                None,
+                None,
+                None,
+                None,
+            ]
         || !manager.permits(replacement, replacement_handle, 2, Rights::WRITE)
         || manager.permits(console_service, console_handle, 2, Rights::WRITE)
         || manager.retire_auxiliary_service(replacement)
@@ -1946,7 +1960,7 @@ fn verify_auxiliary_service_registry_invariants_inner() -> Option<bool> {
     manager.lifecycle_events.next_sequence = u64::MAX;
     Some(
         !manager.retire_auxiliary_service(host_service)
-            && manager.auxiliary_service_ids == [None, Some(host_service)]
+            && manager.auxiliary_service_ids == [None, Some(host_service), None, None, None, None]
             && manager.domain(host_service)?.state == State::Stopping
             && manager.lifecycle_events.is_empty()
             && manager.lifecycle_events.next_sequence == u64::MAX,
@@ -2185,9 +2199,9 @@ fn address_space_root_is_owned(domain_raw: u64, root: u64) -> bool {
     let Some(frames) = crate::arch::x86_64::paging::validated_user_root_frames(root) else {
         return false;
     };
-    (frames.base().len() == crate::address_space::USER_ADDRESS_SPACE_FRAMES
-        || (8..=crate::address_space::NATIVE_CONTROLLER_FRAME_COUNT).contains(&frames.base().len()))
-        && crate::memory::frame_addresses_owned_by(owner, frames.base())
+    (frames.base_count() == crate::address_space::USER_ADDRESS_SPACE_FRAMES
+        || (8..=crate::address_space::NATIVE_NETWORK_FRAME_COUNT).contains(&frames.base_count()))
+        && frames.frames_owned_by(owner)
         && frames
             .dma()
             .is_none_or(|dma| crate::memory::frame_addresses_owned_by(owner, &[dma]))

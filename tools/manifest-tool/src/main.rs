@@ -20,11 +20,11 @@ const EXECUTABLE_MAGIC: &[u8; 8] = b"GINXBIN\0";
 const EXECUTABLE_VERSION: u16 = 2;
 const EXECUTABLE_HEADER_SIZE: u16 = 40;
 const EXECUTABLE_MAX_CODE_SIZE: usize = 4096;
-const NETWORK_SERVICE_MAX_SIZE: usize = 64 * 1024;
+const NETWORK_SERVICE_MAX_SIZE: usize = 512 * 1024;
 const PROTOCOL_SERVICE_MAX_SIZE: usize = 64 * 1024;
 const VOLUME_SERVICE_MAX_SIZE: usize = 64 * 1024;
 const CONTROLLER_RUNTIME_MAX_SIZE: usize = 64 * 1024;
-const ROOT_IMAGE_MAX_SIZE: usize = 48 * 4096;
+const ROOT_IMAGE_MAX_SIZE: usize = 160 * 4096;
 const DEVELOPMENT_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
@@ -55,7 +55,7 @@ fn main() {
     }
     let network_service = read_root_artifact(Path::new(&arguments[6]));
     if network_service.is_empty() || network_service.len() > NETWORK_SERVICE_MAX_SIZE {
-        fail("network service must contain 1 through 65536 bytes");
+        fail("network service must contain 1 through 524288 bytes");
     }
     let protocol_service = read_root_artifact(Path::new(&arguments[7]));
     if protocol_service.is_empty() || protocol_service.len() > PROTOCOL_SERVICE_MAX_SIZE {
@@ -77,7 +77,7 @@ fn main() {
         &system_profile,
     );
     if root_image.len() > ROOT_IMAGE_MAX_SIZE {
-        fail("generated root image exceeds the 48-page publication capacity");
+        fail("generated root image exceeds the 160-page publication capacity");
     }
 
     let bundle_digest: [u8; 32] = Sha256::digest(&bundle).into();
@@ -341,8 +341,8 @@ fn parse_config(source: &str) -> (u64, Vec<(u64, u64)>) {
     let sequence = sequence.filter(|value| *value != 0).unwrap_or_else(|| {
         fail("manifest requires one nonzero sequence");
     });
-    if grants.is_empty() || grants.len() > 9 {
-        fail("manifest requires one through nine grants");
+    if grants.is_empty() || grants.len() > 10 {
+        fail("manifest requires one through ten grants");
     }
     (sequence, grants)
 }

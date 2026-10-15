@@ -44,15 +44,15 @@ verification exercises configuration and lifecycle commands.
 
 ## C3: Alpine shell container
 
-**Implementation status:** In progress. The explicit image contract, pinned
-Alpine OCI input, verified rootfs reader, Alpine-enabled boot profile, scalable
+**Implementation status:** In progress. Explicit image configuration, runtime
+registry resolution and download, verified rootfs ingestion, scalable
 four-segment PIE mapping, ELF-declared dynamic-loader startup, and an interactive
-BusyBox `/bin/sh` smoke path are complete. Rootfs-backed file operations,
-detach/reattach, runtime registry pull, and container networking remain.
+BusyBox `/bin/sh` path are complete. Detach/reattach, multi-layer filesystem
+merging, and container networking remain.
 
 Deliverables:
 
-- A reproducible, architecture-specific, digest-pinned Alpine x86-64 image.
+- Runtime selection of the linux/amd64 Alpine manifest without a build-embedded image.
 - Operator-configurable control-domain networking can reach an OCI registry
   and resolve the x86-64 manifest. `container start NAME` automatically pulls
   a missing configured image, verifies every digest while streaming it into a

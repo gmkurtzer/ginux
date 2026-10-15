@@ -67,10 +67,11 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'container new alpine' \
         'container set alpine image=alpine:latest init=/bin/sh' \
         'container list'
-    wait_for 'docker.io/library/alpine:3.24.2'
+    wait_for 'docker.io/library/alpine:latest'
     printf '%s\n' \
         'container start alpine --attach'
     wait_for 'ginux: entering configured OCI init'
+    wait_for 'ginux: OCI image downloaded, verified, unpacked, and published'
     printf '%s\n' \
         "printf 'LIBC_RUNTIME_OK\\n'" \
         "test -f /bin/busybox && printf 'STAT_ABI_OK\\n'" \
@@ -119,7 +120,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
 } | GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
-for _ in {1..90}; do
+for _ in {1..300}; do
     if grep -Fq 'GINUX_KERNEL_OK' "$output_file" || grep -Eq '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
         break
     fi

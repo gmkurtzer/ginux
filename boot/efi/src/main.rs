@@ -12,19 +12,6 @@ use generated_boot::{
 };
 use ginux_kernel::{kernel_entry, BootInfo, ResetSystem, BOOT_INFO_MAGIC, BOOT_INFO_VERSION};
 
-#[cfg(feature = "alpine-fixture")]
-static OCI_ROOTFS: &[u8] = include_bytes!(env!("GINUX_OCI_ROOTFS"));
-
-#[cfg(feature = "alpine-fixture")]
-fn oci_rootfs() -> (*const u8, usize) {
-    (OCI_ROOTFS.as_ptr(), OCI_ROOTFS.len())
-}
-
-#[cfg(not(feature = "alpine-fixture"))]
-fn oci_rootfs() -> (*const u8, usize) {
-    (core::ptr::null(), 0)
-}
-
 type EfiHandle = *mut c_void;
 type EfiStatus = usize;
 
@@ -84,7 +71,7 @@ struct EfiSimpleTextOutputProtocol {
 #[repr(C)]
 struct EfiRuntimeServices {
     header: EfiTableHeader,
-    get_time: usize,
+    get_time: unsafe extern "efiapi" fn(*mut EfiTime, *mut c_void) -> EfiStatus,
     set_time: usize,
     get_wakeup_time: usize,
     set_wakeup_time: usize,
@@ -95,6 +82,21 @@ struct EfiRuntimeServices {
     set_variable: usize,
     get_next_high_monotonic_count: usize,
     reset_system: ResetSystem,
+}
+
+#[repr(C)]
+struct EfiTime {
+    year: u16,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+    pad1: u8,
+    nanosecond: u32,
+    time_zone: i16,
+    daylight: u8,
+    pad2: u8,
 }
 
 type GetMemoryMap =
@@ -259,6 +261,7 @@ unsafe fn exit_boot_services(
         panic!("UEFI service table is missing");
     }
     let (image_base, image_size) = loaded_image_bounds(image, boot_services);
+    let unix_time = read_unix_time(runtime_services);
 
     let memory_map = core::ptr::addr_of_mut!(MEMORY_MAP_STORAGE.0).cast::<u8>();
 
@@ -284,7 +287,6 @@ unsafe fn exit_boot_services(
 
         let status = ((*boot_services).exit_boot_services)(image, map_key);
         if status == EFI_SUCCESS {
-            let (oci_rootfs, oci_rootfs_size) = oci_rootfs();
             return BootInfo {
                 magic: BOOT_INFO_MAGIC,
                 version: BOOT_INFO_VERSION,
@@ -304,8 +306,9 @@ unsafe fn exit_boot_services(
                 controller_runtime_size: CONTROLLER_RUNTIME.len(),
                 root_image: ROOT_IMAGE.as_ptr(),
                 root_image_size: ROOT_IMAGE.len(),
-                oci_rootfs,
-                oci_rootfs_size,
+                oci_rootfs: core::ptr::null(),
+                oci_rootfs_size: 0,
+                unix_time,
                 reset_system: (*runtime_services).reset_system,
                 image_base,
                 image_size,
@@ -314,6 +317,52 @@ unsafe fn exit_boot_services(
     }
 
     panic!("failed to exit UEFI boot services");
+}
+
+unsafe fn read_unix_time(runtime_services: *mut EfiRuntimeServices) -> u64 {
+    let mut time = EfiTime {
+        year: 0,
+        month: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        pad1: 0,
+        nanosecond: 0,
+        time_zone: 0,
+        daylight: 0,
+        pad2: 0,
+    };
+    if ((*runtime_services).get_time)(&mut time, core::ptr::null_mut()) != EFI_SUCCESS
+        || !(1970..=9999).contains(&time.year)
+        || !(1..=12).contains(&time.month)
+        || !(1..=31).contains(&time.day)
+        || time.hour > 23
+        || time.minute > 59
+        || time.second > 60
+    {
+        panic!("UEFI wall clock is unavailable");
+    }
+    let mut days = 0_u64;
+    for year in 1970..time.year {
+        days += if is_leap_year(year) { 366 } else { 365 };
+    }
+    const MONTH_DAYS: [u8; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    for month in 1..time.month {
+        days += u64::from(MONTH_DAYS[usize::from(month - 1)]);
+        if month == 2 && is_leap_year(time.year) {
+            days += 1;
+        }
+    }
+    days += u64::from(time.day - 1);
+    days * 86_400
+        + u64::from(time.hour) * 3_600
+        + u64::from(time.minute) * 60
+        + u64::from(time.second.min(59))
+}
+
+const fn is_leap_year(year: u16) -> bool {
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
 }
 
 unsafe fn loaded_image_bounds(

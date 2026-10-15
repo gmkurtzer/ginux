@@ -9,8 +9,10 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+ginux-image-store = { path = "../crates/image-store" }
 ginux-oci = { path = "../crates/oci" }
 ed25519-dalek = { version = "=3.0.0", default-features = false }
 ginux-native-abi = { path = "../crates/native-abi" }
 ginux-volume-format = { path = "../crates/volume-format" }
 ginux-volume-service = { path = "../crates/volume-service" }
+miniz_oxide = { version = "=0.9.1", default-features = false }

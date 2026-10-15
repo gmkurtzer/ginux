@@ -22,7 +22,10 @@ const HERTZ_PER_MHZ: u64 = 1_000_000;
 const SCHEDULER_PROOF_INITIAL_PREEMPTIONS_PER_SECOND: u64 = 1_000;
 const SCHEDULER_PROOF_RELOAD_PREEMPTIONS_PER_SECOND: u64 = 10_000;
 const LINUX_WAIT_TICKS_PER_SECOND: u64 = 1_000;
-const DEVICE_WAIT_TIMEOUTS_PER_SECOND: u64 = 10;
+// TCG and heavily loaded hosts can take longer than 100 ms to deliver a valid
+// emulated device completion. Keep the timeout bounded without mistaking host
+// scheduling latency for a driver failure.
+const DEVICE_WAIT_TIMEOUTS_PER_SECOND: u64 = 2;
 const DEVICE_WAIT_TEST_DOMAIN: u64 = u64::MAX;
 const APIC_LVT_TIMER: u32 = 0x320;
 const APIC_INITIAL_COUNT: u32 = 0x380;

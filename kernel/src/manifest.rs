@@ -5,7 +5,7 @@ const MAGIC: &[u8; 8] = b"GINXMNF\0";
 const VERSION: u16 = 4;
 const HEADER_SIZE: usize = 152;
 const GRANT_SIZE: usize = 16;
-const MAX_GRANTS: usize = 9;
+const MAX_GRANTS: usize = 10;
 const ALLOWED_RIGHTS: u64 = 0x0f;
 const DEVELOPMENT_PUBLIC_KEY: [u8; 32] = [
     0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,

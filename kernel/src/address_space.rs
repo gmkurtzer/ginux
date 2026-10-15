@@ -2661,9 +2661,19 @@ struct RegisteredAuxiliaryAddressSpace {
     network_egress_acknowledged: u64,
 }
 
+// Freestanding service address spaces are stored inline because the kernel has
+// no general-purpose heap at this boundary.
+#[allow(clippy::large_enum_variant)]
 enum AuxiliaryAddressSpace {
     Wx(WxAddressSpace),
     Native(NativeServiceAddressSpace),
+    Network(
+        NativeServiceAddressSpace<
+            NATIVE_NETWORK_IMAGE_PAGES,
+            NATIVE_NETWORK_FRAME_COUNT,
+            NATIVE_NETWORK_STACK_PAGES,
+        >,
+    ),
     Controller(
         NativeServiceAddressSpace<NATIVE_CONTROLLER_IMAGE_PAGES, NATIVE_CONTROLLER_FRAME_COUNT>,
     ),
@@ -4364,7 +4374,7 @@ fn current_user_root_is_owned(root: u64) -> bool {
     let Some(frames) = paging::validated_user_root_frames(root) else {
         return false;
     };
-    memory::frame_addresses_owned_by(owner, frames.base())
+    frames.frames_owned_by(owner)
         && frames
             .dma()
             .is_none_or(|dma| memory::frame_addresses_owned_by(owner, &[dma]))
@@ -4590,6 +4600,10 @@ pub(crate) fn verify_control_plane_wx_layout() -> bool {
 
 const NATIVE_SERVICE_IMAGE_PAGES: usize = 7;
 pub(crate) const NATIVE_SERVICE_FRAME_COUNT: usize = 4 + NATIVE_SERVICE_IMAGE_PAGES + 3;
+const NATIVE_NETWORK_IMAGE_PAGES: usize = 160;
+const NATIVE_NETWORK_STACK_PAGES: usize = 16;
+pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
+    4 + NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1;
 const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 8;
 pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize = 4 + NATIVE_CONTROLLER_IMAGE_PAGES + 3;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;
@@ -4598,6 +4612,7 @@ const NATIVE_BOOT_INFO_PAGE: usize = NATIVE_STACK_PAGE + 3;
 struct NativeServiceAddressSpace<
     const IMAGE_CAPACITY: usize = NATIVE_SERVICE_IMAGE_PAGES,
     const FRAME_COUNT: usize = NATIVE_SERVICE_FRAME_COUNT,
+    const STACK_PAGES: usize = 2,
 > {
     kernel_root: u64,
     root: u64,
@@ -4608,14 +4623,13 @@ struct NativeServiceAddressSpace<
     dma_frame: Option<memory::FrameLease>,
 }
 
-impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize>
-    NativeServiceAddressSpace<IMAGE_CAPACITY, FRAME_COUNT>
+impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize, const STACK_PAGES: usize>
+    NativeServiceAddressSpace<IMAGE_CAPACITY, FRAME_COUNT, STACK_PAGES>
 {
     const STACK_PAGE: usize = IMAGE_CAPACITY + 1;
-    const BOOT_INFO_PAGE: usize = Self::STACK_PAGE + 3;
+    const BOOT_INFO_PAGE: usize = Self::STACK_PAGE + STACK_PAGES + 1;
     const FIRST_STACK_FRAME: usize = 4 + IMAGE_CAPACITY;
-    const SECOND_STACK_FRAME: usize = Self::FIRST_STACK_FRAME + 1;
-    const BOOT_INFO_FRAME: usize = Self::SECOND_STACK_FRAME + 1;
+    const BOOT_INFO_FRAME: usize = Self::FIRST_STACK_FRAME + STACK_PAGES;
 
     fn new(
         kernel_root: u64,
@@ -4623,7 +4637,10 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize>
         image: &crate::native_elf::NativeImage<'_>,
     ) -> Option<Self> {
         let image_pages = image.page_count()?;
-        if FRAME_COUNT != 4 + IMAGE_CAPACITY + 3 || !(1..=IMAGE_CAPACITY).contains(&image_pages) {
+        if STACK_PAGES == 0
+            || FRAME_COUNT != 4 + IMAGE_CAPACITY + STACK_PAGES + 1
+            || !(1..=IMAGE_CAPACITY).contains(&image_pages)
+        {
             return None;
         }
         let frames = memory::allocate_frames::<FRAME_COUNT>(owner)?;
@@ -4658,6 +4675,9 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize>
                         return None;
                     }
                     let mut flags = PRESENT | USER;
+                    if image.page_is_writable(page) {
+                        flags |= WRITABLE;
+                    }
                     if !image.page_is_executable(page) {
                         flags |= NO_EXECUTE;
                     }
@@ -4667,13 +4687,16 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize>
                     .add(Self::BOOT_INFO_PAGE)
                     .write(addresses[Self::BOOT_INFO_FRAME] | PRESENT | USER | NO_EXECUTE);
                 table.add(Self::STACK_PAGE - 1).write(0);
-                table.add(Self::STACK_PAGE).write(
-                    addresses[Self::FIRST_STACK_FRAME] | PRESENT | WRITABLE | USER | NO_EXECUTE,
-                );
-                table.add(Self::STACK_PAGE + 1).write(
-                    addresses[Self::SECOND_STACK_FRAME] | PRESENT | WRITABLE | USER | NO_EXECUTE,
-                );
-                table.add(Self::STACK_PAGE + 2).write(0);
+                for stack_page in 0..STACK_PAGES {
+                    table.add(Self::STACK_PAGE + stack_page).write(
+                        addresses[Self::FIRST_STACK_FRAME + stack_page]
+                            | PRESENT
+                            | WRITABLE
+                            | USER
+                            | NO_EXECUTE,
+                    );
+                }
+                table.add(Self::STACK_PAGE + STACK_PAGES).write(0);
 
                 for relocation in image.relocations[..image.relocation_count].iter().flatten() {
                     let page = usize::try_from(relocation.target / PAGE_SIZE as u64).ok()?;
@@ -4729,17 +4752,20 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize>
                 || root.read() & USER != 0
                 || root.add(256).read() & USER != 0
                 || table.add(Self::STACK_PAGE - 1).read() != 0
-                || table.add(Self::STACK_PAGE + 2).read() != 0
+                || table.add(Self::STACK_PAGE + STACK_PAGES).read() != 0
             {
                 return false;
             }
             for page in 0..self.image_pages {
                 let observed = table.add(page).read();
                 let mut expected = self.frames[4 + page].address() | PRESENT | USER;
+                if image.page_is_writable(page) {
+                    expected |= WRITABLE;
+                }
                 if !image.page_is_executable(page) {
                     expected |= NO_EXECUTE;
                 }
-                if observed != expected || observed & WRITABLE != 0 {
+                if observed != expected {
                     return false;
                 }
             }
@@ -4748,18 +4774,14 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize>
             }
             table.add(Self::BOOT_INFO_PAGE).read()
                 == self.frames[Self::BOOT_INFO_FRAME].address() | PRESENT | USER | NO_EXECUTE
-                && table.add(Self::STACK_PAGE).read()
-                    == self.frames[Self::FIRST_STACK_FRAME].address()
-                        | PRESENT
-                        | WRITABLE
-                        | USER
-                        | NO_EXECUTE
-                && table.add(Self::STACK_PAGE + 1).read()
-                    == self.frames[Self::SECOND_STACK_FRAME].address()
-                        | PRESENT
-                        | WRITABLE
-                        | USER
-                        | NO_EXECUTE
+                && (0..STACK_PAGES).all(|stack_page| {
+                    table.add(Self::STACK_PAGE + stack_page).read()
+                        == self.frames[Self::FIRST_STACK_FRAME + stack_page].address()
+                            | PRESENT
+                            | WRITABLE
+                            | USER
+                            | NO_EXECUTE
+                })
         }
     }
 
@@ -4992,6 +5014,21 @@ impl<const IMAGE_CAPACITY: usize, const FRAME_COUNT: usize>
         true
     }
 
+    fn write_network_boot_info_v8(&self, info: ginux_native_abi::NativeNetworkBootV8) -> bool {
+        if !info.is_valid_registry_pull() {
+            return false;
+        }
+        let Some(page) = mapped_frame::<ginux_native_abi::NativeNetworkBootV8>(
+            self.frames[Self::BOOT_INFO_FRAME].address(),
+        ) else {
+            return false;
+        };
+        unsafe {
+            page.write(info);
+        }
+        true
+    }
+
     fn write_protocol_boot_info(&self, info: ginux_native_abi::NativeProtocolBootV0) -> bool {
         if !info.is_valid_arp_consumer() {
             return false;
@@ -5094,6 +5131,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.root,
             Self::Native(space) => space.root,
+            Self::Network(space) => space.root,
             Self::Controller(space) => space.root,
         }
     }
@@ -5102,6 +5140,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.kernel_root,
             Self::Native(space) => space.kernel_root,
+            Self::Network(space) => space.kernel_root,
             Self::Controller(space) => space.kernel_root,
         }
     }
@@ -5114,6 +5153,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.dma_frame,
             Self::Native(space) => space.dma_frame,
+            Self::Network(space) => space.dma_frame,
             Self::Controller(space) => space.dma_frame,
         }
     }
@@ -5122,6 +5162,10 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.device_page_mapping_is_exact(7, physical, true),
             Self::Native(space) => space.device_page_mapping_is_exact(14, physical),
+            Self::Network(space) => space.device_page_mapping_is_exact(
+                NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 5,
+                physical,
+            ),
             Self::Controller(_) => false,
         }
     }
@@ -5139,6 +5183,7 @@ impl AuxiliaryAddressSpace {
                 NATIVE_VOLUME_COMPLETION.store(if recovered { 2 } else { 1 }, Ordering::Release);
                 true
             },
+            Self::Network(_) => false,
             Self::Controller(_) => false,
         }
     }
@@ -5161,6 +5206,14 @@ impl AuxiliaryAddressSpace {
                             && memory::frame_leases_releasable(space.owner, &[frame])
                     })
             }
+            Self::Network(space) => {
+                memory::frames_owned_by(space.owner, &space.frames)
+                    && memory::frame_leases_releasable(space.owner, &space.frames)
+                    && space.dma_frame.is_none_or(|frame| {
+                        memory::frames_owned_by(space.owner, &[frame])
+                            && memory::frame_leases_releasable(space.owner, &[frame])
+                    })
+            }
             Self::Controller(space) => {
                 memory::frames_owned_by(space.owner, &space.frames)
                     && memory::frame_leases_releasable(space.owner, &space.frames)
@@ -5172,6 +5225,7 @@ impl AuxiliaryAddressSpace {
         match self {
             Self::Wx(space) => space.release(),
             Self::Native(space) => space.release(),
+            Self::Network(space) => space.release(),
             Self::Controller(space) => space.release(),
         }
     }
@@ -5180,11 +5234,38 @@ impl AuxiliaryAddressSpace {
 pub(crate) fn verify_native_service_materialization(
     image: &crate::native_elf::NativeImage<'_>,
 ) -> bool {
-    let kernel_root = current_root();
-    let Some(space) = NativeServiceAddressSpace::<
+    verify_native_service_materialization_with_capacity::<
         NATIVE_SERVICE_IMAGE_PAGES,
         NATIVE_SERVICE_FRAME_COUNT,
+    >(image)
+}
+
+pub(crate) fn verify_native_network_service_materialization(
+    image: &crate::native_elf::NativeImage<'_>,
+) -> bool {
+    let kernel_root = current_root();
+    let Some(space) = NativeServiceAddressSpace::<
+        NATIVE_NETWORK_IMAGE_PAGES,
+        NATIVE_NETWORK_FRAME_COUNT,
+        NATIVE_NETWORK_STACK_PAGES,
     >::new(kernel_root, memory::FrameOwner::KERNEL, image) else {
+        return false;
+    };
+    space.layout_is_valid(image) && space.relocations_are_valid(image) && space.release()
+}
+
+fn verify_native_service_materialization_with_capacity<
+    const IMAGE_PAGES: usize,
+    const FRAME_COUNT: usize,
+>(
+    image: &crate::native_elf::NativeImage<'_>,
+) -> bool {
+    let kernel_root = current_root();
+    let Some(space) = NativeServiceAddressSpace::<IMAGE_PAGES, FRAME_COUNT>::new(
+        kernel_root,
+        memory::FrameOwner::KERNEL,
+        image,
+    ) else {
         return false;
     };
     if !space.layout_is_valid(image) || !space.relocations_are_valid(image) {
@@ -5369,23 +5450,33 @@ fn interactive_controller_return_is_valid(
 
 pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeImage<'_>) -> bool {
     let Some(auxiliary) = domain::initialize_boot_unprivileged_auxiliary_service() else {
+        crate::serial_write("\r\nginux: native network invariant: domain allocation failed");
         return false;
     };
     let (Some(identity), Some(owner)) = (
         domain::domain_service_identity(auxiliary),
         memory::FrameOwner::domain(auxiliary),
     ) else {
+        crate::serial_write("\r\nginux: native network invariant: identity allocation failed");
         return false;
     };
     let kernel_root = current_root();
-    let Some(space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+    let Some(space) = NativeServiceAddressSpace::<
+        NATIVE_NETWORK_IMAGE_PAGES,
+        NATIVE_NETWORK_FRAME_COUNT,
+        NATIVE_NETWORK_STACK_PAGES,
+    >::new(kernel_root, owner, image) else {
+        crate::serial_write(
+            "\r\nginux: native network invariant: address-space construction failed",
+        );
         return false;
     };
     if !space.layout_is_valid(image)
         || !space.relocations_are_valid(image)
         || domain::auxiliary_boot_handle(auxiliary, 0).is_some()
-        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT)
+        || memory::owner_live_frame_count(owner) != Some(NATIVE_NETWORK_FRAME_COUNT)
     {
+        crate::serial_write("\r\nginux: native network invariant: initial layout rejected");
         let _ = space.release();
         return false;
     }
@@ -5397,23 +5488,24 @@ pub(crate) fn verify_native_network_service(image: &crate::native_elf::NativeIma
             return false;
         }
     };
-    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS
+        + (NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1) * PAGE_SIZE;
     let root_frames = paging::validated_user_root_frames(root);
     if root_frames.as_ref().is_none_or(|frames| {
-        frames.base().len() != 4 + space.image_pages + 3
+        frames.base_count() != 4 + space.image_pages + NATIVE_NETWORK_STACK_PAGES + 1
             || frames.dma().is_some()
-            || !memory::frame_addresses_owned_by(owner, frames.base())
+            || !frames.frames_owned_by(owner)
     }) {
         crate::serial_write_bytes(b"\r\nginux: native network root frame count: ");
         crate::serial_write_u64(
             root_frames
                 .as_ref()
-                .map_or(u64::MAX, |frames| frames.base().len() as u64),
+                .map_or(u64::MAX, |frames| frames.base_count() as u64),
         );
         let _ = space.release();
         return false;
     }
-    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space)) {
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Network(space)) {
         crate::serial_write_bytes(b"\r\nginux: native network registration failed");
         return false;
     }
@@ -5479,6 +5571,7 @@ enum NativeNetworkRunMode {
     ReceiveArpReuse,
     PingGateway,
     Dhcp,
+    RegistryPull,
     PacketHandoff,
     PacketHandoffFault,
     PacketBatch,
@@ -5498,6 +5591,12 @@ struct NativeNetworkRun {
     domain: u64,
     service_identity: u64,
     iommu_evidence: iommu::TranslationEvidence,
+}
+
+#[derive(Clone, Copy)]
+struct RegistryPull<'a> {
+    reference: &'a [u8],
+    unix_time: u64,
 }
 
 impl NativeNetworkRun {
@@ -6156,6 +6255,32 @@ pub(crate) fn configure_native_network_dhcp(
         NativeNetworkRunMode::Dhcp,
         Some(common_mapping),
         Some((msix_mapping, apic)),
+    )
+}
+
+pub(crate) fn pull_native_oci_image(
+    image: &crate::native_elf::NativeImage<'_>,
+    device: VirtioNetworkDevice,
+    initialization: VirtioNetworkInitialization,
+    iommu_profile: iommu::DeviceTranslationProfile,
+    common_mapping: paging::MmioMapping,
+    reference: &[u8],
+    unix_time: u64,
+) -> bool {
+    verify_native_network_bootstrap_run_with_evidence(
+        image,
+        device,
+        initialization,
+        iommu_profile,
+        NativeNetworkRunMode::RegistryPull,
+        Some(common_mapping),
+        None,
+        None,
+        None,
+        Some(RegistryPull {
+            reference,
+            unix_time,
+        }),
     )
 }
 
@@ -7055,9 +7180,9 @@ fn verify_native_protocol_consumer(
     let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
     let root_frames = paging::validated_user_root_frames(root);
     if root_frames.as_ref().is_none_or(|frames| {
-        frames.base().len() != 4 + space.image_pages + 3
+        frames.base_count() != 4 + space.image_pages + 3
             || frames.dma().is_some()
-            || !memory::frame_addresses_owned_by(owner, frames.base())
+            || !frames.frames_owned_by(owner)
     }) {
         let _ = space.release();
         let _ = domain::discard_unstarted_auxiliary_service(auxiliary);
@@ -7922,6 +8047,7 @@ fn verify_native_network_bootstrap_run(
         interrupt,
         None,
         None,
+        None,
     )
 }
 
@@ -7947,6 +8073,7 @@ fn verify_native_network_bootstrap_run_evidence(
         interrupt,
         restart_identity,
         Some(&mut evidence),
+        None,
     )
     .then_some(())?;
     evidence
@@ -7963,6 +8090,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
     interrupt: Option<(paging::MmioMapping, &LocalApic)>,
     restart_identity: Option<u64>,
     evidence_output: Option<&mut Option<NativeNetworkRun>>,
+    registry_pull: Option<RegistryPull<'_>>,
 ) -> bool {
     let baseline_registered = registered_auxiliary_address_space_count();
     let reject_reserved = matches!(
@@ -8027,6 +8155,10 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::PacketHandoffFault
             | NativeNetworkRunMode::PacketBatch
     );
+    let registry = mode == NativeNetworkRunMode::RegistryPull;
+    if registry {
+        crate::serial_write("ginux: OCI preparing isolated registry transport\r\n");
+    }
     let packet_fault = mode == NativeNetworkRunMode::PacketHandoffFault;
     let packet_batch = mode == NativeNetworkRunMode::PacketBatch;
     let packet_egress = matches!(
@@ -8082,10 +8214,13 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::ReliableEgressResidentDrain
     );
     let egress_graceful_drain = mode == NativeNetworkRunMode::ReliableEgressResidentDrain;
-    const DMA_PAGE_INDEX: usize = 12;
-    const COMMON_PAGE_INDEX: usize = 13;
-    const NOTIFICATION_PAGE_INDEX: usize = 14;
+    const DMA_PAGE_INDEX: usize = NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 3;
+    const COMMON_PAGE_INDEX: usize = DMA_PAGE_INDEX + 1;
+    const NOTIFICATION_PAGE_INDEX: usize = DMA_PAGE_INDEX + 2;
     let Some((common_physical, common_length)) = device.common_region() else {
+        if registry {
+            crate::serial_write("ginux: OCI registry common region unavailable\r\n");
+        }
         return false;
     };
     let common_page = common_physical & ADDRESS_MASK;
@@ -8107,12 +8242,18 @@ fn verify_native_network_bootstrap_run_with_evidence(
         || !pci::network_function_is_disabled(device)
         || !pci::network_msix_is_disabled(device)
     {
+        if registry {
+            crate::serial_write("ginux: OCI registry device state rejected\r\n");
+        }
         return false;
     }
     if active_mapping.is_some() && (!activate_iommu || reject_reserved)
         || fail_after_activation && active_mapping.is_none()
         || transmit_probe != interrupt.is_some()
     {
+        if registry {
+            crate::serial_write("ginux: OCI registry activation mode rejected\r\n");
+        }
         return false;
     }
     let rights = if active_mapping.is_some() {
@@ -8120,7 +8261,16 @@ fn verify_native_network_bootstrap_run_with_evidence(
     } else {
         crate::capability::Rights::READ
     };
-    let auxiliary = if packet_handoff {
+    let auxiliary = if registry {
+        domain::initialize_boot_auxiliary_service_with_two_grants(
+            3,
+            crate::control_abi::NETWORK_DEVICE_OBJECT,
+            rights,
+            9,
+            ginux_native_abi::NATIVE_IMAGE_STORE_OBJECT,
+            crate::capability::Rights::WRITE,
+        )
+    } else if packet_handoff {
         domain::initialize_boot_auxiliary_service_with_two_grants(
             3,
             crate::control_abi::NETWORK_DEVICE_OBJECT,
@@ -8158,6 +8308,9 @@ fn verify_native_network_bootstrap_run_with_evidence(
         )
     };
     let Some(auxiliary) = auxiliary else {
+        if registry {
+            crate::serial_write("ginux: OCI registry domain allocation rejected\r\n");
+        }
         return false;
     };
     let (Some(handle), Some(identity), Some(owner)) = (
@@ -8165,13 +8318,16 @@ fn verify_native_network_bootstrap_run_with_evidence(
         domain::domain_service_identity(auxiliary),
         memory::FrameOwner::domain(auxiliary),
     ) else {
+        if registry {
+            crate::serial_write("ginux: OCI registry primary capability rejected\r\n");
+        }
         return false;
     };
-    let packet_handle = (packet_handoff || packet_egress)
+    let secondary_handle = (registry || packet_handoff || packet_egress)
         .then(|| domain::auxiliary_boot_handle(auxiliary, 1))
         .flatten();
     if packet_handoff
-        && packet_handle.is_none_or(|packet_handle| {
+        && secondary_handle.is_none_or(|packet_handle| {
             !domain::handle_permits(
                 auxiliary,
                 packet_handle,
@@ -8188,7 +8344,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
         return false;
     }
     if packet_egress
-        && packet_handle.is_none_or(|packet_handle| {
+        && secondary_handle.is_none_or(|packet_handle| {
             !domain::handle_permits(
                 auxiliary,
                 packet_handle,
@@ -8209,8 +8365,33 @@ fn verify_native_network_bootstrap_run_with_evidence(
     {
         return false;
     }
+    if registry
+        && secondary_handle.is_none_or(|store_handle| {
+            !domain::handle_permits(
+                auxiliary,
+                store_handle,
+                ginux_native_abi::NATIVE_IMAGE_STORE_OBJECT,
+                crate::capability::Rights::WRITE,
+            ) || domain::handle_permits(
+                auxiliary,
+                store_handle,
+                ginux_native_abi::NATIVE_IMAGE_STORE_OBJECT,
+                crate::capability::Rights::READ,
+            )
+        })
+    {
+        crate::serial_write("ginux: OCI registry image-store capability rejected\r\n");
+        return false;
+    }
     let kernel_root = current_root();
-    let Some(mut space) = NativeServiceAddressSpace::new(kernel_root, owner, image) else {
+    let Some(mut space) = NativeServiceAddressSpace::<
+        NATIVE_NETWORK_IMAGE_PAGES,
+        NATIVE_NETWORK_FRAME_COUNT,
+        NATIVE_NETWORK_STACK_PAGES,
+    >::new(kernel_root, owner, image) else {
+        if registry {
+            crate::serial_write("ginux: OCI registry service address space rejected\r\n");
+        }
         return false;
     };
     if !space.layout_is_valid(image)
@@ -8218,6 +8399,9 @@ fn verify_native_network_bootstrap_run_with_evidence(
         || !space.map_uncached_device_page(COMMON_PAGE_INDEX, common_page)
         || !space.map_uncached_device_page(NOTIFICATION_PAGE_INDEX, receive_page)
     {
+        if registry {
+            crate::serial_write("ginux: OCI registry service mappings rejected\r\n");
+        }
         let _ = space.release();
         return false;
     }
@@ -8277,8 +8461,29 @@ fn verify_native_network_bootstrap_run_with_evidence(
             }
         }
     }
-    let boot_written = if egress_resident {
-        packet_handle.is_some_and(|packet_handle| {
+    let boot_written = if registry {
+        registry_pull.is_some_and(|pull| {
+            secondary_handle.is_some_and(|store_handle| {
+                let configuration = crate::network::ipv4_configuration();
+                let ipv4 = configuration as u32;
+                let prefix = (configuration >> 32) as u8;
+                ginux_native_abi::NativeNetworkBootV8::registry_pull(
+                    boot,
+                    store_handle,
+                    pull.unix_time,
+                    (
+                        ipv4,
+                        prefix,
+                        crate::network::ipv4_gateway() as u32,
+                        crate::network::dns() as u32,
+                    ),
+                    pull.reference,
+                )
+                .is_some_and(|boot| space.write_network_boot_info_v8(boot))
+            })
+        })
+    } else if egress_resident {
+        secondary_handle.is_some_and(|packet_handle| {
             packet::egress_next_sequence().is_some_and(|sequence| {
                 space.write_network_boot_info_v7(
                     ginux_native_abi::NativeNetworkBootV7::resident_reliable_egress_loop(
@@ -8290,7 +8495,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             })
         })
     } else if egress_batch {
-        packet_handle.is_some_and(|packet_handle| {
+        secondary_handle.is_some_and(|packet_handle| {
             packet::egress_next_sequence().is_some_and(|sequence| {
                 space.write_network_boot_info_v6(
                     ginux_native_abi::NativeNetworkBootV6::resident_reliable_egress_batch(
@@ -8302,7 +8507,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             })
         })
     } else if egress_reuse {
-        packet_handle.is_some_and(|packet_handle| {
+        secondary_handle.is_some_and(|packet_handle| {
             packet::egress_next_sequence().is_some_and(|sequence| {
                 space.write_network_boot_info_v5(
                     ginux_native_abi::NativeNetworkBootV5::resident_reliable_egress_transmit(
@@ -8314,7 +8519,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             })
         })
     } else if egress_wait {
-        packet_handle.is_some_and(|packet_handle| {
+        secondary_handle.is_some_and(|packet_handle| {
             packet::egress_next_sequence().is_some_and(|sequence| {
                 space.write_network_boot_info_v4(
                     ginux_native_abi::NativeNetworkBootV4::waiting_reliable_egress_transmit(
@@ -8326,7 +8531,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             })
         })
     } else if reliable_egress {
-        packet_handle.is_some_and(|packet_handle| {
+        secondary_handle.is_some_and(|packet_handle| {
             packet::egress_pending_metadata().is_some_and(|metadata| {
                 space.write_network_boot_info_v3(
                     ginux_native_abi::NativeNetworkBootV3::reliable_egress_transmit(
@@ -8339,7 +8544,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             })
         })
     } else if packet_egress {
-        packet_handle.is_some_and(|packet_handle| {
+        secondary_handle.is_some_and(|packet_handle| {
             packet::egress_pending_metadata().is_some_and(|metadata| {
                 space.write_network_boot_info_v2(
                     ginux_native_abi::NativeNetworkBootV2::egress_transmit(
@@ -8351,7 +8556,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
             })
         })
     } else if packet_handoff {
-        packet_handle.is_some_and(|packet_handle| {
+        secondary_handle.is_some_and(|packet_handle| {
             let mut boot = ginux_native_abi::NativeNetworkBootV1::from_v0(boot, packet_handle);
             if packet_fault {
                 boot.features |= ginux_native_abi::NATIVE_NETWORK_FEATURE_PACKET_FAULT;
@@ -8367,8 +8572,11 @@ fn verify_native_network_bootstrap_run_with_evidence(
         space.write_network_boot_info(boot)
     };
     if !boot_written
-        || memory::owner_live_frame_count(owner) != Some(NATIVE_SERVICE_FRAME_COUNT + 1)
+        || memory::owner_live_frame_count(owner) != Some(NATIVE_NETWORK_FRAME_COUNT + 1)
     {
+        if registry {
+            crate::serial_write("ginux: OCI registry boot contract rejected\r\n");
+        }
         let _ = space.release();
         return false;
     }
@@ -8377,18 +8585,26 @@ fn verify_native_network_bootstrap_run_with_evidence(
         let _ = space.release();
         return false;
     };
-    let stack = USER_TEST_ADDRESS + (NATIVE_STACK_PAGE + 2) * PAGE_SIZE;
-    let boot_info = USER_TEST_ADDRESS + NATIVE_BOOT_INFO_PAGE * PAGE_SIZE;
+    let stack = USER_TEST_ADDRESS
+        + (NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1) * PAGE_SIZE;
+    let boot_info = USER_TEST_ADDRESS
+        + (NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 2) * PAGE_SIZE;
     let root_frames = paging::validated_user_root_frames(root);
     if root_frames.as_ref().is_none_or(|frames| {
-        frames.base().len() != 4 + space.image_pages + 3
+        frames.base_count() != 4 + space.image_pages + NATIVE_NETWORK_STACK_PAGES + 1
             || frames.dma() != Some(dma_physical)
-            || !memory::frame_addresses_owned_by(owner, frames.base())
+            || !frames.frames_owned_by(owner)
     }) {
+        if registry {
+            crate::serial_write("ginux: OCI registry address-space validation rejected\r\n");
+        }
         let _ = space.release();
         return false;
     }
-    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Native(space)) {
+    if !register_address_space(auxiliary, AuxiliaryAddressSpace::Network(space)) {
+        if registry {
+            crate::serial_write("ginux: OCI registry service registration rejected\r\n");
+        }
         return false;
     }
     let packet_bound = !packet_handoff || packet::bind_producer(auxiliary, identity);
@@ -8474,7 +8690,13 @@ fn verify_native_network_bootstrap_run_with_evidence(
         || !active_device_ready
         || !execution_ready
     {
+        if registry {
+            crate::serial_write("ginux: OCI registry device activation rejected\r\n");
+        }
         return false;
+    }
+    if registry {
+        crate::serial_write("ginux: OCI registry transport active\r\n");
     }
     let drain_authorized = if egress_graceful_drain {
         let (Some(supervisor), Some(manage_handle), Some(wrong_handle)) = (
@@ -8680,6 +8902,29 @@ fn verify_native_network_bootstrap_run_with_evidence(
         crate::serial_write_u64(u64::from(
             domain::last_lifecycle_event_has_fault().unwrap_or(true),
         ));
+    }
+    if registry && !valid {
+        crate::serial_write_bytes(b"\r\nginux: OCI service lifecycle event/detail/fault: ");
+        crate::serial_write_u64(event.unwrap_or(u64::MAX));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(domain::last_lifecycle_event_detail().map_or(u64::MAX, u64::from));
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(u64::from(
+            domain::last_lifecycle_event_has_fault().unwrap_or(true),
+        ));
+        if domain::last_lifecycle_event_has_fault() == Some(true) {
+            if let Some(descriptor) = domain::delivered_fault_descriptor() {
+                for range in [6..8, 16..24, 24..32, 32..40] {
+                    crate::serial_write_bytes(b" ");
+                    let value = if range.len() == 2 {
+                        u16::from_le_bytes(descriptor[range].try_into().unwrap()) as u64
+                    } else {
+                        u64::from_le_bytes(descriptor[range].try_into().unwrap())
+                    };
+                    crate::serial_write_u64(value);
+                }
+            }
+        }
     }
     if valid {
         if let (Some(evidence_output), Some(iommu_evidence)) = (evidence_output, iommu_evidence) {
@@ -11010,9 +11255,9 @@ fn verify_native_volume_service_run(
     NATIVE_VOLUME_COMPLETION.store(0, Ordering::Release);
     let root_frames = paging::validated_user_root_frames(root);
     if root_frames.as_ref().is_none_or(|frames| {
-        frames.base().len() != 4 + space.image_pages + 3
+        frames.base_count() != 4 + space.image_pages + 3
             || frames.dma() != Some(dma_physical)
-            || !memory::frame_addresses_owned_by(owner, frames.base())
+            || !frames.frames_owned_by(owner)
     }) {
         crate::serial_write_bytes(b"\r\nginux: native volume root validation failed");
         let _ = space.release();
