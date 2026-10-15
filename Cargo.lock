@@ -489,6 +489,10 @@ name = "ginux-protocol-state"
 version = "0.1.0"
 
 [[package]]
+name = "ginux-runtime-memory"
+version = "0.1.0"
+
+[[package]]
 name = "ginux-volume-format"
 version = "0.1.0"
 dependencies = [

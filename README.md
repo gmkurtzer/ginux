@@ -294,7 +294,12 @@ replacement, whiteout, and opaque-directory semantics before publication.
 Full controlling-terminal and session semantics are still incomplete. The
 Rocky `10-ubi-init` image now reaches its dynamic linker, but systemd remains
 blocked by the fixed-size runtime mmap bookkeeping; replacing that bookkeeping
-with domain-memory-backed dynamic metadata is the next compatibility step.
+with domain-memory-backed dynamic metadata is the next compatibility step. The
+`ginux-runtime-memory` foundation now provides backend-independent mapping
+metadata that grows by allocating pages, rolls back failed growth atomically,
+and releases the complete chain. The kernel frame backend and mmap migration
+remain in progress; the existing 32-page runtime path has not been relabeled as
+unbounded.
 
 Useful development gates:
 
