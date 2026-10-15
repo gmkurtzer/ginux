@@ -654,14 +654,20 @@ the raw Linux syscall value 20. It accepts only `PRIO_PROCESS` and PID 0 or 1;
 other selectors return `-EINVAL` and an unknown PID returns `-ESRCH`.
 `setpriority` accepts only an idempotent request for nice value zero; an actual
 priority change returns `-EPERM`.
-`rax = 228` (`__NR_clock_gettime`) exposes `CLOCK_MONOTONIC` and
-`CLOCK_MONOTONIC_RAW` from an ordered bootstrap-processor TSC. The conversion
+`rax = 228` (`__NR_clock_gettime`) exposes `CLOCK_REALTIME`,
+`CLOCK_MONOTONIC`, and `CLOCK_MONOTONIC_RAW` from an ordered
+bootstrap-processor TSC. The conversion
 uses a CPUID-reported frequency when available and the PIT-calibrated fallback
 otherwise. Both clocks share a private process epoch, return a normalized
 16-byte x86-64 `timespec`, and cannot move backward during this single-CPU
-proof. Other clock IDs return `-EINVAL`; an invalid output range returns
-`-EFAULT` without changing its valid prefix. Realtime, clock adjustment, and a
-vDSO remain unsupported.
+proof. Realtime adds elapsed TSC time since the validated UEFI wall-clock
+handoff. Other clock IDs return `-EINVAL`; an invalid output range returns
+`-EFAULT` without changing its valid prefix. Clock adjustment and a vDSO
+remain unsupported.
+`rax = 96` (`__NR_gettimeofday`) exposes the same realtime source as a
+normalized 16-byte x86-64 `timeval`. A non-null legacy timezone pointer receives
+two zero 32-bit fields. Both complete output ranges are validated before
+copy-out; null outputs are accepted and bad ranges return `-EFAULT`.
 `rax = 229` (`__NR_clock_getres`) exposes the corresponding single-tick
 resolution, rounded up to a normalized `timespec`. A null result pointer is a
 valid support query. Clock selection and copy errors match `clock_gettime`, and

@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **114 Partial**, **28 Policy-denied**, **233 Missing**.
+Current totals: **115 Partial**, **28 Policy-denied**, **232 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -174,7 +174,7 @@ therefore omitted.
 | 93 | fchown | Missing |
 | 94 | lchown | Missing |
 | 95 | umask | Partial |
-| 96 | gettimeofday | Missing |
+| 96 | gettimeofday | Partial |
 | 97 | getrlimit | Partial |
 | 98 | getrusage | Partial |
 | 99 | sysinfo | Missing |

@@ -872,6 +872,32 @@ ginux_linux_system_init:
 
 .Lfork_complete:
 
+    # Verify gettimeofday conversion, timezone compatibility, and bounds.
+    lea rdi, [rip + .Lstatus]
+    lea rsi, [rip + .Lstatus + 16]
+    mov eax, 96
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp qword ptr [rip + .Lstatus], 1577836800
+    jb .Lfailure
+    cmp qword ptr [rip + .Lstatus + 8], 999999
+    ja .Lfailure
+    cmp qword ptr [rip + .Lstatus + 16], 0
+    jne .Lfailure
+    mov edi, 1
+    xor esi, esi
+    mov eax, 96
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+    xor edi, edi
+    xor esi, esi
+    mov eax, 96
+    syscall
+    test rax, rax
+    jne .Lfailure
+
     # Verify close_range marking, closure, and Linux error boundaries.
     mov edi, -100
     lea rsi, [rip + .Lnull_path]

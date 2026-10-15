@@ -4748,9 +4748,11 @@ linux_child_joined:
     require_equal
 
     xor edi, edi
-    mov esi, 0x405900
+    mov esi, 0x405990
     mov eax, 228
-    call syscall_expect_einval
+    call syscall_expect_zero
+    cmp qword ptr [0x405990], 1577836800
+    jb failure
 
     mov edi, 1
     mov esi, 0x405900
@@ -4799,7 +4801,7 @@ clock_advanced:
     xor edi, edi
     xor esi, esi
     mov eax, 229
-    call syscall_expect_einval
+    call syscall_expect_zero
 
     mov edi, 1
     xor esi, esi

@@ -28,10 +28,12 @@ mod volume;
 use core::arch::{asm, global_asm};
 use core::ffi::c_void;
 use core::mem::size_of;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 const COM1: u16 = 0x3f8;
 static OPERATOR_CONSOLE_READY: AtomicBool = AtomicBool::new(false);
+static LINUX_REALTIME_EPOCH_SECONDS: AtomicU64 = AtomicU64::new(0);
+static LINUX_REALTIME_EPOCH_TSC: AtomicU64 = AtomicU64::new(0);
 const EFI_RESET_SHUTDOWN: u32 = 2;
 const EFI_SUCCESS: usize = 0;
 pub(crate) const EFI_LOADER_CODE: u32 = 1;
@@ -48,6 +50,22 @@ const KERNEL_STACK_STORAGE_SIZE: usize = PAGE_SIZE + KERNEL_STACK_SIZE + PAGE_SI
 const KERNEL_STACK_TOP_OFFSET: usize = PAGE_SIZE + KERNEL_STACK_SIZE;
 pub const BOOT_INFO_MAGIC: u64 = 0x0049_4258_554e_4947;
 pub const BOOT_INFO_VERSION: u32 = 7;
+
+fn initialize_linux_realtime(unix_time: u64, timestamp_counter: u64) -> bool {
+    if unix_time < 1_577_836_800 || timestamp_counter == 0 {
+        return false;
+    }
+    LINUX_REALTIME_EPOCH_TSC.store(timestamp_counter, Ordering::Release);
+    LINUX_REALTIME_EPOCH_SECONDS
+        .compare_exchange(0, unix_time, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+pub(crate) fn linux_realtime_epoch() -> Option<(u64, u64)> {
+    let seconds = LINUX_REALTIME_EPOCH_SECONDS.load(Ordering::Acquire);
+    let timestamp_counter = LINUX_REALTIME_EPOCH_TSC.load(Ordering::Acquire);
+    (seconds != 0 && timestamp_counter != 0).then_some((seconds, timestamp_counter))
+}
 
 #[repr(C, align(4096))]
 struct KernelStack([u8; KERNEL_STACK_STORAGE_SIZE]);
@@ -165,6 +183,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             .is_multiple_of(boot_info.memory_descriptor_size)
     {
         kernel_fail("ginux: invalid UEFI memory map\r\n");
+    }
+    if !initialize_linux_realtime(
+        boot_info.unix_time,
+        arch::x86_64::timer::timestamp_counter(),
+    ) {
+        kernel_fail("ginux: invalid realtime clock handoff\r\n");
     }
 
     let Some(acpi_rsdp_end) = validate_acpi_rsdp(boot_info.acpi_rsdp) else {

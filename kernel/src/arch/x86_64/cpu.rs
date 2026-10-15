@@ -130,6 +130,7 @@ const LINUX_CHDIR_SYSCALL: u64 = 80;
 const LINUX_FCHDIR_SYSCALL: u64 = 81;
 const LINUX_READLINK_SYSCALL: u64 = 89;
 const LINUX_UMASK_SYSCALL: u64 = 95;
+const LINUX_GETTIMEOFDAY_SYSCALL: u64 = 96;
 const LINUX_GETRLIMIT_SYSCALL: u64 = 97;
 const LINUX_GETRUSAGE_SYSCALL: u64 = 98;
 const LINUX_TIMES_SYSCALL: u64 = 100;
@@ -453,6 +454,7 @@ const LINUX_ROBUST_LIST_HEAD_SIZE: usize = 24;
 const LINUX_CLEAR_CHILD_TID_OFFSET: u64 = 400;
 const LINUX_ROBUST_LIST_OFFSET: u64 = 432;
 const LINUX_CLOCK_MONOTONIC: u64 = 1;
+const LINUX_CLOCK_REALTIME: u64 = 0;
 const LINUX_CLOCK_PROCESS_CPUTIME_ID: u64 = 2;
 const LINUX_CLOCK_THREAD_CPUTIME_ID: u64 = 3;
 const LINUX_CLOCK_MONOTONIC_RAW: u64 = 4;
@@ -7350,6 +7352,7 @@ extern "sysv64" fn linux_syscall_handler(
             linux_faccessat(u64::from(LINUX_AT_FDCWD), first_argument, buffer, 0)
         }
         LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
+        LINUX_GETTIMEOFDAY_SYSCALL => linux_gettimeofday(first_argument, buffer),
         LINUX_GETRLIMIT_SYSCALL => {
             let Some(limit) = linux_resource_limit(first_argument) else {
                 return LINUX_EINVAL;
@@ -8159,13 +8162,44 @@ fn linux_clock_gettime(clock: u64, output_address: u64) -> u64 {
     if !linux_clock_supported(clock) {
         return LINUX_EINVAL;
     }
-    let Some((seconds, nanoseconds)) = linux_elapsed_time() else {
+    let Some((seconds, nanoseconds)) = (if clock == LINUX_CLOCK_REALTIME {
+        linux_realtime_time()
+    } else {
+        linux_elapsed_time()
+    }) else {
         return LINUX_ENOSYS;
     };
     let mut timespec = [0_u8; 16];
     timespec[..8].copy_from_slice(&seconds.to_ne_bytes());
     timespec[8..].copy_from_slice(&nanoseconds.to_ne_bytes());
     if !copy_to_linux_user(output_address, &timespec) {
+        return LINUX_EFAULT;
+    }
+    0
+}
+
+fn linux_gettimeofday(timeval_address: u64, timezone_address: u64) -> u64 {
+    if timeval_address == 0 && timezone_address == 0 {
+        return 0;
+    }
+    if timeval_address != 0 && !linux_writable_user_range_contains(timeval_address, 16) {
+        return LINUX_EFAULT;
+    }
+    if timezone_address != 0 && !linux_writable_user_range_contains(timezone_address, 8) {
+        return LINUX_EFAULT;
+    }
+    let Some((seconds, nanoseconds)) = linux_realtime_time() else {
+        return LINUX_ENOSYS;
+    };
+    if timeval_address != 0 {
+        let mut timeval = [0_u8; 16];
+        timeval[..8].copy_from_slice(&seconds.to_ne_bytes());
+        timeval[8..].copy_from_slice(&(nanoseconds / 1_000).to_ne_bytes());
+        if !copy_to_linux_user(timeval_address, &timeval) {
+            return LINUX_EFAULT;
+        }
+    }
+    if timezone_address != 0 && !copy_to_linux_user(timezone_address, &[0; 8]) {
         return LINUX_EFAULT;
     }
     0
@@ -8184,6 +8218,18 @@ fn linux_elapsed_time() -> Option<(u64, u64)> {
     ))
 }
 
+fn linux_realtime_time() -> Option<(u64, u64)> {
+    let frequency = ELF_PROBE_CLOCK_FREQUENCY.load(Ordering::SeqCst);
+    let (epoch_seconds, epoch_counter) = crate::linux_realtime_epoch()?;
+    let ticks = timer::timestamp_counter().checked_sub(epoch_counter)?;
+    let elapsed_seconds = ticks.checked_div(frequency)?;
+    let remainder = ticks.checked_rem(frequency)?;
+    let nanoseconds = remainder
+        .checked_mul(NANOSECONDS_PER_SECOND)?
+        .checked_div(frequency)?;
+    Some((epoch_seconds.checked_add(elapsed_seconds)?, nanoseconds))
+}
+
 fn linux_elapsed_nanoseconds() -> Option<u64> {
     let (seconds, nanoseconds) = linux_elapsed_time()?;
     seconds
@@ -8194,7 +8240,8 @@ fn linux_elapsed_nanoseconds() -> Option<u64> {
 fn linux_clock_supported(clock: u64) -> bool {
     matches!(
         clock,
-        LINUX_CLOCK_MONOTONIC
+        LINUX_CLOCK_REALTIME
+            | LINUX_CLOCK_MONOTONIC
             | LINUX_CLOCK_PROCESS_CPUTIME_ID
             | LINUX_CLOCK_THREAD_CPUTIME_ID
             | LINUX_CLOCK_MONOTONIC_RAW
