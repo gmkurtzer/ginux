@@ -9,12 +9,13 @@ use ginux_native_abi::{
     native_control_abi_is_compatible, NativeContainerRequestV1, NativeControlDescriptorV4,
     NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
     NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_LINE_OPERATION,
-    NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_CONFIG_AUTOSTART, NATIVE_CONTAINER_CONFIG_CPU,
-    NATIVE_CONTAINER_CONFIG_IMAGE, NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_CONFIG_MEMORY,
-    NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE, NATIVE_CONTAINER_HOST_SHUTDOWN,
-    NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY,
-    NATIVE_CONTAINER_RESTART, NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU,
-    NATIVE_CONTAINER_SET_IMAGE, NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB,
+    NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_ATTACH, NATIVE_CONTAINER_CONFIG_AUTOSTART,
+    NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_CONFIG_IMAGE, NATIVE_CONTAINER_CONFIG_INIT,
+    NATIVE_CONTAINER_CONFIG_MEMORY, NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE,
+    NATIVE_CONTAINER_HOST_SHUTDOWN, NATIVE_CONTAINER_INJECT_FAILURE,
+    NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY, NATIVE_CONTAINER_RESTART,
+    NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU, NATIVE_CONTAINER_SET_IMAGE,
+    NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_START_ATTACHED,
     NATIVE_CONTAINER_STATE_CONFIGURED, NATIVE_CONTAINER_STATE_CREATED,
     NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING, NATIVE_CONTAINER_STATE_STOPPED,
     NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
@@ -58,6 +59,7 @@ const COMMAND_NETWORK_START: u16 = 20;
 const COMMAND_NETWORK_STOP: u16 = 21;
 const COMMAND_NETWORK_RESTART: u16 = 22;
 const COMMAND_TEST_LINUX: u16 = 23;
+const COMMAND_CONTAINER_ATTACH: u16 = 24;
 
 const LINUX_ABI_TESTS: &[&[u8]] = &[
     b"syscall-entry",
@@ -184,9 +186,16 @@ const CONTAINER_COMMANDS: &[Command<'static>] = &[
     Command::leaf(
         b"start",
         b"container start NAME [--attach]",
-        b"Start a configured container and attach its console",
+        b"Start a configured container, optionally attached",
         COMMAND_CONTAINER_START,
         Arity::range(1, 2),
+    ),
+    Command::leaf(
+        b"attach",
+        b"container attach NAME",
+        b"Attach to a running container; Ctrl-] detaches",
+        COMMAND_CONTAINER_ATTACH,
+        Arity::exact(1),
     ),
     Command::leaf(
         b"stop",
@@ -411,6 +420,9 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
                 handle_container_command(console, host, invocation.id(), invocation.arguments())
             }
             COMMAND_CONTAINER_LIST => show_container_list(console, host),
+            COMMAND_CONTAINER_ATTACH => {
+                handle_container_command(console, host, invocation.id(), invocation.arguments())
+            }
             COMMAND_NETWORK_LIST => show_network_list(console, network),
             COMMAND_NETWORK_STATUS => show_network_status(console, network, invocation.arguments()),
             COMMAND_NETWORK_SET => set_network(console, network, invocation.arguments()),
@@ -1006,12 +1018,42 @@ fn handle_container_command(console: u64, host: u64, command: u16, arguments: Ar
             }
         }
         COMMAND_CONTAINER_START | COMMAND_CONTAINER_RESTART => {
-            if container_call(host, NATIVE_CONTAINER_RESTART, &mut request)
-                == NATIVE_CONTAINER_STATE_STOPPED
-            {
-                write_name_state(console, name, b"stopped\r\n");
-            } else {
+            let operation =
+                if command == COMMAND_CONTAINER_START && arguments.get(1) == Some(b"--attach") {
+                    NATIVE_CONTAINER_START_ATTACHED
+                } else {
+                    NATIVE_CONTAINER_RESTART
+                };
+            if container_call(host, operation, &mut request) == NATIVE_CALL_FAILED {
                 write(console, b"container: start rejected (image not ready)\r\n");
+                return;
+            }
+            let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
+            if state == NATIVE_CONTAINER_STATE_RUNNING {
+                write_name_state(console, name, b"running (detached)\r\n");
+            } else if state == NATIVE_CONTAINER_STATE_STOPPED {
+                write_name_state(console, name, b"stopped\r\n");
+            } else if state == NATIVE_CONTAINER_STATE_FAILED {
+                write_name_state(console, name, b"failed\r\n");
+            } else {
+                write(console, b"container: start failed\r\n");
+            }
+        }
+        COMMAND_CONTAINER_ATTACH => {
+            if container_call(host, NATIVE_CONTAINER_ATTACH, &mut request) == NATIVE_CALL_FAILED {
+                write(
+                    console,
+                    b"container: attach rejected (container is not running)\r\n",
+                );
+                return;
+            }
+            let state = container_call(host, NATIVE_CONTAINER_QUERY, &mut request);
+            if state == NATIVE_CONTAINER_STATE_RUNNING {
+                write_name_state(console, name, b"running (detached)\r\n");
+            } else if state == NATIVE_CONTAINER_STATE_STOPPED {
+                write_name_state(console, name, b"stopped\r\n");
+            } else if state == NATIVE_CONTAINER_STATE_FAILED {
+                write_name_state(console, name, b"failed\r\n");
             }
         }
         COMMAND_CONTAINER_STOP => {

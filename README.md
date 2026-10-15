@@ -240,8 +240,10 @@ container start alpine --attach
 ```
 
 The final command resolves and downloads Alpine from Docker Hub, verifies and
-unpacks its layer, then enters the unmodified Alpine shell. `exit` returns to
-the Ginux controller; `shutdown` stops the host.
+unpacks its layer, then enters the unmodified Alpine shell. Press `Ctrl-]` to
+return to the controller without stopping it, and run `container attach alpine`
+to clear, redraw, and reconnect to its retained console. `exit` stops the
+container and returns to the Ginux controller; `shutdown` stops the host.
 
 Useful development gates:
 

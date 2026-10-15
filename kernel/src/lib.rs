@@ -3674,11 +3674,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     break;
                 };
                 serial_write("ginux: entering configured OCI init\r\n");
+                arch::x86_64::cpu::begin_configured_container();
                 if !address_space::run_oci_process(&init[..init_size]) {
                     serial_write("ginux: OCI init execution failed; container marked failed\r\n");
                     arch::x86_64::cpu::fail_configured_container();
                     break;
                 }
+                arch::x86_64::cpu::stop_configured_container();
                 serial_write("ginux: OCI init exited cleanly\r\n");
             } else if !linux_elf::verify_mapped_system_init_plan(
                 boot_info.image_base as u64,

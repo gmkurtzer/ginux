@@ -46,9 +46,9 @@ verification exercises configuration and lifecycle commands.
 
 **Implementation status:** In progress. Explicit image configuration, runtime
 registry resolution and download, verified rootfs ingestion, scalable
-four-segment PIE mapping, ELF-declared dynamic-loader startup, and an interactive
-BusyBox `/bin/sh` path are complete. Detach/reattach, multi-layer filesystem
-merging, and container networking remain.
+four-segment PIE mapping, ELF-declared dynamic-loader startup, an interactive
+BusyBox `/bin/sh`, and detach/reattach with retained console redraw are complete.
+Multi-layer filesystem merging and container networking remain.
 
 Deliverables:
 
