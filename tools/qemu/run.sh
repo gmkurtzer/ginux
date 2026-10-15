@@ -60,4 +60,5 @@ exec "$qemu" \
     -drive "if=none,id=ginux-volume,format=raw,file=$volume_image" \
     -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code" \
     -drive "if=pflash,format=raw,file=$ovmf_vars" \
-    -drive "format=raw,file=fat:rw:$esp_dir"
+    -drive "if=none,id=ginux-esp,format=raw,file=fat:rw:$esp_dir" \
+    -device "ide-hd,drive=ginux-esp,bootindex=1"

@@ -1118,57 +1118,58 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some(iommu_guard_virtual) = iommu_guard_frame.direct_map_address() else {
         kernel_fail("\r\nginux: IOMMU guard frame is outside direct map\r\n");
     };
-    // The guard remains owned but deliberately absent from the translation
-    // hierarchy. A blocked device write must leave every sentinel byte intact.
-    unsafe {
-        core::ptr::write_bytes(iommu_guard_virtual as *mut u8, 0xa5, 4096);
+    if cfg!(feature = "verification-boot") {
+        // The guard remains owned but deliberately absent from the translation
+        // hierarchy. A blocked device write must leave every sentinel byte intact.
+        unsafe {
+            core::ptr::write_bytes(iommu_guard_virtual as *mut u8, 0xa5, 4096);
+        }
+        // SAFETY: This deliberately invalid DMA request is restricted to the
+        // verification image. Normal boots never provoke a hardware fault.
+        let Some(mut fault_probe) = (unsafe {
+            arch::x86_64::pci::VirtioBlockBackend::start(
+                virtio_block,
+                virtio_mmio,
+                virtio_dma_frame.address(),
+                virtio_dma_virtual,
+            )
+        }) else {
+            kernel_fail("\r\nginux: adversarial virtio backend activation failed\r\n");
+        };
+        let Some(unmapped_attempt) =
+            fault_probe.attempt_unmapped_read(2, iommu_guard_frame.address())
+        else {
+            kernel_fail("\r\nginux: unauthorized virtio DMA request was not submitted\r\n");
+        };
+        let faulting_transport_bounded = unmapped_attempt.transport_outcome_is_bounded(0);
+        let faulting_device_quiesced = fault_probe.finish();
+        let guard_unchanged = (0..4096)
+            .all(|offset| unsafe { (iommu_guard_virtual as *const u8).add(offset).read() == 0xa5 });
+        if !faulting_transport_bounded {
+            kernel_fail("\r\nginux: unauthorized virtio DMA request state invalid\r\n");
+        }
+        if !faulting_device_quiesced {
+            kernel_fail("\r\nginux: faulting virtio device teardown failed\r\n");
+        }
+        if !guard_unchanged {
+            kernel_fail("\r\nginux: unmapped DMA guard frame was modified\r\n");
+        }
+        serial_write("\r\nginux: unauthorized virtio DMA payload blocked");
+        serial_write("\r\nginux: faulting virtio transport outcome bounded");
+        serial_write("\r\nginux: unmapped DMA guard frame remained unchanged");
+        serial_write("\r\nginux: faulting virtio device reset and bus mastering revoked");
+        if !iommu_active.recover_expected_write_fault(
+            virtio_block.bus,
+            virtio_block.device,
+            virtio_block.function,
+            iommu_guard_frame.address(),
+        ) {
+            kernel_fail("\r\nginux: expected IOMMU fault validation or recovery failed\r\n");
+        }
+        serial_write("\r\nginux: IOMMU fault source and address validated");
+        serial_write("\r\nginux: IOMMU write-permission fault reason validated");
+        serial_write("\r\nginux: IOMMU fault record cleared and translation recovered");
     }
-    // SAFETY: The queue page is exclusively kernel-owned and mapped by the
-    // active IOMMU hierarchy. The guard target is separately owned, aligned,
-    // and intentionally unmapped. `finish` resets the device and revokes bus
-    // mastering before either lease is inspected or released.
-    let Some(mut fault_probe) = (unsafe {
-        arch::x86_64::pci::VirtioBlockBackend::start(
-            virtio_block,
-            virtio_mmio,
-            virtio_dma_frame.address(),
-            virtio_dma_virtual,
-        )
-    }) else {
-        kernel_fail("\r\nginux: adversarial virtio backend activation failed\r\n");
-    };
-    let Some(unmapped_attempt) = fault_probe.attempt_unmapped_read(2, iommu_guard_frame.address())
-    else {
-        kernel_fail("\r\nginux: unauthorized virtio DMA request was not submitted\r\n");
-    };
-    let faulting_transport_bounded = unmapped_attempt.transport_outcome_is_bounded(0);
-    let faulting_device_quiesced = fault_probe.finish();
-    let guard_unchanged = (0..4096)
-        .all(|offset| unsafe { (iommu_guard_virtual as *const u8).add(offset).read() == 0xa5 });
-    if !faulting_transport_bounded {
-        kernel_fail("\r\nginux: unauthorized virtio DMA request state invalid\r\n");
-    }
-    if !faulting_device_quiesced {
-        kernel_fail("\r\nginux: faulting virtio device teardown failed\r\n");
-    }
-    if !guard_unchanged {
-        kernel_fail("\r\nginux: unmapped DMA guard frame was modified\r\n");
-    }
-    serial_write("\r\nginux: unauthorized virtio DMA payload blocked");
-    serial_write("\r\nginux: faulting virtio transport outcome bounded");
-    serial_write("\r\nginux: unmapped DMA guard frame remained unchanged");
-    serial_write("\r\nginux: faulting virtio device reset and bus mastering revoked");
-    if !iommu_active.recover_expected_write_fault(
-        virtio_block.bus,
-        virtio_block.device,
-        virtio_block.function,
-        iommu_guard_frame.address(),
-    ) {
-        kernel_fail("\r\nginux: expected IOMMU fault validation or recovery failed\r\n");
-    }
-    serial_write("\r\nginux: IOMMU fault source and address validated");
-    serial_write("\r\nginux: IOMMU write-permission fault reason validated");
-    serial_write("\r\nginux: IOMMU fault record cleared and translation recovered");
     // SAFETY: The allocator returned one exclusively kernel-owned page, its
     // direct-map alias covers the complete physical frame, and the lease stays
     // live until the device has reset and bus mastering is disabled.
@@ -1346,65 +1347,66 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             )
         })
         .flatten();
-    // The guard is owned but absent from the NIC's exact translation. A
-    // blocked receive write must leave every byte unchanged.
-    unsafe {
-        core::ptr::write_bytes(virtio_network_guard_virtual as *mut u8, 0xa5, PAGE_SIZE);
-    }
-    // SAFETY: Both pages are exclusively kernel-owned. Only the queue page is
-    // in the active VT-d hierarchy; the aligned guard target is deliberately
-    // absent and remains live until after the device is reset below.
-    let network_dma_fault = network_transmit
-        .is_some()
-        .then(|| unsafe {
-            arch::x86_64::pci::attempt_unmapped_network_receive(
-                virtio_network,
-                virtio_network_common_mmio,
-                virtio_network_notify_mmio,
-                virtio_network_msix_mmio,
-                &local_apic,
-                virtio_network_dma_frame.address(),
-                virtio_network_dma_virtual,
-                virtio_network_guard_frame.address(),
-            )
-        })
-        .flatten();
-    let network_fault_completion_published =
-        network_dma_fault.map(|fault| fault.completion_published);
-    let network_guard_unchanged = (0..PAGE_SIZE).all(|offset| unsafe {
-        (virtio_network_guard_virtual as *const u8)
-            .add(offset)
-            .read()
-            == 0xa5
-    });
-    if network_fault_completion_published.is_none() || !network_guard_unchanged {
-        kernel_fail("\r\nginux: unauthorized virtio-net RX DMA was not contained\r\n");
-    }
-    if !virtio_network_active.recover_expected_write_fault(
-        virtio_network.bus,
-        virtio_network.device,
-        virtio_network.function,
-        virtio_network_guard_frame.address(),
-    ) {
-        kernel_fail("\r\nginux: virtio-net IOMMU fault validation or recovery failed\r\n");
-    }
-    // SAFETY: The faulting exchange returned with the function reset and bus
-    // mastering revoked. Fault state has been cleared and the exact translation
-    // recovered before reusing the mapped page for a valid reply.
-    let network_receive = network_dma_fault
-        .is_some()
-        .then(|| unsafe {
-            arch::x86_64::pci::receive_network_arp_reply(
-                virtio_network,
-                virtio_network_common_mmio,
-                virtio_network_notify_mmio,
-                virtio_network_msix_mmio,
-                &local_apic,
-                virtio_network_dma_frame.address(),
-                virtio_network_dma_virtual,
-            )
-        })
-        .flatten();
+    let network_receive = if cfg!(feature = "verification-boot") {
+        // The guard is owned but absent from the NIC's exact translation. This
+        // deliberately faulting receive is verification-only; normal boots do
+        // not submit invalid DMA.
+        unsafe {
+            core::ptr::write_bytes(virtio_network_guard_virtual as *mut u8, 0xa5, PAGE_SIZE);
+        }
+        let network_dma_fault = network_transmit
+            .is_some()
+            .then(|| unsafe {
+                arch::x86_64::pci::attempt_unmapped_network_receive(
+                    virtio_network,
+                    virtio_network_common_mmio,
+                    virtio_network_notify_mmio,
+                    virtio_network_msix_mmio,
+                    &local_apic,
+                    virtio_network_dma_frame.address(),
+                    virtio_network_dma_virtual,
+                    virtio_network_guard_frame.address(),
+                )
+            })
+            .flatten();
+        let network_fault_completion_published =
+            network_dma_fault.map(|fault| fault.completion_published);
+        let network_guard_unchanged = (0..PAGE_SIZE).all(|offset| unsafe {
+            (virtio_network_guard_virtual as *const u8)
+                .add(offset)
+                .read()
+                == 0xa5
+        });
+        if network_fault_completion_published.is_none() || !network_guard_unchanged {
+            kernel_fail("\r\nginux: unauthorized virtio-net RX DMA was not contained\r\n");
+        }
+        if !virtio_network_active.recover_expected_write_fault(
+            virtio_network.bus,
+            virtio_network.device,
+            virtio_network.function,
+            virtio_network_guard_frame.address(),
+        ) {
+            kernel_fail("\r\nginux: virtio-net IOMMU fault validation or recovery failed\r\n");
+        }
+        // SAFETY: The faulting exchange returned with the function reset and
+        // bus mastering revoked before this valid verification exchange.
+        network_dma_fault
+            .is_some()
+            .then(|| unsafe {
+                arch::x86_64::pci::receive_network_arp_reply(
+                    virtio_network,
+                    virtio_network_common_mmio,
+                    virtio_network_notify_mmio,
+                    virtio_network_msix_mmio,
+                    &local_apic,
+                    virtio_network_dma_frame.address(),
+                    virtio_network_dma_virtual,
+                )
+            })
+            .flatten()
+    } else {
+        None
+    };
     let network_translation_retired = virtio_network_active.finish();
     if !network_queues_activated {
         kernel_fail("\r\nginux: virtio-net empty queue activation failed\r\n");
@@ -1412,7 +1414,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if network_transmit.is_none_or(|transmit| transmit.frame_length != 19) {
         kernel_fail("\r\nginux: confined virtio-net transmit failed\r\n");
     }
-    if network_receive.is_none_or(|receive| !(42..=1523).contains(&receive.frame_length)) {
+    if cfg!(feature = "verification-boot")
+        && network_receive.is_none_or(|receive| !(42..=1523).contains(&receive.frame_length))
+    {
         kernel_fail("\r\nginux: confined virtio-net receive failed\r\n");
     }
     if !network_translation_retired

@@ -66,6 +66,11 @@ struct EfiSimpleTextOutputProtocol {
     reset: usize,
     output_string:
         unsafe extern "efiapi" fn(*mut EfiSimpleTextOutputProtocol, *const u16) -> EfiStatus,
+    test_string: usize,
+    query_mode: usize,
+    set_mode: usize,
+    set_attribute: usize,
+    clear_screen: unsafe extern "efiapi" fn(*mut EfiSimpleTextOutputProtocol) -> EfiStatus,
 }
 
 #[repr(C)]
@@ -180,7 +185,6 @@ static mut MEMORY_MAP_STORAGE: MemoryMapStorage = MemoryMapStorage([0; MEMORY_MA
 #[no_mangle]
 extern "efiapi" fn efi_main(image: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
     serial_init();
-    serial_write("ginux: UEFI boot entered\r\n");
 
     // Keep the firmware-console message as a convenience for UTM's graphical view.
     // Serial is the authoritative interface used by automated tests.
@@ -208,6 +212,7 @@ extern "efiapi" fn efi_main(image: EfiHandle, system_table: *mut EfiSystemTable)
         unsafe {
             let console = (*system_table).console_out;
             if !console.is_null() {
+                let _ = ((*console).clear_screen)(console);
                 let _ = ((*console).output_string)(console, message.as_ptr());
             }
         }

@@ -231,6 +231,24 @@ if grep -qE '^GINUX_(BOOT|KERNEL)_PANIC' "$output_file"; then
     exit 1
 fi
 
+if grep -qE 'vtd_iova_to_slpte|vtd_iommu_translate|Interrupt Mask set|New fault is not recorded' "$output_file"; then
+    cat "$output_file"
+    echo "Controller console test failed: normal boot emitted an intentional VT-d fault diagnostic." >&2
+    exit 1
+fi
+
+if grep -Fq 'ginux: UEFI boot entered' "$output_file"; then
+    cat "$output_file"
+    echo "Controller console test failed: obsolete UEFI entry chatter was emitted." >&2
+    exit 1
+fi
+
+if grep -Fq 'BdsDxe: failed to load' "$output_file"; then
+    cat "$output_file"
+    echo "Controller console test failed: firmware attempted a non-bootable device first." >&2
+    exit 1
+fi
+
 if [[ "$(grep -Fc 'Ginux controller v0 (ring 3)' "$output_file")" -ne 1 ]]; then
     cat "$output_file"
     echo "Controller console test failed: controller was relaunched." >&2
