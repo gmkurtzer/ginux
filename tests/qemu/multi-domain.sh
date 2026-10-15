@@ -67,17 +67,17 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'ginux> '
     printf '%s\n' \
         'domain new alpine' \
-        'domain set alpine personality=linux image=alpine:latest init=/bin/sh' \
+        'domain set alpine image=alpine:latest init=/bin/sh' \
         'domain start alpine'
     wait_for 'alpine: running (detached)'
     printf '%s\n' \
         'domain new alpine2' \
-        'domain set alpine2 personality=linux image=alpine:latest init=/bin/sh' \
+        'domain set alpine2 image=alpine:latest init=/bin/sh' \
         'domain start alpine2'
     wait_for 'alpine2: running (detached)'
     printf '%s\n' \
         'domain new rocky' \
-        'domain set rocky personality=linux image=rockylinux/rockylinux:10 init=/usr/bin/true' \
+        'domain set rocky image=rockylinux/rockylinux:10 init=/usr/bin/true' \
         'domain start rocky'
     wait_for_count 'ginux: OCI image ready' 3 240
     wait_for_count 'ginux: entering configured OCI init' 3 30

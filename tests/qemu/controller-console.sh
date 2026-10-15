@@ -58,7 +58,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     for command in \
         '' '   ' $'sta\t' $'statuz\177s' $'statuz\bs' $'domain a\t' help 'domain help' 'domain set --help' 'network help' 'network set --help' 'test linux' '  status  ' components ls 'ls /etc' 'ls /proc' 'ls /proc/1' ps 'domain list' \
         'network list' 'network new gnet0 type=virtual' 'network new gnet1 type=virtual uplink=gnet0' 'network list' 'network status gnet0' 'network stop gnet0' 'network status gnet0' 'network start gnet0' 'network restart gnet1' 'network status eth0' 'network status lo' 'network status eth9' 'network ping lo 127.0.0.1' 'network set lo dns 10.0.2.3' 'network set eth0 static 10.0.2.15/99 10.0.2.2' 'network set eth0 static 10.0.2.15/24 10.0.2.2' 'network set eth0 dns 10.0.2.3' 'network status eth0' 'network ping eth0 10.0.2.15' 'network ping eth0 10.0.2.2' 'network ping eth0 10.0.2.2' 'network stop eth0' 'network status eth0' 'network start eth0' 'network restart eth0' 'network ping eth0 10.0.2.2' 'network down eth0' 'network set eth0 dhcp' 'network status eth0' 'network ping eth0 10.0.2.2' 'network stop eth0' \
-        'domain status default' 'domain new demo' 'domain new demo' 'domain new rocky' 'domain set rocky personality=linux image=rockylinux/rockylinux:10 init=/bin/sh' 'domain list' \
+        'domain status default' 'domain new demo' 'domain new demo' 'domain new rocky' 'domain set rocky image=rockylinux/rockylinux:10 init=/bin/sh' 'domain list' \
         'domain start' 'domain set demo cpu=1 cpu=1' 'domain set demo personality=linux image=alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395 init=/bin/sh' 'domain list' 'domain set demo personality=linux image=rockylinux/rockylinux:10' 'domain list' \
         'domain set demo personality=linux image=embedded://minimal-system-v0 init=/sbin/init cpu=1 memory-mib=1048576 autostart=true network=gnet0 network=gnet1' 'domain set demo autostart=false' 'domain set demo cpu 1' 'domain list' 'network list' status \
         'domain start demo' 'domain list' 'domain status demo' 'ls /proc' 'ls /proc/100' ps \
@@ -187,9 +187,9 @@ for expected in \
     'domains: 0 configured' \
     'domain: not found' \
     'NAME            STATE       PERSONALITY  INIT                  CPU  MEM-MIB  AUTO   NETWORKS          IMAGE' \
-    'demo: created (personality and image required)' \
+    'demo: created (image required)' \
     'domain: create rejected' \
-    'rocky: created (personality and image required)' \
+    'rocky: created (image required)' \
     'rocky           configured  linux' \
     'docker.io/rockylinux/rockylinux:10' \
     'demo            configured  linux' \

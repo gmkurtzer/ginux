@@ -113,10 +113,11 @@ representation, addressability, and resources actually available at runtime.
 Each configured workload is a Ginux domain. The domain is the outer,
 non-bypassable security boundary and owns its CPU and memory budget, process
 tree, IPC objects, filesystem root and mount view, network view, and devices.
-`personality=linux` selects the Linux userspace contract; `image=...` selects
-how that domain's system root is populated. A domain without an explicit
-network attachment uses the control domain's host network; this shares
-connectivity, not authority to reconfigure the host interface.
+New domains default to `personality=linux`, selecting the Linux userspace
+contract; `image=...` selects how that domain's system root is populated. A
+domain without an explicit network attachment uses the control domain's host
+network; this shares connectivity, not authority to reconfigure the host
+interface.
 
 Physical network devices are discovered by the kernel. Operators may create
 named virtual devices with `network new`, chain them to physical or virtual
@@ -253,7 +254,7 @@ simulation is not sufficient.
 |---|---|---|
 | Boot | Direct x86-64 UEFI boot as one EFI application under Q35/OVMF | Production signing, recovery, and physical hardware profiles |
 | Controller | Persistent ring-3 command console with command-name completion, aligned status tables, and component, process, network, and domain lifecycle control | Dynamic argument completion, remote authenticated management, and persistent configuration |
-| Domains | Explicitly selected Linux-personality domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
+| Domains | Default-Linux domains with concurrent isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
 | Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, an automatically mounted per-domain procfs, and an unmodified Alpine musl/BusyBox shell with rootfs-backed commands | Complete Alpine checkpoint, then Rocky Linux 10 and systemd |
@@ -293,7 +294,7 @@ help
 status
 network new gnet0 type=virtual
 domain new alpine
-domain set alpine personality=linux image=alpine:latest init=/bin/sh network=gnet0
+domain set alpine image=alpine:latest init=/bin/sh network=gnet0
 domain start alpine --attach
 ```
 

@@ -7,8 +7,8 @@ kernel isolation, ownership, accounting, scheduling, device, and failure
 boundary. OCI does not create that boundary; it is one way to populate a Linux
 personality domain's root filesystem.
 
-Creation applies resource and init defaults but deliberately does not infer a
-personality or system image:
+Creation applies Linux personality, resource, and init defaults but deliberately
+does not infer a system image:
 
 ```text
 domain new NAME
@@ -17,14 +17,15 @@ init=/sbin/init
 cpu=1
 memory-mib=128
 autostart=false
+personality=linux
 ```
 
-Before start, the operator must explicitly configure `personality=linux` and
-an image. Linux is the only implemented personality in v0; the versioned field
-is designed for future BSD and native personalities.
+Before start, the operator must configure an image. Linux is the default and
+only implemented personality in v0; the versioned field remains explicit and
+may be overridden as future BSD and native personalities are implemented.
 
 ```text
-domain set alpine personality=linux image=alpine:latest init=/bin/sh
+domain set alpine image=alpine:latest init=/bin/sh
 ```
 
 `cpu` accepts any nonzero 16-bit count and `memory-mib` accepts any nonzero

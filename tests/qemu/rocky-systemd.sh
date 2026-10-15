@@ -52,7 +52,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'ginux> '
     printf '%s\n' \
         'domain new rocky' \
-        'domain set rocky personality=linux image=rockylinux/rockylinux:10-ubi-init init=/sbin/init' \
+        'domain set rocky image=rockylinux/rockylinux:10-ubi-init init=/sbin/init' \
         'domain start rocky --attach'
     wait_for 'ginux: OCI image ready' 240
     wait_for 'ginux: entering configured OCI init' 30

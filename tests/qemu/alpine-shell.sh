@@ -80,7 +80,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for 'ginux> '
     printf '%s\n' \
         'domain new alpine' \
-        'domain set alpine personality=linux image=alpine:latest init=/bin/sh' \
+        'domain set alpine image=alpine:latest init=/bin/sh' \
         'domain list'
     wait_for 'docker.io/library/alpine:latest'
     printf '%s\n' \

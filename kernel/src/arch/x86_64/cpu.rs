@@ -18906,10 +18906,16 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
                 &CONTAINER_INITS[slot],
                 &CONTAINER_INIT_SIZES[slot],
             );
+            store_container_value(
+                b"linux",
+                &DOMAIN_PERSONALITIES[slot],
+                &DOMAIN_PERSONALITY_SIZES[slot],
+            );
             CONTAINER_CONFIG_FLAGS[slot].store(
                 control_abi::DOMAIN_CONFIG_INIT
                     | control_abi::DOMAIN_CONFIG_CPU
-                    | control_abi::DOMAIN_CONFIG_MEMORY,
+                    | control_abi::DOMAIN_CONFIG_MEMORY
+                    | control_abi::DOMAIN_CONFIG_PERSONALITY,
                 Ordering::SeqCst,
             );
             CONTAINER_CONTROL_STATES[slot]

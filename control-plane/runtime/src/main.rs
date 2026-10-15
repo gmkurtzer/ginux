@@ -1287,11 +1287,7 @@ fn handle_domain_command(console: u64, host: u64, command: u16, arguments: Argum
         COMMAND_DOMAIN_NEW => {
             if domain_call(host, NATIVE_DOMAIN_CREATE, &mut request) == NATIVE_DOMAIN_STATE_CREATED
             {
-                write_name_state(
-                    console,
-                    name,
-                    b"created (personality and image required)\r\n",
-                );
+                write_name_state(console, name, b"created (image required)\r\n");
             } else {
                 write(console, b"domain: create rejected\r\n");
             }
