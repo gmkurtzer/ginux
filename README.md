@@ -224,6 +224,12 @@ label, decide the final path.
 
 ## Current state
 
+The active runtime stabilization findings and required multi-container QEMU
+acceptance sequence are tracked in
+[docs/STABILITY-AUDIT.md](docs/STABILITY-AUDIT.md). Runtime behavior is treated
+as complete only when its real lifecycle gate passes; configuration-state
+simulation is not sufficient.
+
 | Area | What works now | Next boundary |
 |---|---|---|
 | Boot | Direct x86-64 UEFI boot as one EFI application under Q35/OVMF | Production signing, recovery, and physical hardware profiles |
