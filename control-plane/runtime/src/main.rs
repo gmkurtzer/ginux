@@ -437,10 +437,7 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
 fn read_line(console: u64, line: &mut [u8; MAX_LINE]) -> usize {
     let mut length = 0;
     loop {
-        let byte = call(NATIVE_CONSOLE_READ_BYTE_OPERATION, console, 0, 0);
-        let Ok(byte) = u8::try_from(byte) else {
-            exit(NATIVE_SERVICE_EXIT_REJECTED);
-        };
+        let byte = read_console_byte(console);
         match byte {
             b'\r' | b'\n' => {
                 write(console, b"\r\n");
@@ -466,6 +463,16 @@ fn read_line(console: u64, line: &mut [u8; MAX_LINE]) -> usize {
             _ => {}
         }
     }
+}
+
+fn read_console_byte(console: u64) -> u8 {
+    const RETRY_LIMIT: usize = 3;
+    for _ in 0..RETRY_LIMIT {
+        if let Ok(byte) = u8::try_from(call(NATIVE_CONSOLE_READ_BYTE_OPERATION, console, 0, 0)) {
+            return byte;
+        }
+    }
+    exit(NATIVE_SERVICE_EXIT_REJECTED)
 }
 
 fn test_linux_userspace(console: u64, host: u64) {

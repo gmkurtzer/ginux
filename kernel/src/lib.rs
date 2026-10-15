@@ -3693,6 +3693,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if !controller_completed {
             controller_recovery_attempts = controller_recovery_attempts.saturating_add(1);
             if controller_recovery_attempts <= 3 {
+                serial_write("ginux: controller exit detail/fault: ");
+                serial_write_u64(domain::last_lifecycle_event_detail().map_or(255, u64::from));
+                serial_write(" ");
+                serial_write_u64(domain::last_lifecycle_event_has_fault().map_or(2, u64::from));
+                serial_write("\r\n");
                 serial_write("ginux: controller failed; restarting control plane\r\n");
                 continue 'managed;
             }

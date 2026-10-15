@@ -18348,14 +18348,11 @@ fn console_read_byte(domain_id: u64, capability: u64, frame: *const UserTrapFram
     if !domain::handle_permits(domain_id, capability, 2, Rights::READ)
         || frame.first_argument() != 0
         || frame.second_argument() != 0
+        || !domain::renew_auxiliary_call_epoch(domain_id)
     {
         return u64::MAX - 2;
     }
-    let byte = crate::serial_read_byte_blocking();
-    if !domain::renew_auxiliary_call_epoch(domain_id) {
-        return u64::MAX - 2;
-    }
-    u64::from(byte)
+    u64::from(crate::serial_read_byte_blocking())
 }
 
 fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
