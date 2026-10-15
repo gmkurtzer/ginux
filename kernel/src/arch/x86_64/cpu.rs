@@ -14401,7 +14401,8 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
     let Ok(capacity) = usize::try_from(count) else {
         return LINUX_EINVAL;
     };
-    let mut entries = [0_u8; 256];
+    let mut entries = [0_u8; PAGE_SIZE];
+    let output_capacity = capacity.min(entries.len());
     let mut used = 0_usize;
     let next_offset;
     let oci_directory = linux_oci_descriptor(descriptor);
@@ -14427,7 +14428,14 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                     &b".."[..],
                 ),
             ] {
-                if !append_linux_dirent(&mut entries, &mut used, inode, next, 4, name) {
+                if !append_linux_dirent(
+                    &mut entries[..output_capacity],
+                    &mut used,
+                    inode,
+                    next,
+                    4,
+                    name,
+                ) {
                     return LINUX_EINVAL;
                 }
             }
@@ -14449,7 +14457,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 return LINUX_EINVAL;
             };
             if !append_linux_dirent(
-                &mut entries,
+                &mut entries[..output_capacity],
                 &mut used,
                 linux_oci_inode(child.handle),
                 next,
@@ -14495,7 +14503,14 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 (directory_inode, 1_i64, &b"."[..]),
                 (parent_inode, 2, &b".."[..]),
             ] {
-                if !append_linux_dirent(&mut entries, &mut used, inode, next, 4, name) {
+                if !append_linux_dirent(
+                    &mut entries[..output_capacity],
+                    &mut used,
+                    inode,
+                    next,
+                    4,
+                    name,
+                ) {
                     return LINUX_EINVAL;
                 }
             }
@@ -14515,14 +14530,17 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             ] {
                 if cursor == index {
                     if !append_linux_dirent(
-                        &mut entries,
+                        &mut entries[..output_capacity],
                         &mut used,
                         inode,
                         (index + 3) as i64,
                         8,
                         name,
                     ) {
-                        return LINUX_EINVAL;
+                        if used == 0 {
+                            return LINUX_EINVAL;
+                        }
+                        break;
                     }
                     cursor += 1;
                 }
@@ -14541,20 +14559,24 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             ] {
                 if cursor == index {
                     if !append_linux_dirent(
-                        &mut entries,
+                        &mut entries[..output_capacity],
                         &mut used,
                         inode,
                         (index + 3) as i64,
                         8,
                         name,
                     ) {
-                        return LINUX_EINVAL;
+                        if used == 0 {
+                            return LINUX_EINVAL;
+                        }
+                        break;
                     }
                     cursor += 1;
                 }
             }
         } else if directory == b"proc" {
             let child_live = linux_process::live_process_status(2).is_some();
+            let mut full = false;
             let root_files = [
                 (25_u64, &b"cpuinfo"[..]),
                 (26_u64, &b"meminfo"[..]),
@@ -14571,34 +14593,43 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             for (index, (inode, name)) in root_files.iter().enumerate() {
                 if cursor == index {
                     if !append_linux_dirent(
-                        &mut entries,
+                        &mut entries[..output_capacity],
                         &mut used,
                         *inode,
                         (index + 3) as i64,
                         8,
                         name,
                     ) {
-                        return LINUX_EINVAL;
+                        if used == 0 {
+                            return LINUX_EINVAL;
+                        }
+                        full = true;
+                        break;
                     }
                     cursor += 1;
                 }
             }
-            for (index, inode, name) in [
-                (root_files.len(), 16_u64, &b"1"[..]),
-                (root_files.len() + 1, 23_u64, &b"2"[..]),
-            ] {
-                if cursor == index && (name == b"1" || child_live) {
-                    if !append_linux_dirent(
-                        &mut entries,
-                        &mut used,
-                        inode,
-                        (index + 3) as i64,
-                        4,
-                        name,
-                    ) {
-                        return LINUX_EINVAL;
+            if !full {
+                for (index, inode, name) in [
+                    (root_files.len(), 16_u64, &b"1"[..]),
+                    (root_files.len() + 1, 23_u64, &b"2"[..]),
+                ] {
+                    if cursor == index && (name == b"1" || child_live) {
+                        if !append_linux_dirent(
+                            &mut entries[..output_capacity],
+                            &mut used,
+                            inode,
+                            (index + 3) as i64,
+                            4,
+                            name,
+                        ) {
+                            if used == 0 {
+                                return LINUX_EINVAL;
+                            }
+                            break;
+                        }
+                        cursor += 1;
                     }
-                    cursor += 1;
                 }
             }
         } else if directory == b"tmp" {
@@ -14609,7 +14640,14 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 let entry = linux_tmpfs::entry()
                     .map(|(handle, name)| (linux_tmpfs::inode(handle), 8, name));
                 if let Some((inode, kind, name)) = entry {
-                    if !append_linux_dirent(&mut entries, &mut used, inode, 3, kind, name) {
+                    if !append_linux_dirent(
+                        &mut entries[..output_capacity],
+                        &mut used,
+                        inode,
+                        3,
+                        kind,
+                        name,
+                    ) {
                         return LINUX_EINVAL;
                     }
                     cursor = 1;
@@ -14654,7 +14692,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                     return LINUX_EINVAL;
                 };
                 if !append_linux_dirent(
-                    &mut entries,
+                    &mut entries[..output_capacity],
                     &mut used,
                     child_inode,
                     next,
@@ -14691,7 +14729,14 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             (3, 5, 2, &b"console"[..]),
             (3, 6, 2, &b"tty"[..]),
         ] {
-            if !append_linux_dirent(&mut entries, &mut used, inode, next, kind, name) {
+            if !append_linux_dirent(
+                &mut entries[..output_capacity],
+                &mut used,
+                inode,
+                next,
+                kind,
+                name,
+            ) {
                 return LINUX_EINVAL;
             }
         }

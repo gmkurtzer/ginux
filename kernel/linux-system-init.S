@@ -140,12 +140,16 @@ ginux_linux_system_init:
     mov r9, rax
     mov rdi, rax
     lea rsi, [rip + .Lstatus]
-    mov edx, 80
+    mov edx, 512
     mov eax, 217
     syscall
-    cmp rax, 72
+    cmp rax, 288
     jne .Lfailure
-    cmp byte ptr [rip + .Lstatus + 67], '1'
+    cmp dword ptr [rip + .Lstatus + 67], 0x69757063
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 251], 0x6c646d63
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 283], '1'
     jne .Lfailure
     mov rdi, r9
     mov eax, 3
@@ -163,10 +167,10 @@ ginux_linux_system_init:
     mov r9, rax
     mov rdi, rax
     lea rsi, [rip + .Lstatus]
-    mov edx, 256
+    mov edx, 512
     mov eax, 217
     syscall
-    cmp rax, 208
+    cmp rax, 264
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 67], 0x74617473
     jne .Lfailure
@@ -181,6 +185,12 @@ ginux_linux_system_init:
     cmp dword ptr [rip + .Lstatus + 163], 0x5f646967
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 195], 0x67746573
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 227], 0x74617473
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 251], 0x74617473
+    jne .Lfailure
+    cmp byte ptr [rip + .Lstatus + 255], 'm'
     jne .Lfailure
     mov rdi, r9
     mov eax, 3
@@ -719,12 +729,12 @@ ginux_linux_system_init:
     mov r9, rax
     mov rdi, rax
     lea rsi, [rip + .Lstatus]
-    mov edx, 96
+    mov edx, 512
     mov eax, 217
     syscall
-    cmp rax, 96
+    cmp rax, 312
     jne .Lfailure
-    cmp byte ptr [rip + .Lstatus + 91], '2'
+    cmp byte ptr [rip + .Lstatus + 307], '2'
     jne .Lfailure
     mov rdi, r9
     mov eax, 3
@@ -742,10 +752,10 @@ ginux_linux_system_init:
     mov r9, rax
     mov rdi, rax
     lea rsi, [rip + .Lstatus]
-    mov edx, 80
+    mov edx, 512
     mov eax, 217
     syscall
-    cmp rax, 80
+    cmp rax, 136
     jne .Lfailure
     cmp dword ptr [rip + .Lstatus + 67], 0x74617473
     jne .Lfailure
@@ -1002,4 +1012,4 @@ ginux_linux_system_init:
 .Lprivilege_marker:
     .ascii "PRIVILEGE_BOUNDARY_READY\n"
 .Lstatus:
-    .space 256
+    .space 512
