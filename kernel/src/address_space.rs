@@ -8156,9 +8156,6 @@ fn verify_native_network_bootstrap_run_with_evidence(
             | NativeNetworkRunMode::PacketBatch
     );
     let registry = mode == NativeNetworkRunMode::RegistryPull;
-    if registry {
-        crate::serial_write("ginux: OCI preparing isolated registry transport\r\n");
-    }
     let packet_fault = mode == NativeNetworkRunMode::PacketHandoffFault;
     let packet_batch = mode == NativeNetworkRunMode::PacketBatch;
     let packet_egress = matches!(
@@ -8695,9 +8692,6 @@ fn verify_native_network_bootstrap_run_with_evidence(
         }
         return false;
     }
-    if registry {
-        crate::serial_write("ginux: OCI registry transport active\r\n");
-    }
     let drain_authorized = if egress_graceful_drain {
         let (Some(supervisor), Some(manage_handle), Some(wrong_handle)) = (
             domain::control_plane_id(),
@@ -8902,6 +8896,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
         crate::serial_write_u64(u64::from(
             domain::last_lifecycle_event_has_fault().unwrap_or(true),
         ));
+        crate::serial_write_bytes(b"\r\n");
     }
     if registry && !valid {
         crate::serial_write_bytes(b"\r\nginux: OCI service lifecycle event/detail/fault: ");
@@ -8925,6 +8920,7 @@ fn verify_native_network_bootstrap_run_with_evidence(
                 }
             }
         }
+        crate::serial_write_bytes(b"\r\n");
     }
     if valid {
         if let (Some(evidence_output), Some(iommu_evidence)) = (evidence_output, iommu_evidence) {

@@ -71,7 +71,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     printf '%s\n' \
         'container start alpine --attach'
     wait_for 'ginux: entering configured OCI init'
-    wait_for 'ginux: OCI image downloaded, verified, unpacked, and published'
+    wait_for 'ginux: OCI image ready'
     printf '%s\n' \
         "printf 'LIBC_RUNTIME_OK\\n'" \
         "test -f /bin/busybox && printf 'STAT_ABI_OK\\n'" \

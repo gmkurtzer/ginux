@@ -88,7 +88,6 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         return false;
     }
     progress(b"registry network stack ready");
-
     let dns_address = info.dns.to_be_bytes();
     let dns_servers = [IpAddress::Ipv4(Ipv4Address::from_octets(dns_address))];
     let dns_socket = dns::Socket::new(
@@ -157,7 +156,7 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
     let token = &mut *core::ptr::addr_of_mut!(PULL_TOKEN);
     token.clear();
     if response.status == 401 {
-        progress(b"requesting registry bearer token");
+        progress(b"authenticating with registry");
         let Some(challenge) = ginux_oci::BearerChallenge::parse(response.www_authenticate.as_str())
         else {
             return false;
@@ -219,7 +218,7 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
     }
 
     let mut manifest_body = unsafe { BufferSink::metadata() };
-    progress(b"downloading image manifest");
+    progress(b"pulling image manifest");
     if !unsafe {
         https_get(
             host,
@@ -306,7 +305,7 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         return false;
     }
     manifest_body.clear();
-    progress(b"downloading and verifying image configuration");
+    progress(b"pulling image configuration");
     if !unsafe {
         https_get(
             host,
@@ -360,7 +359,9 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         return false;
     }
     progress_platform(platform);
-    for (layer_digest, layer_size) in &layers {
+    progress(b"image configuration verified");
+    let layer_count = layers.len();
+    for (layer_index, (layer_digest, layer_size)) in layers.iter().enumerate() {
         let Some(digest) = parse_digest(layer_digest.as_str()) else {
             return false;
         };
@@ -372,7 +373,13 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         else {
             return false;
         };
-        progress(b"downloading and verifying image layer");
+        progress_layer(
+            "pulling",
+            layer_index + 1,
+            layer_count,
+            layer_digest.as_str(),
+            *layer_size,
+        );
         let fetched = unsafe {
             https_get(
                 host,
@@ -429,7 +436,13 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
             progress(b"registry layer digest or publication rejected");
             return false;
         }
-        progress(b"image layer published");
+        progress_layer(
+            "verified",
+            layer_index + 1,
+            layer_count,
+            layer_digest.as_str(),
+            *layer_size,
+        );
     }
     true
 }
@@ -472,6 +485,15 @@ fn progress_platform(platform: ginux_oci::Platform<'_>) {
     if !platform.variant.is_empty() {
         let _ = write!(message, "/{}", platform.variant);
     }
+    progress(message.as_bytes());
+}
+
+fn progress_layer(stage: &str, index: usize, count: usize, digest: &str, size: usize) {
+    let mut message = String::<128>::new();
+    let _ = write!(
+        message,
+        "layer {index}/{count}: {stage} {digest} ({size} bytes)"
+    );
     progress(message.as_bytes());
 }
 

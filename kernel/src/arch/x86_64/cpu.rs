@@ -15779,14 +15779,36 @@ fn native_progress_call(caller_domain: u64, capability: u64, frame: *const UserT
     {
         return u64::MAX - 2;
     }
-    serial_write("ginux: OCI ");
-    crate::serial_write_bytes(&bytes[..size]);
-    serial_write("\r\n");
+    if oci_progress_is_console_visible(&bytes[..size]) {
+        serial_write("ginux: OCI ");
+        crate::serial_write_bytes(&bytes[..size]);
+        serial_write("\r\n");
+    }
     if domain::renew_auxiliary_call_epoch(caller_domain) {
         size as u64
     } else {
         u64::MAX - 2
     }
+}
+
+fn oci_progress_is_console_visible(message: &[u8]) -> bool {
+    message == b"authenticating with registry"
+        || message == b"pulling image manifest"
+        || message == b"pulling image configuration"
+        || message == b"image configuration verified"
+        || message.starts_with(b"manifest selected for ")
+        || message.starts_with(b"layer ")
+        || contains_bytes(message, b"failed")
+        || contains_bytes(message, b"rejected")
+        || contains_bytes(message, b"unavailable")
+        || contains_bytes(message, b"exceeded")
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 fn image_store_call(caller_domain: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {

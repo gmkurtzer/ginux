@@ -3617,8 +3617,12 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("\r\nginux: runtime network initialization failed\r\n");
     }
     let mut controller_recovery_attempts = 0_u8;
+    let mut controller_launch_announced = false;
     'managed: loop {
-        serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
+        if !controller_launch_announced {
+            serial_write("\r\nginux: launching embedded controller in ring 3\r\n");
+            controller_launch_announced = true;
+        }
         let controller_completed = address_space::run_installed_interactive_controller();
         let shutdown_requested = arch::x86_64::cpu::take_container_host_shutdown_request();
         if shutdown_requested {
@@ -3668,7 +3672,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         if arch::x86_64::cpu::take_container_pull_request() {
             let mut image = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
             let image_size = arch::x86_64::cpu::configured_container_image(&mut image).unwrap_or(0);
-            serial_write("ginux: resolving OCI image ");
+            serial_write("ginux: pulling OCI image ");
             serial_write_bytes(&image[..image_size]);
             serial_write("\r\n");
             let downloaded = image_size != 0
@@ -3681,10 +3685,13 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     &image[..image_size],
                     boot_info.unix_time,
                 );
+            if downloaded {
+                serial_write("ginux: OCI unpacking image filesystem\r\n");
+            }
             let success = downloaded && image_store::install_latest_layer();
             arch::x86_64::cpu::complete_container_pull(success);
             serial_write(if success {
-                "ginux: OCI image downloaded, verified, unpacked, and published\r\n"
+                "ginux: OCI image ready\r\n"
             } else {
                 "ginux: OCI image pull failed; partial objects discarded\r\n"
             });
