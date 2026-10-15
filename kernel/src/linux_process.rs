@@ -1278,6 +1278,46 @@ pub(crate) fn finish_runtime_process_registry() -> bool {
     finish_live_process_registry_with_refresh_floor(0)
 }
 
+pub(crate) fn suspend_runtime_process_registry() -> bool {
+    let Some(instance) = active_process_instance() else {
+        return false;
+    };
+    if instance != current_process_instance()
+        || !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire)
+    {
+        return false;
+    }
+    LIVE_PROCESS_ACTIVE_INSTANCE.store(PROCESS_INSTANCE_NONE, Ordering::Release);
+    true
+}
+
+pub(crate) fn resume_runtime_process_registry() -> bool {
+    let instance = current_process_instance();
+    if !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire)
+        || LIVE_PROCESS_ACTIVE_INSTANCE
+            .compare_exchange(
+                PROCESS_INSTANCE_NONE,
+                instance as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+    {
+        return false;
+    }
+    let valid = live_process_table_mut().is_some_and(|table| {
+        table.owner_domain
+            == cpu::current_container_slot()
+                .and_then(cpu::container_domain_id)
+                .unwrap_or(0)
+            && table.init.is_some()
+    });
+    if !valid {
+        LIVE_PROCESS_ACTIVE_INSTANCE.store(PROCESS_INSTANCE_NONE, Ordering::Release);
+    }
+    valid
+}
+
 fn finish_live_process_registry_with_refresh_floor(refresh_floor: u32) -> bool {
     let Some(instance) = active_process_instance() else {
         return true;

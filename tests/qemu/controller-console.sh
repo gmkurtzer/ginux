@@ -5,14 +5,27 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 output_file="$(mktemp -t ginux-controller.XXXXXX)"
 volume_image="$(mktemp -t ginux-controller-volume.XXXXXX)"
+qemu_pid_file="$(mktemp -t ginux-controller-pid.XXXXXX)"
 qemu_pid=""
+: >"$qemu_pid_file"
+
+stop_qemu() {
+    local pid=""
+    if [[ -s "$qemu_pid_file" ]]; then
+        read -r pid <"$qemu_pid_file" || true
+    fi
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
+}
 
 cleanup() {
+    stop_qemu
     if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
     fi
-    rm -f "$output_file" "$volume_image"
+    rm -f "$output_file" "$volume_image" "$qemu_pid_file"
 }
 trap cleanup EXIT
 
@@ -55,12 +68,13 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         send_command "$command"
     done
     printf 'shutdown\n'
-} | GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
+} | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
+    "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
 for _ in {1..75}; do
     if grep -Fq 'GINUX_KERNEL_PANIC' "$output_file"; then
-        kill "$qemu_pid" 2>/dev/null || true
+        stop_qemu
         break
     fi
     if ! kill -0 "$qemu_pid" 2>/dev/null; then
@@ -84,6 +98,7 @@ else
     exit 1
 fi
 qemu_pid=""
+: >"$qemu_pid_file"
 
 for expected in \
     'ginux: embedded controller runtime measurement accepted' \

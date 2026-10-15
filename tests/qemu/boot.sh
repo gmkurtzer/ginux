@@ -10,9 +10,21 @@ native_corrupt_output_file="$(mktemp -t ginux-native-corrupt.XXXXXX)"
 volume_image="$(mktemp -t ginux-volume.XXXXXX)"
 corrupt_volume_image="$(mktemp -t ginux-corrupt-volume.XXXXXX)"
 native_corrupt_volume_image="$(mktemp -t ginux-native-corrupt-volume.XXXXXX)"
+qemu_pid_file="$(mktemp -t ginux-boot-pid.XXXXXX)"
 qemu_pid=""
 
+stop_qemu() {
+    local pid=""
+    if [[ -s "$qemu_pid_file" ]]; then
+        read -r pid <"$qemu_pid_file" || true
+    fi
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
+}
+
 cleanup() {
+    stop_qemu
     if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
@@ -24,7 +36,8 @@ cleanup() {
         "$native_corrupt_output_file" \
         "$volume_image" \
         "$corrupt_volume_image" \
-        "$native_corrupt_volume_image"
+        "$native_corrupt_volume_image" \
+        "$qemu_pid_file"
 }
 trap cleanup EXIT
 
@@ -35,6 +48,7 @@ run_boot() {
     local boot_name="$2"
     local boot_volume="${3:-$volume_image}"
 
+    : >"$qemu_pid_file"
     {
         for _ in {1..60}; do
             if grep -Fq 'ginux> ' "$boot_output"; then
@@ -43,7 +57,8 @@ run_boot() {
             sleep 1
         done
         printf 'shutdown\n'
-    } | GINUX_VOLUME_IMAGE="$boot_volume" "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
+    } | GINUX_VOLUME_IMAGE="$boot_volume" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
+        "$repo_root/tools/qemu/run.sh" >"$boot_output" 2>&1 &
     qemu_pid=$!
 
     for _ in {1..60}; do
@@ -54,6 +69,7 @@ run_boot() {
     done
 
     if kill -0 "$qemu_pid" 2>/dev/null; then
+        stop_qemu
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
         qemu_pid=""
@@ -68,6 +84,7 @@ run_boot() {
         qemu_status=$?
     fi
     qemu_pid=""
+    : >"$qemu_pid_file"
 
     if [[ "$qemu_status" -ne 0 ]]; then
         cat "$boot_output"
@@ -529,7 +546,8 @@ cp "$volume_image" "$corrupt_volume_image"
 dd if=/dev/zero of="$corrupt_volume_image" bs=1 seek=0 count=1 conv=notrunc 2>/dev/null
 corrupt_checksum="$(cksum "$corrupt_volume_image")"
 
-GINUX_VOLUME_IMAGE="$corrupt_volume_image" \
+: >"$qemu_pid_file"
+GINUX_VOLUME_IMAGE="$corrupt_volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
     "$repo_root/tools/qemu/run.sh" >"$corrupt_output_file" 2>&1 &
 qemu_pid=$!
 for _ in {1..30}; do
@@ -540,10 +558,12 @@ for _ in {1..30}; do
     sleep 1
 done
 if kill -0 "$qemu_pid" 2>/dev/null; then
+    stop_qemu
     kill "$qemu_pid" 2>/dev/null || true
 fi
 wait "$qemu_pid" 2>/dev/null || true
 qemu_pid=""
+: >"$qemu_pid_file"
 
 if ! grep -q '^ginux: persistent virtio device reset and bus mastering revoked' "$corrupt_output_file" ||
     ! grep -q '^ginux: virtio DMA frame scrubbed and released' "$corrupt_output_file" ||

@@ -10,7 +10,7 @@ use crate::memory::{self, FrameLease, FrameOwner};
 const PAGE_SIZE: usize = 4096;
 const OBJECT_LIMIT: usize = 4;
 const OBJECT_PAGE_LIMIT: usize = 32_768;
-const ROOTFS_PAGE_LIMIT: usize = 98_304;
+const ROOTFS_PAGE_LIMIT: usize = 131_072;
 pub(crate) const OBJECT_SIZE_LIMIT: usize = OBJECT_PAGE_LIMIT * PAGE_SIZE;
 pub(crate) const CACHE_QUOTA: usize = OBJECT_SIZE_LIMIT;
 
@@ -239,12 +239,18 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
         }
         let expected_length = u32::from_le_bytes(trailer) as usize;
         if expected_length == 0 || expected_length > ROOTFS_PAGE_LIMIT * PAGE_SIZE {
+            crate::serial_write_bytes(b"ginux: OCI rootfs expanded size exceeds limit: ");
+            crate::serial_write_u64(expected_length as u64);
+            crate::serial_write_bytes(b" bytes\r\n");
             return false;
         }
         let page_count = expected_length.div_ceil(PAGE_SIZE);
         let Some((first_frame, _)) =
             memory::allocate_contiguous_extent(FrameOwner::KERNEL, page_count)
         else {
+            crate::serial_write_bytes(b"ginux: OCI rootfs memory allocation failed: ");
+            crate::serial_write_u64(expected_length as u64);
+            crate::serial_write_bytes(b" bytes\r\n");
             return false;
         };
         let Some(address) = first_frame.direct_map_address() else {
@@ -283,6 +289,16 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
         }
         let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, written) };
         if !crate::oci_image::install_runtime_rootfs(slot, bytes) {
+            crate::serial_write_bytes(b"ginux: OCI rootfs index or init validation failed\r\n");
+            let _ = memory::scrub_and_release_contiguous_extent(
+                FrameOwner::KERNEL,
+                first_frame,
+                page_count,
+            );
+            return false;
+        }
+        if store.remove(digest).is_err() {
+            let _ = crate::oci_image::uninstall_runtime_rootfs(slot);
             let _ = memory::scrub_and_release_contiguous_extent(
                 FrameOwner::KERNEL,
                 first_frame,
@@ -292,6 +308,9 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
         }
         ROOTFS_FRAME_STARTS[slot].store(first_frame.address(), Ordering::Release);
         ROOTFS_FRAME_COUNTS[slot].store(page_count, Ordering::Release);
+        unsafe {
+            core::ptr::addr_of_mut!(LAST_PUBLISHED).write(Digest([0; 32]));
+        }
         true
     })
     .unwrap_or(false)

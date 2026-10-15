@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build build-verification run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-multi-container rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build build-verification run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -26,6 +26,7 @@ help:
 	@echo "  make manifest Regenerate the signed development boot inputs"
 	@echo "  make system-image Build the pinned minimal system-container candidate"
 	@echo "  make test-alpine Download Alpine at runtime and verify its real shell in QEMU"
+	@echo "  make test-multi-container Run concurrent Alpine and Rocky domains in QEMU"
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
@@ -117,6 +118,9 @@ build-verification: manifest
 
 test-alpine: build
 	@tests/qemu/alpine-shell.sh
+
+test-multi-container: build
+	@tests/qemu/multi-container.sh
 
 run: build
 	@tools/qemu/run.sh

@@ -35,12 +35,22 @@ const EXCEPTION_STACK_SIZE: usize = 16 * 1024;
 const EXCEPTION_STACK_STORAGE_SIZE: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE + PAGE_SIZE;
 const EXCEPTION_STACK_TOP_OFFSET: usize = PAGE_SIZE + EXCEPTION_STACK_SIZE;
 const CPUID_STRUCTURED_FEATURES: u32 = 7;
+const CPUID_EXTENDED_STATE: u32 = 0x0d;
 const CPUID_EXTENDED_MAX: u32 = 0x8000_0000;
 const CPUID_EXTENDED_FEATURES: u32 = 0x8000_0001;
 const CPUID_NX: u32 = 1 << 20;
 const CPUID_SMEP: u32 = 1 << 7;
 const CPUID_SMAP: u32 = 1 << 20;
 const CPUID_UMIP: u32 = 1 << 2;
+const CPUID_XSAVE: u32 = 1 << 26;
+const CPUID_AVX: u32 = 1 << 28;
+const CPUID_SSE: u32 = 1 << 25;
+const CR0_MP: u64 = 1 << 1;
+const CR0_EM: u64 = 1 << 2;
+const CR0_NE: u64 = 1 << 5;
+const CR4_OSFXSR: u64 = 1 << 9;
+const CR4_OSXMMEXCPT: u64 = 1 << 10;
+const CR4_OSXSAVE: u64 = 1 << 18;
 const CR4_UMIP: u64 = 1 << 11;
 const CR4_SMEP: u64 = 1 << 20;
 const CR4_SMAP: u64 = 1 << 21;
@@ -73,6 +83,7 @@ const LINUX_IOCTL_SYSCALL: u64 = 16;
 const LINUX_PREAD64_SYSCALL: u64 = 17;
 const LINUX_READV_SYSCALL: u64 = 19;
 const LINUX_WRITEV_SYSCALL: u64 = 20;
+const LINUX_ACCESS_SYSCALL: u64 = 21;
 const LINUX_PIPE_SYSCALL: u64 = 22;
 const LINUX_SCHED_YIELD_SYSCALL: u64 = 24;
 const LINUX_MINCORE_SYSCALL: u64 = 27;
@@ -1010,6 +1021,7 @@ static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_PULL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static LINUX_RUNTIME_SUSPEND_REQUESTED: BankedAtomicBool = BankedAtomicBool::new(false);
 static LINUX_RUNTIME_SUSPENDED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_RUNTIME_UNSUPPORTED_SYSCALLS: BankedAtomicU8 = BankedAtomicU8::new(0);
 static LINUX_RUNTIME_SUSPEND_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_SUSPEND_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static LINUX_RUNTIME_SUSPEND_RIP: BankedAtomicU64 = BankedAtomicU64::new(0);
@@ -1022,6 +1034,20 @@ const CONTAINER_CONSOLE_CAPACITY: usize = 4096;
 const CONTAINER_CONSOLE_DETACH: u8 = 0x1d;
 static CONTAINER_CONSOLE_ATTACHED: [AtomicBool; control_abi::CONTAINER_LIMIT] =
     [const { AtomicBool::new(false) }; control_abi::CONTAINER_LIMIT];
+static CONTAINER_STOP_REQUESTED: [AtomicBool; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicBool::new(false) }; control_abi::CONTAINER_LIMIT];
+
+const EXTENDED_STATE_SIZE: usize = 1024;
+
+#[derive(Clone, Copy)]
+#[repr(C, align(64))]
+struct ExtendedState([u8; EXTENDED_STATE_SIZE]);
+
+static mut CONTAINER_EXTENDED_STATES: [ExtendedState; control_abi::CONTAINER_LIMIT] =
+    [ExtendedState([0; EXTENDED_STATE_SIZE]); control_abi::CONTAINER_LIMIT];
+static CONTAINER_EXTENDED_STATE_VALID: [AtomicBool; control_abi::CONTAINER_LIMIT] =
+    [const { AtomicBool::new(false) }; control_abi::CONTAINER_LIMIT];
+static EXTENDED_USER_STATE_ENABLED: AtomicBool = AtomicBool::new(false);
 static CONTAINER_CONSOLE_CURSOR: [AtomicU64; control_abi::CONTAINER_LIMIT] =
     [const { AtomicU64::new(0) }; control_abi::CONTAINER_LIMIT];
 static CONTAINER_CONSOLE_BYTES: [[AtomicU8; CONTAINER_CONSOLE_CAPACITY];
@@ -1583,6 +1609,111 @@ pub(crate) fn user_mode_instruction_prevention_enabled() -> bool {
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
     }
     cr4 & CR4_UMIP != 0
+}
+
+pub(crate) fn enable_extended_user_state() -> bool {
+    let features = __cpuid(1);
+    if features.edx & CPUID_SSE == 0
+        || features.ecx & (CPUID_XSAVE | CPUID_AVX) != CPUID_XSAVE | CPUID_AVX
+        || __cpuid(0).eax < CPUID_EXTENDED_STATE
+        || __cpuid_count(CPUID_EXTENDED_STATE, 0).eax & 7 != 7
+    {
+        return false;
+    }
+    let mut cr0: u64;
+    let mut cr4: u64;
+    unsafe {
+        asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
+        cr0 = (cr0 | CR0_MP | CR0_NE) & !CR0_EM;
+        asm!("mov cr0, {}", in(reg) cr0, options(nomem, nostack, preserves_flags));
+        asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+        cr4 |= CR4_OSFXSR | CR4_OSXMMEXCPT | CR4_OSXSAVE;
+        asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack, preserves_flags));
+        asm!(
+            "xsetbv",
+            in("ecx") 0_u32,
+            in("eax") 7_u32,
+            in("edx") 0_u32,
+            options(nostack, preserves_flags)
+        );
+    }
+    let state = __cpuid_count(CPUID_EXTENDED_STATE, 0);
+    let enabled = state.ebx as usize <= EXTENDED_STATE_SIZE && reset_extended_user_state();
+    EXTENDED_USER_STATE_ENABLED.store(enabled, Ordering::Release);
+    enabled
+}
+
+fn reset_extended_user_state() -> bool {
+    let default_mxcsr = 0x1f80_u32;
+    unsafe {
+        asm!("fninit", options(nostack));
+        asm!("ldmxcsr [{}]", in(reg) &default_mxcsr, options(nostack));
+        asm!("vzeroall", options(nostack));
+    }
+    true
+}
+
+fn restore_container_extended_state() -> bool {
+    if !EXTENDED_USER_STATE_ENABLED.load(Ordering::Acquire) {
+        return true;
+    }
+    let Some(slot) = active_container_slot() else {
+        return false;
+    };
+    if !CONTAINER_EXTENDED_STATE_VALID[slot].load(Ordering::Acquire) {
+        return reset_extended_user_state();
+    }
+    let state = unsafe {
+        core::ptr::addr_of!(CONTAINER_EXTENDED_STATES)
+            .cast::<ExtendedState>()
+            .add(slot)
+    };
+    unsafe {
+        asm!(
+            "xrstor64 [{}]",
+            in(reg) state,
+            in("eax") 7_u32,
+            in("edx") 0_u32,
+            options(nostack)
+        );
+    }
+    true
+}
+
+fn save_container_extended_state() -> bool {
+    if !EXTENDED_USER_STATE_ENABLED.load(Ordering::Acquire) {
+        return true;
+    }
+    let Some(slot) = active_container_slot() else {
+        return false;
+    };
+    let state = unsafe {
+        core::ptr::addr_of_mut!(CONTAINER_EXTENDED_STATES)
+            .cast::<ExtendedState>()
+            .add(slot)
+    };
+    unsafe {
+        asm!(
+            "xsave64 [{}]",
+            in(reg) state,
+            in("eax") 7_u32,
+            in("edx") 0_u32,
+            options(nostack)
+        );
+    }
+    CONTAINER_EXTENDED_STATE_VALID[slot].store(true, Ordering::Release);
+    reset_extended_user_state()
+}
+
+fn discard_container_extended_state() -> bool {
+    if !EXTENDED_USER_STATE_ENABLED.load(Ordering::Acquire) {
+        return true;
+    }
+    let Some(slot) = active_container_slot() else {
+        return false;
+    };
+    CONTAINER_EXTENDED_STATE_VALID[slot].store(false, Ordering::Release);
+    reset_extended_user_state()
 }
 
 pub(crate) fn initialize_user_call_gate() -> bool {
@@ -5022,7 +5153,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     let linux_wait_timer_armed = execution.tls_size == 0 || timer::arm_linux_wait_timer();
     if !linux_wait_timer_armed {
         if execution.runtime {
-            serial_write("ginux: Alpine wait timer setup failed\r\n");
+            serial_write("ginux: OCI wait timer setup failed\r\n");
         }
         let _ = restore_linux_syscall(saved_msrs);
         let _ = finish_linux_thread_table();
@@ -5031,7 +5162,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     }
     if !linux_mount::activate_initial() {
         if execution.runtime {
-            serial_write("ginux: Alpine mount setup failed\r\n");
+            serial_write("ginux: OCI mount setup failed\r\n");
         }
         let _ = restore_linux_syscall(saved_msrs);
         let _ = finish_linux_thread_table();
@@ -5051,14 +5182,26 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
         return LinuxElfResult::FAILED;
     }
+    if execution.runtime && !restore_container_extended_state() {
+        let _ = linux_process::finish_runtime_process_registry();
+        let _ = linux_mount::deactivate_initial();
+        let _ = restore_linux_syscall(saved_msrs);
+        let _ = finish_linux_thread_table();
+        ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
+        return LinuxElfResult::FAILED;
+    }
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
     if execution.runtime {
         if LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
+            let state_saved = save_container_extended_state();
+            let registry_suspended =
+                state_saved && linux_process::suspend_runtime_process_registry();
+            let mount_deactivated = registry_suspended && linux_mount::deactivate_initial();
             let msrs_restored = restore_linux_syscall(saved_msrs);
             LINUX_RUNTIME_MODE.store(false, Ordering::Release);
             return LinuxElfResult {
-                valid: msrs_restored,
-                suspended: msrs_restored,
+                valid: mount_deactivated && msrs_restored,
+                suspended: mount_deactivated && msrs_restored,
                 ..LinuxElfResult::FAILED
             };
         }
@@ -7123,6 +7266,9 @@ extern "sysv64" fn linux_syscall_handler(
         ),
         LINUX_FACCESSAT_SYSCALL => linux_faccessat(first_argument, buffer, count, 0),
         LINUX_FACCESSAT2_SYSCALL => linux_faccessat(first_argument, buffer, count, register(0)),
+        LINUX_ACCESS_SYSCALL => {
+            linux_faccessat(u64::from(LINUX_AT_FDCWD), first_argument, buffer, 0)
+        }
         LINUX_UMASK_SYSCALL => ELF_PROBE_UMASK.swap(first_argument & 0o777, Ordering::SeqCst),
         LINUX_GETRLIMIT_SYSCALL => {
             let Some(limit) = linux_resource_limit(first_argument) else {
@@ -7277,7 +7423,16 @@ extern "sysv64" fn linux_syscall_handler(
         number if linux_privileged_operation(number).is_some() => {
             linux_deny_privileged_operation(number)
         }
-        _ => LINUX_ENOSYS,
+        _ => {
+            if LINUX_RUNTIME_MODE.load(Ordering::Acquire)
+                && LINUX_RUNTIME_UNSUPPORTED_SYSCALLS.fetch_add(1, Ordering::AcqRel) < 8
+            {
+                serial_write("ginux: unsupported Linux syscall ");
+                serial_write_u64(number);
+                serial_write("\r\n");
+            }
+            LINUX_ENOSYS
+        }
     }
 }
 
@@ -7625,7 +7780,8 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
     let Some(slot) = active_container_slot() else {
         return LinuxElfResult::FAILED;
     };
-    if !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
+    let stopping = CONTAINER_STOP_REQUESTED[slot].swap(false, Ordering::AcqRel);
+    if !stopping && !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
         return LinuxElfResult::FAILED;
     }
     let address = LINUX_RUNTIME_SUSPEND_ADDRESS.load(Ordering::Acquire);
@@ -7633,9 +7789,11 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
     if address == 0 || count == 0 {
         return LinuxElfResult::FAILED;
     }
-    let byte = crate::serial_read_byte_blocking();
-    if !copy_to_linux_user(address, &[byte]) {
-        return LinuxElfResult::FAILED;
+    if !stopping {
+        let byte = crate::serial_read_byte_blocking();
+        if !copy_to_linux_user(address, &[byte]) {
+            return LinuxElfResult::FAILED;
+        }
     }
     let registers = LinuxSyscallFrame::from_array(core::array::from_fn(|index| {
         LINUX_RUNTIME_SUSPEND_REGISTERS[index].load(Ordering::Acquire)
@@ -7645,15 +7803,30 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
         rip: LINUX_RUNTIME_SUSPEND_RIP.load(Ordering::Acquire),
         rsp: LINUX_RUNTIME_SUSPEND_RSP.load(Ordering::Acquire),
         rflags: LINUX_RUNTIME_SUSPEND_RFLAGS.load(Ordering::Acquire),
-        rax: 1,
+        rax: u64::from(!stopping),
         fs_base: LINUX_RUNTIME_SUSPEND_FS_BASE.load(Ordering::Acquire),
     };
     if !context.is_valid() {
         return LinuxElfResult::FAILED;
     }
+    if !linux_mount::activate_initial() {
+        return LinuxElfResult::FAILED;
+    }
+    if !linux_process::resume_runtime_process_registry() {
+        let _ = linux_mount::deactivate_initial();
+        return LinuxElfResult::FAILED;
+    }
     let Some(saved_msrs) = configure_linux_syscall() else {
+        let _ = linux_process::suspend_runtime_process_registry();
+        let _ = linux_mount::deactivate_initial();
         return LinuxElfResult::FAILED;
     };
+    if !restore_container_extended_state() {
+        let _ = linux_process::finish_runtime_process_registry();
+        let _ = linux_mount::deactivate_initial();
+        let _ = restore_linux_syscall(saved_msrs);
+        return LinuxElfResult::FAILED;
+    }
     LINUX_RUNTIME_SUSPENDED.store(false, Ordering::Release);
     LINUX_RUNTIME_MODE.store(true, Ordering::Release);
     let resumed = resume_live_linux_process(
@@ -7666,15 +7839,20 @@ pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
         context.rflags,
     );
     if LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
+        let state_saved = save_container_extended_state();
+        let registry_suspended = state_saved && linux_process::suspend_runtime_process_registry();
+        let mount_deactivated = registry_suspended && linux_mount::deactivate_initial();
         let msrs_restored = restore_linux_syscall(saved_msrs);
         LINUX_RUNTIME_MODE.store(false, Ordering::Release);
         return LinuxElfResult {
-            valid: resumed && msrs_restored,
-            suspended: resumed && msrs_restored,
+            valid: resumed && mount_deactivated && msrs_restored,
+            suspended: resumed && mount_deactivated && msrs_restored,
             ..LinuxElfResult::FAILED
         };
     }
     if !resumed {
+        let _ = linux_process::finish_runtime_process_registry();
+        let _ = linux_mount::deactivate_initial();
         let _ = restore_linux_syscall(saved_msrs);
         LINUX_RUNTIME_MODE.store(false, Ordering::Release);
         return LinuxElfResult::FAILED;
@@ -7691,15 +7869,19 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
         }
     }
     if forks_completed && LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
+        let state_saved = save_container_extended_state();
+        let registry_suspended = state_saved && linux_process::suspend_runtime_process_registry();
+        let mount_deactivated = registry_suspended && linux_mount::deactivate_initial();
         let msrs_restored = restore_linux_syscall(saved_msrs);
         LINUX_RUNTIME_MODE.store(false, Ordering::Release);
         return LinuxElfResult {
-            valid: msrs_restored,
-            suspended: msrs_restored,
+            valid: mount_deactivated && msrs_restored,
+            suspended: mount_deactivated && msrs_restored,
             ..LinuxElfResult::FAILED
         };
     }
     let completed = ELF_PROBE_COMPLETED.swap(false, Ordering::SeqCst);
+    let extended_state_discarded = discard_container_extended_state();
     let mmap_released = release_linux_runtime_mmaps(mmap);
     let descriptors_closed = linux_close_all_descriptors();
     let registry_finished = linux_process::finish_runtime_process_registry();
@@ -7709,6 +7891,7 @@ fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
     let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
     LINUX_RUNTIME_MODE.store(false, Ordering::SeqCst);
     let valid = forks_completed
+        && extended_state_discarded
         && completed
         && mmap_released
         && descriptors_closed
@@ -10570,6 +10753,7 @@ fn linux_oci_inode(handle: u16) -> u64 {
 fn linux_oci_mode(entry: ginux_oci::Entry<'_>) -> u32 {
     let kind = match entry.kind {
         ginux_oci::EntryKind::File => 0o100000,
+        ginux_oci::EntryKind::Hardlink => 0o100000,
         ginux_oci::EntryKind::Directory => 0o040000,
         ginux_oci::EntryKind::Symlink => 0o120000,
     };
@@ -10641,6 +10825,7 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
         match entry.map(|entry| entry.kind) {
             None | Some(ginux_oci::EntryKind::Directory) => LINUX_ROOT_MEASURED_DIRECTORY,
             Some(ginux_oci::EntryKind::File) => LINUX_FILE_ROOT_GENERIC,
+            Some(ginux_oci::EntryKind::Hardlink) => LINUX_FILE_ROOT_GENERIC,
             Some(ginux_oci::EntryKind::Symlink) => return LINUX_EINVAL,
         }
     } else {
@@ -14063,6 +14248,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             let kind = match child.entry.kind {
                 ginux_oci::EntryKind::Directory => 4,
                 ginux_oci::EntryKind::File => 8,
+                ginux_oci::EntryKind::Hardlink => 8,
                 ginux_oci::EntryKind::Symlink => 10,
             };
             let Ok(next) = i64::try_from(child.next_cursor + 2) else {
@@ -18120,13 +18306,20 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         }
         control_abi::CONTAINER_STOP
             if requested_slot.is_some()
-                && active_container_slot() == requested_slot
                 && container_state(requested_slot.unwrap_or(0))
-                    == control_abi::CONTAINER_STATE_RUNNING =>
+                    == control_abi::CONTAINER_STATE_RUNNING
+                && (active_container_slot() == requested_slot
+                    || address_space::oci_runtime_is_suspended(requested_slot.unwrap_or(0))) =>
         {
             let slot = requested_slot.unwrap_or(0);
-            CONTAINER_CONTROL_STATES[slot]
-                .store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
+            if address_space::oci_runtime_is_suspended(slot) {
+                CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::Release);
+                CONTAINER_STOP_REQUESTED[slot].store(true, Ordering::Release);
+                CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
+            } else {
+                CONTAINER_CONTROL_STATES[slot]
+                    .store(control_abi::CONTAINER_STATE_STOPPED as u8, Ordering::SeqCst);
+            }
             control_abi::CONTAINER_STATE_STOPPED
         }
         control_abi::CONTAINER_RESTART | control_abi::CONTAINER_START_ATTACHED

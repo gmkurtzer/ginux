@@ -8,7 +8,12 @@ qemu="$(find_qemu)"
 ovmf_code="$(find_ovmf_code)"
 ovmf_vars_template="$(find_ovmf_vars)"
 accelerator="${QEMU_ACCEL:-$(default_accelerator)}"
-cpu_model="${QEMU_CPU:-qemu64,+smep,+smap,+umip}"
+if [[ "$accelerator" == "tcg" ]]; then
+    default_cpu_model="max,+smep,+smap,+umip"
+else
+    default_cpu_model="host,+smep,+smap,+umip"
+fi
+cpu_model="${QEMU_CPU:-$default_cpu_model}"
 esp_dir="${GINUX_ESP_DIR:-$repo_root/build/esp}"
 runtime_dir="$repo_root/build/qemu"
 ovmf_vars="$runtime_dir/ovmf-vars.fd"

@@ -322,34 +322,47 @@ pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
 
         let stack =
             unsafe { &mut *(mapped_frame::<u8>(stack_frame.address())? as *mut [u8; PAGE_SIZE]) };
-        let argument_length = init.len().checked_add(1)?;
+        let arguments = crate::oci_image::launch_arguments(init)?;
         let environment = b"PATH=/bin:/usr/bin:/sbin:/usr/sbin\0";
-        let argument_offset = PAGE_SIZE.checked_sub(argument_length)?;
-        let environment_offset = argument_offset.checked_sub(environment.len())?;
+        let mut argument_offsets = [0_usize; 3];
+        let mut string_offset = PAGE_SIZE;
+        for index in (0..arguments.count).rev() {
+            let value = arguments.values[index];
+            string_offset = string_offset.checked_sub(value.len().checked_add(1)?)?;
+            stack[string_offset..string_offset + value.len()].copy_from_slice(value);
+            stack[string_offset + value.len()] = 0;
+            argument_offsets[index] = string_offset;
+        }
+        let environment_offset = string_offset.checked_sub(environment.len())?;
         let platform_offset = environment_offset.checked_sub(LINUX_PLATFORM.len())?;
-        let words = 5 + crate::linux_elf::AUXILIARY_VECTOR_WORDS;
+        let words = arguments
+            .count
+            .checked_add(4 + crate::linux_elf::AUXILIARY_VECTOR_WORDS)?;
         let stack_offset = (platform_offset.checked_sub(words * size_of::<u64>())?) & !15;
-        let argument_address = STACK_ADDRESS + argument_offset as u64;
+        let argument_addresses = argument_offsets.map(|offset| STACK_ADDRESS + offset as u64);
+        let argument_address = argument_addresses[arguments.execfn];
         let environment_address = STACK_ADDRESS + environment_offset as u64;
         let platform_address = STACK_ADDRESS + platform_offset as u64;
-        stack[argument_offset..argument_offset + init.len()].copy_from_slice(init);
-        stack[argument_offset + init.len()] = 0;
-        stack[environment_offset..argument_offset].copy_from_slice(environment);
+        stack[environment_offset..string_offset].copy_from_slice(environment);
         stack[platform_offset..platform_offset + LINUX_PLATFORM.len()]
             .copy_from_slice(&LINUX_PLATFORM);
         let stack_words = unsafe { stack.as_mut_ptr().add(stack_offset).cast::<u64>() };
-        for (index, value) in [1_u64, argument_address, 0, environment_address, 0]
-            .into_iter()
-            .enumerate()
-        {
-            unsafe { stack_words.add(index).write(value) };
+        unsafe { stack_words.write(arguments.count as u64) };
+        for (index, address) in argument_addresses[..arguments.count].iter().enumerate() {
+            unsafe { stack_words.add(1 + index).write(*address) };
+        }
+        let environment_word = arguments.count + 2;
+        unsafe {
+            stack_words.add(arguments.count + 1).write(0);
+            stack_words.add(environment_word).write(environment_address);
+            stack_words.add(environment_word + 1).write(0);
         }
         for (index, value) in
             crate::linux_elf::auxiliary_vector(startup, argument_address, platform_address)
                 .into_iter()
                 .enumerate()
         {
-            unsafe { stack_words.add(5 + index).write(value) };
+            unsafe { stack_words.add(environment_word + 2 + index).write(value) };
         }
         stage = 5;
 

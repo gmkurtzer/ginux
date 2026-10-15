@@ -419,6 +419,7 @@ pub enum EntryKind {
     File,
     Directory,
     Symlink,
+    Hardlink,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -564,6 +565,37 @@ fn parse_entry(bytes: &[u8], offset: usize) -> Option<(Entry<'_>, usize)> {
     if &header[257..263] != b"ustar\0" || checksum(header)? != stored_checksum(header)? {
         return None;
     }
+    if header[156] == b'x' {
+        let size = usize::try_from(octal(&header[124..136])?).ok()?;
+        let data_start = offset.checked_add(TAR_HEADER_SIZE)?;
+        let data_end = data_start.checked_add(size)?;
+        let overrides = parse_pax_overrides(bytes.get(data_start..data_end)?)?;
+        let padded = size.checked_add(TAR_BLOCK_SIZE - 1)? / TAR_BLOCK_SIZE * TAR_BLOCK_SIZE;
+        let next = data_start.checked_add(padded)?;
+        let (mut entry, next) = parse_entry(bytes, next)?;
+        if let Some(path) = overrides.path {
+            let path = if entry.kind == EntryKind::Directory {
+                path.strip_suffix(b"/").unwrap_or(path)
+            } else {
+                path
+            };
+            if path.is_empty() || !valid_entry_path(b"", path) {
+                return None;
+            }
+            entry.path = path;
+            entry.prefix = b"";
+        }
+        if let Some(link) = overrides.link {
+            if link.is_empty()
+                || entry.kind == EntryKind::Hardlink
+                    && !valid_path(link.strip_prefix(b"/").unwrap_or(link))
+            {
+                return None;
+            }
+            entry.link = link;
+        }
+        return Some((entry, next));
+    }
     let stored_path = terminated(&header[..TAR_NAME_SIZE])?;
     let prefix = terminated(&header[345..345 + TAR_PREFIX_SIZE])?;
     let size = usize::try_from(octal(&header[124..136])?).ok()?;
@@ -572,6 +604,7 @@ fn parse_entry(bytes: &[u8], offset: usize) -> Option<(Entry<'_>, usize)> {
         0 | b'0' => EntryKind::File,
         b'5' if size == 0 => EntryKind::Directory,
         b'2' if size == 0 => EntryKind::Symlink,
+        b'1' if size == 0 => EntryKind::Hardlink,
         _ => return None,
     };
     let path = if kind == EntryKind::Directory {
@@ -583,7 +616,10 @@ fn parse_entry(bytes: &[u8], offset: usize) -> Option<(Entry<'_>, usize)> {
         return None;
     }
     let link = terminated(&header[157..257])?;
-    if kind == EntryKind::Symlink && link.is_empty() {
+    if matches!(kind, EntryKind::Symlink | EntryKind::Hardlink) && link.is_empty() {
+        return None;
+    }
+    if kind == EntryKind::Hardlink && !valid_path(link.strip_prefix(b"/").unwrap_or(link)) {
         return None;
     }
     let data_start = offset.checked_add(TAR_HEADER_SIZE)?;
@@ -603,6 +639,46 @@ fn parse_entry(bytes: &[u8], offset: usize) -> Option<(Entry<'_>, usize)> {
         },
         next,
     ))
+}
+
+#[derive(Clone, Copy)]
+struct PaxOverrides<'a> {
+    path: Option<&'a [u8]>,
+    link: Option<&'a [u8]>,
+}
+
+fn parse_pax_overrides(mut bytes: &[u8]) -> Option<PaxOverrides<'_>> {
+    let mut overrides = PaxOverrides {
+        path: None,
+        link: None,
+    };
+    while !bytes.is_empty() {
+        let separator = bytes.iter().position(|byte| *byte == b' ')?;
+        let length = bytes[..separator].iter().try_fold(0_usize, |value, byte| {
+            byte.is_ascii_digit()
+                .then(|| {
+                    value
+                        .checked_mul(10)?
+                        .checked_add(usize::from(*byte - b'0'))
+                })
+                .flatten()
+        })?;
+        let record = bytes.get(..length)?;
+        if length <= separator + 2 || record[length - 1] != b'\n' {
+            return None;
+        }
+        let field = &record[separator + 1..length - 1];
+        let equals = field.iter().position(|byte| *byte == b'=')?;
+        let (key, value) = (&field[..equals], &field[equals + 1..]);
+        match key {
+            b"path" if overrides.path.is_none() => overrides.path = Some(value),
+            b"linkpath" if overrides.link.is_none() => overrides.link = Some(value),
+            b"path" | b"linkpath" => return None,
+            _ => {}
+        }
+        bytes = &bytes[length..];
+    }
+    Some(overrides)
 }
 
 fn entry_path_matches(entry: Entry<'_>, wanted: &[u8]) -> bool {
@@ -855,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn indexes_regular_file_and_symlink() {
+    fn indexes_regular_file_symlink_and_hardlink() {
         let bytes = archive(b"bin/busybox", b"ELF", b'0', b"");
         let root = Rootfs::parse(&bytes).unwrap();
         assert_eq!(root.entry_count(), 1);
@@ -864,6 +940,17 @@ mod tests {
         let bytes = archive(b"bin/sh", b"", b'2', b"/bin/busybox");
         let root = Rootfs::parse(&bytes).unwrap();
         assert_eq!(root.find(b"bin/sh").unwrap().link, b"/bin/busybox");
+
+        let bytes = archive(b"bin/tool", b"", b'1', b"bin/busybox");
+        let root = Rootfs::parse(&bytes).unwrap();
+        assert_eq!(root.find(b"bin/tool").unwrap().kind, EntryKind::Hardlink);
+
+        let mut bytes = archive(b"PaxHeaders/tool", b"21 linkpath=bin/real\n", b'x', b"");
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b"bin/tool", b"", b'1', b"truncated"));
+        let root = Rootfs::parse(&bytes).unwrap();
+        assert_eq!(root.entry_count(), 1);
+        assert_eq!(root.find(b"bin/tool").unwrap().link, b"bin/real");
     }
 
     #[test]

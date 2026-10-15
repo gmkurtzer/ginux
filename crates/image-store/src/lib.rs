@@ -221,6 +221,26 @@ impl<B: ObjectBackend, const OBJECTS: usize> ImageStore<B, OBJECTS> {
             .map(|entry| (entry.object, entry.expected_length))
     }
 
+    pub fn remove(&mut self, digest: Digest) -> Result<(), StoreError> {
+        let slot = self
+            .entries
+            .iter()
+            .position(|entry| {
+                entry
+                    .as_ref()
+                    .is_some_and(|entry| entry.published && entry.expected == digest)
+            })
+            .ok_or(StoreError::InvalidHandle)?;
+        let entry = self.entries[slot].take().ok_or(StoreError::InvalidHandle)?;
+        if !self.backend.destroy(entry.object) {
+            self.entries[slot] = Some(entry);
+            return Err(StoreError::Backend);
+        }
+        self.reserved -= entry.expected_length;
+        self.published -= entry.expected_length;
+        Ok(())
+    }
+
     pub const fn quota(&self) -> usize {
         self.quota
     }
@@ -354,5 +374,22 @@ mod tests {
         assert_eq!(StagingHandle::from_raw(handle.into_raw()), Some(handle));
         assert!(StagingHandle::from_raw(0).is_none());
         assert!(StagingHandle::from_raw(u64::MAX).is_none());
+    }
+
+    #[test]
+    fn removing_a_published_object_releases_its_slot_and_quota() {
+        let payload = b"1234";
+        let expected = digest(payload);
+        let mut store = ImageStore::<Backend, 1>::new(Backend::default(), payload.len());
+        let first = store.stage(expected, payload.len()).unwrap();
+        store.append(first, payload).unwrap();
+        store.publish(first).unwrap();
+        assert_eq!(store.reserved_bytes(), payload.len());
+        assert_eq!(store.published_bytes(), payload.len());
+        assert_eq!(store.remove(expected), Ok(()));
+        assert_eq!(store.reserved_bytes(), 0);
+        assert_eq!(store.published_bytes(), 0);
+        assert!(!store.contains(expected));
+        assert!(store.stage(expected, payload.len()).is_ok());
     }
 }

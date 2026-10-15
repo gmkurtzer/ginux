@@ -464,6 +464,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !arch::x86_64::cpu::enable_user_mode_instruction_prevention() {
         kernel_fail("ginux: UMIP unavailable or inactive\r\n");
     }
+    let _ = arch::x86_64::cpu::enable_extended_user_state();
     serial_write("ginux: user-mode instruction prevention active\r\n");
     serial_write("ginux: null and bidirectional stack guard pages active\r\n");
     if !cfg!(feature = "verification-boot") {

@@ -8,8 +8,8 @@ use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 128;
-const MAX_RECYCLED_FRAMES: usize = 131_072;
-const MAX_LIVE_FRAMES: usize = 131_072;
+const MAX_RECYCLED_FRAMES: usize = 262_144;
+const MAX_LIVE_FRAMES: usize = 262_144;
 const DOMAIN_FRAME_LIMIT: usize = 192;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
