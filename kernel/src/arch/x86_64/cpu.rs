@@ -223,6 +223,7 @@ const LINUX_FINIT_MODULE_SYSCALL: u64 = 313;
 const LINUX_KEXEC_FILE_LOAD_SYSCALL: u64 = 320;
 const LINUX_BPF_SYSCALL: u64 = 321;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
+const LINUX_GETRANDOM_SYSCALL: u64 = 318;
 const LINUX_STATX_SYSCALL: u64 = 332;
 const LINUX_CLOSE_RANGE_SYSCALL: u64 = 436;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
@@ -397,11 +398,11 @@ const LINUX_PROC_PID2_ZOMBIE_STAT: &[u8] = b"2 (init) Z 1 1 1 0 -1 4194560 0 0 0
 const LINUX_PROC_PID2_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 440;
-pub(crate) const LINUX_PROCESS_HIERARCHY_LIMIT: usize = 16;
+pub(crate) const LINUX_PROCESS_HIERARCHY_LIMIT: usize = 64;
 pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = 1408;
-const LINUX_EXEC_VECTOR_LIMIT: usize = 8;
-const LINUX_EXEC_STRING_LIMIT: usize = 64;
-const LINUX_EXEC_STACK_SIZE: usize = 512;
+const LINUX_EXEC_VECTOR_LIMIT: usize = 32;
+const LINUX_EXEC_STRING_LIMIT: usize = 256;
+const LINUX_EXEC_STACK_SIZE: usize = PAGE_SIZE;
 const LINUX_PLATFORM: &[u8] = b"x86_64\0";
 const LINUX_F_DUPFD: u64 = 0;
 const LINUX_F_GETFD: u64 = 1;
@@ -727,6 +728,35 @@ pub(crate) fn linux_startup_random() -> Option<[u8; 16]> {
         chunk.copy_from_slice(&generated?.to_ne_bytes());
     }
     Some(output)
+}
+
+fn linux_getrandom(address: u64, length: u64, flags: u64) -> u64 {
+    const LINUX_GRND_SUPPORTED: u64 = 0x7;
+    if flags & !LINUX_GRND_SUPPORTED != 0 {
+        return LINUX_EINVAL;
+    }
+    let Ok(length) = usize::try_from(length) else {
+        return LINUX_EFAULT;
+    };
+    let mut written = 0_usize;
+    while written < length {
+        let Some(random) = linux_startup_random() else {
+            return if written == 0 {
+                LINUX_EIO
+            } else {
+                written as u64
+            };
+        };
+        let count = (length - written).min(random.len());
+        let Some(destination) = address.checked_add(written as u64) else {
+            return LINUX_EFAULT;
+        };
+        if !copy_to_linux_user(destination, &random[..count]) {
+            return LINUX_EFAULT;
+        }
+        written += count;
+    }
+    written as u64
 }
 static CONTROL_DISCOVERY_OVERRIDE_DOMAIN: AtomicU64 = AtomicU64::new(0);
 static CONTROL_DISCOVERY_OVERRIDE_WORD: AtomicU64 = AtomicU64::new(0);
@@ -7583,6 +7613,7 @@ extern "sysv64" fn linux_syscall_handler(
             }
             0
         }
+        LINUX_GETRANDOM_SYSCALL => linux_getrandom(first_argument, buffer, count),
         LINUX_GETDENTS64_SYSCALL => linux_getdents64(first_argument, buffer, count),
         LINUX_CLOCK_GETTIME_SYSCALL => linux_clock_gettime(first_argument, buffer),
         LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
@@ -10447,7 +10478,10 @@ fn linux_fchdir(descriptor: u64) -> u64 {
     0
 }
 
-fn linux_exec_vector(address: u64, require_nonempty: bool) -> Result<([u64; 8], usize), u64> {
+fn linux_exec_vector(
+    address: u64,
+    require_nonempty: bool,
+) -> Result<([u64; LINUX_EXEC_VECTOR_LIMIT], usize), u64> {
     let mut pointers = [0_u64; LINUX_EXEC_VECTOR_LIMIT];
     for index in 0..=LINUX_EXEC_VECTOR_LIMIT {
         let Some(pointer_address) = address.checked_add((index * size_of::<u64>()) as u64) else {
@@ -10709,10 +10743,21 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     let Some(plan) = crate::oci_image::process_plan(path) else {
         return LINUX_ENOEXEC;
     };
+    let Some(launch_arguments) = crate::oci_image::launch_arguments(path) else {
+        return LINUX_ENOEXEC;
+    };
     let startup = crate::linux_elf::relocatable_startup(&plan);
-    let (argument_pointers, argument_count) = match linux_exec_vector(arguments_address, true) {
-        Ok(vector) => vector,
-        Err(error) => return error,
+    let (argument_pointers, original_argument_count) =
+        match linux_exec_vector(arguments_address, true) {
+            Ok(vector) => vector,
+            Err(error) => return error,
+        };
+    let Some(argument_count) = launch_arguments
+        .count
+        .checked_add(original_argument_count.saturating_sub(1))
+        .filter(|count| *count <= LINUX_EXEC_VECTOR_LIMIT)
+    else {
+        return LINUX_E2BIG;
     };
     let (environment_pointers, environment_count) =
         match linux_exec_vector(environment_address, false) {
@@ -10727,13 +10772,27 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     let mut string_offset = table_words * size_of::<u64>();
     stack_image[..8].copy_from_slice(&(argument_count as u64).to_ne_bytes());
     let mut string = [0_u8; LINUX_EXEC_STRING_LIMIT];
-    let mut argument_zero_address = 0;
-    for (index, pointer) in argument_pointers[..argument_count].iter().enumerate() {
-        string.fill(0);
-        let length = match copy_linux_c_string(*pointer, &mut string) {
-            Ok(length) => length + 1,
-            Err(LINUX_ENAMETOOLONG) => return LINUX_E2BIG,
-            Err(error) => return error,
+    let mut execfn_address = 0;
+    for index in 0..argument_count {
+        let length = if index < launch_arguments.count {
+            let value = launch_arguments.values[index];
+            let Some(length) = value.len().checked_add(1) else {
+                return LINUX_E2BIG;
+            };
+            let Some(output) = string.get_mut(..length) else {
+                return LINUX_E2BIG;
+            };
+            output[..value.len()].copy_from_slice(value);
+            output[value.len()] = 0;
+            length
+        } else {
+            string.fill(0);
+            let original_index = 1 + index - launch_arguments.count;
+            match copy_linux_c_string(argument_pointers[original_index], &mut string) {
+                Ok(length) => length + 1,
+                Err(LINUX_ENAMETOOLONG) => return LINUX_E2BIG,
+                Err(error) => return error,
+            }
         };
         let Some(end) = string_offset.checked_add(length) else {
             return LINUX_E2BIG;
@@ -10744,10 +10803,13 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
         output.copy_from_slice(&string[..length]);
         let address = new_stack + string_offset as u64;
         stack_image[(1 + index) * 8..(2 + index) * 8].copy_from_slice(&address.to_ne_bytes());
-        if index == 0 {
-            argument_zero_address = address;
+        if index == launch_arguments.execfn {
+            execfn_address = address;
         }
         string_offset = end;
+    }
+    if execfn_address == 0 {
+        return LINUX_ENOEXEC;
     }
     let environment_word = 1 + argument_count + 1;
     for (index, pointer) in environment_pointers[..environment_count].iter().enumerate() {
@@ -10790,7 +10852,7 @@ fn linux_oci_execve(path: &[u8], arguments_address: u64, environment_address: u6
     let auxiliary_word = environment_word + environment_count + 1;
     for (index, value) in crate::linux_elf::auxiliary_vector(
         startup,
-        argument_zero_address,
+        execfn_address,
         new_stack + platform_offset as u64,
         new_stack + random_offset as u64,
     )
