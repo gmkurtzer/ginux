@@ -18260,7 +18260,7 @@ fn console_write(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -
     let message = &bytes[..length];
     if !message
         .iter()
-        .all(|byte| matches!(*byte, b'\n' | b'\r' | 0x20..=0x7e))
+        .all(|byte| matches!(*byte, 0x08 | b'\n' | b'\r' | 0x20..=0x7e))
     {
         return u64::MAX - 2;
     }
@@ -18288,7 +18288,7 @@ fn console_write_buffer(domain_id: u64, capability: u64, frame: *const UserTrapF
     if !address_space::copy_from_current_user(frame.first_argument(), &mut bytes[..length])
         || !bytes[..length]
             .iter()
-            .all(|byte| matches!(*byte, b'\n' | b'\r' | 0x20..=0x7e))
+            .all(|byte| matches!(*byte, 0x08 | b'\n' | b'\r' | 0x20..=0x7e))
     {
         return u64::MAX - 2;
     }
