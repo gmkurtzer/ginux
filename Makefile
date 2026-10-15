@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine test-multi-domain probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build build-verification run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine test-multi-domain probe-rocky-systemd rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check linux-compat-check build build-verification run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -37,6 +37,7 @@ help:
 	@echo "  make volume-service Build the freestanding isolated volume service"
 	@echo "  make abi-conformance Compile the public native ABI as freestanding C"
 	@echo "  make architecture-check Check architecture and roadmap consistency"
+	@echo "  make linux-compat-check Validate the Linux syscall compatibility ledger"
 	@echo "  make build   Build the x86-64 UEFI image"
 	@echo "  make run     Build Ginux and boot it in headless QEMU"
 	@echo "  make test    Build and verify the automated QEMU boot test"
@@ -141,7 +142,10 @@ test-c2: test-c1
 architecture-check:
 	@bash tools/architecture/check.sh
 
-check: manifest architecture-check
+linux-compat-check:
+	@bash tools/architecture/check-linux-compat.sh
+
+check: manifest architecture-check linux-compat-check
 	@$(MAKE) abi-conformance
 	@cargo fmt --all -- --check
 	@cargo clippy --package ginux-boot --target $(TARGET) -- -D warnings

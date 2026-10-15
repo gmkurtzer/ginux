@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **112 Partial**, **28 Policy-denied**, **235 Missing**.
+Current totals: **113 Partial**, **28 Policy-denied**, **234 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -99,7 +99,7 @@ therefore omitted.
 | 18 | pwrite64 | Missing |
 | 19 | readv | Partial |
 | 20 | writev | Partial |
-| 21 | access | Missing |
+| 21 | access | Partial |
 | 22 | pipe | Partial |
 | 23 | select | Missing |
 | 24 | sched_yield | Partial |

@@ -390,7 +390,7 @@ the same `-ENOENT` and `-EFAULT` boundaries as the older metadata call.
 device, directory, or immutable runtime file without opening it. Only zero
 flags are accepted; bad path or output memory returns
 `-EFAULT`, unsupported flags return `-EINVAL`, and other paths return `-ENOENT`.
-`faccessat` and `faccessat2` report read/write access for either fixed node
+`access`, `faccessat`, and `faccessat2` report read/write access for either fixed node
 and return `-EACCES` for execute access. `faccessat2` accepts only zero flags;
 unknown mode bits or flags return `-EINVAL`, with the same path errors as
 `openat`.
