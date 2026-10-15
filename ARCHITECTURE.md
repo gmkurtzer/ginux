@@ -6,11 +6,11 @@
 
 ## 1. Vision
 
-Build a new, Rust-first operating system that boots directly via UEFI and acts as a small, immutable, capability-secure container host for AI/HPC servers. One authenticated `GINUX.EFI` contains the kernel, boot-required modules, the native controller payload, recovery support, and a component catalog. The kernel launches the controller as the first ring-3 process; that controller starts Linux-compatible system containers and the few optional native services that remain outside the kernel. There is no conventional host distribution or host root filesystem.
+Build a new, Rust-first operating system that boots directly via UEFI and acts as a small, immutable, capability-secure container host for AI/HPC servers. One authenticated `GINUX.EFI` contains the kernel, boot-required modules, a statically linked Linux-ABI controller payload, recovery support, and a component catalog. The kernel launches the controller as the first ring-3 process; that controller starts Linux-compatible system containers and the few optional native services that remain outside the kernel. There is no conventional host distribution or host root filesystem.
 
 The product acceptance benchmark is an unmodified Rocky Linux 10 x86-64 userspace booting `/sbin/init` as PID 1 inside a system container and behaving like a normal independently networked system. Smaller fixtures may prove individual interfaces, but they are test scaffolding rather than the product environment. Linux compatibility is a container interface; the native host is not a Linux distribution.
 
-**North star:** A small, verifiable kernel and boot-required module set; one embedded but ring-3 native controller; normal Linux system containers; a stable native kernel/driver ABI; immutable executable integrity and hard authority boundaries; and no unnecessary cycles in critical data paths.
+**North star:** A small, verifiable kernel and boot-required module set; one embedded but ring-3 Linux-ABI controller; normal Linux system containers; a stable native kernel/driver ABI; immutable executable integrity and hard authority boundaries; and no unnecessary cycles in critical data paths.
 
 The design is intentionally narrower than Linux in hardware support. A binary compiled for a supported stable native system or driver ABI must remain compatible within its specified contract. Binary Linux `.ko` compatibility is not a proof-of-concept requirement, but the architecture must not preclude a future authenticated compatibility layer for selected modules.
 
@@ -70,7 +70,7 @@ This is a **logical** architecture, not a requirement that every operation trave
 
 ### Native domains
 
-A **domain** is the native unit of isolation, ownership, accounting, and failure containment. A domain owns processes/address spaces, a capability table, memory and CPU budgets, IPC endpoints, device grants, network endpoints, filesystem views, and failure policy. Linux system containers are domains with Linux-compatible behavior; the controller and optional native services are domains without a Linux ABI requirement.
+A **domain** is the native unit of isolation, ownership, accounting, and failure containment. A domain owns processes/address spaces, a capability table, memory and CPU budgets, IPC endpoints, device grants, network endpoints, filesystem views, and failure policy. Linux system containers are domains with Linux-compatible behavior. The controller is a statically linked Linux-ABI process; optional isolated services may retain their narrower native service ABI.
 
 The kernel maintains one global host PID namespace spanning native userspace
 processes and Linux-compatible processes in every container. The controller's
@@ -81,9 +81,9 @@ remain internal isolation identities and are never presented as PIDs.
 
 The kernel creates exactly one initial userspace authority: the native control-plane domain. All other domains descend from authority it delegates. Process ancestry determines lifecycle and accounting, but never grants authority by itself.
 
-### Embedded native controller
+### Embedded Linux-ABI controller
 
-The controller is packaged inside `GINUX.EFI` but executes in ring 3 as the first userspace process tree and the only initial holder of boot-authorized host capabilities. Its authenticated local configuration declares which containers start automatically, their image and resource grants, and the init path (normally `/sbin/init`). It:
+The controller is packaged inside `GINUX.EFI` but executes in ring 3 as a statically linked Linux-ABI userspace process and the only initial holder of boot-authorized host capabilities. It uses ordinary Linux `read`, `write`, and `exit` syscalls. Ginux-specific management is exposed through a versioned device/ioctl UAPI rather than a private syscall convention. Its authenticated local configuration declares which containers start automatically, their image and resource grants, and the init path (normally `/sbin/init`). It:
 
 - Starts, stops, inspects, and restarts native services and containers.
 - Creates domain process trees and assigns CPU, memory, storage, network, and device resources.
@@ -167,8 +167,8 @@ Linux ABI compatibility is libc-neutral. Ginux never selects a musl, glibc, or o
 
 ### 5.1 Three distinct interfaces
 
-1. **Linux container ABI:** Syscalls and observable Linux behavior required by the pinned Rocky Linux 10 profile and later distribution/application profiles.
-2. **Native system ABI:** Stable, language-neutral binary contract between the kernel and native control/service domains.
+1. **Linux userspace ABI:** Syscalls and observable Linux behavior required by the controller, the pinned Rocky Linux 10 profile, and later distribution/application profiles. Ginux-specific controller operations use a versioned Linux device/ioctl UAPI.
+2. **Native service ABI:** Stable, language-neutral binary contract for narrowly scoped isolated services; it is not a second general-purpose application syscall ABI.
 3. **Kernel/driver and service ABI:** A stable native kABI for authenticated modules plus IPC, capabilities, shared-memory, resource, lifecycle, failure, and device contracts for isolated components.
 
 ### 5.2 Native system and driver ABI requirements

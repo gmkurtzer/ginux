@@ -394,6 +394,37 @@ impl UserFaultFrame {
 }
 
 impl UserTrapFrame {
+    pub(crate) fn from_linux_syscall(
+        registers: [u64; 12],
+        rip: u64,
+        rsp: u64,
+        rflags: u64,
+        first: u64,
+        second: u64,
+    ) -> Self {
+        Self {
+            r15: registers[0],
+            r14: registers[1],
+            r13: registers[2],
+            r12: registers[3],
+            r11: 0,
+            r10: registers[6],
+            r9: registers[7],
+            r8: registers[8],
+            rbp: registers[4],
+            rdi: registers[11],
+            rsi: first,
+            rdx: second,
+            rcx: 0,
+            rbx: registers[5],
+            rip,
+            cs: 0x33,
+            rflags,
+            rsp,
+            ss: 0x2b,
+        }
+    }
+
     pub(crate) fn process_general_registers(&self, rax: u64) -> [u64; 15] {
         [
             rax, self.rbx, self.rcx, self.rdx, self.rsi, self.rdi, self.rbp, self.r8, self.r9,

@@ -46,6 +46,10 @@ pub const NATIVE_SERVICE_EXIT_OPERATION: u64 = 2;
 pub const NATIVE_SERVICE_EXIT_COMPLETED: u8 = 0;
 pub const NATIVE_SERVICE_EXIT_REJECTED: u8 = 1;
 pub const NATIVE_SERVICE_EXIT_RESTART_REQUIRED: u8 = 2;
+// Linux _IOWR('G', 1, struct GinuxControlIoctlV0).
+pub const GINUX_CONTROL_IOCTL: u64 = 0xc020_4701;
+pub const GINUX_CONTROL_IOCTL_VERSION: u16 = 0;
+pub const GINUX_CONTROL_IOCTL_SIZE: u32 = 32;
 pub const NATIVE_BLOCK_WAIT_OPERATION: u64 = 19;
 pub const NATIVE_BLOCK_WAIT_PREPARED: u64 = 1;
 pub const NATIVE_BLOCK_WAIT_NOTIFIED: u64 = 2;
@@ -307,6 +311,37 @@ impl NativeControlDescriptorV4 {
 
 const _: () = assert!(core::mem::size_of::<NativeControlDescriptorV4>() == 16);
 const _: () = assert!(core::mem::align_of::<NativeControlDescriptorV4>() == 4);
+
+/// Versioned payload for the Linux `/dev/ginuxctl` ioctl transport.
+///
+/// The operation payload remains pointer-free except where the selected
+/// operation explicitly names a userspace buffer. The ioctl return value is
+/// the operation result.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct GinuxControlIoctlV0 {
+    pub size: u32,
+    pub version: u16,
+    pub reserved: u16,
+    pub operation: u64,
+    pub first: u64,
+    pub second: u64,
+}
+
+impl GinuxControlIoctlV0 {
+    pub const fn new(operation: u64, first: u64, second: u64) -> Self {
+        Self {
+            size: GINUX_CONTROL_IOCTL_SIZE,
+            version: GINUX_CONTROL_IOCTL_VERSION,
+            reserved: 0,
+            operation,
+            first,
+            second,
+        }
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<GinuxControlIoctlV0>() == 32);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -2552,5 +2587,21 @@ mod tests {
             ..valid
         }
         .is_compatible());
+    }
+
+    #[test]
+    fn linux_control_ioctl_layout_is_frozen() {
+        let request = GinuxControlIoctlV0::new(17, 23, 42);
+        assert_eq!(GINUX_CONTROL_IOCTL, 0xc020_4701);
+        assert_eq!(core::mem::size_of::<GinuxControlIoctlV0>(), 32);
+        assert_eq!(core::mem::offset_of!(GinuxControlIoctlV0, size), 0);
+        assert_eq!(core::mem::offset_of!(GinuxControlIoctlV0, version), 4);
+        assert_eq!(core::mem::offset_of!(GinuxControlIoctlV0, reserved), 6);
+        assert_eq!(core::mem::offset_of!(GinuxControlIoctlV0, operation), 8);
+        assert_eq!(core::mem::offset_of!(GinuxControlIoctlV0, first), 16);
+        assert_eq!(core::mem::offset_of!(GinuxControlIoctlV0, second), 24);
+        assert_eq!(request.size, GINUX_CONTROL_IOCTL_SIZE);
+        assert_eq!(request.version, GINUX_CONTROL_IOCTL_VERSION);
+        assert_eq!(request.reserved, 0);
     }
 }

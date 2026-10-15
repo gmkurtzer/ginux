@@ -31,7 +31,7 @@ help:
 	@echo "  make rocky-image Fetch and export the pinned Rocky 10 x86-64 system image"
 	@echo "  make rocky-image-check Verify the prepared Rocky image without downloading"
 	@echo "  make linux-probe Build the static probe and dynamic Linux ELF fixtures"
-	@echo "  make controller-runtime Build the embedded ring-3 controller"
+	@echo "  make controller-runtime Build the embedded Linux-ABI ring-3 controller"
 	@echo "  make network-service Build the freestanding isolated network service"
 	@echo "  make protocol-service Build the freestanding isolated protocol service"
 	@echo "  make volume-service Build the freestanding isolated volume service"

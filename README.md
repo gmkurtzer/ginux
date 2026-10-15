@@ -20,7 +20,7 @@ sharing the same underlying isolation, scheduling, storage, and device
 mechanisms.
 
 Ginux is currently a research and engineering prototype. It boots, runs its
-native controller and isolated services, and executes an unmodified Alpine
+statically linked Linux-ABI controller and isolated services, and executes an unmodified Alpine
 Linux userspace in QEMU. It does not yet provide complete Linux compatibility,
 boot Rocky Linux with systemd, or implement a second userspace personality.
 
@@ -50,7 +50,7 @@ boot Rocky Linux with systemd, or implement a second userspace personality.
 +------------------------------------------------------------------+
 | Personality contracts: syscalls, ELF, processes, VFS, devices    |
 +------------------------------------------------------------------+
-| Ring-3 controller        | Isolated native services              |
+| Linux-ABI controller     | Isolated native services              |
 | lifecycle and policy     | storage, network, protocol, crypto    |
 +------------------------------------------------------------------+
 | Ginux kernel                                                    |
@@ -152,9 +152,11 @@ addition because it can reuse the same kernel mechanisms, but it would still
 require an explicit BSD syscall and userspace ABI implementation. Loading an
 ELF file alone is not compatibility.
 
-Native Ginux services are separate from workload personalities. They use a
-small, versioned service ABI and bounded static PIE ELF images. Ginux is not
-trying to create a third general-purpose application ecosystem.
+The controller is a static Linux-ABI executable: console and lifecycle use
+standard Linux syscalls, while host-specific management uses a versioned
+device/ioctl UAPI. Narrow isolated Ginux services may use a small, versioned
+service ABI and bounded static PIE ELF images. Ginux is not creating a third
+general-purpose application syscall ecosystem.
 
 ## Boot process
 

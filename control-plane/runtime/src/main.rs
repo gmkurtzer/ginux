@@ -6,10 +6,10 @@ use ginux_command::{
     complete, parse, write_error, write_help, Arguments, Arity, Command, HelpWriter, ParseOutcome,
 };
 use ginux_native_abi::{
-    native_control_abi_is_compatible, NativeContainerRequestV2, NativeControlDescriptorV4,
-    NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
-    NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION,
-    NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_ATTACH,
+    native_control_abi_is_compatible, GinuxControlIoctlV0, NativeContainerRequestV2,
+    NativeControlDescriptorV4, NativeHostInspectRecordV0, NativeHostInspectRequestV0,
+    NativeRootDirectoryRequestV4, GINUX_CONTROL_IOCTL, NATIVE_CALL_FAILED,
+    NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION, NATIVE_CONTAINER_ATTACH,
     NATIVE_CONTAINER_CONFIG_AUTOSTART, NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_CONFIG_IMAGE,
     NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_CONFIG_MEMORY,
     NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE, NATIVE_CONTAINER_CURSOR_END,
@@ -34,10 +34,19 @@ use ginux_native_abi::{
     NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
     NATIVE_ROOT_DIRECTORY_REQUEST_SIZE, NATIVE_ROOT_MAX_DIRECTORY_RECORD_SIZE,
     NATIVE_ROOT_OPERATION, NATIVE_ROOT_READ_DIRECTORY, NATIVE_SERVICE_EXIT_COMPLETED,
-    NATIVE_SERVICE_EXIT_OPERATION, NATIVE_SERVICE_EXIT_REJECTED,
+    NATIVE_SERVICE_EXIT_REJECTED,
 };
 
 const MAX_LINE: usize = NATIVE_CONSOLE_MAX_LINE_BYTES as usize;
+const LINUX_STDIN: u64 = 0;
+const LINUX_STDOUT: u64 = 1;
+const GINUX_HOST_FD: u64 = 3;
+const GINUX_ROOT_FD: u64 = 4;
+const GINUX_NETWORK_FD: u64 = 5;
+const LINUX_READ_SYSCALL: u64 = 0;
+const LINUX_WRITE_SYSCALL: u64 = 1;
+const LINUX_IOCTL_SYSCALL: u64 = 16;
+const LINUX_EXIT_SYSCALL: u64 = 60;
 static CONTROLLER_IDENTITY: &[u8] = b"GINUX_CONTROLLER_V0";
 const COMMAND_STATUS: u16 = 1;
 const COMMAND_COMPONENTS: u16 = 2;
@@ -297,10 +306,6 @@ global_asm!(
     .text
     .global _start
 _start:
-    mov rdi, rbx
-    mov rsi, rcx
-    mov rdx, r14
-    mov rcx, r8
     call ginux_controller_main
     ud2
 "#
@@ -312,13 +317,13 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 }
 
 #[no_mangle]
-extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network: u64) -> ! {
+extern "C" fn ginux_controller_main() -> ! {
+    let console = LINUX_STDOUT;
+    let host = GINUX_HOST_FD;
+    let root = GINUX_ROOT_FD;
+    let network = GINUX_NETWORK_FD;
     let identity = unsafe { core::ptr::read_volatile(&CONTROLLER_IDENTITY) };
     if identity != b"GINUX_CONTROLLER_V0"
-        || console == 0
-        || host == 0
-        || root == 0
-        || network == 0
         || !native_control_abi_is_compatible(call(NATIVE_CONTROL_DISCOVERY_OPERATION, 0, 0, 0))
     {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
@@ -335,15 +340,6 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
     let mut line = [0_u8; MAX_LINE];
-    if call(
-        NATIVE_CONSOLE_READ_LINE_OPERATION,
-        0,
-        line.as_mut_ptr() as u64,
-        line.len() as u64,
-    ) != NATIVE_CALL_FAILED
-    {
-        exit(NATIVE_SERVICE_EXIT_REJECTED);
-    }
 
     write(console, b"\r\nGinux controller v0 (ring 3)\r\n");
     write(console, b"Type 'help' for commands.\r\n");
@@ -1351,8 +1347,8 @@ fn write(console: u64, bytes: &[u8]) {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
     for chunk in bytes.chunks(NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES as usize) {
-        if call(
-            NATIVE_CONSOLE_WRITE_OPERATION,
+        if linux_syscall(
+            LINUX_WRITE_SYSCALL,
             console,
             chunk.as_ptr() as u64,
             chunk.len() as u64,
@@ -1637,29 +1633,55 @@ fn read_u64(bytes: &[u8], offset: usize) -> u64 {
 }
 
 fn call(number: u64, capability: u64, first: u64, second: u64) -> u64 {
+    if number == NATIVE_CONSOLE_READ_BYTE_OPERATION {
+        let mut byte = 0_u8;
+        return if linux_syscall(
+            LINUX_READ_SYSCALL,
+            LINUX_STDIN,
+            (&mut byte as *mut u8) as u64,
+            1,
+        ) == 1
+        {
+            u64::from(byte)
+        } else {
+            NATIVE_CALL_FAILED
+        };
+    }
+    let request = GinuxControlIoctlV0::new(number, first, second);
+    linux_syscall(
+        LINUX_IOCTL_SYSCALL,
+        if capability == 0 {
+            GINUX_HOST_FD
+        } else {
+            capability
+        },
+        GINUX_CONTROL_IOCTL,
+        (&request as *const GinuxControlIoctlV0) as u64,
+    )
+}
+
+fn exit(status: u8) -> ! {
+    let _ = linux_syscall(LINUX_EXIT_SYSCALL, u64::from(status), 0, 0);
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+fn linux_syscall(number: u64, first: u64, second: u64, third: u64) -> u64 {
     let result: u64;
     unsafe {
         asm!(
-            "int 0x80",
+            "syscall",
             inlateout("rax") number => result,
-            in("rdi") capability,
-            in("rsi") first,
-            in("rdx") second,
+            in("rdi") first,
+            in("rsi") second,
+            in("rdx") third,
+            lateout("rcx") _,
+            lateout("r11") _,
             options(nostack)
         );
     }
     result
-}
-
-fn exit(status: u8) -> ! {
-    unsafe {
-        asm!(
-            "int 0x80",
-            in("rax") NATIVE_SERVICE_EXIT_OPERATION,
-            in("rsi") u64::from(status),
-            options(noreturn)
-        );
-    }
 }
 
 const _: () = assert!(NATIVE_CALL_FAILED == u64::MAX - 2);

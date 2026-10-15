@@ -529,6 +529,11 @@ struct ExceptionStack([u8; EXCEPTION_STACK_STORAGE_SIZE]);
 
 static BREAKPOINT_HANDLED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_STATE: AtomicU8 = AtomicU8::new(0);
+static LINUX_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
+static LINUX_CONTROLLER_CONSOLE: AtomicU64 = AtomicU64::new(0);
+static LINUX_CONTROLLER_HOST: AtomicU64 = AtomicU64::new(0);
+static LINUX_CONTROLLER_ROOT: AtomicU64 = AtomicU64::new(0);
+static LINUX_CONTROLLER_NETWORK: AtomicU64 = AtomicU64::new(0);
 
 const LINUX_RUNTIME_HOST_INSTANCE: u8 = control_abi::CONTAINER_LIMIT as u8;
 const LINUX_RUNTIME_INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
@@ -2009,7 +2014,19 @@ pub(crate) fn execute_native_controller(
     domain_id: u64,
     service_identity: u64,
 ) {
-    if !install_current_scheduler_fs_base() {
+    if !install_current_scheduler_fs_base()
+        || LINUX_CONTROLLER_DOMAIN
+            .compare_exchange(0, domain_id, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+    {
+        return;
+    }
+    LINUX_CONTROLLER_CONSOLE.store(console_handle, Ordering::Release);
+    LINUX_CONTROLLER_HOST.store(host_handle, Ordering::Release);
+    LINUX_CONTROLLER_ROOT.store(root_handle, Ordering::Release);
+    LINUX_CONTROLLER_NETWORK.store(network_handle, Ordering::Release);
+    if configure_linux_syscall().is_none() {
+        LINUX_CONTROLLER_DOMAIN.store(0, Ordering::Release);
         return;
     }
     unsafe {
@@ -6688,6 +6705,11 @@ extern "sysv64" fn linux_syscall_handler(
     // SAFETY: the assembly entry stub passes the aligned base of the exact
     // twelve-register frame represented by LinuxSyscallFrame.
     let saved_registers = unsafe { registers.read() };
+    if let Some(result) =
+        linux_controller_syscall(number, saved_registers, user_stack, user_rip, user_rflags)
+    {
+        return result;
+    }
     let syscall_return = LinuxUserContext {
         registers: saved_registers,
         rip: user_rip,
@@ -7488,6 +7510,116 @@ extern "sysv64" fn linux_syscall_handler(
             );
             LINUX_ENOSYS
         }
+    }
+}
+
+fn linux_controller_syscall(
+    number: u64,
+    registers: LinuxSyscallFrame,
+    user_stack: u64,
+    user_rip: u64,
+    user_rflags: u64,
+) -> Option<u64> {
+    let domain_id = LINUX_CONTROLLER_DOMAIN.load(Ordering::Acquire);
+    if domain_id == 0 || scheduler::current_domain() != Some(domain_id) {
+        return None;
+    }
+    let first = registers.rdi;
+    let second = registers.rsi;
+    let third = registers.rdx;
+    match number {
+        LINUX_READ_SYSCALL if first == 0 && third != 0 => {
+            let capability = LINUX_CONTROLLER_CONSOLE.load(Ordering::Acquire);
+            if !domain::handle_permits(domain_id, capability, 2, Rights::READ) {
+                return Some(LINUX_EBADF);
+            }
+            let byte = crate::serial_read_byte_blocking();
+            if !address_space::copy_to_current_user(second, &[byte]) {
+                return Some(LINUX_EFAULT);
+            }
+            Some(1)
+        }
+        LINUX_READ_SYSCALL => Some(if first == 0 { 0 } else { LINUX_EBADF }),
+        LINUX_WRITE_SYSCALL if matches!(first, 1 | 2) => {
+            let Ok(length) = usize::try_from(third) else {
+                return Some(LINUX_EINVAL);
+            };
+            if length == 0 {
+                return Some(0);
+            }
+            if length > control_abi::MAX_BUFFERED_CONSOLE_BYTES as usize {
+                return Some(LINUX_EINVAL);
+            }
+            let capability = LINUX_CONTROLLER_CONSOLE.load(Ordering::Acquire);
+            let mut bytes = [0_u8; control_abi::MAX_BUFFERED_CONSOLE_BYTES as usize];
+            if !domain::handle_permits(domain_id, capability, 2, Rights::WRITE)
+                || !address_space::copy_from_current_user(second, &mut bytes[..length])
+            {
+                return Some(LINUX_EFAULT);
+            }
+            crate::serial_write_bytes(&bytes[..length]);
+            Some(third)
+        }
+        LINUX_WRITE_SYSCALL => Some(LINUX_EBADF),
+        LINUX_IOCTL_SYSCALL if second == ginux_native_abi::GINUX_CONTROL_IOCTL => {
+            let capability = match first {
+                1 | 2 => LINUX_CONTROLLER_CONSOLE.load(Ordering::Acquire),
+                3 => LINUX_CONTROLLER_HOST.load(Ordering::Acquire),
+                4 => LINUX_CONTROLLER_ROOT.load(Ordering::Acquire),
+                5 => LINUX_CONTROLLER_NETWORK.load(Ordering::Acquire),
+                _ => return Some(LINUX_EBADF),
+            };
+            let mut request = [0_u8; ginux_native_abi::GINUX_CONTROL_IOCTL_SIZE as usize];
+            if !address_space::copy_from_current_user(third, &mut request)
+                || u32::from_ne_bytes(request[0..4].try_into().unwrap())
+                    != ginux_native_abi::GINUX_CONTROL_IOCTL_SIZE
+                || u16::from_ne_bytes(request[4..6].try_into().unwrap())
+                    != ginux_native_abi::GINUX_CONTROL_IOCTL_VERSION
+                || request[6..8] != [0, 0]
+            {
+                return Some(LINUX_EFAULT);
+            }
+            let operation = u64::from_ne_bytes(request[8..16].try_into().unwrap());
+            let operation_first = u64::from_ne_bytes(request[16..24].try_into().unwrap());
+            let operation_second = u64::from_ne_bytes(request[24..32].try_into().unwrap());
+            let mut frame = UserTrapFrame::from_linux_syscall(
+                registers.into_array(),
+                user_rip,
+                user_stack,
+                user_rflags,
+                operation_first,
+                operation_second,
+            );
+            let result = syscall_handler(operation, capability, &mut frame);
+            Some(if scheduler::current_domain() == Some(domain_id) {
+                result
+            } else {
+                LINUX_RETURN_TO_KERNEL
+            })
+        }
+        LINUX_IOCTL_SYSCALL => Some(LINUX_ENOTTY),
+        LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL => {
+            let mut frame = UserTrapFrame::from_linux_syscall(
+                registers.into_array(),
+                user_rip,
+                user_stack,
+                user_rflags,
+                first,
+                0,
+            );
+            let result = syscall_handler(2, 0, &mut frame);
+            LINUX_CONTROLLER_DOMAIN.store(0, Ordering::Release);
+            LINUX_CONTROLLER_CONSOLE.store(0, Ordering::Release);
+            LINUX_CONTROLLER_HOST.store(0, Ordering::Release);
+            LINUX_CONTROLLER_ROOT.store(0, Ordering::Release);
+            LINUX_CONTROLLER_NETWORK.store(0, Ordering::Release);
+            Some(if result == u64::MAX {
+                LINUX_RETURN_TO_KERNEL
+            } else {
+                result
+            })
+        }
+        _ => Some(LINUX_ENOSYS),
     }
 }
 

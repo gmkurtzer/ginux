@@ -12,7 +12,7 @@ The earlier architecture placed nearly all storage, networking, filesystem, and 
 ## Decision
 
 1. One authenticated `GINUX.EFI` packages the kernel, boot-required modules, controller payload, recovery support, and a versioned component catalog.
-2. The controller is embedded as bytes but executes in ring 3. It is not linked into the kernel's privilege domain and is the only initial userspace authority.
+2. The controller is embedded as bytes but executes in ring 3 as a statically linked Linux-ABI process. It uses standard Linux syscalls for ordinary process I/O and lifecycle, plus a versioned Linux device/ioctl UAPI for Ginux-specific host management. It is not linked into the kernel's privilege domain and is the only initial userspace authority.
 3. The native boot path has no separate initramfs or host root filesystem. Container-image formats, including CPIO fixtures, remain independent inputs.
 4. Boot-critical storage, filesystem, networking, GPU, and primary-device support runs in the kernel or authenticated native kernel modules. Nonessential or experimental drivers may run in isolated userspace domains.
 5. Native modules use a stable, versioned kABI. They are authenticated and selected before the runtime integrity seal; arbitrary post-seal insertion is forbidden.
