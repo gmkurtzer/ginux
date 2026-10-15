@@ -286,7 +286,7 @@ pub(crate) fn validated_user_root_frames(root: u64) -> Option<ValidatedUserRootF
     let image_capacity = if network_layout {
         160
     } else if controller_layout {
-        8
+        crate::address_space::NATIVE_CONTROLLER_IMAGE_PAGES
     } else {
         7
     };

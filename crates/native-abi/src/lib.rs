@@ -194,6 +194,7 @@ pub const NATIVE_IMAGE_STORE_CHUNK_LIMIT: u32 = 4096;
 pub const NATIVE_IMAGE_STORE_RESULT_FAILED: u64 = u64::MAX - 2;
 pub const NATIVE_PROGRESS_OPERATION: u64 = 36;
 pub const NATIVE_PROGRESS_MAX_SIZE: usize = 128;
+pub const NATIVE_CONSOLE_READ_BYTE_OPERATION: u64 = 37;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

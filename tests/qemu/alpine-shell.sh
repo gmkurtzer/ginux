@@ -124,14 +124,14 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for "[detached from container; use 'container attach NAME' to return]"
     wait_for_count 'ginux> ' 2
     printf '%s\n' 'container list'
-    wait_for_line 'alpine running /bin/sh 1 128 false docker.io/library/alpine:latest'
+    wait_for_line 'alpine          running     /bin/sh               1    128      false  docker.io/library/alpine:latest'
     printf '%s\n' 'container attach alpine'
     wait_for_count $'\033[2J\033[H' 1
     printf '%s\n' 'exit 0'
     wait_for_count 'ginux: OCI init exited cleanly' 1
     wait_for_count 'ginux> ' 3
     printf '%s\n' 'container list'
-    wait_for_line 'alpine stopped /bin/sh 1 128 false docker.io/library/alpine:latest'
+    wait_for_line 'alpine          stopped     /bin/sh               1    128      false  docker.io/library/alpine:latest'
     wait_for_count 'ginux> ' 4
     printf '%s\n' 'container start alpine --attach'
     wait_for_count 'ginux: entering configured OCI init' 2

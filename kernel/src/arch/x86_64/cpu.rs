@@ -16388,6 +16388,9 @@ fn dispatch_charged_call(
         control_abi::CONSOLE_READ_LINE_OPERATION => {
             console_read_line(caller_domain, capability, frame)
         }
+        ginux_native_abi::NATIVE_CONSOLE_READ_BYTE_OPERATION => {
+            console_read_byte(caller_domain, capability, frame)
+        }
         control_abi::HOST_INSPECT_OPERATION => host_inspect(caller_domain, capability, frame),
         control_abi::CONTAINER_CONTROL_OPERATION => {
             container_control(caller_domain, capability, frame)
@@ -18055,6 +18058,23 @@ fn console_read_line(domain_id: u64, capability: u64, frame: *const UserTrapFram
     length as u64
 }
 
+fn console_read_byte(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
+    let Some(frame) = (unsafe { frame.as_ref() }) else {
+        return u64::MAX - 2;
+    };
+    if !domain::handle_permits(domain_id, capability, 2, Rights::READ)
+        || frame.first_argument() != 0
+        || frame.second_argument() != 0
+    {
+        return u64::MAX - 2;
+    }
+    let byte = crate::serial_read_byte_blocking();
+    if !domain::renew_auxiliary_call_epoch(domain_id) {
+        return u64::MAX - 2;
+    }
+    u64::from(byte)
+}
+
 fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) -> u64 {
     let Some(frame) = (unsafe { frame.as_ref() }) else {
         return u64::MAX - 2;
@@ -18082,39 +18102,69 @@ fn host_inspect(domain_id: u64, capability: u64, frame: *const UserTrapFrame) ->
             let Ok(cursor) = usize::try_from(selector) else {
                 return u64::MAX - 2;
             };
-            if selector == domain::HOST_DOMAIN_CURSOR_END + 1 {
+            let container_cursor_base = domain::HOST_DOMAIN_CURSOR_END as usize + 1;
+            let container_cursor_end = container_cursor_base + control_abi::CONTAINER_LIMIT;
+            if cursor == container_cursor_end {
                 return if domain::renew_auxiliary_call_epoch(domain_id) {
                     0
                 } else {
                     u64::MAX - 2
                 };
             }
-            let Some(record) = domain::inspect_live_domain(cursor) else {
-                return u64::MAX - 2;
-            };
-            match record {
-                Some(record) => record,
-                None if container_runtime_is_running() => domain::InspectionRecord {
-                    pid: 100,
-                    parent_pid: 0,
-                    kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
-                    state: control_abi::HOST_INSPECT_STATE_READY,
-                    active_threads: 1,
-                    next_cursor: domain::HOST_DOMAIN_CURSOR_END + 1,
-                },
-                None => {
+            if cursor <= domain::HOST_DOMAIN_CURSOR_END as usize {
+                let Some(record) = domain::inspect_live_domain(cursor) else {
+                    return u64::MAX - 2;
+                };
+                if let Some(record) = record {
+                    record
+                } else if let Some(slot) = next_running_container_slot(0) {
+                    domain::InspectionRecord {
+                        pid: 100 + slot as u64,
+                        parent_pid: 0,
+                        kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+                        state: control_abi::HOST_INSPECT_STATE_READY,
+                        active_threads: 1,
+                        next_cursor: (container_cursor_base + slot + 1) as u64,
+                    }
+                } else {
                     return if domain::renew_auxiliary_call_epoch(domain_id) {
                         0
                     } else {
                         u64::MAX - 2
                     };
                 }
+            } else {
+                let Some(start) = cursor.checked_sub(container_cursor_base) else {
+                    return u64::MAX - 2;
+                };
+                let Some(slot) = next_running_container_slot(start) else {
+                    return if domain::renew_auxiliary_call_epoch(domain_id) {
+                        0
+                    } else {
+                        u64::MAX - 2
+                    };
+                };
+                domain::InspectionRecord {
+                    pid: 100 + slot as u64,
+                    parent_pid: 0,
+                    kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
+                    state: control_abi::HOST_INSPECT_STATE_READY,
+                    active_threads: 1,
+                    next_cursor: (container_cursor_base + slot + 1) as u64,
+                }
             }
         }
         control_abi::HOST_PROC_STATUS => {
-            if selector == 100 && container_runtime_is_running() {
+            if let Some(slot) = selector
+                .checked_sub(100)
+                .and_then(|slot| usize::try_from(slot).ok())
+                .filter(|slot| {
+                    *slot < control_abi::CONTAINER_LIMIT
+                        && container_state(*slot) == control_abi::CONTAINER_STATE_RUNNING
+                })
+            {
                 domain::InspectionRecord {
-                    pid: 100,
+                    pid: 100 + slot as u64,
                     parent_pid: 0,
                     kind: control_abi::HOST_PROCESS_KIND_CONTAINER_INIT,
                     state: control_abi::HOST_INSPECT_STATE_READY,
@@ -18482,6 +18532,11 @@ fn next_container_slot(cursor: usize) -> Option<usize> {
         .find(|slot| CONTAINER_CONTROL_STATES[*slot].load(Ordering::SeqCst) != 0)
 }
 
+fn next_running_container_slot(cursor: usize) -> Option<usize> {
+    (cursor..control_abi::CONTAINER_LIMIT)
+        .find(|slot| container_state(*slot) == control_abi::CONTAINER_STATE_RUNNING)
+}
+
 fn next_container_cursor(cursor: usize) -> u64 {
     next_container_slot(cursor)
         .map(|slot| slot as u64)
@@ -18504,11 +18559,6 @@ fn selected_or_active_container_slot() -> Option<usize> {
 
 fn container_state(slot: usize) -> u64 {
     u64::from(CONTAINER_CONTROL_STATES[slot].load(Ordering::SeqCst))
-}
-
-fn container_runtime_is_running() -> bool {
-    active_container_slot()
-        .is_some_and(|slot| container_state(slot) == control_abi::CONTAINER_STATE_RUNNING)
 }
 
 fn container_image_is_embedded(slot: usize) -> bool {

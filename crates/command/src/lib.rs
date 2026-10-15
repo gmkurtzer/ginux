@@ -257,6 +257,62 @@ pub fn parse<'schema, 'input>(
     }))
 }
 
+pub fn complete(root: &Command<'_>, input: &[u8], output: &mut [u8]) -> usize {
+    let ends_with_space = input.last().is_some_and(u8::is_ascii_whitespace);
+    let mut words = input
+        .split(|byte| byte.is_ascii_whitespace())
+        .filter(|word| !word.is_empty())
+        .peekable();
+    let mut command = root;
+    let mut partial = b"" as &[u8];
+    while let Some(word) = words.next() {
+        if words.peek().is_none() && !ends_with_space {
+            partial = word;
+            break;
+        }
+        let Some(child) = command.child(word) else {
+            return 0;
+        };
+        command = child;
+    }
+    if command.id.is_some() {
+        return 0;
+    }
+    let mut match_count = 0;
+    let mut common = b"" as &[u8];
+    for child in command
+        .subcommands
+        .iter()
+        .filter(|child| child.name.starts_with(partial))
+    {
+        if match_count == 0 {
+            common = child.name;
+        } else {
+            let length = common
+                .iter()
+                .zip(child.name)
+                .position(|(left, right)| left != right)
+                .unwrap_or(common.len().min(child.name.len()));
+            common = &common[..length];
+        }
+        match_count += 1;
+    }
+    if match_count == 0 || common.len() <= partial.len() {
+        return 0;
+    }
+    let suffix = &common[partial.len()..];
+    let add_space = match_count == 1;
+    let length = suffix.len() + usize::from(add_space);
+    if length > output.len() {
+        return 0;
+    }
+    output[..suffix.len()].copy_from_slice(suffix);
+    if add_space {
+        output[suffix.len()] = b' ';
+    }
+    length
+}
+
 fn resolve_help<'schema, 'input>(
     root: &'schema Command<'schema>,
     words: impl Iterator<Item = &'input [u8]>,
@@ -428,5 +484,16 @@ mod tests {
         assert!(output.contains("Usage:\r\n  container COMMAND"));
         assert!(output.contains("container start NAME"));
         assert!(output.contains("Start one container"));
+    }
+
+    #[test]
+    fn completes_root_and_nested_command_names() {
+        let mut output = [0_u8; 32];
+        let length = complete(&ROOT, b"cont", &mut output);
+        assert_eq!(&output[..length], b"ainer ");
+        let length = complete(&ROOT, b"container sta", &mut output);
+        assert_eq!(&output[..length], b"rt ");
+        assert_eq!(complete(&ROOT, b"container start ", &mut output), 0);
+        assert_eq!(complete(&ROOT, b"missing", &mut output), 0);
     }
 }

@@ -82,10 +82,12 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_count 'ginux: OCI image ready' 3 240
     wait_for_count 'ginux: entering configured OCI init' 3 30
     wait_for 'rocky: stopped'
-    printf '%s\n' 'container list'
-    wait_for 'alpine running /bin/sh 1 128 false docker.io/library/alpine:latest'
-    wait_for 'alpine2 running /bin/sh 1 128 false docker.io/library/alpine:latest'
-    wait_for 'rocky stopped /usr/bin/true 1 128 false docker.io/rockylinux/rockylinux:10'
+    printf '%s\n' 'container list' 'ps'
+    wait_for 'alpine          running     /bin/sh               1    128      false  docker.io/library/alpine:latest'
+    wait_for 'alpine2         running     /bin/sh               1    128      false  docker.io/library/alpine:latest'
+    wait_for 'rocky           stopped     /usr/bin/true         1    128      false  docker.io/rockylinux/rockylinux:10'
+    wait_for '100    0      R      alpine:init'
+    wait_for '101    0      R      alpine2:init'
     printf '%s\n' 'container attach alpine'
     wait_for $'\033[2J\033[H'
     printf '%s\n' \

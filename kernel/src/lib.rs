@@ -3783,7 +3783,6 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 match address_space::run_oci_process(&init[..init_size]) {
                     address_space::OciProcessOutcome::Suspended => {
                         arch::x86_64::cpu::suspend_configured_container();
-                        serial_write("ginux: container runtime suspended\r\n");
                         break;
                     }
                     address_space::OciProcessOutcome::Failed => {
@@ -3817,7 +3816,6 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             break;
         }
     }
-    serial_write("ginux: runtime container manager exited cleanly\r\n");
     serial_write("\r\nginux: controller requested clean shutdown");
     serial_write("\r\nGINUX_KERNEL_OK\r\n");
 

@@ -233,8 +233,8 @@ simulation is not sufficient.
 | Area | What works now | Next boundary |
 |---|---|---|
 | Boot | Direct x86-64 UEFI boot as one EFI application under Q35/OVMF | Production signing, recovery, and physical hardware profiles |
-| Controller | Persistent ring-3 command console with component, process, network, and container lifecycle control | Remote authenticated management and persistent configuration |
-| Domains | Capability tables, isolated address spaces, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | General concurrent workload domains and broader resource accounting |
+| Controller | Persistent ring-3 command console with command-name completion, aligned status tables, and component, process, network, and container lifecycle control | Dynamic argument completion, remote authenticated management, and persistent configuration |
+| Domains | Concurrent container domains with isolated address spaces, root/mount and process views, retained CPU state, IPC, scheduling, lifecycle events, fault containment, and generation-safe cleanup | Broader per-domain resource accounting and policy enforcement |
 | Native services | Measured ring-3 network, protocol, and volume services with bounded ABIs and restart proofs | Production service supervision and broader device support |
 | Devices | Virtio block/network paths, MSI-X, and VT-d DMA confinement in the QEMU profile | NVMe, high-speed networking, GPU support, and selected real servers |
 | Linux personality | Bounded x86-64 ELF/dynamic-linker support, a growing syscall/VFS/process/signal ABI, and an unmodified Alpine musl/BusyBox shell with rootfs-backed commands | Complete Alpine checkpoint, then Rocky Linux 10 and systemd |
@@ -278,10 +278,18 @@ container start alpine --attach
 ```
 
 The final command resolves and downloads Alpine from Docker Hub, verifies and
-unpacks its layer, then enters the unmodified Alpine shell. The single-container
-shell path is available for development, but concurrent detach/attach remains
-under stabilization and is not yet a completed checkpoint. `exit` stops the
-container and returns to the Ginux controller; `shutdown` stops the host.
+unpacks its layer, then enters the unmodified Alpine shell. Multiple domains
+can run concurrently; each keeps its own address space, root/mount view,
+process view, and suspended execution state. Press Control-] to detach, use
+`container attach NAME` to return, and use `exit` to stop the attached
+container. `shutdown` stops the host.
+
+The validated OCI images currently used by the acceptance tests each contain
+one filesystem layer. General ordered multi-layer overlay application remains
+required before arbitrary OCI images are supported. Full controlling-terminal
+and session semantics are also still incomplete, so interactive Rocky Linux
+programs are not yet claimed even though Rocky image ingestion and ELF
+execution are tested.
 
 Useful development gates:
 
@@ -290,6 +298,7 @@ make build          # build the unified EFI image
 make test           # run the core QEMU boot gate
 make test-c2        # verify configured container lifecycle
 make test-alpine    # verify runtime OCI download and the Alpine shell
+make test-multi-container # verify concurrent Alpine domains and Rocky ingestion
 make check          # run architecture, ABI, format, lint, and unit checks
 make gate           # run the clean reproducible project gate
 ```

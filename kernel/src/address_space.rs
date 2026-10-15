@@ -4682,7 +4682,7 @@ const NATIVE_NETWORK_IMAGE_PAGES: usize = 160;
 const NATIVE_NETWORK_STACK_PAGES: usize = 16;
 pub(crate) const NATIVE_NETWORK_FRAME_COUNT: usize =
     4 + NATIVE_NETWORK_IMAGE_PAGES + NATIVE_NETWORK_STACK_PAGES + 1;
-const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 8;
+pub(crate) const NATIVE_CONTROLLER_IMAGE_PAGES: usize = 9;
 pub(crate) const NATIVE_CONTROLLER_FRAME_COUNT: usize = 4 + NATIVE_CONTROLLER_IMAGE_PAGES + 3;
 const NATIVE_STACK_PAGE: usize = NATIVE_SERVICE_IMAGE_PAGES + 1;
 const NATIVE_BOOT_INFO_PAGE: usize = NATIVE_STACK_PAGE + 3;
@@ -5510,19 +5510,6 @@ fn interactive_controller_return_is_valid(
     if no_current && blocked && one_space && owns_frames && live {
         return true;
     }
-    crate::serial_write("ginux: controller return state current/blocked/space/frames/live: ");
-    for state in [no_current, blocked, one_space, owns_frames, live] {
-        crate::serial_write_u64(u64::from(state));
-        crate::serial_write(" ");
-    }
-    crate::serial_write("\r\n");
-    crate::serial_write("ginux: controller exit detail: ");
-    crate::serial_write_u64(
-        domain::last_lifecycle_event_detail()
-            .map(u64::from)
-            .unwrap_or(u64::MAX),
-    );
-    crate::serial_write("\r\n");
     if INTERACTIVE_CONTROLLER_DOMAIN
         .compare_exchange(controller, 0, Ordering::AcqRel, Ordering::Acquire)
         .is_err()

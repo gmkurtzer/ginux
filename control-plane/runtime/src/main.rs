@@ -3,30 +3,32 @@
 
 use core::arch::{asm, global_asm};
 use ginux_command::{
-    parse, write_error, write_help, Arguments, Arity, Command, HelpWriter, ParseOutcome,
+    complete, parse, write_error, write_help, Arguments, Arity, Command, HelpWriter, ParseOutcome,
 };
 use ginux_native_abi::{
     native_control_abi_is_compatible, NativeContainerRequestV1, NativeControlDescriptorV4,
     NativeHostInspectRecordV0, NativeHostInspectRequestV0, NativeRootDirectoryRequestV4,
-    NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_LINE_OPERATION,
-    NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_ATTACH, NATIVE_CONTAINER_CONFIG_AUTOSTART,
-    NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_CONFIG_IMAGE, NATIVE_CONTAINER_CONFIG_INIT,
-    NATIVE_CONTAINER_CONFIG_MEMORY, NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE,
-    NATIVE_CONTAINER_CURSOR_END, NATIVE_CONTAINER_HOST_SHUTDOWN, NATIVE_CONTAINER_INJECT_FAILURE,
+    NATIVE_CALL_FAILED, NATIVE_CONSOLE_MAX_LINE_BYTES, NATIVE_CONSOLE_READ_BYTE_OPERATION,
+    NATIVE_CONSOLE_READ_LINE_OPERATION, NATIVE_CONSOLE_WRITE_OPERATION, NATIVE_CONTAINER_ATTACH,
+    NATIVE_CONTAINER_CONFIG_AUTOSTART, NATIVE_CONTAINER_CONFIG_CPU, NATIVE_CONTAINER_CONFIG_IMAGE,
+    NATIVE_CONTAINER_CONFIG_INIT, NATIVE_CONTAINER_CONFIG_MEMORY,
+    NATIVE_CONTAINER_CONTROL_OPERATION, NATIVE_CONTAINER_CREATE, NATIVE_CONTAINER_CURSOR_END,
+    NATIVE_CONTAINER_HOST_SHUTDOWN, NATIVE_CONTAINER_INJECT_FAILURE, NATIVE_CONTAINER_LIMIT,
     NATIVE_CONTAINER_MAX_NAME_SIZE, NATIVE_CONTAINER_QUERY, NATIVE_CONTAINER_RESTART,
     NATIVE_CONTAINER_SET_AUTOSTART, NATIVE_CONTAINER_SET_CPU, NATIVE_CONTAINER_SET_IMAGE,
     NATIVE_CONTAINER_SET_INIT, NATIVE_CONTAINER_SET_MEMORY_MIB, NATIVE_CONTAINER_START_ATTACHED,
     NATIVE_CONTAINER_STATE_CONFIGURED, NATIVE_CONTAINER_STATE_CREATED,
     NATIVE_CONTAINER_STATE_FAILED, NATIVE_CONTAINER_STATE_RUNNING, NATIVE_CONTAINER_STATE_STOPPED,
     NATIVE_CONTAINER_STOP, NATIVE_CONTROL_DESCRIPTOR_OPERATION, NATIVE_CONTROL_DESCRIPTOR_SIZE,
-    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_HOST_INSPECT_OPERATION,
-    NATIVE_HOST_INSPECT_RECORD_SIZE, NATIVE_HOST_INSPECT_REQUEST_SIZE,
-    NATIVE_HOST_INSPECT_STATE_READY, NATIVE_HOST_INSPECT_STATE_STOPPING,
-    NATIVE_HOST_INSPECT_VERSION, NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT,
-    NATIVE_HOST_PROCESS_KIND_CONTROLLER, NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS,
-    NATIVE_LINUX_ABI_TEST_COUNT, NATIVE_LINUX_ABI_TEST_OPERATION, NATIVE_NETWORK_APPLY_VERSION,
-    NATIVE_NETWORK_DEVICE_APPLY, NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION,
-    NATIVE_NETWORK_DEVICE_PING, NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_DNS,
+    NATIVE_CONTROL_DISCOVERY_OPERATION, NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES,
+    NATIVE_HOST_INSPECT_OPERATION, NATIVE_HOST_INSPECT_RECORD_SIZE,
+    NATIVE_HOST_INSPECT_REQUEST_SIZE, NATIVE_HOST_INSPECT_STATE_READY,
+    NATIVE_HOST_INSPECT_STATE_STOPPING, NATIVE_HOST_INSPECT_VERSION,
+    NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT, NATIVE_HOST_PROCESS_KIND_CONTROLLER,
+    NATIVE_HOST_PROC_ENUMERATE, NATIVE_HOST_PROC_STATUS, NATIVE_LINUX_ABI_TEST_COUNT,
+    NATIVE_LINUX_ABI_TEST_OPERATION, NATIVE_NETWORK_APPLY_VERSION, NATIVE_NETWORK_DEVICE_APPLY,
+    NATIVE_NETWORK_DEVICE_DHCP, NATIVE_NETWORK_DEVICE_OPERATION, NATIVE_NETWORK_DEVICE_PING,
+    NATIVE_NETWORK_DEVICE_QUERY_DHCP, NATIVE_NETWORK_DEVICE_QUERY_DNS,
     NATIVE_NETWORK_DEVICE_QUERY_PING, NATIVE_NETWORK_DEVICE_QUERY_SNAPSHOT,
     NATIVE_NETWORK_DEVICE_SET_DNS, NATIVE_NETWORK_DEVICE_SET_LINK, NATIVE_NETWORK_SNAPSHOT_SIZE,
     NATIVE_NETWORK_SNAPSHOT_VERSION, NATIVE_ROOT_DIRECTORY_RECORD_HEADER_SIZE,
@@ -351,15 +353,7 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
     }
     loop {
         write(console, b"ginux> ");
-        let length = call(
-            NATIVE_CONSOLE_READ_LINE_OPERATION,
-            console,
-            line.as_mut_ptr() as u64,
-            line.len() as u64,
-        );
-        let Ok(length) = usize::try_from(length) else {
-            exit(NATIVE_SERVICE_EXIT_REJECTED);
-        };
+        let length = read_line(console, &mut line);
         let Some(command) = line.get(..length) else {
             exit(NATIVE_SERVICE_EXIT_REJECTED);
         };
@@ -436,6 +430,40 @@ extern "C" fn ginux_controller_main(console: u64, host: u64, root: u64, network:
             COMMAND_PING => ping(console, network, invocation.arguments()),
             COMMAND_TEST_LINUX => test_linux_userspace(console, host),
             _ => exit(NATIVE_SERVICE_EXIT_REJECTED),
+        }
+    }
+}
+
+fn read_line(console: u64, line: &mut [u8; MAX_LINE]) -> usize {
+    let mut length = 0;
+    loop {
+        let byte = call(NATIVE_CONSOLE_READ_BYTE_OPERATION, console, 0, 0);
+        let Ok(byte) = u8::try_from(byte) else {
+            exit(NATIVE_SERVICE_EXIT_REJECTED);
+        };
+        match byte {
+            b'\r' | b'\n' => {
+                write(console, b"\r\n");
+                return length;
+            }
+            b'\t' => {
+                let (input, output) = line.split_at_mut(length);
+                let added = complete(&ROOT_COMMAND, input, output);
+                if added != 0 {
+                    write(console, &line[length..length + added]);
+                    length += added;
+                }
+            }
+            0x08 | 0x7f if length != 0 => {
+                length -= 1;
+                write(console, b"\x08 \x08");
+            }
+            byte @ 0x20..=0x7e if length < line.len() => {
+                line[length] = byte;
+                length += 1;
+                write(console, &[byte]);
+            }
+            _ => {}
         }
     }
 }
@@ -545,7 +573,7 @@ fn show_network_list(console: u64, network: u64) {
     };
     write(
         console,
-        b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS\r\n",
+        b"DEVICE  DOMAIN   CONNECTED  STATE  CONFIGURATION  ADDRESS          GATEWAY          DNS\r\n",
     );
     write_eth0_status(console, network, snapshot, false);
     write_loopback_status(console, false);
@@ -555,7 +583,7 @@ fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
     if is_loopback(arguments.first()) {
         write(
             console,
-            b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS GENERATION\r\n",
+            b"DEVICE  DOMAIN   CONNECTED  STATE  CONFIGURATION  ADDRESS          GATEWAY          DNS             GENERATION\r\n",
         );
         write_loopback_status(console, true);
         return;
@@ -570,46 +598,78 @@ fn show_network_status(console: u64, network: u64, arguments: Arguments<'_>) {
     };
     write(
         console,
-        b"DEVICE DOMAIN CONNECTED STATE CONFIGURATION ADDRESS GATEWAY DNS GENERATION\r\n",
+        b"DEVICE  DOMAIN   CONNECTED  STATE  CONFIGURATION  ADDRESS          GATEWAY          DNS             GENERATION\r\n",
     );
     write_eth0_status(console, network, snapshot, true);
 }
 
 fn write_eth0_status(console: u64, network: u64, snapshot: [u64; 7], generation: bool) {
-    write(console, b"eth0 control yes ");
-    write(console, if snapshot[2] == 1 { b"up " } else { b"down " });
-    write(
-        console,
+    let mut row = OutputLine::new();
+    row.padded(b"eth0", 8);
+    row.padded(b"control", 9);
+    row.padded(b"yes", 11);
+    row.padded(if snapshot[2] == 1 { b"up" } else { b"down" }, 7);
+    row.padded(
         if snapshot[3] == 0 {
-            b"unconfigured "
+            b"unconfigured"
         } else {
-            b"configured "
+            b"configured"
         },
+        15,
     );
     if snapshot[3] == 0 {
-        write(console, b"- - ");
+        row.padded(b"-", 17);
+        row.padded(b"-", 17);
     } else {
-        write_ipv4(console, snapshot[3] as u32);
-        write(console, b"/");
-        write_decimal(console, snapshot[3] >> 32);
-        write(console, b" ");
-        write_ipv4(console, snapshot[4] as u32);
-        write(console, b" ");
+        let mut address = [0_u8; 18];
+        let mut length = format_ipv4(&mut address, snapshot[3] as u32);
+        address[length] = b'/';
+        length += 1;
+        length += append_decimal(&mut address[length..], snapshot[3] >> 32);
+        row.padded(&address[..length], 17);
+        let mut gateway = [0_u8; 15];
+        let length = format_ipv4(&mut gateway, snapshot[4] as u32);
+        row.padded(&gateway[..length], 17);
     }
-    write_network_dns(console, network);
+    let dns = call(
+        NATIVE_NETWORK_DEVICE_OPERATION,
+        network,
+        NATIVE_NETWORK_DEVICE_QUERY_DNS,
+        0,
+    );
+    let mut dns_address = [0_u8; 15];
+    let dns = if dns == NATIVE_CALL_FAILED || dns == 0 {
+        b"-" as &[u8]
+    } else {
+        let length = format_ipv4(&mut dns_address, dns as u32);
+        &dns_address[..length]
+    };
     if generation {
-        write(console, b" ");
-        write_decimal(console, snapshot[1]);
+        row.padded(dns, 16);
+        row.decimal(snapshot[1]);
+    } else {
+        row.push(dns);
     }
-    write(console, b"\r\n");
+    row.push(b"\r\n");
+    row.write(console);
 }
 
 fn write_loopback_status(console: u64, generation: bool) {
-    write(console, b"lo control yes up configured 127.0.0.1/8 - -");
+    let mut row = OutputLine::new();
+    row.padded(b"lo", 8);
+    row.padded(b"control", 9);
+    row.padded(b"yes", 11);
+    row.padded(b"up", 7);
+    row.padded(b"configured", 15);
+    row.padded(b"127.0.0.1/8", 17);
+    row.padded(b"-", 17);
+    row.push(b"-");
     if generation {
-        write(console, b" 0");
+        row.spaces(16);
+        row.push(b"0");
     }
-    write(console, b"\r\n");
+    row.push(b"\r\n");
+    row.write(console);
 }
 
 fn set_network(console: u64, network: u64, arguments: Arguments<'_>) {
@@ -842,6 +902,11 @@ fn parse_ipv4(bytes: &[u8]) -> Option<u32> {
 
 fn write_ipv4(console: u64, address: u32) {
     let mut bytes = [0_u8; 15];
+    let length = format_ipv4(&mut bytes, address);
+    write(console, &bytes[..length]);
+}
+
+fn format_ipv4(bytes: &mut [u8], address: u32) -> usize {
     let mut length = 0;
     for (index, octet) in address.to_be_bytes().iter().enumerate() {
         if index != 0 {
@@ -850,7 +915,7 @@ fn write_ipv4(console: u64, address: u32) {
         }
         length += append_decimal(&mut bytes[length..], u64::from(*octet));
     }
-    write(console, &bytes[..length]);
+    length
 }
 
 fn append_decimal(output: &mut [u8], mut value: u64) -> usize {
@@ -913,17 +978,21 @@ fn container_state_name(state: u64) -> &'static [u8] {
 }
 
 fn show_container_list(console: u64, host: u64) {
-    write(console, b"NAME STATE INIT CPU MEM-MIB AUTO IMAGE\r\n");
+    write(
+        console,
+        b"NAME            STATE       INIT                  CPU  MEM-MIB  AUTO   IMAGE\r\n",
+    );
     let mut cursor = 0;
     loop {
         let Some((state, request)) = next_container(host, cursor) else {
             return;
         };
-        write(console, request_name(&request));
-        write(console, b" ");
-        write(console, container_state_name(state));
-        write(console, b" ");
-        write_container_configuration(console, &request);
+        let mut row = OutputLine::new();
+        row.padded(request_name(&request), 16);
+        row.padded(container_state_name(state), 12);
+        append_container_configuration(&mut row, &request);
+        row.push(b"\r\n");
+        row.write(console);
         if request.value == NATIVE_CONTAINER_CURSOR_END {
             return;
         }
@@ -942,57 +1011,51 @@ fn next_container(host: u64, cursor: u64) -> Option<(u64, NativeContainerRequest
     (state != 0 && state != NATIVE_CALL_FAILED).then_some((state, request))
 }
 
-fn write_container_configuration(console: u64, request: &NativeContainerRequestV1) {
+fn append_container_configuration(row: &mut OutputLine, request: &NativeContainerRequestV1) {
     let configured = |flag| request.config_flags & flag != 0;
     if configured(NATIVE_CONTAINER_CONFIG_INIT) {
         let init = request
             .init
             .get(..usize::from(request.init_size))
             .unwrap_or_default();
-        write(console, init);
+        row.padded(init, 22);
     } else {
-        write(console, b"-");
+        row.padded(b"-", 22);
     }
-    write(console, b" ");
-    write(
-        console,
+    row.padded(
         if configured(NATIVE_CONTAINER_CONFIG_CPU) {
             b"1"
         } else {
             b"-"
         },
+        5,
     );
-    write(console, b" ");
-    write(
-        console,
+    row.padded(
         if configured(NATIVE_CONTAINER_CONFIG_MEMORY) {
             b"128"
         } else {
             b"-"
         },
+        9,
     );
-    write(console, b" ");
-    write(
-        console,
+    row.padded(
         if configured(NATIVE_CONTAINER_CONFIG_AUTOSTART) {
             b"true"
         } else {
             b"false"
         },
+        7,
     );
-    write(console, b" ");
     if configured(NATIVE_CONTAINER_CONFIG_IMAGE) {
-        write(
-            console,
+        row.push(
             request
                 .image
                 .get(..usize::from(request.image_size))
                 .unwrap_or_default(),
         );
     } else {
-        write(console, b"-");
+        row.push(b"-");
     }
-    write(console, b"\r\n");
 }
 
 fn handle_container_command(console: u64, host: u64, command: u16, arguments: Arguments<'_>) {
@@ -1280,7 +1343,7 @@ fn write(console: u64, bytes: &[u8]) {
     if bytes.is_empty() {
         exit(NATIVE_SERVICE_EXIT_REJECTED);
     }
-    for chunk in bytes.chunks(64) {
+    for chunk in bytes.chunks(NATIVE_CONTROL_MAX_BUFFERED_CONSOLE_BYTES as usize) {
         if call(
             NATIVE_CONSOLE_WRITE_OPERATION,
             console,
@@ -1363,8 +1426,7 @@ fn list_directory(console: u64, root: u64, path: &[u8]) {
 }
 
 fn show_processes(console: u64, host: u64) {
-    let configuration = running_container(host).unwrap_or_else(NativeContainerRequestV1::zeroed);
-    write(console, b"PID PPID STATE NAME\r\n");
+    write(console, b"PID    PPID   STATE  NAME\r\n");
     let mut cursor = 0;
     loop {
         let Some(directory_record) = proc_request(host, NATIVE_HOST_PROC_ENUMERATE, cursor) else {
@@ -1378,47 +1440,43 @@ fn show_processes(console: u64, host: u64) {
             write(console, b"ps: inspection failed\r\n");
             return;
         };
-        write_decimal(console, record.pid);
-        write(console, b" ");
-        write_decimal(console, record.parent_pid);
-        write(console, b" ");
-        write(
-            console,
+        let container = (record.kind == NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT)
+            .then(|| container_for_pid(host, record.pid))
+            .flatten();
+        let mut row = OutputLine::new();
+        row.decimal_padded(record.pid, 7);
+        row.decimal_padded(record.parent_pid, 7);
+        row.padded(
             match record.state {
                 NATIVE_HOST_INSPECT_STATE_READY => b"R",
                 NATIVE_HOST_INSPECT_STATE_STOPPING => b"S",
                 _ => b"unknown",
             },
+            7,
         );
-        write(console, b" ");
-        write(
-            console,
-            match record.kind {
-                NATIVE_HOST_PROCESS_KIND_CONTROLLER => b"controller",
-                NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT => request_name(&configuration),
-                _ => b"unknown",
-            },
-        );
+        row.push(match record.kind {
+            NATIVE_HOST_PROCESS_KIND_CONTROLLER => b"controller",
+            NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT => {
+                container.as_ref().map(request_name).unwrap_or(b"unknown")
+            }
+            _ => b"unknown",
+        });
         if record.kind == NATIVE_HOST_PROCESS_KIND_CONTAINER_INIT {
-            write(console, b":init");
+            row.push(b":init");
         }
-        write(console, b"\r\n");
+        row.push(b"\r\n");
+        row.write(console);
         cursor = directory_record.next_cursor;
     }
 }
 
-fn running_container(host: u64) -> Option<NativeContainerRequestV1> {
-    let mut cursor = 0;
-    loop {
-        let (state, request) = next_container(host, cursor)?;
-        if state == NATIVE_CONTAINER_STATE_RUNNING {
-            return Some(request);
-        }
-        if request.value == NATIVE_CONTAINER_CURSOR_END {
-            return None;
-        }
-        cursor = request.value;
+fn container_for_pid(host: u64, pid: u64) -> Option<NativeContainerRequestV1> {
+    let slot = pid.checked_sub(100)?;
+    if slot >= NATIVE_CONTAINER_LIMIT as u64 {
+        return None;
     }
+    let (state, request) = next_container(host, slot)?;
+    (state == NATIVE_CONTAINER_STATE_RUNNING).then_some(request)
 }
 
 fn list_proc_directory(console: u64, host: u64, path: &[u8]) {
@@ -1501,6 +1559,62 @@ fn write_decimal(console: u64, mut value: u64) {
         }
     }
     write(console, &bytes[start..]);
+}
+
+struct OutputLine {
+    bytes: [u8; MAX_LINE],
+    length: usize,
+}
+
+impl OutputLine {
+    const fn new() -> Self {
+        Self {
+            bytes: [0; MAX_LINE],
+            length: 0,
+        }
+    }
+
+    fn push(&mut self, value: &[u8]) {
+        let Some(end) = self.length.checked_add(value.len()) else {
+            exit(NATIVE_SERVICE_EXIT_REJECTED);
+        };
+        let Some(output) = self.bytes.get_mut(self.length..end) else {
+            exit(NATIVE_SERVICE_EXIT_REJECTED);
+        };
+        output.copy_from_slice(value);
+        self.length = end;
+    }
+
+    fn spaces(&mut self, count: usize) {
+        const SPACES: &[u8; 32] = b"                                ";
+        let mut remaining = count;
+        while remaining != 0 {
+            let length = remaining.min(SPACES.len());
+            self.push(&SPACES[..length]);
+            remaining -= length;
+        }
+    }
+
+    fn padded(&mut self, value: &[u8], width: usize) {
+        self.push(value);
+        self.spaces(width.saturating_sub(value.len()).max(1));
+    }
+
+    fn decimal(&mut self, value: u64) {
+        let mut bytes = [0_u8; 20];
+        let length = append_decimal(&mut bytes, value);
+        self.push(&bytes[..length]);
+    }
+
+    fn decimal_padded(&mut self, value: u64, width: usize) {
+        let mut bytes = [0_u8; 20];
+        let length = append_decimal(&mut bytes, value);
+        self.padded(&bytes[..length], width);
+    }
+
+    fn write(&self, console: u64) {
+        write(console, &self.bytes[..self.length]);
+    }
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> u16 {
