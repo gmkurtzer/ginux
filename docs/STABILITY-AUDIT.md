@@ -95,3 +95,19 @@ At the start of this audit:
 These results show that the existing green gates do not cover the failing
 runtime topology.
 
+## Stabilization progress
+
+- OCI runtime extents are now allocated per container slot. Starting another
+  domain can no longer reuse the first domain's runtime pages.
+- Mutable Linux/ELF ABI state is now banked by the executing container domain,
+  with a separate host/proof instance. Controller handoff temporarily selects
+  the host bank.
+- `make check`, the normal `make test` boot, and `make test-c2` pass with these
+  ownership changes. One corruption-boot run hit the pre-existing native-volume
+  recovery timeout; an immediate identical rerun passed. That nondeterministic
+  device test remains an S1 audit item rather than being hidden by a retry.
+
+The S0 scheduler item remains open. `CONTAINER_ACTIVE_SLOT` and recursive
+console handoff are intentionally still enforcing one executable Linux runtime;
+lifting that guard before resumable domain contexts exist would misreport
+concurrency and risk corrupting process state.
