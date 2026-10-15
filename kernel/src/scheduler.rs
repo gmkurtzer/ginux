@@ -462,6 +462,29 @@ impl UserTrapFrame {
 }
 
 impl UserContext {
+    const ZERO: Self = Self {
+        rax: 0,
+        rbx: 0,
+        rcx: 0,
+        rdx: 0,
+        rsi: 0,
+        rdi: 0,
+        rbp: 0,
+        r8: 0,
+        r9: 0,
+        r10: 0,
+        r11: 0,
+        r12: 0,
+        r13: 0,
+        r14: 0,
+        r15: 0,
+        rip: 0,
+        rsp: 0,
+        rflags: 0,
+        address_space_root: 0,
+        fs_base: 0,
+    };
+
     fn is_valid(&self) -> bool {
         const LOWER_CANONICAL_END: u64 = (1_u64 << 47) - 1;
         const INTERRUPT_ENABLE: u64 = 1 << 9;
@@ -1153,6 +1176,33 @@ pub(crate) fn initialize_runtime(
         }));
     }
     RUNTIME_INITIALIZED.store(true, Ordering::Release);
+    true
+}
+
+pub(crate) fn initialize_control_runtime(control_domain: u64) -> bool {
+    if control_domain == 0 || RUNTIME_INITIALIZED.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+    unsafe {
+        core::ptr::addr_of_mut!(RUNTIME).write(MaybeUninit::new(Runtime {
+            scheduler: Scheduler::new(),
+            control_domain,
+            yields: 0,
+            preemptions: 0,
+            exits: 0,
+            address_space_switches: 0,
+            faults: 0,
+            expected_fault_instruction: 0,
+            expected_fault_observed: false,
+            service_restart_context: UserContext::ZERO,
+            service_address_space_owner: 0,
+            restarts: 0,
+            blocks: 0,
+            wakes: 0,
+            last_wake_source: None,
+            last_wake_sequence: None,
+        }));
+    }
     true
 }
 

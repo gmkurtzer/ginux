@@ -5,6 +5,10 @@ edition = "2021"
 license.workspace = true
 publish = false
 
+[features]
+default = []
+verification-boot = []
+
 [lib]
 path = "src/lib.rs"
 

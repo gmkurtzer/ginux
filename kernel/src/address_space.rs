@@ -104,6 +104,29 @@ static LAST_UNSAFE_DEVICE_QUIESCE_WAS_ACTIVE: AtomicBool = AtomicBool::new(false
 static INTERACTIVE_CONTROLLER_IMAGE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_IMAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 static INTERACTIVE_CONTROLLER_DOMAIN: AtomicU64 = AtomicU64::new(0);
+const OCI_RUNTIME_FRAME_CAPACITY: usize = 440;
+const OCI_OWNED_FRAME_COUNT: usize = 8;
+static OCI_RUNTIME_ACTIVE: [AtomicBool; crate::control_abi::CONTAINER_LIMIT] =
+    [const { AtomicBool::new(false) }; crate::control_abi::CONTAINER_LIMIT];
+static mut OCI_RUNTIME_OWNED_FRAMES: [[memory::FrameLease; OCI_OWNED_FRAME_COUNT];
+    crate::control_abi::CONTAINER_LIMIT] =
+    [[memory::FrameLease::EMPTY; OCI_OWNED_FRAME_COUNT]; crate::control_abi::CONTAINER_LIMIT];
+static mut OCI_RUNTIME_FRAMES: [[memory::FrameLease; OCI_RUNTIME_FRAME_CAPACITY];
+    crate::control_abi::CONTAINER_LIMIT] =
+    [[memory::FrameLease::EMPTY; OCI_RUNTIME_FRAME_CAPACITY]; crate::control_abi::CONTAINER_LIMIT];
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum OciProcessOutcome {
+    Exited,
+    Suspended,
+    Failed,
+}
+
+pub(crate) fn oci_runtime_is_suspended(slot: usize) -> bool {
+    OCI_RUNTIME_ACTIVE
+        .get(slot)
+        .is_some_and(|active| active.load(Ordering::Acquire))
+}
 
 pub(crate) fn install_interactive_controller_image(
     image: &crate::native_elf::NativeImage<'_>,
@@ -143,32 +166,37 @@ pub(crate) fn run_installed_interactive_controller() -> bool {
     valid && current_root() == linux_root
 }
 
-pub(crate) fn run_oci_process(init: &[u8]) -> bool {
+pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
     const HIERARCHY_FRAMES: usize = 6;
-    const OWNED_FRAME_COUNT: usize = HIERARCHY_FRAMES + 2;
-    const RUNTIME_FRAME_CAPACITY: usize = 440;
     const HEAP_ADDRESS: u64 = 0x80_0000;
     const STACK_ADDRESS: u64 = 0x88_0000;
     const MMAP_ADDRESS: u64 = 0x90_0000;
 
+    let Some(slot) = cpu::current_container_slot() else {
+        return OciProcessOutcome::Failed;
+    };
+    if OCI_RUNTIME_ACTIVE[slot].load(Ordering::Acquire) {
+        return resume_oci_process(slot, MMAP_ADDRESS);
+    }
     let Some(plan) = crate::oci_image::process_plan(init) else {
         crate::serial_write_bytes(b"ginux: OCI init load plan unavailable\r\n");
-        return false;
+        return OciProcessOutcome::Failed;
     };
     let startup = crate::linux_elf::relocatable_startup(&plan);
-    let Some(frames) = memory::allocate_frames::<OWNED_FRAME_COUNT>(memory::FrameOwner::KERNEL)
+    let Some(frames) = memory::allocate_frames::<OCI_OWNED_FRAME_COUNT>(memory::FrameOwner::KERNEL)
     else {
         crate::serial_write_bytes(b"ginux: OCI init hierarchy allocation failed\r\n");
-        return false;
+        return OciProcessOutcome::Failed;
     };
-    let Some(runtime_frames) = memory::allocate_runtime_extent::<RUNTIME_FRAME_CAPACITY>() else {
+    let Some(runtime_frames) = memory::allocate_runtime_extent::<OCI_RUNTIME_FRAME_CAPACITY>()
+    else {
         crate::serial_write_bytes(b"ginux: OCI init image allocation failed\r\n");
         let _ = memory::release_frames(memory::FrameOwner::KERNEL, frames);
-        return false;
+        return OciProcessOutcome::Failed;
     };
     let kernel_root = current_root();
     let mut stage = 0_u8;
-    let valid = (|| -> Option<bool> {
+    let result = (|| -> Option<cpu::LinuxElfResult> {
         let [root, pdpt, directory, main_table, interpreter_table, runtime_table] = [
             frames[0], frames[1], frames[2], frames[3], frames[4], frames[5],
         ];
@@ -385,11 +413,20 @@ pub(crate) fn run_oci_process(init: &[u8]) -> bool {
         });
         unsafe { activate(kernel_root) };
         stage = 7;
-        Some(result.valid && current_root() == kernel_root)
+        (current_root() == kernel_root).then_some(result)
     })()
-    .unwrap_or(false);
+    .unwrap_or(cpu::LinuxElfResult::FAILED);
+    let valid = result.valid;
     if current_root() != kernel_root {
         unsafe { activate(kernel_root) };
+    }
+    if valid && result.suspended {
+        unsafe {
+            OCI_RUNTIME_OWNED_FRAMES[slot] = frames;
+            OCI_RUNTIME_FRAMES[slot] = runtime_frames;
+        }
+        OCI_RUNTIME_ACTIVE[slot].store(true, Ordering::Release);
+        return OciProcessOutcome::Suspended;
     }
     let runtime_scrubbed = memory::scrub_runtime_extent(runtime_frames);
     if !valid {
@@ -397,7 +434,35 @@ pub(crate) fn run_oci_process(init: &[u8]) -> bool {
         crate::serial_write_u64(u64::from(stage));
         crate::serial_write_bytes(b"\r\n");
     }
-    valid && runtime_scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, frames)
+    if valid && runtime_scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, frames) {
+        OciProcessOutcome::Exited
+    } else {
+        OciProcessOutcome::Failed
+    }
+}
+
+fn resume_oci_process(slot: usize, mmap: u64) -> OciProcessOutcome {
+    let (frames, runtime_frames) =
+        unsafe { (OCI_RUNTIME_OWNED_FRAMES[slot], OCI_RUNTIME_FRAMES[slot]) };
+    let kernel_root = current_root();
+    unsafe { activate(frames[0].address()) };
+    let result = cpu::resume_suspended_linux_runtime(mmap);
+    unsafe { activate(kernel_root) };
+    if result.valid && result.suspended {
+        return OciProcessOutcome::Suspended;
+    }
+    OCI_RUNTIME_ACTIVE[slot].store(false, Ordering::Release);
+    unsafe {
+        OCI_RUNTIME_OWNED_FRAMES[slot] = [memory::FrameLease::EMPTY; OCI_OWNED_FRAME_COUNT];
+        OCI_RUNTIME_FRAMES[slot] = [memory::FrameLease::EMPTY; OCI_RUNTIME_FRAME_CAPACITY];
+    }
+    let released = memory::scrub_runtime_extent(runtime_frames)
+        && memory::release_frames(memory::FrameOwner::KERNEL, frames);
+    if result.valid && released {
+        OciProcessOutcome::Exited
+    } else {
+        OciProcessOutcome::Failed
+    }
 }
 
 fn map_linux_leaf_in_root(
@@ -5346,6 +5411,11 @@ pub(crate) fn run_interactive_controller(image: &crate::native_elf::NativeImage<
         NATIVE_CONTROLLER_FRAME_COUNT,
     >::new(kernel_root, owner, image) else {
         crate::serial_write("ginux: controller address-space creation failed\r\n");
+        crate::serial_write("ginux: controller image-pages/owner-frames: ");
+        crate::serial_write_u64(image.page_count().unwrap_or(0) as u64);
+        crate::serial_write(" ");
+        crate::serial_write_u64(memory::owner_live_frame_count(owner).unwrap_or(usize::MAX) as u64);
+        crate::serial_write("\r\n");
         return false;
     };
     if !space.layout_is_valid(image)
@@ -5418,15 +5488,28 @@ fn interactive_controller_return_is_valid(
     identity: u64,
     kernel_root: u64,
 ) -> bool {
-    if scheduler::current_domain().is_none()
-        && scheduler::auxiliary_runtime_state(controller)
-            == Some(crate::control_abi::AUXILIARY_STATE_BLOCKED)
-        && registered_auxiliary_address_space_count() == 1
-        && memory::owner_live_frame_count(owner).is_some_and(|count| count != 0)
-        && !domain::domain_is_retired(controller)
-    {
+    let no_current = scheduler::current_domain().is_none();
+    let blocked = scheduler::auxiliary_runtime_state(controller)
+        == Some(crate::control_abi::AUXILIARY_STATE_BLOCKED);
+    let one_space = registered_auxiliary_address_space_count() == 1;
+    let owns_frames = memory::owner_live_frame_count(owner).is_some_and(|count| count != 0);
+    let live = !domain::domain_is_retired(controller);
+    if no_current && blocked && one_space && owns_frames && live {
         return true;
     }
+    crate::serial_write("ginux: controller return state current/blocked/space/frames/live: ");
+    for state in [no_current, blocked, one_space, owns_frames, live] {
+        crate::serial_write_u64(u64::from(state));
+        crate::serial_write(" ");
+    }
+    crate::serial_write("\r\n");
+    crate::serial_write("ginux: controller exit detail: ");
+    crate::serial_write_u64(
+        domain::last_lifecycle_event_detail()
+            .map(u64::from)
+            .unwrap_or(u64::MAX),
+    );
+    crate::serial_write("\r\n");
     if INTERACTIVE_CONTROLLER_DOMAIN
         .compare_exchange(controller, 0, Ordering::AcqRel, Ordering::Acquire)
         .is_err()

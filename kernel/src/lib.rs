@@ -28,8 +28,10 @@ mod volume;
 use core::arch::{asm, global_asm};
 use core::ffi::c_void;
 use core::mem::size_of;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 const COM1: u16 = 0x3f8;
+static OPERATOR_CONSOLE_READY: AtomicBool = AtomicBool::new(false);
 const EFI_RESET_SHUTDOWN: u32 = 2;
 const EFI_SUCCESS: usize = 0;
 pub(crate) const EFI_LOADER_CODE: u32 = 1;
@@ -136,6 +138,7 @@ pub unsafe extern "sysv64" fn kernel_entry(boot_info: *const BootInfo) -> ! {
 
 unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_init();
+    serial_write_raw(b"ginux: booting\r\n");
     serial_write("ginux: kernel entered after ExitBootServices\r\n");
 
     if !kernel_stack_is_active() {
@@ -463,6 +466,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     }
     serial_write("ginux: user-mode instruction prevention active\r\n");
     serial_write("ginux: null and bidirectional stack guard pages active\r\n");
+    if !cfg!(feature = "verification-boot") {
+        serial_write_raw(b"ginux: memory protections ready\r\n");
+    }
 
     let Some(platform) = arch::x86_64::acpi::discover(
         boot_info.acpi_rsdp,
@@ -1038,6 +1044,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !verify_initial_frame_allocation(boot_info) {
         kernel_fail("ginux: physical frame allocation test failed\r\n");
     }
+    if !cfg!(feature = "verification-boot") {
+        serial_write_raw(b"ginux: memory manager ready\r\n");
+    }
     serial_write("\r\nginux: physical frame allocator active");
     serial_write("\r\nginux: reclaimed boot-service frames: ");
     serial_write_u64(memory::reclaimed_boot_service_frame_count().unwrap_or(0));
@@ -1455,6 +1464,9 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     let Some((disk_record, recovered_after_reboot)) = disk_volume else {
         kernel_fail("\r\nginux: persistent virtio volume transaction failed\r\n");
     };
+    if !cfg!(feature = "verification-boot") {
+        serial_write_raw(b"ginux: boot devices ready\r\n");
+    }
     serial_write("\r\nginux: generation-owned virtio DMA frame allocated");
     serial_write("\r\nginux: malformed virtio queue geometry rejected");
     serial_write("\r\nginux: bounded blank virtio sector read completed");
@@ -1655,1015 +1667,1044 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !image_store::install() {
         kernel_fail("ginux: boot-local image store initialization failed\r\n");
     }
-    serial_write("ginux: quota-bound page-backed RAM store installed\r\n");
-    serial_write("ginux: generation-safe Linux tmpfs view mounted at /tmp\r\n");
-    let Some(system_profile_node) =
-        initramfs::published_regular_file_node(b"etc/ginux-system-profile")
-    else {
-        kernel_fail("ginux: minimal system profile missing\r\n");
-    };
-    if initramfs::published_file_by_node(system_profile_node).is_none() {
-        kernel_fail("ginux: minimal system profile unreadable\r\n");
+    if !cfg!(feature = "verification-boot") {
+        serial_write_raw(b"ginux: control runtime ready\r\n");
     }
-    serial_write("ginux: pinned minimal system profile accepted\r\n");
-    if !linux_process::verify_lifecycle_contract() {
-        kernel_fail("ginux: bounded Linux process lifecycle contract invalid\r\n");
+    if !cfg!(feature = "verification-boot") {
+        if !scheduler::initialize_control_runtime(control_plane) {
+            kernel_fail("ginux: control scheduler initialization failed\r\n");
+        }
+        if !arch::x86_64::cpu::initialize_user_call_gate() {
+            kernel_fail("ginux: userspace call-gate initialization failed\r\n");
+        }
+        if !packet::install() {
+            kernel_fail("ginux: packet runtime initialization failed\r\n");
+        }
+        if !arch::x86_64::cpu::publish_linux_abi_test_results() {
+            kernel_fail("ginux: Linux ABI status publication failed\r\n");
+        }
     }
-    serial_write("ginux: bounded Linux process lifecycle contract validated\r\n");
-    serial_write("ginux: generation-bound Linux process roots validated\r\n");
-    serial_write("ginux: bounded Linux process resource bundles validated\r\n");
-    serial_write("ginux: Linux process mapping inventory validated\r\n");
-    serial_write("ginux: transactional Linux child publication validated\r\n");
-    serial_write("ginux: cloned Linux child resources published atomically\r\n");
-    serial_write("ginux: address-space-bound Linux process contexts validated\r\n");
-    serial_write("ginux: Linux fork child return context derived\r\n");
-    serial_write("ginux: Linux process contexts staged on native scheduler\r\n");
-    serial_write("ginux: scheduled Linux process roots matched ownership\r\n");
-    serial_write("ginux: stale Linux process scheduler bindings rejected\r\n");
-    serial_write("ginux: Linux process roots inherited kernel mappings\r\n");
-    serial_write("ginux: scheduled Linux child CR3 activated and restored\r\n");
-    serial_write("ginux: scheduled Linux child returned from ring 3\r\n");
-    serial_write("ginux: Linux fork child RAX zero executed\r\n");
-    serial_write("ginux: Linux process child FS isolation executed\r\n");
-    serial_write("ginux: complete Linux process register frame executed\r\n");
-    serial_write("ginux: Linux process child exit captured from ring 3\r\n");
-    serial_write("ginux: Linux process child exit drove zombie wait status\r\n");
-    if !linux_process::verify_private_page_copy_contract() {
-        kernel_fail("ginux: bounded Linux private page copy invalid\r\n");
-    }
-    serial_write("ginux: bounded Linux private page copy validated\r\n");
-    if !address_space::verify_linux_process_hierarchy_clone() {
-        kernel_fail("ginux: bounded Linux child hierarchy clone invalid\r\n");
-    }
-    serial_write("ginux: bounded Linux child hierarchy clone validated\r\n");
-    let Some(system_init_node) = initramfs::published_regular_file_node(b"sbin/init") else {
-        kernel_fail("ginux: minimal system init missing\r\n");
-    };
-    let Some(system_init) = initramfs::published_file_by_node(system_init_node) else {
-        kernel_fail("ginux: minimal system init unreadable\r\n");
-    };
-    let Some(system_init_plan) = linux_elf::measured_static_exec_plan(system_init) else {
-        kernel_fail("ginux: minimal system init invalid\r\n");
-    };
-    if system_init_plan.entry != 0x41_5100
-        || system_init_plan.executable.page_count != 2
-        || system_init_plan.writable.page_count != 1
-        || system_init_plan.executable.writable
-        || !system_init_plan.executable.executable
-        || !system_init_plan.writable.writable
-        || system_init_plan.writable.executable
-    {
-        kernel_fail("ginux: minimal system init plan outside profile\r\n");
-    }
-    serial_write("ginux: measured minimal system init planned\r\n");
-    let Some(exec_second_node) = initramfs::published_regular_file_node(b"bin/exec-second") else {
-        kernel_fail("ginux: second measured Linux exec target missing\r\n");
-    };
-    let Some(exec_second) = initramfs::published_file_by_node(exec_second_node) else {
-        kernel_fail("ginux: second measured Linux exec target unreadable\r\n");
-    };
-    let Some(signal_probe_node) = initramfs::published_regular_file_node(b"bin/signal-probe")
-    else {
-        kernel_fail("ginux: measured Linux signal probe missing\r\n");
-    };
-    let Some(signal_probe) = initramfs::published_file_by_node(signal_probe_node) else {
-        kernel_fail("ginux: measured Linux signal probe unreadable\r\n");
-    };
-    let Some(exec_second_plan) = linux_elf::measured_static_exec_plan(exec_second) else {
-        kernel_fail("ginux: second measured Linux exec target invalid\r\n");
-    };
-    let Some(signal_probe_plan) = linux_elf::measured_static_exec_plan(signal_probe) else {
-        kernel_fail("ginux: measured Linux signal probe invalid\r\n");
-    };
-    let measured_file = |name: &[u8]| {
-        initramfs::published_regular_file_node(name).and_then(initramfs::published_file_by_node)
-    };
-    let Some(dynamic_main) = measured_file(b"linux/init") else {
-        kernel_fail("ginux: measured Linux dynamic main missing\r\n");
-    };
-    let Some(dynamic_interpreter) = measured_file(b"linux/ld-ginux.so") else {
-        kernel_fail("ginux: measured Linux interpreter missing\r\n");
-    };
-    let Some(dynamic_dependency) = measured_file(b"linux/libginux.so") else {
-        kernel_fail("ginux: measured Linux primary dependency missing\r\n");
-    };
-    let Some(dynamic_auxiliary) = measured_file(b"linux/libginux-aux.so") else {
-        kernel_fail("ginux: measured Linux auxiliary dependency missing\r\n");
-    };
-    let Some(dynamic_plan) = linux_elf::measured_interpreted_exec_plan(
-        dynamic_main,
-        dynamic_interpreter,
-        [dynamic_dependency, dynamic_auxiliary],
-    ) else {
-        kernel_fail("ginux: measured Linux interpreted graph invalid\r\n");
-    };
-    if dynamic_plan.process.initial_entry != 0x60_0200
-        || dynamic_plan.process.main_entry != 0x40_0100
-        || dynamic_plan.dependency_bases != [0x61_0000, 0x63_0000]
-        || linux_elf::measured_interpreted_exec_plan(
-            signal_probe,
-            dynamic_interpreter,
-            [dynamic_dependency, dynamic_auxiliary],
-        )
-        .is_some()
-        || linux_elf::measured_interpreted_exec_plan(
+    if cfg!(feature = "verification-boot") {
+        serial_write("ginux: quota-bound page-backed RAM store installed\r\n");
+        serial_write("ginux: generation-safe Linux tmpfs view mounted at /tmp\r\n");
+        let Some(system_profile_node) =
+            initramfs::published_regular_file_node(b"etc/ginux-system-profile")
+        else {
+            kernel_fail("ginux: minimal system profile missing\r\n");
+        };
+        if initramfs::published_file_by_node(system_profile_node).is_none() {
+            kernel_fail("ginux: minimal system profile unreadable\r\n");
+        }
+        serial_write("ginux: pinned minimal system profile accepted\r\n");
+        if !linux_process::verify_lifecycle_contract() {
+            kernel_fail("ginux: bounded Linux process lifecycle contract invalid\r\n");
+        }
+        serial_write("ginux: bounded Linux process lifecycle contract validated\r\n");
+        serial_write("ginux: generation-bound Linux process roots validated\r\n");
+        serial_write("ginux: bounded Linux process resource bundles validated\r\n");
+        serial_write("ginux: Linux process mapping inventory validated\r\n");
+        serial_write("ginux: transactional Linux child publication validated\r\n");
+        serial_write("ginux: cloned Linux child resources published atomically\r\n");
+        serial_write("ginux: address-space-bound Linux process contexts validated\r\n");
+        serial_write("ginux: Linux fork child return context derived\r\n");
+        serial_write("ginux: Linux process contexts staged on native scheduler\r\n");
+        serial_write("ginux: scheduled Linux process roots matched ownership\r\n");
+        serial_write("ginux: stale Linux process scheduler bindings rejected\r\n");
+        serial_write("ginux: Linux process roots inherited kernel mappings\r\n");
+        serial_write("ginux: scheduled Linux child CR3 activated and restored\r\n");
+        serial_write("ginux: scheduled Linux child returned from ring 3\r\n");
+        serial_write("ginux: Linux fork child RAX zero executed\r\n");
+        serial_write("ginux: Linux process child FS isolation executed\r\n");
+        serial_write("ginux: complete Linux process register frame executed\r\n");
+        serial_write("ginux: Linux process child exit captured from ring 3\r\n");
+        serial_write("ginux: Linux process child exit drove zombie wait status\r\n");
+        if !linux_process::verify_private_page_copy_contract() {
+            kernel_fail("ginux: bounded Linux private page copy invalid\r\n");
+        }
+        serial_write("ginux: bounded Linux private page copy validated\r\n");
+        if !address_space::verify_linux_process_hierarchy_clone() {
+            kernel_fail("ginux: bounded Linux child hierarchy clone invalid\r\n");
+        }
+        serial_write("ginux: bounded Linux child hierarchy clone validated\r\n");
+        let Some(system_init_node) = initramfs::published_regular_file_node(b"sbin/init") else {
+            kernel_fail("ginux: minimal system init missing\r\n");
+        };
+        let Some(system_init) = initramfs::published_file_by_node(system_init_node) else {
+            kernel_fail("ginux: minimal system init unreadable\r\n");
+        };
+        let Some(system_init_plan) = linux_elf::measured_static_exec_plan(system_init) else {
+            kernel_fail("ginux: minimal system init invalid\r\n");
+        };
+        if system_init_plan.entry != 0x41_5100
+            || system_init_plan.executable.page_count != 2
+            || system_init_plan.writable.page_count != 1
+            || system_init_plan.executable.writable
+            || !system_init_plan.executable.executable
+            || !system_init_plan.writable.writable
+            || system_init_plan.writable.executable
+        {
+            kernel_fail("ginux: minimal system init plan outside profile\r\n");
+        }
+        serial_write("ginux: measured minimal system init planned\r\n");
+        let Some(exec_second_node) = initramfs::published_regular_file_node(b"bin/exec-second")
+        else {
+            kernel_fail("ginux: second measured Linux exec target missing\r\n");
+        };
+        let Some(exec_second) = initramfs::published_file_by_node(exec_second_node) else {
+            kernel_fail("ginux: second measured Linux exec target unreadable\r\n");
+        };
+        let Some(signal_probe_node) = initramfs::published_regular_file_node(b"bin/signal-probe")
+        else {
+            kernel_fail("ginux: measured Linux signal probe missing\r\n");
+        };
+        let Some(signal_probe) = initramfs::published_file_by_node(signal_probe_node) else {
+            kernel_fail("ginux: measured Linux signal probe unreadable\r\n");
+        };
+        let Some(exec_second_plan) = linux_elf::measured_static_exec_plan(exec_second) else {
+            kernel_fail("ginux: second measured Linux exec target invalid\r\n");
+        };
+        let Some(signal_probe_plan) = linux_elf::measured_static_exec_plan(signal_probe) else {
+            kernel_fail("ginux: measured Linux signal probe invalid\r\n");
+        };
+        let measured_file = |name: &[u8]| {
+            initramfs::published_regular_file_node(name).and_then(initramfs::published_file_by_node)
+        };
+        let Some(dynamic_main) = measured_file(b"linux/init") else {
+            kernel_fail("ginux: measured Linux dynamic main missing\r\n");
+        };
+        let Some(dynamic_interpreter) = measured_file(b"linux/ld-ginux.so") else {
+            kernel_fail("ginux: measured Linux interpreter missing\r\n");
+        };
+        let Some(dynamic_dependency) = measured_file(b"linux/libginux.so") else {
+            kernel_fail("ginux: measured Linux primary dependency missing\r\n");
+        };
+        let Some(dynamic_auxiliary) = measured_file(b"linux/libginux-aux.so") else {
+            kernel_fail("ginux: measured Linux auxiliary dependency missing\r\n");
+        };
+        let Some(dynamic_plan) = linux_elf::measured_interpreted_exec_plan(
             dynamic_main,
             dynamic_interpreter,
-            [dynamic_auxiliary, dynamic_dependency],
-        )
-        .is_some()
-        || linux_elf::measured_interpreted_exec_plan(
-            dynamic_main,
-            &dynamic_interpreter[..64],
             [dynamic_dependency, dynamic_auxiliary],
+        ) else {
+            kernel_fail("ginux: measured Linux interpreted graph invalid\r\n");
+        };
+        if dynamic_plan.process.initial_entry != 0x60_0200
+            || dynamic_plan.process.main_entry != 0x40_0100
+            || dynamic_plan.dependency_bases != [0x61_0000, 0x63_0000]
+            || linux_elf::measured_interpreted_exec_plan(
+                signal_probe,
+                dynamic_interpreter,
+                [dynamic_dependency, dynamic_auxiliary],
+            )
+            .is_some()
+            || linux_elf::measured_interpreted_exec_plan(
+                dynamic_main,
+                dynamic_interpreter,
+                [dynamic_auxiliary, dynamic_dependency],
+            )
+            .is_some()
+            || linux_elf::measured_interpreted_exec_plan(
+                dynamic_main,
+                &dynamic_interpreter[..64],
+                [dynamic_dependency, dynamic_auxiliary],
+            )
+            .is_some()
+        {
+            kernel_fail("ginux: measured Linux interpreted graph substitution accepted\r\n");
+        }
+        serial_write("ginux: measured-root Linux interpreted exec graph planned\r\n");
+        serial_write("ginux: measured-root Linux graph substitution rejected\r\n");
+        if signal_probe == exec_second
+            || signal_probe_plan.executable.virtual_page == exec_second_plan.executable.virtual_page
+            || signal_probe_plan.executable.page_count != 2
+            || exec_second_plan.executable.page_count != 2
+        {
+            kernel_fail("ginux: measured Linux exec target invalid\r\n");
+        }
+        serial_write("ginux: dedicated measured Linux signal runtime planned\r\n");
+        serial_write("ginux: multiple measured Linux exec targets planned\r\n");
+        if !linux_elf::verify_parser() {
+            kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
+        }
+        serial_write("ginux: non-executable Linux GNU stack enforced\r\n");
+        serial_write("ginux: bounded Linux ELF metadata headers validated\r\n");
+        serial_write("ginux: bounded Linux interpreter metadata validated\r\n");
+        serial_write("ginux: bounded Linux ELF verifier stack usage validated\r\n");
+        serial_write("ginux: bounded Linux GNU RELRO metadata validated\r\n");
+        serial_write("ginux: three-load Linux ELF runtime mapping verified\r\n");
+        if !linux_elf::verify_linked_probe() {
+            kernel_fail("ginux: linked Linux ELF64 probe invariant failed\r\n");
+        }
+        serial_write("ginux: live Linux process address-space snapshot validated\r\n");
+        serial_write("ginux: incomplete Linux process snapshots rejected\r\n");
+        serial_write("ginux: live Linux PID 1 context admitted to process model\r\n");
+        serial_write("ginux: live Linux process registry persisted across syscalls\r\n");
+        serial_write("ginux: live Linux child address space cloned transactionally\r\n");
+        serial_write("ginux: live Linux cloned child executed in ring 3\r\n");
+        serial_write("ginux: toolchain-linked static Linux ELF executed\r\n");
+        serial_write("ginux: five-page Linux executable mapping validated\r\n");
+        serial_write("ginux: bounded Linux exec rejection preserved live image\r\n");
+        serial_write("ginux: Linux exec mapping rollback restored active image\r\n");
+        serial_write("ginux: Linux exec argv and environment delivered\r\n");
+        serial_write("ginux: bounded Linux exec vectors validated\r\n");
+        serial_write("ginux: old Linux image pages removed after exec\r\n");
+        serial_write("ginux: replaced Linux image retired cleanly\r\n");
+        serial_write("ginux: Linux close-on-exec descriptors transitioned\r\n");
+        serial_write("ginux: Linux exec signal state transitioned\r\n");
+        serial_write("ginux: Linux exec process identity installed\r\n");
+        serial_write("ginux: Linux executable link followed exec identity\r\n");
+        serial_write("ginux: measured-root Linux exec selection validated\r\n");
+        serial_write("ginux: measured-dirfd Linux execveat validated\r\n");
+        serial_write("ginux: measured-fd Linux empty-path exec validated\r\n");
+        serial_write("ginux: measured Linux exec selection is profile-driven\r\n");
+        serial_write("ginux: independent measured Linux exec layouts validated\r\n");
+        serial_write("ginux: runtime-selected Linux exec plans committed\r\n");
+        serial_write("ginux: variable-page Linux exec images committed\r\n");
+        serial_write("ginux: Linux active image ownership transitioned\r\n");
+        serial_write("ginux: generation-bound Linux image ownership verified\r\n");
+        serial_write("ginux: generation-bound Linux page-table hierarchy verified\r\n");
+        serial_write("ginux: Linux RELRO ownership permissions synchronized\r\n");
+        serial_write("ginux: stale Linux image retirement rejected\r\n");
+        serial_write("ginux: old Linux image leases retired at exec commit\r\n");
+        serial_write("ginux: Linux image lease double release rejected\r\n");
+        serial_write("ginux: Linux replacement frames allocated on demand\r\n");
+        serial_write("ginux: Linux replacement frame generations reclaimed\r\n");
+        if !linux_elf::verify_load_plan() {
+            kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
+        }
+        serial_write("ginux: bounded multi-page Linux ELF plan verified\r\n");
+        serial_write("ginux: bounded Linux ET_DYN load bias validated\r\n");
+        if !linux_elf::verify_interpreted_plan() {
+            kernel_fail("ginux: authenticated Linux dependency plan invalid\r\n");
+        }
+        serial_write("ginux: bounded Linux interpreter resolution plan validated\r\n");
+        serial_write("ginux: measured Linux interpreter bytes enforced\r\n");
+        serial_write("ginux: authenticated Linux dependency bytes enforced\r\n");
+        serial_write("ginux: Linux dependency SONAME identity bound\r\n");
+        if !linux_elf::verify_dynamic_relocation_rejections() {
+            kernel_fail("ginux: malformed Linux dynamic relocation metadata accepted\r\n");
+        }
+        serial_write("ginux: bounded Linux relative relocation metadata validated\r\n");
+        serial_write("ginux: bounded Linux symbol relocation metadata validated\r\n");
+        serial_write("ginux: bounded Linux PLT relocation metadata validated\r\n");
+        serial_write("ginux: split Linux PLT relocation table validated\r\n");
+        serial_write("ginux: bounded Linux SysV hash metadata validated\r\n");
+        serial_write("ginux: bounded Linux GNU hash metadata validated\r\n");
+        if !linux_elf::verify_unresolved_dynamic_image_rejected() {
+            kernel_fail("ginux: unresolved dynamic Linux image admitted as static\r\n");
+        }
+        serial_write("ginux: unresolved dynamic Linux static entry denied\r\n");
+        serial_write("ginux: separate-header Linux interpreter plan validated\r\n");
+        serial_write("ginux: Linux dynamic startup metadata validated\r\n");
+        serial_write("ginux: Linux auxiliary vector encoding validated\r\n");
+        serial_write("ginux: Linux page-aliasing ELF segments rejected\r\n");
+        serial_write("ginux: Linux ELF entry metadata overlap rejected\r\n");
+        if !linux_elf::verify_dependency_list_metadata() {
+            kernel_fail("ginux: bounded Linux dependency-list metadata invalid\r\n");
+        }
+        serial_write("ginux: bounded Linux dependency list validated\r\n");
+        serial_write("ginux: bounded Linux dependency authority graph validated\r\n");
+        serial_write("ginux: bounded Linux dependency TLS metadata validated\r\n");
+        if !linux_elf::verify_tls_relocation_metadata() {
+            kernel_fail("ginux: malformed Linux TLS relocation metadata accepted\r\n");
+        }
+        serial_write("ginux: bounded Linux TPOFF64 relocation metadata validated\r\n");
+        if !linux_elf::verify_static_tls_layout() {
+            kernel_fail("ginux: bounded Linux static TLS layout invalid\r\n");
+        }
+        serial_write("ginux: bounded Linux static TLS layout plan validated\r\n");
+        serial_write("ginux: reusable Linux TLS page materialization validated\r\n");
+        if !arch::x86_64::cpu::verify_linux_tls_context_contract() {
+            kernel_fail("ginux: bounded Linux TLS execution context invalid\r\n");
+        }
+        serial_write("ginux: bounded Linux TLS execution context validated\r\n");
+        if !linux_elf::verify_tls_template_metadata() {
+            kernel_fail("ginux: bounded Linux TLS template metadata invalid\r\n");
+        }
+        serial_write("ginux: bounded Linux TLS template metadata validated\r\n");
+        if !linux_elf::verify_mapped_load_plan(boot_info.image_base as u64, boot_info.image_size) {
+            kernel_fail("ginux: Linux ELF64 address-space mapping failed\r\n");
+        }
+        serial_write("ginux: Linux ELF headers mapped in executable segment\r\n");
+        serial_write("ginux: bounded multi-page Linux ELF mapping verified\r\n");
+        if !linux_elf::verify_mapped_system_init_plan(
+            boot_info.image_base as u64,
+            boot_info.image_size,
+        ) {
+            kernel_fail("ginux: minimal system init execution failed\r\n");
+        }
+        serial_write("ginux: measured minimal system init executed as PID 1\r\n");
+        serial_write("ginux: persistent Linux PID 1 supervisor lifecycle validated\r\n");
+        serial_write("ginux: bounded Linux standard signal lifecycle validated\r\n");
+        serial_write("ginux: bounded Linux private futex lifecycle validated\r\n");
+        serial_write("ginux: bounded Linux devfs profile validated\r\n");
+        serial_write("ginux: lifecycle-aware bounded procfs validated\r\n");
+        serial_write("ginux: transactional page-backed tmpfs lifecycle validated\r\n");
+        serial_write("ginux: minimal system init exited cleanly\r\n");
+        if !linux_elf::verify_mapped_interpreted_plan(
+            boot_info.image_base as u64,
+            boot_info.image_size,
+        ) {
+            kernel_fail("ginux: interpreted Linux ELF64 address-space mapping failed\r\n");
+        }
+        serial_write("ginux: measured-root interpreted Linux exec committed\r\n");
+        serial_write("ginux: interpreted Linux exec graph remapped\r\n");
+        serial_write("ginux: bounded Linux cross-area copy-in validated\r\n");
+        serial_write("ginux: complete interpreted Linux graph retired at exec\r\n");
+        serial_write("ginux: interpreted Linux exec stack replaced atomically\r\n");
+        serial_write("ginux: old interpreted Linux stack lease retired at exec\r\n");
+        serial_write("ginux: replacement Linux stack lease reclaimed\r\n");
+        serial_write("ginux: static Linux exec stack replaced atomically\r\n");
+        serial_write("ginux: old static Linux stack lease retired at exec\r\n");
+        serial_write("ginux: replacement static Linux stack lease reclaimed\r\n");
+        serial_write("ginux: interpreted Linux exec heap replaced atomically\r\n");
+        serial_write("ginux: old interpreted Linux heap lease retired at exec\r\n");
+        serial_write("ginux: replacement Linux heap lease reclaimed\r\n");
+        serial_write("ginux: static Linux exec heap replaced atomically\r\n");
+        serial_write("ginux: old static Linux heap lease retired at exec\r\n");
+        serial_write("ginux: replacement static Linux heap lease reclaimed\r\n");
+        serial_write("ginux: Linux exec process break reset\r\n");
+        serial_write("ginux: interpreted Linux TLS state rematerialized\r\n");
+        serial_write("ginux: interpreted Linux TLS leases replaced atomically\r\n");
+        serial_write("ginux: old interpreted Linux TLS leases retired at exec\r\n");
+        serial_write("ginux: replacement Linux TLS leases reclaimed\r\n");
+        serial_write("ginux: interpreted Linux sibling stack replaced atomically\r\n");
+        serial_write("ginux: old interpreted Linux sibling stack lease retired at exec\r\n");
+        serial_write("ginux: replacement Linux sibling stack lease reclaimed\r\n");
+        serial_write("ginux: interpreted Linux mmap registry empty across exec\r\n");
+        serial_write("ginux: static Linux mmap registry empty across exec\r\n");
+        serial_write("ginux: interpreted Linux page-table hierarchy replaced atomically\r\n");
+        serial_write("ginux: old interpreted Linux page-table leases retired at exec\r\n");
+        serial_write("ginux: replacement Linux page-table leases reclaimed\r\n");
+        serial_write("ginux: static Linux page-table hierarchy replaced atomically\r\n");
+        serial_write("ginux: old static Linux page-table leases retired at exec\r\n");
+        serial_write("ginux: replacement static Linux page-table leases reclaimed\r\n");
+        serial_write("ginux: static Linux exec auxiliary vector rebuilt\r\n");
+        serial_write("ginux: interpreted Linux exec auxiliary vector rebuilt\r\n");
+        serial_write("ginux: canonical interpreted Linux executable identity validated\r\n");
+        serial_write("ginux: interpreted Linux exec vectors generalized\r\n");
+        serial_write("ginux: combined Linux static TLS materialized\r\n");
+        serial_write("ginux: ordered Linux dependency TLS layout materialized\r\n");
+        serial_write("ginux: Linux TLS active before initializers\r\n");
+        serial_write("ginux: Linux dependency TLS active before constructors\r\n");
+        serial_write("ginux: toolchain-driven Linux dependency TLS relocation applied\r\n");
+        serial_write("ginux: toolchain-driven Linux auxiliary TLS relocation applied\r\n");
+        serial_write("ginux: linker-resolved Linux TLS symbols executed\r\n");
+        serial_write("ginux: bounded Linux TLS syscall copies validated\r\n");
+        serial_write("ginux: independent Linux sibling TLS materialized\r\n");
+        serial_write("ginux: non-current Linux TLS syscall access denied\r\n");
+        serial_write("ginux: Linux TLS execution context switched and restored\r\n");
+        serial_write("ginux: guarded Linux sibling stack materialized\r\n");
+        serial_write("ginux: non-current Linux stack syscall access denied\r\n");
+        serial_write("ginux: bounded Linux clone contract validated\r\n");
+        serial_write("ginux: Linux child return context constructed\r\n");
+        serial_write("ginux: Linux child context cleared on slot reuse\r\n");
+        serial_write("ginux: failed Linux clone publication rolled back\r\n");
+        serial_write("ginux: Linux parent and child TID publication validated\r\n");
+        serial_write("ginux: unpublished Linux child retired cleanly\r\n");
+        serial_write("ginux: full Linux syscall register frame preserved\r\n");
+        serial_write("ginux: typed Linux syscall frame validated\r\n");
+        serial_write("ginux: complete Linux child context persisted\r\n");
+        serial_write("ginux: stale Linux return contexts rejected\r\n");
+        serial_write("ginux: Linux child return frame installed atomically\r\n");
+        serial_write("ginux: Linux return ownership restored to parent\r\n");
+        serial_write("ginux: stale Linux return installation left state unchanged\r\n");
+        serial_write("ginux: live Linux syscall return frame round-trip validated\r\n");
+        serial_write("ginux: guarded Linux child executed in ring 3\r\n");
+        serial_write("ginux: Linux child exit restored suspended parent\r\n");
+        serial_write("ginux: bounded Linux clone syscall dispatched\r\n");
+        serial_write("ginux: sequential Linux clone slot reuse validated\r\n");
+        serial_write("ginux: reused Linux child stack began scrubbed\r\n");
+        serial_write("ginux: monotonic Linux clone TIDs validated\r\n");
+        serial_write("ginux: live Linux child TIDs matched published words\r\n");
+        serial_write("ginux: live Linux child FS self pointers validated\r\n");
+        serial_write("ginux: per-thread Linux signal masks isolated\r\n");
+        serial_write("ginux: bidirectional Linux sched_yield switching validated\r\n");
+        serial_write("ginux: occupied Linux clone capacity rejected live\r\n");
+        serial_write("ginux: live Linux clone failures rolled back transactionally\r\n");
+        serial_write("ginux: Linux clone return values validated\r\n");
+        serial_write("ginux: Linux clone child TID cleared on exit\r\n");
+        serial_write("ginux: Linux clone parent TID preserved on child exit\r\n");
+        serial_write("ginux: Linux parent and child futex waits blocked\r\n");
+        serial_write("ginux: explicit Linux futex wake restored child\r\n");
+        serial_write("ginux: Linux clear-child-TID wake restored parent\r\n");
+        serial_write("ginux: Linux futex waiter state reclaimed\r\n");
+        serial_write("ginux: per-thread Linux syscall stacks validated\r\n");
+        serial_write("ginux: bounded Linux TID lifecycle validated\r\n");
+        serial_write("ginux: stale Linux thread handles rejected\r\n");
+        serial_write("ginux: Linux per-thread exit state isolated\r\n");
+        serial_write("ginux: Linux thread exit registrations cleared\r\n");
+        serial_write("ginux: Linux thread table reclaimed on exit\r\n");
+        serial_write("ginux: sibling Linux TLS frame scrubbed and released\r\n");
+        serial_write("ginux: Linux sibling stack scrubbed and released\r\n");
+        serial_write("ginux: retired Linux thread stacks scrubbed\r\n");
+        serial_write("ginux: Linux TLS frame scrubbed and released\r\n");
+        serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
+        serial_write("ginux: toolchain-linked Linux interpreter executed\r\n");
+        serial_write("ginux: two-page Linux interpreter RX mapping verified\r\n");
+        serial_write("ginux: userspace Linux interpreter metadata discovered\r\n");
+        serial_write("ginux: userspace Linux runtime files discovered\r\n");
+        serial_write("ginux: userspace Linux PT_LOAD mappings derived\r\n");
+        serial_write("ginux: userspace Linux startup metadata consumed\r\n");
+        serial_write("ginux: userspace Linux main segments mapped\r\n");
+        serial_write("ginux: userspace Linux DT_NEEDED path resolved\r\n");
+        serial_write("ginux: userspace Linux dependency segments mapped\r\n");
+        serial_write("ginux: complete interpreted Linux image ownership tracked\r\n");
+        serial_write("ginux: userspace Linux dependency bias selected\r\n");
+        serial_write("ginux: Linux dependency frames allocated on demand\r\n");
+        serial_write("ginux: Linux executable frames allocated on demand\r\n");
+        serial_write("ginux: bounded Linux dependency page contracts applied\r\n");
+        serial_write("ginux: bounded Linux dependency mapping slots isolated\r\n");
+        serial_write("ginux: userspace Linux auxiliary dependency mapped\r\n");
+        serial_write("ginux: Linux read-only dependency segment mapped\r\n");
+        serial_write("ginux: toolchain-linked Linux PIE and shared object executed\r\n");
+        serial_write("ginux: linker-emitted Linux dynamic tags validated\r\n");
+        serial_write("ginux: separate-header interpreted Linux mapping verified\r\n");
+        serial_write("ginux: Linux dependency W^X mapping verified\r\n");
+        serial_write("ginux: interpreter-first Linux ring-3 entry verified\r\n");
+        serial_write("ginux: userspace Linux interpreter self-relocation applied\r\n");
+        serial_write("ginux: userspace Linux relocation table shapes validated\r\n");
+        serial_write("ginux: userspace Linux relative relocation applied\r\n");
+        serial_write("ginux: userspace Linux GLOB_DAT relocation applied\r\n");
+        serial_write("ginux: userspace Linux JUMP_SLOT relocation applied\r\n");
+        serial_write("ginux: userspace Linux hash bucket resolution applied\r\n");
+        serial_write("ginux: userspace Linux symbol names matched\r\n");
+        serial_write("ginux: userspace Linux cross-object symbol resolved\r\n");
+        serial_write("ginux: userspace Linux two-provider symbols resolved\r\n");
+        serial_write("ginux: Linux JUMP_SLOT dependency call executed\r\n");
+        serial_write("ginux: Linux auxiliary JUMP_SLOT dependency call executed\r\n");
+        serial_write("ginux: userspace Linux dependency self-relocations applied\r\n");
+        serial_write("ginux: userspace Linux auxiliary dependency self-relocations applied\r\n");
+        serial_write("ginux: bounded Linux main preinit array validated\r\n");
+        serial_write("ginux: userspace Linux main preinit metadata consumed\r\n");
+        serial_write("ginux: userspace Linux main preinit executed\r\n");
+        serial_write("ginux: Linux preinit-before-dependency initialization ordered\r\n");
+        serial_write("ginux: bounded Linux dependency init arrays validated\r\n");
+        serial_write("ginux: userspace Linux init arrays bound to relocations\r\n");
+        serial_write("ginux: userspace Linux dependency constructors executed\r\n");
+        serial_write("ginux: bounded Linux main init array validated\r\n");
+        serial_write("ginux: userspace Linux main constructor executed\r\n");
+        serial_write("ginux: Linux dependency-before-main initialization ordered\r\n");
+        serial_write("ginux: userspace Linux constructor startup context delivered\r\n");
+        serial_write("ginux: bounded Linux DT_INIT functions validated\r\n");
+        serial_write("ginux: userspace Linux DT_INIT functions executed\r\n");
+        serial_write("ginux: Linux DT_INIT-before-init-array ordering enforced\r\n");
+        serial_write("ginux: Linux auxiliary dependency entry executed\r\n");
+        serial_write("ginux: metadata-driven Linux relative relocations applied\r\n");
+        serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
+        serial_write("ginux: Linux proof workload assembled from source\r\n");
+        serial_write("ginux: Linux bounded console writes validated\r\n");
+        serial_write("ginux: Linux atomic vectored console writes validated\r\n");
+        serial_write("ginux: Linux bounded descriptor polling validated\r\n");
+        serial_write("ginux: Linux bounded ppoll inputs validated\r\n");
+        serial_write("ginux: Linux bounded epoll lifecycle validated\r\n");
+        serial_write("ginux: Linux bounded epoll_pwait inputs validated\r\n");
+        serial_write("ginux: Linux bounded epoll_pwait2 timeout validated\r\n");
+        serial_write("ginux: Linux four-slot auxiliary descriptor table validated\r\n");
+        serial_write("ginux: Linux bounded eventfd notification validated\r\n");
+        serial_write("ginux: Linux bounded timerfd expiration validated\r\n");
+        serial_write("ginux: Linux bounded pipe notification validated\r\n");
+        serial_write("ginux: Linux atomic vectored pipe I/O validated\r\n");
+        serial_write("ginux: Linux mutable descriptor status flags validated\r\n");
+        serial_write("ginux: Linux bounded pipe introspection validated\r\n");
+        serial_write("ginux: Linux anonymous descriptor metadata validated\r\n");
+        serial_write("ginux: Linux bounded syscall stack movement validated\r\n");
+        serial_write("ginux: Linux callable syscall assertion helpers validated\r\n");
+        serial_write("ginux: Linux container-local root credentials verified\r\n");
+        serial_write("ginux: Linux errno recovery verified in ring 3\r\n");
+        serial_write("ginux: Linux single-thread signal mask validated\r\n");
+        serial_write("ginux: Linux bounded signal actions validated\r\n");
+        serial_write("ginux: Linux synchronous SIGSEGV lifecycle validated\r\n");
+        serial_write("ginux: Linux self-directed signal delivery validated\r\n");
+        serial_write("ginux: Linux thread-directed signal delivery validated\r\n");
+        serial_write("ginux: Linux legacy thread signal delivery validated\r\n");
+        serial_write("ginux: Linux pending signal delivery validated\r\n");
+        serial_write("ginux: Linux standard signal queue ordering validated\r\n");
+        serial_write("ginux: Linux chained pending signal delivery validated\r\n");
+        serial_write("ginux: Linux scheduler-backed timed signal wait validated\r\n");
+        serial_write("ginux: Linux signal-interrupted timed wait validated\r\n");
+        serial_write("ginux: Linux one-shot signal action validated\r\n");
+        serial_write("ginux: Linux rt signal frame ABI validated\r\n");
+        serial_write("ginux: Linux mutable signal context validated\r\n");
+        serial_write("ginux: Linux autodisarming alternate stack validated\r\n");
+        serial_write("ginux: Linux alternate signal stack delivery validated\r\n");
+        serial_write("ginux: Linux bounded alternate signal stack validated\r\n");
+        serial_write("ginux: Linux single-thread process identity verified\r\n");
+        serial_write("ginux: Linux initial environment vector validated\r\n");
+        serial_write("ginux: Linux credential auxiliary vector validated\r\n");
+        serial_write("ginux: Linux clock-tick auxiliary vector validated\r\n");
+        serial_write("ginux: Linux platform auxiliary vector validated\r\n");
+        serial_write("ginux: Linux conservative hardware capabilities validated\r\n");
+        serial_write("ginux: Linux FS base query validated\r\n");
+        serial_write("ginux: Linux clear-child-TID exit action validated\r\n");
+        serial_write("ginux: Linux robust-list registration validated\r\n");
+        serial_write("ginux: Linux scheduler-backed timed futex wait validated\r\n");
+        serial_write("ginux: Linux read-only memory transition validated\r\n");
+        serial_write("ginux: Linux initial process namespace identity validated\r\n");
+        serial_write("ginux: Linux bounded process name state validated\r\n");
+        serial_write("ginux: Linux no-new-privileges boundary validated\r\n");
+        serial_write("ginux: Linux static executable metadata validated\r\n");
+        serial_write("ginux: Linux bounded brk heap validated\r\n");
+        serial_write("ginux: Linux bounded anonymous mapping lifecycle validated\r\n");
+        serial_write("ginux: Linux two-page anonymous extent validated\r\n");
+        serial_write("ginux: multiple bounded Linux mmap areas validated\r\n");
+        serial_write("ginux: bounded Linux mmap area splitting validated\r\n");
+        serial_write("ginux: Linux anonymous mapping write seal validated\r\n");
+        serial_write("ginux: Linux atomic multi-page write seal validated\r\n");
+        serial_write("ginux: bounded Linux mmap protection splitting validated\r\n");
+        serial_write("ginux: idempotent Linux mmap protection validated\r\n");
+        serial_write("ginux: adjacent Linux mmap range operations validated\r\n");
+        serial_write("ginux: four-page fragmented Linux mmap window validated\r\n");
+        serial_write("ginux: bounded anonymous fixed mmap placement validated\r\n");
+        serial_write("ginux: bounded anonymous fixed mmap replacement validated\r\n");
+        serial_write("ginux: bounded PROT_NONE fixed replacement validated\r\n");
+        serial_write("ginux: bounded read-only anonymous mapping validated\r\n");
+        serial_write("ginux: page-rounded Linux mmap lengths validated\r\n");
+        serial_write("ginux: Linux PROT_NONE reservations validated\r\n");
+        serial_write("ginux: Linux PROT_NONE activation validated\r\n");
+        serial_write("ginux: Linux mmap frames allocated on demand\r\n");
+        serial_write("ginux: Linux mmap frame leases reclaimed\r\n");
+        if !arch::x86_64::cpu::verify_linux_mmap_process_restore() {
+            kernel_fail("ginux: Linux process mmap state restoration failed\r\n");
+        }
+        serial_write("ginux: Linux parent mmap state restored after child execution\r\n");
+        serial_write("ginux: Linux anonymous mapping discard validated\r\n");
+        serial_write("ginux: Linux anonymous mapping residency validated\r\n");
+        serial_write("ginux: Linux heap copy bounds validated\r\n");
+        serial_write("ginux: Linux stack copy bounds validated\r\n");
+        serial_write("ginux: Linux directional VMA copies validated\r\n");
+        serial_write("ginux: indexed Linux working directory validated\r\n");
+        serial_write("ginux: relative Linux directory changes validated\r\n");
+        serial_write("ginux: Linux fchdir descriptor boundary validated\r\n");
+        serial_write("ginux: Linux working-directory traversal rejected\r\n");
+        serial_write("ginux: Linux proc self executable link validated\r\n");
+        serial_write("ginux: Linux proc self executable link-at validated\r\n");
+        serial_write("ginux: Linux process umask state validated\r\n");
+        serial_write("ginux: Linux disconnected console input validated\r\n");
+        serial_write("ginux: Linux console descriptor metadata validated\r\n");
+        serial_write("ginux: Linux fixed console geometry validated\r\n");
+        serial_write("ginux: Linux fixed console termios validated\r\n");
+        serial_write("ginux: Linux non-seekable console validated\r\n");
+        serial_write("ginux: Linux console descriptor close validated\r\n");
+        serial_write("ginux: Linux console descriptor duplication validated\r\n");
+        serial_write("ginux: Linux targeted descriptor duplication validated\r\n");
+        serial_write("ginux: Linux console descriptor flags validated\r\n");
+        serial_write("ginux: Linux minimum descriptor duplication validated\r\n");
+        serial_write("ginux: Linux close-on-exec descriptor state validated\r\n");
+        serial_write("ginux: Linux bounded null device validated\r\n");
+        serial_write("ginux: Linux bounded null device metadata validated\r\n");
+        serial_write("ginux: Linux bounded null device access validated\r\n");
+        serial_write("ginux: Linux bounded zero device validated\r\n");
+        serial_write("ginux: Linux bounded console device validated\r\n");
+        serial_write("ginux: Linux bounded tty alias validated\r\n");
+        serial_write("ginux: Linux bounded device statx validated\r\n");
+        serial_write("ginux: Linux atomic zero-device readv validated\r\n");
+        serial_write("ginux: Linux bounded device writev validated\r\n");
+        serial_write("ginux: Linux immutable device directory validated\r\n");
+        serial_write("ginux: Linux immutable runtime ELF files validated\r\n");
+        serial_write("ginux: Linux auxiliary dependency runtime file validated\r\n");
+        serial_write("ginux: Linux read-only runtime file mapping validated\r\n");
+        serial_write("ginux: measured-root Linux executable graph validated\r\n");
+        serial_write("ginux: measured-root Linux executable graph executed\r\n");
+        serial_write("ginux: measured-root Linux file content validated\r\n");
+        serial_write("ginux: measured-root Linux file metadata validated\r\n");
+        serial_write("ginux: measured-root Linux file mutation denied\r\n");
+        serial_write("ginux: measured-root Linux directory enumerated\r\n");
+        serial_write("ginux: measured-root Linux directory cursor validated\r\n");
+        serial_write("ginux: measured-root Linux root enumerated\r\n");
+        serial_write("ginux: measured-root Linux root pagination validated\r\n");
+        serial_write("ginux: measured-root Linux empty directory opened\r\n");
+        serial_write("ginux: measured-root Linux dirfd lookup validated\r\n");
+        serial_write("ginux: measured-root Linux relative metadata validated\r\n");
+        serial_write("ginux: indexed measured-root file descriptors validated\r\n");
+        serial_write("ginux: generic measured-root Linux file validated\r\n");
+        serial_write("ginux: index-driven measured child lookup validated\r\n");
+        serial_write("ginux: unlisted measured-root Linux file validated\r\n");
+        serial_write("ginux: indexed measured-root directories validated\r\n");
+        serial_write("ginux: unlisted measured-root directory opened\r\n");
+        serial_write("ginux: nested measured-root dirfd traversal validated\r\n");
+        serial_write("ginux: measured-root traversal components rejected\r\n");
+        serial_write("ginux: expanded measured-root index capacity validated\r\n");
+        serial_write("ginux: Linux saved credential queries validated\r\n");
+        serial_write("ginux: Linux supplementary root group validated\r\n");
+        serial_write("ginux: Linux fixed execution personality validated\r\n");
+        serial_write("ginux: Linux empty capability boundary validated\r\n");
+        serial_write("ginux: Linux immutable resource limits validated\r\n");
+        serial_write("ginux: Linux single-CPU topology queries validated\r\n");
+        serial_write("ginux: Linux single-thread scheduling yield validated\r\n");
+        serial_write("ginux: Linux fixed scheduler policy validated\r\n");
+        serial_write("ginux: Linux fixed process priority validated\r\n");
+        serial_write("ginux: Linux bounded monotonic clocks validated\r\n");
+        serial_write("ginux: Linux bounded clock resolution validated\r\n");
+        serial_write("ginux: Linux scheduler-backed nanosleep validated\r\n");
+        serial_write("ginux: Linux signal-interrupted nanosleep validated\r\n");
+        serial_write("ginux: Linux monotonic clock_nanosleep validated\r\n");
+        serial_write("ginux: Linux scheduler-backed poll waits validated\r\n");
+        serial_write("ginux: Linux scheduler-backed ppoll waits validated\r\n");
+        serial_write("ginux: Linux scheduler-backed epoll waits validated\r\n");
+        serial_write("ginux: Linux scheduler-backed epoll masked waits validated\r\n");
+        serial_write("ginux: Linux signal-interrupted masked waits validated\r\n");
+        serial_write("ginux: Linux signal-interrupted epoll waits validated\r\n");
+        serial_write("ginux: Linux signal-interrupted poll waits validated\r\n");
+        serial_write("ginux: Linux signal-interrupted epoll_wait validated\r\n");
+        serial_write("ginux: Linux zero-descriptor poll sleeps validated\r\n");
+        serial_write("ginux: Linux scheduler-backed eventfd reads validated\r\n");
+        serial_write("ginux: Linux signal-interrupted eventfd reads validated\r\n");
+        serial_write("ginux: Linux scheduler-backed eventfd writes validated\r\n");
+        serial_write("ginux: Linux signal-interrupted eventfd writes validated\r\n");
+        serial_write("ginux: Linux eventfd write snapshot isolation validated\r\n");
+        serial_write("ginux: Linux scheduler-backed pipe reads validated\r\n");
+        serial_write("ginux: Linux scheduler-backed pipe readv validated\r\n");
+        serial_write("ginux: Linux signal-interrupted pipe reads validated\r\n");
+        serial_write("ginux: Linux scheduler-backed pipe writes validated\r\n");
+        serial_write("ginux: Linux scheduler-backed pipe writev validated\r\n");
+        serial_write("ginux: Linux pipe writev snapshot isolation validated\r\n");
+        serial_write("ginux: Linux signal-interrupted pipe writes validated\r\n");
+        serial_write("ginux: Linux scheduler-backed timerfd reads validated\r\n");
+        serial_write("ginux: Linux signal-interrupted timerfd reads validated\r\n");
+        serial_write("ginux: APIC-driven Linux wait expiry validated\r\n");
+        serial_write("ginux: APIC-driven Linux wait preemption validated\r\n");
+        serial_write("ginux: Linux single-task CPU time validated\r\n");
+        serial_write("ginux: Linux bounded resource usage validated\r\n");
+        serial_write("ginux: Linux disabled interval timers validated\r\n");
+        if !arch::x86_64::cpu::publish_linux_abi_test_results() {
+            kernel_fail("\r\nginux: Linux ABI test results published twice\r\n");
+        }
+        if !ipc::verify_channel_invariants() {
+            kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
+        }
+        if !packet::verify_invariants() || !packet::install() {
+            kernel_fail("\r\nginux: bounded packet handoff invariant failed\r\n");
+        }
+        serial_write("ginux: bounded packet handoff invariants verified\r\n");
+        serial_write("ginux: generation-scoped IPC diagnostics verified\r\n");
+        serial_write("ginux: monotonic sequence exhaustion contained\r\n");
+        let (
+            Some(host_handle),
+            Some(console_handle),
+            Some(ipc_handle),
+            Some(root_handle),
+            Some(service_ipc_handle),
+        ) = (
+            domain::control_plane_boot_handle(0),
+            domain::control_plane_boot_handle(1),
+            domain::control_plane_boot_handle(2),
+            domain::control_plane_boot_handle(4),
+            domain::service_boot_handle(),
         )
-        .is_some()
-    {
-        kernel_fail("ginux: measured Linux interpreted graph substitution accepted\r\n");
-    }
-    serial_write("ginux: measured-root Linux interpreted exec graph planned\r\n");
-    serial_write("ginux: measured-root Linux graph substitution rejected\r\n");
-    if signal_probe == exec_second
-        || signal_probe_plan.executable.virtual_page == exec_second_plan.executable.virtual_page
-        || signal_probe_plan.executable.page_count != 2
-        || exec_second_plan.executable.page_count != 2
-    {
-        kernel_fail("ginux: measured Linux exec target invalid\r\n");
-    }
-    serial_write("ginux: dedicated measured Linux signal runtime planned\r\n");
-    serial_write("ginux: multiple measured Linux exec targets planned\r\n");
-    if !linux_elf::verify_parser() {
-        kernel_fail("ginux: Linux ELF64 parser invariant failed\r\n");
-    }
-    serial_write("ginux: non-executable Linux GNU stack enforced\r\n");
-    serial_write("ginux: bounded Linux ELF metadata headers validated\r\n");
-    serial_write("ginux: bounded Linux interpreter metadata validated\r\n");
-    serial_write("ginux: bounded Linux ELF verifier stack usage validated\r\n");
-    serial_write("ginux: bounded Linux GNU RELRO metadata validated\r\n");
-    serial_write("ginux: three-load Linux ELF runtime mapping verified\r\n");
-    if !linux_elf::verify_linked_probe() {
-        kernel_fail("ginux: linked Linux ELF64 probe invariant failed\r\n");
-    }
-    serial_write("ginux: live Linux process address-space snapshot validated\r\n");
-    serial_write("ginux: incomplete Linux process snapshots rejected\r\n");
-    serial_write("ginux: live Linux PID 1 context admitted to process model\r\n");
-    serial_write("ginux: live Linux process registry persisted across syscalls\r\n");
-    serial_write("ginux: live Linux child address space cloned transactionally\r\n");
-    serial_write("ginux: live Linux cloned child executed in ring 3\r\n");
-    serial_write("ginux: toolchain-linked static Linux ELF executed\r\n");
-    serial_write("ginux: five-page Linux executable mapping validated\r\n");
-    serial_write("ginux: bounded Linux exec rejection preserved live image\r\n");
-    serial_write("ginux: Linux exec mapping rollback restored active image\r\n");
-    serial_write("ginux: Linux exec argv and environment delivered\r\n");
-    serial_write("ginux: bounded Linux exec vectors validated\r\n");
-    serial_write("ginux: old Linux image pages removed after exec\r\n");
-    serial_write("ginux: replaced Linux image retired cleanly\r\n");
-    serial_write("ginux: Linux close-on-exec descriptors transitioned\r\n");
-    serial_write("ginux: Linux exec signal state transitioned\r\n");
-    serial_write("ginux: Linux exec process identity installed\r\n");
-    serial_write("ginux: Linux executable link followed exec identity\r\n");
-    serial_write("ginux: measured-root Linux exec selection validated\r\n");
-    serial_write("ginux: measured-dirfd Linux execveat validated\r\n");
-    serial_write("ginux: measured-fd Linux empty-path exec validated\r\n");
-    serial_write("ginux: measured Linux exec selection is profile-driven\r\n");
-    serial_write("ginux: independent measured Linux exec layouts validated\r\n");
-    serial_write("ginux: runtime-selected Linux exec plans committed\r\n");
-    serial_write("ginux: variable-page Linux exec images committed\r\n");
-    serial_write("ginux: Linux active image ownership transitioned\r\n");
-    serial_write("ginux: generation-bound Linux image ownership verified\r\n");
-    serial_write("ginux: generation-bound Linux page-table hierarchy verified\r\n");
-    serial_write("ginux: Linux RELRO ownership permissions synchronized\r\n");
-    serial_write("ginux: stale Linux image retirement rejected\r\n");
-    serial_write("ginux: old Linux image leases retired at exec commit\r\n");
-    serial_write("ginux: Linux image lease double release rejected\r\n");
-    serial_write("ginux: Linux replacement frames allocated on demand\r\n");
-    serial_write("ginux: Linux replacement frame generations reclaimed\r\n");
-    if !linux_elf::verify_load_plan() {
-        kernel_fail("ginux: Linux ELF64 load plan invariant failed\r\n");
-    }
-    serial_write("ginux: bounded multi-page Linux ELF plan verified\r\n");
-    serial_write("ginux: bounded Linux ET_DYN load bias validated\r\n");
-    if !linux_elf::verify_interpreted_plan() {
-        kernel_fail("ginux: authenticated Linux dependency plan invalid\r\n");
-    }
-    serial_write("ginux: bounded Linux interpreter resolution plan validated\r\n");
-    serial_write("ginux: measured Linux interpreter bytes enforced\r\n");
-    serial_write("ginux: authenticated Linux dependency bytes enforced\r\n");
-    serial_write("ginux: Linux dependency SONAME identity bound\r\n");
-    if !linux_elf::verify_dynamic_relocation_rejections() {
-        kernel_fail("ginux: malformed Linux dynamic relocation metadata accepted\r\n");
-    }
-    serial_write("ginux: bounded Linux relative relocation metadata validated\r\n");
-    serial_write("ginux: bounded Linux symbol relocation metadata validated\r\n");
-    serial_write("ginux: bounded Linux PLT relocation metadata validated\r\n");
-    serial_write("ginux: split Linux PLT relocation table validated\r\n");
-    serial_write("ginux: bounded Linux SysV hash metadata validated\r\n");
-    serial_write("ginux: bounded Linux GNU hash metadata validated\r\n");
-    if !linux_elf::verify_unresolved_dynamic_image_rejected() {
-        kernel_fail("ginux: unresolved dynamic Linux image admitted as static\r\n");
-    }
-    serial_write("ginux: unresolved dynamic Linux static entry denied\r\n");
-    serial_write("ginux: separate-header Linux interpreter plan validated\r\n");
-    serial_write("ginux: Linux dynamic startup metadata validated\r\n");
-    serial_write("ginux: Linux auxiliary vector encoding validated\r\n");
-    serial_write("ginux: Linux page-aliasing ELF segments rejected\r\n");
-    serial_write("ginux: Linux ELF entry metadata overlap rejected\r\n");
-    if !linux_elf::verify_dependency_list_metadata() {
-        kernel_fail("ginux: bounded Linux dependency-list metadata invalid\r\n");
-    }
-    serial_write("ginux: bounded Linux dependency list validated\r\n");
-    serial_write("ginux: bounded Linux dependency authority graph validated\r\n");
-    serial_write("ginux: bounded Linux dependency TLS metadata validated\r\n");
-    if !linux_elf::verify_tls_relocation_metadata() {
-        kernel_fail("ginux: malformed Linux TLS relocation metadata accepted\r\n");
-    }
-    serial_write("ginux: bounded Linux TPOFF64 relocation metadata validated\r\n");
-    if !linux_elf::verify_static_tls_layout() {
-        kernel_fail("ginux: bounded Linux static TLS layout invalid\r\n");
-    }
-    serial_write("ginux: bounded Linux static TLS layout plan validated\r\n");
-    serial_write("ginux: reusable Linux TLS page materialization validated\r\n");
-    if !arch::x86_64::cpu::verify_linux_tls_context_contract() {
-        kernel_fail("ginux: bounded Linux TLS execution context invalid\r\n");
-    }
-    serial_write("ginux: bounded Linux TLS execution context validated\r\n");
-    if !linux_elf::verify_tls_template_metadata() {
-        kernel_fail("ginux: bounded Linux TLS template metadata invalid\r\n");
-    }
-    serial_write("ginux: bounded Linux TLS template metadata validated\r\n");
-    if !linux_elf::verify_mapped_load_plan(boot_info.image_base as u64, boot_info.image_size) {
-        kernel_fail("ginux: Linux ELF64 address-space mapping failed\r\n");
-    }
-    serial_write("ginux: Linux ELF headers mapped in executable segment\r\n");
-    serial_write("ginux: bounded multi-page Linux ELF mapping verified\r\n");
-    if !linux_elf::verify_mapped_system_init_plan(boot_info.image_base as u64, boot_info.image_size)
-    {
-        kernel_fail("ginux: minimal system init execution failed\r\n");
-    }
-    serial_write("ginux: measured minimal system init executed as PID 1\r\n");
-    serial_write("ginux: persistent Linux PID 1 supervisor lifecycle validated\r\n");
-    serial_write("ginux: bounded Linux standard signal lifecycle validated\r\n");
-    serial_write("ginux: bounded Linux private futex lifecycle validated\r\n");
-    serial_write("ginux: bounded Linux devfs profile validated\r\n");
-    serial_write("ginux: lifecycle-aware bounded procfs validated\r\n");
-    serial_write("ginux: transactional page-backed tmpfs lifecycle validated\r\n");
-    serial_write("ginux: minimal system init exited cleanly\r\n");
-    if !linux_elf::verify_mapped_interpreted_plan(boot_info.image_base as u64, boot_info.image_size)
-    {
-        kernel_fail("ginux: interpreted Linux ELF64 address-space mapping failed\r\n");
-    }
-    serial_write("ginux: measured-root interpreted Linux exec committed\r\n");
-    serial_write("ginux: interpreted Linux exec graph remapped\r\n");
-    serial_write("ginux: bounded Linux cross-area copy-in validated\r\n");
-    serial_write("ginux: complete interpreted Linux graph retired at exec\r\n");
-    serial_write("ginux: interpreted Linux exec stack replaced atomically\r\n");
-    serial_write("ginux: old interpreted Linux stack lease retired at exec\r\n");
-    serial_write("ginux: replacement Linux stack lease reclaimed\r\n");
-    serial_write("ginux: static Linux exec stack replaced atomically\r\n");
-    serial_write("ginux: old static Linux stack lease retired at exec\r\n");
-    serial_write("ginux: replacement static Linux stack lease reclaimed\r\n");
-    serial_write("ginux: interpreted Linux exec heap replaced atomically\r\n");
-    serial_write("ginux: old interpreted Linux heap lease retired at exec\r\n");
-    serial_write("ginux: replacement Linux heap lease reclaimed\r\n");
-    serial_write("ginux: static Linux exec heap replaced atomically\r\n");
-    serial_write("ginux: old static Linux heap lease retired at exec\r\n");
-    serial_write("ginux: replacement static Linux heap lease reclaimed\r\n");
-    serial_write("ginux: Linux exec process break reset\r\n");
-    serial_write("ginux: interpreted Linux TLS state rematerialized\r\n");
-    serial_write("ginux: interpreted Linux TLS leases replaced atomically\r\n");
-    serial_write("ginux: old interpreted Linux TLS leases retired at exec\r\n");
-    serial_write("ginux: replacement Linux TLS leases reclaimed\r\n");
-    serial_write("ginux: interpreted Linux sibling stack replaced atomically\r\n");
-    serial_write("ginux: old interpreted Linux sibling stack lease retired at exec\r\n");
-    serial_write("ginux: replacement Linux sibling stack lease reclaimed\r\n");
-    serial_write("ginux: interpreted Linux mmap registry empty across exec\r\n");
-    serial_write("ginux: static Linux mmap registry empty across exec\r\n");
-    serial_write("ginux: interpreted Linux page-table hierarchy replaced atomically\r\n");
-    serial_write("ginux: old interpreted Linux page-table leases retired at exec\r\n");
-    serial_write("ginux: replacement Linux page-table leases reclaimed\r\n");
-    serial_write("ginux: static Linux page-table hierarchy replaced atomically\r\n");
-    serial_write("ginux: old static Linux page-table leases retired at exec\r\n");
-    serial_write("ginux: replacement static Linux page-table leases reclaimed\r\n");
-    serial_write("ginux: static Linux exec auxiliary vector rebuilt\r\n");
-    serial_write("ginux: interpreted Linux exec auxiliary vector rebuilt\r\n");
-    serial_write("ginux: canonical interpreted Linux executable identity validated\r\n");
-    serial_write("ginux: interpreted Linux exec vectors generalized\r\n");
-    serial_write("ginux: combined Linux static TLS materialized\r\n");
-    serial_write("ginux: ordered Linux dependency TLS layout materialized\r\n");
-    serial_write("ginux: Linux TLS active before initializers\r\n");
-    serial_write("ginux: Linux dependency TLS active before constructors\r\n");
-    serial_write("ginux: toolchain-driven Linux dependency TLS relocation applied\r\n");
-    serial_write("ginux: toolchain-driven Linux auxiliary TLS relocation applied\r\n");
-    serial_write("ginux: linker-resolved Linux TLS symbols executed\r\n");
-    serial_write("ginux: bounded Linux TLS syscall copies validated\r\n");
-    serial_write("ginux: independent Linux sibling TLS materialized\r\n");
-    serial_write("ginux: non-current Linux TLS syscall access denied\r\n");
-    serial_write("ginux: Linux TLS execution context switched and restored\r\n");
-    serial_write("ginux: guarded Linux sibling stack materialized\r\n");
-    serial_write("ginux: non-current Linux stack syscall access denied\r\n");
-    serial_write("ginux: bounded Linux clone contract validated\r\n");
-    serial_write("ginux: Linux child return context constructed\r\n");
-    serial_write("ginux: Linux child context cleared on slot reuse\r\n");
-    serial_write("ginux: failed Linux clone publication rolled back\r\n");
-    serial_write("ginux: Linux parent and child TID publication validated\r\n");
-    serial_write("ginux: unpublished Linux child retired cleanly\r\n");
-    serial_write("ginux: full Linux syscall register frame preserved\r\n");
-    serial_write("ginux: typed Linux syscall frame validated\r\n");
-    serial_write("ginux: complete Linux child context persisted\r\n");
-    serial_write("ginux: stale Linux return contexts rejected\r\n");
-    serial_write("ginux: Linux child return frame installed atomically\r\n");
-    serial_write("ginux: Linux return ownership restored to parent\r\n");
-    serial_write("ginux: stale Linux return installation left state unchanged\r\n");
-    serial_write("ginux: live Linux syscall return frame round-trip validated\r\n");
-    serial_write("ginux: guarded Linux child executed in ring 3\r\n");
-    serial_write("ginux: Linux child exit restored suspended parent\r\n");
-    serial_write("ginux: bounded Linux clone syscall dispatched\r\n");
-    serial_write("ginux: sequential Linux clone slot reuse validated\r\n");
-    serial_write("ginux: reused Linux child stack began scrubbed\r\n");
-    serial_write("ginux: monotonic Linux clone TIDs validated\r\n");
-    serial_write("ginux: live Linux child TIDs matched published words\r\n");
-    serial_write("ginux: live Linux child FS self pointers validated\r\n");
-    serial_write("ginux: per-thread Linux signal masks isolated\r\n");
-    serial_write("ginux: bidirectional Linux sched_yield switching validated\r\n");
-    serial_write("ginux: occupied Linux clone capacity rejected live\r\n");
-    serial_write("ginux: live Linux clone failures rolled back transactionally\r\n");
-    serial_write("ginux: Linux clone return values validated\r\n");
-    serial_write("ginux: Linux clone child TID cleared on exit\r\n");
-    serial_write("ginux: Linux clone parent TID preserved on child exit\r\n");
-    serial_write("ginux: Linux parent and child futex waits blocked\r\n");
-    serial_write("ginux: explicit Linux futex wake restored child\r\n");
-    serial_write("ginux: Linux clear-child-TID wake restored parent\r\n");
-    serial_write("ginux: Linux futex waiter state reclaimed\r\n");
-    serial_write("ginux: per-thread Linux syscall stacks validated\r\n");
-    serial_write("ginux: bounded Linux TID lifecycle validated\r\n");
-    serial_write("ginux: stale Linux thread handles rejected\r\n");
-    serial_write("ginux: Linux per-thread exit state isolated\r\n");
-    serial_write("ginux: Linux thread exit registrations cleared\r\n");
-    serial_write("ginux: Linux thread table reclaimed on exit\r\n");
-    serial_write("ginux: sibling Linux TLS frame scrubbed and released\r\n");
-    serial_write("ginux: Linux sibling stack scrubbed and released\r\n");
-    serial_write("ginux: retired Linux thread stacks scrubbed\r\n");
-    serial_write("ginux: Linux TLS frame scrubbed and released\r\n");
-    serial_write("ginux: bounded interpreted Linux ELF mapping verified\r\n");
-    serial_write("ginux: toolchain-linked Linux interpreter executed\r\n");
-    serial_write("ginux: two-page Linux interpreter RX mapping verified\r\n");
-    serial_write("ginux: userspace Linux interpreter metadata discovered\r\n");
-    serial_write("ginux: userspace Linux runtime files discovered\r\n");
-    serial_write("ginux: userspace Linux PT_LOAD mappings derived\r\n");
-    serial_write("ginux: userspace Linux startup metadata consumed\r\n");
-    serial_write("ginux: userspace Linux main segments mapped\r\n");
-    serial_write("ginux: userspace Linux DT_NEEDED path resolved\r\n");
-    serial_write("ginux: userspace Linux dependency segments mapped\r\n");
-    serial_write("ginux: complete interpreted Linux image ownership tracked\r\n");
-    serial_write("ginux: userspace Linux dependency bias selected\r\n");
-    serial_write("ginux: Linux dependency frames allocated on demand\r\n");
-    serial_write("ginux: Linux executable frames allocated on demand\r\n");
-    serial_write("ginux: bounded Linux dependency page contracts applied\r\n");
-    serial_write("ginux: bounded Linux dependency mapping slots isolated\r\n");
-    serial_write("ginux: userspace Linux auxiliary dependency mapped\r\n");
-    serial_write("ginux: Linux read-only dependency segment mapped\r\n");
-    serial_write("ginux: toolchain-linked Linux PIE and shared object executed\r\n");
-    serial_write("ginux: linker-emitted Linux dynamic tags validated\r\n");
-    serial_write("ginux: separate-header interpreted Linux mapping verified\r\n");
-    serial_write("ginux: Linux dependency W^X mapping verified\r\n");
-    serial_write("ginux: interpreter-first Linux ring-3 entry verified\r\n");
-    serial_write("ginux: userspace Linux interpreter self-relocation applied\r\n");
-    serial_write("ginux: userspace Linux relocation table shapes validated\r\n");
-    serial_write("ginux: userspace Linux relative relocation applied\r\n");
-    serial_write("ginux: userspace Linux GLOB_DAT relocation applied\r\n");
-    serial_write("ginux: userspace Linux JUMP_SLOT relocation applied\r\n");
-    serial_write("ginux: userspace Linux hash bucket resolution applied\r\n");
-    serial_write("ginux: userspace Linux symbol names matched\r\n");
-    serial_write("ginux: userspace Linux cross-object symbol resolved\r\n");
-    serial_write("ginux: userspace Linux two-provider symbols resolved\r\n");
-    serial_write("ginux: Linux JUMP_SLOT dependency call executed\r\n");
-    serial_write("ginux: Linux auxiliary JUMP_SLOT dependency call executed\r\n");
-    serial_write("ginux: userspace Linux dependency self-relocations applied\r\n");
-    serial_write("ginux: userspace Linux auxiliary dependency self-relocations applied\r\n");
-    serial_write("ginux: bounded Linux main preinit array validated\r\n");
-    serial_write("ginux: userspace Linux main preinit metadata consumed\r\n");
-    serial_write("ginux: userspace Linux main preinit executed\r\n");
-    serial_write("ginux: Linux preinit-before-dependency initialization ordered\r\n");
-    serial_write("ginux: bounded Linux dependency init arrays validated\r\n");
-    serial_write("ginux: userspace Linux init arrays bound to relocations\r\n");
-    serial_write("ginux: userspace Linux dependency constructors executed\r\n");
-    serial_write("ginux: bounded Linux main init array validated\r\n");
-    serial_write("ginux: userspace Linux main constructor executed\r\n");
-    serial_write("ginux: Linux dependency-before-main initialization ordered\r\n");
-    serial_write("ginux: userspace Linux constructor startup context delivered\r\n");
-    serial_write("ginux: bounded Linux DT_INIT functions validated\r\n");
-    serial_write("ginux: userspace Linux DT_INIT functions executed\r\n");
-    serial_write("ginux: Linux DT_INIT-before-init-array ordering enforced\r\n");
-    serial_write("ginux: Linux auxiliary dependency entry executed\r\n");
-    serial_write("ginux: metadata-driven Linux relative relocations applied\r\n");
-    serial_write("ginux: Linux copy errors and overflow bounds verified\r\n");
-    serial_write("ginux: Linux proof workload assembled from source\r\n");
-    serial_write("ginux: Linux bounded console writes validated\r\n");
-    serial_write("ginux: Linux atomic vectored console writes validated\r\n");
-    serial_write("ginux: Linux bounded descriptor polling validated\r\n");
-    serial_write("ginux: Linux bounded ppoll inputs validated\r\n");
-    serial_write("ginux: Linux bounded epoll lifecycle validated\r\n");
-    serial_write("ginux: Linux bounded epoll_pwait inputs validated\r\n");
-    serial_write("ginux: Linux bounded epoll_pwait2 timeout validated\r\n");
-    serial_write("ginux: Linux four-slot auxiliary descriptor table validated\r\n");
-    serial_write("ginux: Linux bounded eventfd notification validated\r\n");
-    serial_write("ginux: Linux bounded timerfd expiration validated\r\n");
-    serial_write("ginux: Linux bounded pipe notification validated\r\n");
-    serial_write("ginux: Linux atomic vectored pipe I/O validated\r\n");
-    serial_write("ginux: Linux mutable descriptor status flags validated\r\n");
-    serial_write("ginux: Linux bounded pipe introspection validated\r\n");
-    serial_write("ginux: Linux anonymous descriptor metadata validated\r\n");
-    serial_write("ginux: Linux bounded syscall stack movement validated\r\n");
-    serial_write("ginux: Linux callable syscall assertion helpers validated\r\n");
-    serial_write("ginux: Linux container-local root credentials verified\r\n");
-    serial_write("ginux: Linux errno recovery verified in ring 3\r\n");
-    serial_write("ginux: Linux single-thread signal mask validated\r\n");
-    serial_write("ginux: Linux bounded signal actions validated\r\n");
-    serial_write("ginux: Linux synchronous SIGSEGV lifecycle validated\r\n");
-    serial_write("ginux: Linux self-directed signal delivery validated\r\n");
-    serial_write("ginux: Linux thread-directed signal delivery validated\r\n");
-    serial_write("ginux: Linux legacy thread signal delivery validated\r\n");
-    serial_write("ginux: Linux pending signal delivery validated\r\n");
-    serial_write("ginux: Linux standard signal queue ordering validated\r\n");
-    serial_write("ginux: Linux chained pending signal delivery validated\r\n");
-    serial_write("ginux: Linux scheduler-backed timed signal wait validated\r\n");
-    serial_write("ginux: Linux signal-interrupted timed wait validated\r\n");
-    serial_write("ginux: Linux one-shot signal action validated\r\n");
-    serial_write("ginux: Linux rt signal frame ABI validated\r\n");
-    serial_write("ginux: Linux mutable signal context validated\r\n");
-    serial_write("ginux: Linux autodisarming alternate stack validated\r\n");
-    serial_write("ginux: Linux alternate signal stack delivery validated\r\n");
-    serial_write("ginux: Linux bounded alternate signal stack validated\r\n");
-    serial_write("ginux: Linux single-thread process identity verified\r\n");
-    serial_write("ginux: Linux initial environment vector validated\r\n");
-    serial_write("ginux: Linux credential auxiliary vector validated\r\n");
-    serial_write("ginux: Linux clock-tick auxiliary vector validated\r\n");
-    serial_write("ginux: Linux platform auxiliary vector validated\r\n");
-    serial_write("ginux: Linux conservative hardware capabilities validated\r\n");
-    serial_write("ginux: Linux FS base query validated\r\n");
-    serial_write("ginux: Linux clear-child-TID exit action validated\r\n");
-    serial_write("ginux: Linux robust-list registration validated\r\n");
-    serial_write("ginux: Linux scheduler-backed timed futex wait validated\r\n");
-    serial_write("ginux: Linux read-only memory transition validated\r\n");
-    serial_write("ginux: Linux initial process namespace identity validated\r\n");
-    serial_write("ginux: Linux bounded process name state validated\r\n");
-    serial_write("ginux: Linux no-new-privileges boundary validated\r\n");
-    serial_write("ginux: Linux static executable metadata validated\r\n");
-    serial_write("ginux: Linux bounded brk heap validated\r\n");
-    serial_write("ginux: Linux bounded anonymous mapping lifecycle validated\r\n");
-    serial_write("ginux: Linux two-page anonymous extent validated\r\n");
-    serial_write("ginux: multiple bounded Linux mmap areas validated\r\n");
-    serial_write("ginux: bounded Linux mmap area splitting validated\r\n");
-    serial_write("ginux: Linux anonymous mapping write seal validated\r\n");
-    serial_write("ginux: Linux atomic multi-page write seal validated\r\n");
-    serial_write("ginux: bounded Linux mmap protection splitting validated\r\n");
-    serial_write("ginux: idempotent Linux mmap protection validated\r\n");
-    serial_write("ginux: adjacent Linux mmap range operations validated\r\n");
-    serial_write("ginux: four-page fragmented Linux mmap window validated\r\n");
-    serial_write("ginux: bounded anonymous fixed mmap placement validated\r\n");
-    serial_write("ginux: bounded anonymous fixed mmap replacement validated\r\n");
-    serial_write("ginux: bounded PROT_NONE fixed replacement validated\r\n");
-    serial_write("ginux: bounded read-only anonymous mapping validated\r\n");
-    serial_write("ginux: page-rounded Linux mmap lengths validated\r\n");
-    serial_write("ginux: Linux PROT_NONE reservations validated\r\n");
-    serial_write("ginux: Linux PROT_NONE activation validated\r\n");
-    serial_write("ginux: Linux mmap frames allocated on demand\r\n");
-    serial_write("ginux: Linux mmap frame leases reclaimed\r\n");
-    if !arch::x86_64::cpu::verify_linux_mmap_process_restore() {
-        kernel_fail("ginux: Linux process mmap state restoration failed\r\n");
-    }
-    serial_write("ginux: Linux parent mmap state restored after child execution\r\n");
-    serial_write("ginux: Linux anonymous mapping discard validated\r\n");
-    serial_write("ginux: Linux anonymous mapping residency validated\r\n");
-    serial_write("ginux: Linux heap copy bounds validated\r\n");
-    serial_write("ginux: Linux stack copy bounds validated\r\n");
-    serial_write("ginux: Linux directional VMA copies validated\r\n");
-    serial_write("ginux: indexed Linux working directory validated\r\n");
-    serial_write("ginux: relative Linux directory changes validated\r\n");
-    serial_write("ginux: Linux fchdir descriptor boundary validated\r\n");
-    serial_write("ginux: Linux working-directory traversal rejected\r\n");
-    serial_write("ginux: Linux proc self executable link validated\r\n");
-    serial_write("ginux: Linux proc self executable link-at validated\r\n");
-    serial_write("ginux: Linux process umask state validated\r\n");
-    serial_write("ginux: Linux disconnected console input validated\r\n");
-    serial_write("ginux: Linux console descriptor metadata validated\r\n");
-    serial_write("ginux: Linux fixed console geometry validated\r\n");
-    serial_write("ginux: Linux fixed console termios validated\r\n");
-    serial_write("ginux: Linux non-seekable console validated\r\n");
-    serial_write("ginux: Linux console descriptor close validated\r\n");
-    serial_write("ginux: Linux console descriptor duplication validated\r\n");
-    serial_write("ginux: Linux targeted descriptor duplication validated\r\n");
-    serial_write("ginux: Linux console descriptor flags validated\r\n");
-    serial_write("ginux: Linux minimum descriptor duplication validated\r\n");
-    serial_write("ginux: Linux close-on-exec descriptor state validated\r\n");
-    serial_write("ginux: Linux bounded null device validated\r\n");
-    serial_write("ginux: Linux bounded null device metadata validated\r\n");
-    serial_write("ginux: Linux bounded null device access validated\r\n");
-    serial_write("ginux: Linux bounded zero device validated\r\n");
-    serial_write("ginux: Linux bounded console device validated\r\n");
-    serial_write("ginux: Linux bounded tty alias validated\r\n");
-    serial_write("ginux: Linux bounded device statx validated\r\n");
-    serial_write("ginux: Linux atomic zero-device readv validated\r\n");
-    serial_write("ginux: Linux bounded device writev validated\r\n");
-    serial_write("ginux: Linux immutable device directory validated\r\n");
-    serial_write("ginux: Linux immutable runtime ELF files validated\r\n");
-    serial_write("ginux: Linux auxiliary dependency runtime file validated\r\n");
-    serial_write("ginux: Linux read-only runtime file mapping validated\r\n");
-    serial_write("ginux: measured-root Linux executable graph validated\r\n");
-    serial_write("ginux: measured-root Linux executable graph executed\r\n");
-    serial_write("ginux: measured-root Linux file content validated\r\n");
-    serial_write("ginux: measured-root Linux file metadata validated\r\n");
-    serial_write("ginux: measured-root Linux file mutation denied\r\n");
-    serial_write("ginux: measured-root Linux directory enumerated\r\n");
-    serial_write("ginux: measured-root Linux directory cursor validated\r\n");
-    serial_write("ginux: measured-root Linux root enumerated\r\n");
-    serial_write("ginux: measured-root Linux root pagination validated\r\n");
-    serial_write("ginux: measured-root Linux empty directory opened\r\n");
-    serial_write("ginux: measured-root Linux dirfd lookup validated\r\n");
-    serial_write("ginux: measured-root Linux relative metadata validated\r\n");
-    serial_write("ginux: indexed measured-root file descriptors validated\r\n");
-    serial_write("ginux: generic measured-root Linux file validated\r\n");
-    serial_write("ginux: index-driven measured child lookup validated\r\n");
-    serial_write("ginux: unlisted measured-root Linux file validated\r\n");
-    serial_write("ginux: indexed measured-root directories validated\r\n");
-    serial_write("ginux: unlisted measured-root directory opened\r\n");
-    serial_write("ginux: nested measured-root dirfd traversal validated\r\n");
-    serial_write("ginux: measured-root traversal components rejected\r\n");
-    serial_write("ginux: expanded measured-root index capacity validated\r\n");
-    serial_write("ginux: Linux saved credential queries validated\r\n");
-    serial_write("ginux: Linux supplementary root group validated\r\n");
-    serial_write("ginux: Linux fixed execution personality validated\r\n");
-    serial_write("ginux: Linux empty capability boundary validated\r\n");
-    serial_write("ginux: Linux immutable resource limits validated\r\n");
-    serial_write("ginux: Linux single-CPU topology queries validated\r\n");
-    serial_write("ginux: Linux single-thread scheduling yield validated\r\n");
-    serial_write("ginux: Linux fixed scheduler policy validated\r\n");
-    serial_write("ginux: Linux fixed process priority validated\r\n");
-    serial_write("ginux: Linux bounded monotonic clocks validated\r\n");
-    serial_write("ginux: Linux bounded clock resolution validated\r\n");
-    serial_write("ginux: Linux scheduler-backed nanosleep validated\r\n");
-    serial_write("ginux: Linux signal-interrupted nanosleep validated\r\n");
-    serial_write("ginux: Linux monotonic clock_nanosleep validated\r\n");
-    serial_write("ginux: Linux scheduler-backed poll waits validated\r\n");
-    serial_write("ginux: Linux scheduler-backed ppoll waits validated\r\n");
-    serial_write("ginux: Linux scheduler-backed epoll waits validated\r\n");
-    serial_write("ginux: Linux scheduler-backed epoll masked waits validated\r\n");
-    serial_write("ginux: Linux signal-interrupted masked waits validated\r\n");
-    serial_write("ginux: Linux signal-interrupted epoll waits validated\r\n");
-    serial_write("ginux: Linux signal-interrupted poll waits validated\r\n");
-    serial_write("ginux: Linux signal-interrupted epoll_wait validated\r\n");
-    serial_write("ginux: Linux zero-descriptor poll sleeps validated\r\n");
-    serial_write("ginux: Linux scheduler-backed eventfd reads validated\r\n");
-    serial_write("ginux: Linux signal-interrupted eventfd reads validated\r\n");
-    serial_write("ginux: Linux scheduler-backed eventfd writes validated\r\n");
-    serial_write("ginux: Linux signal-interrupted eventfd writes validated\r\n");
-    serial_write("ginux: Linux eventfd write snapshot isolation validated\r\n");
-    serial_write("ginux: Linux scheduler-backed pipe reads validated\r\n");
-    serial_write("ginux: Linux scheduler-backed pipe readv validated\r\n");
-    serial_write("ginux: Linux signal-interrupted pipe reads validated\r\n");
-    serial_write("ginux: Linux scheduler-backed pipe writes validated\r\n");
-    serial_write("ginux: Linux scheduler-backed pipe writev validated\r\n");
-    serial_write("ginux: Linux pipe writev snapshot isolation validated\r\n");
-    serial_write("ginux: Linux signal-interrupted pipe writes validated\r\n");
-    serial_write("ginux: Linux scheduler-backed timerfd reads validated\r\n");
-    serial_write("ginux: Linux signal-interrupted timerfd reads validated\r\n");
-    serial_write("ginux: APIC-driven Linux wait expiry validated\r\n");
-    serial_write("ginux: APIC-driven Linux wait preemption validated\r\n");
-    serial_write("ginux: Linux single-task CPU time validated\r\n");
-    serial_write("ginux: Linux bounded resource usage validated\r\n");
-    serial_write("ginux: Linux disabled interval timers validated\r\n");
-    if !arch::x86_64::cpu::publish_linux_abi_test_results() {
-        kernel_fail("\r\nginux: Linux ABI test results published twice\r\n");
-    }
-    if !ipc::verify_channel_invariants() {
-        kernel_fail("\r\nginux: bounded IPC invariant failed\r\n");
-    }
-    if !packet::verify_invariants() || !packet::install() {
-        kernel_fail("\r\nginux: bounded packet handoff invariant failed\r\n");
-    }
-    serial_write("ginux: bounded packet handoff invariants verified\r\n");
-    serial_write("ginux: generation-scoped IPC diagnostics verified\r\n");
-    serial_write("ginux: monotonic sequence exhaustion contained\r\n");
-    let (
-        Some(host_handle),
-        Some(console_handle),
-        Some(ipc_handle),
-        Some(root_handle),
-        Some(service_ipc_handle),
-    ) = (
-        domain::control_plane_boot_handle(0),
-        domain::control_plane_boot_handle(1),
-        domain::control_plane_boot_handle(2),
-        domain::control_plane_boot_handle(4),
-        domain::service_boot_handle(),
-    )
-    else {
-        kernel_fail("\r\nginux: control-plane bootstrap handles unavailable\r\n");
-    };
-    let ipc_rights = capability::Rights::READ.union(capability::Rights::WRITE);
-    if domain::control_plane_id() != Some(control_plane)
-        || !domain::control_owns_service(control_plane, service_domain)
-        || !domain::handle_permits(service_domain, service_ipc_handle, 3, ipc_rights)
-        || domain::handle_permits(
-            control_plane,
-            service_ipc_handle,
-            3,
-            capability::Rights::READ,
-        )
-        || domain::handle_permits(service_domain, ipc_handle, 3, capability::Rights::READ)
-        || !domain::handle_permits(
-            control_plane,
-            root_handle,
-            control_abi::ROOT_OBJECT,
-            capability::Rights::READ,
-        )
-        || domain::handle_permits(
-            control_plane,
-            root_handle,
-            control_abi::ROOT_OBJECT,
-            capability::Rights::WRITE,
-        )
-    {
-        kernel_fail("\r\nginux: cross-domain capability isolation failed\r\n");
-    }
-    if !address_space::verify_ring3_control_plane(
-        control_plane_image.code,
-        control_plane_image.entries,
-        [control_plane, service_domain],
-        [
-            [host_handle, console_handle, ipc_handle, root_handle],
-            [0, 0, service_ipc_handle, 0],
-        ],
-        &local_apic,
-        &apic_timer,
-    ) {
-        kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
-    }
-    if !initramfs::published_root_is_live() {
-        kernel_fail("\r\nginux: published root ownership was lost\r\n");
-    }
-    serial_write("\r\nginux: read-only root capability enforced");
-    serial_write("\r\nginux: ring-3 root metadata lookup completed");
-    serial_write("\r\nginux: ring-3 root file read completed");
-    serial_write("\r\nginux: ring-3 root directory enumeration completed");
-    serial_write("\r\nginux: non-directory enumeration denied");
-    serial_write("\r\nginux: invalid root userspace requests denied");
-    serial_write("\r\nginux: published root remains kernel-owned");
-    let Some(expected_fault_instruction) =
-        address_space::expected_service_fault_instruction(control_plane_image.entries[1])
-    else {
-        kernel_fail("\r\nginux: service fault instruction overflowed\r\n");
-    };
-    if !domain::domain_is_retired(service_domain)
-        || !domain::service_fault_was_delivered(service_domain)
-        || domain::last_fault_event_audit() != Some((1, service_domain, 1))
-        || domain::last_fault_service_identity() != Some(service_identity)
-        || domain::primary_service_identity() != Some(service_identity)
-        || !domain::delivered_fault_matches(
-            service_domain,
-            domain::FaultMetadata {
-                vector: 14,
-                error: 6,
-                address: 0,
-                instruction: expected_fault_instruction,
-            },
-        )
-        || !arch::x86_64::paging::static_page_tables_are_read_only()
-        || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
-        || !arch::x86_64::pci::bus_master_is_disabled(virtio_block)
-        || !arch::x86_64::pci::device_is_reset(virtio_block, virtio_mmio)
-        || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
-        || !arch::x86_64::paging::identity_range_is_read_only_data(
-            boot_info.manifest as usize,
-            boot_info.manifest_size,
-        )
-        || !arch::x86_64::paging::identity_range_is_read_only_data(
-            boot_info.control_plane_bundle as usize,
-            boot_info.control_plane_bundle_size,
-        )
-        || !arch::x86_64::paging::identity_range_is_read_only_data(
-            boot_info.controller_runtime as usize,
-            boot_info.controller_runtime_size,
-        )
-        || !arch::x86_64::paging::identity_range_is_read_only_data(
-            boot_info.root_image as usize,
-            boot_info.root_image_size,
-        )
-        || !arch::x86_64::cpu::execute_disable_enabled()
-        || !arch::x86_64::cpu::supervisor_execution_prevention_enabled()
-        || !arch::x86_64::cpu::supervisor_access_prevention_enabled()
-        || !arch::x86_64::cpu::user_interrupt_surface_is_minimal()
-        || !arch::x86_64::cpu::user_mode_instruction_prevention_enabled()
-        || !arch::x86_64::cpu::service_restart_stack_was_scrubbed()
-        || !arch::x86_64::cpu::service_address_space_frames_were_transferred()
-        || !arch::x86_64::paging::verify_user_context_layout_invariants()
-        || !domain::call_budget_proof_complete()
-        || !domain::thread_budget_proof_complete()
-        || !domain::operation_accounting_proof_complete()
-        || !domain::service_frame_quarantine_is_clear()
-        || domain::handle_permits(
-            service_domain,
-            service_ipc_handle,
-            3,
-            capability::Rights::READ,
-        )
-    {
-        kernel_fail("\r\nginux: faulted service authority remained live\r\n");
-    }
-    let Some(replacement_domain) = domain::last_retired_service_domain() else {
-        kernel_fail("\r\nginux: replacement service retirement unavailable\r\n");
-    };
-    if replacement_domain == service_domain
-        || domain::service_boot_handle().is_some()
-        || !domain::domain_is_retired(replacement_domain)
-        || !domain::service_ready_was_delivered(replacement_domain)
-        || !domain::service_exit_was_delivered(replacement_domain)
-        || !domain::service_restart_budget_proof_complete()
-    {
-        kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
-    }
-    if ipc::last_message_audit() != Some(((replacement_domain, 4), (control_plane, 4))) {
-        kernel_fail("\r\nginux: IPC message provenance invariant failed\r\n");
-    }
-    if ipc::receive(control_plane) != ipc::Receive::PeerClosed(service_domain)
-        || ipc::receive(control_plane) != ipc::Receive::PeerClosed(replacement_domain)
-        || ipc::receive(control_plane) != ipc::Receive::Empty
-        || ipc::last_closure_audit() != Some((replacement_domain, 2))
-    {
-        kernel_fail("\r\nginux: sticky IPC peer closure invariant failed\r\n");
-    }
-    if !address_space::verify_ring3_auxiliary_exit() {
-        kernel_fail("\r\nginux: ring-3 auxiliary exit invariant failed\r\n");
-    }
-    serial_write("\r\nginux: auxiliary exit status sequenced and retired");
-    serial_write("\r\nginux: userspace auxiliary creation authority enforced");
-    serial_write("\r\nginux: userspace auxiliary stop sequenced and retired");
-    serial_write("\r\nginux: failed auxiliary load rollback enforced");
-    serial_write("\r\nginux: queued auxiliary cancellation and teardown enforced");
-    serial_write("\r\nginux: ready auxiliary cancellation and teardown enforced");
-    serial_write("\r\nginux: yielded auxiliary cancellation and teardown enforced");
-    serial_write("\r\nginux: userspace auxiliary load and admission enforced");
-    serial_write("\r\nginux: private auxiliary payload initialization enforced");
-    serial_write("\r\nginux: auxiliary initialization state observable");
-    serial_write("\r\nginux: uninitialized auxiliary admission denied");
-    serial_write("\r\nginux: explicit auxiliary start authority enforced");
-    serial_write("\r\nginux: auxiliary runtime state query enforced");
-    serial_write("\r\nginux: userspace auxiliary lifecycle observation enforced");
-    serial_write("\r\nginux: userspace auxiliary lifecycle descriptor enforced");
-    serial_write("\r\nginux: userspace auxiliary service identity enforced");
-    serial_write("\r\nginux: auxiliary management authority denied");
-    if !address_space::verify_ring3_network_service() {
-        kernel_fail("\r\nginux: ring-3 network service invariant failed\r\n");
-    }
-    serial_write("\r\nginux: isolated network device probe completed");
-    serial_write("\r\nginux: network device command validation enforced");
-    serial_write("\r\nginux: network link state configured");
-    serial_write("\r\nginux: network IPv4 configuration retained");
-    serial_write("\r\nginux: network default gateway validated");
-    serial_write("\r\nginux: network configuration generation tracked");
-    serial_write("\r\nginux: network gateway invalidated on address change");
-    serial_write("\r\nginux: bounded static network route retained");
-    serial_write("\r\nginux: coherent network state snapshot copied");
-    serial_write("\r\nginux: network device capability revoked on exit");
-    if !address_space::verify_ring3_network_observer() {
-        kernel_fail("\r\nginux: ring-3 network observer invariant failed\r\n");
-    }
-    serial_write("\r\nginux: read-only network observer isolated");
-    serial_write("\r\nginux: network mutation denied to observer");
-    serial_write("\r\nginux: observer capability revoked on exit");
-    if !address_space::verify_ring3_network_configurator() {
-        kernel_fail("\r\nginux: ring-3 network configurator invariant failed\r\n");
-    }
-    serial_write("\r\nginux: write-only network configurator isolated");
-    serial_write("\r\nginux: network observation denied to configurator");
-    serial_write("\r\nginux: denied network copy-out left memory unchanged");
-    serial_write("\r\nginux: stale network configuration apply rejected");
-    serial_write("\r\nginux: atomic network configuration apply completed");
-    serial_write("\r\nginux: configurator capability revoked on exit");
-    if !address_space::verify_ring3_network_fault_containment() {
-        kernel_fail("\r\nginux: network service fault containment invariant failed\r\n");
-    }
-    serial_write("\r\nginux: faulted network service contained");
-    serial_write("\r\nginux: faulted network authority revoked");
-    serial_write("\r\nginux: network state survived service fault");
-    if !address_space::verify_ring3_network_recovery() {
-        kernel_fail("\r\nginux: replacement network service invariant failed\r\n");
-    }
-    serial_write("\r\nginux: replacement network service observed retained state");
-    serial_write("\r\nginux: replacement network capability lifecycle isolated");
-    if !address_space::verify_ring3_volume_service() {
-        kernel_fail("\r\nginux: ring-3 persistent volume service invariant failed\r\n");
-    }
-    serial_write("\r\nginux: write-only volume service committed generation");
-    serial_write("\r\nginux: faulted volume service authority revoked");
-    serial_write("\r\nginux: persistent volume survived service fault");
-    serial_write("\r\nginux: read-only replacement recovered volume");
-    serial_write("\r\nginux: volume mutation denied to replacement");
-    if !address_space::verify_ring3_auxiliary_fault() {
-        kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
-    }
-    serial_write("\r\nginux: stop-only auxiliary fault executed and contained");
-    if !unsafe { arch::x86_64::timer::verify_device_wait_timeout_interrupt() } {
-        kernel_fail("\r\nginux: device-wait timeout interrupt invariant failed\r\n");
-    }
-    serial_write("\r\nginux: APIC device-wait timeout delivered");
-    let Some(virtio_status_physical) = virtio_block.status_register_physical() else {
-        kernel_fail("\r\nginux: virtio status register unavailable\r\n");
-    };
-    let Some(native_volume_device) = address_space::NativeVolumeDevice::new(
-        virtio_status_physical,
-        virtio_block,
-        virtio_mmio,
-        virtio_msix_mmio,
-        virtio_iommu_profile,
-    ) else {
-        kernel_fail("\r\nginux: native volume device profile invalid\r\n");
-    };
-    if !address_space::verify_ring3_read_only_device_grant(virtio_status_physical, 0) {
-        kernel_fail("\r\nginux: ring-3 block-device grant invariant failed\r\n");
-    }
-    if !arch::x86_64::pci::bus_master_is_disabled(virtio_block)
-        || !arch::x86_64::pci::device_is_reset(virtio_block, virtio_mmio)
-    {
-        kernel_fail("\r\nginux: block-device observer changed device state\r\n");
-    }
-    serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
-    serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
-    serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
-    let native_volume_summary = 'native_volume_validation: {
-        let mut native_volume_run = address_space::verify_native_volume_service(
-            &volume_image,
-            native_volume_device,
+        else {
+            kernel_fail("\r\nginux: control-plane bootstrap handles unavailable\r\n");
+        };
+        let ipc_rights = capability::Rights::READ.union(capability::Rights::WRITE);
+        if domain::control_plane_id() != Some(control_plane)
+            || !domain::control_owns_service(control_plane, service_domain)
+            || !domain::handle_permits(service_domain, service_ipc_handle, 3, ipc_rights)
+            || domain::handle_permits(
+                control_plane,
+                service_ipc_handle,
+                3,
+                capability::Rights::READ,
+            )
+            || domain::handle_permits(service_domain, ipc_handle, 3, capability::Rights::READ)
+            || !domain::handle_permits(
+                control_plane,
+                root_handle,
+                control_abi::ROOT_OBJECT,
+                capability::Rights::READ,
+            )
+            || domain::handle_permits(
+                control_plane,
+                root_handle,
+                control_abi::ROOT_OBJECT,
+                capability::Rights::WRITE,
+            )
+        {
+            kernel_fail("\r\nginux: cross-domain capability isolation failed\r\n");
+        }
+        if !address_space::verify_ring3_control_plane(
+            control_plane_image.code,
+            control_plane_image.entries,
+            [control_plane, service_domain],
+            [
+                [host_handle, console_handle, ipc_handle, root_handle],
+                [0, 0, service_ipc_handle, 0],
+            ],
             &local_apic,
-            None,
-        );
-        let mut native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        if native_volume_run.is_none() && native_volume_quiesced {
-            serial_write("\r\nginux: initial native volume driver fault contained; retrying");
-            native_volume_run = address_space::verify_native_volume_service(
+            &apic_timer,
+        ) {
+            kernel_fail("\r\nginux: ring-3 control-plane entry failed\r\n");
+        }
+        if !initramfs::published_root_is_live() {
+            kernel_fail("\r\nginux: published root ownership was lost\r\n");
+        }
+        serial_write("\r\nginux: read-only root capability enforced");
+        serial_write("\r\nginux: ring-3 root metadata lookup completed");
+        serial_write("\r\nginux: ring-3 root file read completed");
+        serial_write("\r\nginux: ring-3 root directory enumeration completed");
+        serial_write("\r\nginux: non-directory enumeration denied");
+        serial_write("\r\nginux: invalid root userspace requests denied");
+        serial_write("\r\nginux: published root remains kernel-owned");
+        let Some(expected_fault_instruction) =
+            address_space::expected_service_fault_instruction(control_plane_image.entries[1])
+        else {
+            kernel_fail("\r\nginux: service fault instruction overflowed\r\n");
+        };
+        if !domain::domain_is_retired(service_domain)
+            || !domain::service_fault_was_delivered(service_domain)
+            || domain::last_fault_event_audit() != Some((1, service_domain, 1))
+            || domain::last_fault_service_identity() != Some(service_identity)
+            || domain::primary_service_identity() != Some(service_identity)
+            || !domain::delivered_fault_matches(
+                service_domain,
+                domain::FaultMetadata {
+                    vector: 14,
+                    error: 6,
+                    address: 0,
+                    instruction: expected_fault_instruction,
+                },
+            )
+            || !arch::x86_64::paging::static_page_tables_are_read_only()
+            || !arch::x86_64::paging::mmio_mapping_is_valid(virtio_mmio)
+            || !arch::x86_64::pci::bus_master_is_disabled(virtio_block)
+            || !arch::x86_64::pci::device_is_reset(virtio_block, virtio_mmio)
+            || !arch::x86_64::paging::identity_map_obeys_wx(boot_info, &image)
+            || !arch::x86_64::paging::identity_range_is_read_only_data(
+                boot_info.manifest as usize,
+                boot_info.manifest_size,
+            )
+            || !arch::x86_64::paging::identity_range_is_read_only_data(
+                boot_info.control_plane_bundle as usize,
+                boot_info.control_plane_bundle_size,
+            )
+            || !arch::x86_64::paging::identity_range_is_read_only_data(
+                boot_info.controller_runtime as usize,
+                boot_info.controller_runtime_size,
+            )
+            || !arch::x86_64::paging::identity_range_is_read_only_data(
+                boot_info.root_image as usize,
+                boot_info.root_image_size,
+            )
+            || !arch::x86_64::cpu::execute_disable_enabled()
+            || !arch::x86_64::cpu::supervisor_execution_prevention_enabled()
+            || !arch::x86_64::cpu::supervisor_access_prevention_enabled()
+            || !arch::x86_64::cpu::user_interrupt_surface_is_minimal()
+            || !arch::x86_64::cpu::user_mode_instruction_prevention_enabled()
+            || !arch::x86_64::cpu::service_restart_stack_was_scrubbed()
+            || !arch::x86_64::cpu::service_address_space_frames_were_transferred()
+            || !arch::x86_64::paging::verify_user_context_layout_invariants()
+            || !domain::call_budget_proof_complete()
+            || !domain::thread_budget_proof_complete()
+            || !domain::operation_accounting_proof_complete()
+            || !domain::service_frame_quarantine_is_clear()
+            || domain::handle_permits(
+                service_domain,
+                service_ipc_handle,
+                3,
+                capability::Rights::READ,
+            )
+        {
+            kernel_fail("\r\nginux: faulted service authority remained live\r\n");
+        }
+        let Some(replacement_domain) = domain::last_retired_service_domain() else {
+            kernel_fail("\r\nginux: replacement service retirement unavailable\r\n");
+        };
+        if replacement_domain == service_domain
+            || domain::service_boot_handle().is_some()
+            || !domain::domain_is_retired(replacement_domain)
+            || !domain::service_ready_was_delivered(replacement_domain)
+            || !domain::service_exit_was_delivered(replacement_domain)
+            || !domain::service_restart_budget_proof_complete()
+        {
+            kernel_fail("\r\nginux: replacement service generation invariant failed\r\n");
+        }
+        if ipc::last_message_audit() != Some(((replacement_domain, 4), (control_plane, 4))) {
+            kernel_fail("\r\nginux: IPC message provenance invariant failed\r\n");
+        }
+        if ipc::receive(control_plane) != ipc::Receive::PeerClosed(service_domain)
+            || ipc::receive(control_plane) != ipc::Receive::PeerClosed(replacement_domain)
+            || ipc::receive(control_plane) != ipc::Receive::Empty
+            || ipc::last_closure_audit() != Some((replacement_domain, 2))
+        {
+            kernel_fail("\r\nginux: sticky IPC peer closure invariant failed\r\n");
+        }
+        if !address_space::verify_ring3_auxiliary_exit() {
+            kernel_fail("\r\nginux: ring-3 auxiliary exit invariant failed\r\n");
+        }
+        serial_write("\r\nginux: auxiliary exit status sequenced and retired");
+        serial_write("\r\nginux: userspace auxiliary creation authority enforced");
+        serial_write("\r\nginux: userspace auxiliary stop sequenced and retired");
+        serial_write("\r\nginux: failed auxiliary load rollback enforced");
+        serial_write("\r\nginux: queued auxiliary cancellation and teardown enforced");
+        serial_write("\r\nginux: ready auxiliary cancellation and teardown enforced");
+        serial_write("\r\nginux: yielded auxiliary cancellation and teardown enforced");
+        serial_write("\r\nginux: userspace auxiliary load and admission enforced");
+        serial_write("\r\nginux: private auxiliary payload initialization enforced");
+        serial_write("\r\nginux: auxiliary initialization state observable");
+        serial_write("\r\nginux: uninitialized auxiliary admission denied");
+        serial_write("\r\nginux: explicit auxiliary start authority enforced");
+        serial_write("\r\nginux: auxiliary runtime state query enforced");
+        serial_write("\r\nginux: userspace auxiliary lifecycle observation enforced");
+        serial_write("\r\nginux: userspace auxiliary lifecycle descriptor enforced");
+        serial_write("\r\nginux: userspace auxiliary service identity enforced");
+        serial_write("\r\nginux: auxiliary management authority denied");
+        if !address_space::verify_ring3_network_service() {
+            kernel_fail("\r\nginux: ring-3 network service invariant failed\r\n");
+        }
+        serial_write("\r\nginux: isolated network device probe completed");
+        serial_write("\r\nginux: network device command validation enforced");
+        serial_write("\r\nginux: network link state configured");
+        serial_write("\r\nginux: network IPv4 configuration retained");
+        serial_write("\r\nginux: network default gateway validated");
+        serial_write("\r\nginux: network configuration generation tracked");
+        serial_write("\r\nginux: network gateway invalidated on address change");
+        serial_write("\r\nginux: bounded static network route retained");
+        serial_write("\r\nginux: coherent network state snapshot copied");
+        serial_write("\r\nginux: network device capability revoked on exit");
+        if !address_space::verify_ring3_network_observer() {
+            kernel_fail("\r\nginux: ring-3 network observer invariant failed\r\n");
+        }
+        serial_write("\r\nginux: read-only network observer isolated");
+        serial_write("\r\nginux: network mutation denied to observer");
+        serial_write("\r\nginux: observer capability revoked on exit");
+        if !address_space::verify_ring3_network_configurator() {
+            kernel_fail("\r\nginux: ring-3 network configurator invariant failed\r\n");
+        }
+        serial_write("\r\nginux: write-only network configurator isolated");
+        serial_write("\r\nginux: network observation denied to configurator");
+        serial_write("\r\nginux: denied network copy-out left memory unchanged");
+        serial_write("\r\nginux: stale network configuration apply rejected");
+        serial_write("\r\nginux: atomic network configuration apply completed");
+        serial_write("\r\nginux: configurator capability revoked on exit");
+        if !address_space::verify_ring3_network_fault_containment() {
+            kernel_fail("\r\nginux: network service fault containment invariant failed\r\n");
+        }
+        serial_write("\r\nginux: faulted network service contained");
+        serial_write("\r\nginux: faulted network authority revoked");
+        serial_write("\r\nginux: network state survived service fault");
+        if !address_space::verify_ring3_network_recovery() {
+            kernel_fail("\r\nginux: replacement network service invariant failed\r\n");
+        }
+        serial_write("\r\nginux: replacement network service observed retained state");
+        serial_write("\r\nginux: replacement network capability lifecycle isolated");
+        if !address_space::verify_ring3_volume_service() {
+            kernel_fail("\r\nginux: ring-3 persistent volume service invariant failed\r\n");
+        }
+        serial_write("\r\nginux: write-only volume service committed generation");
+        serial_write("\r\nginux: faulted volume service authority revoked");
+        serial_write("\r\nginux: persistent volume survived service fault");
+        serial_write("\r\nginux: read-only replacement recovered volume");
+        serial_write("\r\nginux: volume mutation denied to replacement");
+        if !address_space::verify_ring3_auxiliary_fault() {
+            kernel_fail("\r\nginux: ring-3 auxiliary fault invariant failed\r\n");
+        }
+        serial_write("\r\nginux: stop-only auxiliary fault executed and contained");
+        if !unsafe { arch::x86_64::timer::verify_device_wait_timeout_interrupt() } {
+            kernel_fail("\r\nginux: device-wait timeout interrupt invariant failed\r\n");
+        }
+        serial_write("\r\nginux: APIC device-wait timeout delivered");
+        let Some(virtio_status_physical) = virtio_block.status_register_physical() else {
+            kernel_fail("\r\nginux: virtio status register unavailable\r\n");
+        };
+        let Some(native_volume_device) = address_space::NativeVolumeDevice::new(
+            virtio_status_physical,
+            virtio_block,
+            virtio_mmio,
+            virtio_msix_mmio,
+            virtio_iommu_profile,
+        ) else {
+            kernel_fail("\r\nginux: native volume device profile invalid\r\n");
+        };
+        if !address_space::verify_ring3_read_only_device_grant(virtio_status_physical, 0) {
+            kernel_fail("\r\nginux: ring-3 block-device grant invariant failed\r\n");
+        }
+        if !arch::x86_64::pci::bus_master_is_disabled(virtio_block)
+            || !arch::x86_64::pci::device_is_reset(virtio_block, virtio_mmio)
+        {
+            kernel_fail("\r\nginux: block-device observer changed device state\r\n");
+        }
+        serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
+        serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
+        serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
+        let native_volume_summary = 'native_volume_validation: {
+            let mut native_volume_run = address_space::verify_native_volume_service(
                 &volume_image,
                 native_volume_device,
                 &local_apic,
                 None,
             );
-            native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-            if native_volume_run.is_some() && native_volume_quiesced {
-                serial_write("\r\nginux: native volume driver recovered in fresh domain");
-            }
-        }
-        let native_volume_valid = native_volume_run.is_some();
-        if !native_volume_quiesced {
-            serial_write("\r\nginux: native volume valid/quiesced: ");
-            serial_write_u64(u64::from(native_volume_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(native_volume_quiesced));
-            kernel_fail("\r\nginux: compiled native volume service invariant failed\r\n");
-        }
-        if !native_volume_valid {
-            serial_write(
-                "\r\nginux: persistent volume unavailable; continuing with tmpfs-only storage",
-            );
-            serial_write("\r\nginux: storage-dependent boot probes skipped");
-            break 'native_volume_validation None;
-        }
-        let Some(native_volume_run) = native_volume_run else {
-            kernel_fail("\r\nginux: native volume outcome unavailable\r\n");
-        };
-        let native_volume_outcome = native_volume_run.outcome;
-        serial_write("\r\nginux: compiled native volume service executed in ring 3");
-        serial_write("\r\nginux: native service bootstrap ABI v0 validated in ring 3");
-        serial_write("\r\nginux: native service lifecycle ABI v0 clean exit validated in ring 3");
-        serial_write("\r\nginux: compiled native service negotiated control ABI v4");
-        serial_write("\r\nginux: compiled native service validated control descriptor v4");
-        serial_write("\r\nginux: native volume service owned virtio request sequence");
-        match native_volume_outcome {
-            address_space::NativeVolumeOutcome::Initialized => {
-                serial_write("\r\nginux: native volume record initialized and flushed");
-                serial_write("\r\nginux: isolated volume prepare flush commit sequence completed");
-            }
-            address_space::NativeVolumeOutcome::Recovered => {
-                serial_write("\r\nginux: native volume record recovered after reboot");
-            }
-            address_space::NativeVolumeOutcome::Rejected => {
-                serial_write(
-                    "\r\nginux: corrupt native volume media rejected without modification",
+            let mut native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            if native_volume_run.is_none() && native_volume_quiesced {
+                serial_write("\r\nginux: initial native volume driver fault contained; retrying");
+                native_volume_run = address_space::verify_native_volume_service(
+                    &volume_image,
+                    native_volume_device,
+                    &local_apic,
+                    None,
                 );
+                native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+                if native_volume_run.is_some() && native_volume_quiesced {
+                    serial_write("\r\nginux: native volume driver recovered in fresh domain");
+                }
             }
-            address_space::NativeVolumeOutcome::RestartRequired => {
-                kernel_fail("\r\nginux: normal native volume run requested restart\r\n");
+            let native_volume_valid = native_volume_run.is_some();
+            if !native_volume_quiesced {
+                serial_write("\r\nginux: native volume valid/quiesced: ");
+                serial_write_u64(u64::from(native_volume_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(native_volume_quiesced));
+                kernel_fail("\r\nginux: compiled native volume service invariant failed\r\n");
             }
-            address_space::NativeVolumeOutcome::IncompatibleAbi => {
-                kernel_fail("\r\nginux: normal native volume run rejected its ABI\r\n");
+            if !native_volume_valid {
+                serial_write(
+                    "\r\nginux: persistent volume unavailable; continuing with tmpfs-only storage",
+                );
+                serial_write("\r\nginux: storage-dependent boot probes skipped");
+                break 'native_volume_validation None;
             }
-            address_space::NativeVolumeOutcome::Faulted => {
-                kernel_fail("\r\nginux: normal native volume run reported a fault\r\n");
+            let Some(native_volume_run) = native_volume_run else {
+                kernel_fail("\r\nginux: native volume outcome unavailable\r\n");
+            };
+            let native_volume_outcome = native_volume_run.outcome;
+            serial_write("\r\nginux: compiled native volume service executed in ring 3");
+            serial_write("\r\nginux: native service bootstrap ABI v0 validated in ring 3");
+            serial_write(
+                "\r\nginux: native service lifecycle ABI v0 clean exit validated in ring 3",
+            );
+            serial_write("\r\nginux: compiled native service negotiated control ABI v4");
+            serial_write("\r\nginux: compiled native service validated control descriptor v4");
+            serial_write("\r\nginux: native volume service owned virtio request sequence");
+            match native_volume_outcome {
+                address_space::NativeVolumeOutcome::Initialized => {
+                    serial_write("\r\nginux: native volume record initialized and flushed");
+                    serial_write(
+                        "\r\nginux: isolated volume prepare flush commit sequence completed",
+                    );
+                }
+                address_space::NativeVolumeOutcome::Recovered => {
+                    serial_write("\r\nginux: native volume record recovered after reboot");
+                }
+                address_space::NativeVolumeOutcome::Rejected => {
+                    serial_write(
+                        "\r\nginux: corrupt native volume media rejected without modification",
+                    );
+                }
+                address_space::NativeVolumeOutcome::RestartRequired => {
+                    kernel_fail("\r\nginux: normal native volume run requested restart\r\n");
+                }
+                address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                    kernel_fail("\r\nginux: normal native volume run rejected its ABI\r\n");
+                }
+                address_space::NativeVolumeOutcome::Faulted => {
+                    kernel_fail("\r\nginux: normal native volume run reported a fault\r\n");
+                }
             }
-        }
-        serial_write("\r\nginux: native volume service exited cleanly and device quiesced");
-        let replacement_volume_run = address_space::verify_native_volume_service(
-            &volume_image,
-            native_volume_device,
-            &local_apic,
-            Some(native_volume_run.service_identity),
-        );
-        let replacement_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let replacement_volume_valid = replacement_volume_run.as_ref().is_some_and(|replacement| {
-            replacement.domain != native_volume_run.domain
-                && replacement.iommu_lease_is_fresh_after(&native_volume_run)
-                && replacement.service_identity == native_volume_run.service_identity
-                && replacement.outcome
-                    == match native_volume_outcome {
-                        address_space::NativeVolumeOutcome::Initialized
-                        | address_space::NativeVolumeOutcome::Recovered => {
-                            address_space::NativeVolumeOutcome::Recovered
-                        }
-                        address_space::NativeVolumeOutcome::Rejected => {
-                            address_space::NativeVolumeOutcome::Rejected
-                        }
-                        address_space::NativeVolumeOutcome::RestartRequired => {
-                            address_space::NativeVolumeOutcome::RestartRequired
-                        }
-                        address_space::NativeVolumeOutcome::IncompatibleAbi => {
-                            address_space::NativeVolumeOutcome::IncompatibleAbi
-                        }
-                        address_space::NativeVolumeOutcome::Faulted => {
-                            address_space::NativeVolumeOutcome::Faulted
-                        }
-                    }
-        });
-        if !replacement_volume_valid || !replacement_volume_quiesced {
-            serial_write("\r\nginux: replacement native volume valid/quiesced: ");
-            serial_write_u64(u64::from(replacement_volume_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(replacement_volume_quiesced));
-            kernel_fail("\r\nginux: replacement native volume service invariant failed\r\n");
-        }
-        let Some(replacement_volume_run) = replacement_volume_run else {
-            kernel_fail("\r\nginux: replacement native volume outcome unavailable\r\n");
-        };
-        serial_write("\r\nginux: replacement native volume domain generation started");
-        serial_write("\r\nginux: native volume service identity survived replacement");
-        serial_write(match native_volume_outcome {
-            address_space::NativeVolumeOutcome::Initialized
-            | address_space::NativeVolumeOutcome::Recovered => {
-                "\r\nginux: replacement native volume service recovered exact record"
-            }
-            address_space::NativeVolumeOutcome::Rejected => {
-                "\r\nginux: replacement native volume service repeated fail-closed rejection"
-            }
-            address_space::NativeVolumeOutcome::RestartRequired => {
-                "\r\nginux: replacement native volume service requested restart unexpectedly"
-            }
-            address_space::NativeVolumeOutcome::IncompatibleAbi => {
-                "\r\nginux: replacement native volume service rejected its ABI unexpectedly"
-            }
-            address_space::NativeVolumeOutcome::Faulted => {
-                "\r\nginux: replacement native volume service faulted unexpectedly"
-            }
-        });
-        serial_write("\r\nginux: replacement native volume resources retired cleanly");
-        let incompatible_volume_run = address_space::verify_native_volume_service_incompatible_abi(
-            &volume_image,
-            native_volume_device,
-            &local_apic,
-            native_volume_run.service_identity,
-        );
-        let incompatible_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let incompatible_volume_valid =
-            incompatible_volume_run
-                .as_ref()
-                .is_some_and(|incompatible| {
-                    incompatible.domain != native_volume_run.domain
-                        && incompatible.domain != replacement_volume_run.domain
-                        && incompatible.iommu_lease_is_fresh_after(&replacement_volume_run)
-                        && incompatible.service_identity == native_volume_run.service_identity
-                        && incompatible.outcome
-                            == address_space::NativeVolumeOutcome::IncompatibleAbi
+            serial_write("\r\nginux: native volume service exited cleanly and device quiesced");
+            let replacement_volume_run = address_space::verify_native_volume_service(
+                &volume_image,
+                native_volume_device,
+                &local_apic,
+                Some(native_volume_run.service_identity),
+            );
+            let replacement_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let replacement_volume_valid =
+                replacement_volume_run.as_ref().is_some_and(|replacement| {
+                    replacement.domain != native_volume_run.domain
+                        && replacement.iommu_lease_is_fresh_after(&native_volume_run)
+                        && replacement.service_identity == native_volume_run.service_identity
+                        && replacement.outcome
+                            == match native_volume_outcome {
+                                address_space::NativeVolumeOutcome::Initialized
+                                | address_space::NativeVolumeOutcome::Recovered => {
+                                    address_space::NativeVolumeOutcome::Recovered
+                                }
+                                address_space::NativeVolumeOutcome::Rejected => {
+                                    address_space::NativeVolumeOutcome::Rejected
+                                }
+                                address_space::NativeVolumeOutcome::RestartRequired => {
+                                    address_space::NativeVolumeOutcome::RestartRequired
+                                }
+                                address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                                    address_space::NativeVolumeOutcome::IncompatibleAbi
+                                }
+                                address_space::NativeVolumeOutcome::Faulted => {
+                                    address_space::NativeVolumeOutcome::Faulted
+                                }
+                            }
                 });
-        if !incompatible_volume_valid || !incompatible_volume_quiesced {
-            serial_write("\r\nginux: incompatible native volume valid/quiesced: ");
-            serial_write_u64(u64::from(incompatible_volume_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(incompatible_volume_quiesced));
-            kernel_fail("\r\nginux: incompatible native volume ABI invariant failed\r\n");
-        }
-        let Some(incompatible_volume_run) = incompatible_volume_run else {
-            kernel_fail("\r\nginux: incompatible native volume outcome unavailable\r\n");
-        };
-        serial_write(
-            "\r\nginux: incompatible native service ABI rejected before device activation",
-        );
-        serial_write("\r\nginux: incompatible native service generation retired cleanly");
-        let recovered_after_incompatible = address_space::verify_native_volume_service(
-            &volume_image,
-            native_volume_device,
-            &local_apic,
-            Some(native_volume_run.service_identity),
-        );
-        let recovered_after_incompatible_quiesced =
-            arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let recovered_after_incompatible_valid =
-            recovered_after_incompatible
+            if !replacement_volume_valid || !replacement_volume_quiesced {
+                serial_write("\r\nginux: replacement native volume valid/quiesced: ");
+                serial_write_u64(u64::from(replacement_volume_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(replacement_volume_quiesced));
+                kernel_fail("\r\nginux: replacement native volume service invariant failed\r\n");
+            }
+            let Some(replacement_volume_run) = replacement_volume_run else {
+                kernel_fail("\r\nginux: replacement native volume outcome unavailable\r\n");
+            };
+            serial_write("\r\nginux: replacement native volume domain generation started");
+            serial_write("\r\nginux: native volume service identity survived replacement");
+            serial_write(match native_volume_outcome {
+                address_space::NativeVolumeOutcome::Initialized
+                | address_space::NativeVolumeOutcome::Recovered => {
+                    "\r\nginux: replacement native volume service recovered exact record"
+                }
+                address_space::NativeVolumeOutcome::Rejected => {
+                    "\r\nginux: replacement native volume service repeated fail-closed rejection"
+                }
+                address_space::NativeVolumeOutcome::RestartRequired => {
+                    "\r\nginux: replacement native volume service requested restart unexpectedly"
+                }
+                address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                    "\r\nginux: replacement native volume service rejected its ABI unexpectedly"
+                }
+                address_space::NativeVolumeOutcome::Faulted => {
+                    "\r\nginux: replacement native volume service faulted unexpectedly"
+                }
+            });
+            serial_write("\r\nginux: replacement native volume resources retired cleanly");
+            let incompatible_volume_run =
+                address_space::verify_native_volume_service_incompatible_abi(
+                    &volume_image,
+                    native_volume_device,
+                    &local_apic,
+                    native_volume_run.service_identity,
+                );
+            let incompatible_volume_quiesced =
+                arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let incompatible_volume_valid =
+                incompatible_volume_run
+                    .as_ref()
+                    .is_some_and(|incompatible| {
+                        incompatible.domain != native_volume_run.domain
+                            && incompatible.domain != replacement_volume_run.domain
+                            && incompatible.iommu_lease_is_fresh_after(&replacement_volume_run)
+                            && incompatible.service_identity == native_volume_run.service_identity
+                            && incompatible.outcome
+                                == address_space::NativeVolumeOutcome::IncompatibleAbi
+                    });
+            if !incompatible_volume_valid || !incompatible_volume_quiesced {
+                serial_write("\r\nginux: incompatible native volume valid/quiesced: ");
+                serial_write_u64(u64::from(incompatible_volume_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(incompatible_volume_quiesced));
+                kernel_fail("\r\nginux: incompatible native volume ABI invariant failed\r\n");
+            }
+            let Some(incompatible_volume_run) = incompatible_volume_run else {
+                kernel_fail("\r\nginux: incompatible native volume outcome unavailable\r\n");
+            };
+            serial_write(
+                "\r\nginux: incompatible native service ABI rejected before device activation",
+            );
+            serial_write("\r\nginux: incompatible native service generation retired cleanly");
+            let recovered_after_incompatible = address_space::verify_native_volume_service(
+                &volume_image,
+                native_volume_device,
+                &local_apic,
+                Some(native_volume_run.service_identity),
+            );
+            let recovered_after_incompatible_quiesced =
+                arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let recovered_after_incompatible_valid = recovered_after_incompatible
                 .as_ref()
                 .is_some_and(|recovered| {
                     recovered.domain != native_volume_run.domain
@@ -2691,71 +2732,151 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                                 }
                             }
                 });
-        if !recovered_after_incompatible_valid || !recovered_after_incompatible_quiesced {
-            serial_write("\r\nginux: post-ABI-rejection native volume valid/quiesced: ");
-            serial_write_u64(u64::from(recovered_after_incompatible_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(recovered_after_incompatible_quiesced));
-            kernel_fail("\r\nginux: post-ABI-rejection recovery invariant failed\r\n");
-        }
-        let Some(recovered_after_incompatible) = recovered_after_incompatible else {
-            kernel_fail("\r\nginux: post-ABI-rejection outcome unavailable\r\n");
-        };
-        serial_write("\r\nginux: compatible native service recovered after ABI rejection");
-        let incompatible_descriptor_run =
-            address_space::verify_native_volume_service_incompatible_descriptor(
+            if !recovered_after_incompatible_valid || !recovered_after_incompatible_quiesced {
+                serial_write("\r\nginux: post-ABI-rejection native volume valid/quiesced: ");
+                serial_write_u64(u64::from(recovered_after_incompatible_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(recovered_after_incompatible_quiesced));
+                kernel_fail("\r\nginux: post-ABI-rejection recovery invariant failed\r\n");
+            }
+            let Some(recovered_after_incompatible) = recovered_after_incompatible else {
+                kernel_fail("\r\nginux: post-ABI-rejection outcome unavailable\r\n");
+            };
+            serial_write("\r\nginux: compatible native service recovered after ABI rejection");
+            let incompatible_descriptor_run =
+                address_space::verify_native_volume_service_incompatible_descriptor(
+                    &volume_image,
+                    native_volume_device,
+                    &local_apic,
+                    native_volume_run.service_identity,
+                );
+            let incompatible_descriptor_quiesced =
+                arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let incompatible_descriptor_valid =
+                incompatible_descriptor_run
+                    .as_ref()
+                    .is_some_and(|incompatible| {
+                        incompatible.domain != native_volume_run.domain
+                            && incompatible.domain != replacement_volume_run.domain
+                            && incompatible.domain != incompatible_volume_run.domain
+                            && incompatible.domain != recovered_after_incompatible.domain
+                            && incompatible
+                                .iommu_lease_is_fresh_after(&recovered_after_incompatible)
+                            && incompatible.service_identity == native_volume_run.service_identity
+                            && incompatible.outcome
+                                == address_space::NativeVolumeOutcome::IncompatibleAbi
+                    });
+            if !incompatible_descriptor_valid || !incompatible_descriptor_quiesced {
+                serial_write("\r\nginux: incompatible native descriptor valid/quiesced: ");
+                serial_write_u64(u64::from(incompatible_descriptor_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(incompatible_descriptor_quiesced));
+                kernel_fail("\r\nginux: incompatible native descriptor invariant failed\r\n");
+            }
+            let Some(incompatible_descriptor_run) = incompatible_descriptor_run else {
+                kernel_fail("\r\nginux: incompatible native descriptor outcome unavailable\r\n");
+            };
+            serial_write(
+                "\r\nginux: malformed native control descriptor rejected before device activation",
+            );
+            serial_write("\r\nginux: malformed descriptor service generation retired cleanly");
+            let recovered_after_descriptor = address_space::verify_native_volume_service(
+                &volume_image,
+                native_volume_device,
+                &local_apic,
+                Some(native_volume_run.service_identity),
+            );
+            let recovered_after_descriptor_quiesced =
+                arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let recovered_after_descriptor_valid =
+                recovered_after_descriptor
+                    .as_ref()
+                    .is_some_and(|recovered| {
+                        recovered.domain != native_volume_run.domain
+                            && recovered.domain != replacement_volume_run.domain
+                            && recovered.domain != incompatible_volume_run.domain
+                            && recovered.domain != recovered_after_incompatible.domain
+                            && recovered.domain != incompatible_descriptor_run.domain
+                            && recovered.iommu_lease_is_fresh_after(&incompatible_descriptor_run)
+                            && recovered.service_identity == native_volume_run.service_identity
+                            && recovered.outcome
+                                == match native_volume_outcome {
+                                    address_space::NativeVolumeOutcome::Initialized
+                                    | address_space::NativeVolumeOutcome::Recovered => {
+                                        address_space::NativeVolumeOutcome::Recovered
+                                    }
+                                    address_space::NativeVolumeOutcome::Rejected => {
+                                        address_space::NativeVolumeOutcome::Rejected
+                                    }
+                                    address_space::NativeVolumeOutcome::RestartRequired => {
+                                        address_space::NativeVolumeOutcome::RestartRequired
+                                    }
+                                    address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                                        address_space::NativeVolumeOutcome::IncompatibleAbi
+                                    }
+                                    address_space::NativeVolumeOutcome::Faulted => {
+                                        address_space::NativeVolumeOutcome::Faulted
+                                    }
+                                }
+                    });
+            if !recovered_after_descriptor_valid || !recovered_after_descriptor_quiesced {
+                serial_write("\r\nginux: post-descriptor-rejection native volume valid/quiesced: ");
+                serial_write_u64(u64::from(recovered_after_descriptor_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(recovered_after_descriptor_quiesced));
+                kernel_fail("\r\nginux: post-descriptor-rejection recovery invariant failed\r\n");
+            }
+            let Some(recovered_after_descriptor) = recovered_after_descriptor else {
+                kernel_fail("\r\nginux: post-descriptor-rejection outcome unavailable\r\n");
+            };
+            serial_write(
+                "\r\nginux: compatible native service recovered after descriptor rejection",
+            );
+            let faulted_volume_run = address_space::verify_native_volume_service_fault(
                 &volume_image,
                 native_volume_device,
                 &local_apic,
                 native_volume_run.service_identity,
             );
-        let incompatible_descriptor_quiesced =
-            arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let incompatible_descriptor_valid =
-            incompatible_descriptor_run
-                .as_ref()
-                .is_some_and(|incompatible| {
-                    incompatible.domain != native_volume_run.domain
-                        && incompatible.domain != replacement_volume_run.domain
-                        && incompatible.domain != incompatible_volume_run.domain
-                        && incompatible.domain != recovered_after_incompatible.domain
-                        && incompatible.iommu_lease_is_fresh_after(&recovered_after_incompatible)
-                        && incompatible.service_identity == native_volume_run.service_identity
-                        && incompatible.outcome
-                            == address_space::NativeVolumeOutcome::IncompatibleAbi
-                });
-        if !incompatible_descriptor_valid || !incompatible_descriptor_quiesced {
-            serial_write("\r\nginux: incompatible native descriptor valid/quiesced: ");
-            serial_write_u64(u64::from(incompatible_descriptor_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(incompatible_descriptor_quiesced));
-            kernel_fail("\r\nginux: incompatible native descriptor invariant failed\r\n");
-        }
-        let Some(incompatible_descriptor_run) = incompatible_descriptor_run else {
-            kernel_fail("\r\nginux: incompatible native descriptor outcome unavailable\r\n");
-        };
-        serial_write(
-            "\r\nginux: malformed native control descriptor rejected before device activation",
-        );
-        serial_write("\r\nginux: malformed descriptor service generation retired cleanly");
-        let recovered_after_descriptor = address_space::verify_native_volume_service(
-            &volume_image,
-            native_volume_device,
-            &local_apic,
-            Some(native_volume_run.service_identity),
-        );
-        let recovered_after_descriptor_quiesced =
-            arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let recovered_after_descriptor_valid =
-            recovered_after_descriptor
-                .as_ref()
-                .is_some_and(|recovered| {
+            let faulted_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let faulted_volume_valid = faulted_volume_run.as_ref().is_some_and(|faulted| {
+                faulted.domain != native_volume_run.domain
+                    && faulted.domain != replacement_volume_run.domain
+                    && faulted.domain != incompatible_volume_run.domain
+                    && faulted.domain != recovered_after_incompatible.domain
+                    && faulted.domain != incompatible_descriptor_run.domain
+                    && faulted.domain != recovered_after_descriptor.domain
+                    && faulted.iommu_lease_is_fresh_after(&recovered_after_descriptor)
+                    && faulted.service_identity == native_volume_run.service_identity
+                    && faulted.outcome == address_space::NativeVolumeOutcome::Faulted
+            });
+            if !faulted_volume_valid || !faulted_volume_quiesced {
+                serial_write("\r\nginux: faulted native volume valid/quiesced: ");
+                serial_write_u64(u64::from(faulted_volume_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(faulted_volume_quiesced));
+                kernel_fail("\r\nginux: faulted native volume service invariant failed\r\n");
+            }
+            let Some(faulted_volume_run) = faulted_volume_run else {
+                kernel_fail("\r\nginux: faulted native volume outcome unavailable\r\n");
+            };
+            serial_write("\r\nginux: compiled native volume service fault contained");
+            serial_write("\r\nginux: faulted native device service authority revoked");
+            serial_write("\r\nginux: incomplete native DMA scrubbed after fault");
+            let recovered_after_fault = address_space::verify_native_volume_service(
+                &volume_image,
+                native_volume_device,
+                &local_apic,
+                Some(native_volume_run.service_identity),
+            );
+            let recovered_after_fault_quiesced =
+                arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let recovered_after_fault_valid =
+                recovered_after_fault.as_ref().is_some_and(|recovered| {
                     recovered.domain != native_volume_run.domain
                         && recovered.domain != replacement_volume_run.domain
-                        && recovered.domain != incompatible_volume_run.domain
-                        && recovered.domain != recovered_after_incompatible.domain
-                        && recovered.domain != incompatible_descriptor_run.domain
-                        && recovered.iommu_lease_is_fresh_after(&incompatible_descriptor_run)
+                        && recovered.domain != faulted_volume_run.domain
+                        && recovered.iommu_lease_is_fresh_after(&faulted_volume_run)
                         && recovered.service_identity == native_volume_run.service_identity
                         && recovered.outcome
                             == match native_volume_outcome {
@@ -2777,150 +2898,74 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                                 }
                             }
                 });
-        if !recovered_after_descriptor_valid || !recovered_after_descriptor_quiesced {
-            serial_write("\r\nginux: post-descriptor-rejection native volume valid/quiesced: ");
-            serial_write_u64(u64::from(recovered_after_descriptor_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(recovered_after_descriptor_quiesced));
-            kernel_fail("\r\nginux: post-descriptor-rejection recovery invariant failed\r\n");
-        }
-        let Some(recovered_after_descriptor) = recovered_after_descriptor else {
-            kernel_fail("\r\nginux: post-descriptor-rejection outcome unavailable\r\n");
-        };
-        serial_write("\r\nginux: compatible native service recovered after descriptor rejection");
-        let faulted_volume_run = address_space::verify_native_volume_service_fault(
-            &volume_image,
-            native_volume_device,
-            &local_apic,
-            native_volume_run.service_identity,
-        );
-        let faulted_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let faulted_volume_valid = faulted_volume_run.as_ref().is_some_and(|faulted| {
-            faulted.domain != native_volume_run.domain
-                && faulted.domain != replacement_volume_run.domain
-                && faulted.domain != incompatible_volume_run.domain
-                && faulted.domain != recovered_after_incompatible.domain
-                && faulted.domain != incompatible_descriptor_run.domain
-                && faulted.domain != recovered_after_descriptor.domain
-                && faulted.iommu_lease_is_fresh_after(&recovered_after_descriptor)
-                && faulted.service_identity == native_volume_run.service_identity
-                && faulted.outcome == address_space::NativeVolumeOutcome::Faulted
-        });
-        if !faulted_volume_valid || !faulted_volume_quiesced {
-            serial_write("\r\nginux: faulted native volume valid/quiesced: ");
-            serial_write_u64(u64::from(faulted_volume_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(faulted_volume_quiesced));
-            kernel_fail("\r\nginux: faulted native volume service invariant failed\r\n");
-        }
-        let Some(faulted_volume_run) = faulted_volume_run else {
-            kernel_fail("\r\nginux: faulted native volume outcome unavailable\r\n");
-        };
-        serial_write("\r\nginux: compiled native volume service fault contained");
-        serial_write("\r\nginux: faulted native device service authority revoked");
-        serial_write("\r\nginux: incomplete native DMA scrubbed after fault");
-        let recovered_after_fault = address_space::verify_native_volume_service(
-            &volume_image,
-            native_volume_device,
-            &local_apic,
-            Some(native_volume_run.service_identity),
-        );
-        let recovered_after_fault_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let recovered_after_fault_valid = recovered_after_fault.as_ref().is_some_and(|recovered| {
-            recovered.domain != native_volume_run.domain
-                && recovered.domain != replacement_volume_run.domain
-                && recovered.domain != faulted_volume_run.domain
-                && recovered.iommu_lease_is_fresh_after(&faulted_volume_run)
-                && recovered.service_identity == native_volume_run.service_identity
-                && recovered.outcome
-                    == match native_volume_outcome {
-                        address_space::NativeVolumeOutcome::Initialized
-                        | address_space::NativeVolumeOutcome::Recovered => {
-                            address_space::NativeVolumeOutcome::Recovered
-                        }
-                        address_space::NativeVolumeOutcome::Rejected => {
-                            address_space::NativeVolumeOutcome::Rejected
-                        }
-                        address_space::NativeVolumeOutcome::RestartRequired => {
-                            address_space::NativeVolumeOutcome::RestartRequired
-                        }
-                        address_space::NativeVolumeOutcome::IncompatibleAbi => {
-                            address_space::NativeVolumeOutcome::IncompatibleAbi
-                        }
-                        address_space::NativeVolumeOutcome::Faulted => {
-                            address_space::NativeVolumeOutcome::Faulted
-                        }
-                    }
-        });
-        if !recovered_after_fault_valid || !recovered_after_fault_quiesced {
-            serial_write("\r\nginux: post-fault native volume valid/quiesced: ");
-            serial_write_u64(u64::from(recovered_after_fault_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(recovered_after_fault_quiesced));
-            kernel_fail("\r\nginux: post-fault native volume recovery invariant failed\r\n");
-        }
-        let Some(recovered_after_fault) = recovered_after_fault else {
-            kernel_fail("\r\nginux: post-fault native volume outcome unavailable\r\n");
-        };
-        serial_write("\r\nginux: post-fault native volume generation started");
-        serial_write("\r\nginux: native volume identity survived actual driver fault");
-        serial_write(match native_volume_outcome {
-            address_space::NativeVolumeOutcome::Initialized
-            | address_space::NativeVolumeOutcome::Recovered => {
-                "\r\nginux: post-fault native volume service recovered exact record"
+            if !recovered_after_fault_valid || !recovered_after_fault_quiesced {
+                serial_write("\r\nginux: post-fault native volume valid/quiesced: ");
+                serial_write_u64(u64::from(recovered_after_fault_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(recovered_after_fault_quiesced));
+                kernel_fail("\r\nginux: post-fault native volume recovery invariant failed\r\n");
             }
-            address_space::NativeVolumeOutcome::Rejected => {
-                "\r\nginux: post-fault native volume service preserved rejection"
+            let Some(recovered_after_fault) = recovered_after_fault else {
+                kernel_fail("\r\nginux: post-fault native volume outcome unavailable\r\n");
+            };
+            serial_write("\r\nginux: post-fault native volume generation started");
+            serial_write("\r\nginux: native volume identity survived actual driver fault");
+            serial_write(match native_volume_outcome {
+                address_space::NativeVolumeOutcome::Initialized
+                | address_space::NativeVolumeOutcome::Recovered => {
+                    "\r\nginux: post-fault native volume service recovered exact record"
+                }
+                address_space::NativeVolumeOutcome::Rejected => {
+                    "\r\nginux: post-fault native volume service preserved rejection"
+                }
+                address_space::NativeVolumeOutcome::RestartRequired => {
+                    "\r\nginux: post-fault native volume service requested restart unexpectedly"
+                }
+                address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                    "\r\nginux: post-fault native volume service rejected its ABI unexpectedly"
+                }
+                address_space::NativeVolumeOutcome::Faulted => {
+                    "\r\nginux: post-fault native volume service faulted unexpectedly"
+                }
+            });
+            serial_write("\r\nginux: post-fault native volume resources retired cleanly");
+            let cancelled_volume_run = address_space::verify_native_volume_service_cancellation(
+                &volume_image,
+                native_volume_device,
+                &local_apic,
+                native_volume_run.service_identity,
+            );
+            let cancelled_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let cancelled_volume_valid = cancelled_volume_run.as_ref().is_some_and(|cancelled| {
+                cancelled.domain != native_volume_run.domain
+                    && cancelled.domain != replacement_volume_run.domain
+                    && cancelled.domain != faulted_volume_run.domain
+                    && cancelled.domain != recovered_after_fault.domain
+                    && cancelled.iommu_lease_is_fresh_after(&recovered_after_fault)
+                    && cancelled.service_identity == native_volume_run.service_identity
+                    && cancelled.outcome == address_space::NativeVolumeOutcome::RestartRequired
+            });
+            if !cancelled_volume_valid || !cancelled_volume_quiesced {
+                serial_write("\r\nginux: cancelled native volume valid/quiesced: ");
+                serial_write_u64(u64::from(cancelled_volume_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(cancelled_volume_quiesced));
+                kernel_fail("\r\nginux: native volume cancellation invariant failed\r\n");
             }
-            address_space::NativeVolumeOutcome::RestartRequired => {
-                "\r\nginux: post-fault native volume service requested restart unexpectedly"
-            }
-            address_space::NativeVolumeOutcome::IncompatibleAbi => {
-                "\r\nginux: post-fault native volume service rejected its ABI unexpectedly"
-            }
-            address_space::NativeVolumeOutcome::Faulted => {
-                "\r\nginux: post-fault native volume service faulted unexpectedly"
-            }
-        });
-        serial_write("\r\nginux: post-fault native volume resources retired cleanly");
-        let cancelled_volume_run = address_space::verify_native_volume_service_cancellation(
-            &volume_image,
-            native_volume_device,
-            &local_apic,
-            native_volume_run.service_identity,
-        );
-        let cancelled_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let cancelled_volume_valid = cancelled_volume_run.as_ref().is_some_and(|cancelled| {
-            cancelled.domain != native_volume_run.domain
-                && cancelled.domain != replacement_volume_run.domain
-                && cancelled.domain != faulted_volume_run.domain
-                && cancelled.domain != recovered_after_fault.domain
-                && cancelled.iommu_lease_is_fresh_after(&recovered_after_fault)
-                && cancelled.service_identity == native_volume_run.service_identity
-                && cancelled.outcome == address_space::NativeVolumeOutcome::RestartRequired
-        });
-        if !cancelled_volume_valid || !cancelled_volume_quiesced {
-            serial_write("\r\nginux: cancelled native volume valid/quiesced: ");
-            serial_write_u64(u64::from(cancelled_volume_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(cancelled_volume_quiesced));
-            kernel_fail("\r\nginux: native volume cancellation invariant failed\r\n");
-        }
-        let Some(cancelled_volume_run) = cancelled_volume_run else {
-            kernel_fail("\r\nginux: cancelled native volume outcome unavailable\r\n");
-        };
-        serial_write("\r\nginux: notified native volume timeout cancelled safely");
-        serial_write("\r\nginux: cancelled native volume request generation retired");
-        let recovered_after_cancellation = address_space::verify_native_volume_service(
-            &volume_image,
-            native_volume_device,
-            &local_apic,
-            Some(native_volume_run.service_identity),
-        );
-        let recovered_after_cancellation_quiesced =
-            arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
-        let recovered_after_cancellation_valid =
-            recovered_after_cancellation
+            let Some(cancelled_volume_run) = cancelled_volume_run else {
+                kernel_fail("\r\nginux: cancelled native volume outcome unavailable\r\n");
+            };
+            serial_write("\r\nginux: notified native volume timeout cancelled safely");
+            serial_write("\r\nginux: cancelled native volume request generation retired");
+            let recovered_after_cancellation = address_space::verify_native_volume_service(
+                &volume_image,
+                native_volume_device,
+                &local_apic,
+                Some(native_volume_run.service_identity),
+            );
+            let recovered_after_cancellation_quiesced =
+                arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+            let recovered_after_cancellation_valid = recovered_after_cancellation
                 .as_ref()
                 .is_some_and(|recovered| {
                     recovered.domain != native_volume_run.domain
@@ -2950,670 +2995,671 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                                 }
                             }
                 });
-        if !recovered_after_cancellation_valid || !recovered_after_cancellation_quiesced {
-            serial_write("\r\nginux: post-cancellation native volume valid/quiesced: ");
-            serial_write_u64(u64::from(recovered_after_cancellation_valid));
-            serial_write(" ");
-            serial_write_u64(u64::from(recovered_after_cancellation_quiesced));
-            kernel_fail("\r\nginux: post-cancellation native volume invariant failed\r\n");
+            if !recovered_after_cancellation_valid || !recovered_after_cancellation_quiesced {
+                serial_write("\r\nginux: post-cancellation native volume valid/quiesced: ");
+                serial_write_u64(u64::from(recovered_after_cancellation_valid));
+                serial_write(" ");
+                serial_write_u64(u64::from(recovered_after_cancellation_quiesced));
+                kernel_fail("\r\nginux: post-cancellation native volume invariant failed\r\n");
+            }
+            Some(native_volume_outcome)
+        };
+        if !address_space::verify_native_network_service(&network_image) {
+            kernel_fail("\r\nginux: compiled native network service invariant failed\r\n");
         }
-        Some(native_volume_outcome)
-    };
-    if !address_space::verify_native_network_service(&network_image) {
-        kernel_fail("\r\nginux: compiled native network service invariant failed\r\n");
-    }
-    serial_write("\r\nginux: compiled native network service executed in ring 3");
-    serial_write("\r\nginux: native network service negotiated control ABI v4");
-    serial_write("\r\nginux: native network service validated control descriptor v4");
-    serial_write("\r\nginux: native network service started without boot capabilities");
-    serial_write("\r\nginux: native network service exited through lifecycle ABI v0");
-    serial_write("\r\nginux: native network service address space retired cleanly");
-    if !address_space::verify_native_network_bootstrap(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-    ) {
-        kernel_fail("\r\nginux: native network bootstrap invariant failed\r\n");
-    }
-    serial_write("\r\nginux: native network bootstrap ABI v0 validated in ring 3");
-    serial_write("\r\nginux: native network read capability exercised in ring 3");
-    serial_write("\r\nginux: native network DMA lease remained device-inaccessible");
-    serial_write("\r\nginux: native network MMIO remained PCI-disabled");
-    serial_write("\r\nginux: native network bootstrap resources retired cleanly");
-    if !address_space::verify_native_network_bootstrap_rejection(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-    ) {
-        kernel_fail("\r\nginux: malformed native network bootstrap invariant failed\r\n");
-    }
-    serial_write("\r\nginux: malformed native network bootstrap rejected in ring 3");
-    serial_write("\r\nginux: malformed network generation fault contained");
-    serial_write("\r\nginux: malformed network capability revoked");
-    serial_write("\r\nginux: malformed network resources retired before device activation");
-    if !address_space::verify_native_network_dma_confinement(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-    ) {
-        kernel_fail("\r\nginux: native network DMA confinement invariant failed\r\n");
-    }
-    serial_write("\r\nginux: native network generation received exact VT-d domain");
-    serial_write("\r\nginux: native network VT-d activated before PCI authority");
-    serial_write("\r\nginux: native network bus mastering remained disabled");
-    serial_write("\r\nginux: native network VT-d retired before DMA release");
-    serial_write("\r\nginux: native network translation tables scrubbed cleanly");
-    if !address_space::verify_native_network_dma_fault_teardown(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-    ) {
-        kernel_fail("\r\nginux: faulted native network VT-d teardown failed\r\n");
-    }
-    serial_write("\r\nginux: faulted native network generation retired active VT-d");
-    serial_write("\r\nginux: faulted network translation disabled before DMA scrub");
-    serial_write("\r\nginux: faulted network VT-d tables released cleanly");
-    if !address_space::verify_native_network_empty_queue_activation(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-    ) {
-        kernel_fail("\r\nginux: native network empty-queue delegation failed\r\n");
-    }
-    serial_write("\r\nginux: native network service configured empty RX/TX queues");
-    serial_write("\r\nginux: native network queue layout validated by kernel");
-    serial_write("\r\nginux: native network bus mastering authorized by capability");
-    serial_write("\r\nginux: native network bus mastering enabled last");
-    serial_write("\r\nginux: native network device quiesced before VT-d teardown");
-    serial_write("\r\nginux: native network empty-queue generation retired cleanly");
-    if !address_space::verify_native_network_active_fault_teardown(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-    ) {
-        kernel_fail("\r\nginux: active native network fault teardown failed\r\n");
-    }
-    serial_write("\r\nginux: active native network driver fault injected at call boundary");
-    serial_write("\r\nginux: faulted native network queues were live before quiescence");
-    serial_write("\r\nginux: faulted native network bus mastering revoked");
-    serial_write("\r\nginux: faulted native network device reset before VT-d teardown");
-    serial_write("\r\nginux: active network fault retired translation before DMA");
-    serial_write("\r\nginux: active network fault contained without kernel panic");
-    if !address_space::verify_native_network_transmit_probe(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: native network service transmit failed\r\n");
-    }
-    serial_write("\r\nginux: native network service published bounded TX descriptor");
-    serial_write("\r\nginux: native network service notified transmit queue");
-    serial_write("\r\nginux: native network service blocked for TX interrupt");
-    serial_write("\r\nginux: native network TX replay rejected");
-    serial_write("\r\nginux: kernel validated native network TX descriptor and payload");
-    serial_write("\r\nginux: native network TX payload guards preserved");
-    serial_write("\r\nginux: native network service transmitted Ethernet probe");
-    serial_write("\r\nginux: native network TX interrupt route retired cleanly");
-    if !address_space::verify_native_network_transmit_timeout(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: native network notified timeout was not contained\r\n");
-    }
-    serial_write("\r\nginux: notified native network timeout cancelled safely");
-    serial_write("\r\nginux: ambiguous native network generation retired");
-    if !address_space::verify_native_network_transmit_probe(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: native network timeout recovery failed\r\n");
-    }
-    serial_write("\r\nginux: fresh native network generation recovered after timeout");
-    serial_write("\r\nginux: recovered network generation completed TX interrupt");
-    if !address_space::verify_native_network_receive_arp(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: native network service ARP receive failed\r\n");
-    }
-    serial_write("\r\nginux: native network service published bounded RX descriptor");
-    serial_write("\r\nginux: native network service transmitted ARP request");
-    serial_write("\r\nginux: native network service blocked for RX interrupt");
-    serial_write("\r\nginux: native network RX replay rejected");
-    serial_write("\r\nginux: native network service validated gateway ARP reply");
-    serial_write("\r\nginux: kernel validated native network RX descriptor and ARP reply");
-    serial_write("\r\nginux: native network RX payload guards preserved");
-    serial_write("\r\nginux: native network TX and RX interrupt routes retired cleanly");
-    if !address_space::verify_native_network_receive_timeout(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: native network RX timeout was not contained\r\n");
-    }
-    serial_write("\r\nginux: native network RX timeout followed completed TX");
-    serial_write("\r\nginux: ambiguous native network RX generation retired");
-    if !address_space::verify_native_network_receive_arp(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: native network RX timeout recovery failed\r\n");
-    }
-    serial_write("\r\nginux: fresh native network generation recovered after RX timeout");
-    serial_write("\r\nginux: recovered network generation validated gateway ARP reply");
-    if !address_space::verify_native_network_malformed_receive(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: malformed native network receive was not contained\r\n");
-    }
-    serial_write("\r\nginux: malformed network ARP reply injected after RX completion");
-    serial_write("\r\nginux: native network service rejected malformed ARP reply");
-    serial_write("\r\nginux: malformed network receive generation retired safely");
-    if !address_space::verify_native_network_receive_arp(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: malformed native network receive recovery failed\r\n");
-    }
-    serial_write("\r\nginux: fresh native network generation recovered after malformed reply");
-    serial_write("\r\nginux: post-malformation network generation validated ARP reply");
-    if !address_space::verify_native_network_receive_reuse(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: native network receive replenishment failed\r\n");
-    }
-    serial_write("\r\nginux: native network service replenished RX descriptor");
-    serial_write("\r\nginux: native network service completed second ARP exchange");
-    serial_write("\r\nginux: native network request generations one through four completed");
-    serial_write("\r\nginux: kernel validated both native network ARP exchanges");
-    if !address_space::verify_native_network_ping_gateway(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: native network ICMP gateway probe failed\r\n");
-    }
-    serial_write("\r\nginux: native network ICMP gateway request transmitted");
-    serial_write("\r\nginux: native network ICMP gateway reply validated");
-    if !address_space::verify_native_network_packet_handoff(
-        &network_image,
-        &protocol_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        serial_write("\r\nginux: compiled native network service executed in ring 3");
+        serial_write("\r\nginux: native network service negotiated control ABI v4");
+        serial_write("\r\nginux: native network service validated control descriptor v4");
+        serial_write("\r\nginux: native network service started without boot capabilities");
+        serial_write("\r\nginux: native network service exited through lifecycle ABI v0");
+        serial_write("\r\nginux: native network service address space retired cleanly");
+        if !address_space::verify_native_network_bootstrap(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+        ) {
+            kernel_fail("\r\nginux: native network bootstrap invariant failed\r\n");
+        }
+        serial_write("\r\nginux: native network bootstrap ABI v0 validated in ring 3");
+        serial_write("\r\nginux: native network read capability exercised in ring 3");
+        serial_write("\r\nginux: native network DMA lease remained device-inaccessible");
+        serial_write("\r\nginux: native network MMIO remained PCI-disabled");
+        serial_write("\r\nginux: native network bootstrap resources retired cleanly");
+        if !address_space::verify_native_network_bootstrap_rejection(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+        ) {
+            kernel_fail("\r\nginux: malformed native network bootstrap invariant failed\r\n");
+        }
+        serial_write("\r\nginux: malformed native network bootstrap rejected in ring 3");
+        serial_write("\r\nginux: malformed network generation fault contained");
+        serial_write("\r\nginux: malformed network capability revoked");
+        serial_write("\r\nginux: malformed network resources retired before device activation");
+        if !address_space::verify_native_network_dma_confinement(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+        ) {
+            kernel_fail("\r\nginux: native network DMA confinement invariant failed\r\n");
+        }
+        serial_write("\r\nginux: native network generation received exact VT-d domain");
+        serial_write("\r\nginux: native network VT-d activated before PCI authority");
+        serial_write("\r\nginux: native network bus mastering remained disabled");
+        serial_write("\r\nginux: native network VT-d retired before DMA release");
+        serial_write("\r\nginux: native network translation tables scrubbed cleanly");
+        if !address_space::verify_native_network_dma_fault_teardown(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+        ) {
+            kernel_fail("\r\nginux: faulted native network VT-d teardown failed\r\n");
+        }
+        serial_write("\r\nginux: faulted native network generation retired active VT-d");
+        serial_write("\r\nginux: faulted network translation disabled before DMA scrub");
+        serial_write("\r\nginux: faulted network VT-d tables released cleanly");
+        if !address_space::verify_native_network_empty_queue_activation(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            virtio_network_common_mmio,
+        ) {
+            kernel_fail("\r\nginux: native network empty-queue delegation failed\r\n");
+        }
+        serial_write("\r\nginux: native network service configured empty RX/TX queues");
+        serial_write("\r\nginux: native network queue layout validated by kernel");
+        serial_write("\r\nginux: native network bus mastering authorized by capability");
+        serial_write("\r\nginux: native network bus mastering enabled last");
+        serial_write("\r\nginux: native network device quiesced before VT-d teardown");
+        serial_write("\r\nginux: native network empty-queue generation retired cleanly");
+        if !address_space::verify_native_network_active_fault_teardown(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            virtio_network_common_mmio,
+        ) {
+            kernel_fail("\r\nginux: active native network fault teardown failed\r\n");
+        }
+        serial_write("\r\nginux: active native network driver fault injected at call boundary");
+        serial_write("\r\nginux: faulted native network queues were live before quiescence");
+        serial_write("\r\nginux: faulted native network bus mastering revoked");
+        serial_write("\r\nginux: faulted native network device reset before VT-d teardown");
+        serial_write("\r\nginux: active network fault retired translation before DMA");
+        serial_write("\r\nginux: active network fault contained without kernel panic");
+        if !address_space::verify_native_network_transmit_probe(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: bounded native packet handoff failed\r\n");
-    }
-    serial_write("\r\nginux: native network service copied validated frame out of DMA");
-    serial_write("\r\nginux: packet producer retained no read authority");
-    serial_write("\r\nginux: compiled Rust protocol service consumed Ethernet frame");
-    serial_write("\r\nginux: protocol service validated gateway ARP reply");
-    serial_write("\r\nginux: protocol service rejected malformed ARP metadata");
-    serial_write("\r\nginux: protocol consumer retained no device or write authority");
-    serial_write("\r\nginux: packet survived producer and device retirement");
-    serial_write("\r\nginux: protocol service address space retired cleanly");
-    if !address_space::verify_native_network_packet_fault_handoff(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: faulted native packet handoff failed\r\n");
-    }
-    serial_write("\r\nginux: network driver faulted after packet publication");
-    serial_write("\r\nginux: faulted packet producer authority revoked");
-    serial_write("\r\nginux: fault teardown preserved copied packet sequence two");
-    serial_write("\r\nginux: fresh ring-3 consumer received fault-surviving packet");
-    if !address_space::verify_native_network_packet_batch(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        virtio_network_common_mmio,
-        virtio_network_msix_mmio,
-        &local_apic,
-    ) {
-        kernel_fail("\r\nginux: bounded native packet FIFO failed\r\n");
-    }
-    serial_write("\r\nginux: network producer queued two packets before retirement");
-    serial_write("\r\nginux: packet FIFO preserved sequence three before four");
-    serial_write("\r\nginux: separate ring-3 consumers drained packet FIFO in order");
-    serial_write("\r\nginux: bounded packet FIFO backpressure invariant verified");
-    if !address_space::verify_packet_wait_wakeup(false) {
-        kernel_fail("\r\nginux: blocking packet wait failed\r\n");
-    }
-    serial_write("\r\nginux: empty packet consumer blocked on exact sequence");
-    serial_write("\r\nginux: write-only packet producer wait denied");
-    serial_write("\r\nginux: packet publication woke exactly one read-only consumer");
-    serial_write("\r\nginux: stale packet waits rejected without blocking");
-    serial_write("\r\nginux: woken packet consumer received exact frame");
-    if !address_space::verify_packet_wait_cancellation() {
-        kernel_fail("\r\nginux: blocked packet wait cancellation failed\r\n");
-    }
-    serial_write("\r\nginux: blocked packet consumer stopped by control authority");
-    serial_write("\r\nginux: cancelled packet wait key released");
-    serial_write("\r\nginux: cancelled packet consumer frames and capability retired");
-    if !address_space::verify_packet_wait_wakeup(false) {
-        kernel_fail("\r\nginux: replacement packet wait failed\r\n");
-    }
-    serial_write("\r\nginux: replacement packet consumer claimed cancelled sequence");
-    serial_write("\r\nginux: replacement packet consumer received exact frame");
-    if !address_space::verify_packet_wait_timeout() {
-        kernel_fail("\r\nginux: bounded packet wait timeout failed\r\n");
-    }
-    serial_write("\r\nginux: bounded packet wait expired through APIC deadline");
-    serial_write("\r\nginux: packet timeout preempted non-cooperative peer");
-    serial_write("\r\nginux: timed-out packet wait key released");
-    if !address_space::verify_packet_wait_wakeup(true) {
-        kernel_fail("\r\nginux: post-timeout packet wait replacement failed\r\n");
-    }
-    serial_write("\r\nginux: replacement packet consumer claimed timed-out sequence");
-    serial_write("\r\nginux: replacement packet consumer received post-timeout frame");
-    serial_write("\r\nginux: packet publication cancelled pending wait deadline");
-    if !address_space::verify_packet_backpressure_wakeup() {
-        kernel_fail("\r\nginux: packet backpressure wakeup failed\r\n");
-    }
-    serial_write("\r\nginux: full packet FIFO blocked write-only producer");
-    serial_write("\r\nginux: packet consumption woke exactly one blocked producer");
-    serial_write("\r\nginux: woken packet producer retried exact next sequence");
-    serial_write("\r\nginux: packet FIFO ordering survived backpressure wakeup");
-    if !address_space::verify_native_protocol_wait_loop(&protocol_image) {
-        kernel_fail("\r\nginux: resident native protocol wait loop failed\r\n");
-    }
-    serial_write("\r\nginux: compiled protocol service waited on an empty packet FIFO");
-    serial_write("\r\nginux: resident protocol domain consumed two ordered packets");
-    serial_write("\r\nginux: protocol domain remained live between packet arrivals");
-    serial_write("\r\nginux: protocol service learned bounded ARP neighbor");
-    serial_write("\r\nginux: protocol service refreshed stable ARP neighbor");
-    serial_write("\r\nginux: conflicting ARP neighbor mapping rejected without mutation");
-    serial_write("\r\nginux: resident protocol wait keys and frames retired cleanly");
-    if !address_space::verify_supervised_native_protocol_loop(&protocol_image) {
-        kernel_fail("\r\nginux: supervised native protocol loop failed\r\n");
-    }
-    serial_write("\r\nginux: supervised protocol loop consumed multiple packets");
-    serial_write("\r\nginux: control plane stopped blocked protocol service");
-    serial_write("\r\nginux: supervised protocol wait and frames retired cleanly");
-    if !address_space::verify_native_protocol_ipv4_dispatch(&protocol_image) {
-        kernel_fail("\r\nginux: native protocol IPv4 dispatch failed\r\n");
-    }
-    serial_write("\r\nginux: protocol service dispatched ARP then IPv4");
-    serial_write("\r\nginux: protocol service validated IPv4 header checksum");
-    serial_write("\r\nginux: malformed IPv4 header rejected in ring 3");
-    serial_write("\r\nginux: IPv4 protocol generation retired cleanly");
-    if !address_space::verify_native_protocol_icmp_echo(&protocol_image) {
-        kernel_fail("\r\nginux: native protocol ICMP echo validation failed\r\n");
-    }
-    serial_write("\r\nginux: protocol service validated ICMP echo request");
-    serial_write("\r\nginux: ICMP type code identifier and sequence accepted");
-    serial_write("\r\nginux: malformed ICMP checksum rejected in ring 3");
-    serial_write("\r\nginux: ICMP protocol generation retired cleanly");
-    if !address_space::verify_native_protocol_icmp_reply(&protocol_image) {
-        kernel_fail("\r\nginux: native protocol ICMP echo reply failed\r\n");
-    }
-    serial_write("\r\nginux: protocol service constructed exact ICMP echo reply");
-    serial_write("\r\nginux: protocol egress authority remained write only");
-    serial_write("\r\nginux: isolated egress consumer retained read-only authority");
-    serial_write("\r\nginux: egress packet survived protocol service retirement");
-    serial_write("\r\nginux: isolated egress consumer received exact echo reply");
-    serial_write("\r\nginux: protocol egress sequence consumed exactly once");
-    if !address_space::verify_native_network_egress_transmit(
-        &network_image,
-        &protocol_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: native network service transmit failed\r\n");
+        }
+        serial_write("\r\nginux: native network service published bounded TX descriptor");
+        serial_write("\r\nginux: native network service notified transmit queue");
+        serial_write("\r\nginux: native network service blocked for TX interrupt");
+        serial_write("\r\nginux: native network TX replay rejected");
+        serial_write("\r\nginux: kernel validated native network TX descriptor and payload");
+        serial_write("\r\nginux: native network TX payload guards preserved");
+        serial_write("\r\nginux: native network service transmitted Ethernet probe");
+        serial_write("\r\nginux: native network TX interrupt route retired cleanly");
+        if !address_space::verify_native_network_transmit_timeout(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: protocol egress virtio transmit failed\r\n");
-    }
-    serial_write("\r\nginux: protocol service published second ICMP echo reply");
-    serial_write("\r\nginux: network service consumed read-only egress sequence");
-    serial_write("\r\nginux: network service copied echo reply into confined DMA");
-    serial_write("\r\nginux: network service transmitted protocol egress through virtio-net");
-    serial_write("\r\nginux: kernel validated egress descriptor and exact echo reply");
-    serial_write("\r\nginux: protocol-to-device egress retired cleanly");
-    if !address_space::verify_native_network_reliable_egress(
-        &network_image,
-        &protocol_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: native network notified timeout was not contained\r\n");
+        }
+        serial_write("\r\nginux: notified native network timeout cancelled safely");
+        serial_write("\r\nginux: ambiguous native network generation retired");
+        if !address_space::verify_native_network_transmit_probe(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: reliable protocol egress transmit failed\r\n");
-    }
-    serial_write("\r\nginux: network service claimed egress without consuming it");
-    serial_write("\r\nginux: premature egress acknowledgement rejected");
-    serial_write("\r\nginux: faulted network generation released egress claim");
-    serial_write("\r\nginux: claimed egress packet survived network driver fault");
-    serial_write("\r\nginux: replacement network generation transmitted preserved reply");
-    serial_write("\r\nginux: egress acknowledged only after TX completion");
-    serial_write("\r\nginux: reliable protocol egress retired cleanly");
-    if !address_space::verify_native_network_egress_wait(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: native network timeout recovery failed\r\n");
+        }
+        serial_write("\r\nginux: fresh native network generation recovered after timeout");
+        serial_write("\r\nginux: recovered network generation completed TX interrupt");
+        if !address_space::verify_native_network_receive_arp(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: blocking protocol egress transmit failed\r\n");
-    }
-    serial_write("\r\nginux: network service blocked before egress publication");
-    serial_write("\r\nginux: egress publication woke exact object and sequence");
-    serial_write("\r\nginux: woken network service claimed exact egress sequence");
-    serial_write("\r\nginux: blocking egress transmitted and acknowledged through virtio-net");
-    serial_write("\r\nginux: blocking egress producer and network domains retired cleanly");
-    if !address_space::verify_egress_backpressure_wakeup() {
-        kernel_fail("\r\nginux: egress backpressure wakeup failed\r\n");
-    }
-    serial_write("\r\nginux: full egress FIFO blocked write-only producer");
-    serial_write("\r\nginux: egress delivery woke only object-9 space waiter");
-    serial_write("\r\nginux: woken egress producer retried exact next sequence");
-    serial_write("\r\nginux: egress FIFO ordering survived backpressure wakeup");
-    if !address_space::verify_native_network_ack_backpressure(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: native network service ARP receive failed\r\n");
+        }
+        serial_write("\r\nginux: native network service published bounded RX descriptor");
+        serial_write("\r\nginux: native network service transmitted ARP request");
+        serial_write("\r\nginux: native network service blocked for RX interrupt");
+        serial_write("\r\nginux: native network RX replay rejected");
+        serial_write("\r\nginux: native network service validated gateway ARP reply");
+        serial_write("\r\nginux: kernel validated native network RX descriptor and ARP reply");
+        serial_write("\r\nginux: native network RX payload guards preserved");
+        serial_write("\r\nginux: native network TX and RX interrupt routes retired cleanly");
+        if !address_space::verify_native_network_receive_timeout(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: reliable egress acknowledgement backpressure failed\r\n");
-    }
-    serial_write("\r\nginux: full egress FIFO remained full while head was claimed");
-    serial_write("\r\nginux: completed egress acknowledgement woke blocked producer");
-    serial_write("\r\nginux: post-ack producer published exact fifth sequence");
-    serial_write("\r\nginux: hardware-coupled egress backpressure retired cleanly");
-    if !address_space::verify_native_network_egress_reuse(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: native network RX timeout was not contained\r\n");
+        }
+        serial_write("\r\nginux: native network RX timeout followed completed TX");
+        serial_write("\r\nginux: ambiguous native network RX generation retired");
+        if !address_space::verify_native_network_receive_arp(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: resident reliable egress reuse failed\r\n");
-    }
-    serial_write("\r\nginux: resident network service transmitted two egress replies");
-    serial_write("\r\nginux: resident network service reused TX descriptor and DMA lease");
-    serial_write("\r\nginux: resident network interrupt generations advanced in order");
-    serial_write("\r\nginux: resident reliable egress retired cleanly");
-    if !address_space::verify_native_network_egress_batch(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: native network RX timeout recovery failed\r\n");
+        }
+        serial_write("\r\nginux: fresh native network generation recovered after RX timeout");
+        serial_write("\r\nginux: recovered network generation validated gateway ARP reply");
+        if !address_space::verify_native_network_malformed_receive(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: resident reliable egress batch failed\r\n");
-    }
-    serial_write("\r\nginux: resident network service drained full egress FIFO");
-    serial_write("\r\nginux: validated device progress renewed service call epochs");
-    serial_write("\r\nginux: four network interrupt generations advanced in order");
-    serial_write("\r\nginux: resident reliable egress batch retired cleanly");
-    if !address_space::verify_native_network_egress_resident_stop(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: malformed native network receive was not contained\r\n");
+        }
+        serial_write("\r\nginux: malformed network ARP reply injected after RX completion");
+        serial_write("\r\nginux: native network service rejected malformed ARP reply");
+        serial_write("\r\nginux: malformed network receive generation retired safely");
+        if !address_space::verify_native_network_receive_arp(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: resident reliable egress stop failed\r\n");
-    }
-    serial_write("\r\nginux: resident network service blocked on fifth sequence");
-    serial_write("\r\nginux: control plane stopped resident network service");
-    serial_write("\r\nginux: resident stop quiesced device before DMA retirement");
-    serial_write("\r\nginux: resident egress wait and authority retired cleanly");
-    if !address_space::verify_native_network_egress_resident_drain(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: malformed native network receive recovery failed\r\n");
+        }
+        serial_write("\r\nginux: fresh native network generation recovered after malformed reply");
+        serial_write("\r\nginux: post-malformation network generation validated ARP reply");
+        if !address_space::verify_native_network_receive_reuse(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: resident reliable egress drain failed\r\n");
-    }
-    serial_write("\r\nginux: unauthorized resident drain requests rejected");
-    serial_write("\r\nginux: control plane requested resident network drain");
-    serial_write("\r\nginux: resident network drain preserved four egress replies");
-    serial_write("\r\nginux: drained resident network service exited normally");
-    serial_write("\r\nginux: resident drain quiesced device before DMA retirement");
-    if !address_space::verify_native_network_egress_resident_restart(
-        &network_image,
-        virtio_network,
-        virtio_network_initialization,
-        virtio_network_iommu_profile,
-        (
+        ) {
+            kernel_fail("\r\nginux: native network receive replenishment failed\r\n");
+        }
+        serial_write("\r\nginux: native network service replenished RX descriptor");
+        serial_write("\r\nginux: native network service completed second ARP exchange");
+        serial_write("\r\nginux: native network request generations one through four completed");
+        serial_write("\r\nginux: kernel validated both native network ARP exchanges");
+        if !address_space::verify_native_network_ping_gateway(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
             virtio_network_common_mmio,
             virtio_network_msix_mmio,
             &local_apic,
-        ),
-    ) {
-        kernel_fail("\r\nginux: resident network replacement failed\r\n");
+        ) {
+            kernel_fail("\r\nginux: native network ICMP gateway probe failed\r\n");
+        }
+        serial_write("\r\nginux: native network ICMP gateway request transmitted");
+        serial_write("\r\nginux: native network ICMP gateway reply validated");
+        if !address_space::verify_native_network_packet_handoff(
+            &network_image,
+            &protocol_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: bounded native packet handoff failed\r\n");
+        }
+        serial_write("\r\nginux: native network service copied validated frame out of DMA");
+        serial_write("\r\nginux: packet producer retained no read authority");
+        serial_write("\r\nginux: compiled Rust protocol service consumed Ethernet frame");
+        serial_write("\r\nginux: protocol service validated gateway ARP reply");
+        serial_write("\r\nginux: protocol service rejected malformed ARP metadata");
+        serial_write("\r\nginux: protocol consumer retained no device or write authority");
+        serial_write("\r\nginux: packet survived producer and device retirement");
+        serial_write("\r\nginux: protocol service address space retired cleanly");
+        if !address_space::verify_native_network_packet_fault_handoff(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ) {
+            kernel_fail("\r\nginux: faulted native packet handoff failed\r\n");
+        }
+        serial_write("\r\nginux: network driver faulted after packet publication");
+        serial_write("\r\nginux: faulted packet producer authority revoked");
+        serial_write("\r\nginux: fault teardown preserved copied packet sequence two");
+        serial_write("\r\nginux: fresh ring-3 consumer received fault-surviving packet");
+        if !address_space::verify_native_network_packet_batch(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            virtio_network_common_mmio,
+            virtio_network_msix_mmio,
+            &local_apic,
+        ) {
+            kernel_fail("\r\nginux: bounded native packet FIFO failed\r\n");
+        }
+        serial_write("\r\nginux: network producer queued two packets before retirement");
+        serial_write("\r\nginux: packet FIFO preserved sequence three before four");
+        serial_write("\r\nginux: separate ring-3 consumers drained packet FIFO in order");
+        serial_write("\r\nginux: bounded packet FIFO backpressure invariant verified");
+        if !address_space::verify_packet_wait_wakeup(false) {
+            kernel_fail("\r\nginux: blocking packet wait failed\r\n");
+        }
+        serial_write("\r\nginux: empty packet consumer blocked on exact sequence");
+        serial_write("\r\nginux: write-only packet producer wait denied");
+        serial_write("\r\nginux: packet publication woke exactly one read-only consumer");
+        serial_write("\r\nginux: stale packet waits rejected without blocking");
+        serial_write("\r\nginux: woken packet consumer received exact frame");
+        if !address_space::verify_packet_wait_cancellation() {
+            kernel_fail("\r\nginux: blocked packet wait cancellation failed\r\n");
+        }
+        serial_write("\r\nginux: blocked packet consumer stopped by control authority");
+        serial_write("\r\nginux: cancelled packet wait key released");
+        serial_write("\r\nginux: cancelled packet consumer frames and capability retired");
+        if !address_space::verify_packet_wait_wakeup(false) {
+            kernel_fail("\r\nginux: replacement packet wait failed\r\n");
+        }
+        serial_write("\r\nginux: replacement packet consumer claimed cancelled sequence");
+        serial_write("\r\nginux: replacement packet consumer received exact frame");
+        if !address_space::verify_packet_wait_timeout() {
+            kernel_fail("\r\nginux: bounded packet wait timeout failed\r\n");
+        }
+        serial_write("\r\nginux: bounded packet wait expired through APIC deadline");
+        serial_write("\r\nginux: packet timeout preempted non-cooperative peer");
+        serial_write("\r\nginux: timed-out packet wait key released");
+        if !address_space::verify_packet_wait_wakeup(true) {
+            kernel_fail("\r\nginux: post-timeout packet wait replacement failed\r\n");
+        }
+        serial_write("\r\nginux: replacement packet consumer claimed timed-out sequence");
+        serial_write("\r\nginux: replacement packet consumer received post-timeout frame");
+        serial_write("\r\nginux: packet publication cancelled pending wait deadline");
+        if !address_space::verify_packet_backpressure_wakeup() {
+            kernel_fail("\r\nginux: packet backpressure wakeup failed\r\n");
+        }
+        serial_write("\r\nginux: full packet FIFO blocked write-only producer");
+        serial_write("\r\nginux: packet consumption woke exactly one blocked producer");
+        serial_write("\r\nginux: woken packet producer retried exact next sequence");
+        serial_write("\r\nginux: packet FIFO ordering survived backpressure wakeup");
+        if !address_space::verify_native_protocol_wait_loop(&protocol_image) {
+            kernel_fail("\r\nginux: resident native protocol wait loop failed\r\n");
+        }
+        serial_write("\r\nginux: compiled protocol service waited on an empty packet FIFO");
+        serial_write("\r\nginux: resident protocol domain consumed two ordered packets");
+        serial_write("\r\nginux: protocol domain remained live between packet arrivals");
+        serial_write("\r\nginux: protocol service learned bounded ARP neighbor");
+        serial_write("\r\nginux: protocol service refreshed stable ARP neighbor");
+        serial_write("\r\nginux: conflicting ARP neighbor mapping rejected without mutation");
+        serial_write("\r\nginux: resident protocol wait keys and frames retired cleanly");
+        if !address_space::verify_supervised_native_protocol_loop(&protocol_image) {
+            kernel_fail("\r\nginux: supervised native protocol loop failed\r\n");
+        }
+        serial_write("\r\nginux: supervised protocol loop consumed multiple packets");
+        serial_write("\r\nginux: control plane stopped blocked protocol service");
+        serial_write("\r\nginux: supervised protocol wait and frames retired cleanly");
+        if !address_space::verify_native_protocol_ipv4_dispatch(&protocol_image) {
+            kernel_fail("\r\nginux: native protocol IPv4 dispatch failed\r\n");
+        }
+        serial_write("\r\nginux: protocol service dispatched ARP then IPv4");
+        serial_write("\r\nginux: protocol service validated IPv4 header checksum");
+        serial_write("\r\nginux: malformed IPv4 header rejected in ring 3");
+        serial_write("\r\nginux: IPv4 protocol generation retired cleanly");
+        if !address_space::verify_native_protocol_icmp_echo(&protocol_image) {
+            kernel_fail("\r\nginux: native protocol ICMP echo validation failed\r\n");
+        }
+        serial_write("\r\nginux: protocol service validated ICMP echo request");
+        serial_write("\r\nginux: ICMP type code identifier and sequence accepted");
+        serial_write("\r\nginux: malformed ICMP checksum rejected in ring 3");
+        serial_write("\r\nginux: ICMP protocol generation retired cleanly");
+        if !address_space::verify_native_protocol_icmp_reply(&protocol_image) {
+            kernel_fail("\r\nginux: native protocol ICMP echo reply failed\r\n");
+        }
+        serial_write("\r\nginux: protocol service constructed exact ICMP echo reply");
+        serial_write("\r\nginux: protocol egress authority remained write only");
+        serial_write("\r\nginux: isolated egress consumer retained read-only authority");
+        serial_write("\r\nginux: egress packet survived protocol service retirement");
+        serial_write("\r\nginux: isolated egress consumer received exact echo reply");
+        serial_write("\r\nginux: protocol egress sequence consumed exactly once");
+        if !address_space::verify_native_network_egress_transmit(
+            &network_image,
+            &protocol_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: protocol egress virtio transmit failed\r\n");
+        }
+        serial_write("\r\nginux: protocol service published second ICMP echo reply");
+        serial_write("\r\nginux: network service consumed read-only egress sequence");
+        serial_write("\r\nginux: network service copied echo reply into confined DMA");
+        serial_write("\r\nginux: network service transmitted protocol egress through virtio-net");
+        serial_write("\r\nginux: kernel validated egress descriptor and exact echo reply");
+        serial_write("\r\nginux: protocol-to-device egress retired cleanly");
+        if !address_space::verify_native_network_reliable_egress(
+            &network_image,
+            &protocol_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: reliable protocol egress transmit failed\r\n");
+        }
+        serial_write("\r\nginux: network service claimed egress without consuming it");
+        serial_write("\r\nginux: premature egress acknowledgement rejected");
+        serial_write("\r\nginux: faulted network generation released egress claim");
+        serial_write("\r\nginux: claimed egress packet survived network driver fault");
+        serial_write("\r\nginux: replacement network generation transmitted preserved reply");
+        serial_write("\r\nginux: egress acknowledged only after TX completion");
+        serial_write("\r\nginux: reliable protocol egress retired cleanly");
+        if !address_space::verify_native_network_egress_wait(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: blocking protocol egress transmit failed\r\n");
+        }
+        serial_write("\r\nginux: network service blocked before egress publication");
+        serial_write("\r\nginux: egress publication woke exact object and sequence");
+        serial_write("\r\nginux: woken network service claimed exact egress sequence");
+        serial_write("\r\nginux: blocking egress transmitted and acknowledged through virtio-net");
+        serial_write("\r\nginux: blocking egress producer and network domains retired cleanly");
+        if !address_space::verify_egress_backpressure_wakeup() {
+            kernel_fail("\r\nginux: egress backpressure wakeup failed\r\n");
+        }
+        serial_write("\r\nginux: full egress FIFO blocked write-only producer");
+        serial_write("\r\nginux: egress delivery woke only object-9 space waiter");
+        serial_write("\r\nginux: woken egress producer retried exact next sequence");
+        serial_write("\r\nginux: egress FIFO ordering survived backpressure wakeup");
+        if !address_space::verify_native_network_ack_backpressure(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: reliable egress acknowledgement backpressure failed\r\n");
+        }
+        serial_write("\r\nginux: full egress FIFO remained full while head was claimed");
+        serial_write("\r\nginux: completed egress acknowledgement woke blocked producer");
+        serial_write("\r\nginux: post-ack producer published exact fifth sequence");
+        serial_write("\r\nginux: hardware-coupled egress backpressure retired cleanly");
+        if !address_space::verify_native_network_egress_reuse(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: resident reliable egress reuse failed\r\n");
+        }
+        serial_write("\r\nginux: resident network service transmitted two egress replies");
+        serial_write("\r\nginux: resident network service reused TX descriptor and DMA lease");
+        serial_write("\r\nginux: resident network interrupt generations advanced in order");
+        serial_write("\r\nginux: resident reliable egress retired cleanly");
+        if !address_space::verify_native_network_egress_batch(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: resident reliable egress batch failed\r\n");
+        }
+        serial_write("\r\nginux: resident network service drained full egress FIFO");
+        serial_write("\r\nginux: validated device progress renewed service call epochs");
+        serial_write("\r\nginux: four network interrupt generations advanced in order");
+        serial_write("\r\nginux: resident reliable egress batch retired cleanly");
+        if !address_space::verify_native_network_egress_resident_stop(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: resident reliable egress stop failed\r\n");
+        }
+        serial_write("\r\nginux: resident network service blocked on fifth sequence");
+        serial_write("\r\nginux: control plane stopped resident network service");
+        serial_write("\r\nginux: resident stop quiesced device before DMA retirement");
+        serial_write("\r\nginux: resident egress wait and authority retired cleanly");
+        if !address_space::verify_native_network_egress_resident_drain(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: resident reliable egress drain failed\r\n");
+        }
+        serial_write("\r\nginux: unauthorized resident drain requests rejected");
+        serial_write("\r\nginux: control plane requested resident network drain");
+        serial_write("\r\nginux: resident network drain preserved four egress replies");
+        serial_write("\r\nginux: drained resident network service exited normally");
+        serial_write("\r\nginux: resident drain quiesced device before DMA retirement");
+        if !address_space::verify_native_network_egress_resident_restart(
+            &network_image,
+            virtio_network,
+            virtio_network_initialization,
+            virtio_network_iommu_profile,
+            (
+                virtio_network_common_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+            ),
+        ) {
+            kernel_fail("\r\nginux: resident network replacement failed\r\n");
+        }
+        serial_write("\r\nginux: stopped resident network service replaced cleanly");
+        serial_write("\r\nginux: replacement network domain generation was distinct");
+        serial_write("\r\nginux: replacement network DMA and VT-d leases were fresh");
+        serial_write("\r\nginux: replacement resident service resumed exact egress sequence");
+        serial_write("\r\nginux: replenished network buffer guards preserved");
+        serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
+        if let Some(native_volume_outcome) = native_volume_summary {
+            serial_write("\r\nginux: post-cancellation native volume generation started");
+            serial_write(match native_volume_outcome {
+                address_space::NativeVolumeOutcome::Initialized
+                | address_space::NativeVolumeOutcome::Recovered => {
+                    "\r\nginux: post-cancellation native volume recovered exact record"
+                }
+                address_space::NativeVolumeOutcome::Rejected => {
+                    "\r\nginux: post-cancellation native volume preserved rejection"
+                }
+                address_space::NativeVolumeOutcome::RestartRequired => {
+                    "\r\nginux: post-cancellation native volume requested restart unexpectedly"
+                }
+                address_space::NativeVolumeOutcome::IncompatibleAbi => {
+                    "\r\nginux: post-cancellation native volume rejected its ABI unexpectedly"
+                }
+                address_space::NativeVolumeOutcome::Faulted => {
+                    "\r\nginux: post-cancellation native volume faulted unexpectedly"
+                }
+            });
+            serial_write("\r\nginux: post-cancellation native resources retired cleanly");
+            serial_write("\r\nginux: every native volume generation used an active IOMMU domain");
+            serial_write("\r\nginux: native volume generations received fresh IOMMU leases");
+            serial_write("\r\nginux: native volume IOMMU retired after device quiescence");
+            serial_write("\r\nginux: fault and timeout paths retired native volume IOMMU state");
+            serial_write("\r\nginux: native volume write-only grant exercised in ring 3");
+            serial_write("\r\nginux: isolated virtio feature negotiation completed");
+            serial_write("\r\nginux: isolated virtio queue geometry configured with owned DMA");
+            serial_write("\r\nginux: isolated DMA lease initialized in ring 3");
+            serial_write("\r\nginux: isolated virtio queue bound to inactive DMA lease");
+            serial_write("\r\nginux: isolated virtio queue activated before publication");
+            serial_write("\r\nginux: isolated virtio read descriptors prepared in ring 3");
+            serial_write("\r\nginux: isolated virtio available entry published in ring 3");
+            serial_write("\r\nginux: stale isolated virtio wait generation rejected");
+            serial_write("\r\nginux: isolated virtio queue notified from ring 3");
+            serial_write("\r\nginux: isolated virtio service blocked on MSI-X");
+            serial_write("\r\nginux: kernel-owned MSI-X woke isolated virtio service");
+            serial_write("\r\nginux: isolated virtio timeout cancelled after MSI-X");
+            serial_write("\r\nginux: isolated virtio live timeout retried successfully");
+            serial_write("\r\nginux: duplicate isolated virtio wait rejected");
+            serial_write("\r\nginux: isolated volume slots scanned in ring 3");
+            serial_write("\r\nginux: isolated virtio request generation advanced and reused");
+            serial_write("\r\nginux: completed native volume service authority revoked");
+            serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
+            serial_write("\r\nginux: clean exit quiesced device before DMA release");
+            serial_write("\r\nginux: retired DMA lease scrubbed and released");
+            serial_write("\r\nginux: native volume device quiesced before release");
+            serial_write("\r\nginux: isolated virtio MSI-X route retired before DMA release");
+        }
+        serial_write("\r\nginux: opaque capability handles enforced at call gate");
+        serial_write("\r\nginux: control call ABI v4 negotiated");
+        serial_write("\r\nginux: userspace console capability enforced");
+        serial_write("\r\nginux: minimal user interrupt surface enforced");
+        serial_write("\r\nginux: bounded userspace read enforced");
+        serial_write("\r\nginux: user copies bound to owned mappings");
+        serial_write("\r\nginux: page-granular user range validation enforced");
+        serial_write("\r\nginux: structured userspace ABI result verified");
+        serial_write("\r\nginux: ring-3 fault survivor resumed and exited");
+        serial_write("\r\nginux: user page fault contained");
+        serial_write("\r\nginux: isolated scheduler address spaces switched");
+        serial_write("\r\nginux: scheduler CR3 roots validated");
+        serial_write("\r\nginux: bounded user page-table hierarchy validated");
+        serial_write("\r\nginux: address-space resource contract shared");
+        serial_write("\r\nginux: scheduler address-space ownership validated");
+        serial_write("\r\nginux: scheduler user mappings validated");
+        serial_write("\r\nginux: one-shot user preemption completed");
+        serial_write("\r\nginux: restarted service preemption completed");
+        serial_write("\r\nginux: completed address-space frames reclaimed");
+        serial_write("\r\nginux: retired domain frame ownership cleared");
+        serial_write("\r\nginux: retired service frame quarantine cleared");
+        serial_write("\r\nginux: capability-gated bounded IPC verified");
+        serial_write("\r\nginux: directional IPC endpoints isolated");
+        serial_write("\r\nginux: generation-bound IPC endpoints verified");
+        serial_write("\r\nginux: generation-tagged IPC messages verified");
+        serial_write("\r\nginux: monotonic queued IPC sequences verified");
+        serial_write("\r\nginux: structured IPC delivery provenance verified");
+        serial_write("\r\nginux: IPC diagnostic authority enforced");
+        serial_write("\r\nginux: blocking IPC direct wake completed");
+        serial_write("\r\nginux: direct IPC wake provenance verified");
+        serial_write("\r\nginux: sequenced direct IPC delivery verified");
+        serial_write("\r\nginux: IPC wait-key matching enforced");
+        serial_write("\r\nginux: blocked IPC peer-close cleanup verified");
+        serial_write("\r\nginux: sticky IPC peer closure delivered");
+        serial_write("\r\nginux: monotonic IPC peer closures verified");
+        serial_write("\r\nginux: isolated service request-reply completed");
+        serial_write("\r\nginux: service domain authority restricted to IPC");
+        serial_write("\r\nginux: faulted service domain authority retired");
+        serial_write("\r\nginux: service fault event delivered to control plane");
+        serial_write("\r\nginux: service fault event generation matched");
+        serial_write("\r\nginux: monotonic lifecycle events verified");
+        serial_write("\r\nginux: structured lifecycle event delivered");
+        serial_write("\r\nginux: structured lifecycle service identity delivered");
+        serial_write("\r\nginux: lifecycle diagnostic authority enforced");
+        serial_write("\r\nginux: service fault metadata matched");
+        serial_write("\r\nginux: structured service fault delivered");
+        serial_write("\r\nginux: service fault diagnostic authority enforced");
+        serial_write("\r\nginux: service domain generation reuse verified");
+        serial_write("\r\nginux: stable service identity survived restart");
+        serial_write("\r\nginux: service restart budget exhausted");
+        serial_write("\r\nginux: service restart rollback invariants verified");
+        serial_write("\r\nginux: failed service stack scrubbed before restart");
+        serial_write("\r\nginux: service frame ownership transferred to replacement");
+        serial_write("\r\nginux: replacement service context executed");
+        serial_write("\r\nginux: replacement service request-reply completed");
+        serial_write("\r\nginux: volatile storage service round-trip completed");
+        serial_write("\r\nginux: volatile storage invalid command rejected");
+        serial_write("\r\nginux: replacement service readiness delivered");
+        serial_write("\r\nginux: replacement service clean exit delivered");
+        serial_write("\r\nginux: per-domain syscall budgets enforced");
+        serial_write("\r\nginux: per-domain thread budgets enforced");
+        serial_write("\r\nginux: in-flight domain operations drained");
+        if !scheduler::verify_scheduler_invariants() {
+            kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
+        }
+        if !arch::x86_64::cpu::verify_user_fs_base_installation() {
+            kernel_fail("\r\nginux: per-thread FS base installation failed\r\n");
+        }
+        serial_write("\r\nginux: scheduler context lifecycle verified");
+        serial_write("\r\nginux: ingress and egress packet wait keys isolated");
+        serial_write("\r\nginux: ingress and egress space-wait keys isolated");
+        serial_write("\r\nginux: preemptible user context flags enforced");
+        serial_write("\r\nginux: per-thread FS base context preserved");
     }
-    serial_write("\r\nginux: stopped resident network service replaced cleanly");
-    serial_write("\r\nginux: replacement network domain generation was distinct");
-    serial_write("\r\nginux: replacement network DMA and VT-d leases were fresh");
-    serial_write("\r\nginux: replacement resident service resumed exact egress sequence");
-    serial_write("\r\nginux: replenished network buffer guards preserved");
-    serial_write("\r\nginux: replenished network interrupt routes retired cleanly");
-    if let Some(native_volume_outcome) = native_volume_summary {
-        serial_write("\r\nginux: post-cancellation native volume generation started");
-        serial_write(match native_volume_outcome {
-            address_space::NativeVolumeOutcome::Initialized
-            | address_space::NativeVolumeOutcome::Recovered => {
-                "\r\nginux: post-cancellation native volume recovered exact record"
-            }
-            address_space::NativeVolumeOutcome::Rejected => {
-                "\r\nginux: post-cancellation native volume preserved rejection"
-            }
-            address_space::NativeVolumeOutcome::RestartRequired => {
-                "\r\nginux: post-cancellation native volume requested restart unexpectedly"
-            }
-            address_space::NativeVolumeOutcome::IncompatibleAbi => {
-                "\r\nginux: post-cancellation native volume rejected its ABI unexpectedly"
-            }
-            address_space::NativeVolumeOutcome::Faulted => {
-                "\r\nginux: post-cancellation native volume faulted unexpectedly"
-            }
-        });
-        serial_write("\r\nginux: post-cancellation native resources retired cleanly");
-        serial_write("\r\nginux: every native volume generation used an active IOMMU domain");
-        serial_write("\r\nginux: native volume generations received fresh IOMMU leases");
-        serial_write("\r\nginux: native volume IOMMU retired after device quiescence");
-        serial_write("\r\nginux: fault and timeout paths retired native volume IOMMU state");
-        serial_write("\r\nginux: native volume write-only grant exercised in ring 3");
-        serial_write("\r\nginux: isolated virtio feature negotiation completed");
-        serial_write("\r\nginux: isolated virtio queue geometry configured with owned DMA");
-        serial_write("\r\nginux: isolated DMA lease initialized in ring 3");
-        serial_write("\r\nginux: isolated virtio queue bound to inactive DMA lease");
-        serial_write("\r\nginux: isolated virtio queue activated before publication");
-        serial_write("\r\nginux: isolated virtio read descriptors prepared in ring 3");
-        serial_write("\r\nginux: isolated virtio available entry published in ring 3");
-        serial_write("\r\nginux: stale isolated virtio wait generation rejected");
-        serial_write("\r\nginux: isolated virtio queue notified from ring 3");
-        serial_write("\r\nginux: isolated virtio service blocked on MSI-X");
-        serial_write("\r\nginux: kernel-owned MSI-X woke isolated virtio service");
-        serial_write("\r\nginux: isolated virtio timeout cancelled after MSI-X");
-        serial_write("\r\nginux: isolated virtio live timeout retried successfully");
-        serial_write("\r\nginux: duplicate isolated virtio wait rejected");
-        serial_write("\r\nginux: isolated volume slots scanned in ring 3");
-        serial_write("\r\nginux: isolated virtio request generation advanced and reused");
-        serial_write("\r\nginux: completed native volume service authority revoked");
-        serial_write("\r\nginux: virtio DMA validation followed hardware quiescence");
-        serial_write("\r\nginux: clean exit quiesced device before DMA release");
-        serial_write("\r\nginux: retired DMA lease scrubbed and released");
-        serial_write("\r\nginux: native volume device quiesced before release");
-        serial_write("\r\nginux: isolated virtio MSI-X route retired before DMA release");
-    }
-    serial_write("\r\nginux: opaque capability handles enforced at call gate");
-    serial_write("\r\nginux: control call ABI v4 negotiated");
-    serial_write("\r\nginux: userspace console capability enforced");
-    serial_write("\r\nginux: minimal user interrupt surface enforced");
-    serial_write("\r\nginux: bounded userspace read enforced");
-    serial_write("\r\nginux: user copies bound to owned mappings");
-    serial_write("\r\nginux: page-granular user range validation enforced");
-    serial_write("\r\nginux: structured userspace ABI result verified");
-    serial_write("\r\nginux: ring-3 fault survivor resumed and exited");
-    serial_write("\r\nginux: user page fault contained");
-    serial_write("\r\nginux: isolated scheduler address spaces switched");
-    serial_write("\r\nginux: scheduler CR3 roots validated");
-    serial_write("\r\nginux: bounded user page-table hierarchy validated");
-    serial_write("\r\nginux: address-space resource contract shared");
-    serial_write("\r\nginux: scheduler address-space ownership validated");
-    serial_write("\r\nginux: scheduler user mappings validated");
-    serial_write("\r\nginux: one-shot user preemption completed");
-    serial_write("\r\nginux: restarted service preemption completed");
-    serial_write("\r\nginux: completed address-space frames reclaimed");
-    serial_write("\r\nginux: retired domain frame ownership cleared");
-    serial_write("\r\nginux: retired service frame quarantine cleared");
-    serial_write("\r\nginux: capability-gated bounded IPC verified");
-    serial_write("\r\nginux: directional IPC endpoints isolated");
-    serial_write("\r\nginux: generation-bound IPC endpoints verified");
-    serial_write("\r\nginux: generation-tagged IPC messages verified");
-    serial_write("\r\nginux: monotonic queued IPC sequences verified");
-    serial_write("\r\nginux: structured IPC delivery provenance verified");
-    serial_write("\r\nginux: IPC diagnostic authority enforced");
-    serial_write("\r\nginux: blocking IPC direct wake completed");
-    serial_write("\r\nginux: direct IPC wake provenance verified");
-    serial_write("\r\nginux: sequenced direct IPC delivery verified");
-    serial_write("\r\nginux: IPC wait-key matching enforced");
-    serial_write("\r\nginux: blocked IPC peer-close cleanup verified");
-    serial_write("\r\nginux: sticky IPC peer closure delivered");
-    serial_write("\r\nginux: monotonic IPC peer closures verified");
-    serial_write("\r\nginux: isolated service request-reply completed");
-    serial_write("\r\nginux: service domain authority restricted to IPC");
-    serial_write("\r\nginux: faulted service domain authority retired");
-    serial_write("\r\nginux: service fault event delivered to control plane");
-    serial_write("\r\nginux: service fault event generation matched");
-    serial_write("\r\nginux: monotonic lifecycle events verified");
-    serial_write("\r\nginux: structured lifecycle event delivered");
-    serial_write("\r\nginux: structured lifecycle service identity delivered");
-    serial_write("\r\nginux: lifecycle diagnostic authority enforced");
-    serial_write("\r\nginux: service fault metadata matched");
-    serial_write("\r\nginux: structured service fault delivered");
-    serial_write("\r\nginux: service fault diagnostic authority enforced");
-    serial_write("\r\nginux: service domain generation reuse verified");
-    serial_write("\r\nginux: stable service identity survived restart");
-    serial_write("\r\nginux: service restart budget exhausted");
-    serial_write("\r\nginux: service restart rollback invariants verified");
-    serial_write("\r\nginux: failed service stack scrubbed before restart");
-    serial_write("\r\nginux: service frame ownership transferred to replacement");
-    serial_write("\r\nginux: replacement service context executed");
-    serial_write("\r\nginux: replacement service request-reply completed");
-    serial_write("\r\nginux: volatile storage service round-trip completed");
-    serial_write("\r\nginux: volatile storage invalid command rejected");
-    serial_write("\r\nginux: replacement service readiness delivered");
-    serial_write("\r\nginux: replacement service clean exit delivered");
-    serial_write("\r\nginux: per-domain syscall budgets enforced");
-    serial_write("\r\nginux: per-domain thread budgets enforced");
-    serial_write("\r\nginux: in-flight domain operations drained");
-    if !scheduler::verify_scheduler_invariants() {
-        kernel_fail("\r\nginux: scheduler lifecycle invariant failed\r\n");
-    }
-    if !arch::x86_64::cpu::verify_user_fs_base_installation() {
-        kernel_fail("\r\nginux: per-thread FS base installation failed\r\n");
-    }
-    serial_write("\r\nginux: scheduler context lifecycle verified");
-    serial_write("\r\nginux: ingress and egress packet wait keys isolated");
-    serial_write("\r\nginux: ingress and egress space-wait keys isolated");
-    serial_write("\r\nginux: preemptible user context flags enforced");
-    serial_write("\r\nginux: per-thread FS base context preserved");
     if !crypto::verify_sha256_known_answers() {
         kernel_fail("\r\nginux: bootstrap SHA-256 self-test failed\r\n");
     }
@@ -3624,6 +3670,8 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if !network::initialize_runtime() {
         kernel_fail("\r\nginux: runtime network initialization failed\r\n");
     }
+    OPERATOR_CONSOLE_READY.store(true, Ordering::Release);
+    serial_write_raw(b"ginux: platform, security, devices, and runtime ready\r\n");
     let mut controller_recovery_attempts = 0_u8;
     let mut controller_launch_announced = false;
     'managed: loop {
@@ -3712,7 +3760,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             kernel_fail("ginux: controller exited without a lifecycle request\r\n");
         }
         loop {
-            serial_write("ginux: starting configured runtime container\r\n");
+            let resuming = arch::x86_64::cpu::configured_container_slot()
+                .is_some_and(address_space::oci_runtime_is_suspended);
+            if !resuming {
+                serial_write("ginux: starting configured runtime container\r\n");
+            }
             if arch::x86_64::cpu::configured_container_uses_installed_oci_image() {
                 let mut init = [0_u8; control_abi::CONTAINER_MAX_INIT_SIZE];
                 let Some(init_size) = arch::x86_64::cpu::configured_container_init(&mut init)
@@ -3723,12 +3775,24 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                     arch::x86_64::cpu::fail_configured_container();
                     break;
                 };
-                serial_write("ginux: entering configured OCI init\r\n");
+                if !resuming {
+                    serial_write("ginux: entering configured OCI init\r\n");
+                }
                 arch::x86_64::cpu::begin_configured_container();
-                if !address_space::run_oci_process(&init[..init_size]) {
-                    serial_write("ginux: OCI init execution failed; container marked failed\r\n");
-                    arch::x86_64::cpu::fail_configured_container();
-                    break;
+                match address_space::run_oci_process(&init[..init_size]) {
+                    address_space::OciProcessOutcome::Suspended => {
+                        arch::x86_64::cpu::suspend_configured_container();
+                        serial_write("ginux: container runtime suspended\r\n");
+                        break;
+                    }
+                    address_space::OciProcessOutcome::Failed => {
+                        serial_write(
+                            "ginux: OCI init execution failed; container marked failed\r\n",
+                        );
+                        arch::x86_64::cpu::fail_configured_container();
+                        break;
+                    }
+                    address_space::OciProcessOutcome::Exited => {}
                 }
                 arch::x86_64::cpu::stop_configured_container();
                 serial_write("ginux: OCI init exited cleanly\r\n");
@@ -3933,8 +3997,8 @@ fn summarize_memory(boot_info: &BootInfo) -> MemorySummary {
 }
 
 fn kernel_fail(message: &str) -> ! {
-    serial_write(message);
-    serial_write("GINUX_KERNEL_PANIC\r\n");
+    serial_write_raw(message.as_bytes());
+    serial_write_raw(b"GINUX_KERNEL_PANIC\r\n");
     loop {
         core::hint::spin_loop();
     }
@@ -3958,6 +4022,13 @@ fn serial_write(message: &str) {
 }
 
 pub(crate) fn serial_write_bytes(bytes: &[u8]) {
+    if !cfg!(feature = "verification-boot") && !OPERATOR_CONSOLE_READY.load(Ordering::Acquire) {
+        return;
+    }
+    serial_write_raw(bytes);
+}
+
+fn serial_write_raw(bytes: &[u8]) {
     for byte in bytes.iter().copied() {
         while unsafe { inb(COM1 + 5) } & 0x20 == 0 {
             core::hint::spin_loop();

@@ -27,6 +27,10 @@ fi
 
 echo "Booting x86-64 Ginux with QEMU/$accelerator using CPU $cpu_model"
 
+if [[ -n "${GINUX_QEMU_PID_FILE:-}" ]]; then
+    printf '%s\n' "$$" >"$GINUX_QEMU_PID_FILE"
+fi
+
 memory="${GINUX_MEMORY:-1G}"
 network_capture=()
 if [[ -n "${GINUX_PCAP:-}" ]]; then

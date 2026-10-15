@@ -4,14 +4,26 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
 output_file=$(mktemp "${TMPDIR:-/tmp}/ginux-alpine-shell.XXXXXX")
 volume_image=$(mktemp "${TMPDIR:-/tmp}/ginux-alpine-shell-volume.XXXXXX")
+qemu_pid_file=$(mktemp "${TMPDIR:-/tmp}/ginux-alpine-shell-pid.XXXXXX")
 qemu_pid=""
 
+stop_qemu() {
+    local pid=""
+    if [[ -s "$qemu_pid_file" ]]; then
+        read -r pid <"$qemu_pid_file" || true
+    fi
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
+}
+
 cleanup() {
+    stop_qemu
     if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
     fi
-    rm -f "$output_file" "$volume_image"
+    rm -f "$output_file" "$volume_image" "$qemu_pid_file"
 }
 trap cleanup EXIT
 
@@ -26,6 +38,7 @@ wait_for() {
     done
     tail -n 120 "$output_file" >&2
     echo "Alpine shell test failed while waiting for '$marker'." >&2
+    stop_qemu
     return 1
 }
 
@@ -40,6 +53,7 @@ wait_for_line() {
     done
     tail -n 120 "$output_file" >&2
     echo "Alpine shell test failed while waiting for line '$marker'." >&2
+    stop_qemu
     return 1
 }
 
@@ -57,6 +71,7 @@ wait_for_count() {
     done
     tail -n 120 "$output_file" >&2
     echo "Alpine shell test failed while waiting for $expected occurrences of '$marker'." >&2
+    stop_qemu
     return 1
 }
 
@@ -88,6 +103,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'ps aux' \
         'ps' \
         'ls /proc' \
+        "test -f /proc/1/status && printf 'PROCFS_OK\\n'" \
+        '/bin/cat /proc/1/status' \
         'ls /' \
         "printf 'FORK_STATE_RESTORE_OK\\n'" \
         "printf 'FORK_EXEC_OK\\n'" \
@@ -101,6 +118,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line '/etc'
     wait_for_line 'FORK_STATE_RESTORE_OK'
     wait_for_line 'FORK_EXEC_OK'
+    wait_for_line 'PROCFS_OK'
     wait_for_line 'OCI_FILESYSTEM_OK'
     printf '\035'
     wait_for "[detached from container; use 'container attach NAME' to return]"
@@ -133,7 +151,8 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'alpine: failed'
     wait_for_count 'ginux> ' 7
     printf '%s\n' 'shutdown'
-} | GINUX_VOLUME_IMAGE="$volume_image" "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
+} | GINUX_VOLUME_IMAGE="$volume_image" GINUX_QEMU_PID_FILE="$qemu_pid_file" \
+    "$repo_root/tools/qemu/run.sh" >"$output_file" 2>&1 &
 qemu_pid=$!
 
 for _ in {1..300}; do
@@ -169,6 +188,7 @@ for expected in \
     'FORK_STATE_RESTORE_OK' \
     '/etc' \
     'FORK_EXEC_OK' \
+    'PROCFS_OK' \
     'OCI_FILESYSTEM_OK' \
     'OCI_RESTART_OK' \
     'ginux: OCI init execution failed; container marked failed' \

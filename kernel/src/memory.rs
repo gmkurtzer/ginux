@@ -8,8 +8,8 @@ use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 const PAGE_SIZE: u64 = 4096;
 const LOW_MEMORY_LIMIT: u64 = 1024 * 1024;
 const MAX_RANGES: usize = 128;
-const MAX_RECYCLED_FRAMES: usize = 8192;
-const MAX_LIVE_FRAMES: usize = 8192;
+const MAX_RECYCLED_FRAMES: usize = 131_072;
+const MAX_LIVE_FRAMES: usize = 131_072;
 const DOMAIN_FRAME_LIMIT: usize = 192;
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -240,6 +240,96 @@ impl<const LIVE_LIMIT: usize, const RECYCLED_LIMIT: usize, const OWNER_LIMIT: us
             self.record_live(*frame, owner)?;
         }
         Some(frames)
+    }
+
+    fn reserve_contiguous_extent(&mut self, owner: FrameOwner, count: usize) -> Option<FrameLease> {
+        if count == 0
+            || self.live_count.checked_add(count)? > LIVE_LIMIT
+            || (!owner.is_kernel()
+                && self.owner_live_count(owner).checked_add(count)? > OWNER_LIMIT)
+        {
+            return None;
+        }
+        let size = (count as u64).checked_mul(PAGE_SIZE)?;
+        let range_index = (self.active_range..self.range_count).find(|index| {
+            self.ranges[*index]
+                .end
+                .checked_sub(self.ranges[*index].next)
+                .is_some_and(|available| available >= size)
+        })?;
+        let start = self.ranges[range_index].next;
+        self.ranges[range_index].next = start.checked_add(size)?;
+        for index in 0..count {
+            self.record_live(
+                FrameLease {
+                    address: start.checked_add((index as u64).checked_mul(PAGE_SIZE)?)?,
+                    generation: 1,
+                },
+                owner,
+            )?;
+        }
+        Some(FrameLease {
+            address: start,
+            generation: 1,
+        })
+    }
+
+    fn release_contiguous_extent(
+        &mut self,
+        owner: FrameOwner,
+        start: FrameLease,
+        count: usize,
+    ) -> bool {
+        let Some(end) = (count as u64)
+            .checked_mul(PAGE_SIZE)
+            .and_then(|size| start.address.checked_add(size))
+        else {
+            return false;
+        };
+        if count == 0
+            || start.address < LOW_MEMORY_LIMIT
+            || !start.address.is_multiple_of(PAGE_SIZE)
+            || start.generation == 0
+            || self
+                .recycled_count
+                .checked_add(count)
+                .is_none_or(|value| value > RECYCLED_LIMIT)
+            || self.allocated_frames < count as u64
+            || self.live_count < count
+            || self.live_frames[..self.live_count]
+                .iter()
+                .zip(&self.live_owners[..self.live_count])
+                .filter(|(frame, frame_owner)| {
+                    **frame_owner == owner
+                        && frame.generation == start.generation
+                        && (start.address..end).contains(&frame.address)
+                        && frame.address.is_multiple_of(PAGE_SIZE)
+                })
+                .count()
+                != count
+        {
+            return false;
+        }
+        let mut index = 0;
+        while index < self.live_count {
+            let frame = self.live_frames[index];
+            if self.live_owners[index] == owner
+                && frame.generation == start.generation
+                && (start.address..end).contains(&frame.address)
+            {
+                self.live_count -= 1;
+                self.live_frames[index] = self.live_frames[self.live_count];
+                self.live_owners[index] = self.live_owners[self.live_count];
+                self.live_frames[self.live_count] = EMPTY_LEASE;
+                self.live_owners[self.live_count] = FrameOwner::KERNEL;
+                self.recycled[self.recycled_count] = frame;
+                self.recycled_count += 1;
+            } else {
+                index += 1;
+            }
+        }
+        self.allocated_frames -= count as u64;
+        true
     }
 
     fn allocate_one(&mut self, owner: FrameOwner) -> Option<FrameLease> {
@@ -544,6 +634,47 @@ pub(crate) fn allocate_contiguous_frames<const N: usize>(
             core::ptr::write_bytes(address as *mut u8, 0, PAGE_SIZE as usize);
         }
         Some(frames)
+    }
+}
+
+pub(crate) fn allocate_contiguous_extent(
+    owner: FrameOwner,
+    count: usize,
+) -> Option<(FrameLease, usize)> {
+    if !INITIALIZED.load(Ordering::Acquire) || count == 0 {
+        return None;
+    }
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        let first = (*allocator).reserve_contiguous_extent(owner, count)?;
+        let address = first.direct_map_address()?;
+        core::ptr::write_bytes(
+            address as *mut u8,
+            0,
+            count.checked_mul(PAGE_SIZE as usize)?,
+        );
+        Some((first, count))
+    }
+}
+
+pub(crate) fn scrub_and_release_contiguous_extent(
+    owner: FrameOwner,
+    first: FrameLease,
+    count: usize,
+) -> bool {
+    if !INITIALIZED.load(Ordering::Acquire) || count == 0 {
+        return false;
+    }
+    let Some(address) = first.direct_map_address() else {
+        return false;
+    };
+    let Some(length) = count.checked_mul(PAGE_SIZE as usize) else {
+        return false;
+    };
+    unsafe { core::ptr::write_bytes(address as *mut u8, 0, length) };
+    unsafe {
+        let allocator = core::ptr::addr_of_mut!(GLOBAL_ALLOCATOR).cast::<FrameAllocator>();
+        (*allocator).release_contiguous_extent(owner, first, count)
     }
 }
 

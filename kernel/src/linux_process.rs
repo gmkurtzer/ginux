@@ -1271,6 +1271,14 @@ pub(crate) fn refresh_live_process_registry(
 }
 
 pub(crate) fn finish_live_process_registry() -> bool {
+    finish_live_process_registry_with_refresh_floor(2)
+}
+
+pub(crate) fn finish_runtime_process_registry() -> bool {
+    finish_live_process_registry_with_refresh_floor(0)
+}
+
+fn finish_live_process_registry_with_refresh_floor(refresh_floor: u32) -> bool {
     let Some(instance) = active_process_instance() else {
         return true;
     };
@@ -1281,7 +1289,7 @@ pub(crate) fn finish_live_process_registry() -> bool {
         return false;
     };
     let valid = table.init.is_some()
-        && LIVE_PROCESS_REFRESH_COUNT[instance].load(Ordering::Acquire) >= 2
+        && LIVE_PROCESS_REFRESH_COUNT[instance].load(Ordering::Acquire) >= refresh_floor
         && table.processes.iter().flatten().count() == 1
         && table.processes.iter().flatten().all(|process| {
             process.parent.is_none()

@@ -1008,6 +1008,16 @@ static NETWORK_PING_RESULT: AtomicU8 = AtomicU8::new(0);
 static NETWORK_DHCP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NETWORK_DHCP_RESULT: AtomicU8 = AtomicU8::new(0);
 static CONTAINER_PULL_REQUESTED: AtomicBool = AtomicBool::new(false);
+static LINUX_RUNTIME_SUSPEND_REQUESTED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_RUNTIME_SUSPENDED: BankedAtomicBool = BankedAtomicBool::new(false);
+static LINUX_RUNTIME_SUSPEND_ADDRESS: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SUSPEND_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SUSPEND_RIP: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SUSPEND_RSP: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SUSPEND_RFLAGS: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SUSPEND_FS_BASE: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_SUSPEND_REGISTERS: [BankedAtomicU64; LINUX_SYSCALL_FRAME_REGISTERS] =
+    [const { BankedAtomicU64::new(0) }; LINUX_SYSCALL_FRAME_REGISTERS];
 const CONTAINER_CONSOLE_CAPACITY: usize = 4096;
 const CONTAINER_CONSOLE_DETACH: u8 = 0x1d;
 static CONTAINER_CONSOLE_ATTACHED: [AtomicBool; control_abi::CONTAINER_LIMIT] =
@@ -1573,6 +1583,11 @@ pub(crate) fn user_mode_instruction_prevention_enabled() -> bool {
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
     }
     cr4 & CR4_UMIP != 0
+}
+
+pub(crate) fn initialize_user_call_gate() -> bool {
+    install_user_interrupt_gate(SYSCALL_VECTOR, ginux_syscall_entry as *const () as usize)
+        && user_interrupt_surface_is_minimal()
 }
 
 pub(crate) unsafe fn with_supervisor_user_access<T>(operation: impl FnOnce() -> T) -> T {
@@ -2869,6 +2884,12 @@ pub(crate) fn stop_configured_container() {
     LINUX_EXECUTION_INSTANCE.store(LINUX_RUNTIME_HOST_INSTANCE, Ordering::SeqCst);
 }
 
+pub(crate) fn suspend_configured_container() {
+    CONTAINER_ACTIVE_SLOT.store(CONTAINER_SLOT_NONE, Ordering::Release);
+    CONTAINER_SELECTED_SLOT.store(CONTAINER_SLOT_NONE, Ordering::Release);
+    LINUX_EXECUTION_INSTANCE.store(LINUX_RUNTIME_HOST_INSTANCE, Ordering::Release);
+}
+
 pub(crate) fn enable_container_management() -> bool {
     CONTAINER_MANAGEMENT_ENABLED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -3929,6 +3950,7 @@ fn finish_linux_thread_table() -> bool {
 
 pub(crate) struct LinuxElfResult {
     pub(crate) valid: bool,
+    pub(crate) suspended: bool,
     pub(crate) exec_replaced: bool,
     pub(crate) exec_node: u8,
     pub(crate) active_image_mapping_count: usize,
@@ -3945,6 +3967,7 @@ pub(crate) struct LinuxElfResult {
 impl LinuxElfResult {
     pub(crate) const FAILED: Self = Self {
         valid: false,
+        suspended: false,
         exec_replaced: false,
         exec_node: 0,
         active_image_mapping_count: 0,
@@ -5016,6 +5039,10 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         return LinuxElfResult::FAILED;
     }
     LINUX_RUNTIME_MODE.store(execution.runtime, Ordering::SeqCst);
+    if execution.runtime {
+        LINUX_RUNTIME_SUSPEND_REQUESTED.store(false, Ordering::Release);
+        LINUX_RUNTIME_SUSPENDED.store(false, Ordering::Release);
+    }
     if !install_live_linux_process_registry(execution.entry, execution.stack, active_fs_base()) {
         LINUX_RUNTIME_MODE.store(false, Ordering::SeqCst);
         let _ = linux_mount::deactivate_initial();
@@ -5026,61 +5053,16 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     }
     unsafe { ginux_user_enter(execution.entry, execution.stack, 0, 0, 0, 0, 0, 0, 0) };
     if execution.runtime {
-        let mut forks_completed = true;
-        while LINUX_FORK_REQUESTED.load(Ordering::SeqCst) {
-            if !execute_deferred_live_fork() {
-                forks_completed = false;
-                break;
-            }
+        if LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
+            let msrs_restored = restore_linux_syscall(saved_msrs);
+            LINUX_RUNTIME_MODE.store(false, Ordering::Release);
+            return LinuxElfResult {
+                valid: msrs_restored,
+                suspended: msrs_restored,
+                ..LinuxElfResult::FAILED
+            };
         }
-        let completed = ELF_PROBE_COMPLETED.swap(false, Ordering::SeqCst);
-        let mmap_released = release_linux_runtime_mmaps(execution.mmap as u64);
-        let descriptors_closed = linux_close_all_descriptors();
-        let registry_finished = linux_process::finish_live_process_registry();
-        let mount_deactivated = linux_mount::deactivate_initial();
-        let msrs_restored = restore_linux_syscall(saved_msrs);
-        let threads_released = finish_linux_thread_table();
-        let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
-        LINUX_RUNTIME_MODE.store(false, Ordering::SeqCst);
-        if !(forks_completed
-            && completed
-            && mmap_released
-            && descriptors_closed
-            && registry_finished
-            && mount_deactivated
-            && msrs_restored
-            && threads_released
-            && inactive)
-        {
-            serial_write("ginux: Alpine runtime return:");
-            for valid in [
-                forks_completed,
-                completed,
-                mmap_released,
-                descriptors_closed,
-                registry_finished,
-                mount_deactivated,
-                msrs_restored,
-                threads_released,
-                inactive,
-            ] {
-                serial_write(" ");
-                serial_write_u64(u64::from(valid));
-            }
-            serial_write("\r\n");
-        }
-        return LinuxElfResult {
-            valid: forks_completed
-                && completed
-                && mmap_released
-                && descriptors_closed
-                && registry_finished
-                && mount_deactivated
-                && msrs_restored
-                && threads_released
-                && inactive,
-            ..LinuxElfResult::FAILED
-        };
+        return finish_linux_runtime(execution.mmap as u64, saved_msrs);
     }
     let live_fork_executed = execute_deferred_live_fork();
     let live_process_registry_finished =
@@ -6169,6 +6151,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     }
     LinuxElfResult {
         valid,
+        suspended: false,
         exec_replaced,
         exec_node,
         active_image_mapping_count: active_image_count,
@@ -7609,6 +7592,137 @@ fn write_linux_live_return(output: *mut LinuxSyscallFrame, context: LinuxUserCon
             && LINUX_USER_RSP == context.rsp
             && LINUX_USER_RIP == context.rip
             && LINUX_USER_RFLAGS == context.rflags
+    }
+}
+
+fn save_suspended_linux_runtime(context: LinuxUserContext, address: u64, count: u64) -> bool {
+    if !context.is_valid()
+        || address == 0
+        || count == 0
+        || LINUX_RUNTIME_SUSPENDED.swap(true, Ordering::AcqRel)
+    {
+        return false;
+    }
+    for (stored, value) in LINUX_RUNTIME_SUSPEND_REGISTERS
+        .iter()
+        .zip(context.registers.into_array())
+    {
+        stored.store(value, Ordering::Release);
+    }
+    LINUX_RUNTIME_SUSPEND_ADDRESS.store(address, Ordering::Release);
+    LINUX_RUNTIME_SUSPEND_COUNT.store(count, Ordering::Release);
+    LINUX_RUNTIME_SUSPEND_RIP.store(context.rip, Ordering::Release);
+    LINUX_RUNTIME_SUSPEND_RSP.store(context.rsp, Ordering::Release);
+    LINUX_RUNTIME_SUSPEND_RFLAGS.store(context.rflags, Ordering::Release);
+    LINUX_RUNTIME_SUSPEND_FS_BASE.store(context.fs_base, Ordering::Release);
+    true
+}
+
+pub(crate) fn resume_suspended_linux_runtime(mmap: u64) -> LinuxElfResult {
+    if !LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
+        return LinuxElfResult::FAILED;
+    }
+    let Some(slot) = active_container_slot() else {
+        return LinuxElfResult::FAILED;
+    };
+    if !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
+        return LinuxElfResult::FAILED;
+    }
+    let address = LINUX_RUNTIME_SUSPEND_ADDRESS.load(Ordering::Acquire);
+    let count = LINUX_RUNTIME_SUSPEND_COUNT.load(Ordering::Acquire);
+    if address == 0 || count == 0 {
+        return LinuxElfResult::FAILED;
+    }
+    let byte = crate::serial_read_byte_blocking();
+    if !copy_to_linux_user(address, &[byte]) {
+        return LinuxElfResult::FAILED;
+    }
+    let registers = LinuxSyscallFrame::from_array(core::array::from_fn(|index| {
+        LINUX_RUNTIME_SUSPEND_REGISTERS[index].load(Ordering::Acquire)
+    }));
+    let context = LinuxUserContext {
+        registers,
+        rip: LINUX_RUNTIME_SUSPEND_RIP.load(Ordering::Acquire),
+        rsp: LINUX_RUNTIME_SUSPEND_RSP.load(Ordering::Acquire),
+        rflags: LINUX_RUNTIME_SUSPEND_RFLAGS.load(Ordering::Acquire),
+        rax: 1,
+        fs_base: LINUX_RUNTIME_SUSPEND_FS_BASE.load(Ordering::Acquire),
+    };
+    if !context.is_valid() {
+        return LinuxElfResult::FAILED;
+    }
+    let Some(saved_msrs) = configure_linux_syscall() else {
+        return LinuxElfResult::FAILED;
+    };
+    LINUX_RUNTIME_SUSPENDED.store(false, Ordering::Release);
+    LINUX_RUNTIME_MODE.store(true, Ordering::Release);
+    let resumed = resume_live_linux_process(
+        context.rip as usize,
+        context.rsp as usize,
+        context.fs_base,
+        context
+            .registers
+            .process_general(context.rax, context.rip, context.rflags),
+        context.rflags,
+    );
+    if LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
+        let msrs_restored = restore_linux_syscall(saved_msrs);
+        LINUX_RUNTIME_MODE.store(false, Ordering::Release);
+        return LinuxElfResult {
+            valid: resumed && msrs_restored,
+            suspended: resumed && msrs_restored,
+            ..LinuxElfResult::FAILED
+        };
+    }
+    if !resumed {
+        let _ = restore_linux_syscall(saved_msrs);
+        LINUX_RUNTIME_MODE.store(false, Ordering::Release);
+        return LinuxElfResult::FAILED;
+    }
+    finish_linux_runtime(mmap, saved_msrs)
+}
+
+fn finish_linux_runtime(mmap: u64, saved_msrs: [u64; 5]) -> LinuxElfResult {
+    let mut forks_completed = true;
+    while LINUX_FORK_REQUESTED.load(Ordering::SeqCst) {
+        if !execute_deferred_live_fork() {
+            forks_completed = false;
+            break;
+        }
+    }
+    if forks_completed && LINUX_RUNTIME_SUSPENDED.load(Ordering::Acquire) {
+        let msrs_restored = restore_linux_syscall(saved_msrs);
+        LINUX_RUNTIME_MODE.store(false, Ordering::Release);
+        return LinuxElfResult {
+            valid: msrs_restored,
+            suspended: msrs_restored,
+            ..LinuxElfResult::FAILED
+        };
+    }
+    let completed = ELF_PROBE_COMPLETED.swap(false, Ordering::SeqCst);
+    let mmap_released = release_linux_runtime_mmaps(mmap);
+    let descriptors_closed = linux_close_all_descriptors();
+    let registry_finished = linux_process::finish_runtime_process_registry();
+    let mount_deactivated = linux_mount::deactivate_initial();
+    let msrs_restored = restore_linux_syscall(saved_msrs);
+    let threads_released = finish_linux_thread_table();
+    let inactive = !ELF_PROBE_ACTIVE.swap(false, Ordering::SeqCst);
+    LINUX_RUNTIME_MODE.store(false, Ordering::SeqCst);
+    let valid = forks_completed
+        && completed
+        && mmap_released
+        && descriptors_closed
+        && registry_finished
+        && mount_deactivated
+        && msrs_restored
+        && threads_released
+        && inactive;
+    if !valid {
+        serial_write("ginux: OCI runtime cleanup failed\r\n");
+    }
+    LinuxElfResult {
+        valid,
+        ..LinuxElfResult::FAILED
     }
 }
 
@@ -9082,6 +9196,30 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     linux_runtime_file_kind(&absolute[..1 + path.len()])
 }
 
+fn linux_virtual_mount_path_at(directory: u64, path: &[u8]) -> Option<u16> {
+    let relative = path.strip_prefix(b"/").unwrap_or(path);
+    if relative != b"proc" && !relative.starts_with(b"proc/") {
+        return None;
+    }
+    let from_root = path.starts_with(b"/")
+        || if directory as u32 == LINUX_AT_FDCWD {
+            ELF_PROBE_CWD.load(Ordering::SeqCst) == LINUX_ROOT_DIRECTORY
+                && matches!(
+                    ELF_PROBE_OCI_CWD.load(Ordering::SeqCst),
+                    0 | crate::oci_image::ROOT_HANDLE
+                )
+        } else {
+            linux_device_descriptor(directory) & !3 == LINUX_ROOT_DIRECTORY
+                && matches!(
+                    linux_oci_descriptor(directory),
+                    0 | crate::oci_image::ROOT_HANDLE
+                )
+        };
+    from_root
+        .then(|| linux_measured_path_kind(relative))
+        .flatten()
+}
+
 fn linux_normalized_relative_path(path: &[u8]) -> bool {
     !path.is_empty()
         && path
@@ -9093,10 +9231,9 @@ fn linux_getcwd(address: u64, capacity: u64) -> u64 {
     let state = ELF_PROBE_CWD.load(Ordering::SeqCst);
     let mut output = [0_u8; 64];
     output[0] = b'/';
-    let length = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
-        let Some(path_length) =
-            crate::oci_image::copy_path(ELF_PROBE_OCI_CWD.load(Ordering::SeqCst), &mut output[1..])
-        else {
+    let oci_cwd = ELF_PROBE_OCI_CWD.load(Ordering::SeqCst);
+    let length = if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && oci_cwd != 0 {
+        let Some(path_length) = crate::oci_image::copy_path(oci_cwd, &mut output[1..]) else {
             return LINUX_ENOENT;
         };
         1 + path_length
@@ -9133,6 +9270,14 @@ fn linux_chdir(path_address: u64) -> u64 {
     };
     let path = &path[..length];
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
+        if let Some(kind) = linux_virtual_mount_path_at(u64::from(LINUX_AT_FDCWD), path) {
+            if kind & LINUX_DEVICE_DIRECTORY == 0 {
+                return LINUX_ENOTDIR;
+            }
+            ELF_PROBE_OCI_CWD.store(0, Ordering::SeqCst);
+            ELF_PROBE_CWD.store(kind & !3, Ordering::SeqCst);
+            return 0;
+        }
         let Some((handle, entry)) = linux_oci_path_at(u64::from(LINUX_AT_FDCWD), path) else {
             return LINUX_ENOENT;
         };
@@ -10489,6 +10634,8 @@ fn linux_openat(directory: u64, path_address: u64, flags: u64) -> u64 {
             return LINUX_ENOENT;
         }
         LINUX_FILE_TMP_SCRATCH
+    } else if let Some(kind) = linux_virtual_mount_path_at(directory, path) {
+        kind
     } else if let Some((handle, entry)) = linux_oci_path_at(directory, path) {
         oci_handle = handle;
         match entry.map(|entry| entry.kind) {
@@ -10558,6 +10705,21 @@ fn linux_newfstatat(directory: u64, path_address: u64, stat_address: u64, flags:
         Err(error) => return error,
     };
     let path = &path[..path_length];
+    if let Some(kind) = linux_virtual_mount_path_at(directory, path) {
+        let stat = if kind & LINUX_DEVICE_DIRECTORY != 0 {
+            linux_stat(
+                LINUX_STAT_DIRECTORY_MODE,
+                linux_root_directory_inode(kind).unwrap_or(0),
+            )
+        } else {
+            linux_regular_file_stat(kind)
+        };
+        return if copy_to_linux_user(stat_address, &stat) {
+            0
+        } else {
+            LINUX_EFAULT
+        };
+    }
     {
         let oci = if flags & LINUX_AT_SYMLINK_NOFOLLOW != 0 {
             linux_oci_metadata_path_at(directory, path)
@@ -10643,6 +10805,14 @@ fn linux_faccessat(directory: u64, path_address: u64, mode: u64, flags: u64) -> 
         Err(error) => return error,
     };
     let path = &path[..path_length];
+    if let Some(kind) = linux_virtual_mount_path_at(directory, path) {
+        let denied = if kind & LINUX_DEVICE_DIRECTORY != 0 {
+            mode & 2 != 0
+        } else {
+            mode & 3 != 0
+        };
+        return if denied { LINUX_EACCES } else { 0 };
+    }
     {
         if let Some((_, entry)) = linux_oci_path_at(directory, path) {
             let permissions = entry.map_or(0o555, |entry| entry.mode);
@@ -10702,6 +10872,34 @@ fn linux_statx(directory: u64, path_address: u64, flags: u64, mask: u64, stat_ad
         Err(error) => return error,
     };
     let path = &path[..path_length];
+    if let Some(kind) = linux_virtual_mount_path_at(directory, path) {
+        let (inode, mode, size) = if kind & LINUX_DEVICE_DIRECTORY != 0 {
+            (
+                linux_root_directory_inode(kind).unwrap_or(0),
+                LINUX_STAT_DIRECTORY_MODE,
+                0,
+            )
+        } else {
+            (
+                linux_regular_file_inode(kind).unwrap_or(0),
+                linux_regular_file_mode(kind),
+                linux_file_size(kind),
+            )
+        };
+        let mut stat = [0_u8; 256];
+        stat[..4].copy_from_slice(&LINUX_STATX_BASIC_STATS.to_ne_bytes());
+        stat[4..8].copy_from_slice(&(PAGE_SIZE as u32).to_ne_bytes());
+        stat[16..20].copy_from_slice(&1_u32.to_ne_bytes());
+        stat[28..30].copy_from_slice(&(mode as u16).to_ne_bytes());
+        stat[32..40].copy_from_slice(&inode.to_ne_bytes());
+        stat[40..48].copy_from_slice(&size.to_ne_bytes());
+        stat[48..56].copy_from_slice(&size.div_ceil(512).to_ne_bytes());
+        return if copy_to_linux_user(stat_address, &stat) {
+            0
+        } else {
+            LINUX_EFAULT
+        };
+    }
     {
         if let Some((handle, entry)) = linux_oci_path_at(directory, path) {
             let mode = entry.map_or(LINUX_STAT_DIRECTORY_MODE, linux_oci_mode);
@@ -11513,6 +11711,15 @@ fn linux_descriptor_read_live_return(
     count: u64,
 ) -> u64 {
     let immediate = linux_descriptor_read(descriptor, address, count);
+    if LINUX_RUNTIME_MODE.load(Ordering::Acquire)
+        && u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_INPUT
+        && LINUX_RUNTIME_SUSPEND_REQUESTED.swap(false, Ordering::AcqRel)
+    {
+        if count == 0 || !save_suspended_linux_runtime(caller, address, count) {
+            return LINUX_EINVAL;
+        }
+        return LINUX_RETURN_TO_KERNEL;
+    }
     if immediate != LINUX_ENOSYS
         || !linux_eventfd_descriptor(descriptor)
             && !linux_pipe_read_descriptor(descriptor)
@@ -11567,6 +11774,19 @@ fn linux_descriptor_readv_live_return(
     count: u64,
 ) -> u64 {
     let immediate = linux_descriptor_readv(descriptor, vectors, count);
+    if LINUX_RUNTIME_MODE.load(Ordering::Acquire)
+        && u16::from(linux_console_descriptor(descriptor)) == LINUX_DESCRIPTOR_INPUT
+        && LINUX_RUNTIME_SUSPEND_REQUESTED.swap(false, Ordering::AcqRel)
+    {
+        let (ranges, vector_count) = match linux_readv_ranges(vectors, count) {
+            Ok(snapshot) => snapshot,
+            Err(error) => return error,
+        };
+        if vector_count == 0 || !save_suspended_linux_runtime(caller, ranges[0].0, 1) {
+            return LINUX_EINVAL;
+        }
+        return LINUX_RETURN_TO_KERNEL;
+    }
     if immediate != LINUX_ENOSYS || !linux_pipe_read_descriptor(descriptor) {
         return immediate;
     }
@@ -13017,37 +13237,22 @@ fn linux_descriptor_writev(descriptor: u64, vectors: u64, count: u64) -> u64 {
 }
 
 fn container_console_read_byte() -> Option<u8> {
-    loop {
-        let slot = active_container_slot()?;
-        if !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
-            if !yield_container_console_to_controller() {
-                return None;
-            }
-            continue;
-        }
-        let byte = crate::serial_read_byte_blocking();
-        if byte != CONTAINER_CONSOLE_DETACH {
-            return Some(byte);
-        }
+    let slot = active_container_slot()?;
+    if !CONTAINER_CONSOLE_ATTACHED[slot].load(Ordering::Acquire) {
+        LINUX_RUNTIME_SUSPEND_REQUESTED.store(true, Ordering::Release);
+        return None;
+    }
+    let byte = crate::serial_read_byte_blocking();
+    if byte == CONTAINER_CONSOLE_DETACH {
         CONTAINER_CONSOLE_ATTACHED[slot].store(false, Ordering::Release);
+        LINUX_RUNTIME_SUSPEND_REQUESTED.store(true, Ordering::Release);
         crate::serial_write_bytes(
             b"\r\n[detached from container; use 'container attach NAME' to return]\r\n",
         );
-        if !yield_container_console_to_controller() {
-            return None;
-        }
+        None
+    } else {
+        Some(byte)
     }
-}
-
-fn yield_container_console_to_controller() -> bool {
-    let linux_fs_base = active_fs_base();
-    let linux_return_stack = unsafe { USER_RETURN_STACK };
-    let linux_instance =
-        LINUX_EXECUTION_INSTANCE.swap(LINUX_RUNTIME_HOST_INSTANCE, Ordering::SeqCst);
-    let resumed = address_space::run_installed_interactive_controller();
-    LINUX_EXECUTION_INSTANCE.store(linux_instance, Ordering::SeqCst);
-    unsafe { USER_RETURN_STACK = linux_return_stack };
-    resumed && install_user_fs_base(linux_fs_base)
 }
 
 fn container_console_write(bytes: &[u8]) {
@@ -17950,13 +18155,15 @@ fn container_control(domain_id: u64, capability: u64, frame: *mut UserTrapFrame)
         }
         control_abi::CONTAINER_ATTACH
             if requested_slot.is_some()
-                && active_container_slot() == requested_slot
                 && container_state(requested_slot.unwrap_or(0))
                     == control_abi::CONTAINER_STATE_RUNNING
                 && !CONTAINER_CONSOLE_ATTACHED[requested_slot.unwrap_or(0)]
                     .swap(true, Ordering::AcqRel) =>
         {
-            redraw_container_console(requested_slot.unwrap_or(0));
+            let slot = requested_slot.unwrap_or(0);
+            CONTAINER_SELECTED_SLOT.store(slot as u8, Ordering::Release);
+            CONTAINER_RESTART_REQUESTED.store(true, Ordering::Release);
+            redraw_container_console(slot);
             control_abi::CONTAINER_STATE_RUNNING
         }
         control_abi::CONTAINER_INJECT_FAILURE
@@ -18563,6 +18770,17 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         }
     }
     if failure_policy == Some(domain::ServiceFailurePolicy::StopOnly) {
+        serial_write("ginux: auxiliary user fault vector/error/address/rip: ");
+        for value in [
+            fault_metadata.vector,
+            fault_metadata.error,
+            fault_metadata.address,
+            fault_metadata.instruction,
+        ] {
+            serial_write_u64(value);
+            serial_write(" ");
+        }
+        serial_write("\r\n");
         if !domain::begin_auxiliary_runtime_fault(fault_domain, fault_metadata) {
             serial_write("ginux: auxiliary fault transition failed\r\n");
             return u64::MAX;

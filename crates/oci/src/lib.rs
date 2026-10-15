@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 const TAR_BLOCK_SIZE: usize = 512;
 const TAR_HEADER_SIZE: usize = 512;
-const TAR_MAX_ENTRIES: usize = 4096;
+const TAR_MAX_ENTRIES: usize = 32_768;
 const TAR_NAME_SIZE: usize = 100;
 const TAR_PREFIX_SIZE: usize = 155;
 pub const REFERENCE_CAPACITY: usize = 128;

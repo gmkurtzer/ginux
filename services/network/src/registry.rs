@@ -1274,51 +1274,69 @@ fn resolve(
     sockets: &mut SocketSet<'static>,
     handle: SocketHandle,
 ) -> Option<IpAddress> {
-    DNS_FALLBACK_A.store(0, Ordering::Release);
-    DNS_FALLBACK_STATE.store(0, Ordering::Release);
-    DNS_QUERY_SENT.store(0, Ordering::Release);
-    let query = match sockets.get_mut::<dns::Socket>(handle).start_query(
-        interface.context(),
-        host,
-        DnsQueryType::A,
-    ) {
-        Ok(query) => query,
-        Err(_) => {
-            progress(b"registry DNS query creation failed");
-            return None;
-        }
-    };
-    for poll in 0..NETWORK_POLL_LIMIT {
-        let _ = interface.poll(
-            Instant::from_millis((poll / POLLS_PER_MILLISECOND) as i64),
-            device,
-            sockets,
-        );
-        let fallback = DNS_FALLBACK_A.swap(0, Ordering::AcqRel);
-        if fallback != 0 {
-            sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
-            return Some(IpAddress::Ipv4(Ipv4Address::from_octets(
-                fallback.to_be_bytes(),
-            )));
-        }
-        match sockets
-            .get_mut::<dns::Socket>(handle)
-            .get_query_result(query)
-        {
-            Ok(addresses) => {
-                if addresses.is_empty() {
-                    progress(b"registry DNS answer was empty");
-                }
-                return addresses.first().copied();
-            }
-            Err(dns::GetQueryResultError::Pending) => core::hint::spin_loop(),
+    let mut elapsed_polls = 0_usize;
+    for attempt in 0..3 {
+        DNS_FALLBACK_A.store(0, Ordering::Release);
+        DNS_FALLBACK_STATE.store(0, Ordering::Release);
+        DNS_QUERY_SENT.store(0, Ordering::Release);
+        let query = match sockets.get_mut::<dns::Socket>(handle).start_query(
+            interface.context(),
+            host,
+            DnsQueryType::A,
+        ) {
+            Ok(query) => query,
             Err(_) => {
-                progress(b"registry DNS response rejected");
+                progress(b"registry DNS query creation failed");
                 return None;
             }
+        };
+        let mut pending = true;
+        for _ in 0..NETWORK_POLL_LIMIT {
+            elapsed_polls = elapsed_polls.saturating_add(1);
+            let _ = interface.poll(
+                Instant::from_millis((elapsed_polls / POLLS_PER_MILLISECOND) as i64),
+                device,
+                sockets,
+            );
+            let fallback = DNS_FALLBACK_A.swap(0, Ordering::AcqRel);
+            if fallback != 0 {
+                sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
+                return Some(IpAddress::Ipv4(Ipv4Address::from_octets(
+                    fallback.to_be_bytes(),
+                )));
+            }
+            match sockets
+                .get_mut::<dns::Socket>(handle)
+                .get_query_result(query)
+            {
+                Ok(addresses) => {
+                    pending = false;
+                    if let Some(address) = addresses.first().copied() {
+                        return Some(address);
+                    }
+                    break;
+                }
+                Err(dns::GetQueryResultError::Pending) => core::hint::spin_loop(),
+                Err(dns::GetQueryResultError::Failed) => {
+                    pending = false;
+                    break;
+                }
+            }
+        }
+        if pending {
+            sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
+        }
+        if attempt == 2 {
+            let mut message = String::<96>::new();
+            let _ = write!(
+                message,
+                "registry DNS response rejected (wire state {}, query sent {})",
+                DNS_FALLBACK_STATE.load(Ordering::Acquire),
+                DNS_QUERY_SENT.load(Ordering::Acquire),
+            );
+            progress(message.as_bytes());
         }
     }
-    sockets.get_mut::<dns::Socket>(handle).cancel_query(query);
     None
 }
 

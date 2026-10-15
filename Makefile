@@ -17,7 +17,7 @@ SYSTEM_PROFILE := profiles/minimal-system-v0/profile.tsv
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor manifest system-image test-alpine rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build run test test-c1 test-c2 fmt gate clean
+.PHONY: help doctor manifest system-image test-alpine rocky-image rocky-image-check linux-probe controller-runtime network-service protocol-service volume-service abi-conformance architecture-check build build-verification run test test-c1 test-c2 fmt gate clean
 
 help:
 	@echo "Ginux development targets"
@@ -108,13 +108,20 @@ build: manifest
 	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
 	@echo "Built $(EFI_DESTINATION)"
 
+build-verification: manifest
+	@echo "Building Ginux verification boot for $(TARGET) ($(PROFILE))"
+	@GINUX_LINUX_PROBE_EXPORT="$(abspath $(LINUX_PROBE))" GINUX_LINUX_DYNAMIC_EXPORT_DIR="$(abspath $(LINUX_DYNAMIC_DIR))" cargo build --package ginux-boot --features verification-boot --target $(TARGET) $(CARGO_PROFILE_FLAG)
+	@mkdir -p "$(dir $(EFI_DESTINATION))"
+	@cp "$(EFI_SOURCE)" "$(EFI_DESTINATION)"
+	@echo "Built verification image $(EFI_DESTINATION)"
+
 test-alpine: build
 	@tests/qemu/alpine-shell.sh
 
 run: build
 	@tools/qemu/run.sh
 
-test: build
+test: build-verification
 	@tests/qemu/boot.sh
 
 test-c1: build

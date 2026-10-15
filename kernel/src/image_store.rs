@@ -1,6 +1,6 @@
 use core::{
     mem::MaybeUninit,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 
 use ginux_image_store::{Digest, ImageStore, ObjectBackend, StagingHandle, StoreError};
@@ -9,23 +9,25 @@ use crate::memory::{self, FrameLease, FrameOwner};
 
 const PAGE_SIZE: usize = 4096;
 const OBJECT_LIMIT: usize = 4;
-const OBJECT_PAGE_LIMIT: usize = 2048;
-const ROOTFS_PAGE_LIMIT: usize = 2560;
+const OBJECT_PAGE_LIMIT: usize = 32_768;
+const ROOTFS_PAGE_LIMIT: usize = 98_304;
 pub(crate) const OBJECT_SIZE_LIMIT: usize = OBJECT_PAGE_LIMIT * PAGE_SIZE;
 pub(crate) const CACHE_QUOTA: usize = OBJECT_SIZE_LIMIT;
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static mut STORE: MaybeUninit<ImageStore<RamBackend, OBJECT_LIMIT>> = MaybeUninit::uninit();
 static mut LAST_PUBLISHED: Digest = Digest([0; 32]);
-static mut ROOTFS_FRAMES: [[FrameLease; ROOTFS_PAGE_LIMIT]; crate::control_abi::CONTAINER_LIMIT] =
-    [const { [FrameLease::EMPTY; ROOTFS_PAGE_LIMIT] }; crate::control_abi::CONTAINER_LIMIT];
+static ROOTFS_FRAME_STARTS: [AtomicU64; crate::control_abi::CONTAINER_LIMIT] =
+    [const { AtomicU64::new(0) }; crate::control_abi::CONTAINER_LIMIT];
+static ROOTFS_FRAME_COUNTS: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
+    [const { AtomicUsize::new(0) }; crate::control_abi::CONTAINER_LIMIT];
 
 #[derive(Clone, Copy)]
 struct RamObject {
     live: bool,
     length: usize,
     page_count: usize,
-    pages: [FrameLease; OBJECT_PAGE_LIMIT],
+    first: FrameLease,
 }
 
 impl RamObject {
@@ -33,7 +35,7 @@ impl RamObject {
         live: false,
         length: 0,
         page_count: 0,
-        pages: [FrameLease::EMPTY; OBJECT_PAGE_LIMIT],
+        first: FrameLease::EMPTY,
     };
 }
 
@@ -59,22 +61,11 @@ impl ObjectBackend for RamBackend {
         }
         let slot = self.objects.iter().position(|object| !object.live)?;
         let object = &mut self.objects[slot];
-        for index in 0..page_count {
-            let Some([frame]) = memory::allocate_frames::<1>(FrameOwner::KERNEL) else {
-                if index != 0 {
-                    let _ = memory::scrub_and_release_frames(
-                        FrameOwner::KERNEL,
-                        &object.pages[..index],
-                    );
-                }
-                object.pages.fill(FrameLease::EMPTY);
-                return None;
-            };
-            object.pages[index] = frame;
-        }
+        let (first, _) = memory::allocate_contiguous_extent(FrameOwner::KERNEL, page_count)?;
         object.live = true;
         object.length = expected_length;
         object.page_count = page_count;
+        object.first = first;
         Some(slot as u8)
     }
 
@@ -98,7 +89,13 @@ impl ObjectBackend for RamBackend {
             let page = position / PAGE_SIZE;
             let page_offset = position % PAGE_SIZE;
             let length = (bytes.len() - copied).min(PAGE_SIZE - page_offset);
-            let Some(address) = object.pages[page].direct_map_address() else {
+            let Some(address) = object
+                .first
+                .address()
+                .checked_add((page * PAGE_SIZE) as u64)
+                .and_then(|address| FrameLease::from_parts(address, object.first.generation()))
+                .and_then(FrameLease::direct_map_address)
+            else {
                 return false;
             };
             let output = unsafe {
@@ -130,7 +127,13 @@ impl ObjectBackend for RamBackend {
             let page = position / PAGE_SIZE;
             let page_offset = position % PAGE_SIZE;
             let length = (output.len() - copied).min(PAGE_SIZE - page_offset);
-            let Some(address) = object.pages[page].direct_map_address() else {
+            let Some(address) = object
+                .first
+                .address()
+                .checked_add((page * PAGE_SIZE) as u64)
+                .and_then(|address| FrameLease::from_parts(address, object.first.generation()))
+                .and_then(FrameLease::direct_map_address)
+            else {
                 return false;
             };
             let input = unsafe {
@@ -150,8 +153,11 @@ impl ObjectBackend for RamBackend {
         else {
             return false;
         };
-        if !memory::scrub_and_release_frames(FrameOwner::KERNEL, &object.pages[..object.page_count])
-        {
+        if !memory::scrub_and_release_contiguous_extent(
+            FrameOwner::KERNEL,
+            object.first,
+            object.page_count,
+        ) {
             return false;
         }
         *object = RamObject::EMPTY;
@@ -235,18 +241,22 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
         if expected_length == 0 || expected_length > ROOTFS_PAGE_LIMIT * PAGE_SIZE {
             return false;
         }
-        let Some(frames) =
-            memory::allocate_contiguous_frames::<ROOTFS_PAGE_LIMIT>(FrameOwner::KERNEL)
+        let page_count = expected_length.div_ceil(PAGE_SIZE);
+        let Some((first_frame, _)) =
+            memory::allocate_contiguous_extent(FrameOwner::KERNEL, page_count)
         else {
             return false;
         };
-        let Some(address) = frames[0].direct_map_address() else {
-            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &frames);
+        let Some(address) = first_frame.direct_map_address() else {
+            let _ = memory::scrub_and_release_contiguous_extent(
+                FrameOwner::KERNEL,
+                first_frame,
+                page_count,
+            );
             return false;
         };
-        let output = unsafe {
-            core::slice::from_raw_parts_mut(address as *mut u8, ROOTFS_PAGE_LIMIT * PAGE_SIZE)
-        };
+        let output =
+            unsafe { core::slice::from_raw_parts_mut(address as *mut u8, page_count * PAGE_SIZE) };
         let input = ObjectSlices::new(
             store.backend(),
             object,
@@ -256,21 +266,32 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
         let Ok(written) =
             miniz_oxide::inflate::decompress_slice_iter_to_slice(output, input, false, true)
         else {
-            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &frames);
+            let _ = memory::scrub_and_release_contiguous_extent(
+                FrameOwner::KERNEL,
+                first_frame,
+                page_count,
+            );
             return false;
         };
         if written != expected_length {
-            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &frames);
+            let _ = memory::scrub_and_release_contiguous_extent(
+                FrameOwner::KERNEL,
+                first_frame,
+                page_count,
+            );
             return false;
         }
         let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, written) };
         if !crate::oci_image::install_runtime_rootfs(slot, bytes) {
-            let _ = memory::scrub_and_release_frames(FrameOwner::KERNEL, &frames);
+            let _ = memory::scrub_and_release_contiguous_extent(
+                FrameOwner::KERNEL,
+                first_frame,
+                page_count,
+            );
             return false;
         }
-        unsafe {
-            core::ptr::addr_of_mut!(ROOTFS_FRAMES[slot]).write(frames);
-        }
+        ROOTFS_FRAME_STARTS[slot].store(first_frame.address(), Ordering::Release);
+        ROOTFS_FRAME_COUNTS[slot].store(page_count, Ordering::Release);
         true
     })
     .unwrap_or(false)
@@ -282,16 +303,19 @@ pub(crate) fn uninstall_rootfs(slot: usize) -> bool {
     {
         return false;
     }
-    let frames = unsafe { core::ptr::addr_of!(ROOTFS_FRAMES[slot]).read() };
-    if frames[0] == FrameLease::EMPTY {
+    let start = ROOTFS_FRAME_STARTS[slot].load(Ordering::Acquire);
+    let count = ROOTFS_FRAME_COUNTS[slot].load(Ordering::Acquire);
+    if count == 0 || start == 0 {
         return true;
     }
-    let released = memory::scrub_and_release_frames(FrameOwner::KERNEL, &frames);
+    let Some(first_frame) = FrameLease::from_parts(start, 1) else {
+        return false;
+    };
+    let released =
+        memory::scrub_and_release_contiguous_extent(FrameOwner::KERNEL, first_frame, count);
     if released {
-        unsafe {
-            core::ptr::addr_of_mut!(ROOTFS_FRAMES[slot])
-                .write([FrameLease::EMPTY; ROOTFS_PAGE_LIMIT]);
-        }
+        ROOTFS_FRAME_STARTS[slot].store(0, Ordering::Release);
+        ROOTFS_FRAME_COUNTS[slot].store(0, Ordering::Release);
     }
     released
 }
@@ -352,7 +376,18 @@ impl<'a> Iterator for ObjectSlices<'a> {
         let page = self.offset / PAGE_SIZE;
         let page_offset = self.offset % PAGE_SIZE;
         let length = self.remaining.min(PAGE_SIZE - page_offset);
-        let address = object.pages.get(page)?.direct_map_address()? + page_offset;
+        if page >= object.page_count {
+            return None;
+        }
+        let address = FrameLease::from_parts(
+            object
+                .first
+                .address()
+                .checked_add((page * PAGE_SIZE) as u64)?,
+            object.first.generation(),
+        )?
+        .direct_map_address()?
+            + page_offset;
         let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
         self.offset += length;
         self.remaining -= length;
