@@ -1388,6 +1388,14 @@ pub(crate) fn container_domain_limits(domain_raw: u64) -> Option<(u16, u32)> {
     (domain.role == Role::Container).then_some((domain.cpu_limit, domain.memory_limit_mib))
 }
 
+pub(crate) fn container_slot_for_domain(domain_raw: u64) -> Option<usize> {
+    let domain = global_manager()?.domain(decode_id(domain_raw)?)?;
+    (domain.role == Role::Container)
+        .then_some(domain.container_slot)
+        .flatten()
+        .map(usize::from)
+}
+
 pub(crate) fn primary_service_identity() -> Option<u64> {
     Some(encode_service_id(
         global_manager()?.primary_service_identity?,

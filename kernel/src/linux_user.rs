@@ -1,22 +1,24 @@
-use core::{
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use crate::{arch::x86_64::cpu, control_abi, domain};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 const NAMESPACE_LIMIT: usize = 4;
 const ROOT_INSIDE_ID: u32 = 0;
 const ROOT_OUTSIDE_ID: u32 = 100_000;
 const ROOT_ID_COUNT: u32 = 1;
+const HOST_INSTANCE: usize = control_abi::CONTAINER_LIMIT;
+const INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
 
 pub(crate) const UID_MAP: &[u8] = b"0 100000 1\n";
 pub(crate) const GID_MAP: &[u8] = b"0 100000 1\n";
 pub(crate) const SETGROUPS: &[u8] = b"deny\n";
 
 static TABLE_INSTALLED: AtomicBool = AtomicBool::new(false);
-static mut LIVE_TABLE: MaybeUninit<UserNamespaceTable> = MaybeUninit::uninit();
+static mut LIVE_TABLES: [UserNamespaceTable; INSTANCE_LIMIT] =
+    [const { UserNamespaceTable::new() }; INSTANCE_LIMIT];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct UserNamespaceHandle {
+    owner_domain: u64,
     slot: u8,
     generation: u32,
     id: u32,
@@ -86,6 +88,7 @@ struct UserNamespace {
 }
 
 struct UserNamespaceTable {
+    owner_domain: u64,
     namespaces: [Option<UserNamespace>; NAMESPACE_LIMIT],
     generations: [u32; NAMESPACE_LIMIT],
     next_id: u32,
@@ -95,6 +98,7 @@ struct UserNamespaceTable {
 impl UserNamespaceTable {
     const fn new() -> Self {
         Self {
+            owner_domain: 0,
             namespaces: [None; NAMESPACE_LIMIT],
             generations: [0; NAMESPACE_LIMIT],
             next_id: 1,
@@ -111,6 +115,7 @@ impl UserNamespaceTable {
         let id = self.next_id;
         self.next_id = self.next_id.checked_add(1)?;
         let handle = UserNamespaceHandle {
+            owner_domain: self.owner_domain,
             slot: u8::try_from(slot).ok()?,
             generation,
             id,
@@ -211,9 +216,16 @@ pub(crate) fn install_initial() -> bool {
     if TABLE_INSTALLED.load(Ordering::Acquire) {
         return false;
     }
-    let table = core::ptr::addr_of_mut!(LIVE_TABLE).cast::<UserNamespaceTable>();
-    unsafe { table.write(UserNamespaceTable::new()) };
-    let table = unsafe { &mut *table };
+    let mut index = 0;
+    while index < INSTANCE_LIMIT {
+        unsafe {
+            core::ptr::addr_of_mut!(LIVE_TABLES[index]).write(UserNamespaceTable::new());
+        }
+        index += 1;
+    }
+    let Some(table) = live_table_mut_at(HOST_INSTANCE) else {
+        return false;
+    };
     let Some(handle) = table.create(IdMap::ROOT, IdMap::ROOT) else {
         return false;
     };
@@ -223,11 +235,20 @@ pub(crate) fn install_initial() -> bool {
 }
 
 pub(crate) fn initial() -> Option<UserNamespaceHandle> {
-    live_table()?.initial
+    let (index, owner_domain) = current_instance_and_owner()?;
+    let table = live_table_mut_at(index)?;
+    if table.initial.is_none() {
+        table.owner_domain = owner_domain;
+        let handle = table.create(IdMap::ROOT, IdMap::ROOT)?;
+        table.initial = Some(handle);
+    }
+    (table.owner_domain == owner_domain)
+        .then_some(table.initial)
+        .flatten()
 }
 
 pub(crate) fn credentials(handle: UserNamespaceHandle) -> Option<Credentials> {
-    let namespace = live_table()?.namespace(handle)?;
+    let namespace = live_table_for_handle(handle)?.namespace(handle)?;
     if namespace.uid_map.outside(0) != Some(ROOT_OUTSIDE_ID)
         || namespace.gid_map.outside(0) != Some(ROOT_OUTSIDE_ID)
         || namespace.setgroups_allowed
@@ -247,13 +268,13 @@ pub(crate) fn credentials(handle: UserNamespaceHandle) -> Option<Credentials> {
 }
 
 pub(crate) fn has_no_linux_capabilities(handle: UserNamespaceHandle) -> bool {
-    live_table()
+    live_table_for_handle(handle)
         .and_then(|table| table.namespace(handle))
         .is_some_and(|namespace| namespace.linux_capabilities == 0)
 }
 
 pub(crate) fn setgroups_allowed(handle: UserNamespaceHandle) -> bool {
-    live_table()
+    live_table_for_handle(handle)
         .and_then(|table| table.namespace(handle))
         .is_some_and(|namespace| namespace.setgroups_allowed)
 }
@@ -262,7 +283,7 @@ pub(crate) fn privileged_operation_denied(
     handle: UserNamespaceHandle,
     operation: PrivilegedOperation,
 ) -> bool {
-    live_table()
+    live_table_for_handle(handle)
         .and_then(|table| table.namespace(handle))
         .is_some_and(|namespace| privileged_operation_denied_in(namespace, operation))
 }
@@ -274,9 +295,43 @@ fn privileged_operation_denied_in(
     namespace.linux_capabilities == 0 && namespace.privileged_operations & operation.bit() == 0
 }
 
-fn live_table() -> Option<&'static UserNamespaceTable> {
+fn live_table_for_handle(handle: UserNamespaceHandle) -> Option<&'static UserNamespaceTable> {
+    let index = if handle.owner_domain == 0 {
+        HOST_INSTANCE
+    } else {
+        domain::container_slot_for_domain(handle.owner_domain)?
+    };
+    let table = live_table_at(index)?;
+    (table.owner_domain == handle.owner_domain).then_some(table)
+}
+
+fn live_table_at(index: usize) -> Option<&'static UserNamespaceTable> {
     if !TABLE_INSTALLED.load(Ordering::Acquire) {
         return None;
     }
-    Some(unsafe { &*core::ptr::addr_of!(LIVE_TABLE).cast::<UserNamespaceTable>() })
+    let table = unsafe {
+        core::ptr::addr_of!(LIVE_TABLES)
+            .cast::<UserNamespaceTable>()
+            .add(index)
+    };
+    Some(unsafe { &*table })
+}
+
+fn live_table_mut_at(index: usize) -> Option<&'static mut UserNamespaceTable> {
+    if !TABLE_INSTALLED.load(Ordering::Acquire) && index != HOST_INSTANCE {
+        return None;
+    }
+    let table = unsafe {
+        core::ptr::addr_of_mut!(LIVE_TABLES)
+            .cast::<UserNamespaceTable>()
+            .add(index)
+    };
+    Some(unsafe { &mut *table })
+}
+
+fn current_instance_and_owner() -> Option<(usize, u64)> {
+    let Some(slot) = cpu::current_container_slot() else {
+        return Some((HOST_INSTANCE, 0));
+    };
+    Some((slot, cpu::container_domain_id(slot)?))
 }

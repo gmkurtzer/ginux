@@ -1,9 +1,9 @@
 use core::{
     mem::{size_of, MaybeUninit},
-    sync::atomic::{AtomicBool, AtomicU32, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering},
 };
 
-use crate::{address_space, arch::x86_64::cpu, linux_user, memory, scheduler};
+use crate::{address_space, arch::x86_64::cpu, control_abi, linux_user, memory, scheduler};
 
 const PROCESS_LIMIT: usize = 4;
 const PROCESS_HIERARCHY_LIMIT: usize = 6;
@@ -18,12 +18,19 @@ const USER: u64 = 1 << 2;
 const NO_EXECUTE: u64 = 1 << 63;
 const TEST_USER_ADDRESS: usize = 1usize << 39;
 const PROCESS_RAX_INDEX: usize = 0;
-static LIVE_PROCESS_TABLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
-static LIVE_PROCESS_REFRESH_COUNT: AtomicU32 = AtomicU32::new(0);
+const HOST_PROCESS_INSTANCE: usize = control_abi::CONTAINER_LIMIT;
+const PROCESS_INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
+const PROCESS_INSTANCE_NONE: u8 = u8::MAX;
+static LIVE_PROCESS_TABLE_INITIALIZED: [AtomicBool; PROCESS_INSTANCE_LIMIT] =
+    [const { AtomicBool::new(false) }; PROCESS_INSTANCE_LIMIT];
+static LIVE_PROCESS_REFRESH_COUNT: [AtomicU32; PROCESS_INSTANCE_LIMIT] =
+    [const { AtomicU32::new(0) }; PROCESS_INSTANCE_LIMIT];
+static LIVE_PROCESS_ACTIVE_INSTANCE: AtomicU8 = AtomicU8::new(PROCESS_INSTANCE_NONE);
 static LIVE_FORK_CHILD_EXECUTED: AtomicBool = AtomicBool::new(false);
 static LIVE_FORK_EXECUTION_STAGE: AtomicU32 = AtomicU32::new(0);
 static LIVE_FORK_CHILD_DIAGNOSTIC: AtomicU32 = AtomicU32::new(0);
-static mut LIVE_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
+static mut LIVE_PROCESS_TABLES: [ProcessTable; PROCESS_INSTANCE_LIMIT] =
+    [const { ProcessTable::new() }; PROCESS_INSTANCE_LIMIT];
 static mut TEST_PROCESS_TABLE: MaybeUninit<ProcessTable> = MaybeUninit::uninit();
 
 fn mapping_requires_fork_copy(mapping: &cpu::LinuxActiveImageMapping) -> bool {
@@ -296,6 +303,7 @@ pub(crate) struct LiveProcessStatus {
 }
 
 struct ProcessTable {
+    owner_domain: u64,
     processes: [Option<Process>; PROCESS_LIMIT],
     generations: [u32; PROCESS_LIMIT],
     next_pid: u32,
@@ -305,6 +313,7 @@ struct ProcessTable {
 impl ProcessTable {
     const fn new() -> Self {
         Self {
+            owner_domain: 0,
             processes: [None; PROCESS_LIMIT],
             generations: [0; PROCESS_LIMIT],
             next_pid: 1,
@@ -337,6 +346,14 @@ impl ProcessTable {
         }
         self.init = Some(handle);
         Some(handle)
+    }
+
+    fn scheduler_domain(&self) -> u64 {
+        if self.owner_domain == 0 {
+            1
+        } else {
+            self.owner_domain
+        }
     }
 
     fn prepare_fork(&mut self, parent: ProcessHandle) -> Option<ProcessHandle> {
@@ -1165,7 +1182,10 @@ pub(crate) fn install_live_process_registry(
     rflags: u64,
     fs_base: u64,
 ) -> bool {
-    if LIVE_PROCESS_TABLE_INITIALIZED.load(Ordering::Acquire) {
+    let instance = current_process_instance();
+    if LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire)
+        || LIVE_PROCESS_ACTIVE_INSTANCE.load(Ordering::Acquire) != PROCESS_INSTANCE_NONE
+    {
         return false;
     }
     let Some(address_space) = ProcessAddressSpace::new(snapshot.hierarchy(), snapshot.mappings())
@@ -1184,8 +1204,17 @@ pub(crate) fn install_live_process_registry(
     if invalid.is_valid(&address_space) || !context.is_valid(&address_space) {
         return false;
     }
-    let table = core::ptr::addr_of_mut!(LIVE_PROCESS_TABLE).cast::<ProcessTable>();
+    let table = unsafe {
+        core::ptr::addr_of_mut!(LIVE_PROCESS_TABLES)
+            .cast::<ProcessTable>()
+            .add(instance)
+    };
     unsafe {
+        core::ptr::addr_of_mut!((*table).owner_domain).write(
+            cpu::current_container_slot()
+                .and_then(cpu::container_domain_id)
+                .unwrap_or(0),
+        );
         let processes = core::ptr::addr_of_mut!((*table).processes).cast::<Option<Process>>();
         let generations = core::ptr::addr_of_mut!((*table).generations).cast::<u32>();
         for index in 0..PROCESS_LIMIT {
@@ -1199,8 +1228,9 @@ pub(crate) fn install_live_process_registry(
     if table.create_init(address_space, context).is_none() {
         return false;
     }
-    LIVE_PROCESS_REFRESH_COUNT.store(0, Ordering::Release);
-    LIVE_PROCESS_TABLE_INITIALIZED.store(true, Ordering::Release);
+    LIVE_PROCESS_REFRESH_COUNT[instance].store(0, Ordering::Release);
+    LIVE_PROCESS_TABLE_INITIALIZED[instance].store(true, Ordering::Release);
+    LIVE_PROCESS_ACTIVE_INSTANCE.store(instance as u8, Ordering::Release);
     true
 }
 
@@ -1232,7 +1262,8 @@ pub(crate) fn refresh_live_process_registry(
         },
     );
     if refreshed {
-        LIVE_PROCESS_REFRESH_COUNT.fetch_add(1, Ordering::SeqCst);
+        let instance = active_process_instance().unwrap_or(HOST_PROCESS_INSTANCE);
+        LIVE_PROCESS_REFRESH_COUNT[instance].fetch_add(1, Ordering::SeqCst);
     } else {
         crate::serial_write("ginux: live registry refresh rejected process context\r\n");
     }
@@ -1240,14 +1271,17 @@ pub(crate) fn refresh_live_process_registry(
 }
 
 pub(crate) fn finish_live_process_registry() -> bool {
-    if !LIVE_PROCESS_TABLE_INITIALIZED.load(Ordering::Acquire) {
+    let Some(instance) = active_process_instance() else {
         return true;
+    };
+    if !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire) {
+        return false;
     }
     let Some(table) = live_process_table_mut() else {
         return false;
     };
     let valid = table.init.is_some()
-        && LIVE_PROCESS_REFRESH_COUNT.load(Ordering::Acquire) >= 2
+        && LIVE_PROCESS_REFRESH_COUNT[instance].load(Ordering::Acquire) >= 2
         && table.processes.iter().flatten().count() == 1
         && table.processes.iter().flatten().all(|process| {
             process.parent.is_none()
@@ -1261,15 +1295,16 @@ pub(crate) fn finish_live_process_registry() -> bool {
         crate::serial_write_u64(u64::from(table.init.is_some()));
         crate::serial_write(" ");
         crate::serial_write_u64(u64::from(
-            LIVE_PROCESS_REFRESH_COUNT.load(Ordering::Acquire),
+            LIVE_PROCESS_REFRESH_COUNT[instance].load(Ordering::Acquire),
         ));
         crate::serial_write(" ");
         crate::serial_write_u64(table.processes.iter().flatten().count() as u64);
         crate::serial_write("\r\n");
         return false;
     }
-    LIVE_PROCESS_TABLE_INITIALIZED.store(false, Ordering::Release);
-    LIVE_PROCESS_REFRESH_COUNT.store(0, Ordering::Release);
+    LIVE_PROCESS_TABLE_INITIALIZED[instance].store(false, Ordering::Release);
+    LIVE_PROCESS_REFRESH_COUNT[instance].store(0, Ordering::Release);
+    LIVE_PROCESS_ACTIVE_INSTANCE.store(PROCESS_INSTANCE_NONE, Ordering::Release);
     true
 }
 
@@ -1446,12 +1481,13 @@ pub(crate) fn begin_live_fork() -> Option<LiveProcessDispatch> {
         return None;
     };
     LIVE_FORK_EXECUTION_STAGE.store(13, Ordering::Release);
-    if !table.admit_to_scheduler(parent_handle, run_queue, 1) {
+    let scheduler_domain = table.scheduler_domain();
+    if !table.admit_to_scheduler(parent_handle, run_queue, scheduler_domain) {
         let _ = scheduler::release_process_scheduler_workspace();
         let _ = discard_live_fork(table, parent_handle, child_handle);
         return None;
     }
-    if !table.admit_to_scheduler(child_handle, run_queue, 1) {
+    if !table.admit_to_scheduler(child_handle, run_queue, scheduler_domain) {
         let _ = table.withdraw_from_scheduler(parent_handle, run_queue);
         let _ = scheduler::release_process_scheduler_workspace();
         let _ = discard_live_fork(table, parent_handle, child_handle);
@@ -1913,11 +1949,12 @@ fn execute_cloned_live_child(
     }
     LIVE_FORK_EXECUTION_STAGE.store(2, Ordering::Release);
     let run_queue = scheduler::acquire_process_scheduler_workspace()?;
-    if !table.admit_to_scheduler(parent_handle, run_queue, 1) {
+    let scheduler_domain = table.scheduler_domain();
+    if !table.admit_to_scheduler(parent_handle, run_queue, scheduler_domain) {
         let _ = scheduler::release_process_scheduler_workspace();
         return None;
     }
-    if !table.admit_to_scheduler(child_handle, run_queue, 1) {
+    if !table.admit_to_scheduler(child_handle, run_queue, scheduler_domain) {
         let _ = table.withdraw_from_scheduler(parent_handle, run_queue);
         let _ = scheduler::release_process_scheduler_workspace();
         return None;
@@ -2006,10 +2043,25 @@ pub(crate) fn live_fork_child_diagnostic() -> u32 {
 }
 
 fn live_process_table_mut() -> Option<&'static mut ProcessTable> {
-    if !LIVE_PROCESS_TABLE_INITIALIZED.load(Ordering::Acquire) {
+    let instance = active_process_instance()?;
+    if !LIVE_PROCESS_TABLE_INITIALIZED[instance].load(Ordering::Acquire) {
         return None;
     }
-    Some(unsafe { &mut *core::ptr::addr_of_mut!(LIVE_PROCESS_TABLE).cast::<ProcessTable>() })
+    let table = unsafe {
+        core::ptr::addr_of_mut!(LIVE_PROCESS_TABLES)
+            .cast::<ProcessTable>()
+            .add(instance)
+    };
+    Some(unsafe { &mut *table })
+}
+
+fn current_process_instance() -> usize {
+    cpu::current_container_slot().unwrap_or(HOST_PROCESS_INSTANCE)
+}
+
+fn active_process_instance() -> Option<usize> {
+    let instance = usize::from(LIVE_PROCESS_ACTIVE_INSTANCE.load(Ordering::Acquire));
+    (instance < PROCESS_INSTANCE_LIMIT).then_some(instance)
 }
 
 fn scrub_candidate_resources(
