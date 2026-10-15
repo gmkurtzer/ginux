@@ -612,7 +612,7 @@ if ! grep -q '^ginux: malformed boot manifests rejected' "$output_file"; then
     exit 1
 fi
 
-if ! grep -q '^ginux: manifest authority grants: 9' "$output_file"; then
+if ! grep -q '^ginux: manifest authority grants: 10' "$output_file"; then
     echo "Boot test failed: a signed directional packet authority grant is missing." >&2
     exit 1
 fi
