@@ -47,6 +47,12 @@ enum State {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ContainerNetworkMode {
+    HostShared,
+    Isolated,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ServiceFailurePolicy {
     RestartManaged,
     StopOnly,
@@ -88,6 +94,7 @@ struct Domain {
     container_slot: Option<u16>,
     cpu_limit: u16,
     memory_limit_mib: u32,
+    container_network: Option<ContainerNetworkMode>,
     state: State,
     capabilities: CapabilityTable,
     boot_roots: [Option<Handle>; MAX_BOOT_GRANTS],
@@ -303,6 +310,7 @@ impl Manager {
             container_slot: None,
             cpu_limit: 1,
             memory_limit_mib: 0,
+            container_network: None,
             state: State::Ready,
             capabilities,
             boot_roots,
@@ -504,6 +512,7 @@ impl Manager {
             container_slot: None,
             cpu_limit: 1,
             memory_limit_mib: 0,
+            container_network: None,
             state: State::Ready,
             capabilities,
             boot_roots,
@@ -561,6 +570,7 @@ impl Manager {
             container_slot: Some(u16::try_from(container_slot).ok()?),
             cpu_limit,
             memory_limit_mib,
+            container_network: Some(ContainerNetworkMode::HostShared),
             state: State::Ready,
             capabilities,
             boot_roots: [None; MAX_BOOT_GRANTS],
@@ -1396,6 +1406,13 @@ pub(crate) fn container_slot_for_domain(domain_raw: u64) -> Option<usize> {
         .map(usize::from)
 }
 
+pub(crate) fn container_network_mode(domain_raw: u64) -> Option<ContainerNetworkMode> {
+    let domain = global_manager()?.domain(decode_id(domain_raw)?)?;
+    (domain.role == Role::Container)
+        .then_some(domain.container_network)
+        .flatten()
+}
+
 pub(crate) fn primary_service_identity() -> Option<u64> {
     Some(encode_service_id(
         global_manager()?.primary_service_identity?,
@@ -1643,6 +1660,7 @@ pub(crate) fn verify_container_domain_invariants() -> bool {
                 && domain.container_slot == Some(0)
                 && domain.cpu_limit == 1
                 && domain.memory_limit_mib == 128
+                && domain.container_network == Some(ContainerNetworkMode::HostShared)
                 && domain.capabilities.is_empty()
                 && domain.capabilities.boot_authority_is_sealed()
         })
@@ -1656,6 +1674,7 @@ pub(crate) fn verify_container_domain_invariants() -> bool {
             .create_container_domain(control, 0, 1, 128)
             .is_none()
         && manager.create_container_domain(first, 2, 1, 128).is_none()
+        && ContainerNetworkMode::HostShared != ContainerNetworkMode::Isolated
 }
 
 pub(crate) fn verify_auxiliary_service_registry_invariants() -> bool {

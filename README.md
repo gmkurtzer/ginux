@@ -100,6 +100,11 @@ network view, and devices. A container without an explicit network attachment
 uses the control domain's host network; this shares connectivity, not the
 authority to reconfigure the host interface.
 
+The filesystem root is an abstract domain-owned kernel object. OCI is an image
+ingestion and population format, not an isolation mechanism: an embedded
+image, an OCI-derived image, or a future persistent-volume snapshot can back
+the same root-object contract without changing the domain boundary.
+
 A Linux personality domain starts with its own root Linux PID, mount, user,
 IPC, UTS, and network namespace views. Linux namespace operations such as
 `clone`, `unshare`, and `setns` may create and join descendants of those roots,

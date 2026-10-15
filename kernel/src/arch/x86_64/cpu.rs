@@ -2672,6 +2672,13 @@ pub(crate) fn begin_configured_container() {
                 .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
             return;
         }
+        if domain::container_network_mode(container_domain)
+            != Some(domain::ContainerNetworkMode::HostShared)
+        {
+            CONTAINER_CONTROL_STATES[slot]
+                .store(control_abi::CONTAINER_STATE_FAILED as u8, Ordering::SeqCst);
+            return;
+        }
         CONTAINER_ACTIVE_SLOT.store(slot as u8, Ordering::SeqCst);
         CONTAINER_CONTROL_STATES[slot]
             .store(control_abi::CONTAINER_STATE_RUNNING as u8, Ordering::SeqCst);
