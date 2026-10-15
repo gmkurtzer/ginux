@@ -101,6 +101,7 @@ const LINUX_EXECVE_SYSCALL: u64 = 59;
 const LINUX_WAIT4_SYSCALL: u64 = 61;
 const LINUX_KILL_SYSCALL: u64 = 62;
 const LINUX_TKILL_SYSCALL: u64 = 200;
+const LINUX_TIME_SYSCALL: u64 = 201;
 const LINUX_TGKILL_SYSCALL: u64 = 234;
 const LINUX_CLONE_VM: u64 = 0x0000_0100;
 const LINUX_CLONE_FS: u64 = 0x0000_0200;
@@ -7062,6 +7063,7 @@ extern "sysv64" fn linux_syscall_handler(
             ),
             Err(error) => error,
         },
+        LINUX_TIME_SYSCALL => linux_time(first_argument),
         LINUX_EXECVEAT_SYSCALL => {
             linux_execveat(first_argument, buffer, count, register(0), register(2))
         }
@@ -8203,6 +8205,19 @@ fn linux_gettimeofday(timeval_address: u64, timezone_address: u64) -> u64 {
         return LINUX_EFAULT;
     }
     0
+}
+
+fn linux_time(output_address: u64) -> u64 {
+    if output_address != 0 && !linux_writable_user_range_contains(output_address, 8) {
+        return LINUX_EFAULT;
+    }
+    let Some((seconds, _)) = linux_realtime_time() else {
+        return LINUX_ENOSYS;
+    };
+    if output_address != 0 && !copy_to_linux_user(output_address, &seconds.to_ne_bytes()) {
+        return LINUX_EFAULT;
+    }
+    seconds
 }
 
 fn linux_elapsed_time() -> Option<(u64, u64)> {

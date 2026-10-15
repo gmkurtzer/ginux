@@ -898,6 +898,20 @@ ginux_linux_system_init:
     test rax, rax
     jne .Lfailure
 
+    # Verify legacy time returns and optionally stores the realtime second.
+    lea rdi, [rip + .Lstatus]
+    mov eax, 201
+    syscall
+    cmp rax, 1577836800
+    jb .Lfailure
+    cmp qword ptr [rip + .Lstatus], rax
+    jne .Lfailure
+    mov edi, 1
+    mov eax, 201
+    syscall
+    cmp rax, -14
+    jne .Lfailure
+
     # Verify close_range marking, closure, and Linux error boundaries.
     mov edi, -100
     lea rsi, [rip + .Lnull_path]

@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **115 Partial**, **28 Policy-denied**, **232 Missing**.
+Current totals: **116 Partial**, **28 Policy-denied**, **231 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -279,7 +279,7 @@ therefore omitted.
 | 198 | lremovexattr | Missing |
 | 199 | fremovexattr | Missing |
 | 200 | tkill | Partial |
-| 201 | time | Missing |
+| 201 | time | Partial |
 | 202 | futex | Partial |
 | 203 | sched_setaffinity | Partial |
 | 204 | sched_getaffinity | Partial |

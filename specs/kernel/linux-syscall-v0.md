@@ -668,6 +668,9 @@ remain unsupported.
 normalized 16-byte x86-64 `timeval`. A non-null legacy timezone pointer receives
 two zero 32-bit fields. Both complete output ranges are validated before
 copy-out; null outputs are accepted and bad ranges return `-EFAULT`.
+`rax = 201` (`__NR_time`) returns that source's whole realtime seconds and
+optionally stores the same 64-bit `time_t`. A bad non-null output returns
+`-EFAULT` without a partial write.
 `rax = 229` (`__NR_clock_getres`) exposes the corresponding single-tick
 resolution, rounded up to a normalized `timespec`. A null result pointer is a
 valid support query. Clock selection and copy errors match `clock_gettime`, and
