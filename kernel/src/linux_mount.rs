@@ -3,9 +3,14 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering},
 };
 
-use crate::initramfs::{self, PublishedRootHandle};
+use crate::{
+    arch::x86_64::cpu,
+    control_abi, domain,
+    initramfs::{self, PublishedRootHandle},
+    oci_image,
+};
 
-const NAMESPACE_LIMIT: usize = 4;
+const NAMESPACE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 4;
 const EMPTY_SLOT: u8 = u8::MAX;
 pub(crate) const ROOT_READ_ONLY: u32 = 1 << 0;
 pub(crate) const ROOT_NOSUID: u32 = 1 << 1;
@@ -29,15 +34,23 @@ pub(crate) struct MountNamespaceHandle {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MountNamespace {
     handle: MountNamespaceHandle,
-    root: PublishedRootHandle,
+    owner_domain: u64,
+    root: NamespaceRoot,
     root_flags: u32,
+    domain_root: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NamespaceRoot {
+    Embedded(PublishedRootHandle),
+    Oci { container_slot: u8 },
 }
 
 struct MountNamespaceTable {
     namespaces: [Option<MountNamespace>; NAMESPACE_LIMIT],
     generations: [u32; NAMESPACE_LIMIT],
     next_id: u32,
-    initial: Option<MountNamespaceHandle>,
+    boot_initial: Option<MountNamespaceHandle>,
 }
 
 impl MountNamespaceTable {
@@ -46,16 +59,24 @@ impl MountNamespaceTable {
             namespaces: [None; NAMESPACE_LIMIT],
             generations: [0; NAMESPACE_LIMIT],
             next_id: 1,
-            initial: None,
+            boot_initial: None,
         }
     }
 
     fn create(
         &mut self,
-        root: PublishedRootHandle,
+        owner_domain: u64,
+        root: NamespaceRoot,
         root_flags: u32,
+        domain_root: bool,
     ) -> Option<MountNamespaceHandle> {
-        if root.generation == 0 || root_flags != ROOT_FLAGS {
+        if !root.is_valid()
+            || root_flags != ROOT_FLAGS
+            || domain_root
+                && self.namespaces.iter().flatten().any(|namespace| {
+                    namespace.owner_domain == owner_domain && namespace.domain_root
+                })
+        {
             return None;
         }
         let slot = self.namespaces.iter().position(Option::is_none)?;
@@ -70,8 +91,10 @@ impl MountNamespaceTable {
         self.generations[slot] = generation;
         self.namespaces[slot] = Some(MountNamespace {
             handle,
+            owner_domain,
             root,
             root_flags,
+            domain_root,
         });
         Some(handle)
     }
@@ -87,7 +110,7 @@ impl MountNamespaceTable {
         let Some(namespace) = self.namespace(handle) else {
             return false;
         };
-        if self.initial == Some(handle) || namespace.handle != handle {
+        if namespace.domain_root || namespace.handle != handle {
             return false;
         }
         self.namespaces[usize::from(handle.slot)] = None;
@@ -95,24 +118,45 @@ impl MountNamespaceTable {
     }
 }
 
+impl NamespaceRoot {
+    fn is_valid(self) -> bool {
+        match self {
+            Self::Embedded(root) => root.generation != 0,
+            Self::Oci { container_slot } => {
+                usize::from(container_slot) < control_abi::CONTAINER_LIMIT
+            }
+        }
+    }
+
+    fn is_live(self) -> bool {
+        match self {
+            Self::Embedded(root) => initramfs::published_root_handle_is_live(root),
+            Self::Oci { container_slot } => oci_image::is_installed(usize::from(container_slot)),
+        }
+    }
+}
+
 pub(crate) fn verify_contract() -> bool {
-    let root = PublishedRootHandle { generation: 7 };
+    let root = NamespaceRoot::Embedded(PublishedRootHandle { generation: 7 });
     let mut table = MountNamespaceTable::new();
-    if table.create(root, ROOT_READ_ONLY).is_some() {
+    if table.create(7, root, ROOT_READ_ONLY, true).is_some() {
         return false;
     }
-    let Some(first) = table.create(root, ROOT_FLAGS) else {
+    let Some(first) = table.create(7, root, ROOT_FLAGS, true) else {
         return false;
     };
-    table.initial = Some(first);
+    table.boot_initial = Some(first);
     let stale = MountNamespaceHandle {
         generation: first.generation.saturating_add(1),
         ..first
     };
     if first.id != 1
-        || table
-            .namespace(first)
-            .is_none_or(|namespace| namespace.root != root || namespace.root_flags != ROOT_FLAGS)
+        || table.namespace(first).is_none_or(|namespace| {
+            namespace.root != root
+                || namespace.root_flags != ROOT_FLAGS
+                || namespace.owner_domain != 7
+                || !namespace.domain_root
+        })
         || table.namespace(stale).is_some()
         || table.retire(first)
     {
@@ -120,16 +164,16 @@ pub(crate) fn verify_contract() -> bool {
     }
     let mut disposable = [None; NAMESPACE_LIMIT - 1];
     for slot in &mut disposable {
-        *slot = table.create(root, ROOT_FLAGS);
+        *slot = table.create(7, root, ROOT_FLAGS, false);
         if slot.is_none() {
             return false;
         }
     }
-    if table.create(root, ROOT_FLAGS).is_some() {
+    if table.create(7, root, ROOT_FLAGS, false).is_some() {
         return false;
     }
     let retired = disposable[0].is_some_and(|handle| table.retire(handle));
-    let Some(replacement) = table.create(root, ROOT_FLAGS) else {
+    let Some(replacement) = table.create(7, root, ROOT_FLAGS, false) else {
         return false;
     };
     retired
@@ -143,27 +187,61 @@ pub(crate) fn install_initial() -> bool {
     if TABLE_INSTALLED.load(Ordering::Acquire) {
         return false;
     }
-    let Some(root) = initramfs::published_root_handle() else {
+    let Some(root) = initramfs::published_root_handle().map(NamespaceRoot::Embedded) else {
         return false;
     };
     let table = core::ptr::addr_of_mut!(LIVE_TABLE).cast::<MountNamespaceTable>();
     unsafe { table.write(MountNamespaceTable::new()) };
     let table = unsafe { &mut *table };
-    let Some(handle) = table.create(root, ROOT_FLAGS) else {
+    let Some(handle) = table.create(0, root, ROOT_FLAGS, true) else {
         return false;
     };
-    table.initial = Some(handle);
+    table.boot_initial = Some(handle);
     TABLE_INSTALLED.store(true, Ordering::Release);
     live_namespace(handle).is_some()
 }
 
 pub(crate) fn activate_initial() -> bool {
-    let Some(table) = live_table() else {
+    let (owner_domain, root) = match cpu::current_container_slot() {
+        Some(container_slot) => {
+            let Some(owner_domain) = cpu::container_domain_id(container_slot) else {
+                return false;
+            };
+            if !cpu::container_uses_installed_oci_image(container_slot) {
+                let Some(root) = initramfs::published_root_handle().map(NamespaceRoot::Embedded)
+                else {
+                    return false;
+                };
+                return activate_domain_root(owner_domain, root);
+            }
+            let Ok(container_slot) = u8::try_from(container_slot) else {
+                return false;
+            };
+            (owner_domain, NamespaceRoot::Oci { container_slot })
+        }
+        None => {
+            let Some(root) = initramfs::published_root_handle().map(NamespaceRoot::Embedded) else {
+                return false;
+            };
+            (0, root)
+        }
+    };
+    activate_domain_root(owner_domain, root)
+}
+
+fn activate_domain_root(owner_domain: u64, root: NamespaceRoot) -> bool {
+    let Some(table) = live_table_mut() else {
         return false;
     };
-    let Some(handle) = table.initial else {
-        return false;
-    };
+    let handle = table
+        .namespaces
+        .iter()
+        .flatten()
+        .find(|namespace| namespace.owner_domain == owner_domain && namespace.domain_root)
+        .map(|namespace| namespace.handle)
+        .or_else(|| (owner_domain == 0).then_some(table.boot_initial).flatten())
+        .or_else(|| table.create(owner_domain, root, ROOT_FLAGS, true));
+    let Some(handle) = handle else { return false };
     if CURRENT_SLOT
         .compare_exchange(EMPTY_SLOT, handle.slot, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
@@ -179,8 +257,7 @@ pub(crate) fn deactivate_initial() -> bool {
     let Some(active) = current() else {
         return false;
     };
-    let initial = live_table().and_then(|table| table.initial);
-    if initial != Some(active) {
+    if live_namespace(active).is_none_or(|namespace| !namespace.domain_root) {
         return false;
     }
     CURRENT_ID.store(0, Ordering::Release);
@@ -190,9 +267,17 @@ pub(crate) fn deactivate_initial() -> bool {
 }
 
 pub(crate) fn current_root_is_read_only() -> bool {
+    let expected_owner = cpu::current_container_slot().and_then(cpu::container_domain_id);
     current().and_then(live_namespace).is_some_and(|namespace| {
-        namespace.root_flags == ROOT_FLAGS
-            && initramfs::published_root_handle_is_live(namespace.root)
+        expected_owner.map_or_else(
+            || {
+                namespace.owner_domain == 0
+                    || domain::container_domain_limits(namespace.owner_domain).is_some()
+            },
+            |expected| namespace.owner_domain == expected,
+        ) && namespace.domain_root
+            && namespace.root_flags == ROOT_FLAGS
+            && namespace.root.is_live()
     })
 }
 
@@ -224,4 +309,11 @@ fn live_table() -> Option<&'static MountNamespaceTable> {
         return None;
     }
     Some(unsafe { &*core::ptr::addr_of!(LIVE_TABLE).cast::<MountNamespaceTable>() })
+}
+
+fn live_table_mut() -> Option<&'static mut MountNamespaceTable> {
+    if !TABLE_INSTALLED.load(Ordering::Acquire) {
+        return None;
+    }
+    Some(unsafe { &mut *core::ptr::addr_of_mut!(LIVE_TABLE).cast::<MountNamespaceTable>() })
 }

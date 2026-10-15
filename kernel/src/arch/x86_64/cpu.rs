@@ -17881,6 +17881,12 @@ pub(crate) fn configured_container_uses_installed_oci_image() -> bool {
     !container_image_is_embedded(slot) && crate::oci_image::is_installed(slot)
 }
 
+pub(crate) fn container_uses_installed_oci_image(slot: usize) -> bool {
+    slot < control_abi::CONTAINER_LIMIT
+        && !container_image_is_embedded(slot)
+        && crate::oci_image::is_installed(slot)
+}
+
 pub(crate) fn configured_container_slot() -> Option<usize> {
     selected_container_slot()
 }

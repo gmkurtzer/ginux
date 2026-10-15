@@ -951,6 +951,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail("ginux: domain ancestry invariant failed\r\n");
     }
     serial_write("ginux: domain lifecycle ancestry verified\r\n");
+    if !domain::verify_container_domain_invariants() {
+        kernel_fail("ginux: container domain boundary invariant failed\r\n");
+    }
+    serial_write("ginux: container domain boundaries verified\r\n");
     if !domain::verify_generation_exhaustion_invariants() {
         kernel_fail("ginux: generation exhaustion invariant failed\r\n");
     }
@@ -3724,11 +3728,15 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 }
                 arch::x86_64::cpu::stop_configured_container();
                 serial_write("ginux: OCI init exited cleanly\r\n");
-            } else if !linux_elf::verify_mapped_system_init_plan(
-                boot_info.image_base as u64,
-                boot_info.image_size,
-            ) {
-                kernel_fail("ginux: minimal system init execution failed\r\n");
+            } else {
+                arch::x86_64::cpu::begin_configured_container();
+                if !linux_elf::verify_mapped_system_init_plan(
+                    boot_info.image_base as u64,
+                    boot_info.image_size,
+                ) {
+                    kernel_fail("ginux: minimal system init execution failed\r\n");
+                }
+                arch::x86_64::cpu::stop_configured_container();
             }
             if arch::x86_64::cpu::take_container_host_shutdown_request() {
                 break 'managed;

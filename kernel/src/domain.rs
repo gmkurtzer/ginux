@@ -531,10 +531,11 @@ impl Manager {
         cpu_limit: u16,
         memory_limit_mib: u32,
     ) -> Option<DomainId> {
+        let parent_role = self.domain(parent)?.role;
         if container_slot >= CONTAINER_DOMAIN_CAPACITY
             || cpu_limit == 0
             || memory_limit_mib == 0
-            || self.domain(parent).is_none()
+            || !matches!(parent_role, Role::ControlPlane | Role::AuxiliaryService)
             || self.domains.iter().flatten().any(|domain| {
                 domain.role == Role::Container
                     && domain.container_slot == u16::try_from(container_slot).ok()
@@ -1610,6 +1611,43 @@ fn verify_cross_domain_revocation_invariants_inner() -> Option<bool> {
 
 pub(crate) fn verify_domain_ancestry_invariants() -> bool {
     verify_domain_ancestry_invariants_inner().unwrap_or(false)
+}
+
+pub(crate) fn verify_container_domain_invariants() -> bool {
+    let grants = [BootGrant::new(1, Rights::READ.union(Rights::MANAGE))];
+    let mut manager = Manager::new();
+    let Some(control) = manager.create_control_plane(&grants) else {
+        return false;
+    };
+    let Some(first) = manager.create_container_domain(control, 0, 1, 128) else {
+        return false;
+    };
+    let Some(second) = manager.create_container_domain(control, 1, 2, 512) else {
+        return false;
+    };
+    let first_domain = manager.domain(first);
+    let second_domain = manager.domain(second);
+    first != second
+        && manager.is_descendant(control, first)
+        && manager.is_descendant(control, second)
+        && first_domain.is_some_and(|domain| {
+            domain.role == Role::Container
+                && domain.container_slot == Some(0)
+                && domain.cpu_limit == 1
+                && domain.memory_limit_mib == 128
+                && domain.capabilities.is_empty()
+                && domain.capabilities.boot_authority_is_sealed()
+        })
+        && second_domain.is_some_and(|domain| {
+            domain.role == Role::Container
+                && domain.container_slot == Some(1)
+                && domain.cpu_limit == 2
+                && domain.memory_limit_mib == 512
+        })
+        && manager
+            .create_container_domain(control, 0, 1, 128)
+            .is_none()
+        && manager.create_container_domain(first, 2, 1, 128).is_none()
 }
 
 pub(crate) fn verify_auxiliary_service_registry_invariants() -> bool {
