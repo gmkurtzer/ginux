@@ -692,6 +692,24 @@ impl ProcessTable {
         true
     }
 
+    fn exit_after_current_address_space_retired(
+        &mut self,
+        handle: ProcessHandle,
+        status: u8,
+    ) -> bool {
+        let Some(process) = self.process_mut(handle) else {
+            return false;
+        };
+        if process.state != ProcessState::Running || process.scheduler_thread.is_some() {
+            return false;
+        }
+        process.address_space = None;
+        process.retiring_address_space = None;
+        process.context = None;
+        process.state = ProcessState::Zombie { status };
+        true
+    }
+
     fn wait(&mut self, parent: ProcessHandle, pid: u32) -> Option<WaitResult> {
         if self.process(parent)?.state != ProcessState::Running {
             return None;
@@ -1270,30 +1288,6 @@ pub(crate) fn refresh_live_process_registry(
     refreshed
 }
 
-pub(crate) fn refresh_live_process_address_space(
-    pid: u32,
-    snapshot: &cpu::LinuxProcessAddressSpaceSnapshot,
-) -> bool {
-    let Some(replacement) = ProcessAddressSpace::new(snapshot.hierarchy(), snapshot.mappings())
-    else {
-        return false;
-    };
-    let Some(table) = live_process_table_mut() else {
-        return false;
-    };
-    let Some(handle) = table.handle_by_pid(pid) else {
-        return false;
-    };
-    let Some(process) = table.process_mut(handle) else {
-        return false;
-    };
-    if process.state != ProcessState::Running || process.address_space.is_none() {
-        return false;
-    }
-    process.address_space = Some(replacement);
-    true
-}
-
 pub(crate) fn finish_live_process_registry() -> bool {
     finish_live_process_registry_with_refresh_floor(2)
 }
@@ -1684,14 +1678,13 @@ pub(crate) fn complete_live_child_exit(pid: u32, status: u8) -> Option<LiveProce
     {
         return None;
     }
-    let retiring = table.begin_exit(child_handle, child_space)?;
     LIVE_FORK_EXECUTION_STAGE.store(161, Ordering::Release);
-    if !retiring.scrub_and_release() {
+    if !address_space::retire_current_linux_child_address_space() {
         LIVE_FORK_EXECUTION_STAGE.store(162, Ordering::Release);
         return None;
     }
     LIVE_FORK_EXECUTION_STAGE.store(163, Ordering::Release);
-    if !table.exit(child_handle, status) {
+    if !table.exit_after_current_address_space_retired(child_handle, status) {
         LIVE_FORK_EXECUTION_STAGE.store(164, Ordering::Release);
         return None;
     }

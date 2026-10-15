@@ -838,6 +838,7 @@ static LINUX_EPOLL_PWAIT_TIMEOUT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0
 static LINUX_MASKED_WAIT_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static LINUX_SIGNAL_WAIT_INTERRUPT_COUNT: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_STACK: BankedAtomicU64 = BankedAtomicU64::new(0);
+static ELF_PROBE_STACK_LOW: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_STACK_FRAME: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_STACK_GENERATION: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_HEAP_FRAME: BankedAtomicU64 = BankedAtomicU64::new(0);
@@ -2915,6 +2916,14 @@ fn execute_deferred_live_fork() -> bool {
     }
     let parent_mmap_state = capture_linux_mmap_runtime_state();
     let parent_descriptor_state = capture_linux_descriptor_runtime_state();
+    let parent_stack_low = ELF_PROBE_STACK_LOW.load(Ordering::SeqCst);
+    let parent_thread_stack = current_linux_thread_slot().map(|slot| {
+        (
+            slot,
+            LINUX_THREAD_STACK_BASES[slot].load(Ordering::SeqCst),
+            LINUX_THREAD_STACK_SIZES[slot].load(Ordering::SeqCst),
+        )
+    });
     let Some(child) = linux_process::begin_live_fork() else {
         LINUX_FORK_CHILD_TID_ADDRESS.store(0, Ordering::SeqCst);
         if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) {
@@ -2955,6 +2964,11 @@ fn execute_deferred_live_fork() -> bool {
     let child_status = LINUX_PROCESS_CHILD_STATUS.swap(0, Ordering::SeqCst);
     restore_linux_mmap_runtime_state(parent_mmap_state);
     restore_linux_descriptor_runtime_state(parent_descriptor_state);
+    ELF_PROBE_STACK_LOW.store(parent_stack_low, Ordering::SeqCst);
+    if let Some((slot, base, size)) = parent_thread_stack {
+        LINUX_THREAD_STACK_BASES[slot].store(base, Ordering::SeqCst);
+        LINUX_THREAD_STACK_SIZES[slot].store(size, Ordering::SeqCst);
+    }
     if LINUX_RUNTIME_MODE.load(Ordering::SeqCst) && !(child_resumed && child_exited) {
         serial_write("ginux: runtime child return resumed/exited/status ");
         serial_write_u64(u64::from(child_resumed));
@@ -5060,6 +5074,11 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         ELF_PROBE_PAGE_TABLE_GENERATIONS[index].store(frame.generation(), Ordering::SeqCst);
     }
     ELF_PROBE_STACK.store(execution.stack as u64, Ordering::SeqCst);
+    ELF_PROBE_STACK_LOW.store(
+        (execution.stack & !(PAGE_SIZE - 1))
+            .saturating_sub((LINUX_RUNTIME_STACK_PAGES - 1) * PAGE_SIZE) as u64,
+        Ordering::SeqCst,
+    );
     ELF_PROBE_STACK_FRAME.store(execution.stack_frame.address(), Ordering::SeqCst);
     ELF_PROBE_STACK_GENERATION.store(execution.stack_frame.generation(), Ordering::SeqCst);
     ELF_PROBE_CODE_BASE.store(execution.code as u64, Ordering::SeqCst);
@@ -6019,11 +6038,17 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
         })
     };
     let observed_stack = ELF_PROBE_STACK.swap(0, Ordering::SeqCst);
+    let observed_stack_low = ELF_PROBE_STACK_LOW.swap(0, Ordering::SeqCst);
     let current_stack_frame = memory::FrameLease::from_parts(
         ELF_PROBE_STACK_FRAME.swap(0, Ordering::SeqCst),
         ELF_PROBE_STACK_GENERATION.swap(0, Ordering::SeqCst),
     );
+    let initial_stack_low = (execution.stack & !(PAGE_SIZE - 1))
+        .saturating_sub((LINUX_RUNTIME_STACK_PAGES - 1) * PAGE_SIZE)
+        as u64;
     let stack_frame_state_valid = observed_stack == execution.stack as u64
+        && observed_stack_low != 0
+        && observed_stack_low <= initial_stack_low
         && current_stack_frame.is_some_and(|frame| {
             address_space::current_linux_mapping_matches(
                 (execution.stack & !(PAGE_SIZE - 1)) as u64,
@@ -7623,27 +7648,6 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument <= u64::from(u8::MAX) && current_linux_process_pid() != 1 =>
         {
-            if runtime_mode {
-                let Some(snapshot) = live_linux_process_address_space_snapshot() else {
-                    serial_write("ginux: child exit snapshot rejected at stage ");
-                    serial_write_u64(u64::from(
-                        LINUX_PROCESS_SNAPSHOT_STAGE.load(Ordering::SeqCst),
-                    ));
-                    serial_write("\r\n");
-                    return LINUX_ESRCH;
-                };
-                if !linux_process::refresh_live_process_address_space(
-                    current_linux_process_pid(),
-                    &snapshot,
-                ) {
-                    serial_write("ginux: child exit address-space refresh rejected ");
-                    serial_write_u64(snapshot.hierarchy().len() as u64);
-                    serial_write(" ");
-                    serial_write_u64(snapshot.mappings().len() as u64);
-                    serial_write("\r\n");
-                    return LINUX_ESRCH;
-                }
-            }
             LINUX_PROCESS_CHILD_STATUS.store(first_argument as u8, Ordering::SeqCst);
             LINUX_PROCESS_CHILD_EXITED.store(true, Ordering::SeqCst);
             LINUX_RETURN_TO_KERNEL
@@ -20391,6 +20395,12 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         0
     };
     let fault_metadata = frame.metadata(fault_address);
+    if fault_domain.is_none()
+        && ELF_PROBE_ACTIVE.load(Ordering::SeqCst)
+        && grow_linux_runtime_stack(fault_metadata)
+    {
+        return 0;
+    }
     if fault_domain.is_some() && failure_policy.is_none() {
         serial_write("ginux: unexpected control fault vector/rip: ");
         serial_write_u64(fault_metadata.vector);
@@ -20500,6 +20510,43 @@ extern "sysv64" fn user_fault_handler(frame: *mut UserFaultFrame) -> u64 {
         }
     }
     resume_action(action)
+}
+
+fn grow_linux_runtime_stack(fault: domain::FaultMetadata) -> bool {
+    const MAX_STACK_GROWTH_GAP: u64 = 32 * PAGE_SIZE as u64;
+    if !LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
+        || fault.vector != 14
+        || fault.error & 1 != 0
+        || fault.address >= 1 << 47
+    {
+        return false;
+    }
+    let page = fault.address & !(PAGE_SIZE as u64 - 1);
+    let low = ELF_PROBE_STACK_LOW.load(Ordering::SeqCst);
+    let floor = ELF_PROBE_BRK_LIMIT
+        .load(Ordering::SeqCst)
+        .saturating_add(PAGE_SIZE as u64);
+    if low == 0 || page < floor || page >= low || low - page > MAX_STACK_GROWTH_GAP {
+        return false;
+    }
+    let Some([frame]) = memory::allocate_frames::<1>(memory::FrameOwner::KERNEL) else {
+        return false;
+    };
+    if !address_space::prepare_linux_frame(frame.address(), &[])
+        || address_space::install_current_linux_runtime_page(page, frame, 3, false, false)
+            != Some(None)
+    {
+        let _ = memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, &[frame]);
+        return false;
+    }
+    ELF_PROBE_STACK_LOW.store(page, Ordering::SeqCst);
+    if let Some(slot) = current_linux_thread_slot() {
+        let end = (ELF_PROBE_STACK.load(Ordering::SeqCst) & !(PAGE_SIZE as u64 - 1))
+            .saturating_add(PAGE_SIZE as u64);
+        LINUX_THREAD_STACK_BASES[slot].store(page, Ordering::SeqCst);
+        LINUX_THREAD_STACK_SIZES[slot].store(end.saturating_sub(page), Ordering::SeqCst);
+    }
+    true
 }
 
 enum ServiceRestartSetup {

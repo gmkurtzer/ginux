@@ -4838,6 +4838,108 @@ pub(crate) fn release_current_linux_runtime_mappings(base: u64) -> bool {
     )
 }
 
+pub(crate) fn retire_current_linux_child_address_space() -> bool {
+    fn validate(table_address: u64, level: usize) -> bool {
+        if level > 3
+            || memory::live_frame_lease(memory::FrameOwner::KERNEL, table_address).is_none()
+        {
+            return false;
+        }
+        let Some(table) = mapped_frame::<u64>(table_address) else {
+            return false;
+        };
+        let end = if level == 0 { 256 } else { ENTRY_COUNT };
+        for index in 0..end {
+            let value = unsafe { table.add(index).read() };
+            if value == 0 {
+                continue;
+            }
+            if level < 3 {
+                if value & (PRESENT | USER | LARGE_PAGE) != PRESENT | USER
+                    || !validate(value & ADDRESS_MASK, level + 1)
+                {
+                    return false;
+                }
+                continue;
+            }
+            if value & PRESENT != 0 {
+                let address = value & ADDRESS_MASK;
+                if value & USER == 0
+                    || !(memory::live_frame_lease(memory::FrameOwner::KERNEL, address).is_some()
+                        || memory::frame_address_is_runtime(address))
+                {
+                    return false;
+                }
+            } else if value & (LINUX_RUNTIME_RESERVED | USER) != LINUX_RUNTIME_RESERVED | USER {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn release_children(table_address: u64, level: usize) -> bool {
+        let Some(table) = mapped_frame::<u64>(table_address) else {
+            return false;
+        };
+        let end = if level == 0 { 256 } else { ENTRY_COUNT };
+        for index in 0..end {
+            let entry = unsafe { table.add(index) };
+            let value = unsafe { entry.read() };
+            if value == 0 {
+                continue;
+            }
+            if level < 3 {
+                let child_address = value & ADDRESS_MASK;
+                if !release_children(child_address, level + 1) {
+                    return false;
+                }
+                let Some(child) =
+                    memory::live_frame_lease(memory::FrameOwner::KERNEL, child_address)
+                else {
+                    return false;
+                };
+                unsafe { entry.write(0) };
+                if !memory::scrub_and_release_frames(
+                    memory::FrameOwner::KERNEL,
+                    core::slice::from_ref(&child),
+                ) {
+                    return false;
+                }
+                continue;
+            }
+            unsafe { entry.write(0) };
+            let address = value & ADDRESS_MASK;
+            if address != 0 {
+                if let Some(frame) = memory::live_frame_lease(memory::FrameOwner::KERNEL, address) {
+                    if !memory::scrub_and_release_frames(
+                        memory::FrameOwner::KERNEL,
+                        core::slice::from_ref(&frame),
+                    ) {
+                        return false;
+                    }
+                } else if !memory::frame_address_is_runtime(address) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    let root_address = current_root();
+    let kernel_root = paging::kernel_root_address();
+    if root_address == kernel_root || !validate(root_address, 0) {
+        return false;
+    }
+    let Some(root) = memory::live_frame_lease(memory::FrameOwner::KERNEL, root_address) else {
+        return false;
+    };
+    unsafe { activate(kernel_root) };
+    if current_root() != kernel_root || !release_children(root_address, 0) {
+        return false;
+    }
+    memory::scrub_and_release_frames(memory::FrameOwner::KERNEL, core::slice::from_ref(&root))
+}
+
 fn linux_leaf_in_root(root: u64, address: u64) -> Option<*mut u64> {
     let indexes = [
         ((address >> 39) & 0x1ff) as usize,
