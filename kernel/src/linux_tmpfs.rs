@@ -1,8 +1,9 @@
-use crate::memory::{self, FrameLease, FrameOwner};
-use core::{
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool, Ordering},
+use crate::{
+    arch::x86_64::cpu,
+    control_abi,
+    memory::{self, FrameLease, FrameOwner},
 };
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) const FILE_CAPACITY: usize = 64;
 const PAGE_SIZE: usize = 4096;
@@ -14,9 +15,11 @@ const OBJECT_CAPACITY: usize = OBJECT_PAGE_LIMIT * PAGE_SIZE;
 const TOTAL_CAPACITY: usize = TOTAL_PAGE_LIMIT * PAGE_SIZE;
 const FILE_NAME: &[u8] = b"ginux-ready";
 const FIRST_FILE_INODE: u64 = 18;
+const HOST_INSTANCE: usize = control_abi::CONTAINER_LIMIT;
+const INSTANCE_LIMIT: usize = control_abi::CONTAINER_LIMIT + 1;
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
-static mut LIVE_TMPFS: MaybeUninit<Tmpfs> = MaybeUninit::uninit();
+static mut LIVE_TMPFS: [Tmpfs; INSTANCE_LIMIT] = [const { Tmpfs::new() }; INSTANCE_LIMIT];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct FileHandle {
@@ -337,11 +340,15 @@ pub(crate) fn install() -> bool {
     if INSTALLED.load(Ordering::Acquire) {
         return false;
     }
-    unsafe {
-        core::ptr::addr_of_mut!(LIVE_TMPFS).write(MaybeUninit::new(Tmpfs::new()));
+    let mut index = 0;
+    while index < INSTANCE_LIMIT {
+        unsafe {
+            core::ptr::addr_of_mut!(LIVE_TMPFS[index]).write(Tmpfs::new());
+        }
+        index += 1;
     }
     INSTALLED.store(true, Ordering::Release);
-    live().is_some_and(Tmpfs::clean)
+    (0..INSTANCE_LIMIT).all(|index| live_at(index).is_some_and(Tmpfs::clean))
 }
 
 pub(crate) fn create(name: &[u8]) -> Option<FileHandle> {
@@ -472,15 +479,30 @@ pub(crate) fn teardown() -> bool {
 }
 
 fn live() -> Option<&'static Tmpfs> {
+    live_at(current_instance())
+}
+
+fn live_at(index: usize) -> Option<&'static Tmpfs> {
     if !INSTALLED.load(Ordering::Acquire) {
         return None;
     }
-    Some(unsafe { &*core::ptr::addr_of!(LIVE_TMPFS).cast::<Tmpfs>() })
+    let tmpfs = unsafe { core::ptr::addr_of!(LIVE_TMPFS).cast::<Tmpfs>().add(index) };
+    Some(unsafe { &*tmpfs })
 }
 
 fn live_mut() -> Option<&'static mut Tmpfs> {
     if !INSTALLED.load(Ordering::Acquire) {
         return None;
     }
-    Some(unsafe { &mut *core::ptr::addr_of_mut!(LIVE_TMPFS).cast::<Tmpfs>() })
+    let index = current_instance();
+    let tmpfs = unsafe {
+        core::ptr::addr_of_mut!(LIVE_TMPFS)
+            .cast::<Tmpfs>()
+            .add(index)
+    };
+    Some(unsafe { &mut *tmpfs })
+}
+
+fn current_instance() -> usize {
+    cpu::current_container_slot().unwrap_or(HOST_INSTANCE)
 }
