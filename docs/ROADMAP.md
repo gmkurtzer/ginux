@@ -52,9 +52,11 @@ Multi-layer filesystem merging and container networking remain.
 
 Deliverables:
 
-- Runtime selection of the linux/amd64 Alpine manifest without a build-embedded image.
+- Runtime selection of the OCI manifest matching the kernel's native OS,
+  architecture, and variant without a build-embedded image. The selected
+  manifest and image configuration are digest-verified before layer ingestion.
 - Operator-configurable control-domain networking can reach an OCI registry
-  and resolve the x86-64 manifest. `container start NAME` automatically pulls
+  and resolve the native-platform manifest. `container start NAME` automatically pulls
   a missing configured image, verifies every digest while streaming it into a
   bounded RAM-backed store, and atomically publishes the immutable object.
 - Container configuration, cached image objects, writable overlays, and

@@ -16,7 +16,7 @@ use ginux_native_abi::{
     NativeImageStoreRequestV0, NATIVE_IMAGE_STORE_ABORT, NATIVE_IMAGE_STORE_OPERATION,
     NATIVE_IMAGE_STORE_PUBLISH, NATIVE_IMAGE_STORE_RESULT_FAILED, NATIVE_PROGRESS_OPERATION,
 };
-use heapless::String;
+use heapless::{String, Vec};
 use p256::ecdsa::DerSignature;
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
@@ -239,7 +239,12 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
         return false;
     }
     sockets.get_mut::<tcp::Socket>(tcp_handle).abort();
-    if let Some(selected) = ginux_oci::select_linux_amd64_manifest(manifest_body.bytes()) {
+    let platform = ginux_oci::Platform::native_linux();
+    if let Some(selected) = ginux_oci::select_manifest(manifest_body.bytes(), platform) {
+        let Some(selected_digest) = parse_digest(selected.digest) else {
+            return false;
+        };
+        let selected_size = selected.size;
         path.clear();
         if write_manifest_path(reference, selected.digest, path).is_none() {
             return false;
@@ -267,21 +272,103 @@ pub(crate) unsafe fn pull(info: &NativeNetworkBootV8) -> bool {
             return false;
         }
         sockets.get_mut::<tcp::Socket>(tcp_handle).abort();
+        if manifest_body.bytes().len() != selected_size
+            || !ginux_oci::verify_sha256(manifest_body.bytes(), &selected_digest)
+        {
+            progress(b"selected manifest digest or size rejected");
+            return false;
+        }
     }
-    let Some(manifest) = ginux_oci::parse_registry_manifest(manifest_body.bytes()) else {
-        progress(b"registry manifest format rejected");
+    let (config_digest_text, config_size, layers) = {
+        let Some(manifest) = ginux_oci::parse_registry_manifest(manifest_body.bytes()) else {
+            progress(b"registry manifest format rejected");
+            return false;
+        };
+        let Ok(config_digest) = String::<72>::try_from(manifest.config.digest) else {
+            return false;
+        };
+        let mut layers = Vec::<(String<72>, usize), { ginux_oci::OCI_LAYER_LIMIT }>::new();
+        for layer in &manifest.layers {
+            let Ok(digest) = String::<72>::try_from(layer.digest) else {
+                return false;
+            };
+            if layers.push((digest, layer.size)).is_err() {
+                return false;
+            }
+        }
+        (config_digest, manifest.config.size, layers)
+    };
+    let Some(config_digest) = parse_digest(config_digest_text.as_str()) else {
         return false;
     };
-    progress(b"manifest selected for linux/amd64");
-    for layer in &manifest.layers {
-        let Some(digest) = parse_digest(layer.digest) else {
+    let mut config_path = String::<384>::new();
+    if write_blob_path(reference, config_digest_text.as_str(), &mut config_path).is_none() {
+        return false;
+    }
+    manifest_body.clear();
+    progress(b"downloading and verifying image configuration");
+    if !unsafe {
+        https_get(
+            host,
+            config_path.as_str(),
+            (!token.is_empty()).then_some(token.as_str()),
+            &mut interface,
+            &mut device,
+            &mut sockets,
+            dns_handle,
+            tcp_handle,
+            response,
+            &mut manifest_body,
+        )
+    } {
+        progress(b"registry image configuration transfer failed");
+        return false;
+    }
+    sockets.get_mut::<tcp::Socket>(tcp_handle).abort();
+    if matches!(response.status, 302 | 307) {
+        let Ok(location) = String::<1536>::try_from(response.location.as_str()) else {
+            return false;
+        };
+        let Some((redirect_host, redirect_path)) = split_https_url(location.as_str()) else {
+            return false;
+        };
+        manifest_body.clear();
+        if !unsafe {
+            https_get(
+                redirect_host,
+                redirect_path,
+                None,
+                &mut interface,
+                &mut device,
+                &mut sockets,
+                dns_handle,
+                tcp_handle,
+                response,
+                &mut manifest_body,
+            )
+        } {
+            return false;
+        }
+        sockets.get_mut::<tcp::Socket>(tcp_handle).abort();
+    }
+    if response.status != 200
+        || manifest_body.bytes().len() != config_size
+        || !ginux_oci::verify_sha256(manifest_body.bytes(), &config_digest)
+        || !ginux_oci::image_configuration_matches_platform(manifest_body.bytes(), platform)
+    {
+        progress(b"image configuration platform, digest, or size rejected");
+        return false;
+    }
+    progress_platform(platform);
+    for (layer_digest, layer_size) in &layers {
+        let Some(digest) = parse_digest(layer_digest.as_str()) else {
             return false;
         };
         let mut blob_path = String::<384>::new();
-        if write_blob_path(reference, layer.digest, &mut blob_path).is_none() {
+        if write_blob_path(reference, layer_digest.as_str(), &mut blob_path).is_none() {
             return false;
         }
-        let Some(mut layer_sink) = StoreSink::new(info.image_store_capability, digest, layer.size)
+        let Some(mut layer_sink) = StoreSink::new(info.image_store_capability, digest, *layer_size)
         else {
             return false;
         };
@@ -373,6 +460,19 @@ fn progress_status(prefix: &[u8], status: u16) {
         let _ = write!(message, "{status}");
         progress(message.as_bytes());
     }
+}
+
+fn progress_platform(platform: ginux_oci::Platform<'_>) {
+    let mut message = String::<96>::new();
+    let _ = write!(
+        message,
+        "manifest selected for {}/{}",
+        platform.os, platform.architecture
+    );
+    if !platform.variant.is_empty() {
+        let _ = write!(message, "/{}", platform.variant);
+    }
+    progress(message.as_bytes());
 }
 
 fn split_https_url(url: &str) -> Option<(&str, &str)> {

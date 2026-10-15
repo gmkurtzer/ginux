@@ -67,6 +67,49 @@ pub struct RegistryDescriptor<'a> {
     pub size: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Platform<'a> {
+    pub os: &'a str,
+    pub architecture: &'a str,
+    pub variant: &'a str,
+}
+
+impl Platform<'static> {
+    pub const fn native_linux() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        return Self {
+            os: "linux",
+            architecture: "amd64",
+            variant: "",
+        };
+        #[cfg(target_arch = "aarch64")]
+        return Self {
+            os: "linux",
+            architecture: "arm64",
+            variant: "v8",
+        };
+        #[cfg(target_arch = "arm")]
+        return Self {
+            os: "linux",
+            architecture: "arm",
+            variant: "v7",
+        };
+        #[cfg(target_arch = "riscv64")]
+        return Self {
+            os: "linux",
+            architecture: "riscv64",
+            variant: "",
+        };
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv64"
+        )))]
+        compile_error!("define the OCI architecture mapping for this native target");
+    }
+}
+
 #[derive(Deserialize)]
 struct JsonPlatform<'a> {
     #[serde(borrow)]
@@ -106,17 +149,32 @@ struct JsonManifest<'a> {
     layers: Vec<JsonDescriptor<'a>, OCI_LAYER_LIMIT>,
 }
 
-pub fn select_linux_amd64_manifest(body: &[u8]) -> Option<RegistryDescriptor<'_>> {
+#[derive(Deserialize)]
+struct JsonImageConfiguration<'a> {
+    #[serde(borrow)]
+    architecture: &'a str,
+    #[serde(borrow)]
+    os: &'a str,
+    #[serde(default, borrow)]
+    variant: &'a str,
+}
+
+pub fn select_manifest<'a>(
+    body: &'a [u8],
+    required: Platform<'_>,
+) -> Option<RegistryDescriptor<'a>> {
     let (index, used): (JsonIndex<'_>, usize) = serde_json_core::from_slice(body).ok()?;
     if index.schema_version != 2 || body[used..].iter().any(|byte| !byte.is_ascii_whitespace()) {
         return None;
     }
     index.manifests.iter().find_map(|descriptor| {
         descriptor.platform.as_ref().and_then(|platform| {
-            (platform.os == "linux"
-                && platform.architecture == "amd64"
-                && platform.variant.is_empty()
-                && valid_registry_digest(descriptor.digest)
+            (platform_matches(
+                required,
+                platform.os,
+                platform.architecture,
+                platform.variant,
+            ) && valid_registry_digest(descriptor.digest)
                 && descriptor.size != 0)
                 .then_some(RegistryDescriptor {
                     media_type: descriptor.media_type,
@@ -125,6 +183,26 @@ pub fn select_linux_amd64_manifest(body: &[u8]) -> Option<RegistryDescriptor<'_>
                 })
         })
     })
+}
+
+pub fn image_configuration_matches_platform(body: &[u8], required: Platform<'_>) -> bool {
+    let Ok((configuration, used)) = serde_json_core::from_slice::<JsonImageConfiguration<'_>>(body)
+    else {
+        return false;
+    };
+    body[used..].iter().all(u8::is_ascii_whitespace)
+        && platform_matches(
+            required,
+            configuration.os,
+            configuration.architecture,
+            configuration.variant,
+        )
+}
+
+fn platform_matches(required: Platform<'_>, os: &str, architecture: &str, variant: &str) -> bool {
+    os == required.os
+        && architecture == required.architecture
+        && (variant == required.variant || variant.is_empty() && !required.variant.is_empty())
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -684,12 +762,20 @@ mod tests {
     }
 
     #[test]
-    fn selects_linux_amd64_index_and_parses_manifest() {
+    fn selects_required_platform_and_parses_manifest() {
         let digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let index = format!(
             r#"{{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"{digest}","size":611,"platform":{{"architecture":"arm64","os":"linux"}}}},{{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"{digest}","size":612,"platform":{{"architecture":"amd64","os":"linux"}}}}]}}"#
         );
-        let selected = select_linux_amd64_manifest(index.as_bytes()).unwrap();
+        let selected = select_manifest(
+            index.as_bytes(),
+            Platform {
+                os: "linux",
+                architecture: "amd64",
+                variant: "",
+            },
+        )
+        .unwrap();
         assert_eq!(selected.digest, digest);
         assert_eq!(selected.size, 612);
 
@@ -700,6 +786,15 @@ mod tests {
         assert_eq!(parsed.config.size, 581);
         assert_eq!(parsed.layers.len(), 1);
         assert_eq!(parsed.layers[0].size, 3_651_200);
+
+        assert!(image_configuration_matches_platform(
+            br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers"}}"#,
+            Platform {
+                os: "linux",
+                architecture: "amd64",
+                variant: "",
+            },
+        ));
     }
 
     #[test]
@@ -708,7 +803,32 @@ mod tests {
         let index = format!(
             r#"{{"schemaVersion":2,"manifests":[{{"mediaType":"manifest","digest":"{digest}","size":1,"platform":{{"architecture":"amd64","os":"windows"}}}}]}}"#
         );
-        assert!(select_linux_amd64_manifest(index.as_bytes()).is_none());
+        let amd64 = Platform {
+            os: "linux",
+            architecture: "amd64",
+            variant: "",
+        };
+        assert!(select_manifest(index.as_bytes(), amd64).is_none());
+        assert!(!image_configuration_matches_platform(
+            br#"{"architecture":"arm64","os":"linux","variant":"v8"}"#,
+            amd64,
+        ));
+        assert!(image_configuration_matches_platform(
+            br#"{"architecture":"arm64","os":"linux"}"#,
+            Platform {
+                os: "linux",
+                architecture: "arm64",
+                variant: "v8",
+            },
+        ));
+        assert!(!image_configuration_matches_platform(
+            br#"{"architecture":"arm64","os":"linux","variant":"v7"}"#,
+            Platform {
+                os: "linux",
+                architecture: "arm64",
+                variant: "v8",
+            },
+        ));
         assert!(!valid_registry_digest("sha256:abcd"));
     }
 
