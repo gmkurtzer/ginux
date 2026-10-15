@@ -87,8 +87,9 @@ At the start of this audit:
 - `make check`: pass.
 - `make test-c1`: pass.
 - `make test`: pass.
-- `make test-alpine`: blocked twice by live Docker registry DNS resolution;
-  neither attempt reached container execution.
+- `make test-alpine`: the latest run completed every boot-time subsystem and
+  reached the controller, then live Docker registry DNS resolution failed;
+  container execution could not begin.
 - Manual two-container test: fail; the second start is rejected while the first
   container is detached.
 
@@ -103,9 +104,13 @@ runtime topology.
   with a separate host/proof instance. Controller handoff temporarily selects
   the host bank.
 - `make check`, the normal `make test` boot, and `make test-c2` pass with these
-  ownership changes. One corruption-boot run hit the pre-existing native-volume
-  recovery timeout; an immediate identical rerun passed. That nondeterministic
-  device test remains an S1 audit item rather than being hidden by a retry.
+  ownership changes.
+- The native-volume recovery proof no longer requires exactly one timeout from
+  a successful normal I/O. Interrupt completion and any bounded number of
+  timeout/retry cycles are accepted only when the final outcome, lifecycle
+  event, frame cleanup, DMA scrub, device quiescence, capability revocation,
+  and IOMMU retirement all validate. Repeated test runs now reach the
+  controller instead of panicking on host timing.
 
 The S0 scheduler item remains open. `CONTAINER_ACTIVE_SLOT` and recursive
 console handoff are intentionally still enforcing one executable Linux runtime;
