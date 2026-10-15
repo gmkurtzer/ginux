@@ -1405,7 +1405,20 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             })
             .flatten()
     } else {
-        None
+        // Normal boot exercises only the valid, mapped receive path. This
+        // leaves the NIC in the same verified reset state without provoking a
+        // VT-d fault merely to prove rejection.
+        unsafe {
+            arch::x86_64::pci::receive_network_arp_reply(
+                virtio_network,
+                virtio_network_common_mmio,
+                virtio_network_notify_mmio,
+                virtio_network_msix_mmio,
+                &local_apic,
+                virtio_network_dma_frame.address(),
+                virtio_network_dma_virtual,
+            )
+        }
     };
     let network_translation_retired = virtio_network_active.finish();
     if !network_queues_activated {
@@ -1414,9 +1427,7 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     if network_transmit.is_none_or(|transmit| transmit.frame_length != 19) {
         kernel_fail("\r\nginux: confined virtio-net transmit failed\r\n");
     }
-    if cfg!(feature = "verification-boot")
-        && network_receive.is_none_or(|receive| !(42..=1523).contains(&receive.frame_length))
-    {
+    if network_receive.is_none_or(|receive| !(42..=1523).contains(&receive.frame_length)) {
         kernel_fail("\r\nginux: confined virtio-net receive failed\r\n");
     }
     if !network_translation_retired
