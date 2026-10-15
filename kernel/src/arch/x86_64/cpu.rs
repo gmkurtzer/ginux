@@ -992,6 +992,12 @@ static ELF_PROBE_CLOCK_EPOCH: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_CLOCK_FREQUENCY: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_LOW: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PROCESS_NAME_HIGH: BankedAtomicU64 = BankedAtomicU64::new(0);
+static LINUX_RUNTIME_EXIT_STATUS: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
+static LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL: BankedAtomicU64 = BankedAtomicU64::new(u64::MAX);
+const LINUX_RUNTIME_SYSCALL_TRACE_LIMIT: usize = 32;
+static LINUX_RUNTIME_SYSCALL_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT] =
+    [const { BankedAtomicU64::new(u64::MAX) }; LINUX_RUNTIME_SYSCALL_TRACE_LIMIT];
+static LINUX_RUNTIME_SYSCALL_TRACE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_SIGNAL_MASK: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNALS: BankedAtomicU64 = BankedAtomicU64::new(0);
@@ -5049,6 +5055,12 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     ELF_PROBE_CLOCK_EPOCH.store(timer::timestamp_counter(), Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(LINUX_INITIAL_PROCESS_NAME, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(0, Ordering::SeqCst);
+    LINUX_RUNTIME_EXIT_STATUS.store(u64::MAX, Ordering::SeqCst);
+    LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.store(u64::MAX, Ordering::SeqCst);
+    LINUX_RUNTIME_SYSCALL_TRACE_COUNT.store(0, Ordering::SeqCst);
+    for syscall in &LINUX_RUNTIME_SYSCALL_TRACE {
+        syscall.store(u64::MAX, Ordering::SeqCst);
+    }
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     store_current_linux_signal_mask(0);
     ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
@@ -6710,6 +6722,11 @@ extern "sysv64" fn linux_syscall_handler(
         return LINUX_RETURN_TO_KERNEL;
     }
     let runtime_mode = LINUX_RUNTIME_MODE.load(Ordering::SeqCst);
+    if runtime_mode {
+        let index = LINUX_RUNTIME_SYSCALL_TRACE_COUNT.fetch_add(1, Ordering::SeqCst) as usize
+            % LINUX_RUNTIME_SYSCALL_TRACE_LIMIT;
+        LINUX_RUNTIME_SYSCALL_TRACE[index].store(number, Ordering::SeqCst);
+    }
     if !runtime_mode
         && current_linux_process_pid() == 1
         && current_linux_tid() == Some(1)
@@ -7401,6 +7418,7 @@ extern "sysv64" fn linux_syscall_handler(
             if LINUX_RUNTIME_MODE.load(Ordering::SeqCst)
                 && first_argument <= u64::from(u8::MAX) =>
         {
+            LINUX_RUNTIME_EXIT_STATUS.store(first_argument, Ordering::SeqCst);
             retire_all_linux_threads();
             ELF_PROBE_COMPLETED.store(true, Ordering::SeqCst);
             ELF_PROBE_ACTIVE.store(false, Ordering::SeqCst);
@@ -7461,8 +7479,38 @@ extern "sysv64" fn linux_syscall_handler(
         number if linux_privileged_operation(number).is_some() => {
             linux_deny_privileged_operation(number)
         }
-        _ => LINUX_ENOSYS,
+        _ => {
+            let _ = LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.compare_exchange(
+                u64::MAX,
+                number,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+            LINUX_ENOSYS
+        }
     }
+}
+
+pub(crate) fn linux_runtime_diagnostics() -> (Option<u8>, Option<u64>) {
+    let status = LINUX_RUNTIME_EXIT_STATUS.load(Ordering::SeqCst);
+    let syscall = LINUX_RUNTIME_FIRST_UNSUPPORTED_SYSCALL.load(Ordering::SeqCst);
+    (
+        u8::try_from(status).ok(),
+        (syscall != u64::MAX).then_some(syscall),
+    )
+}
+
+pub(crate) fn write_linux_runtime_syscall_trace() {
+    let count = LINUX_RUNTIME_SYSCALL_TRACE_COUNT.load(Ordering::SeqCst) as usize;
+    let retained = count.min(LINUX_RUNTIME_SYSCALL_TRACE_LIMIT);
+    let start = count.saturating_sub(retained);
+    crate::serial_write_bytes(b"ginux: OCI init recent syscalls:");
+    for offset in 0..retained {
+        let index = (start + offset) % LINUX_RUNTIME_SYSCALL_TRACE_LIMIT;
+        crate::serial_write_bytes(b" ");
+        crate::serial_write_u64(LINUX_RUNTIME_SYSCALL_TRACE[index].load(Ordering::SeqCst));
+    }
+    crate::serial_write_bytes(b"\r\n");
 }
 
 fn linux_privileged_operation(number: u64) -> Option<linux_user::PrivilegedOperation> {

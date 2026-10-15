@@ -289,12 +289,12 @@ process view, and suspended execution state. Press Control-] to detach, use
 `container attach NAME` to return, and use `exit` to stop the attached
 container. `shutdown` stops the host.
 
-The validated OCI images currently used by the acceptance tests each contain
-one filesystem layer. General ordered multi-layer overlay application remains
-required before arbitrary OCI images are supported. Full controlling-terminal
-and session semantics are also still incomplete, so interactive Rocky Linux
-programs are not yet claimed even though Rocky image ingestion and ELF
-execution are tested.
+OCI layers are downloaded and verified in manifest order, then assembled with
+replacement, whiteout, and opaque-directory semantics before publication.
+Full controlling-terminal and session semantics are still incomplete. The
+Rocky `10-ubi-init` image now reaches its dynamic linker, but systemd remains
+blocked by the fixed-size runtime mmap bookkeeping; replacing that bookkeeping
+with domain-memory-backed dynamic metadata is the next compatibility step.
 
 Useful development gates:
 
@@ -304,6 +304,7 @@ make test           # run the core QEMU boot gate
 make test-c2        # verify configured container lifecycle
 make test-alpine    # verify runtime OCI download and the Alpine shell
 make test-multi-container # verify concurrent Alpine domains and Rocky ingestion
+make probe-rocky-systemd # probe Rocky systemd's documented mmap boundary
 make check          # run architecture, ABI, format, lint, and unit checks
 make gate           # run the clean reproducible project gate
 ```

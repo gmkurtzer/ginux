@@ -117,7 +117,7 @@ static mut OCI_RUNTIME_FRAMES: [[memory::FrameLease; OCI_RUNTIME_FRAME_CAPACITY]
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum OciProcessOutcome {
-    Exited,
+    Exited(u8),
     Suspended,
     Failed,
 }
@@ -448,7 +448,22 @@ pub(crate) fn run_oci_process(init: &[u8]) -> OciProcessOutcome {
         crate::serial_write_bytes(b"\r\n");
     }
     if valid && runtime_scrubbed && memory::release_frames(memory::FrameOwner::KERNEL, frames) {
-        OciProcessOutcome::Exited
+        let (status, syscall) = cpu::linux_runtime_diagnostics();
+        if status.is_some_and(|status| status != 0) || syscall.is_some() {
+            crate::serial_write_bytes(b"ginux: OCI init diagnostics: exit=");
+            status.map_or_else(
+                || crate::serial_write_bytes(b"signal"),
+                |status| crate::serial_write_u64(u64::from(status)),
+            );
+            crate::serial_write_bytes(b" first-unsupported-syscall=");
+            syscall.map_or_else(
+                || crate::serial_write_bytes(b"none"),
+                crate::serial_write_u64,
+            );
+            crate::serial_write_bytes(b"\r\n");
+            cpu::write_linux_runtime_syscall_trace();
+        }
+        OciProcessOutcome::Exited(status.unwrap_or(u8::MAX))
     } else {
         OciProcessOutcome::Failed
     }
@@ -472,7 +487,7 @@ fn resume_oci_process(slot: usize, mmap: u64) -> OciProcessOutcome {
     let released = memory::scrub_runtime_extent(runtime_frames)
         && memory::release_frames(memory::FrameOwner::KERNEL, frames);
     if result.valid && released {
-        OciProcessOutcome::Exited
+        OciProcessOutcome::Exited(cpu::linux_runtime_diagnostics().0.unwrap_or(u8::MAX))
     } else {
         OciProcessOutcome::Failed
     }

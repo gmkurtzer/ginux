@@ -8,12 +8,14 @@ use ginux_image_store::{Digest, ImageStore, ObjectBackend, StagingHandle, StoreE
 use crate::memory::{self, FrameLease, FrameOwner};
 
 const PAGE_SIZE: usize = 4096;
-const OBJECT_LIMIT: usize = 4;
+const OBJECT_LIMIT: usize = ginux_oci::OCI_LAYER_LIMIT;
 pub(crate) const CACHE_QUOTA: usize = usize::MAX;
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static mut STORE: MaybeUninit<ImageStore<RamBackend, OBJECT_LIMIT>> = MaybeUninit::uninit();
-static mut LAST_PUBLISHED: Digest = Digest([0; 32]);
+static mut PUBLISHED_LAYERS: [Digest; ginux_oci::OCI_LAYER_LIMIT] =
+    [Digest([0; 32]); ginux_oci::OCI_LAYER_LIMIT];
+static PUBLISHED_LAYER_COUNT: AtomicUsize = AtomicUsize::new(0);
 static ROOTFS_FRAME_STARTS: [AtomicU64; crate::control_abi::CONTAINER_LIMIT] =
     [const { AtomicU64::new(0) }; crate::control_abi::CONTAINER_LIMIT];
 static ROOTFS_FRAME_COUNTS: [AtomicUsize; crate::control_abi::CONTAINER_LIMIT] =
@@ -186,8 +188,16 @@ pub(crate) fn append(handle: StagingHandle, bytes: &[u8]) -> Result<usize, Store
 pub(crate) fn publish(handle: StagingHandle) -> Result<Digest, StoreError> {
     let result = with_store(|store| store.publish(handle)).unwrap_or(Err(StoreError::Backend));
     if let Ok(digest) = result {
+        let index = PUBLISHED_LAYER_COUNT.fetch_add(1, Ordering::AcqRel);
+        if index >= ginux_oci::OCI_LAYER_LIMIT {
+            PUBLISHED_LAYER_COUNT.store(ginux_oci::OCI_LAYER_LIMIT, Ordering::Release);
+            return Err(StoreError::QuotaExceeded);
+        }
         unsafe {
-            core::ptr::addr_of_mut!(LAST_PUBLISHED).write(digest);
+            core::ptr::addr_of_mut!(PUBLISHED_LAYERS)
+                .cast::<Digest>()
+                .add(index)
+                .write(digest);
         }
     }
     result
@@ -209,41 +219,96 @@ fn with_store<T>(
     Some(operation(store))
 }
 
-pub(crate) fn install_latest_layer(slot: usize) -> bool {
-    if slot >= crate::control_abi::CONTAINER_LIMIT || crate::oci_image::is_installed(slot) {
-        return false;
-    }
-    let digest = unsafe { core::ptr::addr_of!(LAST_PUBLISHED).read() };
-    if digest == Digest([0; 32]) {
+pub(crate) fn begin_layer_pull() -> bool {
+    discard_published_layers()
+}
+
+pub(crate) fn discard_published_layers() -> bool {
+    let count = PUBLISHED_LAYER_COUNT.swap(0, Ordering::AcqRel);
+    if count > ginux_oci::OCI_LAYER_LIMIT {
         return false;
     }
     with_store(|store| {
-        let Some((object, compressed_length)) = store.published_object(digest) else {
-            return false;
-        };
-        let Some(header) = gzip_header_length(store.backend(), object, compressed_length) else {
-            return false;
-        };
-        if compressed_length < header + 8 {
-            return false;
+        let mut valid = true;
+        for index in 0..count {
+            let digest = unsafe {
+                core::ptr::addr_of!(PUBLISHED_LAYERS)
+                    .cast::<Digest>()
+                    .add(index)
+                    .read()
+            };
+            valid &= digest != Digest([0; 32]) && store.remove(digest).is_ok();
+            unsafe {
+                core::ptr::addr_of_mut!(PUBLISHED_LAYERS)
+                    .cast::<Digest>()
+                    .add(index)
+                    .write(Digest([0; 32]));
+            }
         }
-        let mut trailer = [0; 4];
-        if !store
-            .backend()
-            .read(object, compressed_length - 4, &mut trailer)
-        {
-            return false;
+        valid
+    })
+    .unwrap_or(false)
+}
+
+pub(crate) fn install_published_layers(slot: usize) -> bool {
+    if slot >= crate::control_abi::CONTAINER_LIMIT || crate::oci_image::is_installed(slot) {
+        return false;
+    }
+    let layer_count = PUBLISHED_LAYER_COUNT.load(Ordering::Acquire);
+    if layer_count == 0 || layer_count > ginux_oci::OCI_LAYER_LIMIT {
+        return false;
+    }
+    with_store(|store| {
+        let mut digests = [Digest([0; 32]); ginux_oci::OCI_LAYER_LIMIT];
+        let mut objects = [0_u8; ginux_oci::OCI_LAYER_LIMIT];
+        let mut compressed_lengths = [0_usize; ginux_oci::OCI_LAYER_LIMIT];
+        let mut headers = [0_usize; ginux_oci::OCI_LAYER_LIMIT];
+        let mut expected_lengths = [0_usize; ginux_oci::OCI_LAYER_LIMIT];
+        let mut allocation_length = 0_usize;
+        for index in 0..layer_count {
+            let digest = unsafe {
+                core::ptr::addr_of!(PUBLISHED_LAYERS)
+                    .cast::<Digest>()
+                    .add(index)
+                    .read()
+            };
+            let Some((object, compressed_length)) = store.published_object(digest) else {
+                return false;
+            };
+            let Some(header) = gzip_header_length(store.backend(), object, compressed_length)
+            else {
+                return false;
+            };
+            if compressed_length < header + 8 {
+                return false;
+            }
+            let mut trailer = [0; 4];
+            if !store
+                .backend()
+                .read(object, compressed_length - 4, &mut trailer)
+            {
+                return false;
+            }
+            let expected_length = u32::from_le_bytes(trailer) as usize;
+            if expected_length == 0 {
+                return false;
+            }
+            allocation_length = match allocation_length.checked_add(expected_length) {
+                Some(length) => length,
+                None => return false,
+            };
+            digests[index] = digest;
+            objects[index] = object;
+            compressed_lengths[index] = compressed_length;
+            headers[index] = header;
+            expected_lengths[index] = expected_length;
         }
-        let expected_length = u32::from_le_bytes(trailer) as usize;
-        if expected_length == 0 {
-            return false;
-        }
-        let page_count = expected_length.div_ceil(PAGE_SIZE);
+        let page_count = allocation_length.div_ceil(PAGE_SIZE);
         let Some((first_frame, _)) =
             memory::allocate_contiguous_extent(FrameOwner::KERNEL, page_count)
         else {
             crate::serial_write_bytes(b"ginux: OCI rootfs memory allocation failed: ");
-            crate::serial_write_u64(expected_length as u64);
+            crate::serial_write_u64(allocation_length as u64);
             crate::serial_write_bytes(b" bytes\r\n");
             return false;
         };
@@ -257,15 +322,56 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
         };
         let output =
             unsafe { core::slice::from_raw_parts_mut(address as *mut u8, page_count * PAGE_SIZE) };
-        let input = ObjectSlices::new(
-            store.backend(),
-            object,
-            header,
-            compressed_length - header - 8,
-        );
-        let Ok(written) =
-            miniz_oxide::inflate::decompress_slice_iter_to_slice(output, input, false, true)
-        else {
+        output.fill(0);
+        let mut rootfs_length = 0_usize;
+        for index in 0..layer_count {
+            let expected_length = expected_lengths[index];
+            let Some(layer_end) = rootfs_length.checked_add(expected_length) else {
+                let _ = memory::scrub_and_release_contiguous_extent(
+                    FrameOwner::KERNEL,
+                    first_frame,
+                    page_count,
+                );
+                return false;
+            };
+            let input = ObjectSlices::new(
+                store.backend(),
+                objects[index],
+                headers[index],
+                compressed_lengths[index] - headers[index] - 8,
+            );
+            let Ok(written) = miniz_oxide::inflate::decompress_slice_iter_to_slice(
+                &mut output[rootfs_length..layer_end],
+                input,
+                false,
+                true,
+            ) else {
+                let _ = memory::scrub_and_release_contiguous_extent(
+                    FrameOwner::KERNEL,
+                    first_frame,
+                    page_count,
+                );
+                return false;
+            };
+            if written != expected_length {
+                let _ = memory::scrub_and_release_contiguous_extent(
+                    FrameOwner::KERNEL,
+                    first_frame,
+                    page_count,
+                );
+                return false;
+            }
+            let Some(layer) = ginux_oci::Rootfs::parse(&output[rootfs_length..layer_end]) else {
+                let _ = memory::scrub_and_release_contiguous_extent(
+                    FrameOwner::KERNEL,
+                    first_frame,
+                    page_count,
+                );
+                return false;
+            };
+            rootfs_length += layer.content_length();
+        }
+        let Some(rootfs_end) = rootfs_length.checked_add(1024) else {
             let _ = memory::scrub_and_release_contiguous_extent(
                 FrameOwner::KERNEL,
                 first_frame,
@@ -273,7 +379,7 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
             );
             return false;
         };
-        if written != expected_length {
+        if rootfs_end > output.len() {
             let _ = memory::scrub_and_release_contiguous_extent(
                 FrameOwner::KERNEL,
                 first_frame,
@@ -281,7 +387,8 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
             );
             return false;
         }
-        let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, written) };
+        output[rootfs_length..rootfs_end].fill(0);
+        let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, rootfs_end) };
         if !crate::oci_image::install_runtime_rootfs(slot, bytes) {
             crate::serial_write_bytes(b"ginux: OCI rootfs index or init validation failed\r\n");
             let _ = memory::scrub_and_release_contiguous_extent(
@@ -291,20 +398,28 @@ pub(crate) fn install_latest_layer(slot: usize) -> bool {
             );
             return false;
         }
-        if store.remove(digest).is_err() {
-            let _ = crate::oci_image::uninstall_runtime_rootfs(slot);
-            let _ = memory::scrub_and_release_contiguous_extent(
-                FrameOwner::KERNEL,
-                first_frame,
-                page_count,
-            );
-            return false;
+        for digest in &digests[..layer_count] {
+            if store.remove(*digest).is_err() {
+                let _ = crate::oci_image::uninstall_runtime_rootfs(slot);
+                let _ = memory::scrub_and_release_contiguous_extent(
+                    FrameOwner::KERNEL,
+                    first_frame,
+                    page_count,
+                );
+                return false;
+            }
         }
         ROOTFS_FRAME_STARTS[slot].store(first_frame.address(), Ordering::Release);
         ROOTFS_FRAME_COUNTS[slot].store(page_count, Ordering::Release);
-        unsafe {
-            core::ptr::addr_of_mut!(LAST_PUBLISHED).write(Digest([0; 32]));
+        for index in 0..layer_count {
+            unsafe {
+                core::ptr::addr_of_mut!(PUBLISHED_LAYERS)
+                    .cast::<Digest>()
+                    .add(index)
+                    .write(Digest([0; 32]));
+            }
         }
+        PUBLISHED_LAYER_COUNT.store(0, Ordering::Release);
         true
     })
     .unwrap_or(false)

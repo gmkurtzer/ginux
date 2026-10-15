@@ -3727,6 +3727,11 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
             continue 'managed;
         }
         if arch::x86_64::cpu::take_container_pull_request() {
+            if !image_store::begin_layer_pull() {
+                serial_write("ginux: OCI image staging reset failed\r\n");
+                arch::x86_64::cpu::complete_container_pull(false);
+                continue 'managed;
+            }
             let mut image = [0_u8; control_abi::CONTAINER_MAX_IMAGE_SIZE];
             let image_size = arch::x86_64::cpu::configured_container_image(&mut image).unwrap_or(0);
             serial_write("ginux: pulling OCI image ");
@@ -3746,7 +3751,10 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                 serial_write("ginux: OCI unpacking image filesystem\r\n");
             }
             let success = arch::x86_64::cpu::configured_container_slot()
-                .is_some_and(|slot| downloaded && image_store::install_latest_layer(slot));
+                .is_some_and(|slot| downloaded && image_store::install_published_layers(slot));
+            if !success {
+                let _ = image_store::discard_published_layers();
+            }
             arch::x86_64::cpu::complete_container_pull(success);
             serial_write(if success {
                 "ginux: OCI image ready\r\n"
@@ -3792,10 +3800,17 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
                         arch::x86_64::cpu::fail_configured_container();
                         break;
                     }
-                    address_space::OciProcessOutcome::Exited => {}
+                    address_space::OciProcessOutcome::Exited(status) => {
+                        arch::x86_64::cpu::stop_configured_container();
+                        if status == 0 {
+                            serial_write("ginux: OCI init exited cleanly\r\n");
+                        } else {
+                            serial_write("ginux: OCI init exited with status ");
+                            serial_write_u64(u64::from(status));
+                            serial_write("\r\n");
+                        }
+                    }
                 }
-                arch::x86_64::cpu::stop_configured_container();
-                serial_write("ginux: OCI init exited cleanly\r\n");
             } else {
                 arch::x86_64::cpu::begin_configured_container();
                 if !linux_elf::verify_mapped_system_init_plan(

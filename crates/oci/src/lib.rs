@@ -435,6 +435,7 @@ pub struct Entry<'a> {
 pub struct Rootfs<'a> {
     bytes: &'a [u8],
     entry_count: usize,
+    content_length: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -461,7 +462,11 @@ impl<'a> Rootfs<'a> {
                 {
                     return None;
                 }
-                return (entry_count != 0).then_some(Self { bytes, entry_count });
+                return (entry_count != 0).then_some(Self {
+                    bytes,
+                    entry_count,
+                    content_length: offset,
+                });
             }
             let (_, next) = parse_entry(bytes, offset)?;
             entry_count = entry_count.checked_add(1)?;
@@ -474,6 +479,12 @@ impl<'a> Rootfs<'a> {
 
     pub const fn entry_count(&self) -> usize {
         self.entry_count
+    }
+
+    /// Length through the final archive entry, excluding the two terminating
+    /// zero blocks. OCI layer installers use this to join verified tar layers.
+    pub const fn content_length(&self) -> usize {
+        self.content_length
     }
 
     pub fn find(&self, path: &[u8]) -> Option<Entry<'a>> {
@@ -496,18 +507,28 @@ impl<'a> Rootfs<'a> {
     }
 
     pub fn find_index(&self, path: &[u8]) -> Option<(usize, Entry<'a>)> {
-        if !valid_path(path) {
+        if !valid_path(path)
+            || path
+                .rsplit(|byte| *byte == b'/')
+                .next()
+                .is_some_and(|name| name.starts_with(b".wh."))
+        {
             return None;
         }
         let mut offset = 0;
+        let mut found = None;
         for index in 0..self.entry_count {
             let (entry, next) = parse_entry(self.bytes, offset)?;
-            if entry_path_matches(entry, path) {
-                return Some((index, entry));
+            if whiteout_hides(entry, path) {
+                found = None;
+            } else if entry_path_matches(entry, path) {
+                // OCI layers are applied in manifest order. The last entry for
+                // a path is therefore the visible overlay entry.
+                found = Some((index, entry));
             }
             offset = next;
         }
-        None
+        found
     }
 
     pub fn next_child(&self, parent: &[u8], cursor: usize) -> Option<Option<Child<'a>>> {
@@ -524,6 +545,12 @@ impl<'a> Rootfs<'a> {
             let mut full_path = [0_u8; TAR_PREFIX_SIZE + 1 + TAR_NAME_SIZE];
             let length = copy_entry_path(entry, &mut full_path)?;
             let path = &full_path[..length];
+            if self
+                .find_index(path)
+                .is_none_or(|(visible, _)| visible != index)
+            {
+                continue;
+            }
             let remainder = if parent.is_empty() {
                 path
             } else {
@@ -552,6 +579,40 @@ impl<'a> Rootfs<'a> {
     pub fn copy_path(&self, index: usize, output: &mut [u8]) -> Option<usize> {
         copy_entry_path(self.entry(index)?, output)
     }
+}
+
+fn whiteout_hides(entry: Entry<'_>, path: &[u8]) -> bool {
+    if entry.kind != EntryKind::File || !entry.data.is_empty() {
+        return false;
+    }
+    let mut entry_path = [0_u8; TAR_PREFIX_SIZE + 1 + TAR_NAME_SIZE];
+    let Some(length) = copy_entry_path(entry, &mut entry_path) else {
+        return false;
+    };
+    let entry_path = &entry_path[..length];
+    let split = entry_path
+        .iter()
+        .rposition(|byte| *byte == b'/')
+        .map_or((b"" as &[u8], entry_path), |index| {
+            (&entry_path[..index], &entry_path[index + 1..])
+        });
+    let (directory, name) = split;
+    if name == b".wh..wh..opq" {
+        return !directory.is_empty()
+            && path
+                .strip_prefix(directory)
+                .is_some_and(|rest| rest.starts_with(b"/"));
+    }
+    let Some(target) = name.strip_prefix(b".wh.") else {
+        return false;
+    };
+    let path_split = path
+        .iter()
+        .rposition(|byte| *byte == b'/')
+        .map_or((b"" as &[u8], path), |index| {
+            (&path[..index], &path[index + 1..])
+        });
+    path_split.0 == directory && path_split.1 == target
 }
 
 #[cfg(feature = "sha256")]
@@ -951,6 +1012,22 @@ mod tests {
         let root = Rootfs::parse(&bytes).unwrap();
         assert_eq!(root.entry_count(), 1);
         assert_eq!(root.find(b"bin/tool").unwrap().link, b"bin/real");
+    }
+
+    #[test]
+    fn applies_later_layer_replacements_and_whiteouts() {
+        let mut bytes = archive(b"etc/value", b"old", b'0', b"");
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b"etc/value", b"new", b'0', b""));
+        let root = Rootfs::parse(&bytes).unwrap();
+        assert_eq!(root.find(b"etc/value").unwrap().data, b"new");
+
+        let mut bytes = archive(b"etc/value", b"old", b'0', b"");
+        bytes.truncate(bytes.len() - TAR_BLOCK_SIZE * 2);
+        bytes.extend_from_slice(&archive(b"etc/.wh.value", b"", b'0', b""));
+        let root = Rootfs::parse(&bytes).unwrap();
+        assert!(root.find(b"etc/value").is_none());
+        assert!(root.find(b"etc/.wh.value").is_none());
     }
 
     #[test]

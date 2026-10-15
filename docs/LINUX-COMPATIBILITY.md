@@ -57,6 +57,8 @@ Current totals: **112 Partial**, **28 Policy-denied**, **235 Missing**.
 | Signals | Partial | Selected standard signal, mask, alternate-stack, delivery, and return behavior; no complete restart/nesting semantics. |
 | VFS and path lookup | Partial | OCI root, directories, symlinks, cwd, tmpfs, devfs, and procfs subsets; not a general Linux VFS. |
 | `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
+| OCI overlay root | Partial | Verified layers are assembled in manifest order with replacements and OCI whiteouts. Broader overlay conformance remains under test. |
+| Runtime `mmap` | Partial | Anonymous and file mappings support current Alpine workloads. Fixed-size mapping metadata currently blocks Rocky systemd's larger dependency graph and must become domain-memory-backed rather than receive another static cap. |
 | `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
 | `/sys` | Missing | No Linux-compatible sysfs contract. |
 | Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |
