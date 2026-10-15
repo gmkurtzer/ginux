@@ -330,6 +330,28 @@ const LINUX_PROC_PID2_DIRECTORY: u16 =
     LINUX_DEVICE_DIRECTORY | LINUX_FILE_PROC_STATUS | LINUX_PROC_PID2_DIRECTORY_NODE;
 const LINUX_PROC_PID2_STATUS_NODE: u16 = 0xf900;
 const LINUX_FILE_PROC_PID2_STATUS: u16 = LINUX_FILE_MASK | LINUX_PROC_PID2_STATUS_NODE;
+const LINUX_PROC_CPUINFO_NODE: u16 = 0xf800;
+const LINUX_FILE_PROC_CPUINFO: u16 = LINUX_FILE_MASK | LINUX_PROC_CPUINFO_NODE;
+const LINUX_PROC_MEMINFO_NODE: u16 = 0xf700;
+const LINUX_FILE_PROC_MEMINFO: u16 = LINUX_FILE_MASK | LINUX_PROC_MEMINFO_NODE;
+const LINUX_PROC_STAT_NODE: u16 = 0xf600;
+const LINUX_FILE_PROC_STAT: u16 = LINUX_FILE_MASK | LINUX_PROC_STAT_NODE;
+const LINUX_PROC_UPTIME_NODE: u16 = 0xf500;
+const LINUX_FILE_PROC_UPTIME: u16 = LINUX_FILE_MASK | LINUX_PROC_UPTIME_NODE;
+const LINUX_PROC_LOADAVG_NODE: u16 = 0xf400;
+const LINUX_FILE_PROC_LOADAVG: u16 = LINUX_FILE_MASK | LINUX_PROC_LOADAVG_NODE;
+const LINUX_PROC_FILESYSTEMS_NODE: u16 = 0xf300;
+const LINUX_FILE_PROC_FILESYSTEMS: u16 = LINUX_FILE_MASK | LINUX_PROC_FILESYSTEMS_NODE;
+const LINUX_PROC_CMDLINE_NODE: u16 = 0xf200;
+const LINUX_FILE_PROC_CMDLINE: u16 = LINUX_FILE_MASK | LINUX_PROC_CMDLINE_NODE;
+const LINUX_PROC_PID1_STAT_NODE: u16 = 0xf100;
+const LINUX_FILE_PROC_PID1_STAT: u16 = LINUX_FILE_MASK | LINUX_PROC_PID1_STAT_NODE;
+const LINUX_PROC_PID1_STATM_NODE: u16 = 0xf000;
+const LINUX_FILE_PROC_PID1_STATM: u16 = LINUX_FILE_MASK | LINUX_PROC_PID1_STATM_NODE;
+const LINUX_PROC_PID2_STAT_NODE: u16 = 0xef00;
+const LINUX_FILE_PROC_PID2_STAT: u16 = LINUX_FILE_MASK | LINUX_PROC_PID2_STAT_NODE;
+const LINUX_PROC_PID2_STATM_NODE: u16 = 0xee00;
+const LINUX_FILE_PROC_PID2_STATM: u16 = LINUX_FILE_MASK | LINUX_PROC_PID2_STATM_NODE;
 const LINUX_ROOT_NODE_SHIFT: u32 = 8;
 const LINUX_ROOT_NODE_MASK: u16 = 0xff00;
 const LINUX_MOUNTINFO_FILE_NODE: u16 = 0xfe00;
@@ -347,6 +369,19 @@ const LINUX_PROC_PID2_RUNNING_STATUS: &[u8] =
     b"Name:\tinit\nState:\tR (running)\nPid:\t2\nPPid:\t1\n";
 const LINUX_PROC_PID2_ZOMBIE_STATUS: &[u8] =
     b"Name:\tinit\nState:\tZ (zombie)\nPid:\t2\nPPid:\t1\n";
+const LINUX_PROC_CPUINFO: &[u8] = b"processor\t: 0\nvendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 158\nmodel name\t: Ginux virtual x86-64 CPU\nstepping\t: 10\ncpu MHz\t\t: 1000.000\ncache size\t: 16384 KB\nphysical id\t: 0\nsiblings\t: 1\ncore id\t\t: 0\ncpu cores\t: 1\nfpu\t\t: yes\ncpuid level\t: 13\nflags\t\t: fpu tsc msr pae cx8 apic sep mtrr pge cmov pat clflush mmx fxsr sse sse2 syscall nx lm constant_tsc rep_good nopl xtopology cpuid tsc_known_freq pni ssse3 cx16 sse4_1 sse4_2 x2apic popcnt aes xsave avx rdrand hypervisor\nbogomips\t: 2000.00\nclflush size\t: 64\ncache_alignment\t: 64\naddress sizes\t: 46 bits physical, 48 bits virtual\n\n";
+const LINUX_PROC_MEMINFO: &[u8] = b"MemTotal:        1048576 kB\nMemFree:          786432 kB\nMemAvailable:     786432 kB\nBuffers:               0 kB\nCached:            65536 kB\nSwapCached:            0 kB\nActive:            32768 kB\nInactive:          32768 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nCommitLimit:       524288 kB\nCommitted_AS:      131072 kB\nVmallocTotal:   13743895347199 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugepagesize:       2048 kB\nDirectMap4k:      1048576 kB\n";
+const LINUX_PROC_STAT: &[u8] = b"cpu  1 0 1 100 0 0 0 0 0 0\ncpu0 1 0 1 100 0 0 0 0 0 0\nintr 0\nctxt 1\nbtime 0\nprocesses 1\nprocs_running 1\nprocs_blocked 0\nsoftirq 0 0 0 0 0 0 0 0 0 0 0\n";
+const LINUX_PROC_UPTIME: &[u8] = b"1.00 0.00\n";
+const LINUX_PROC_LOADAVG: &[u8] = b"0.00 0.00 0.00 1/1 1\n";
+const LINUX_PROC_FILESYSTEMS: &[u8] =
+    b"nodev\tproc\nnodev\ttmpfs\nnodev\tdevtmpfs\n\text2\n\text3\n\text4\n\txfs\n";
+const LINUX_PROC_CMDLINE: &[u8] = b"ginux immutable=1\n";
+const LINUX_PROC_PID1_STAT: &[u8] = b"1 (init) S 0 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+const LINUX_PROC_PID1_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
+const LINUX_PROC_PID2_RUNNING_STAT: &[u8] = b"2 (init) R 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 1048576 256 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+const LINUX_PROC_PID2_ZOMBIE_STAT: &[u8] = b"2 (init) Z 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+const LINUX_PROC_PID2_STATM: &[u8] = b"256 64 32 16 0 32 0\n";
 pub(crate) const LINUX_EXEC_MAPPING_LIMIT: usize = 8;
 pub(crate) const LINUX_ACTIVE_IMAGE_MAPPING_LIMIT: usize = 440;
 pub(crate) const LINUX_PROCESS_MAPPING_LIMIT: usize = LINUX_ACTIVE_IMAGE_MAPPING_LIMIT
@@ -9265,11 +9300,25 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     if !linux_mount::current_root_is_read_only() {
         return None;
     }
+    if let Some(name) = path.strip_prefix(b"/proc/") {
+        if let Some(kind) = linux_proc_root_file_kind(name) {
+            return Some(kind);
+        }
+    }
+    if let Some(name) = path.strip_prefix(b"/proc/self/") {
+        return linux_proc_pid_file_kind(current_linux_process_pid(), name);
+    }
     if path == b"/proc/1/status" {
         return Some(LINUX_FILE_PROC_STATUS);
     }
     if path == b"/proc/2/status" && linux_process::live_process_status(2).is_some() {
         return Some(LINUX_FILE_PROC_PID2_STATUS);
+    }
+    if let Some(name) = path.strip_prefix(b"/proc/1/") {
+        return linux_proc_pid_file_kind(1, name);
+    }
+    if let Some(name) = path.strip_prefix(b"/proc/2/") {
+        return linux_proc_pid_file_kind(2, name);
     }
     if path == b"/proc/1/mountinfo" {
         return Some(LINUX_FILE_PROC_MOUNTINFO);
@@ -9311,6 +9360,36 @@ fn linux_runtime_file_kind(path: &[u8]) -> Option<u16> {
     Some(kind | (u16::from(node) << LINUX_ROOT_NODE_SHIFT))
 }
 
+fn linux_proc_root_file_kind(name: &[u8]) -> Option<u16> {
+    match name {
+        b"cpuinfo" => Some(LINUX_FILE_PROC_CPUINFO),
+        b"meminfo" => Some(LINUX_FILE_PROC_MEMINFO),
+        b"stat" => Some(LINUX_FILE_PROC_STAT),
+        b"uptime" => Some(LINUX_FILE_PROC_UPTIME),
+        b"loadavg" => Some(LINUX_FILE_PROC_LOADAVG),
+        b"filesystems" => Some(LINUX_FILE_PROC_FILESYSTEMS),
+        b"cmdline" => Some(LINUX_FILE_PROC_CMDLINE),
+        _ => None,
+    }
+}
+
+fn linux_proc_pid_file_kind(pid: u32, name: &[u8]) -> Option<u16> {
+    linux_process::live_process_status(pid)?;
+    match (pid, name) {
+        (1, b"status") => Some(LINUX_FILE_PROC_STATUS),
+        (1, b"stat") => Some(LINUX_FILE_PROC_PID1_STAT),
+        (1, b"statm") => Some(LINUX_FILE_PROC_PID1_STATM),
+        (1, b"mountinfo") => Some(LINUX_FILE_PROC_MOUNTINFO),
+        (1, b"uid_map") => Some(LINUX_FILE_PROC_UID_MAP),
+        (1, b"gid_map") => Some(LINUX_FILE_PROC_GID_MAP),
+        (1, b"setgroups") => Some(LINUX_FILE_PROC_SETGROUPS),
+        (2, b"status") => Some(LINUX_FILE_PROC_PID2_STATUS),
+        (2, b"stat") => Some(LINUX_FILE_PROC_PID2_STAT),
+        (2, b"statm") => Some(LINUX_FILE_PROC_PID2_STATM),
+        _ => None,
+    }
+}
+
 fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
     if !linux_mount::current_root_is_read_only() {
         return None;
@@ -9318,6 +9397,11 @@ fn linux_root_directory_kind(path: &[u8]) -> Option<u16> {
     match path {
         b"/" => Some(LINUX_ROOT_DIRECTORY),
         b"/dev" => Some(LINUX_DEVICE_DIRECTORY),
+        b"/proc/self" => match current_linux_process_pid() {
+            1 => Some(LINUX_PROC_PID1_DIRECTORY),
+            2 if linux_process::live_process_status(2).is_some() => Some(LINUX_PROC_PID2_DIRECTORY),
+            _ => None,
+        },
         b"/proc/1" => Some(LINUX_PROC_PID1_DIRECTORY),
         b"/proc/2" if linux_process::live_process_status(2).is_some() => {
             Some(LINUX_PROC_PID2_DIRECTORY)
@@ -9337,6 +9421,21 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     if path == b"dev" {
         return Some(LINUX_DEVICE_DIRECTORY);
     }
+    if let Some(name) = path.strip_prefix(b"proc/") {
+        if let Some(kind) = linux_proc_root_file_kind(name) {
+            return Some(kind);
+        }
+    }
+    if let Some(name) = path.strip_prefix(b"proc/self/") {
+        return linux_proc_pid_file_kind(current_linux_process_pid(), name);
+    }
+    if path == b"proc/self" {
+        return match current_linux_process_pid() {
+            1 => Some(LINUX_PROC_PID1_DIRECTORY),
+            2 if linux_process::live_process_status(2).is_some() => Some(LINUX_PROC_PID2_DIRECTORY),
+            _ => None,
+        };
+    }
     if path == b"proc/1" {
         return Some(LINUX_PROC_PID1_DIRECTORY);
     }
@@ -9348,6 +9447,12 @@ fn linux_measured_path_kind(path: &[u8]) -> Option<u16> {
     }
     if path == b"proc/2/status" && linux_process::live_process_status(2).is_some() {
         return Some(LINUX_FILE_PROC_PID2_STATUS);
+    }
+    if let Some(name) = path.strip_prefix(b"proc/1/") {
+        return linux_proc_pid_file_kind(1, name);
+    }
+    if let Some(name) = path.strip_prefix(b"proc/2/") {
+        return linux_proc_pid_file_kind(2, name);
     }
     if path == b"proc/1/mountinfo" {
         return Some(LINUX_FILE_PROC_MOUNTINFO);
@@ -13522,6 +13627,17 @@ fn linux_proc_file(state: u16) -> bool {
             | LINUX_FILE_PROC_UID_MAP
             | LINUX_FILE_PROC_GID_MAP
             | LINUX_FILE_PROC_SETGROUPS
+            | LINUX_FILE_PROC_CPUINFO
+            | LINUX_FILE_PROC_MEMINFO
+            | LINUX_FILE_PROC_STAT
+            | LINUX_FILE_PROC_UPTIME
+            | LINUX_FILE_PROC_LOADAVG
+            | LINUX_FILE_PROC_FILESYSTEMS
+            | LINUX_FILE_PROC_CMDLINE
+            | LINUX_FILE_PROC_PID1_STAT
+            | LINUX_FILE_PROC_PID1_STATM
+            | LINUX_FILE_PROC_PID2_STAT
+            | LINUX_FILE_PROC_PID2_STATM
     )
 }
 
@@ -13565,6 +13681,28 @@ fn linux_regular_file(state: u16) -> Option<&'static [u8]> {
             linux_process::LiveProcessState::Zombie => Some(LINUX_PROC_PID2_ZOMBIE_STATUS),
         };
     }
+    match state & !3 {
+        LINUX_FILE_PROC_CPUINFO => return Some(LINUX_PROC_CPUINFO),
+        LINUX_FILE_PROC_MEMINFO => return Some(LINUX_PROC_MEMINFO),
+        LINUX_FILE_PROC_STAT => return Some(LINUX_PROC_STAT),
+        LINUX_FILE_PROC_UPTIME => return Some(LINUX_PROC_UPTIME),
+        LINUX_FILE_PROC_LOADAVG => return Some(LINUX_PROC_LOADAVG),
+        LINUX_FILE_PROC_FILESYSTEMS => return Some(LINUX_PROC_FILESYSTEMS),
+        LINUX_FILE_PROC_CMDLINE => return Some(LINUX_PROC_CMDLINE),
+        LINUX_FILE_PROC_PID1_STAT => return Some(LINUX_PROC_PID1_STAT),
+        LINUX_FILE_PROC_PID1_STATM => return Some(LINUX_PROC_PID1_STATM),
+        LINUX_FILE_PROC_PID2_STATM => {
+            return linux_process::live_process_status(2).map(|_| LINUX_PROC_PID2_STATM)
+        }
+        LINUX_FILE_PROC_PID2_STAT => {
+            let status = linux_process::live_process_status(2)?;
+            return match status.state {
+                linux_process::LiveProcessState::Running => Some(LINUX_PROC_PID2_RUNNING_STAT),
+                linux_process::LiveProcessState::Zombie => Some(LINUX_PROC_PID2_ZOMBIE_STAT),
+            };
+        }
+        _ => {}
+    }
     if linux_tmp_file(state) {
         return None;
     }
@@ -13592,6 +13730,20 @@ fn linux_regular_file_inode(state: u16) -> Option<u64> {
         LINUX_FILE_PROC_UID_MAP => return Some(20),
         LINUX_FILE_PROC_GID_MAP => return Some(21),
         LINUX_FILE_PROC_SETGROUPS => return Some(22),
+        _ => {}
+    }
+    match state & !3 {
+        LINUX_FILE_PROC_CPUINFO => return Some(25),
+        LINUX_FILE_PROC_MEMINFO => return Some(26),
+        LINUX_FILE_PROC_STAT => return Some(27),
+        LINUX_FILE_PROC_UPTIME => return Some(28),
+        LINUX_FILE_PROC_LOADAVG => return Some(29),
+        LINUX_FILE_PROC_FILESYSTEMS => return Some(30),
+        LINUX_FILE_PROC_CMDLINE => return Some(31),
+        LINUX_FILE_PROC_PID1_STAT => return Some(32),
+        LINUX_FILE_PROC_PID1_STATM => return Some(33),
+        LINUX_FILE_PROC_PID2_STAT => return linux_process::live_process_status(2).map(|_| 34),
+        LINUX_FILE_PROC_PID2_STATM => return linux_process::live_process_status(2).map(|_| 35),
         _ => {}
     }
     if linux_tmp_file(state) {
@@ -14301,7 +14453,7 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
             }
         }
         if directory == b"proc/1" {
-            if cursor > 5 {
+            if cursor > 7 {
                 return LINUX_EINVAL;
             }
             for (index, inode, name) in [
@@ -14310,6 +14462,8 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 (2_usize, 20_u64, &b"uid_map"[..]),
                 (3_usize, 21_u64, &b"gid_map"[..]),
                 (4_usize, 22_u64, &b"setgroups"[..]),
+                (5_usize, 32_u64, &b"stat"[..]),
+                (6_usize, 33_u64, &b"statm"[..]),
             ] {
                 if cursor == index {
                     if !append_linux_dirent(
@@ -14326,26 +14480,66 @@ fn linux_getdents64(descriptor: u64, address: u64, count: u64) -> u64 {
                 }
             }
         } else if directory == b"proc/2" {
-            if cursor > 1 {
+            if cursor > 3 {
                 return LINUX_EINVAL;
             }
-            if cursor == 0 {
-                if linux_process::live_process_status(2).is_none()
-                    || !append_linux_dirent(&mut entries, &mut used, 24, 3, 8, b"status")
-                {
-                    return LINUX_ENOENT;
+            if linux_process::live_process_status(2).is_none() {
+                return LINUX_ENOENT;
+            }
+            for (index, inode, name) in [
+                (0_usize, 24_u64, &b"status"[..]),
+                (1_usize, 34_u64, &b"stat"[..]),
+                (2_usize, 35_u64, &b"statm"[..]),
+            ] {
+                if cursor == index {
+                    if !append_linux_dirent(
+                        &mut entries,
+                        &mut used,
+                        inode,
+                        (index + 3) as i64,
+                        8,
+                        name,
+                    ) {
+                        return LINUX_EINVAL;
+                    }
+                    cursor += 1;
                 }
-                cursor = 1;
             }
         } else if directory == b"proc" {
             let child_live = linux_process::live_process_status(2).is_some();
-            let limit = 1 + usize::from(child_live);
+            let root_files = [
+                (25_u64, &b"cpuinfo"[..]),
+                (26_u64, &b"meminfo"[..]),
+                (27_u64, &b"stat"[..]),
+                (28_u64, &b"uptime"[..]),
+                (29_u64, &b"loadavg"[..]),
+                (30_u64, &b"filesystems"[..]),
+                (31_u64, &b"cmdline"[..]),
+            ];
+            let limit = root_files.len() + 1 + usize::from(child_live);
             if cursor > limit {
                 return LINUX_EINVAL;
             }
-            for (index, inode, name) in [(0_usize, 16_u64, &b"1"[..]), (1_usize, 23_u64, &b"2"[..])]
-            {
-                if cursor == index && (index == 0 || child_live) {
+            for (index, (inode, name)) in root_files.iter().enumerate() {
+                if cursor == index {
+                    if !append_linux_dirent(
+                        &mut entries,
+                        &mut used,
+                        *inode,
+                        (index + 3) as i64,
+                        8,
+                        name,
+                    ) {
+                        return LINUX_EINVAL;
+                    }
+                    cursor += 1;
+                }
+            }
+            for (index, inode, name) in [
+                (root_files.len(), 16_u64, &b"1"[..]),
+                (root_files.len() + 1, 23_u64, &b"2"[..]),
+            ] {
+                if cursor == index && (name == b"1" || child_live) {
                     if !append_linux_dirent(
                         &mut entries,
                         &mut used,

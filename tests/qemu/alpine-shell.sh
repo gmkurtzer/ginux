@@ -104,7 +104,11 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
         'ps' \
         'ls /proc' \
         "test -f /proc/1/status && printf 'PROCFS_OK\\n'" \
+        "test -f /proc/cpuinfo && test -f /proc/meminfo && test -f /proc/stat && test -f /proc/uptime && test -f /proc/loadavg && test -f /proc/filesystems && test -f /proc/cmdline && test -f /proc/self/stat && test -f /proc/self/statm && printf 'PROCFS_SYSTEM_OK\\n'" \
         '/bin/cat /proc/1/status' \
+        '/bin/cat /proc/1/stat' \
+        '/bin/cat /proc/1/statm' \
+        '/bin/cat /proc/1/mountinfo' \
         'ls /' \
         "printf 'FORK_STATE_RESTORE_OK\\n'" \
         "printf 'FORK_EXEC_OK\\n'" \
@@ -119,6 +123,7 @@ dd if=/dev/zero of="$volume_image" bs=1048576 count=1 2>/dev/null
     wait_for_line 'FORK_STATE_RESTORE_OK'
     wait_for_line 'FORK_EXEC_OK'
     wait_for_line 'PROCFS_OK'
+    wait_for_line 'PROCFS_SYSTEM_OK'
     wait_for_line 'OCI_FILESYSTEM_OK'
     printf '\035'
     wait_for "[detached from container; use 'container attach NAME' to return]"
@@ -189,6 +194,7 @@ for expected in \
     '/etc' \
     'FORK_EXEC_OK' \
     'PROCFS_OK' \
+    'PROCFS_SYSTEM_OK' \
     'OCI_FILESYSTEM_OK' \
     'OCI_RESTART_OK' \
     'ginux: OCI init execution failed; container marked failed' \

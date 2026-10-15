@@ -16,7 +16,7 @@ pub(crate) const ROOT_READ_ONLY: u32 = 1 << 0;
 pub(crate) const ROOT_NOSUID: u32 = 1 << 1;
 pub(crate) const ROOT_NODEV: u32 = 1 << 2;
 const ROOT_FLAGS: u32 = ROOT_READ_ONLY | ROOT_NOSUID | ROOT_NODEV;
-pub(crate) const MOUNTINFO: &[u8] = b"1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro\n";
+pub(crate) const MOUNTINFO: &[u8] = b"1 0 0:1 / / ro,nosuid,nodev - ginux-root rootfs ro\n2 1 0:2 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw\n";
 
 static TABLE_INSTALLED: AtomicBool = AtomicBool::new(false);
 static CURRENT_SLOT: AtomicU8 = AtomicU8::new(EMPTY_SLOT);

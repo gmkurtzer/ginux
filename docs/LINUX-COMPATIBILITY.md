@@ -56,7 +56,7 @@ Current totals: **112 Partial**, **28 Policy-denied**, **235 Missing**.
 | Process and thread model | Partial | Bounded fork/exec/clone/wait lifecycle; not general Linux scheduling or process semantics. |
 | Signals | Partial | Selected standard signal, mask, alternate-stack, delivery, and return behavior; no complete restart/nesting semantics. |
 | VFS and path lookup | Partial | OCI root, directories, symlinks, cwd, tmpfs, devfs, and procfs subsets; not a general Linux VFS. |
-| `/proc` | Partial | Generated process views needed by current probes; most Linux procfs files are absent. |
+| `/proc` | Partial | Automatically mounted per domain with domain-local PID directories, `status`, `stat`, `statm`, `mountinfo`, namespace maps, `cpuinfo`, `meminfo`, `stat`, `uptime`, `loadavg`, `filesystems`, and `cmdline`. Broader Linux procfs coverage and unconstrained process enumeration remain incomplete. |
 | `/dev` and terminal ABI | Partial | Selected console/device nodes and bounded termios/winsize ioctls. |
 | `/sys` | Missing | No Linux-compatible sysfs contract. |
 | Credentials and user namespaces | Partial | Container-scoped identity and hard privilege boundary; many mutation calls are policy-denied. |
