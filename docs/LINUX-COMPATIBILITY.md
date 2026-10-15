@@ -42,7 +42,7 @@ implemented calls lives in [Linux Syscall Entry v0](../specs/kernel/linux-syscal
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **113 Partial**, **28 Policy-denied**, **234 Missing**.
+Current totals: **114 Partial**, **28 Policy-denied**, **233 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -426,7 +426,7 @@ therefore omitted.
 | 433 | fspick | Missing |
 | 434 | pidfd_open | Missing |
 | 435 | clone3 | Missing |
-| 436 | close_range | Missing |
+| 436 | close_range | Partial |
 | 437 | openat2 | Missing |
 | 438 | pidfd_getfd | Missing |
 | 439 | faccessat2 | Partial |

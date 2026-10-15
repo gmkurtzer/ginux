@@ -220,6 +220,7 @@ const LINUX_KEXEC_FILE_LOAD_SYSCALL: u64 = 320;
 const LINUX_BPF_SYSCALL: u64 = 321;
 const LINUX_EXECVEAT_SYSCALL: u64 = 322;
 const LINUX_STATX_SYSCALL: u64 = 332;
+const LINUX_CLOSE_RANGE_SYSCALL: u64 = 436;
 const LINUX_FACCESSAT2_SYSCALL: u64 = 439;
 const LINUX_EPOLL_PWAIT2_SYSCALL: u64 = 441;
 const LINUX_ARCH_SET_FS: u64 = 0x1002;
@@ -401,6 +402,7 @@ const LINUX_F_GETFL: u64 = 3;
 const LINUX_F_SETFL: u64 = 4;
 const LINUX_F_DUPFD_CLOEXEC: u64 = 1030;
 const LINUX_FD_CLOEXEC: u8 = 1;
+const LINUX_CLOSE_RANGE_CLOEXEC: u64 = 1 << 2;
 const LINUX_O_CLOEXEC: u64 = 0x80000;
 const LINUX_O_DIRECTORY: u64 = 0x10000;
 const LINUX_O_CREAT: u64 = 0x40;
@@ -7429,6 +7431,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_CLOCK_GETTIME_SYSCALL => linux_clock_gettime(first_argument, buffer),
         LINUX_CLOCK_GETRES_SYSCALL => linux_clock_getres(first_argument, buffer),
         LINUX_STATX_SYSCALL => linux_statx(first_argument, buffer, count, register(0), register(2)),
+        LINUX_CLOSE_RANGE_SYSCALL => linux_close_range(first_argument, buffer, count),
         LINUX_WAIT4_SYSCALL => linux_wait4(first_argument, buffer, count, register(0)),
         LINUX_EXIT_SYSCALL | LINUX_EXIT_GROUP_SYSCALL
             if first_argument <= u64::from(u8::MAX) && current_linux_process_pid() != 1 =>
@@ -14067,6 +14070,27 @@ fn linux_close_all_descriptors() -> bool {
         }
     }
     (0..LINUX_DESCRIPTOR_TABLE_LIMIT).all(|descriptor| !linux_descriptor_open(descriptor))
+}
+
+fn linux_close_range(first: u64, last: u64, flags: u64) -> u64 {
+    if first > last || flags & !LINUX_CLOSE_RANGE_CLOEXEC != 0 {
+        return LINUX_EINVAL;
+    }
+    let end = last.min(LINUX_DESCRIPTOR_TABLE_LIMIT - 1);
+    if first > end {
+        return 0;
+    }
+    for descriptor in first..=end {
+        if !linux_descriptor_open(descriptor) {
+            continue;
+        }
+        if flags == LINUX_CLOSE_RANGE_CLOEXEC {
+            ELF_PROBE_CONSOLE_CLOEXEC.fetch_or(1 << descriptor, Ordering::SeqCst);
+        } else if linux_descriptor_close(descriptor) != 0 {
+            return LINUX_EBADF;
+        }
+    }
+    0
 }
 
 fn linux_descriptor_close_with_wake(descriptor: u64, wake_waiters: bool) -> u64 {

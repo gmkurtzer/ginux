@@ -872,6 +872,58 @@ ginux_linux_system_init:
 
 .Lfork_complete:
 
+    # Verify close_range marking, closure, and Linux error boundaries.
+    mov edi, -100
+    lea rsi, [rip + .Lnull_path]
+    mov edx, 2
+    mov eax, 257
+    syscall
+    cmp rax, 3
+    jb .Lfailure
+    mov r9, rax
+    mov rdi, rax
+    mov rsi, rax
+    mov edx, 4
+    mov eax, 436
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    mov esi, 1
+    xor edx, edx
+    mov eax, 72
+    syscall
+    cmp rax, 1
+    jne .Lfailure
+    mov rdi, r9
+    mov esi, -1
+    xor edx, edx
+    mov eax, 436
+    syscall
+    test rax, rax
+    jne .Lfailure
+    mov rdi, r9
+    mov esi, 1
+    xor edx, edx
+    mov eax, 72
+    syscall
+    cmp rax, -9
+    jne .Lfailure
+    mov edi, 4
+    mov esi, 3
+    xor edx, edx
+    mov eax, 436
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+    mov edi, 3
+    mov esi, 3
+    mov edx, 2
+    mov eax, 436
+    syscall
+    cmp rax, -22
+    jne .Lfailure
+
     mov qword ptr [rip + .Lsignal_set], 0x4000
     xor edi, edi
     lea rsi, [rip + .Lsignal_set]
