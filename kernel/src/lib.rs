@@ -2482,14 +2482,27 @@ unsafe extern "sysv64" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write("\r\nginux: read-only virtio MMIO grant exercised in ring 3");
     serial_write("\r\nginux: denied virtio MMIO write contained and revoked");
     serial_write("\r\nginux: observed virtio device remained reset and DMA-disabled");
-    let native_volume_run = address_space::verify_native_volume_service(
+    let mut native_volume_run = address_space::verify_native_volume_service(
         &volume_image,
         native_volume_device,
         &local_apic,
         None,
     );
+    let mut native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+    if native_volume_run.is_none() && native_volume_quiesced {
+        serial_write("\r\nginux: initial native volume driver fault contained; retrying");
+        native_volume_run = address_space::verify_native_volume_service(
+            &volume_image,
+            native_volume_device,
+            &local_apic,
+            None,
+        );
+        native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
+        if native_volume_run.is_some() && native_volume_quiesced {
+            serial_write("\r\nginux: native volume driver recovered in fresh domain");
+        }
+    }
     let native_volume_valid = native_volume_run.is_some();
-    let native_volume_quiesced = arch::x86_64::pci::quiesce(virtio_block, virtio_mmio);
     if !native_volume_valid || !native_volume_quiesced {
         serial_write("\r\nginux: native volume valid/quiesced: ");
         serial_write_u64(u64::from(native_volume_valid));
