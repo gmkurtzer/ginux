@@ -198,6 +198,38 @@ ginux_linux_system_init:
     syscall
     cmp rax, -14
     jne .Lfailure
+    mov dword ptr [rip + .Lstatus + 16], 16
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lstatus]
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 51
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus], 1
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 16], 2
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus + 16], 16
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    lea rsi, [rip + .Lstatus]
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 52
+    syscall
+    test rax, rax
+    jne .Lfailure
+    cmp word ptr [rip + .Lstatus], 1
+    jne .Lfailure
+    cmp dword ptr [rip + .Lstatus + 16], 2
+    jne .Lfailure
+    mov dword ptr [rip + .Lstatus + 16], 16
+    mov edi, dword ptr [rip + .Lsocket_pair]
+    mov esi, 1
+    lea rdx, [rip + .Lstatus + 16]
+    mov eax, 52
+    syscall
+    cmp rax, -14
+    jne .Lfailure
     lea rax, [rip + .Lmmsg_send_iov]
     mov qword ptr [rip + .Lmmsg_send + 16], rax
     mov qword ptr [rip + .Lmmsg_send + 24], 1

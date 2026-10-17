@@ -916,6 +916,18 @@ pub(crate) fn names(slot: u8) -> Option<(IpEndpoint, Option<IpEndpoint>)> {
     ))
 }
 
+pub(crate) fn unix_peer_connected(slot: u8) -> bool {
+    let Some(state) = (unsafe { SLOTS.get(usize::from(slot)).copied() })
+        .filter(|state| state.occupied && state.kind == Kind::Unix)
+    else {
+        return false;
+    };
+    state.peer.is_some_and(|peer| {
+        unsafe { SLOTS.get(usize::from(peer)).copied() }
+            .is_some_and(|peer| peer.occupied && peer.kind == Kind::Unix)
+    })
+}
+
 pub(crate) fn endpoint(address: u32, port: u16) -> IpEndpoint {
     IpEndpoint::new(
         IpAddress::Ipv4(Ipv4Address::from_octets(address.to_be_bytes())),

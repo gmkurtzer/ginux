@@ -20831,6 +20831,24 @@ fn linux_socket_name(descriptor: u64, address: u64, length: u64, peer: bool) -> 
     let Some(slot) = linux_socket_slot(descriptor) else {
         return LINUX_EBADF;
     };
+    if crate::linux_socket::kind(slot) == Some(crate::linux_socket::Kind::Unix) {
+        if peer && !crate::linux_socket::unix_peer_connected(slot) {
+            return LINUX_ENOTCONN;
+        }
+        let mut supplied = [0_u8; 4];
+        if !copy_from_linux_user(length, &mut supplied) {
+            return LINUX_EFAULT;
+        }
+        let output_length = u32::from_ne_bytes(supplied).min(2) as usize;
+        let family = 1_u16.to_ne_bytes();
+        return if copy_to_linux_user(address, &family[..output_length])
+            && copy_to_linux_user(length, &2_u32.to_ne_bytes())
+        {
+            0
+        } else {
+            LINUX_EFAULT
+        };
+    }
     let Some((local, remote)) = crate::linux_socket::names(slot) else {
         return LINUX_EBADF;
     };
