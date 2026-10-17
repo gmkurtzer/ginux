@@ -411,6 +411,7 @@ const LINUX_PIDFD_SEND_SIGNAL_SYSCALL: u64 = 424;
 const LINUX_PIDFD_OPEN_SYSCALL: u64 = 434;
 const LINUX_PIDFD_GETFD_SYSCALL: u64 = 438;
 const LINUX_PROCESS_MADVISE_SYSCALL: u64 = 440;
+const LINUX_PROCESS_MRELEASE_SYSCALL: u64 = 448;
 const LINUX_SIGNALFD_SYSCALL: u64 = 282;
 const LINUX_SIGNALFD4_SYSCALL: u64 = 289;
 const LINUX_INOTIFY_INIT_SYSCALL: u64 = 253;
@@ -7922,6 +7923,7 @@ extern "sysv64" fn linux_syscall_handler(
         LINUX_PROCESS_MADVISE_SYSCALL => {
             linux_process_madvise(first_argument, buffer, count, register(0), register(2))
         }
+        LINUX_PROCESS_MRELEASE_SYSCALL => linux_process_mrelease(first_argument, buffer),
         LINUX_DUP_SYSCALL => linux_console_dup(first_argument),
         LINUX_DUP2_SYSCALL => linux_console_dup2(first_argument, buffer),
         LINUX_DUP3_SYSCALL if count == 0 => linux_console_dup2(first_argument, buffer),
@@ -11835,7 +11837,10 @@ fn verify_linux_process_madvise_syscall() -> bool {
     };
     let errors = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT
         && linux_process_madvise(descriptor, mapping, 2, LINUX_MADV_DONTNEED, 1) == LINUX_EINVAL
-        && linux_process_madvise(descriptor, mapping, 1025, LINUX_MADV_DONTNEED, 0) == LINUX_EINVAL;
+        && linux_process_madvise(descriptor, mapping, 1025, LINUX_MADV_DONTNEED, 0) == LINUX_EINVAL
+        && linux_process_mrelease(descriptor, 0) == LINUX_EINVAL
+        && linux_process_mrelease(descriptor, 1) == LINUX_EINVAL
+        && linux_process_mrelease(LINUX_DESCRIPTOR_TABLE_LIMIT, 0) == LINUX_EBADF;
     let closed = descriptor < LINUX_AUX_DESCRIPTOR_LIMIT && linux_descriptor_close(descriptor) == 0;
     let unmapped = linux_runtime_munmap(mapping, (3 * PAGE_SIZE) as u64) == 0;
     cleared && errors && closed && unmapped
@@ -13681,6 +13686,24 @@ fn linux_process_madvise(
         advised = total;
     }
     advised
+}
+
+fn linux_process_mrelease(pid_descriptor: u64, flags: u64) -> u64 {
+    if flags != 0 {
+        return LINUX_EINVAL;
+    }
+    if !linux_pidfd_descriptor(pid_descriptor) {
+        return LINUX_EBADF;
+    }
+    if linux_descriptor_offset(pid_descriptor).load(Ordering::SeqCst)
+        != u64::from(current_linux_process_pid())
+    {
+        return LINUX_ESRCH;
+    }
+    // pidfd_open currently admits only the live caller. Linux permits release
+    // only after the target has entered exit and therefore returns EINVAL for
+    // every pidfd that can reach this implementation today.
+    LINUX_EINVAL
 }
 
 fn linux_mincore(address: u64, length: u64, vector: u64) -> u64 {

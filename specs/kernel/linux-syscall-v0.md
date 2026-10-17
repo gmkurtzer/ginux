@@ -1052,6 +1052,13 @@ matching the syscall's partial-progress contract. Unknown flags or advice
 return `-EINVAL`, invalid vector memory returns `-EFAULT`, and a closed or
 foreign pidfd returns `-EBADF` or `-ESRCH`. Advising another process and all
 other advice values remain unsupported.
+`rax = 448` (`__NR_process_mrelease`) validates flags and a live pidfd using
+the same generation-bound descriptor contract. Every pidfd currently creatable
+by `pidfd_open` names the live caller, for which Linux requires `-EINVAL`
+because memory release is permitted only after exit begins. Closed descriptors
+return `-EBADF`, foreign generations return `-ESRCH`, and nonzero flags return
+`-EINVAL`. Reclaiming an exiting child remains pending until pidfds can retain
+zombie process identities.
 `rax = 27` (`__NR_mincore`) accepts any fully occupied nonzero scratch range
 rounding to one through four pages, including a range crossing adjacent
 registry records, and atomically
