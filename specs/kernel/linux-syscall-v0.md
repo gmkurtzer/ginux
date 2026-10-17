@@ -788,8 +788,16 @@ valid memory-backed filesystem objects because their data is already resident
 and there is no durable backing store in this milestone. Legacy
 `epoll_create` delegates to `epoll_create1(0)`. The current process, group, or
 user may query the default I/O priority or idempotently set it to default.
-`membarrier` advertises, registers, and executes the private-expedited profile
-with a sequentially consistent kernel fence; other commands remain rejected.
+`membarrier` implements a complete single-CPU advertised profile: global,
+global-expedited, private-expedited, both expedited registration commands, and
+registration queries. Registrations belong to the process memory context, are
+inherited by fork, and are cleared by exec. Private-expedited execution before
+registration returns `-EPERM`; unsupported commands and invalid flags return
+`-EINVAL`. Successful barriers issue a sequentially consistent kernel fence.
+The syscall narrows its command, flags, and CPU arguments to their Linux UAPI
+types, and runtime tests cover query, registration, repeat registration,
+execution, rejection, and error precedence. Sync-core and rseq commands are not
+advertised and consistently return `-EINVAL`.
 `preadv`, `pwritev`, `preadv2`, and `pwritev2` apply the validated bounded
 iovec profile to regular files without changing the descriptor offset. The
 current profile accepts a zero high offset and, for the v2 calls, zero flags.

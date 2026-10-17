@@ -42,7 +42,7 @@ Detailed bounded behavior for implemented calls lives in
 The matrix must be updated in the same commit whenever syscall dispatch or its
 documented behavior changes.
 
-Current totals: **48 Complete**, **279 Partial**, **48 Policy-denied**, **0 Missing**.
+Current totals: **49 Complete**, **278 Partial**, **48 Policy-denied**, **0 Missing**.
 
 ## Non-syscall ABI surfaces
 
@@ -451,7 +451,7 @@ therefore omitted.
 | 321 | bpf | Policy-denied |
 | 322 | execveat | Partial |
 | 323 | userfaultfd | Partial |
-| 324 | membarrier | Partial |
+| 324 | membarrier | Complete |
 | 325 | mlock2 | Partial |
 | 326 | copy_file_range | Partial |
 | 327 | preadv2 | Partial |

@@ -1439,6 +1439,7 @@ static LINUX_RUNTIME_SYSCALL_RESULT_TRACE: [BankedAtomicU64; LINUX_RUNTIME_SYSCA
 static LINUX_RUNTIME_SYSCALL_TRACE_COUNT: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_NO_NEW_PRIVS: BankedAtomicBool = BankedAtomicBool::new(false);
 static ELF_PROBE_SECCOMP_STRICT: BankedAtomicBool = BankedAtomicBool::new(false);
+static ELF_PROBE_MEMBARRIER_REGISTRATIONS: BankedAtomicU32 = BankedAtomicU32::new(0);
 static ELF_PROBE_SIGNAL_MASK: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNALS: BankedAtomicU64 = BankedAtomicU64::new(0);
 static ELF_PROBE_PENDING_SIGNAL_CODES: [BankedAtomicU32; LINUX_SIGNAL_COUNT] =
@@ -6014,6 +6015,7 @@ pub(crate) fn verify_linux_elf_entry(execution: &LinuxElfExecution) -> LinuxElfR
     }
     ELF_PROBE_NO_NEW_PRIVS.store(false, Ordering::SeqCst);
     ELF_PROBE_SECCOMP_STRICT.store(false, Ordering::SeqCst);
+    ELF_PROBE_MEMBARRIER_REGISTRATIONS.store(0, Ordering::SeqCst);
     store_current_linux_signal_mask(0);
     ELF_PROBE_PENDING_SIGNALS.store(0, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(0, Ordering::SeqCst);
@@ -10916,6 +10918,7 @@ struct LinuxProcessRuntimeState {
     process_name: [u64; 2],
     no_new_privileges: bool,
     seccomp_strict: bool,
+    membarrier_registrations: u32,
     pending_signals: u64,
     pending_signal_codes: [u32; LINUX_SIGNAL_COUNT],
     pending_signal_values: [u64; LINUX_SIGNAL_COUNT],
@@ -10951,6 +10954,7 @@ impl LinuxProcessRuntimeState {
         process_name: [0; 2],
         no_new_privileges: false,
         seccomp_strict: false,
+        membarrier_registrations: 0,
         pending_signals: 0,
         pending_signal_codes: [0; LINUX_SIGNAL_COUNT],
         pending_signal_values: [0; LINUX_SIGNAL_COUNT],
@@ -11011,6 +11015,7 @@ fn capture_linux_process_runtime_state() -> Option<LinuxProcessRuntimeState> {
         ],
         no_new_privileges: ELF_PROBE_NO_NEW_PRIVS.load(Ordering::SeqCst),
         seccomp_strict: ELF_PROBE_SECCOMP_STRICT.load(Ordering::SeqCst),
+        membarrier_registrations: ELF_PROBE_MEMBARRIER_REGISTRATIONS.load(Ordering::SeqCst),
         pending_signals: ELF_PROBE_PENDING_SIGNALS.load(Ordering::SeqCst),
         pending_signal_codes: core::array::from_fn(|signal| {
             ELF_PROBE_PENDING_SIGNAL_CODES[signal].load(Ordering::SeqCst)
@@ -11061,6 +11066,7 @@ fn restore_linux_process_runtime_state(state: LinuxProcessRuntimeState) {
     ELF_PROBE_PROCESS_NAME_HIGH.store(state.process_name[1], Ordering::SeqCst);
     ELF_PROBE_NO_NEW_PRIVS.store(state.no_new_privileges, Ordering::SeqCst);
     ELF_PROBE_SECCOMP_STRICT.store(state.seccomp_strict, Ordering::SeqCst);
+    ELF_PROBE_MEMBARRIER_REGISTRATIONS.store(state.membarrier_registrations, Ordering::SeqCst);
     ELF_PROBE_PENDING_SIGNALS.store(state.pending_signals, Ordering::SeqCst);
     ELF_PROBE_EXEC_IGNORED_SIGNALS.store(state.exec_ignored_signals, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_POINTER.store(state.alternate_signal_stack[0], Ordering::SeqCst);
@@ -12731,6 +12737,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
     let filesystem_sync = linux_syncfs(1) == 0 && linux_syncfs(99) == LINUX_EBADF;
     let robust_list = verify_linux_robust_list_syscalls();
     let rseq = verify_linux_rseq_syscall();
+    let membarrier = verify_linux_membarrier_syscall();
     let mappings_released =
         address_space::release_current_linux_runtime_mappings(LINUX_RUNTIME_DYNAMIC_MMAP_BASE);
     ELF_PROBE_MMAP_NEXT.store(LINUX_RUNTIME_DYNAMIC_MMAP_BASE, Ordering::SeqCst);
@@ -12763,6 +12770,7 @@ fn verify_linux_sysv_shared_memory_syscalls() -> bool {
         && filesystem_sync
         && robust_list
         && rseq
+        && membarrier
         && mappings_released
 }
 
@@ -13047,6 +13055,42 @@ fn verify_linux_rseq_syscall() -> bool {
         && LINUX_THREAD_RSEQ_SIGNATURES[slot].load(Ordering::SeqCst) == 0;
     let unmapped = linux_runtime_munmap(mapping, PAGE_SIZE as u64) == 0;
     unregistered && clean && unmapped
+}
+
+fn verify_linux_membarrier_syscall() -> bool {
+    let saved = ELF_PROBE_MEMBARRIER_REGISTRATIONS.swap(0, Ordering::SeqCst);
+    let query = linux_membarrier(1_u64 << 32, 1_u64 << 32, u64::MAX)
+        == u64::from(MEMBARRIER_SUPPORTED_COMMANDS)
+        && linux_membarrier(0, 1, 0) == LINUX_EINVAL
+        && linux_membarrier(MEMBARRIER_CMD_PRIVATE_EXPEDITED.into(), 0, 0) == LINUX_EPERM
+        && linux_membarrier(MEMBARRIER_CMD_GET_REGISTRATIONS.into(), 0, 0) == 0;
+    let private = query
+        && linux_membarrier(
+            MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED.into(),
+            0,
+            u64::MAX,
+        ) == 0
+        && linux_membarrier(MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED.into(), 0, 0) == 0
+        && linux_membarrier(MEMBARRIER_CMD_PRIVATE_EXPEDITED.into(), 0, u64::MAX) == 0;
+    let global = private
+        && linux_membarrier(MEMBARRIER_CMD_REGISTER_GLOBAL_EXPEDITED.into(), 0, 0) == 0
+        && linux_membarrier(MEMBARRIER_CMD_GET_REGISTRATIONS.into(), 0, 0)
+            == u64::from(
+                MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED
+                    | MEMBARRIER_CMD_REGISTER_GLOBAL_EXPEDITED,
+            )
+        && linux_membarrier(MEMBARRIER_CMD_GLOBAL.into(), 0, u64::MAX) == 0
+        && linux_membarrier(MEMBARRIER_CMD_GLOBAL_EXPEDITED.into(), 0, u64::MAX) == 0;
+    let rejected = global
+        && linux_membarrier(1 << 5, 0, 0) == LINUX_EINVAL
+        && linux_membarrier(
+            MEMBARRIER_CMD_PRIVATE_EXPEDITED_RSEQ.into(),
+            MEMBARRIER_CMD_FLAG_CPU.into(),
+            0,
+        ) == LINUX_EINVAL
+        && linux_membarrier(u64::from(u32::MAX), 0, 0) == LINUX_EINVAL;
+    ELF_PROBE_MEMBARRIER_REGISTRATIONS.store(saved, Ordering::SeqCst);
+    rejected
 }
 
 fn verify_linux_io_uring_syscalls() -> bool {
@@ -17757,6 +17801,7 @@ fn linux_execve_at(
     ELF_PROBE_ALT_STACK_POINTER.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_SIZE.store(0, Ordering::SeqCst);
     ELF_PROBE_ALT_STACK_FLAGS.store(LINUX_SS_DISABLE, Ordering::SeqCst);
+    ELF_PROBE_MEMBARRIER_REGISTRATIONS.store(0, Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_LOW.store(process_name[0], Ordering::SeqCst);
     ELF_PROBE_PROCESS_NAME_HIGH.store(process_name[1], Ordering::SeqCst);
     ELF_PROBE_EXITED_CLEAR_CHILD_TID.store(clear_child_tid, Ordering::SeqCst);
@@ -26600,22 +26645,54 @@ fn linux_ioprio_set(which: u64, who: u64, priority: u64) -> u64 {
     }
 }
 
-fn linux_membarrier(command: u64, flags: u64, cpu_id: u64) -> u64 {
-    const MEMBARRIER_CMD_QUERY: u64 = 0;
-    const MEMBARRIER_CMD_PRIVATE_EXPEDITED: u64 = 1 << 3;
-    const MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED: u64 = 1 << 4;
-    let supported = MEMBARRIER_CMD_PRIVATE_EXPEDITED | MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED;
-    if command == MEMBARRIER_CMD_QUERY {
-        return supported;
-    }
-    if flags != 0 || cpu_id != 0 {
+const MEMBARRIER_CMD_QUERY: u32 = 0;
+const MEMBARRIER_CMD_GLOBAL: u32 = 1 << 0;
+const MEMBARRIER_CMD_GLOBAL_EXPEDITED: u32 = 1 << 1;
+const MEMBARRIER_CMD_REGISTER_GLOBAL_EXPEDITED: u32 = 1 << 2;
+const MEMBARRIER_CMD_PRIVATE_EXPEDITED: u32 = 1 << 3;
+const MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED: u32 = 1 << 4;
+const MEMBARRIER_CMD_PRIVATE_EXPEDITED_RSEQ: u32 = 1 << 7;
+const MEMBARRIER_CMD_GET_REGISTRATIONS: u32 = 1 << 9;
+const MEMBARRIER_CMD_FLAG_CPU: u32 = 1;
+const MEMBARRIER_SUPPORTED_COMMANDS: u32 = MEMBARRIER_CMD_GLOBAL
+    | MEMBARRIER_CMD_GLOBAL_EXPEDITED
+    | MEMBARRIER_CMD_REGISTER_GLOBAL_EXPEDITED
+    | MEMBARRIER_CMD_PRIVATE_EXPEDITED
+    | MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED
+    | MEMBARRIER_CMD_GET_REGISTRATIONS;
+
+fn linux_membarrier(command: u64, flags: u64, _cpu_id: u64) -> u64 {
+    let command = command as u32;
+    let flags = flags as u32;
+    if command == MEMBARRIER_CMD_PRIVATE_EXPEDITED_RSEQ {
+        if !matches!(flags, 0 | MEMBARRIER_CMD_FLAG_CPU) {
+            return LINUX_EINVAL;
+        }
+    } else if flags != 0 {
         return LINUX_EINVAL;
     }
     match command {
-        MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED => 0,
-        MEMBARRIER_CMD_PRIVATE_EXPEDITED => {
+        MEMBARRIER_CMD_QUERY => u64::from(MEMBARRIER_SUPPORTED_COMMANDS),
+        MEMBARRIER_CMD_GLOBAL | MEMBARRIER_CMD_GLOBAL_EXPEDITED => {
             core::sync::atomic::fence(Ordering::SeqCst);
             0
+        }
+        MEMBARRIER_CMD_REGISTER_GLOBAL_EXPEDITED | MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED => {
+            ELF_PROBE_MEMBARRIER_REGISTRATIONS.fetch_or(command, Ordering::SeqCst);
+            0
+        }
+        MEMBARRIER_CMD_PRIVATE_EXPEDITED => {
+            if ELF_PROBE_MEMBARRIER_REGISTRATIONS.load(Ordering::SeqCst)
+                & MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED
+                == 0
+            {
+                return LINUX_EPERM;
+            }
+            core::sync::atomic::fence(Ordering::SeqCst);
+            0
+        }
+        MEMBARRIER_CMD_GET_REGISTRATIONS => {
+            u64::from(ELF_PROBE_MEMBARRIER_REGISTRATIONS.load(Ordering::SeqCst))
         }
         _ => LINUX_EINVAL,
     }
